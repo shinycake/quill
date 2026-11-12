@@ -158,7 +158,8 @@ fn viewing_trending_sends_only_the_unread_sets_and_clears_their_dots() {
         cover_files: Vec::new(),
         is_viewed: viewed,
     };
-    driver.session.stickers.stickers.trending = vec![set(1, true), set(2, false), set(3, false)];
+    driver.session.stickers.stickers.trending.sets =
+        vec![set(1, true), set(2, false), set(3, false)];
     assert!(driver.view_shown_trending_stickers().unwrap().is_some());
     assert_eq!(
         sent_request(&recorder, "viewTrendingStickerSets")["sticker_set_ids"],
@@ -170,6 +171,7 @@ fn viewing_trending_sends_only_the_unread_sets_and_clears_their_dots() {
             .stickers
             .stickers
             .trending
+            .sets
             .iter()
             .all(|set| set.is_viewed)
     );

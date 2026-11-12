@@ -27,6 +27,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session
                 .messages
                 .scheduled_messages
+                .rows
                 .iter()
                 .find(|m| m.chat_id == edit.chat_id && m.id == edit.message_id)
                 .map(|m| (m.chat_id, m.id, m.is_outgoing, false, &m.content))
@@ -204,6 +205,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .messages
             .scheduled_messages
+            .rows
             .iter()
             .any(|m| m.chat_id == chat_id && m.id == message_id);
         if !known {
@@ -238,6 +240,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .messages
             .scheduled_messages
+            .rows
             .iter()
             .any(|m| m.chat_id == chat_id && m.id == message_id);
         if !known {
@@ -319,7 +322,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             .request(RequestPurpose::GetChatScheduledMessages, Some(chat_id));
         let json = get_chat_scheduled_messages(extra, chat_id);
         match self.sender.send_json(&json) {
-            Ok(()) => Ok(extra),
+            Ok(()) => {
+                self.session
+                    .messages
+                    .scheduled_messages
+                    .asked(chat_id, extra);
+                Ok(extra)
+            }
             Err(err) => {
                 self.session.requests.take(extra);
                 Err(err)

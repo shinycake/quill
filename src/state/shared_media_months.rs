@@ -93,7 +93,8 @@ impl Session {
         let gallery = &self.media.shared_media;
         let (chat_id, tab) = (gallery.chat_id()?, gallery.active_tab);
         let media = calendar_media(tab)?;
-        self.search.clear_date_jump_note();
+        let window = self.view_in_place();
+        self.search.clear_date_jump_note_for(window);
         let mut calendar = HistoryCalendar::new(chat_id, media, now);
         calendar.shared_tab = Some(tab);
         self.search.history_calendar = Some(calendar);

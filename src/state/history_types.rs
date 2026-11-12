@@ -98,8 +98,8 @@ pub fn effective_preview(message: &HistoryMessage) -> String {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum SendState {
     #[default]
-    Sent,
-    Sending,
+    Delivered,
+    Unconfirmed,
     /// `can_retry`: `resendMessages` may retry it (not every failure can).
     Failed {
         can_retry: bool,
@@ -112,8 +112,8 @@ impl SendState {
     pub fn from_flags(pending: bool, failed: bool, can_retry: bool) -> Self {
         match (pending, failed) {
             (_, true) => Self::Failed { can_retry },
-            (true, false) => Self::Sending,
-            (false, false) => Self::Sent,
+            (true, false) => Self::Unconfirmed,
+            (false, false) => Self::Delivered,
         }
     }
 }
@@ -128,7 +128,7 @@ pub struct HistoryMessage {
     /// in-bubble timestamp. `0` when the source didn't carry one.
     pub date: i32,
     pub content: MessageContent,
-    /// Where the send stands: delivered, still sending, or failed.
+    /// Where the send stands: delivered, not yet confirmed by the server, or failed.
     pub send: SendState,
     pub reply_to: Option<MessageReplyTo>,
     pub forward_info: Option<MessageForwardInfo>,
@@ -143,7 +143,6 @@ pub struct HistoryMessage {
     /// (B1). Rendered as the button grid under the message (inline) or the
     /// custom keyboard above the composer (showKeyboard).
     pub reply_markup: Option<ReplyMarkup>,
-    /// Phase B3: schema `message.self_destruct_type` /
     /// Phase B3: schema `message.self_destruct_type` /
     /// `message.self_destruct_in` (TDLib 1.8.67 lines 3146–3147 / 3165).
     /// `None` for ordinary messages. Self-destructed rows leave via
@@ -167,9 +166,9 @@ pub struct HistoryMessage {
 }
 
 impl HistoryMessage {
-    /// Not on the server yet: still sending, or its send failed.
+    /// Not on the server yet: not yet confirmed, or its send failed.
     pub fn pending(&self) -> bool {
-        self.send != SendState::Sent
+        self.send != SendState::Delivered
     }
 
     /// The send failed (the row shows the failed mark).

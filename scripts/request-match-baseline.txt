@@ -1,15 +1,8 @@
 # Answers not matched by RequestId (scripts/check-request-match.py).
 # <rule>:<Type::function> <count>. Only remove lines or lower counts.
-purpose:Session::accept_group_call_participant_update 1
-purpose:Session::apply_ok 2
 purpose:Session::finish_mask_mutation 1
 purpose:Session::mark_saved_sounds_stale 1
-purpose:Session::needs_profile_audio_check 1
 purpose:Session::sharing_request_answering 1
 purpose:Session::suggested_post_busy 1
 unmatched:ForumTopicsMap::insert 1
-unmatched:GifPanel::search_answered 1
-unmatched:QuillApp::submit_default_auto_delete 1
-unmatched:Session::apply_saved_tags 1
-unmatched:Session::apply_ton_wallet 1
 unsent:GiveawayOptions::begin 2

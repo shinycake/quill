@@ -55,7 +55,7 @@ fn reply_header_names_the_original_sender_in_their_color() {
         ),
     );
     let header = session.reply_header(&message(&session, 11)).unwrap();
-    assert_eq!(header.state, ReplyState::Ready);
+    assert_eq!(header.state, ReplyTargetView::Ready);
     assert_eq!(header.name.as_deref(), Some("Ada Lovelace"));
     assert_eq!(header.accent, Some(3));
     assert_eq!(header.text, "original words");
@@ -150,7 +150,7 @@ fn reply_outside_the_window_is_fetched_and_filled_in() {
         ),
     );
     let before = session.reply_header(&message(&session, 500)).unwrap();
-    assert_eq!(before.state, ReplyState::Loading);
+    assert_eq!(before.state, ReplyTargetView::Loading);
     assert_eq!(before.text, "Loading…");
     assert!(!before.clickable);
     assert_eq!(
@@ -172,7 +172,7 @@ fn reply_outside_the_window_is_fetched_and_filled_in() {
     // The answer stays beside the history.
     assert!(!session.histories[&GROUP].messages.contains_key(&3));
     let header = session.reply_header(&message(&session, 500)).unwrap();
-    assert_eq!(header.state, ReplyState::Ready);
+    assert_eq!(header.state, ReplyTargetView::Ready);
     assert_eq!(header.name.as_deref(), Some("Ada Lovelace"));
     assert_eq!(header.text, "the old question");
     assert!(header.clickable);
@@ -203,7 +203,7 @@ fn reply_to_a_deleted_message_reads_deleted_message() {
         ),
     );
     let header = session.reply_header(&message(&session, 500)).unwrap();
-    assert_eq!(header.state, ReplyState::Deleted);
+    assert_eq!(header.state, ReplyTargetView::Deleted);
     assert_eq!(header.text, "Deleted message");
     assert_eq!(header.name, None);
     assert!(!header.clickable);
@@ -230,7 +230,7 @@ fn reply_from_another_chat_names_sender_and_chat() {
     assert!(matches!(reply.origin(), Some(MessageOrigin::User { .. })));
     assert!(reply.content().is_some());
     let header = session.reply_header(&message(&session, 12)).unwrap();
-    assert_eq!(header.state, ReplyState::Ready);
+    assert_eq!(header.state, ReplyTargetView::Ready);
     assert_eq!(header.external_chat.as_deref(), Some("Ada Lovelace"));
     assert_eq!(header.name.as_deref(), Some("Ada Lovelace"));
     assert_eq!(header.thumb, vec![FileId(900)]);

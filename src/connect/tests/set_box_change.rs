@@ -42,7 +42,7 @@ fn the_box_closes_on_the_answer_and_not_on_a_request_skipped_as_busy() {
     let seq = AtomicU64::new(0);
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
     driver.session.stickers.sticker_set_view =
-        Some(StickerSetView::loading(77, crate::ids::RequestId(800)));
+        Some(StickerSetView::loading(77, crate::ids::RequestId(700)));
 
     let install = driver.manage_sticker_set(77, true, false).unwrap().unwrap();
     driver
@@ -96,7 +96,7 @@ fn an_answer_for_another_change_does_not_finish_the_one_waited_on() {
     let seq = AtomicU64::new(0);
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
     driver.session.stickers.sticker_set_view =
-        Some(StickerSetView::loading(77, crate::ids::RequestId(800)));
+        Some(StickerSetView::loading(77, crate::ids::RequestId(700)));
     let archive = crate::ids::RequestId(900);
     driver
         .session

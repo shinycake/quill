@@ -219,36 +219,29 @@ impl Session {
                 .account_delete
                 .answered(pending.map(|p| p.id), ());
         }
-        // Slice A8: a `checkPhoneNumberCode` succeeded — the
-        // server completed the number change of the number the
-        // code was sent to, so the own user's `phone_number` is
-        // updated directly (not an optimistic guess — the `ok`
-        // confirms it; the authoritative `updateUser` that
-        // follows lands the same value idempotently). The
-        // code-entry step clears and any stale error goes with
-        // it.
-        if matches!(
-            pending.map(|p| p.purpose),
-            Some(RequestPurpose::CheckPhoneNumberCode)
-        ) {
-            if let Some(target) = self.auth_state.change_number.phone().map(str::to_string)
-                && let Some(my_id) = self.my_user_id
+        // Slice A8: a `checkPhoneNumberCode` succeeded: the server
+        // completed the number change of the number the code was sent to,
+        // so the own user's `phone_number` is updated directly (not an
+        // optimistic guess: the `ok` confirms it; the authoritative
+        // `updateUser` that follows lands the same value idempotently).
+        // Only the check the flow waits for ends it. The send or resend
+        // still out is dropped: a late answer must not resurrect the
+        // completed flow (re-write phone/timeout or park a phantom error
+        // after the number already changed).
+        if let Some(pending) = pending
+            && pending.purpose == RequestPurpose::CheckPhoneNumberCode
+            && let Some((target, out)) = self.auth_state.change_number.checked(pending.id)
+        {
+            if let Some(my_id) = self.my_user_id
                 && let Some(me) = self.users.get_mut(&my_id)
             {
                 me.phone_number = target;
             }
-            // The send/resend answers are dropped below, so nothing else
-            // would end a send in flight.
-            self.auth_state.change_number.finish();
-            // A8: drop any stale in-flight send/resend purposes —
-            // a late resend answer must not resurrect the
-            // completed flow (re-write phone/timeout or park a
-            // phantom error after the number already changed).
-            self.requests
-                .take_purpose(RequestPurpose::SendPhoneNumberCode);
-            self.requests
-                .take_purpose(RequestPurpose::ResendPhoneNumberCode);
+            for request in out {
+                self.requests.take(request);
+            }
         }
+        self.settle_participant_mute_toggle(pending);
         // Slice S4: a `setAutoDownloadSettings` succeeded — apply
         // the confirmed sent settings (the `ok` carries none, so
         // they ride the purpose); the error clears and the driver
@@ -304,11 +297,13 @@ impl Session {
         // `editStarSubscription` / `reuseStarSubscription` succeeded —
         // same stale pattern: the old cache stays visible until the
         // server-confirmed refetch replaces it (never optimistic).
-        if matches!(
-            pending.map(|p| p.purpose),
-            Some(RequestPurpose::EditStarSubscription | RequestPurpose::ReuseStarSubscription)
-        ) {
-            self.payments.star_subscriptions.edit_done();
+        if let Some(pending) = pending
+            && matches!(
+                pending.purpose,
+                RequestPurpose::EditStarSubscription | RequestPurpose::ReuseStarSubscription
+            )
+        {
+            self.payments.star_subscriptions.edit_done(pending.id);
         }
         // `toggleGiftIsSaved` / `sellGift` succeeded: refetch the list from
         // the server (the connect driver does it on the same ingest) and,
@@ -367,7 +362,7 @@ impl Session {
                 self.finish_set_change(request, set_id, true);
             }
             for sets in [
-                &mut self.stickers.stickers.trending,
+                &mut self.stickers.stickers.trending.sets,
                 &mut self.stickers.stickers.search.sets,
             ] {
                 for set in sets.iter_mut().filter(|set| set.id == set_id) {
@@ -375,11 +370,10 @@ impl Session {
                 }
             }
             self.stickers.stickers.sets.clear();
-            self.stickers.stickers.lists.installed = crate::state::fetch::Fetch::Idle;
+            // A fetch out asked before the change: its answer predates it.
+            self.stickers.stickers.lists.installed.outdate();
             self.stickers.stickers.lists.archived = crate::state::fetch::Fetch::Idle;
-            self.stickers.stickers.archived.clear();
-            self.stickers.stickers.archived_has_more = false;
-            self.stickers.stickers.archived_next_offset = 0;
+            self.stickers.stickers.archived = Default::default();
             if self.stickers.stickers.tab == StickerTab::Archived {
                 self.stickers.stickers.selection = StickerSelection::default();
             }

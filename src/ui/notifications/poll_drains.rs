@@ -15,6 +15,18 @@ use quill::ids::ChatId;
 use quill::lang::{keys, tr};
 
 impl QuillApp {
+    /// Each window in `failed` gets "Couldn't jump to that date" in its own
+    /// toast host. True when a note was set.
+    pub(crate) fn say_date_jumps_failed(&mut self, failed: Vec<Option<ChatId>>) -> bool {
+        let any = !failed.is_empty();
+        for window in failed {
+            self.as_asked_by(window, |this| {
+                this.set_note(StatusNote::error(tr(keys::Q_MISC_COULD_NOT_JUMP_TO_THAT)));
+            });
+        }
+        any
+    }
+
     /// Drain what the last ingest left for the UI. Returns whether anything
     /// was drained (the poll redraws at once).
     pub(super) fn poll_drains(&mut self, cx: &mut Context<Self>) -> bool {
@@ -103,6 +115,15 @@ impl QuillApp {
             .unwrap_or_default()
         {
             self.set_note(StatusNote::error(err));
+            progressed = true;
+        }
+        // A date lookup that failed says so in the window that asked.
+        let failed = self
+            .live
+            .as_mut()
+            .map(|live| live.driver.session.take_failed_date_jumps())
+            .unwrap_or_default();
+        if self.say_date_jumps_failed(failed) {
             progressed = true;
         }
         if self.drain_replies_blocked() {

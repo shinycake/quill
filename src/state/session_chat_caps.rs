@@ -529,7 +529,7 @@ impl Session {
         let is_it = |m: &ParsedMessage| Some(m.chat_id) == chat_id && m.id == message_id;
         match scheduling {
             ComposerScheduling::None => {
-                self.messages.scheduled_messages.retain(|m| !is_it(m));
+                self.messages.scheduled_messages.rows.retain(|m| !is_it(m));
                 self.messages.note_action("message sent");
             }
             ComposerScheduling::SendAtDate {
@@ -538,6 +538,7 @@ impl Session {
                 if let Some(message) = self
                     .messages
                     .scheduled_messages
+                    .rows
                     .iter_mut()
                     .find(|m| is_it(m))
                 {
@@ -553,6 +554,7 @@ impl Session {
                 if let Some(message) = self
                     .messages
                     .scheduled_messages
+                    .rows
                     .iter_mut()
                     .find(|m| is_it(m))
                 {
@@ -567,6 +569,7 @@ impl Session {
     pub fn scheduled_in(&self, chat_id: ChatId) -> impl Iterator<Item = &ParsedMessage> {
         self.messages
             .scheduled_messages
+            .rows
             .iter()
             .filter(move |m| m.chat_id == chat_id)
     }

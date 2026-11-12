@@ -125,7 +125,7 @@ pub struct ClipInfo {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum ClipState {
+pub enum ClipView {
     Opening,
     Ready(ClipInfo),
     Failed(String),

@@ -240,8 +240,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         // settle the account's requests again and replace the request its
         // answer is matched to. A close or a quit under way takes none.
         match self.session.shutdown {
-            crate::state::ShutdownPhase::Running
-            | crate::state::ShutdownPhase::LogoutRefused(_) => {}
+            crate::state::ShutdownPhase::Active | crate::state::ShutdownPhase::LogoutRefused(_) => {
+            }
             crate::state::ShutdownPhase::LogoutRequested(request) => return Ok(request),
             _ => return Err(ConnectSendError::InvalidRequest),
         }

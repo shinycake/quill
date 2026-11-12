@@ -31,7 +31,7 @@ fn server_chats_merge_behind_local_hits_without_gating_status() {
     apply_json(&mut session, &seq, &sink, &chats_json(chats, "[11]"));
     apply_json(&mut session, &seq, &sink, &chats_json(public, "[11,42]"));
     apply_json(&mut session, &seq, &sink, &no_messages_json(messages));
-    assert_eq!(session.search.search.status(), SearchStatus::Ready);
+    assert_eq!(session.search.search.status(), SearchStateView::Ready);
     // ... and the late server answer adds only what was missing.
     apply_json(&mut session, &seq, &sink, &chats_json(server, "[11,77]"));
     assert_eq!(
@@ -57,9 +57,9 @@ fn server_chats_alone_turn_empty_into_ready() {
     apply_json(&mut session, &seq, &sink, &chats_json(chats, "[]"));
     apply_json(&mut session, &seq, &sink, &chats_json(public, "[]"));
     apply_json(&mut session, &seq, &sink, &no_messages_json(messages));
-    assert_eq!(session.search.search.status(), SearchStatus::Empty);
+    assert_eq!(session.search.search.status(), SearchStateView::Empty);
     apply_json(&mut session, &seq, &sink, &chats_json(server, "[5]"));
-    assert_eq!(session.search.search.status(), SearchStatus::Ready);
+    assert_eq!(session.search.search.status(), SearchStateView::Ready);
 }
 
 #[test]
@@ -80,7 +80,7 @@ fn a_failed_server_search_changes_nothing() {
         ),
     );
     assert!(session.search.search.server_chats.items().is_empty());
-    assert_eq!(session.search.search.status(), SearchStatus::Searching);
+    assert_eq!(session.search.search.status(), SearchStateView::Searching);
 }
 
 fn public_post_json(extra: RequestId, exceeded: bool, with_message: bool) -> String {
@@ -109,7 +109,7 @@ fn public_posts_fill_the_messages_and_flag_an_exhausted_quota() {
         &sink,
         &public_post_json(extra, false, true),
     );
-    assert_eq!(session.search.search.status(), SearchStatus::Ready);
+    assert_eq!(session.search.search.status(), SearchStateView::Ready);
     assert_eq!(session.search.search.messages.len(), 1);
     assert!(!session.search.search.public_limits_exceeded());
 
@@ -123,7 +123,7 @@ fn public_posts_fill_the_messages_and_flag_an_exhausted_quota() {
         &public_post_json(extra, true, false),
     );
     assert!(session.search.search.public_limits_exceeded());
-    assert_eq!(session.search.search.status(), SearchStatus::Empty);
+    assert_eq!(session.search.search.status(), SearchStateView::Empty);
 }
 
 #[test]
@@ -143,7 +143,7 @@ fn tag_search_results_land_in_the_messages() {
             extra.0
         ),
     );
-    assert_eq!(session.search.search.status(), SearchStatus::Ready);
+    assert_eq!(session.search.search.status(), SearchStateView::Ready);
     assert_eq!(session.search.search.messages.len(), 1);
 }
 
@@ -191,10 +191,10 @@ fn removing_one_recent_keeps_the_rest_and_idles_when_empty() {
     };
     assert!(search.remove_recent(ChatId(1)));
     assert_eq!(search.chat_ids, vec![ChatId(2)]);
-    assert_eq!(search.status(), SearchStatus::Ready);
+    assert_eq!(search.status(), SearchStateView::Ready);
     assert!(!search.remove_recent(ChatId(1)));
     assert!(search.remove_recent(ChatId(2)));
-    assert_eq!(search.status(), SearchStatus::Idle);
+    assert_eq!(search.status(), SearchStateView::Idle);
     // Typed results are not "recents": nothing to remove.
     search.surface = SearchSurface::Query;
     search.chat_ids = vec![ChatId(3)];
@@ -261,7 +261,7 @@ fn a_leg_settles_only_on_the_request_it_waits_for() {
     let second = session.request_search(RequestPurpose::SearchChats);
     apply_json(&mut session, &seq, &sink, &chats_json(first, "[11]"));
     assert!(session.search.search.chat_ids.is_empty());
-    assert_eq!(session.search.search.status(), SearchStatus::Searching);
+    assert_eq!(session.search.search.status(), SearchStateView::Searching);
     apply_json(&mut session, &seq, &sink, &chats_json(second, "[42]"));
     assert_eq!(session.search.search.chat_ids, vec![ChatId(42)]);
 }

@@ -749,7 +749,7 @@ fn b14_close_friends_error_keeps_the_list() {
     assert_eq!(session.stories.close_friends.ids(), Some(&vec![31]));
     assert!(matches!(
         session.stories.page_ops.latest().map(|op| &op.state),
-        Some(crate::story_page::StoryPageOpState::Failed(_))
+        Some(crate::story_page::StoryPageOpState::Failed { .. })
     ));
 }
 
@@ -771,7 +771,7 @@ fn b14_hide_and_profile_ops_finish_on_ok() {
         );
         assert_eq!(
             session.stories.page_ops.latest().map(|op| &op.state),
-            Some(&crate::story_page::StoryPageOpState::Succeeded)
+            Some(&crate::story_page::StoryPageOpState::Succeeded { request: extra })
         );
     }
 }
@@ -799,11 +799,11 @@ fn a_stale_answer_does_not_settle_the_op_tracked_now() {
     );
     assert_eq!(
         session.stories.page_ops.get(second).map(|op| &op.state),
-        Some(&crate::story_page::StoryPageOpState::Sending)
+        Some(&crate::story_page::StoryPageOpState::Sending { request: second })
     );
     assert!(matches!(
         session.stories.page_ops.get(first).map(|op| &op.state),
-        Some(crate::story_page::StoryPageOpState::Failed(_))
+        Some(crate::story_page::StoryPageOpState::Failed { .. })
     ));
 }
 
@@ -1017,4 +1017,24 @@ fn r2_clear_all_answers_only_by_its_own_request_and_keeps_the_list_until_ok() {
     );
     assert!(session.calls.recent_calls.rows().is_empty());
     assert_eq!(session.calls.recent_calls.next_offset(), "");
+}
+
+/// A close-friends load that never went out (no connection) fails the list
+/// so the panel shows Retry; a list already held, or a load out, stays.
+#[test]
+fn a_close_friends_load_that_cannot_start_fails_the_list() {
+    let (mut session, _sink) = session();
+    session.stories.close_friends.refused();
+    assert!(session.stories.close_friends.failed_without_list());
+    let load = RequestId(5);
+    session.stories.close_friends.begin_load(load);
+    session.stories.close_friends.refused();
+    assert!(session.stories.close_friends.ids().is_none());
+    assert!(!session.stories.close_friends.failed_without_list());
+    session
+        .stories
+        .close_friends
+        .answered(Some(load), vec![1, 2]);
+    session.stories.close_friends.refused();
+    assert_eq!(session.stories.close_friends.ids(), Some(&vec![1, 2]));
 }

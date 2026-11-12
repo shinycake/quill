@@ -110,8 +110,8 @@ impl QuillApp {
                 (
                     tab,
                     panel.sets.clone(),
-                    panel.trending.clone(),
-                    panel.archived.clone(),
+                    panel.trending.sets.clone(),
+                    panel.archived.sets.clone(),
                     loading,
                     panel.lists.tab_error(panel.tab).is_some(),
                 )
@@ -377,13 +377,12 @@ impl QuillApp {
         let session = &live.driver.session;
         let result = match (kind, view.tab) {
             (Kind::Stickers, ManagerTab::Trending)
-                if session.stickers.stickers.trending_next_offset
-                    < session.stickers.stickers.trending_total =>
+                if session.stickers.stickers.trending.has_more() =>
             {
                 live.driver.fetch_trending_stickers(true).map(drop)
             }
             (Kind::Stickers, ManagerTab::Archived)
-                if session.stickers.stickers.archived_has_more =>
+                if session.stickers.stickers.archived.next_offset().is_some() =>
             {
                 live.driver.fetch_archived_stickers(true).map(drop)
             }

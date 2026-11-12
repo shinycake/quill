@@ -195,6 +195,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         let purpose = RequestPurpose::Stickers(StickersPurpose::ViewStickerSet { set_id });
         let extra = self.session.request(purpose, None);
         let sent = self.sender.send_json(&get_sticker_set(extra, set_id));
+        if let Some(view) = self.session.stickers.sticker_set_view.as_mut() {
+            match sent {
+                Ok(()) => view.edits.refreshing(extra),
+                Err(_) => view.edits.refresh_skipped(),
+            }
+        }
         if sent.is_err() {
             self.session.requests.take(extra);
             // The refresh is over: a refused one is not asked again from
@@ -203,13 +209,6 @@ impl<S: JsonSender> ConnectDriver<S> {
                 crate::lang::tr(crate::lang::keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN)
                     .to_string(),
             );
-        }
-        if let Some(view) = self.session.stickers.sticker_set_view.as_mut() {
-            if sent.is_ok() {
-                view.edits.refresh_sent(extra);
-            } else {
-                view.edits.refresh_unsent();
-            }
         }
         sent.map(|()| Some(extra))
     }

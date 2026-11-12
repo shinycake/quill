@@ -616,8 +616,8 @@ fn add_people_invitations_end_in_one_toast() {
         .1
         .session
         .calls
-        .invite_results
-        .clone()
+        .invite_results()
+        .cloned()
         .expect("results");
     assert!(!results.is_done());
     feed(
@@ -631,8 +631,8 @@ fn add_people_invitations_end_in_one_toast() {
         .1
         .session
         .calls
-        .invite_results
-        .clone()
+        .invite_results()
+        .cloned()
         .expect("results");
     assert!(results.is_done());
     assert_eq!(results.invited, [42]);
@@ -645,26 +645,32 @@ fn add_people_invitations_end_in_one_toast() {
 fn invited_into(harness: &mut Harness, group_call_id: i32) {
     let mut results = crate::state::ConferenceInviteResults::default();
     results.invited.push(42);
-    harness.1.session.calls.invite_results = Some(results.for_call(group_call_id));
+    let call = harness.1.session.calls.group_call_mut(group_call_id);
+    call.expect("the conference is tracked").invite_results = Some(results.for_call(group_call_id));
 }
 
-#[test]
-fn the_invite_toast_goes_with_its_conference_and_the_account() {
-    let mut harness = conference_driver();
+/// Join the conference call 600 by its link: the call is tracked.
+fn join_conference_600(harness: &mut Harness) {
     let request = harness
         .1
         .join_conference_link("https://t.me/call/xyz".into())
         .expect("join sends");
     let extra: Value = serde_json::to_value(request.as_extra()).unwrap();
-    feed(&mut harness, &answer(&extra, 600));
+    feed(harness, &answer(&extra, 600));
     feed(
-        &mut harness,
+        harness,
         &conference_update(600, "https://t.me/call/xyz", false),
     );
+}
+
+#[test]
+fn the_invite_toast_goes_with_its_conference_and_the_account() {
+    let mut harness = conference_driver();
+    join_conference_600(&mut harness);
     // Leaving drops it.
     invited_into(&mut harness, 600);
     harness.1.leave_group_call().expect("leave sends");
-    assert_eq!(harness.1.session.calls.invite_results, None);
+    assert_eq!(harness.1.session.calls.invite_results(), None);
     // The server ending the call drops it.
     invited_into(&mut harness, 600);
     // (TDLib has confirmed the leave by now.)
@@ -677,12 +683,14 @@ fn the_invite_toast_goes_with_its_conference_and_the_account() {
             .replace(r#""is_active":true"#, r#""is_active":false"#),
     );
     assert!(harness.1.session.calls.active_group_call.is_none());
-    assert_eq!(harness.1.session.calls.invite_results, None);
+    assert_eq!(harness.1.session.calls.invite_results(), None);
     // Dropping the call locally drops it.
+    join_conference_600(&mut harness);
     invited_into(&mut harness, 600);
     harness.1.drop_group_call_locally();
-    assert_eq!(harness.1.session.calls.invite_results, None);
+    assert_eq!(harness.1.session.calls.invite_results(), None);
     // Logging out drops it, and the box's search.
+    join_conference_600(&mut harness);
     invited_into(&mut harness, 600);
     harness
         .1
@@ -694,7 +702,7 @@ fn the_invite_toast_goes_with_its_conference_and_the_account() {
         &mut harness,
         r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateLoggingOut"}}"#,
     );
-    assert_eq!(harness.1.session.calls.invite_results, None);
+    assert_eq!(harness.1.session.calls.invite_results(), None);
     assert!(harness.1.session.calls.add_people_search.query().is_empty());
     let _ = std::fs::remove_dir_all(&harness.0);
 }

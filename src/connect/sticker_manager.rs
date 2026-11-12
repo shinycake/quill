@@ -24,8 +24,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             .stickers
             .sets
             .iter()
-            .chain(&stickers.stickers.trending)
-            .chain(&stickers.stickers.archived)
+            .chain(&stickers.stickers.trending.sets)
+            .chain(&stickers.stickers.archived.sets)
             .chain(stickers.masks.installed.items())
             .chain(stickers.masks.archived_sets())
         {
@@ -61,6 +61,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .stickers
             .stickers
             .trending
+            .sets
             .iter()
             .filter(|set| !set.is_viewed)
             .map(|set| set.id)
@@ -73,7 +74,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         })?;
         // The dots go once TDLib has been told; a refused send keeps them.
         if sent.is_some() {
-            for set in &mut self.session.stickers.stickers.trending {
+            for set in &mut self.session.stickers.stickers.trending.sets {
                 if ids.contains(&set.id) {
                     set.is_viewed = true;
                 }

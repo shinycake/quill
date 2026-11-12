@@ -183,10 +183,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             if state.query().is_empty()
                 && matches!(
                     state.status(),
-                    SearchStatus::Searching
-                        | SearchStatus::Ready
-                        | SearchStatus::Empty
-                        | SearchStatus::Failed
+                    SearchStateView::Searching
+                        | SearchStateView::Ready
+                        | SearchStateView::Empty
+                        | SearchStateView::Failed
                 )
             {
                 return Ok(ChatSearchQueryOutcome::Unchanged);
@@ -198,7 +198,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             if self.session.search.chat_search.query().is_empty()
                 && matches!(
                     self.session.search.chat_search.status(),
-                    SearchStatus::Idle | SearchStatus::Closed
+                    SearchStateView::Idle | SearchStateView::Closed
                 )
             {
                 return Ok(ChatSearchQueryOutcome::Unchanged);
@@ -221,10 +221,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             && self.session.search.chat_search.query() == trimmed
             && matches!(
                 self.session.search.chat_search.status(),
-                SearchStatus::Searching
-                    | SearchStatus::Ready
-                    | SearchStatus::Empty
-                    | SearchStatus::Failed
+                SearchStateView::Searching
+                    | SearchStateView::Ready
+                    | SearchStateView::Empty
+                    | SearchStateView::Failed
             )
         {
             return Ok(ChatSearchQueryOutcome::Unchanged);
@@ -481,14 +481,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             .as_ref()
             .and_then(|c| c.shared_tab)
         {
-            self.session.search.clear_date_jump_note();
+            let window = self.session.view_in_place();
+            self.session.search.clear_date_jump_note_for(window);
             self.jump_shared_media_to_day(tab, day_number)?;
             return Ok(None);
         }
         let Some(calendar) = self.session.search.history_calendar.take() else {
             return Ok(None);
         };
-        self.session.search.clear_date_jump_note();
+        let window = self.session.view_in_place();
+        self.session.search.clear_date_jump_note_for(window);
         // The jump runs in the view in place: it must be the chat the box
         // was opened for (a box left over from a view that is gone has
         // nothing to jump in).
@@ -507,10 +509,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             chat_id,
             crate::search_filters::before_day_date(day_number),
         )) {
-            Ok(()) => Ok(Some(extra)),
+            Ok(()) => {
+                self.session.begin_jump_ask(extra);
+                Ok(Some(extra))
+            }
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.fail_date_jump(false, None);
                 Err(err)
             }
         }

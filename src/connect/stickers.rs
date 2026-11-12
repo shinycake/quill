@@ -77,7 +77,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             .stickers
             .sticker_set_view
             .as_ref()
-            .is_some_and(|view| view.set_id == 0 && view.waits_for_load(Some(request)));
+            .is_some_and(|view| {
+                view.set_id == 0
+                    && matches!(
+                        view.stage,
+                        crate::state::StickerSetViewStage::Loading { request: asked } if asked == request
+                    )
+            });
         if !waiting {
             return Ok(());
         }
@@ -149,7 +155,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let panel = &mut self.session.stickers.stickers;
         panel.lists.installed.clear_error();
         if panel.selection.stage.is_failed() {
-            panel.selection.stage = crate::state::StickerSetStage::Idle;
+            panel.selection.reselect();
         }
         if self.session.stickers.stickers.lists.installed.is_loading() {
             return Ok(None);
@@ -206,14 +212,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         // One request per list at a time, answered by the list's own fetch.
         // Viewed pages are independent: a new page may arrive while the
-        // prior ack is pending.
-        if self
-            .session
-            .stickers
-            .stickers
-            .lists
-            .for_purpose(purpose)
-            .is_some_and(|list| list.is_loading())
+        // prior ack is pending. The trending list's page stage
+        // (`TrendingSets`) holds the page in flight, so it decides what is
+        // asked: a first page asked while a later one is out replaces it.
+        if purpose != RequestPurpose::GetTrendingStickerSets
+            && self
+                .session
+                .stickers
+                .stickers
+                .lists
+                .for_purpose(purpose)
+                .is_some_and(|list| list.is_loading())
         {
             return Ok(None);
         }
@@ -276,7 +285,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .stickers
                     .sets
                     .iter()
-                    .any(|set| Some(set.id) == self.session.stickers.stickers.selection.set_id)
+                    .any(|set| Some(set.id) == self.session.stickers.stickers.selection.set_id())
             {
                 self.session.select_sticker_set(id);
             }
@@ -455,18 +464,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.stickers.stickers.lists.archived.is_loading()
-            || more && !self.session.stickers.stickers.archived_has_more
-        {
+        if self.session.stickers.stickers.lists.archived.is_loading() {
             return Ok(None);
         }
         let offset = if more {
-            self.session.stickers.stickers.archived_next_offset
+            let Some(next) = self.session.stickers.stickers.archived.next_offset() else {
+                return Ok(None);
+            };
+            next
         } else {
+            self.session.stickers.stickers.archived.page = crate::state::ArchivedPage::First;
             0
         };
-        // The page carries its own start: its answer replaces or extends by it.
-        self.sticker_request_from(RequestPurpose::GetArchivedStickerSets, Some(offset), |id| {
+        self.sticker_request(RequestPurpose::GetArchivedStickerSets, |id| {
             get_archived_sticker_sets(id, offset)
         })
     }
@@ -478,19 +488,33 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.stickers.stickers.lists.trending.is_loading() {
-            return Ok(None);
-        }
+        // The stage decides, not the request table: a next page waits for
+        // the page out (`next_offset` is `None` while one is), the first
+        // page is not asked twice, and a first page asked while a later one
+        // is out replaces it (its answer then lands nowhere).
+        let trending = &self.session.stickers.stickers.trending;
         let offset = if more {
-            self.session.stickers.stickers.trending_next_offset
+            let Some(next) = trending.next_offset() else {
+                return Ok(None);
+            };
+            next
+        } else if matches!(
+            trending.page,
+            crate::state::TrendingPage::Asking { from: 0, .. }
+        ) {
+            return Ok(None);
         } else {
             0
         };
-        self.sticker_request_from(
-            RequestPurpose::GetTrendingStickerSets,
-            Some(offset as i64),
-            |id| get_trending_sticker_sets(id, offset as i32, 100),
-        )
+        let sent = self.sticker_request(RequestPurpose::GetTrendingStickerSets, |id| {
+            get_trending_sticker_sets(id, offset as i32, 100)
+        });
+        // The list waits for this page: the answer lands only while it is
+        // the page asked last.
+        if let Ok(Some(request)) = sent {
+            self.session.stickers.stickers.trending.ask(request, offset);
+        }
+        sent
     }
 
     pub(crate) fn sticker_request_favorites(
@@ -557,6 +581,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .stickers
             .stickers
             .trending
+            .sets
             .iter()
             .map(|set| set.id)
             .collect();
@@ -804,7 +829,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.session.stickers.gifs.open || !self.chats_path_active() {
             return Ok(None);
         }
-        if self.session.stickers.gifs.saved.is_loading() {
+        if self.session.stickers.gifs.loading() {
             return Ok(None);
         }
         let needs =
@@ -824,10 +849,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             Err(err) => {
                 self.session.requests.take(extra);
                 // A refetch owed after an update stays owed.
-                if owed {
-                    self.session.stickers.gifs.saved_outdated();
-                } else {
-                    self.session.stickers.gifs.saved_failed();
+                if !owed {
+                    self.session.stickers.gifs.saved_asked(extra);
+                    self.session.stickers.gifs.saved_failed(extra);
                 }
                 Err(err)
             }

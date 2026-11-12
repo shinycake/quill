@@ -32,7 +32,7 @@ pub(super) fn test_message(chat: i64, id: i64, content: MessageContent) -> Histo
         is_outgoing: false,
         date: 0,
         content,
-        send: crate::state::SendState::Sent,
+        send: crate::state::SendState::Delivered,
         reply_to: None,
         forward_info: None,
         extras: Default::default(),

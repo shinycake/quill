@@ -109,10 +109,12 @@ impl Sim {
     /// Ask for the next older thread page and answer it with `ids`.
     fn page(&mut self, ids: std::ops::RangeInclusive<i64>) {
         let request = self.session(|s| {
-            s.request(
+            let request = s.request(
                 RequestPurpose::GetMessageThreadHistory { message_id: POST.0 },
                 Some(CHANNEL),
-            )
+            );
+            s.thread_older_asked(request);
+            request
         });
         let messages: Vec<String> = ids.rev().map(reply).collect();
         self.apply(&[format!(

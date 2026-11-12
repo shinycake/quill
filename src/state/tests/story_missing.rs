@@ -22,7 +22,7 @@ fn a_refused_story_is_asked_again_when_its_poster_chat_loads() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     refuse(&mut session, &seq, &sink, 21, 5);
-    assert_eq!(session.story_card_state(21, 5), StoryCardState::Expired);
+    assert_eq!(session.story_card_state(21, 5), StoryCardView::Expired);
     // Another poster's refusal is not touched by this chat loading.
     refuse(&mut session, &seq, &sink, 22, 6);
     apply_json(
@@ -31,9 +31,9 @@ fn a_refused_story_is_asked_again_when_its_poster_chat_loads() {
         &sink,
         r#"{"@type":"updateNewChat","chat":{"id":21,"title":"Poster","type":{"@type":"chatTypePrivate","user_id":21},"unread_count":0}}"#,
     );
-    assert_eq!(session.story_card_state(21, 5), StoryCardState::Loading);
+    assert_eq!(session.story_card_state(21, 5), StoryCardView::Loading);
     assert!(!session.stories.story_fetch.is_asked((21, 5)));
-    assert_eq!(session.story_card_state(22, 6), StoryCardState::Expired);
+    assert_eq!(session.story_card_state(22, 6), StoryCardView::Expired);
 }
 
 #[test]
@@ -49,7 +49,7 @@ fn a_refused_story_that_arrives_is_no_longer_missing() {
         r#"{"@type":"updateStory","story":{"@type":"story","id":5,"poster_chat_id":21,"date":1,"content":{"@type":"storyContentUnsupported"},"caption":{"@type":"formattedText","text":"","entities":[]}}}"#,
     );
     assert!(!session.stories.story_fetch.is_gone((21, 5)));
-    assert_eq!(session.story_card_state(21, 5), StoryCardState::Ready);
+    assert_eq!(session.story_card_state(21, 5), StoryCardView::Ready);
 }
 
 #[test]

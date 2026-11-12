@@ -31,7 +31,7 @@ fn story_messages_name_their_story() {
 fn card_state_is_loading_until_the_story_lands_or_fails() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    assert_eq!(session.story_card_state(77, 5), StoryCardState::Loading);
+    assert_eq!(session.story_card_state(77, 5), StoryCardView::Loading);
 
     // `getStory` fails: the story is gone.
     let extra = session.request_for_story(RequestPurpose::GetStory, ChatId(77), 5);
@@ -44,7 +44,7 @@ fn card_state_is_loading_until_the_story_lands_or_fails() {
             extra.0
         ),
     );
-    assert_eq!(session.story_card_state(77, 5), StoryCardState::Expired);
+    assert_eq!(session.story_card_state(77, 5), StoryCardView::Expired);
 
     // Another story arrives and is ready.
     let extra = session.request_for_story(RequestPurpose::GetStory, ChatId(77), 6);
@@ -57,7 +57,7 @@ fn card_state_is_loading_until_the_story_lands_or_fails() {
             extra.0
         ),
     );
-    assert_eq!(session.story_card_state(77, 6), StoryCardState::Ready);
+    assert_eq!(session.story_card_state(77, 6), StoryCardView::Ready);
 }
 
 #[test]
@@ -75,7 +75,7 @@ fn a_transient_get_story_failure_leaves_the_story_to_ask_for_again() {
                 extra.0
             ),
         );
-        assert_eq!(session.story_card_state(77, 5), StoryCardState::Loading);
+        assert_eq!(session.story_card_state(77, 5), StoryCardView::Loading);
     }
     let extra = session.request_for_story(RequestPurpose::GetStory, ChatId(77), 5);
     apply_json(
@@ -87,7 +87,7 @@ fn a_transient_get_story_failure_leaves_the_story_to_ask_for_again() {
             extra.0
         ),
     );
-    assert_eq!(session.story_card_state(77, 5), StoryCardState::Expired);
+    assert_eq!(session.story_card_state(77, 5), StoryCardView::Expired);
 }
 
 #[test]

@@ -57,9 +57,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<RequestId, ConnectSendError> {
         let extra = pending.request;
         let sent = self.send_json_request(extra, json)?;
-        let apps = &mut self.session.bots.web_apps;
-        apps.opening = Some(pending);
-        apps.replace_open_result(None);
+        // The new launch replaces the one before and any answer not yet shown.
+        self.session.bots.web_apps.begin_launch(pending);
         Ok(sent)
     }
 
@@ -186,11 +185,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// nothing opens later behind an unrelated action.
     pub fn forget_web_app_launches(&mut self) {
         let apps = &mut self.session.bots.web_apps;
-        apps.opening = None;
-        apps.found.clear();
-        apps.attachment_menu_bot.clear();
-        apps.attachment_menu_toggled.clear();
-        apps.replace_open_result(None);
+        apps.forget_answers();
         self.close_dropped_web_apps();
     }
 
@@ -391,7 +386,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .bots
             .web_apps
             .custom_requests
-            .insert(extra.0, (launch_id, req_id.to_string()));
+            .insert(extra, (launch_id, req_id.to_string()));
         Ok(sent)
     }
 }

@@ -65,9 +65,9 @@ pub(super) struct EventLogPage {
     pub(super) chat: ChatId,
     /// The page's search box, built once the window it shows in is known.
     pub(super) search: Option<EventLogSearch>,
-    /// The list length an automatic "load earlier" was last asked for in
-    /// this page (cleared when the list starts over).
-    pub(super) autoload: std::cell::Cell<Option<usize>>,
+    /// Whether an automatic "load earlier" was asked for the list as long
+    /// as it is now (cleared when the list starts over).
+    pub(super) autoload: std::cell::Cell<EventLogAutoload>,
     /// The search debounce: each edit replaces it, so only the last one
     /// searches.
     pub(super) typed: SearchPause,
@@ -111,12 +111,28 @@ pub(super) enum EventLogPoll {
     },
 }
 
+impl EventLogPoll {
+    pub(super) fn is_running(&self) -> bool {
+        matches!(self, Self::Running { .. })
+    }
+}
+
+/// Whether the page's automatic "load earlier" ran for the list length the
+/// page shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum EventLogAutoload {
+    /// Not asked for the current list.
+    Unasked,
+    /// Asked while the list held this many events.
+    AskedAt { len: usize },
+}
+
 impl EventLogPage {
     pub(super) fn new(chat: ChatId) -> Self {
         Self {
             chat,
             search: None,
-            autoload: std::cell::Cell::new(None),
+            autoload: std::cell::Cell::new(EventLogAutoload::Unasked),
             typed: SearchPause::Idle,
             poll: EventLogPoll::Stopped,
         }

@@ -136,8 +136,13 @@ impl QuillApp {
         let usage: Option<NetworkUsage> =
             session.and_then(|s| s.settings.privacy_data.network.data().cloned());
         let loading = session.is_some_and(|s| s.settings.privacy_data.network.is_loading());
-        let error =
-            session.and_then(|s| s.settings.privacy_data.network.error().map(str::to_string));
+        let error = session.and_then(|s| {
+            let data = &s.settings.privacy_data;
+            data.network_reset
+                .error()
+                .or(data.network.error())
+                .map(str::to_string)
+        });
         let mut section = div().flex().flex_col().gap_2().px_3().py_2();
         if let Some(line) = error {
             section = section.child(div().text_xs().text_color(cx.theme().danger).child(line));
@@ -248,8 +253,10 @@ impl QuillApp {
                             })),
                     ),
             ),
-            stage => {
-                let resetting = matches!(stage, NetworkReset::Resetting(_));
+            NetworkReset::Idle => {
+                let resetting = self
+                    .session()
+                    .is_some_and(|s| s.settings.privacy_data.network_reset.is_sending());
                 section.child(
                     div().flex().child(
                         Button::new("network-usage-reset")
@@ -269,22 +276,21 @@ impl QuillApp {
     }
 }
 
-/// "Reset statistics": from the confirmation to the request's answer.
-/// Every stage has a way out: Cancel, the answer, or leaving the page; a
-/// send that did not go out stays on the confirmation and says so through
-/// `data_storage_save` (`StorageSaveKind::ResetStatistics`).
+/// "Reset statistics": the confirmation before the request. Cancel, the
+/// confirm or leaving the page ends it; a send that did not go out stays on
+/// the confirmation and says so through `data_storage_save`
+/// (`StorageSaveKind::ResetStatistics`). The request in flight is the
+/// session's (`PrivacyData::network_reset`), which the button reads.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) enum NetworkReset {
     #[default]
     Idle,
     Confirming,
-    /// `resetNetworkStatistics` is out; its answer ends the stage.
-    Resetting(quill::ids::RequestId),
 }
 
 impl QuillApp {
-    /// The confirmed reset: the stage holds the request it waits on, and a
-    /// send that did not go out says so on the page.
+    /// The confirmed reset: the session holds the request it waits on, and
+    /// a send that did not go out says so on the page.
     pub(crate) fn reset_network_usage(&mut self) {
         if self.privacy.extra.network_reset != NetworkReset::Confirming {
             return;
@@ -293,7 +299,7 @@ impl QuillApp {
             let save = &mut live.driver.session.settings.data_storage_save;
             save.begin(quill::state::StorageSaveKind::ResetStatistics);
             match live.driver.reset_network_statistics() {
-                Ok(request) => self.privacy.extra.network_reset = NetworkReset::Resetting(request),
+                Ok(_) => self.privacy.extra.network_reset = NetworkReset::Idle,
                 Err(_) => live.driver.session.settings.data_storage_save.fail(
                     quill::state::StorageSaveKind::ResetStatistics,
                     tr(keys::Q_OPS_RESET_STATISTICS_FAILED).to_string(),
@@ -306,22 +312,6 @@ impl QuillApp {
                 quill::state::fetch::Fetch::Ready(NetworkUsage::default());
         }
         self.privacy.extra.network_reset = NetworkReset::Idle;
-    }
-
-    /// Poll-loop half: the reset's request answered (or its session went),
-    /// so the page offers Reset again. A refusal from TDLib shows on the
-    /// usage block itself (`privacy_data.network`).
-    pub(in crate::ui) fn settle_network_reset(&mut self, cx: &mut Context<Self>) {
-        let NetworkReset::Resetting(request) = self.privacy.extra.network_reset else {
-            return;
-        };
-        let in_flight = self
-            .session()
-            .is_some_and(|session| session.requests.get(request).is_some());
-        if !in_flight {
-            self.privacy.extra.network_reset = NetworkReset::Idle;
-            cx.notify();
-        }
     }
 }
 

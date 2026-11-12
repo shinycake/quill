@@ -811,7 +811,11 @@ fn a_stale_subscriptions_refetch_waits_for_an_appended_page_and_is_kept_when_ref
     t.answer("getStarSubscriptions", subs("more"));
     t.driver.fetch_more_star_subscriptions().unwrap();
     // An edit landed while the appended page is out.
-    t.driver.session.payments.star_subscriptions.edit_done();
+    {
+        let list = &mut t.driver.session.payments.star_subscriptions;
+        list.begin_edit(crate::ids::RequestId(900));
+        list.edit_done(crate::ids::RequestId(900));
+    }
     // The appended page is out: no first-page request beside it.
     assert!(
         t.driver
@@ -838,7 +842,11 @@ fn a_stale_subscriptions_refetch_waits_for_an_appended_page_and_is_kept_when_ref
     let list = &t.driver.session.payments.star_subscriptions;
     assert!(!list.is_stale() && !list.is_loading());
     // A refetch that is refused shows its error and is not asked every frame.
-    t.driver.session.payments.star_subscriptions.edit_done();
+    {
+        let list = &mut t.driver.session.payments.star_subscriptions;
+        list.begin_edit(crate::ids::RequestId(901));
+        list.edit_done(crate::ids::RequestId(901));
+    }
     t.sender.refuse(&["getStarSubscriptions"]);
     assert!(t.driver.refresh_star_subscriptions_if_stale().is_err());
     let payments = &t.driver.session.payments;

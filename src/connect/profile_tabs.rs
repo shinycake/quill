@@ -240,7 +240,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             None,
         );
         let json = is_profile_audio(extra, file_id.0);
-        self.send_profile_request(extra, &json)
+        self.send_profile_request(extra, &json)?;
+        self.session.begin_profile_audio_check(file_id, extra);
+        Ok(())
     }
 
     /// Remove a track from your own playlist (`removeProfileAudio`).

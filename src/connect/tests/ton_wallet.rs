@@ -74,7 +74,7 @@ fn explorer_prefix_is_asked_once_and_applied() {
         extra.0
     ));
     let wallet = &rig.driver.session.ton_wallet;
-    assert_eq!(wallet.explorer_url.as_deref(), Some("https://tonscan.org"));
+    assert_eq!(wallet.explorer_url(), Some("https://tonscan.org"));
     assert_eq!(
         wallet.explorer_url_for("EQabc"),
         "https://tonscan.org/EQabc"

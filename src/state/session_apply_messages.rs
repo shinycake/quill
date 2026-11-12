@@ -39,14 +39,11 @@ impl Session {
             && pending.purpose == RequestPurpose::GetChatScheduledMessages
         {
             // The list holds each chat's rows; an answer replaces only the
-            // rows of the chat it was asked for.
-            let chat = pending.chat_id;
+            // rows of the chat it was asked for, and only the ask the chat
+            // waits for.
             self.messages
                 .scheduled_messages
-                .retain(|m| Some(m.chat_id) != chat);
-            self.messages
-                .scheduled_messages
-                .extend(messages.iter().filter(|m| Some(m.chat_id) == chat).cloned());
+                .answered(pending, &messages);
             return;
         }
         if let Some(pending) = pending
@@ -180,18 +177,14 @@ impl Session {
                 }
             }
             Some(RequestPurpose::GetChatArchivedStories) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    let entry = self.stories.archived_stories.entry(chat_id.0).or_default();
-                    // Phase 9.7: TDLib returns archive stories newest
-                    // first (decreasing id); preserve server order
-                    // across pages — append new ids, dedupe.
-                    for id in ids.iter().copied() {
-                        if !entry.story_ids.contains(&id) {
-                            entry.story_ids.push(id);
-                        }
+                if let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                    && let Some(request) = pending.map(|p| p.id)
+                {
+                    // Only the page the list waits for lands; TDLib
+                    // returns archive stories newest first (decreasing id).
+                    if let Some(entry) = self.stories.archived_stories.get_mut(&chat_id.0) {
+                        entry.land(request, &ids, total_count);
                     }
-                    entry.total_count = total_count;
-                    entry.next_from_story_id = entry.story_ids.iter().copied().min();
                     self.clear_story_page_op(pending);
                 }
             }
@@ -213,16 +206,12 @@ impl Session {
                         self.clear_story_page_op(pending);
                         return;
                     }
-                    let entry = self.stories.chat_page_stories.entry(chat_id.0).or_default();
-                    // Phase 9.7: preserve server order (newest
-                    // first) across pages — append new ids, dedupe.
-                    for id in ids.iter().copied() {
-                        if !entry.story_ids.contains(&id) {
-                            entry.story_ids.push(id);
-                        }
-                    }
-                    entry.total_count = total_count;
-                    if !pinned_story_ids.is_empty() {
+                    // Only the page the list waits for lands (newest first
+                    // across pages); the first page also carries the pins.
+                    if let Some(entry) = self.stories.chat_page_stories.get_mut(&chat_id.0)
+                        && let Some(first) = entry.land(request, &ids, total_count)
+                        && first
+                    {
                         entry.pinned_story_ids = pinned_story_ids;
                     }
                     self.clear_story_page_op(pending);
@@ -271,8 +260,7 @@ impl Session {
                 MessagesPurpose::JumpToUnread { .. }
             ))
         ) {
-            self.messages.unread_jump = oldest_message_id(messages.iter().map(|m| m.id))
-                .and_then(|id| ViewJump::for_request(pending, id, DateJumpMode::Exact));
+            self.accept_unread_jump(oldest_message_id(messages.iter().map(|m| m.id)), pending);
             return;
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPinnedMessages) {
@@ -420,6 +408,7 @@ impl Session {
         if let Some(slot) = self
             .messages
             .scheduled_messages
+            .rows
             .iter_mut()
             .find(|m| m.chat_id == chat_id && m.id == message_id)
         {

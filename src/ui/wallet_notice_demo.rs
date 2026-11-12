@@ -100,7 +100,7 @@ impl QuillApp {
             let wallet = &mut session.ton_wallet;
             wallet.set_can_use(true);
             wallet.ton_usd_rate = Some(3.0);
-            wallet.own = Some(OwnWallet {
+            wallet.own = quill::state::fetch::Fetch::Ready(OwnWallet {
                 address: ADDRESS.into(),
                 gram_amount: 12_500_000_000,
                 is_being_created: false,
@@ -124,7 +124,7 @@ impl QuillApp {
                     90_000_000_022,
                     ServiceAction::TonConnectRequest(TonConnectRequest {
                         session_id: 1,
-                        state: TonConnectRequestState::Pending { expiration_date: 0 },
+                        state: TonConnectRequestState::Unanswered { expiration_date: 0 },
                         dapp_name: "Fragment".into(),
                         topic: String::new(),
                     }),

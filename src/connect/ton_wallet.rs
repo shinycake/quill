@@ -35,7 +35,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             .request(RequestPurpose::GetTonExplorerUrl, None);
         let json = crate::telegram::requests::get_application_config(extra);
         self.session.ton_wallet.explorer.begin();
-        self.session.ton_wallet.explorer.sent(extra);
         if let Err(err) = self.send_json_request(extra, &json) {
             self.session.ton_wallet.explorer.cancel();
             return Err(err);
@@ -85,26 +84,26 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Each ask is independent: a refused one leaves its own stage to be
         // asked again, and never keeps the history from being requested.
         let mut first_error = None;
-        if self.session.ton_wallet.state_fetch.can_ask() {
-            self.session.ton_wallet.state_fetch.begin();
+        if self.session.ton_wallet.own.can_ask() {
+            self.session.ton_wallet.own.begin();
             match self.send_wallet(TonWalletPurpose::LoadState, None, load_ton_wallet_state) {
-                Ok(request) => self.session.ton_wallet.state_fetch.sent(request),
+                Ok(request) => self.session.ton_wallet.own.sent(request),
                 Err(err) => {
-                    self.session.ton_wallet.state_fetch.cancel();
+                    self.session.ton_wallet.own.cancel();
                     first_error.get_or_insert(err);
                 }
             }
         }
-        if self.session.ton_wallet.rates_fetch.can_ask() {
-            self.session.ton_wallet.rates_fetch.begin();
+        if self.session.ton_wallet.rates.can_ask() {
+            self.session.ton_wallet.rates.begin();
             match self.send_wallet(
                 TonWalletPurpose::ExchangeRates,
                 None,
                 get_currency_exchange_rates,
             ) {
-                Ok(request) => self.session.ton_wallet.rates_fetch.sent(request),
+                Ok(request) => self.session.ton_wallet.rates.sent(request),
                 Err(err) => {
-                    self.session.ton_wallet.rates_fetch.cancel();
+                    self.session.ton_wallet.rates.cancel();
                     first_error.get_or_insert(err);
                 }
             }

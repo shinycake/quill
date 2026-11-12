@@ -55,7 +55,7 @@ pub const MAX_SELECTED_MEDIA: usize = 100;
 /// Where a row's file stands when its menu is built: one fact, so a file
 /// is never both downloading and on disk.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum MenuFile {
+pub enum MenuFileView {
     /// Not on disk and not being fetched (or not offered for saving).
     #[default]
     Remote,
@@ -71,7 +71,7 @@ pub struct MediaMenuFacts {
     /// The row is a message (stories and gifts are not).
     pub is_message: bool,
     /// Where the message's file stands.
-    pub file: MenuFile,
+    pub file: MenuFileView,
     pub can_forward: bool,
     pub can_delete: bool,
     pub selected: bool,
@@ -104,9 +104,9 @@ pub fn media_menu_items(facts: &MediaMenuFacts) -> Vec<MediaMenuItem> {
     }
     items.push(MediaMenuItem::GoToMessage);
     match facts.file {
-        MenuFile::Downloading => items.push(MediaMenuItem::CancelDownload),
-        MenuFile::OnDisk => items.push(MediaMenuItem::ShowInFolder),
-        MenuFile::Remote => {}
+        MenuFileView::Downloading => items.push(MediaMenuItem::CancelDownload),
+        MenuFileView::OnDisk => items.push(MediaMenuItem::ShowInFolder),
+        MenuFileView::Remote => {}
     }
     if facts.can_forward {
         items.push(MediaMenuItem::Forward);
@@ -307,7 +307,7 @@ mod tests {
     fn menu_follows_tdesktop_order() {
         use MediaMenuItem::*;
         let local = MediaMenuFacts {
-            file: MenuFile::OnDisk,
+            file: MenuFileView::OnDisk,
             ..facts()
         };
         assert_eq!(
@@ -315,7 +315,7 @@ mod tests {
             [GoToMessage, ShowInFolder, Forward, Delete, Select]
         );
         let busy = MediaMenuFacts {
-            file: MenuFile::Downloading,
+            file: MenuFileView::Downloading,
             ..facts()
         };
         assert_eq!(

@@ -1,6 +1,5 @@
 # In-flight variants that wait for nothing Quill started (scripts/check-stage-enums.py).
 # One per line: <rule>:<Enum>::<Variant> <reason>
-unkeyed:Stage::Decoding src/sticker_playback/player/engine.rs: the clip holds the index of the opener thread decoding it, which is what ends it: `WorkerEnd` (dropped when that thread returns, panics or never starts) fails every clip of its index (`State::opener_ended`). The index is a `usize`, which the check cannot tell from plain data
 bare:StartupStep::Waiting src/tray_reveal.rs: what one look at the tray returned ("look again soon"), not a stored stage. The stored stage is `StartupWatch::Watching { since }`, which holds its deadline
 bare:GiveawayLaunch::Verifying waits on the person at the payment provider's verification page (3-D Secure), which sends Quill no answer; it was Verifying { chat_id } in the baseline and is now the value of that chat's entry in GiveawayLaunches. "Start over" on the form (end_verification) or the end of the session leaves it
 bare:CloseFriendsStage::Awaiting src/story_extras.rs: the editor is open before the list arrived and keeps no copy of the load. The fetch (with its request, its failure and the Retry) is the session's `CloseFriendsList`, which the panel reads while the editor awaits; the upkeep moves it to `Editing` when that list is loaded, and Cancel or the viewer closing leaves it
@@ -22,4 +21,3 @@ bare:RowStatus::Sending src/state/chat_types.rs: a mark derived at draw time fro
 bare:RowStatus::Sent src/state/chat_types.rs: a mark derived at draw time from the outbox receipt (`ChatSummary::row_status`); delivered, not yet read
 bare:Delivery::Sending src/ui/message_text/mod.rs: a message's footer mark, computed at draw time from the message's own `pending` and receipt (`Delivery::of`); nothing is in flight in this value and nothing answers it. The send itself is the outbox's stage
 bare:Delivery::Sent src/ui/message_text/mod.rs: as `Delivery::Sending`: the receipt the server gave, mirrored for the footer
-bare:MenuFile::Downloading a fact about the row's file read while a menu is built (the download stage lives in the downloads table); nothing is held or waited for

@@ -281,6 +281,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        self.session
+            .begin_participant_mute_toggle(group_call_id, participant_id, extra);
         Ok(extra)
     }
 

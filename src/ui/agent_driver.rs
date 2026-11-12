@@ -172,11 +172,8 @@ impl QuillApp {
         // planned on this account's tree.
         let screen = self.screen_epoch();
         let before = window.a11y_tree_frame();
-        let input_id = pending
-            .request
-            .command
-            .is_input()
-            .then_some(pending.request.id);
+        let read_id = pending.request.id;
+        let input_id = pending.request.command.is_input().then_some(read_id);
         // screen-scope: an agent's command drives whichever account is on screen when it runs.
         let task = QuillApp::spawn_app_in(window, cx, async move |app, cx| {
             // Held until the task ends: deferred refusals until then are
@@ -220,8 +217,6 @@ impl QuillApp {
                     }
                 };
                 let mut refusals: Vec<String> = Vec::new();
-                // A send left by an earlier command's deferred half is not this one's.
-                let _ = app.update(cx, |app, _| app.agent_bridge.ui_send = None);
                 let mut ui_send: Option<UiSend> = None;
                 let mut stopped: Option<String> = None;
                 let mut done = 0usize;
@@ -267,7 +262,7 @@ impl QuillApp {
                     refusals.extend(guard::take_refusals());
                     // Only a send built on this command's screen is its own.
                     let send = app.update(cx, |app, _| {
-                        let taken = app.agent_bridge.ui_send.take();
+                        let taken = app.agent_bridge.take_send();
                         taken.filter(|sent| sent.0 == screen).map(|sent| sent.1)
                     });
                     match outcome {
@@ -372,28 +367,32 @@ impl QuillApp {
                 });
             };
             body.await;
-            if let Some(id) = input_id {
-                let finished = app.update_in(cx, |app, window, cx| {
-                    app.agent_command_finished(id, window, cx)
-                });
-                if finished.is_err() {
-                    // The window is gone: nothing can start the next command,
-                    // so the ones in line are answered and the stage ends.
-                    let _ = app.update(cx, |app, _| app.agent_command_abandoned(id));
-                }
+            let Some(id) = input_id else {
+                let _ = app.update(cx, |app, _| app.agent_bridge.reads.answered(read_id));
+                return;
+            };
+            let finished = app.update_in(cx, |app, window, cx| {
+                app.agent_command_finished(id, window, cx)
+            });
+            if finished.is_err() {
+                // The window is gone: nothing can start the next command,
+                // so the ones in line are answered and the stage ends.
+                let _ = app.update(cx, |app, _| app.agent_command_abandoned(id));
             }
         });
         // The running input command is the stage; its task lives in it. A
-        // read holds nothing, so its task runs on its own.
+        // read holds no stage, so its task lives in the bridge's `reads`
+        // until it answers.
         match input_id {
             Some(id) => {
                 self.agent_bridge.driver = Driver::Running {
                     id,
                     _task: task,
                     waiting: std::collections::VecDeque::new(),
+                    sent: None,
                 };
             }
-            None => task.detach(),
+            None => self.agent_bridge.reads.hold(read_id, task),
         }
     }
 

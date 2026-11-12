@@ -90,26 +90,8 @@ impl Session {
         }
     }
 
-    /// An archived page that started at `from` (0 = the first, which
-    /// replaces the list), as its request carried it.
-    pub fn accept_archived_sticker_sets(&mut self, from: i64, sets: Vec<StickerSetInfo>) {
-        let next = sets.last().map(|set| set.id).unwrap_or(0);
-        self.stickers.stickers.archived_has_more = sets.len() == 100 && next > 0 && next != from;
-        self.stickers.stickers.archived_next_offset = next;
-        if from == 0 {
-            self.stickers.stickers.archived.clear();
-        }
-        let mut ids: HashSet<_> = self
-            .stickers
-            .stickers
-            .archived
-            .iter()
-            .map(|set| set.id)
-            .collect();
-        self.stickers
-            .stickers
-            .archived
-            .extend(sets.into_iter().filter(|set| ids.insert(set.id)));
+    pub fn accept_archived_sticker_sets(&mut self, sets: Vec<StickerSetInfo>) {
+        self.stickers.stickers.archived.accept(sets);
     }
 
     /// The installed sets the load that waits for them answered (the
@@ -123,44 +105,34 @@ impl Session {
             .stickers
             .stickers
             .selection
-            .set_id
+            .set_id()
             .is_some_and(|id| self.stickers.stickers.sets.iter().any(|set| set.id == id));
         if !still_selected {
-            self.stickers.stickers.selection = StickerSelection {
-                set_id: self.stickers.stickers.sets.first().map(|set| set.id),
-                ..StickerSelection::default()
-            };
+            self.stickers.stickers.selection = self
+                .stickers
+                .stickers
+                .sets
+                .first()
+                .map_or_else(StickerSelection::default, |set| {
+                    StickerSelection::of(set.id)
+                });
         }
     }
 
-    /// Replace the first trending page; append later pages without duplicate sets.
-    /// `from` is the offset the page started at, as its request carried it.
+    /// A trending page answered as `request`: the first replaces the list,
+    /// a later one adds the sets it does not have; only the page asked last
+    /// lands.
     pub fn accept_trending_sticker_sets(
         &mut self,
-        from: usize,
+        request: Option<RequestId>,
         sets: Vec<StickerSetInfo>,
         is_premium: bool,
+        total: usize,
     ) {
-        self.stickers.stickers.trending_next_offset = from + sets.len();
-        if sets.is_empty() {
-            self.stickers.stickers.trending_total = self.stickers.stickers.trending_next_offset;
-        }
-        if from == 0 {
-            self.stickers.stickers.trending = sets;
-        } else {
-            let mut ids: HashSet<_> = self
-                .stickers
-                .stickers
-                .trending
-                .iter()
-                .map(|set| set.id)
-                .collect();
-            self.stickers
-                .stickers
-                .trending
-                .extend(sets.into_iter().filter(|set| ids.insert(set.id)));
-        }
-        self.stickers.stickers.trending_is_premium = is_premium;
+        self.stickers
+            .stickers
+            .trending
+            .accept(request, sets, is_premium, total);
     }
 
     /// Slice S8: store a `getFavoriteStickers` answer.
@@ -269,7 +241,7 @@ impl Session {
     }
 
     pub fn select_sticker_set(&mut self, set_id: i64) {
-        if self.stickers.stickers.selection.set_id == Some(set_id) {
+        if self.stickers.stickers.selection.set_id() == Some(set_id) {
             return;
         }
         self.stickers.stickers.selection = StickerSelection::of(set_id);
@@ -307,7 +279,7 @@ impl Session {
         }
         self.stickers
             .gifs
-            .search_page_answered(animations, next_offset, first_page);
+            .search_page_answered(request, animations, next_offset, first_page);
         let gifs = &mut self.stickers.gifs;
         let query = gifs.search_query().to_string();
         let found = gifs.search_results().to_vec();

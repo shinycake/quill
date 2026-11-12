@@ -17,7 +17,7 @@ use quill::composer::ForwardDraft;
 use quill::ids::{ChatId, FileId, MessageId};
 use quill::lang::{keys, tr};
 use quill::state::{
-    MediaMenuFacts, MediaMenuItem, MenuFile, SelectedMedia, SharedMediaAction, SharedMediaItem,
+    MediaMenuFacts, MediaMenuItem, MenuFileView, SelectedMedia, SharedMediaAction, SharedMediaItem,
     SharedMediaState, SharedMediaTab, media_menu_items,
 };
 use quill::telegram::envelope::MessageActions;
@@ -255,15 +255,15 @@ impl QuillApp {
         MediaMenuFacts {
             is_message: item.action == SharedMediaAction::Message,
             file: if downloading {
-                MenuFile::Downloading
+                MenuFileView::Downloading
             } else if document_tab
                 && on_disk
                 && !protected
                 && actions.is_none_or(|a| a.can_be_saved)
             {
-                MenuFile::OnDisk
+                MenuFileView::OnDisk
             } else {
-                MenuFile::Remote
+                MenuFileView::Remote
             },
             can_forward,
             can_delete,

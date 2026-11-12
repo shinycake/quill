@@ -76,7 +76,7 @@ fn installed_and_archived_masks_stay_out_of_the_regular_panel() {
         .map(|s| s.id)
         .collect();
     assert_eq!(ids, [21, 22]);
-    assert!(session.stickers.stickers.archived.is_empty());
+    assert!(session.stickers.stickers.archived.sets.is_empty());
     assert!(session.stickers.masks.archived_next_offset().is_none());
 }
 

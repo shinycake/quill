@@ -7,7 +7,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::engine::Shared;
-use super::engine::{Open, Stage};
+use super::engine::{Open, Stage, Taking};
 use super::source::Packer;
 use super::store::Scratch;
 use super::{Cancel, ClipInfo, ClipKey, DecodeAll};
@@ -16,7 +16,7 @@ use crate::locks::lock_or_recover;
 pub(super) fn run(index: usize, shared: &Shared) {
     let mut scratch = Scratch::default();
     loop {
-        let (key, id, decode, cancel) = {
+        let (key, id, decode, cancel, taking) = {
             let mut state = lock_or_recover(&shared.state);
             loop {
                 if state.stop {
@@ -31,7 +31,7 @@ pub(super) fn run(index: usize, shared: &Shared) {
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
             }
         };
-        open(shared, &mut scratch, key, id, decode, &cancel);
+        open(shared, &mut scratch, (key, id), taking, decode, &cancel);
         shared.wake();
         shared.work.notify_all();
     }
@@ -40,8 +40,8 @@ pub(super) fn run(index: usize, shared: &Shared) {
 pub(super) fn open(
     shared: &Shared,
     scratch: &mut Scratch,
-    key: ClipKey,
-    id: u64,
+    (key, id): (ClipKey, u64),
+    taking: Taking,
     decode: DecodeAll,
     cancel: &Cancel,
 ) {
@@ -49,7 +49,12 @@ pub(super) fn open(
     let opened = decode(cancel, &mut packer).and_then(|fps| packer.timeline(fps));
     let packed = packer.store;
     let mut state = lock_or_recover(&shared.state);
-    let Some(clip) = state.clip_mut(&key, id) else {
+    // Landed only for the thread the clip was handed to: when that thread's
+    // end already failed the clip, a late open must not bring it back.
+    let Some(clip) = state
+        .clip_mut(&key, id)
+        .filter(|clip| clip.stage.taken_by(taking))
+    else {
         state.freed.push(packed);
         return;
     };

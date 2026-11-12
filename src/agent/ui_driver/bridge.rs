@@ -310,6 +310,12 @@ impl Ticket {
         if let Ok(reply) = self.rx.recv_timeout(timeout) {
             return Ok(reply);
         }
+        self.give_up()
+    }
+
+    /// Stop waiting now: the command is withdrawn and cancelled, unless its
+    /// answer is in already.
+    pub fn give_up(self) -> Result<UiReply, BridgeError> {
         let ran = Stage::change(&self.stage, |stage| match stage {
             Stage::Injected | Stage::GaveUpAfterInjecting => Stage::GaveUpAfterInjecting,
             _ => Stage::GaveUp,

@@ -26,30 +26,24 @@ impl Session {
     /// Phase 9.7: start tracking a story-page mutation (`Sending`) sent as
     /// `request`.
     pub fn begin_story_page_op(&mut self, kind: StoryPageOpKind, request: RequestId) {
-        self.track_story_page_op(kind, StoryPageOpState::Sending, request);
+        self.track_story_page_op(kind, StoryPageOpState::Sending { request });
     }
 
     /// Phase 9.7: start tracking a story-page read (`Checking`) sent as
     /// `request`.
     pub fn begin_story_page_check(&mut self, kind: StoryPageOpKind, request: RequestId) {
-        self.track_story_page_op(kind, StoryPageOpState::Checking, request);
+        self.track_story_page_op(kind, StoryPageOpState::Checking { request });
     }
 
     /// The chat page comes from the pending request the op tracks.
-    fn track_story_page_op(
-        &mut self,
-        kind: StoryPageOpKind,
-        state: StoryPageOpState,
-        request: RequestId,
-    ) {
+    fn track_story_page_op(&mut self, kind: StoryPageOpKind, state: StoryPageOpState) {
         let chat_id = self
             .requests
-            .get(request)
+            .get(state.request())
             .and_then(|pending| pending.chat_id);
         self.stories.page_ops.begin(StoryPageOp {
             kind,
             state,
-            request,
             chat_id,
         });
     }
@@ -64,8 +58,7 @@ impl Session {
     ) {
         self.stories.page_ops.begin(StoryPageOp {
             kind,
-            state: StoryPageOpState::Failed(reason),
-            request,
+            state: StoryPageOpState::Failed { request, reason },
             chat_id,
         });
     }
@@ -80,14 +73,14 @@ impl Session {
     /// Phase 9.7: mark the story-page op `Succeeded` when its answer lands.
     pub(crate) fn succeed_story_page_op(&mut self, pending: Option<&PendingRequest>) {
         if let Some(op) = self.story_page_op_for(pending) {
-            op.state = StoryPageOpState::Succeeded;
+            op.state = op.state.succeeded();
         }
     }
 
     /// Phase 9.7: mark the story-page op `Failed` on a TDLib error.
     pub(crate) fn fail_story_page_op(&mut self, pending: Option<&PendingRequest>, reason: String) {
         if let Some(op) = self.story_page_op_for(pending) {
-            op.state = StoryPageOpState::Failed(reason);
+            op.state = op.state.failed(reason);
         }
     }
 

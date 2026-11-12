@@ -255,7 +255,7 @@ mod tests {
             content: MessageContent::Unsupported {
                 type_name: "test".into(),
             },
-            send: crate::state::SendState::Sent,
+            send: crate::state::SendState::Delivered,
             reply_to: None,
             forward_info: None,
             extras: Default::default(),
@@ -336,7 +336,7 @@ mod tests {
     fn a_trim_keeps_a_pending_send_and_drops_the_server_rows_around_it() {
         let mut state = window(1..=1600);
         let mut sending = message(1_700);
-        sending.send = crate::state::SendState::Sending;
+        sending.send = crate::state::SendState::Unconfirmed;
         sending.is_outgoing = true;
         state.upsert(sending);
         assert_eq!(

@@ -146,8 +146,7 @@ fn explorer_url_uses_the_app_config_prefix() {
     );
     assert_eq!(explorer_url_from_config(&json!({"members": []})), None);
     let state = TonWalletState {
-        explorer_url: explorer_url_from_config(&config),
-        explorer: crate::state::fetch::Fetch::Ready(()),
+        explorer: crate::state::fetch::Fetch::Ready(explorer_url_from_config(&config)),
         ..TonWalletState::default()
     };
     assert_eq!(
@@ -302,7 +301,7 @@ fn ton_connect_request_states() {
                 assert_eq!(parsed.session_id, 42);
                 assert_eq!(
                     parsed.state,
-                    TonConnectRequestState::Pending {
+                    TonConnectRequestState::Unanswered {
                         expiration_date: 1_900_000_000
                     }
                 );

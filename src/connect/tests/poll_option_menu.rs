@@ -302,3 +302,58 @@ fn a_refused_properties_lookup_leaves_loading() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_properties_lookup_that_cannot_be_sent_does_not_wait_for_good() {
+    let (dir, mut driver, recorder, _sink, dyn_sink, seq) = poll_driver();
+    ingest(&mut driver, &seq, &dyn_sink, POLL);
+    let (chat, message) = (ChatId(7), MessageId(120));
+    recorder.refuse(Some("getPollOptionProperties"));
+    assert!(
+        driver
+            .fetch_poll_option_properties(chat, message, "a")
+            .is_err()
+    );
+    let menu = driver.session.messages.poll_option_menu.clone().unwrap();
+    assert!(
+        menu.properties.error().is_some() && !menu.properties.is_loading(),
+        "a refused send ends the wait"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_answer_of_an_older_properties_lookup_does_not_land_on_the_newer_one() {
+    let (dir, mut driver, _recorder, _sink, dyn_sink, seq) = poll_driver();
+    ingest(&mut driver, &seq, &dyn_sink, POLL);
+    let (chat, message) = (ChatId(7), MessageId(120));
+    let older = driver
+        .fetch_poll_option_properties(chat, message, "a")
+        .unwrap();
+    let newer = driver
+        .fetch_poll_option_properties(chat, message, "a")
+        .unwrap();
+    ingest(
+        &mut driver,
+        &seq,
+        &dyn_sink,
+        &format!(
+            r#"{{"@type":"pollOptionProperties","@extra":"{}","can_be_deleted":false,"can_be_replied":true}}"#,
+            older.0
+        ),
+    );
+    let menu = driver.session.messages.poll_option_menu.clone().unwrap();
+    assert!(menu.properties.is_loading(), "the newer lookup still waits");
+    ingest(
+        &mut driver,
+        &seq,
+        &dyn_sink,
+        &format!(
+            r#"{{"@type":"pollOptionProperties","@extra":"{}","can_be_deleted":false,"can_be_replied":true}}"#,
+            newer.0
+        ),
+    );
+    let menu = driver.session.messages.poll_option_menu.clone().unwrap();
+    assert!(menu.properties.data().is_some());
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -4,7 +4,7 @@ use super::super::*;
 use super::*;
 use crate::diagnostics::DiagnosticSink;
 use crate::diagnostics::MemorySink;
-use crate::ids::{AccountKey, ChatId};
+use crate::ids::{AccountKey, ChatId, RequestId};
 use crate::platform::MemorySecretStore;
 use crate::state::{Session, WebAppOpenResult, WriteAccessResult, WriteAnswer};
 use crate::telegram::client::copy_and_parse;
@@ -94,7 +94,7 @@ fn open_web_app_sends_theme_and_keeps_the_launch_context() {
             .session
             .bots
             .web_apps
-            .opening
+            .opening()
             .as_ref()
             .map(|p| p.bot_user_id),
         Some(42)
@@ -105,7 +105,7 @@ fn open_web_app_sends_theme_and_keeps_the_launch_context() {
         extra.as_extra()
     ));
     assert_eq!(
-        h.driver.session.bots.web_apps.open_result,
+        h.driver.session.bots.web_apps.open_result().cloned(),
         Some(WebAppOpenResult::Opened {
             bot_user_id: 42,
             chat_id: Some(5),
@@ -114,7 +114,7 @@ fn open_web_app_sends_theme_and_keeps_the_launch_context() {
             url: "https://bot.example/app?tgWebAppData=x".into(),
         })
     );
-    assert!(h.driver.session.bots.web_apps.opening.is_none());
+    assert!(h.driver.session.bots.web_apps.opening().is_none());
 }
 
 #[test]
@@ -131,13 +131,13 @@ fn a_refused_open_reports_a_failure_and_clears_the_context() {
         extra.as_extra()
     ));
     assert!(matches!(
-        h.driver.session.bots.web_apps.open_result,
+        h.driver.session.bots.web_apps.open_result().cloned(),
         Some(WebAppOpenResult::Failed {
             bot_user_id: 42,
             ..
         })
     ));
-    assert!(h.driver.session.bots.web_apps.opening.is_none());
+    assert!(h.driver.session.bots.web_apps.opening().is_none());
 }
 
 /// Two keyboard-button launches before either answers (a double click):
@@ -166,7 +166,7 @@ fn only_the_latest_launch_asked_opens() {
             .session
             .bots
             .web_apps
-            .opening
+            .opening()
             .as_ref()
             .map(|o| o.request),
         Some(second)
@@ -175,7 +175,7 @@ fn only_the_latest_launch_asked_opens() {
         r#"{{"@type":"webAppInfo","@extra":"{}","launch_id":"801","url":{{"@type":"webAppUrl","url":"https://bot.example/a?x","require_same_origin":false}}}}"#,
         first.as_extra()
     ));
-    assert_eq!(h.driver.session.bots.web_apps.open_result, None);
+    assert_eq!(h.driver.session.bots.web_apps.open_result().cloned(), None);
     assert_eq!(h.last("closeWebApp")["web_app_launch_id"], 801);
     h.ingest(&format!(
         r#"{{"@type":"webAppUrl","@extra":"{}","url":"https://bot.example/b?x","require_same_origin":false}}"#,
@@ -186,13 +186,13 @@ fn only_the_latest_launch_asked_opens() {
         chat_id,
         bot_user_id,
         ..
-    }) = h.driver.session.bots.web_apps.open_result.take()
+    }) = h.driver.session.bots.web_apps.take_open_result()
     else {
         panic!("not opened");
     };
     assert!(source.allows_data_send(), "still the keyboard button");
     assert_eq!((chat_id, bot_user_id), (Some(5), 43));
-    assert!(h.driver.session.bots.web_apps.opening.is_none());
+    assert!(h.driver.session.bots.web_apps.opening().is_none());
 }
 
 /// Sweep r4-03 round 2 (item 15): a second launch whose send is refused
@@ -219,13 +219,7 @@ fn a_refused_second_launch_leaves_the_first_alone() {
     );
     h.recorder.refuse_sends(false);
     assert_eq!(
-        h.driver
-            .session
-            .bots
-            .web_apps
-            .opening
-            .as_ref()
-            .map(|o| o.request),
+        h.driver.session.bots.web_apps.opening().map(|o| o.request),
         Some(first)
     );
     h.ingest(&format!(
@@ -233,7 +227,7 @@ fn a_refused_second_launch_leaves_the_first_alone() {
         first.as_extra()
     ));
     assert!(matches!(
-        h.driver.session.bots.web_apps.open_result,
+        h.driver.session.bots.web_apps.open_result(),
         Some(WebAppOpenResult::Opened {
             bot_user_id: 42,
             ..
@@ -257,7 +251,7 @@ fn keyboard_button_apps_use_get_web_app_url_and_may_send_data() {
     ));
     let Some(WebAppOpenResult::Opened {
         source, launch_id, ..
-    }) = h.driver.session.bots.web_apps.open_result.clone()
+    }) = h.driver.session.bots.web_apps.open_result().cloned()
     else {
         panic!("not opened");
     };
@@ -620,7 +614,7 @@ fn named_app_links_search_first() {
             .session
             .bots
             .web_apps
-            .opening
+            .opening()
             .as_ref()
             .map(|p| p.source.clone()),
         Some(LaunchSource::Link {
@@ -785,7 +779,7 @@ fn a_launch_dropped_by_a_switch_opens_nothing_and_is_closed() {
         r#"{{"@type":"webAppInfo","@extra":"{}","launch_id":"777","url":{{"@type":"webAppUrl","url":"https://bot.example/app?x","require_same_origin":false}}}}"#,
         extra.as_extra()
     ));
-    assert_eq!(h.driver.session.bots.web_apps.open_result, None);
+    assert_eq!(h.driver.session.bots.web_apps.open_result().cloned(), None);
     assert_eq!(h.last("closeWebApp")["web_app_launch_id"], 777);
 }
 
@@ -803,7 +797,7 @@ fn an_unshown_answer_is_closed_on_a_switch() {
         extra.as_extra()
     ));
     h.driver.forget_web_app_launches();
-    assert_eq!(h.driver.session.bots.web_apps.open_result, None);
+    assert_eq!(h.driver.session.bots.web_apps.open_result().cloned(), None);
     assert_eq!(h.last("closeWebApp")["web_app_launch_id"], 778);
 }
 
@@ -822,13 +816,13 @@ fn a_new_launch_closes_the_app_of_an_unshown_answer() {
         first.as_extra()
     ));
     assert!(matches!(
-        h.driver.session.bots.web_apps.open_result,
+        h.driver.session.bots.web_apps.open_result().cloned(),
         Some(WebAppOpenResult::Opened { launch_id: 779, .. })
     ));
     h.driver
         .open_web_app(ChatId(5), 43, "", LaunchSource::InlineButton, &theme)
         .expect("sent");
-    assert_eq!(h.driver.session.bots.web_apps.open_result, None);
+    assert_eq!(h.driver.session.bots.web_apps.open_result().cloned(), None);
     assert_eq!(h.driver.session.bots.web_apps.dropped_launches, vec![779]);
 }
 
@@ -867,8 +861,8 @@ fn emoji_status_access_is_put_back_when_the_send_fails() {
 fn closing_a_mini_app_drops_its_custom_requests_and_answers() {
     use crate::state::{CustomRequestReply, WebApps};
     let mut apps = WebApps::default();
-    apps.custom_requests.insert(1, (10, "a".into()));
-    apps.custom_requests.insert(2, (20, "b".into()));
+    apps.custom_requests.insert(RequestId(1), (10, "a".into()));
+    apps.custom_requests.insert(RequestId(2), (20, "b".into()));
     apps.custom_replies.push(CustomRequestReply {
         launch_id: 10,
         req_id: "x".into(),
@@ -881,7 +875,7 @@ fn closing_a_mini_app_drops_its_custom_requests_and_answers() {
     });
     apps.forget_custom_requests_of(10);
     assert_eq!(apps.custom_requests.len(), 1);
-    assert!(apps.custom_requests.contains_key(&2));
+    assert!(apps.custom_requests.contains_key(&RequestId(2)));
     assert_eq!(apps.custom_replies.len(), 1);
     assert_eq!(apps.custom_replies[0].launch_id, 20);
 }

@@ -242,7 +242,7 @@ pub(super) fn service_message_row(
         .filter(|(_, _, via_mention)| *via_mention);
     let text = match (mention, session) {
         (Some((poster, story, _)), Some(s))
-            if s.story_card_state(poster, story) == quill::state::StoryCardState::Expired =>
+            if s.story_card_state(poster, story) == quill::state::StoryCardView::Expired =>
         {
             super::message_media::expired_mention_text(&text, message.is_outgoing)
         }

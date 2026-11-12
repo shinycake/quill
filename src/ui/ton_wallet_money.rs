@@ -174,8 +174,7 @@ impl QuillApp {
             return None;
         }
         let balance = wallet
-            .own
-            .as_ref()
+            .own()
             .filter(|own| own.gram_amount > 10_000_000)
             .map(|own| settings_balance(own.gram_amount));
         Some(
@@ -259,7 +258,7 @@ fn overview(
     let money = wallet.money_page();
     let muted = cx.theme().muted_foreground;
     let mut body = div().flex().flex_col().gap_3();
-    let own = wallet.own.as_ref();
+    let own = wallet.own();
     let balance = own.map(|own| own.gram_amount);
     body = body.child(
         div()
@@ -473,7 +472,7 @@ fn overview(
 /// rates cover (iOS `Wallet.Currency`).
 fn currency_row(wallet: &TonWalletState, cx: &mut Context<QuillApp>) -> AnyElement {
     let current = wallet.currency().to_string();
-    let codes = fiat::available_currencies(&wallet.rates);
+    let codes = fiat::available_currencies(wallet.rates());
     let owner = cx.entity().downgrade();
     let label = tr_with(keys::Q_MONEY_CURRENCY, &[("current", &current.to_string())]);
     let button = Button::new("money-currency")

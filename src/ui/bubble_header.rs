@@ -13,7 +13,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::MessageId;
 use quill::lang::{keys, tr, tr_with};
-use quill::state::{ForwardHeader, ForwardLink, ReplyHeader, ReplyState};
+use quill::state::{ForwardHeader, ForwardLink, ReplyHeader, ReplyTargetView};
 use quill::telegram::envelope::MessageSender;
 use std::path::PathBuf;
 
@@ -172,12 +172,12 @@ pub(super) fn reply_header_strip(
                     div()
                         .text_sm()
                         .truncate()
-                        .text_color(if state == ReplyState::Ready {
+                        .text_color(if state == ReplyTargetView::Ready {
                             body
                         } else {
                             muted
                         })
-                        .when(state != ReplyState::Ready, |this| this.italic())
+                        .when(state != ReplyTargetView::Ready, |this| this.italic())
                         .child(quote_line.unwrap_or_else(|| {
                             super::emoji_sprites::one_line(&text, px(14.)).unwrap_or_else(|| {
                                 super::bidi_line::one_line_plain(text).into_any_element()

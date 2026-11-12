@@ -121,7 +121,7 @@ impl QuillApp {
             ArchivedStories {
                 story_ids: ids.clone(),
                 total_count: ids.len() as i32,
-                next_from_story_id: None,
+                page: Default::default(),
             },
         );
         session.stories.chat_page_stories.insert(
@@ -130,6 +130,7 @@ impl QuillApp {
                 story_ids: ids,
                 pinned_story_ids: Vec::new(),
                 total_count: 8,
+                page: Default::default(),
             },
         );
         let mut page = StoryPage::new(ChatId(CHANNEL), window, cx);

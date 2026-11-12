@@ -68,31 +68,35 @@ fn update_message_content_refreshes_scheduled_entry() {
 
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.messages.scheduled_messages.push(ParsedMessage {
-        sender: None,
-        id: MessageId(70),
-        chat_id: ChatId(7),
-        date: 0,
-        is_outgoing: true,
-        is_pinned: false,
-        ephemeral: None,
-        media_album_id: 0,
-        author_signature: None,
-        scheduling_state: Some(MessageSchedulingState::SendAtDate {
-            send_date: 999,
-            repeat_period: 0,
-        }),
-        send_state: Default::default(),
-        content: MessageContent::Text("old caption".into()),
-        files: Vec::new(),
-        reply_to: None,
-        forward_info: None,
-        extras: Default::default(),
-        interaction_info: None,
-        reply_markup: None,
-        self_destruct: None,
-        auto_delete: None,
-    });
+    session
+        .messages
+        .scheduled_messages
+        .rows
+        .push(ParsedMessage {
+            sender: None,
+            id: MessageId(70),
+            chat_id: ChatId(7),
+            date: 0,
+            is_outgoing: true,
+            is_pinned: false,
+            ephemeral: None,
+            media_album_id: 0,
+            author_signature: None,
+            scheduling_state: Some(MessageSchedulingState::SendAtDate {
+                send_date: 999,
+                repeat_period: 0,
+            }),
+            send_state: Default::default(),
+            content: MessageContent::Text("old caption".into()),
+            files: Vec::new(),
+            reply_to: None,
+            forward_info: None,
+            extras: Default::default(),
+            interaction_info: None,
+            reply_markup: None,
+            self_destruct: None,
+            auto_delete: None,
+        });
     apply_json(
         &mut session,
         &seq,
@@ -100,7 +104,9 @@ fn update_message_content_refreshes_scheduled_entry() {
         r#"{"@type":"updateMessageContent","chat_id":7,"message_id":70,"new_content":{"@type":"messageText","text":{"@type":"formattedText","text":"new caption","entities":[]}}}"#,
     );
     assert_eq!(
-        session.messages.scheduled_messages[0].content.preview(),
+        session.messages.scheduled_messages.rows[0]
+            .content
+            .preview(),
         "new caption"
     );
 }

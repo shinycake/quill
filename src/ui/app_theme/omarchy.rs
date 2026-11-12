@@ -82,6 +82,16 @@ impl Omarchy {
         }
     }
 
+    /// The theme could not be read at the generation `seen` (its folder is
+    /// gone): the stamp is kept as looked at, so the next tick re-reads
+    /// only when the generation changes again, instead of failing every
+    /// tick. The last theme stays.
+    fn note_stamp(&mut self, seen: Option<String>) {
+        if let Self::Watching { state, .. } | Self::Found(state) = self {
+            state.stamp = seen;
+        }
+    }
+
     /// A re-read theme replaces the state, keeping the watcher's stage.
     fn replace(&mut self, new: OmarchyState) {
         match self {
@@ -150,10 +160,13 @@ impl QuillApp {
                     if seen == current {
                         return;
                     }
-                    if let Some(state) = OmarchyState::read(dir.clone()) {
-                        app.preferences.app_theme.omarchy.replace(state);
-                        app.apply_appearance(cx);
-                        cx.notify();
+                    match OmarchyState::read(dir.clone()) {
+                        Some(state) => {
+                            app.preferences.app_theme.omarchy.replace(state);
+                            app.apply_appearance(cx);
+                            cx.notify();
+                        }
+                        None => app.preferences.app_theme.omarchy.note_stamp(seen),
                     }
                 }) else {
                     return;
@@ -206,5 +219,17 @@ mod tests {
         assert!(matches!(omarchy, Omarchy::Absent));
         omarchy.unwatch();
         assert!(matches!(omarchy, Omarchy::Absent));
+    }
+
+    #[test]
+    fn a_failed_read_keeps_the_generation_it_looked_at() {
+        let mut omarchy = found();
+        omarchy.watch(Task::ready(()));
+        omarchy.note_stamp(Some("gone".into()));
+        assert_eq!(
+            omarchy.state().and_then(|state| state.stamp.clone()),
+            Some("gone".into())
+        );
+        assert!(matches!(omarchy, Omarchy::Watching { .. }));
     }
 }

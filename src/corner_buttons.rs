@@ -79,7 +79,7 @@ pub enum FastShare {
 /// click) and `displayFastShare` (channel posts; forwards from channels and
 /// bot media in private chats), the latter only when forwarding is allowed.
 pub fn fast_share(facts: FastShareFacts) -> Option<FastShare> {
-    if facts.send != SendState::Sent {
+    if facts.send != SendState::Delivered {
         return None;
     }
     if let Some((chat_id, message_id)) = facts.forward_source
@@ -109,7 +109,7 @@ mod tests {
     fn facts(chat: FastShareChat) -> FastShareFacts {
         FastShareFacts {
             chat,
-            send: SendState::Sent,
+            send: SendState::Delivered,
             outgoing: false,
             forwardable: true,
             forwarded_from_channel: false,
@@ -133,7 +133,7 @@ mod tests {
         f.forwardable = false;
         assert_eq!(fast_share(f), None);
         f.forwardable = true;
-        f.send = SendState::Sending;
+        f.send = SendState::Unconfirmed;
         assert_eq!(fast_share(f), None);
     }
 
@@ -168,7 +168,7 @@ mod tests {
             fast_share(f),
             Some(FastShare::GoToOriginal(ChatId(7), MessageId(9)))
         );
-        f.send = SendState::Sending;
+        f.send = SendState::Unconfirmed;
         assert_eq!(fast_share(f), None);
     }
 

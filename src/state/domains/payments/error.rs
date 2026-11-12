@@ -254,10 +254,12 @@ impl Session {
                 }
             }
             Some(RequestPurpose::EditStarSubscription | RequestPurpose::ReuseStarSubscription) => {
-                self.payments.star_subscriptions.edit_failed(format!(
-                    "Couldn't update the subscription: {}",
-                    error_reason(err)
-                ));
+                if let Some(pending) = pending {
+                    self.payments.star_subscriptions.edit_failed(
+                        pending.id,
+                        format!("Couldn't update the subscription: {}", error_reason(err)),
+                    );
+                }
             }
             // Slice payments: a refused `deleteSavedOrderInfo` /
             // `deleteSavedCredentials` surfaces in the status note (the

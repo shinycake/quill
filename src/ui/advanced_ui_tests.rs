@@ -80,7 +80,7 @@ fn debugmode_typed_in_settings_asks_before_turning_the_logs_on(cx: &mut TestAppC
     app.read_with(vcx, |app, _| {
         assert_eq!(
             app.preferences.advanced.debug_confirm,
-            DebugConfirm::Asking {
+            DebugConfirm::Open {
                 logs_on: quill::advanced::debug_mode::enabled()
             }
         );

@@ -321,6 +321,7 @@ impl Session {
             &self
                 .messages
                 .scheduled_messages
+                .rows
                 .iter()
                 .find(|m| m.chat_id == edit.chat_id && m.id == edit.message_id)?
                 .content
@@ -337,6 +338,7 @@ impl Session {
             return !self
                 .messages
                 .scheduled_messages
+                .rows
                 .iter()
                 .any(|m| m.chat_id == edit.chat_id && m.id == edit.message_id);
         }

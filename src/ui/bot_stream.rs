@@ -268,7 +268,7 @@ impl QuillApp {
             is_outgoing: false,
             date: (unix_ms_now() / 1000) as i32,
             content,
-            send: quill::state::SendState::Sent,
+            send: quill::state::SendState::Delivered,
             reply_to: None,
             forward_info: None,
             extras: Default::default(),

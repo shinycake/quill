@@ -106,9 +106,6 @@ pub struct CallsState {
     /// `searchChatsOnServer` answer, `server` the `searchPublicChats` one
     /// (`crate::state::conference_add_people`).
     pub add_people_search: ShareSearch,
-    /// The invitations "Add People" sent into the new conference, until
-    /// their toast is dismissed (`crate::state::conference_add_people`).
-    pub invite_results: Option<ConferenceInviteResults>,
 }
 
 impl CallsState {
@@ -133,6 +130,22 @@ impl CallsState {
             .into_iter()
             .flatten()
             .find(|call| call.id == id)
+    }
+
+    /// The invitations "Add People" sent into the current conference.
+    pub fn invite_results(&self) -> Option<&ConferenceInviteResults> {
+        self.active_group_call.as_ref()?.invite_results.as_ref()
+    }
+
+    pub fn invite_results_mut(&mut self) -> Option<&mut ConferenceInviteResults> {
+        self.active_group_call.as_mut()?.invite_results.as_mut()
+    }
+
+    /// The toast of the current conference's invitations is dismissed.
+    pub fn clear_invite_results(&mut self) {
+        if let Some(call) = self.active_group_call.as_mut() {
+            call.invite_results = None;
+        }
     }
 
     /// The group call `id` was just left (`leaveGroupCall`) and TDLib has
@@ -209,7 +222,6 @@ impl CallsState {
             conference_invite: None,
             conference_invite_declines: Vec::new(),
             add_people_search: ShareSearch::default(),
-            invite_results: None,
         }
     }
 }

@@ -247,6 +247,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        // A refused reset's line goes when the usage is fetched again; a
+        // reset still out keeps its stage.
+        if self
+            .session
+            .settings
+            .privacy_data
+            .network_reset
+            .error()
+            .is_some()
+        {
+            self.session.settings.privacy_data.network_reset = crate::state::NetworkReset::Idle;
+        }
         let extra = self
             .session
             .request(RequestPurpose::GetNetworkStatistics, None);
@@ -274,6 +286,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         self.session.settings.privacy_data.network = Default::default();
+        self.session.settings.privacy_data.network_reset =
+            crate::state::NetworkReset::Sending(extra);
         let _ = self.fetch_network_statistics();
         Ok(extra)
     }

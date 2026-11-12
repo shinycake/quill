@@ -158,8 +158,7 @@ impl QuillApp {
         let current = session.calls.active_group_call.as_ref()?.id;
         let results = session
             .calls
-            .invite_results
-            .as_ref()
+            .invite_results()
             .filter(|r| r.is_done() && r.group_call_id == current)?;
         let text = quill::state::conference_invite_toast(results, |user_id| {
             session
@@ -184,9 +183,9 @@ impl QuillApp {
                 .cursor_pointer()
                 .on_click(cx.listener(|this, _, _, cx| {
                     if let Some(live) = this.live.as_mut() {
-                        live.driver.session.calls.invite_results = None;
+                        live.driver.session.calls.clear_invite_results();
                     } else if let Some(session) = this.demo_session.as_mut() {
-                        session.calls.invite_results = None;
+                        session.calls.clear_invite_results();
                     }
                     cx.notify();
                 }))

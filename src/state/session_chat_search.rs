@@ -169,7 +169,7 @@ impl Session {
             return None;
         };
         let err = err.clone();
-        self.shutdown = ShutdownPhase::Running;
+        self.shutdown = ShutdownPhase::Active;
         Some(err)
     }
 
@@ -203,9 +203,9 @@ pub(crate) fn history_message(message: ParsedMessage, pending: bool) -> HistoryM
     use crate::telegram::envelope::MessageSendState;
     let send = match message.send_state {
         MessageSendState::Failed { can_retry } => SendState::Failed { can_retry },
-        MessageSendState::Pending => SendState::Sending,
-        MessageSendState::Sent if pending => SendState::Sending,
-        MessageSendState::Sent => SendState::Sent,
+        MessageSendState::Pending => SendState::Unconfirmed,
+        MessageSendState::Sent if pending => SendState::Unconfirmed,
+        MessageSendState::Sent => SendState::Delivered,
     };
     HistoryMessage {
         sender: message.sender,

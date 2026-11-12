@@ -26,7 +26,7 @@ pub enum MessagesPurpose {
     GetPinnedMessages,
     /// The corner "@" / heart button: `searchChatMessages` with
     /// `searchMessagesFilterUnreadMention` / `…UnreadReaction`; the oldest
-    /// hit becomes the jump target (`Session::unread_jump`).
+    /// hit becomes the jump target (`Session::accept_unread_jump`).
     JumpToUnread {
         kind: UnreadJumpKind,
     },

@@ -13,6 +13,20 @@ use quill::composer_doc::ComposerDoc;
 use quill::lang::{keys, tr};
 
 impl QuillApp {
+    /// A rewrite asked by the shortcut is still out: its request is in the
+    /// session's table, or it answered and the answer waits in
+    /// `apply_answers` for the asking window's upkeep to land it.
+    pub(in crate::ui) fn ai_apply_in_flight(&self) -> bool {
+        self.ai_compose
+            .apply_in_place
+            .as_ref()
+            .zip(self.session())
+            .is_some_and(|(asked, session)| {
+                session.requests.get(asked.request).is_some()
+                    || session.messages.ai_compose.apply_answers.has(asked.request)
+            })
+    }
+
     pub(in crate::ui) fn ai_compose_apply_by_key(
         &mut self,
         window: &mut Window,
@@ -30,6 +44,13 @@ impl QuillApp {
         let Some(account) = self.current_account() else {
             return false;
         };
+        // One rewrite at a time: another press while the request is out
+        // sends nothing (a second ask would spend the quota again and drop
+        // the first one's answer). A request the session no longer holds
+        // is lost, and the press asks afresh.
+        if self.ai_apply_in_flight() {
+            return true;
+        }
         let Some(style_name) = prefs::current().bound_style(&account).map(str::to_string) else {
             self.push_ai_toast(text_toast(tr(keys::AI_COMPOSE_APPLY_UNBOUND)), window, cx);
             return true;

@@ -4,7 +4,7 @@
 //! Earlier events load when the list is scrolled to its top.
 #![deny(clippy::indexing_slicing)]
 
-use super::admin_state::{EventLogPage, EventLogPoll, EventLogSearch};
+use super::admin_state::{EventLogAutoload, EventLogPage, EventLogPoll, EventLogSearch};
 use super::app::QuillApp;
 use super::dialogs::group_admin_settings::GroupSettingsView;
 use super::event_log_rows::{LogEntry, render_entry};
@@ -210,7 +210,9 @@ impl QuillApp {
     /// events are fetched and join the bottom of the list (the list keeps a
     /// reader who has scrolled up where they are).
     pub(super) fn start_event_log_poll(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
-        self.event_log_page_for(chat_id).autoload.set(None);
+        self.event_log_page_for(chat_id)
+            .autoload
+            .set(EventLogAutoload::Unasked);
         self.spawn_event_log_poll(chat_id, cx);
     }
 
@@ -220,10 +222,11 @@ impl QuillApp {
         let Some(chat_id) = self.event_log_open_chat() else {
             return;
         };
-        let stopped =
-            self.admin.event_log_page.as_ref().is_some_and(|page| {
-                page.chat == chat_id && matches!(page.poll, EventLogPoll::Stopped)
-            });
+        let stopped = self
+            .admin
+            .event_log_page
+            .as_ref()
+            .is_some_and(|page| page.chat == chat_id && !page.poll.is_running());
         if !stopped || !self.frame.window_active.get() {
             return;
         }
@@ -274,6 +277,16 @@ impl QuillApp {
     /// One poll step; `false` once the page is closed or the app is inactive.
     fn event_log_poll_tick(&mut self, chat_id: ChatId, cx: &mut Context<Self>) -> bool {
         if self.event_log_open_chat() != Some(chat_id) {
+            // The page closed: the task ends here, and the page (if it is
+            // still held for this chat) has no poll.
+            if let Some(page) = self
+                .admin
+                .event_log_page
+                .as_mut()
+                .filter(|page| page.chat == chat_id)
+            {
+                page.poll = EventLogPoll::Stopped;
+            }
             return false;
         }
         if !self.frame.window_active.get() {
@@ -498,7 +511,7 @@ impl QuillApp {
     /// Forget the rows the list was built for.
     pub(super) fn event_log_reset_list(&self) {
         if let Some(page) = self.admin.event_log_page.as_ref() {
-            page.autoload.set(None);
+            page.autoload.set(EventLogAutoload::Unasked);
         }
         self.admin.event_log_rows.forget();
     }
@@ -520,7 +533,9 @@ impl QuillApp {
         // Only once the list has been laid out: before that every offset is 0.
         let laid_out = state.viewport_bounds().size.height > px(0.);
         let at_top = laid_out && state.scroll_px_offset_for_scrollbar().y > px(-TOP_SLACK);
-        let asked = Some(page.events.len());
+        let asked = EventLogAutoload::AskedAt {
+            len: page.events.len(),
+        };
         let mark = self
             .admin
             .event_log_page

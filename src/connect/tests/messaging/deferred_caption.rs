@@ -147,7 +147,7 @@ fn up_leaves_a_pending_text_alone() {
         PENDING + 1
     ));
     let history = &mut s.driver.session.histories.get_mut(&7).unwrap().messages;
-    history.get_mut(&(PENDING + 1)).unwrap().send = crate::state::SendState::Sending;
+    history.get_mut(&(PENDING + 1)).unwrap().send = crate::state::SendState::Unconfirmed;
     assert!(s.driver.session.last_editable_message(ChatId(7)).is_none());
     assert!(
         ComposerEdit::from_pending_media(

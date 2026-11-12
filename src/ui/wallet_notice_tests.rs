@@ -91,7 +91,7 @@ fn seed_wallet(app: &mut QuillApp, with_wallet: bool) {
     let session = app.demo_session.as_mut().expect("demo session");
     let wallet = &mut session.ton_wallet;
     wallet.set_can_use(true);
-    wallet.own = Some(OwnWallet {
+    wallet.own = quill::state::fetch::Fetch::Ready(OwnWallet {
         address: if with_wallet {
             ADDRESS.into()
         } else {
@@ -302,7 +302,7 @@ fn chat_surfaces_open_the_notice(cx: &mut TestAppContext) {
         add_service(
             app,
             pending,
-            ServiceAction::TonConnectRequest(request(TonConnectRequestState::Pending {
+            ServiceAction::TonConnectRequest(request(TonConnectRequestState::Unanswered {
                 expiration_date: 0,
             })),
         );
@@ -426,7 +426,7 @@ fn the_encrypted_comment_and_review_request_do_nothing_while_the_wallet_is_off(
             pending,
             ServiceAction::TonConnectRequest(TonConnectRequest {
                 session_id: 1,
-                state: TonConnectRequestState::Pending { expiration_date: 0 },
+                state: TonConnectRequestState::Unanswered { expiration_date: 0 },
                 dapp_name: "Fragment".into(),
                 topic: String::new(),
             }),

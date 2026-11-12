@@ -26,7 +26,7 @@ pub(crate) fn ban_step(fetch: &Fetch<quill::telegram::envelope::CommunityMemberC
         Fetch::Loading { .. } => BanStep::Wait,
         Fetch::Idle => BanStep::Cancel,
         Fetch::Failed { .. } => BanStep::BanNow,
-        Fetch::Outdated(_) => BanStep::Cancel,
+        Fetch::Outdated { .. } => BanStep::Cancel,
         Fetch::Ready(chats) if chats.owned_chat_ids.is_empty() => BanStep::BanNow,
         Fetch::Ready(chats) => BanStep::Warn(chats.owned_chat_ids.clone()),
     }

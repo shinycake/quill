@@ -80,6 +80,10 @@ pub(crate) struct SidebarReveal {
     mode: Mode,
     docked: Glide,
     peek: Glide,
+    /// A test holds the clock still and moves it by hand, so a slow
+    /// machine cannot end a grace period or a slide early.
+    #[cfg(test)]
+    pinned: Option<Instant>,
 }
 
 impl SidebarReveal {
@@ -92,7 +96,30 @@ impl SidebarReveal {
             },
             docked: Glide::settled(if hidden { 0. } else { 1. }, now, ease_out_cubic),
             peek: Glide::settled(0., now, ease_out_cubic),
+            #[cfg(test)]
+            pinned: None,
         }
+    }
+
+    /// The instant the column's motion is measured against: the wall
+    /// clock, or in a test the clock it holds.
+    pub(crate) fn now(&self) -> Instant {
+        #[cfg(test)]
+        if let Some(pinned) = self.pinned {
+            return pinned;
+        }
+        Instant::now()
+    }
+
+    /// Hold the clock at now; it moves only through [`Self::advance`].
+    #[cfg(test)]
+    pub(crate) fn pin(&mut self) {
+        self.pinned = Some(Instant::now());
+    }
+
+    #[cfg(test)]
+    pub(crate) fn advance(&mut self, by: Duration) {
+        self.pinned = self.pinned.map(|at| at + by);
     }
 
     /// The stored preference: the user hid the column.

@@ -9,31 +9,35 @@ fn edit_scheduled_message_refreshes_scheduled_list_not_history() {
 
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.messages.scheduled_messages.push(ParsedMessage {
-        sender: None,
-        id: MessageId(70),
-        chat_id: ChatId(7),
-        date: 0,
-        is_outgoing: true,
-        is_pinned: false,
-        ephemeral: None,
-        media_album_id: 0,
-        author_signature: None,
-        scheduling_state: Some(MessageSchedulingState::SendAtDate {
-            send_date: 999,
-            repeat_period: 0,
-        }),
-        send_state: Default::default(),
-        content: MessageContent::Text("scheduled draft".into()),
-        files: Vec::new(),
-        reply_to: None,
-        forward_info: None,
-        extras: Default::default(),
-        interaction_info: None,
-        reply_markup: None,
-        self_destruct: None,
-        auto_delete: None,
-    });
+    session
+        .messages
+        .scheduled_messages
+        .rows
+        .push(ParsedMessage {
+            sender: None,
+            id: MessageId(70),
+            chat_id: ChatId(7),
+            date: 0,
+            is_outgoing: true,
+            is_pinned: false,
+            ephemeral: None,
+            media_album_id: 0,
+            author_signature: None,
+            scheduling_state: Some(MessageSchedulingState::SendAtDate {
+                send_date: 999,
+                repeat_period: 0,
+            }),
+            send_state: Default::default(),
+            content: MessageContent::Text("scheduled draft".into()),
+            files: Vec::new(),
+            reply_to: None,
+            forward_info: None,
+            extras: Default::default(),
+            interaction_info: None,
+            reply_markup: None,
+            self_destruct: None,
+            auto_delete: None,
+        });
     let extra = session.request(RequestPurpose::EditMessage, Some(ChatId(7)));
     apply_json(
         &mut session,
@@ -44,9 +48,11 @@ fn edit_scheduled_message_refreshes_scheduled_list_not_history() {
             extra.0,
         ),
     );
-    assert_eq!(session.messages.scheduled_messages.len(), 1);
+    assert_eq!(session.messages.scheduled_messages.rows.len(), 1);
     assert_eq!(
-        session.messages.scheduled_messages[0].content.preview(),
+        session.messages.scheduled_messages.rows[0]
+            .content
+            .preview(),
         "edited draft"
     );
     assert!(
@@ -67,6 +73,10 @@ fn scheduled_list_answers_and_edits_keep_to_their_chat() {
     let seq = AtomicU64::new(0);
     let answer = |session: &mut Session, chat: i64, ids: &[i64]| {
         let extra = session.request(RequestPurpose::GetChatScheduledMessages, Some(ChatId(chat)));
+        session
+            .messages
+            .scheduled_messages
+            .asked(ChatId(chat), extra);
         let rows: Vec<String> = ids
             .iter()
             .map(|id| {
@@ -109,6 +119,29 @@ fn scheduled_list_answers_and_edits_keep_to_their_chat() {
     );
     let left: Vec<i64> = session.scheduled_in(ChatId(8)).map(|m| m.id.0).collect();
     assert_eq!(left, vec![80]);
+
+    // An older ask of a chat answering after a newer one began changes
+    // nothing; the newer one lands.
+    let ask = |session: &mut Session| {
+        let extra = session.request(RequestPurpose::GetChatScheduledMessages, Some(ChatId(9)));
+        session.messages.scheduled_messages.asked(ChatId(9), extra);
+        extra
+    };
+    let older = ask(&mut session);
+    let newer = ask(&mut session);
+    for (request, id) in [(newer, 91), (older, 90)] {
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"messages","@extra":"{}","total_count":1,"messages":[{{"@type":"message","id":{id},"chat_id":9,"is_outgoing":true,"scheduling_state":{{"@type":"messageSchedulingStateSendAtDate","send_date":999}},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"s","entities":[]}}}}}}]}}"#,
+                request.0
+            ),
+        );
+    }
+    let held: Vec<i64> = session.scheduled_in(ChatId(9)).map(|m| m.id.0).collect();
+    assert_eq!(held, vec![91]);
 }
 
 #[test]

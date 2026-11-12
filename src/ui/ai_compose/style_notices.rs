@@ -153,8 +153,9 @@ impl QuillApp {
                     Some(_) => keys::AI_COMPOSE_TONE_UPDATED,
                     None => keys::AI_COMPOSE_TONE_CREATED,
                 };
-                open.view = AiComposeView::Card;
-                open.select_saved = Some(style.name.clone());
+                open.view = AiComposeView::Card {
+                    select_on_arrival: Some(style.name.clone()),
+                };
                 Some(self.ai_style_toast(
                     Some(tr_with(key, &[("title", &style.title)])),
                     tr(keys::AI_COMPOSE_TONE_CREATED_DESCRIPTION).to_string(),
@@ -180,13 +181,21 @@ impl QuillApp {
         let Some(open) = self.ai_compose.open.as_mut() else {
             return;
         };
-        let Some(name) = open.select_saved.clone() else {
+        let AiComposeView::Card {
+            select_on_arrival: waiting @ Some(_),
+        } = &mut open.view
+        else {
             return;
         };
-        if !open.style_names.contains(&name) {
+        if !waiting
+            .as_ref()
+            .is_some_and(|name| open.style_names.contains(name))
+        {
             return;
         }
-        open.select_saved = None;
+        let Some(name) = waiting.take() else {
+            return;
+        };
         self.ai_compose_update(window, cx, |ai| ai.select_style(&name));
     }
 

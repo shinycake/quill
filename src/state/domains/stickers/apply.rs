@@ -62,10 +62,7 @@ impl Session {
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetArchivedStickerSets)
                 {
                     if current {
-                        self.accept_archived_sticker_sets(
-                            pending.map_or(0, PendingRequest::page_from),
-                            sets,
-                        );
+                        self.accept_archived_sticker_sets(sets);
                     }
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::SearchStickerSets) {
                     // Slice S8: `searchStickerSets` answers with `stickerSets`.
@@ -151,11 +148,11 @@ impl Session {
                 }
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetTrendingStickerSets) {
                     if current {
-                        self.stickers.stickers.trending_total = total_count.max(0) as usize;
                         self.accept_trending_sticker_sets(
-                            pending.map_or(0, PendingRequest::page_from).max(0) as usize,
+                            pending.map(|p| p.id),
                             sets,
                             is_premium,
+                            total_count.max(0) as usize,
                         );
                     }
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetTrendingEmojiSets) {
@@ -287,14 +284,15 @@ impl Session {
                     self.chats_state.enter_deep_link_stage(DeepLinkState::Ui(
                         crate::deep_link_types::DeepLinkUi::StickerSet { set_id: id },
                     ));
-                } else if let Some(RequestPurpose::Stickers(StickersPurpose::ViewStickerSet {
-                    set_id,
-                })) = pending.map(|p| p.purpose)
+                } else if let Some((
+                    request,
+                    RequestPurpose::Stickers(StickersPurpose::ViewStickerSet { set_id }),
+                )) = pending.map(|p| (p.id, p.purpose))
                 {
                     self.remember_files(&files);
                     self.accept_sticker_set_view(
+                        request,
                         set_id,
-                        pending.map(|p| p.id),
                         StickerSetViewStage::Ready {
                             title,
                             name,
@@ -302,7 +300,6 @@ impl Session {
                             is_emoji: is_custom_emoji,
                             is_owned,
                             stickers,
-                            files: SetFiles::Unasked,
                         },
                     );
                 } else if let Some(PendingRequest {

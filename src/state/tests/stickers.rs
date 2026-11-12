@@ -11,6 +11,7 @@ fn s8_sticker_backend_purpose_gated_dispatch() {
     let extra = with_purpose.request(RequestPurpose::GetTrendingStickerSets, None);
     with_purpose.stickers.stickers.lists.trending.begin();
     with_purpose.stickers.stickers.lists.trending.sent(extra);
+    with_purpose.stickers.stickers.trending.ask(extra, 0);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -20,9 +21,9 @@ fn s8_sticker_backend_purpose_gated_dispatch() {
             extra.0
         ),
     );
-    assert_eq!(with_purpose.stickers.stickers.trending.len(), 1);
-    assert_eq!(with_purpose.stickers.stickers.trending[0].id, 77);
-    assert!(with_purpose.stickers.stickers.trending_is_premium);
+    assert_eq!(with_purpose.stickers.stickers.trending.sets.len(), 1);
+    assert_eq!(with_purpose.stickers.stickers.trending.sets[0].id, 77);
+    assert!(with_purpose.stickers.stickers.trending.is_premium);
 
     // A stray trendingStickerSets (no matching purpose) is ignored.
     let (mut without_purpose, sink2) = session();
@@ -33,7 +34,7 @@ fn s8_sticker_backend_purpose_gated_dispatch() {
         &sink2,
         r#"{"@type":"trendingStickerSets","total_count":1,"is_premium":false,"sets":[]}"#,
     );
-    assert!(without_purpose.stickers.stickers.trending.is_empty());
+    assert!(without_purpose.stickers.stickers.trending.sets.is_empty());
 
     // Favorites arrive as the bare `stickers` type under
     // GetFavoriteStickers.
@@ -82,7 +83,8 @@ fn s8_sticker_backend_purpose_gated_dispatch() {
 
     // A changeStickerSet `ok` drops the installed-sets cache so the
     // panel refetches the authoritative list.
-    with_purpose.stickers.stickers.sets = vec![with_purpose.stickers.stickers.trending[0].clone()];
+    with_purpose.stickers.stickers.sets =
+        vec![with_purpose.stickers.stickers.trending.sets[0].clone()];
     let extra = with_purpose.request(RequestPurpose::ChangeStickerSet, None);
     apply_json(
         &mut with_purpose,
@@ -162,12 +164,8 @@ fn s9_gif_backend_purpose_gated_dispatch() {
 
     // An addSavedAnimation `ok` clears the saved-GIF cache so it
     // refetches the server-confirmed list.
-    let saved = with_purpose.request(RequestPurpose::GetSavedAnimations, None);
-    with_purpose.stickers.gifs.saved_asked(saved);
-    with_purpose.stickers.gifs.saved_answered(
-        Some(saved),
-        with_purpose.stickers.gifs.search_results().to_vec(),
-    );
+    let found = with_purpose.stickers.gifs.search_results().to_vec();
+    seed_saved(&mut with_purpose.stickers.gifs, found);
     let extra = with_purpose.request(RequestPurpose::AddSavedAnimation, None);
     apply_json(
         &mut with_purpose,
@@ -178,12 +176,8 @@ fn s9_gif_backend_purpose_gated_dispatch() {
     assert!(with_purpose.stickers.gifs.animations.is_empty());
 
     // A removeSavedAnimation `ok` invalidates the same way.
-    let saved = with_purpose.request(RequestPurpose::GetSavedAnimations, None);
-    with_purpose.stickers.gifs.saved_asked(saved);
-    with_purpose.stickers.gifs.saved_answered(
-        Some(saved),
-        with_purpose.stickers.gifs.search_results().to_vec(),
-    );
+    let found = with_purpose.stickers.gifs.search_results().to_vec();
+    seed_saved(&mut with_purpose.stickers.gifs, found);
     let extra = with_purpose.request(RequestPurpose::RemoveSavedAnimation, None);
     apply_json(
         &mut with_purpose,
@@ -316,9 +310,8 @@ fn gif_panel_downloads_stills_then_preview_loops_then_unpreviewed_clips() {
         thumb: crate::telegram::envelope::Thumb::of(thumb.map(FileId), 160, 90, still),
         minithumbnail: None,
     };
-    session.stickers.gifs.saved_asked(RequestId(1));
-    session.stickers.gifs.saved_answered(
-        Some(RequestId(1)),
+    seed_saved(
+        &mut session.stickers.gifs,
         vec![
             // An MP4 preview loop: the loop plays, the GIF itself waits.
             gif(1, Some(11), false),
@@ -409,12 +402,11 @@ fn a_failed_refetch_keeps_the_shown_sticker_set() {
         is_emoji: false,
         is_owned: true,
         stickers: Vec::new(),
-        files: Default::default(),
     };
-    let mut view = StickerSetView::loading(5, RequestId(1));
+    let mut view = StickerSetView::loading(5, RequestId(50));
     view.stage = ready.clone();
     session.stickers.sticker_set_view = Some(view);
-    session.fail_sticker_set_view(5, None);
+    session.fail_sticker_set_view(RequestId(50));
     let stage = |session: &Session| {
         session
             .stickers
@@ -423,15 +415,73 @@ fn a_failed_refetch_keeps_the_shown_sticker_set() {
             .map(|v| v.stage.clone())
     };
     assert_eq!(stage(&session), Some(ready));
-    session.stickers.sticker_set_view = Some(StickerSetView::loading(5, RequestId(1)));
-    // Another request's error leaves the load waiting.
-    session.fail_sticker_set_view(5, Some(RequestId(2)));
+    session.stickers.sticker_set_view = Some(StickerSetView::loading(5, RequestId(51)));
+    session.fail_sticker_set_view(RequestId(50));
     assert!(matches!(
         stage(&session),
         Some(StickerSetViewStage::Loading { .. })
     ));
-    session.fail_sticker_set_view(5, Some(RequestId(1)));
+    session.fail_sticker_set_view(RequestId(51));
     assert_eq!(stage(&session), Some(StickerSetViewStage::Failed));
+}
+
+/// An open box takes the answer of the refresh it asked after an edit, and
+/// no other `getStickerSet` answer of that set.
+#[test]
+fn a_shown_sticker_set_takes_only_the_refresh_it_asked() {
+    let (mut session, _sink) = session();
+    let stage = |title: &str| StickerSetViewStage::Ready {
+        title: title.into(),
+        name: "cats".into(),
+        installed: true,
+        is_emoji: false,
+        is_owned: true,
+        stickers: Vec::new(),
+    };
+    let title = |session: &Session| match session.stickers.sticker_set_view.as_ref() {
+        Some(StickerSetView {
+            stage: StickerSetViewStage::Ready { title, .. },
+            ..
+        }) => title.clone(),
+        _ => String::new(),
+    };
+    let mut view = StickerSetView::loading(5, RequestId(50));
+    view.stage = stage("Cats");
+    view.edits.need_refresh();
+    view.edits.refreshing(RequestId(60));
+    session.stickers.sticker_set_view = Some(view);
+    // An answer nobody asked for, and the load that is over, change nothing.
+    session.accept_sticker_set_view(RequestId(61), 5, stage("Stray"));
+    session.accept_sticker_set_view(RequestId(50), 5, stage("Old load"));
+    assert_eq!(title(&session), "Cats");
+    // An edit confirmed meanwhile makes the refresh stale: it asks again.
+    if let Some(view) = session.stickers.sticker_set_view.as_mut() {
+        view.edits.need_refresh();
+    }
+    session.accept_sticker_set_view(RequestId(60), 5, stage("Stale"));
+    assert_eq!(title(&session), "Cats");
+    if let Some(view) = session.stickers.sticker_set_view.as_mut() {
+        assert!(view.edits.refresh_needed());
+        view.edits.refreshing(RequestId(62));
+    }
+    session.accept_sticker_set_view(RequestId(62), 5, stage("Fresh"));
+    assert_eq!(title(&session), "Fresh");
+    assert!(
+        session
+            .stickers
+            .sticker_set_view
+            .as_ref()
+            .is_some_and(|view| !view.edits.busy() && !view.edits.refresh_needed())
+    );
+}
+
+/// The saved list asked for and answered, as the driver would.
+fn seed_saved(
+    gifs: &mut crate::state::GifPanel,
+    animations: Vec<crate::telegram::envelope::AnimationItem>,
+) {
+    gifs.saved_asked(RequestId(900));
+    gifs.saved_answered(Some(RequestId(900)), animations);
 }
 
 fn saved_gif(id: i32) -> crate::telegram::envelope::AnimationItem {
@@ -451,21 +501,22 @@ fn saved_gif(id: i32) -> crate::telegram::envelope::AnimationItem {
 fn an_update_during_the_request_survives_its_answer_and_asks_again() {
     let mut gifs = crate::state::GifPanel::default();
     gifs.saved_asked(RequestId(1));
-    gifs.saved_answered(Some(RequestId(1)), vec![saved_gif(1)]);
-    gifs.saved_asked(RequestId(2));
     // `updateSavedAnimations` while the request is out: the answer may
     // predate the change, so it is dropped and the list asked for again.
     gifs.saved_outdated();
-    gifs.saved_answered(Some(RequestId(2)), vec![saved_gif(2)]);
-    assert!(gifs.saved_is_outdated(), "the list is asked for again");
+    gifs.saved_answered(Some(RequestId(1)), vec![saved_gif(1)]);
+    assert!(
+        gifs.loaded() && gifs.saved_is_outdated(),
+        "the list is asked for again"
+    );
     assert_eq!(gifs.animations.len(), 1, "the list does not blank");
     // The failure of the ask that predates the change keeps the mark.
-    gifs.saved_request_failed(Some(RequestId(2)));
+    gifs.saved_failed(RequestId(1));
     assert!(gifs.loaded() && gifs.saved_is_outdated());
     // A failure of the new ask keeps the list and counts as loaded until
     // the next opening.
-    gifs.saved_asked(RequestId(3));
-    gifs.saved_request_failed(Some(RequestId(3)));
+    gifs.saved_asked(RequestId(2));
+    gifs.saved_failed(RequestId(2));
     assert!(gifs.failed() && gifs.loaded());
     assert_eq!(gifs.animations.len(), 1);
     gifs.saved_retry();
@@ -478,7 +529,12 @@ fn a_new_gif_search_starts_with_no_results_or_paging() {
     gifs.search_begun("cats".into());
     gifs.search_page_asked(String::new());
     gifs.search_sent(crate::ids::RequestId(1));
-    gifs.search_page_answered(vec![saved_gif(1)], "50".into(), true);
+    gifs.search_page_answered(
+        Some(crate::ids::RequestId(1)),
+        vec![saved_gif(1)],
+        "50".into(),
+        true,
+    );
     assert_eq!(gifs.search_results().len(), 1);
     assert_eq!(gifs.search_next_offset(), "50");
     // A different search replaces the results and the paging whole.
@@ -488,4 +544,41 @@ fn a_new_gif_search_starts_with_no_results_or_paging() {
     // Back on the saved GIFs there is no search to page.
     gifs.search_left();
     assert!(gifs.search_results().is_empty());
+}
+
+#[test]
+fn only_the_trending_page_asked_last_lands() {
+    use crate::state::{TrendingPage, TrendingSets};
+    let set = |id: i64| StickerSetInfo {
+        id,
+        title: String::new(),
+        name: String::new(),
+        size: 1,
+        is_installed: false,
+        is_official: false,
+        is_owned: false,
+        covers: Vec::new(),
+        cover_files: Vec::new(),
+        is_viewed: false,
+    };
+    let mut trending = TrendingSets::default();
+    trending.ask(RequestId(1), 0);
+    assert!(trending.accept(Some(RequestId(1)), vec![set(1), set(2)], false, 5));
+    assert_eq!(trending.page, TrendingPage::More { next: 2 });
+    // The next page is asked, then a restart replaces it: the older page's
+    // answer lands nowhere, and the restart replaces the list.
+    trending.ask(RequestId(2), 2);
+    trending.ask(RequestId(3), 0);
+    assert!(!trending.accept(Some(RequestId(2)), vec![set(3), set(4)], false, 5));
+    assert_eq!(trending.sets.len(), 2);
+    assert!(trending.accept(Some(RequestId(3)), vec![set(7)], true, 1));
+    assert_eq!(trending.sets.len(), 1);
+    assert!(trending.is_premium);
+    assert_eq!(trending.page, TrendingPage::End);
+    // A failed page can be asked again from where it was.
+    trending.ask(RequestId(4), 1);
+    trending.failed(Some(RequestId(9)));
+    assert!(matches!(trending.page, TrendingPage::Asking { .. }));
+    trending.failed(Some(RequestId(4)));
+    assert_eq!(trending.page, TrendingPage::More { next: 1 });
 }

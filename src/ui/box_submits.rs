@@ -18,6 +18,5 @@ impl QuillApp {
         self.settle_profile_op(cx);
         self.settle_group_edit_box(cx);
         self.settle_group_upgrade(cx);
-        self.settle_network_reset(cx);
     }
 }

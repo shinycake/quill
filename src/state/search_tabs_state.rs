@@ -157,6 +157,7 @@ impl SearchState {
     }
 
     /// `getRecommendedChats` answer.
+    /// Only the request the tab waits for lands.
     pub(crate) fn accept_recommended(&mut self, request: Option<RequestId>, chat_ids: Vec<ChatId>) {
         self.tabs.recommended.answered(request, chat_ids);
     }

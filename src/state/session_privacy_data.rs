@@ -45,6 +45,39 @@ impl PasswordCheck {
     }
 }
 
+/// The `resetNetworkStatistics` of the Network usage block. Its outcome is
+/// its own: the refetch asked behind it is the usage's fetch, and a refusal
+/// of the reset must not land on that one.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum NetworkReset {
+    #[default]
+    Idle,
+    /// The reset is out under this request; its answer ends the stage.
+    Sending(RequestId),
+    /// TDLib refused the reset: the line the block draws until the next
+    /// try or the next fetch of the usage.
+    Failed(String),
+}
+
+impl NetworkReset {
+    /// The refusal line, when the last reset failed.
+    pub fn error(&self) -> Option<&str> {
+        match self {
+            Self::Failed(line) => Some(line),
+            _ => None,
+        }
+    }
+
+    /// The reset is out and waits for its answer.
+    pub fn is_sending(&self) -> bool {
+        matches!(self, Self::Sending(_))
+    }
+
+    fn waits_for(&self, request: RequestId) -> bool {
+        matches!(self, Self::Sending(asked) if *asked == request)
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct PrivacyData {
     /// `getNewChatPrivacySettings` state; `None` = never asked. Saves in
@@ -59,8 +92,10 @@ pub struct PrivacyData {
     /// account turn the 18+ toggle on.
     pub can_ignore_sensitive: bool,
     /// `getNetworkStatistics`: the answer, a refetch under it, or why it
-    /// failed (a failed reset lands here too).
+    /// failed.
     pub network: crate::state::fetch::Fetch<NetworkUsage>,
+    /// The reset of that usage, apart from its fetch.
+    pub network_reset: NetworkReset,
     pub password_check: PasswordCheck,
     /// The own gift settings' saves in flight, over the confirmed value.
     pub gift_save: GiftSave,
@@ -157,6 +192,8 @@ impl Session {
             }
             SettingsPayload::NetworkStatistics(usage) => {
                 if purpose == Some(RequestPurpose::GetNetworkStatistics) {
+                    // Only the fetch that waits for this request takes it: the
+                    // numbers of a fetch asked before a reset are dropped.
                     self.settings
                         .privacy_data
                         .network
@@ -190,9 +227,20 @@ impl Session {
     /// `ok` of this block's purposes.
     pub(crate) fn apply_privacy_data_ok(&mut self, pending: Option<&PendingRequest>) {
         match pending.map(|p| p.purpose) {
-            // The reset sender already dropped the old numbers and asked
-            // again behind it; the refetch holds its own request.
-            Some(RequestPurpose::ResetNetworkStatistics) => {}
+            // The old numbers are already gone: the driver cleared them when
+            // it sent the reset and asked again behind it, so the fetch in
+            // flight (if any) holds its own request and is left alone.
+            Some(RequestPurpose::ResetNetworkStatistics) => {
+                if let Some(pending) = pending
+                    && self
+                        .settings
+                        .privacy_data
+                        .network_reset
+                        .waits_for(pending.id)
+                {
+                    self.settings.privacy_data.network_reset = NetworkReset::Idle;
+                }
+            }
             Some(RequestPurpose::HideCheckPasswordSuggestion) => {
                 self.chat_list
                     .suggestions
@@ -368,8 +416,12 @@ impl Session {
                 );
             }
             RequestPurpose::ResetNetworkStatistics => {
-                data.network
-                    .fail(sessions_error_line("reset the network usage", err));
+                if let Some(pending) = pending
+                    && data.network_reset.waits_for(pending.id)
+                {
+                    data.network_reset =
+                        NetworkReset::Failed(sessions_error_line("reset the network usage", err));
+                }
             }
             RequestPurpose::CheckRememberedPassword if data.password_check.waits_for(pending) => {
                 data.password_check = if err.class == ErrorClass::Invalid {

@@ -561,12 +561,13 @@ impl Session {
                     if let Some(slot) = self
                         .messages
                         .scheduled_messages
+                        .rows
                         .iter_mut()
                         .find(|m| m.chat_id == message.chat_id && m.id == message.id)
                     {
                         *slot = message;
                     } else {
-                        self.messages.scheduled_messages.push(message);
+                        self.messages.scheduled_messages.rows.push(message);
                     }
                 } else if let Some(request) =
                     pending.filter(|p| p.purpose == RequestPurpose::SendMessage)

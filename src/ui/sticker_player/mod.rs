@@ -38,7 +38,7 @@ use futures_channel::oneshot;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::sticker_playback::player::{
-    AHEAD, ClipKey, ClipState, Engine, PlayHead, PlayMode, Timeline, edge_for,
+    AHEAD, ClipKey, ClipView, Engine, PlayHead, PlayMode, Timeline, edge_for,
 };
 use smallvec::SmallVec;
 #[cfg(test)]
@@ -422,7 +422,7 @@ impl Player {
     /// Whether `key` failed to open.
     #[cfg(feature = "demo-capture")]
     pub(super) fn failed_key(&self, key: &ClipKey) -> bool {
-        matches!(self.engine.state(key), Some(ClipState::Failed(_)))
+        matches!(self.engine.state(key), Some(ClipView::Failed(_)))
     }
 
     /// Take the frames the workers drew. True when one of them is a clip's

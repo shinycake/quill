@@ -380,7 +380,6 @@ impl QuillApp {
         if session.threads.saved.waiting_to_retry() {
             return;
         }
-        // The tags fetch is `Idle` until `load_saved_tags` records its ask.
         if session.threads.saved.tags.is_idle() {
             let _ = live.driver.load_saved_tags(0);
         }

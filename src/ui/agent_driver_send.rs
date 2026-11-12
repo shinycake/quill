@@ -72,7 +72,7 @@ impl QuillApp {
             .and_then(|session| session.chats.get(&chat_id.0))
             .map(|chat| chat.title.clone())
             .unwrap_or_default();
-        self.agent_bridge.ui_send = Some(Box::new((
+        let handed = self.agent_bridge.hand_over_send(Box::new((
             self.screen_epoch(),
             UiSend {
                 account,
@@ -82,6 +82,10 @@ impl QuillApp {
                 request,
             },
         )));
+        if !handed {
+            // Only a running command takes a send; none runs.
+            guard::refuse_if_injecting("send a message");
+        }
         cx.notify();
     }
 

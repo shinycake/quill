@@ -45,8 +45,13 @@ impl StickerSearch {
 /// request that asked.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum StickerSetStage {
+    /// No set is selected.
     #[default]
     Idle,
+    /// `set_id` is selected and its stickers are not asked for yet.
+    Selected {
+        set_id: i64,
+    },
     Loading {
         set_id: i64,
         request: RequestId,
@@ -64,9 +69,10 @@ impl StickerSetStage {
     pub fn set_id(&self) -> Option<i64> {
         match *self {
             Self::Idle => None,
-            Self::Loading { set_id, .. } | Self::Ready { set_id } | Self::Failed { set_id } => {
-                Some(set_id)
-            }
+            Self::Selected { set_id }
+            | Self::Loading { set_id, .. }
+            | Self::Ready { set_id }
+            | Self::Failed { set_id } => Some(set_id),
         }
     }
 
@@ -339,11 +345,10 @@ impl StickerChanges {
 }
 
 /// The sticker set the panel has selected: nothing, or a set with its
-/// `getStickerSet` stage (asked, answered or failed) and stickers. Changing
-/// mode or set replaces it whole.
+/// `getStickerSet` stage (selected, asked, answered or failed; the stage
+/// holds the set id) and stickers. Changing mode or set replaces it whole.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StickerSelection {
-    pub set_id: Option<i64>,
     pub stage: StickerSetStage,
     pub stickers: Vec<StickerItem>,
 }
@@ -352,8 +357,21 @@ impl StickerSelection {
     /// `set_id` is selected and not yet loaded.
     pub fn of(set_id: i64) -> Self {
         Self {
-            set_id: Some(set_id),
+            stage: StickerSetStage::Selected { set_id },
             ..Self::default()
+        }
+    }
+
+    /// The selected set.
+    pub fn set_id(&self) -> Option<i64> {
+        self.stage.set_id()
+    }
+
+    /// The selected set is asked for again: a request that was dropped, or
+    /// a failure the next opening retries.
+    pub fn reselect(&mut self) {
+        if let Some(set_id) = self.stage.set_id() {
+            self.stage = StickerSetStage::Selected { set_id };
         }
     }
 }
@@ -396,9 +414,7 @@ pub struct StickerPanel {
     pub open: bool,
     pub tab: StickerTab,
     pub sets: Vec<StickerSetInfo>,
-    pub archived: Vec<StickerSetInfo>,
-    pub archived_next_offset: i64,
-    pub archived_has_more: bool,
+    pub archived: ArchivedSets,
     /// The selected set: its id, `getStickerSet` stage and stickers, one
     /// value replaced whole when the mode or the set changes.
     pub selection: StickerSelection,
@@ -409,11 +425,9 @@ pub struct StickerPanel {
     pub batch: StickerBatch,
     /// The set changes and the reorder in flight.
     pub changes: StickerChanges,
-    /// Slice S8: trending sets (`getTrendingStickerSets`) + premium-row flag.
-    pub trending: Vec<StickerSetInfo>,
-    pub trending_total: usize,
-    pub trending_next_offset: usize,
-    pub trending_is_premium: bool,
+    /// Slice S8: trending sets (`getTrendingStickerSets`), the premium-row
+    /// flag and how far their paging got, one value.
+    pub trending: TrendingSets,
     /// `getGreetingStickers`: hello stickers for empty private chats.
     /// Asked once per session from `Idle`; a failure stays `Failed`, so a
     /// redraw never asks again.
@@ -553,9 +567,9 @@ impl GifPanel {
         match &self.saved {
             Fetch::Idle => false,
             Fetch::Ready(()) => true,
-            Fetch::Outdated(stale) | Fetch::Loading { stale, .. } | Fetch::Failed { stale, .. } => {
-                stale.is_some()
-            }
+            Fetch::Outdated { held: stale, .. }
+            | Fetch::Loading { stale, .. }
+            | Fetch::Failed { stale, .. } => stale.is_some(),
         }
     }
 
@@ -596,28 +610,40 @@ impl GifPanel {
         }
     }
 
-    /// `getSavedAnimations` went out as `request`: the list waits for its
-    /// answer.
-    pub fn saved_asked(&mut self, request: RequestId) {
+    /// `getSavedAnimations` went out as `request`.
+    pub fn saved_asked(&mut self, request: crate::ids::RequestId) {
         self.saved.begin();
         self.saved.sent(request);
     }
 
-    /// `getSavedAnimations` answered as `request`. Only the fetch that waits
-    /// for it takes the answer: an `updateSavedAnimations` or a removal that
-    /// came while it was out dropped it (the list is asked for again), so
-    /// an answer that predates the change never shows.
-    pub fn saved_answered(&mut self, request: Option<RequestId>, animations: Vec<AnimationItem>) {
-        if self.saved.answered(request, ()) {
-            self.animations = animations;
+    /// `getSavedAnimations` answered. An `updateSavedAnimations` that came
+    /// while the request was out marks the list out of date: the answer may
+    /// predate the change, so it is shown (the list does not blank) and the
+    /// mark stays, so the list is asked for again.
+    pub fn saved_answered(
+        &mut self,
+        request: Option<crate::ids::RequestId>,
+        animations: Vec<AnimationItem>,
+    ) {
+        // The answer of the request the list waits for, or of the one an
+        // `updateSavedAnimations` outdated while it was out.
+        let Some(request) = request else {
+            return;
+        };
+        let waits = self.saved.waits_for(request);
+        if !waits && !self.saved.asked_before_change(request) {
+            return;
         }
-    }
-
-    /// `getSavedAnimations` came back with an error as `request`: only the
-    /// fetch that waits for it fails.
-    pub fn saved_request_failed(&mut self, request: Option<RequestId>) {
-        if request.is_some_and(|id| self.saved.waits_for(id)) {
-            self.saved_failed();
+        self.animations = animations;
+        // Kept `Outdated` (now with a list held) when
+        // `updateSavedAnimations` arrived meanwhile: asked for again.
+        if waits {
+            self.saved.answered(Some(request), ());
+        } else {
+            self.saved = Fetch::Outdated {
+                held: Some(()),
+                asked: None,
+            };
         }
     }
 
@@ -632,12 +658,12 @@ impl GifPanel {
         self.saved.is_outdated()
     }
 
-    /// `getSavedAnimations` could not be sent (or its error was matched, see
-    /// [`Self::saved_request_failed`]): counted as loaded,
-    /// so nothing asks again until the panel is opened. A list marked out
-    /// of date stays marked.
-    pub fn saved_failed(&mut self) {
-        if self.saved.is_outdated() {
+    /// `getSavedAnimations` `request` failed, or could not be sent: counted
+    /// as loaded, so nothing asks again until the panel is opened. Only the
+    /// fetch the list waits for fails; a list marked out of date stays
+    /// marked, and a fetch asked after a forget is not this one's.
+    pub fn saved_failed(&mut self, request: crate::ids::RequestId) {
+        if !self.saved.waits_for(request) {
             return;
         }
         self.saved = Fetch::Failed {
@@ -686,9 +712,9 @@ impl GifPanel {
     /// The list is out of date: the next ask fetches it again.
     pub fn saved_forgotten(&mut self) {
         self.saved = match std::mem::take(&mut self.saved) {
-            Fetch::Idle | Fetch::Ready(()) | Fetch::Outdated(_) => Fetch::Idle,
-            // A fetch in flight was asked before the change: it is dropped
-            // with its stage, and the next ask goes out.
+            Fetch::Idle | Fetch::Ready(()) | Fetch::Outdated { .. } => Fetch::Idle,
+            // A fetch out asked before the change: its answer predates it, so
+            // it is dropped and the next ask goes out afresh.
             Fetch::Loading { .. } => Fetch::Idle,
             Fetch::Failed { error, .. } => Fetch::Failed { error, stale: None },
         };
@@ -750,11 +776,12 @@ impl GifPanel {
     /// page's own start ends the paging.
     pub fn search_page_answered(
         &mut self,
+        request: Option<crate::ids::RequestId>,
         animations: Vec<AnimationItem>,
         next_offset: String,
         first_page: bool,
     ) {
-        self.search_answered();
+        self.search_answered(request);
         let GifList::Search(search) = &mut self.list else {
             return;
         };
@@ -801,10 +828,11 @@ impl GifPanel {
             if request.is_some_and(|request| search.fetch.waits_for(request)))
     }
 
-    /// A search page answered (the caller checked [`Self::search_waits_for`]).
-    pub fn search_answered(&mut self) {
-        if let GifList::Search(search) = &mut self.list {
-            search.fetch.succeed(());
+    /// The page `request` answered: taken only by the search that waits for it.
+    pub fn search_answered(&mut self, request: Option<crate::ids::RequestId>) -> bool {
+        match &mut self.list {
+            GifList::Search(search) => search.fetch.answered(request, ()),
+            GifList::Saved => false,
         }
     }
 
@@ -892,11 +920,11 @@ impl StickerPanel {
     pub fn visible_stickers(&self) -> &[StickerItem] {
         match self.tab {
             StickerTab::Installed | StickerTab::Trending => &self.selection.stickers,
-            StickerTab::Archived if self.selection.set_id.is_some() => &self.selection.stickers,
+            StickerTab::Archived if self.selection.set_id().is_some() => &self.selection.stickers,
             StickerTab::Archived => &[],
             StickerTab::Recent => &self.recent,
             StickerTab::Favorites => &self.favorites,
-            StickerTab::Search if self.selection.set_id.is_some() => &self.selection.stickers,
+            StickerTab::Search if self.selection.set_id().is_some() => &self.selection.stickers,
             StickerTab::Search => &self.search.stickers,
         }
     }
@@ -906,11 +934,9 @@ impl StickerPanel {
     }
 
     pub fn selected_needs_load(&self) -> Option<i64> {
-        let id = self.selection.set_id?;
-        if self.selection.stage.set_id() == Some(id) {
-            None
-        } else {
-            Some(id)
+        match self.selection.stage {
+            StickerSetStage::Selected { set_id } => Some(set_id),
+            _ => None,
         }
     }
 }

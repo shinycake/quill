@@ -209,7 +209,7 @@ impl QuillApp {
             .icon(IconName::Star)
             .label(tr(keys::TRANSLATE_COCOON_DONE))
             .on_click(cx.listener(|this, _, _, cx| {
-                this.set_ai_compose_view(AiComposeView::Card, cx);
+                this.set_ai_compose_view(AiComposeView::card(), cx);
             }))
             .into_any_element()
     }

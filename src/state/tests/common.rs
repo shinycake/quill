@@ -189,3 +189,14 @@ pub(crate) fn payment_sent_for_shown(session: &mut Session, request: RequestId) 
         .expect("a checkout is open");
     session.payment_sent(request, &invoice);
 }
+
+/// A `getMessageThreadHistory` page of the open thread, asked as the driver
+/// asks it: the window waits for it.
+pub(super) fn asked_thread_page(session: &mut Session, message_id: i64, chat: i64) -> RequestId {
+    let page = session.request(
+        RequestPurpose::GetMessageThreadHistory { message_id },
+        Some(ChatId(chat)),
+    );
+    session.thread_older_asked(page);
+    page
+}

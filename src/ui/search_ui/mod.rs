@@ -35,7 +35,7 @@ use quill::search_filters::{
 };
 use quill::search_tabs::SearchTab;
 use quill::state::{
-    ChatSearchJump, FromPicker, RequestPurpose, SearchConfirm, SearchStatus, Session,
+    ChatSearchJump, FromPicker, RequestPurpose, SearchConfirm, SearchStateView, Session,
 };
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::MessageSender;
@@ -656,7 +656,7 @@ impl QuillApp {
             let trimmed = query.trim();
             if session.search.chat_search.is_open()
                 && session.search.chat_search.query() == trimmed
-                && !matches!(session.search.chat_search.status(), SearchStatus::Closed)
+                && !matches!(session.search.chat_search.status(), SearchStateView::Closed)
             {
                 cx.notify();
                 return;

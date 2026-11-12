@@ -75,8 +75,10 @@ impl Session {
                     titles.remove(&set_id);
                 }
             }
-            Some(RequestPurpose::Stickers(StickersPurpose::ViewStickerSet { set_id })) => {
-                self.fail_sticker_set_view(set_id, pending.map(|p| p.id))
+            Some(RequestPurpose::Stickers(StickersPurpose::ViewStickerSet { .. })) => {
+                if let Some(pending) = pending {
+                    self.fail_sticker_set_view(pending.id);
+                }
             }
             Some(RequestPurpose::Stickers(StickersPurpose::CustomEmojiPack { .. })) => {
                 if let Some(pending) = pending {
@@ -93,7 +95,9 @@ impl Session {
                     .waits_for(pending.map(|p| p.id))
                 {
                     self.stickers.stickers.attached = AttachedSets::Idle;
-                    self.fail_sticker_set_view(0, pending.map(|p| p.id));
+                    if let Some(pending) = pending {
+                        self.fail_sticker_set_view(pending.id);
+                    }
                 }
             }
             // The lookup's ids are asked for again. A rate limit is no
@@ -176,6 +180,12 @@ impl Session {
             .emoji
             .status_change
             .failed(pending.map(|p| p.id));
+        if emoji_purpose == Some(RequestPurpose::GetTrendingStickerSets) {
+            self.stickers
+                .stickers
+                .trending
+                .failed(pending.map(|p| p.id));
+        }
         if emoji_purpose == Some(RequestPurpose::GetTrendingEmojiSets) {
             self.stickers.emoji.lists.trending.failed_request(
                 pending.map(|p| p.id),
@@ -252,10 +262,8 @@ impl Session {
             self.stickers.gifs.saved_mutation_failed();
             self.stickers.gifs.save_settled(pending.map(|p| p.id));
         }
-        if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSavedAnimations) {
-            self.stickers
-                .gifs
-                .saved_request_failed(pending.map(|p| p.id));
+        if let Some(pending) = pending.filter(|p| p.purpose == RequestPurpose::GetSavedAnimations) {
+            self.stickers.gifs.saved_failed(pending.id);
         }
     }
 }

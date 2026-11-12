@@ -40,9 +40,9 @@ impl QuillApp {
                 .ai_compose
                 .open
                 .as_ref()
-                .map_or(AiComposeView::Card, |open| open.view.clone());
+                .map_or(AiComposeView::card(), |open| open.view.clone());
             let (title, body, footer) = match view {
-                AiComposeView::Card => (
+                AiComposeView::Card { .. } => (
                     Some(this.ai_compose_title(cx)),
                     this.ai_compose_card_view(cx),
                     this.ai_compose_footer(cx),
@@ -94,7 +94,7 @@ impl QuillApp {
             Some(
                 AiComposeView::Languages | AiComposeView::About | AiComposeView::StyleEditor(_),
             ) => {
-                self.set_ai_compose_view(AiComposeView::Card, cx);
+                self.set_ai_compose_view(AiComposeView::card(), cx);
             }
             Some(AiComposeView::StyleIcon(_)) => {
                 self.show_ai_style_editor(cx);

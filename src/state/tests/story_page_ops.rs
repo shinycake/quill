@@ -36,7 +36,7 @@ fn a_failed_delete_shows_while_a_read_is_in_flight() {
     let ops = &session.stories.page_ops;
     assert!(matches!(
         ops.get(delete).map(|op| &op.state),
-        Some(StoryPageOpState::Failed(_))
+        Some(StoryPageOpState::Failed { .. })
     ));
     assert!(ops.loading(
         ChatId(11),
@@ -44,7 +44,7 @@ fn a_failed_delete_shows_while_a_read_is_in_flight() {
     ));
     assert!(matches!(
         ops.status_for(Some(ChatId(11))).map(|op| &op.state),
-        Some(StoryPageOpState::Failed(_))
+        Some(StoryPageOpState::Failed { .. })
     ));
 }
 
@@ -91,7 +91,7 @@ fn a_failed_send_keeps_the_other_ops() {
     );
     assert_eq!(
         session.stories.page_ops.get(read).map(|op| &op.state),
-        Some(&StoryPageOpState::Checking)
+        Some(&StoryPageOpState::Checking { request: read })
     );
     // The read still settles by its own answer.
     apply_json(

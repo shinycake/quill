@@ -34,16 +34,18 @@ pub enum ThreadStatus {
     },
     /// The thread is known but lives in another chat (a channel post's
     /// discussion group): the driver still has to open that chat. Leaves
-    /// by `switch_to_thread_chat` (`Starting`, or `Failed` when the chat
+    /// by `switch_to_thread_chat` (`ChatOpen`, or `Failed` when the chat
     /// is unknown) or by closing the thread.
     SwitchingChat,
     /// The thread's chat is open; reading and the first
     /// `getMessageThreadHistory` page are still to be started.
-    Starting,
-    /// The first `getMessageThreadHistory` page is in flight (the
-    /// request that went out). Its answer makes the thread `Ready`, its
-    /// error `Failed`; it is entered only once the send succeeded.
-    LoadingHistory(RequestId),
+    ChatOpen,
+    /// The first `getMessageThreadHistory` page is in flight. The request
+    /// is the window's older end (`history.older`), which matches its
+    /// answer; this stage only says the thread has no page to show yet.
+    /// The answer makes the thread `Ready`, the error `Failed`; it is
+    /// entered only once the send succeeded.
+    LoadingHistory,
     Ready,
     /// The reducer replaced the window (an own send while newer replies
     /// were unloaded); the driver has to request the newest page, which
@@ -65,7 +67,7 @@ impl ThreadStatus {
 
     /// The thread chat is open and its first page was not requested yet.
     pub fn needs_start(&self) -> bool {
-        matches!(self, Self::Starting)
+        matches!(self, Self::ChatOpen)
     }
 
     /// The thread is known but its first page has not landed: the driver
@@ -74,20 +76,14 @@ impl ThreadStatus {
     pub fn is_opening(&self) -> bool {
         matches!(
             self,
-            Self::SwitchingChat | Self::Starting | Self::LoadingHistory(_)
+            Self::SwitchingChat | Self::ChatOpen | Self::LoadingHistory
         )
     }
 
-    /// A history page answered by `request` may be applied. While the
-    /// first page is out (`LoadingHistory`) only that request's answer
-    /// counts; any other page is from a view that is gone. (The driver
-    /// enters `LoadingHistory` in the same step that sends the page, so
-    /// nothing answers during `Starting`.)
-    pub fn takes_page_of(&self, request: RequestId) -> bool {
-        match self {
-            Self::LoadingHistory(waiting) => *waiting == request,
-            _ => true,
-        }
+    /// A newer history page may be applied: not while the first page is
+    /// out (a newer one then is from a view that is gone).
+    pub fn takes_newer_page(&self) -> bool {
+        !matches!(self, Self::LoadingHistory)
     }
 
     /// The first page landed: the thread shows rows (or the reload of its
@@ -130,8 +126,6 @@ pub struct ThreadView {
     pub history: TopicHistory,
     /// The unread divider goes above the first incoming reply after this id.
     pub unread_anchor: Option<MessageId>,
-    /// Bumped by "jump to root" so the view scrolls to the top again.
-    pub root_jump_serial: u64,
     /// The forum topic the thread was opened from. Sends and typing stay in
     /// that topic (`messageTopicForum`) and reply to the thread root;
     /// `None` outside forums, where a thread is its own `messageTopicThread`.
@@ -162,7 +156,6 @@ impl ThreadView {
             root_ids: Vec::new(),
             history: TopicHistory::default(),
             unread_anchor: None,
-            root_jump_serial: 0,
             forum_topic_id: None,
             draft: None,
         }
@@ -338,6 +331,13 @@ impl ThreadView {
         true
     }
 
+    /// Whether the older (or first) page answered by `request` is the one
+    /// the thread waits for: the window's older end holds it. Any other is
+    /// from a window that is gone.
+    pub(crate) fn takes_older_page(&self, request: RequestId) -> bool {
+        self.history.older == OlderEnd::Asking(request)
+    }
+
     /// Drop the loaded replies so the newest page can load; the root rows
     /// stay (they are the pinned bar), own sends still in flight stay (they
     /// belong to the newest end, as tdesktop's `appendClientSideMessages`),
@@ -351,7 +351,10 @@ impl ThreadView {
         self.history.next_from_message_id = MessageId(0);
         self.history.reader = ReaderPosition::Tail;
         self.history.newer = NewerEnd::AtLatest;
-        self.history.older = OlderEnd::Open;
+        // Every way out of the older end: the page out is forgotten, a
+        // failure is forgiven.
+        self.history.forget_older();
+        self.history.reopen_older();
         if self.status == ThreadStatus::Ready {
             self.status = ThreadStatus::ReloadNeeded;
         }

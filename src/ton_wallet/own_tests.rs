@@ -187,12 +187,12 @@ fn wallet_state_hides_everything_when_the_option_is_off() {
     wallet
         .profile_addresses
         .insert(5, ProfileAddress::Found("EQfive".into()));
-    wallet.own = Some(OwnWallet::default());
+    wallet.own = Fetch::Ready(OwnWallet::default());
     wallet.money = Some(MoneyPage::default());
     assert_eq!(wallet.profile_address(5), Some("EQfive"));
     wallet.set_can_use(false);
     assert_eq!(wallet.profile_address(5), None);
-    assert!(wallet.own.is_none() && !wallet.money_open() && wallet.state_fetch.is_idle());
+    assert!(wallet.own.is_idle() && !wallet.money_open());
 }
 
 #[test]

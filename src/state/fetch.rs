@@ -106,7 +106,15 @@ pub enum Fetch<T> {
     Ready(T),
     /// A change landed after the answer: the old answer, if any, stays
     /// visible until the refetch replaces it (never optimistic).
-    Outdated(Option<T>),
+    ///
+    /// `asked` is the request that was out when the change landed, if one
+    /// was: its answer predates the change but is the only one that may be
+    /// shown meanwhile ([`Fetch::asked_before_change`]); any other answer is
+    /// not this fetch's.
+    Outdated {
+        held: Option<T>,
+        asked: Option<crate::ids::RequestId>,
+    },
     /// The latest request failed; `stale` is the last answer, if any.
     Failed { error: String, stale: Option<T> },
 }
@@ -124,23 +132,34 @@ impl<T> Fetch<T> {
 
     /// The answer is out of date and a refetch is due.
     pub fn is_outdated(&self) -> bool {
-        matches!(self, Self::Outdated(_))
+        matches!(self, Self::Outdated { .. })
     }
 
     /// A change landed: what is held stays visible and is asked for
     /// again, also when nothing was held (the change needs the answer). A
     /// request in flight asked before the change, so it is dropped with its
-    /// mark: a first ask with nothing held becomes `Outdated(None)` too,
+    /// mark: a first ask with nothing held becomes `Outdated { held: None, .. }` too,
     /// whose answer would otherwise land without the change. The owner that
     /// refetches asks again.
     pub fn outdate(&mut self) {
-        *self = Self::Outdated(self.take_data());
+        let asked = match self {
+            Self::Loading { request, .. } => *request,
+            Self::Outdated { asked, .. } => *asked,
+            _ => None,
+        };
+        *self = Self::Outdated {
+            held: self.take_data(),
+            asked,
+        };
     }
 
     /// Something is being waited for: a request in flight, or a refetch due
     /// with nothing held to show meanwhile. What draws a spinner.
     pub fn shows_loading(&self) -> bool {
-        matches!(self, Self::Loading { .. } | Self::Outdated(None))
+        matches!(
+            self,
+            Self::Loading { .. } | Self::Outdated { held: None, .. }
+        )
     }
 
     pub fn is_loading(&self) -> bool {
@@ -161,7 +180,7 @@ impl<T> Fetch<T> {
         match self {
             Self::Idle => None,
             Self::Ready(value) => Some(value),
-            Self::Outdated(held)
+            Self::Outdated { held, .. }
             | Self::Loading { stale: held, .. }
             | Self::Failed { stale: held, .. } => held.as_ref(),
         }
@@ -171,7 +190,7 @@ impl<T> Fetch<T> {
         match self {
             Self::Idle => None,
             Self::Ready(value) => Some(value),
-            Self::Outdated(held)
+            Self::Outdated { held, .. }
             | Self::Loading { stale: held, .. }
             | Self::Failed { stale: held, .. } => held.as_mut(),
         }
@@ -182,7 +201,7 @@ impl<T> Fetch<T> {
         match std::mem::take(self) {
             Self::Idle => None,
             Self::Ready(value) => Some(value),
-            Self::Outdated(held)
+            Self::Outdated { held, .. }
             | Self::Loading { stale: held, .. }
             | Self::Failed { stale: held, .. } => held,
         }
@@ -204,7 +223,10 @@ impl<T> Fetch<T> {
                 error,
                 stale: Some(make()),
             },
-            Self::Outdated(_) => Self::Outdated(Some(make())),
+            Self::Outdated { asked, .. } => Self::Outdated {
+                held: Some(make()),
+                asked,
+            },
             Self::Idle | Self::Ready(_) => Self::Ready(make()),
         };
     }
@@ -212,7 +234,7 @@ impl<T> Fetch<T> {
     /// Whether a request should go out now: never asked, or a refetch is
     /// owed. A request in flight, an answer and a failure wait.
     pub fn wants_fetch(&self) -> bool {
-        matches!(self, Self::Idle | Self::Outdated(_))
+        matches!(self, Self::Idle | Self::Outdated { .. })
     }
 
     /// A request goes out. The last answer stays visible, the last error is
@@ -253,6 +275,12 @@ impl<T> Fetch<T> {
     /// The fetch waits for the answer of `request`.
     pub fn waits_for(&self, request: crate::ids::RequestId) -> bool {
         matches!(self, Self::Loading { request: Some(asked), .. } if *asked == request)
+    }
+
+    /// Whether `request` is the one that was out when a change outdated the
+    /// list: its answer predates the change.
+    pub fn asked_before_change(&self, request: crate::ids::RequestId) -> bool {
+        matches!(self, Self::Outdated { asked: Some(asked), .. } if *asked == request)
     }
 
     /// `request` answered: taken only by the fetch that waits for it
@@ -307,7 +335,18 @@ impl<T> Fetch<T> {
         true
     }
 
-    /// An answer that names no request: a pushed update, or a fetch whose
+    /// The held value is now `value`, and the stage stays what it was: a
+    /// request in flight keeps waiting for its own answer, a failure stays
+    /// failed. For a value that no request of this fetch carries (a server
+    /// push, a local choice), which is therefore not an answer to match.
+    pub fn replace_data(&mut self, value: T) {
+        match self.data_mut() {
+            Some(held) => *held = value,
+            None => self.insert_data_if_missing(|| value),
+        }
+    }
+
+    /// An answer that names no request: a fetch whose
     /// sender does not record its request ([`Fetch::sent`]). An older request's
     /// late answer lands on a newer ask through this, so a sender prefers
     /// [`Fetch::answered`]; `scripts/check-request-match.py` counts the callers
@@ -567,5 +606,27 @@ mod tests {
         let mut fetch = Fetch::Ready(7);
         assert_eq!(fetch.take_data(), Some(7));
         assert!(fetch.is_idle());
+    }
+
+    #[test]
+    fn replacing_the_data_keeps_the_stage_and_its_request() {
+        let mut idle: Fetch<i32> = Fetch::Idle;
+        idle.replace_data(1);
+        assert_eq!(idle, Fetch::Ready(1));
+
+        let mut loading: Fetch<i32> = Fetch::Idle;
+        loading.begin();
+        loading.sent(RequestId(7));
+        loading.replace_data(2);
+        assert!(loading.waits_for(RequestId(7)), "{loading:?}");
+        assert_eq!(loading.data(), Some(&2));
+        assert!(loading.answered(Some(RequestId(7)), 3));
+        assert_eq!(loading, Fetch::Ready(3));
+
+        let mut failed: Fetch<i32> = Fetch::Idle;
+        failed.fail("no");
+        failed.replace_data(4);
+        assert_eq!(failed.error(), Some("no"));
+        assert_eq!(failed.data(), Some(&4));
     }
 }

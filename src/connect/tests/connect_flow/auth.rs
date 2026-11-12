@@ -743,7 +743,7 @@ fn a_refused_logout_puts_the_session_back_to_running() {
         } else {
             assert!(driver.session.shutdown.is_running());
             assert!(driver.session.take_logout_refusal().is_some());
-            assert_eq!(driver.session.shutdown, ShutdownPhase::Running);
+            assert_eq!(driver.session.shutdown, ShutdownPhase::Active);
             assert!(driver.session.take_logout_refusal().is_none());
             assert!(matches!(driver.session.auth, AuthorizationState::Ready));
         }

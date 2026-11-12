@@ -62,12 +62,11 @@ pub enum StickerSetEdits {
     /// the box shows the server's set. `out` are the edits still being
     /// answered; the ask waits for them.
     NeedsRefresh { out: Vec<RequestId> },
-    /// The refresh is out as `request`: only its answer or error ends it.
-    /// An edit confirmed meanwhile makes it stale (`NeedsRefresh` again, so
-    /// its answer is dropped and a new one asked); `out` are the edits
-    /// still being answered.
+    /// The `getStickerSet` refresh is out as `refresh`; only its answer
+    /// updates the box. An edit confirmed meanwhile makes it stale
+    /// (`NeedsRefresh` again).
     Refreshing {
-        request: RequestId,
+        refresh: RequestId,
         out: Vec<RequestId>,
     },
     /// `deleteStickerSet` was confirmed: the box closes.
@@ -119,6 +118,7 @@ impl StickerSetEdits {
     pub fn need_refresh(&mut self) {
         match std::mem::take(self) {
             Self::Idle => *self = Self::NeedsRefresh { out: Vec::new() },
+            // The refresh out predates the edit: its answer is not taken.
             Self::InFlight(out) | Self::NeedsRefresh { out } | Self::Refreshing { out, .. } => {
                 *self = Self::NeedsRefresh { out };
             }
@@ -126,68 +126,75 @@ impl StickerSetEdits {
         }
     }
 
-    /// The refresh went out as `request`.
-    pub fn refresh_sent(&mut self, request: RequestId) {
+    /// The refresh went out as `refresh`.
+    pub fn refreshing(&mut self, refresh: RequestId) {
         if let Self::NeedsRefresh { out } = std::mem::take(self) {
-            *self = Self::Refreshing { request, out };
+            *self = Self::Refreshing { refresh, out };
         }
     }
 
-    /// The refresh could not be sent: it is not asked again from every
-    /// poll.
-    pub fn refresh_unsent(&mut self) {
+    /// The refresh never went out: it is over, and not asked again from
+    /// every poll.
+    pub fn refresh_skipped(&mut self) {
         if let Self::NeedsRefresh { out } = std::mem::take(self) {
             *self = Self::after_refresh(out, false);
         }
     }
 
-    /// The refresh `request` was refused: the box keeps what it shows.
-    /// `false` when it is not the refresh this box waits for.
-    pub fn refresh_failed(&mut self, request: Option<RequestId>) -> bool {
-        match std::mem::take(self) {
-            Self::Refreshing {
-                request: asked,
-                out,
-            } if Some(asked) == request => {
-                *self = Self::after_refresh(out, false);
-                true
-            }
-            other => {
-                *self = other;
-                false
-            }
+    /// Whether `request` is the refresh this stage waits for.
+    pub fn waits_for_refresh(&self, request: RequestId) -> bool {
+        matches!(self, Self::Refreshing { refresh, .. } if *refresh == request)
+    }
+
+    /// The set's contents arrived as the refresh `request`. An edit still
+    /// in flight (a move applied locally) may have changed the set after
+    /// this answer was built, so the box asks again once it is answered;
+    /// otherwise the answer is current. `false` (nothing changes) for any
+    /// other request.
+    pub fn refresh_arrived(&mut self, request: RequestId) -> bool {
+        if !self.waits_for_refresh(request) {
+            return false;
+        }
+        self.settle_refresh();
+        true
+    }
+
+    /// The refresh failed: the box keeps what it shows.
+    pub fn refresh_failed(&mut self, request: RequestId) {
+        if self.waits_for_refresh(request) {
+            let Self::Refreshing { out, .. } = std::mem::take(self) else {
+                return;
+            };
+            *self = if out.is_empty() {
+                Self::Idle
+            } else {
+                Self::InFlight(out)
+            };
         }
     }
 
-    /// The set's contents arrived as `request`. Only the refresh this box
-    /// waits for lands. An edit still in flight (a move applied locally)
-    /// may have changed the set after the answer was built, so the box asks
-    /// again once it is answered; otherwise the answer is current. `false`
-    /// when it is not the refresh this box waits for.
-    pub fn refresh_arrived(&mut self, request: Option<RequestId>) -> bool {
+    /// The set's contents arrived under the load stage of the box (the
+    /// first answer): edits out make the answer stale.
+    pub fn load_arrived(&mut self) {
         match std::mem::take(self) {
-            Self::Refreshing {
-                request: asked,
-                out,
-            } if Some(asked) == request => {
-                *self = Self::after_refresh(out, true);
-                true
+            Self::InFlight(out) | Self::NeedsRefresh { out } | Self::Refreshing { out, .. }
+                if !out.is_empty() =>
+            {
+                *self = Self::NeedsRefresh { out };
             }
-            other => {
-                *self = other;
-                false
-            }
+            Self::Deleted => *self = Self::Deleted,
+            _ => *self = Self::Idle,
         }
     }
 
-    /// The first load of the set arrived (the view had no refresh out).
-    pub fn set_arrived(&mut self) {
-        *self = match std::mem::take(self) {
-            Self::InFlight(out) | Self::NeedsRefresh { out } if !out.is_empty() => {
-                Self::NeedsRefresh { out }
-            }
-            Self::Deleted => Self::Deleted,
-            _ => Self::Idle,
+    fn settle_refresh(&mut self) {
+        let Self::Refreshing { out, .. } = std::mem::take(self) else {
+            return;
+        };
+        *self = if out.is_empty() {
+            Self::Idle
+        } else {
+            Self::NeedsRefresh { out }
         };
     }
 
@@ -220,15 +227,9 @@ impl StickerSetEdits {
                 out.retain(|held| Some(*held) != request);
                 *self = Self::NeedsRefresh { out };
             }
-            Self::Refreshing {
-                request: asked,
-                mut out,
-            } => {
+            Self::Refreshing { refresh, mut out } => {
                 out.retain(|held| Some(*held) != request);
-                *self = Self::Refreshing {
-                    request: asked,
-                    out,
-                };
+                *self = Self::Refreshing { refresh, out };
             }
             other => *self = other,
         }

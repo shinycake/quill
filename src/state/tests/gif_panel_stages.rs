@@ -18,7 +18,7 @@ fn a_new_search_starts_clean_after_a_failed_one() {
     panel.search_begun("cats".into());
     assert!(panel.search_loading() && !panel.search_failed());
     panel.search_sent(RequestId(1));
-    panel.search_answered();
+    panel.search_answered(Some(RequestId(1)));
     assert!(!panel.search_loading() && !panel.search_failed());
 }
 
@@ -60,7 +60,7 @@ fn a_failed_search_asks_again_loading_not_failed() {
 #[test]
 fn an_answer_to_a_left_search_changes_nothing() {
     let mut panel = GifPanel::default();
-    panel.search_answered();
+    assert!(!panel.search_answered(Some(RequestId(1))));
     panel.search_failed_now();
     assert_eq!(panel.list, GifList::Saved);
 }
@@ -76,7 +76,7 @@ fn the_saved_list_is_loaded_after_an_answer_or_a_failure_and_asked_again_after_a
     // A refresh runs over the answer: still loaded, and loading.
     panel.saved_asked(RequestId(2));
     assert!(panel.loaded() && panel.loading());
-    panel.saved_failed();
+    panel.saved_failed(RequestId(2));
     assert!(panel.loaded() && panel.failed() && !panel.loading());
     // Opening the panel again after a failure asks from scratch.
     panel.saved_retry();
@@ -118,7 +118,7 @@ fn a_new_search_replaces_what_the_last_one_found() {
     panel.search_sent(RequestId(1));
     panel.search_page_asked(String::new());
     panel.search_sent(RequestId(2));
-    panel.search_page_answered(Vec::new(), "50".into(), true);
+    panel.search_page_answered(Some(RequestId(2)), Vec::new(), "50".into(), true);
     assert_eq!(panel.search_next_offset(), "50");
     panel.search_begun("dogs".into());
     assert!(panel.search_results().is_empty());
@@ -138,7 +138,7 @@ fn a_saved_list_marked_out_of_date_drops_the_older_answer_and_is_asked_again() {
     panel.saved_outdated();
     panel.saved_answered(Some(RequestId(2)), Vec::new());
     assert!(panel.saved_is_outdated(), "the answer predates the change");
-    panel.saved_request_failed(Some(RequestId(2)));
+    panel.saved_failed(RequestId(2));
     assert!(panel.saved_is_outdated(), "a failure keeps the mark");
     panel.saved_asked(RequestId(3));
     assert!(panel.loaded() && !panel.saved_is_outdated());
@@ -166,7 +166,7 @@ fn an_older_saved_gif_fetch_never_lands_on_a_newer_one() {
     panel.saved_answered(Some(RequestId(1)), vec![gif(7)]);
     assert!(panel.animations.is_empty(), "the old answer is dropped");
     assert!(panel.loading());
-    panel.saved_request_failed(Some(RequestId(1)));
+    panel.saved_failed(RequestId(1));
     assert!(
         panel.loading() && !panel.failed(),
         "the old error is dropped"
@@ -189,4 +189,44 @@ fn only_the_request_that_saved_ends_the_save() {
     );
     panel.save_settled(Some(RequestId(5)));
     assert_eq!(panel.save, crate::state::GifSave::Idle);
+}
+
+/// A stray answer (no request waits for it) changes nothing.
+#[test]
+fn a_saved_answer_nobody_waits_for_is_dropped() {
+    let mut panel = GifPanel::default();
+    panel.saved_asked(RequestId(1));
+    panel.saved_asked(RequestId(2));
+    panel.saved_answered(Some(RequestId(1)), Vec::new());
+    assert!(
+        panel.loading() && !panel.loaded(),
+        "the older ask is dropped"
+    );
+    panel.saved_answered(Some(RequestId(2)), Vec::new());
+    assert!(panel.loaded() && !panel.loading());
+}
+
+/// An error of a fetch asked before a forget does not fail the fetch asked
+/// after it, and an answer of one asked before a forget is not shown.
+#[test]
+fn an_older_saved_error_or_answer_leaves_the_newer_ask_alone() {
+    let mut panel = GifPanel::default();
+    panel.saved_asked(RequestId(1));
+    panel.saved_forgotten();
+    panel.saved_asked(RequestId(2));
+    panel.saved_failed(RequestId(1));
+    assert!(panel.loading() && !panel.failed());
+    panel.saved_answered(Some(RequestId(1)), vec![]);
+    assert!(panel.loading());
+    panel.saved_answered(Some(RequestId(2)), vec![]);
+    assert!(panel.loaded() && !panel.loading() && !panel.failed());
+
+    // The same through an `updateSavedAnimations` after a forget.
+    let mut panel = GifPanel::default();
+    panel.saved_asked(RequestId(1));
+    panel.saved_forgotten();
+    panel.saved_outdated();
+    panel.saved_answered(Some(RequestId(1)), vec![]);
+    assert!(!panel.loaded(), "the answer of a fetch forgotten earlier");
+    assert!(panel.saved_is_outdated());
 }

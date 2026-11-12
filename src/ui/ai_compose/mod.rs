@@ -137,9 +137,8 @@ impl QuillApp {
             conversation,
             window: self.windows.scope,
             ai,
-            view: AiComposeView::Card,
+            view: AiComposeView::card(),
             style_names: self.ai_compose_style_names(),
-            select_saved: None,
         });
         self.open_box(crate::ui::shell::DialogKind::AiCompose);
         self.ai_compose_dispatch(send, window, cx);

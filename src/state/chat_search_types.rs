@@ -46,7 +46,7 @@ pub enum ChatSearchPhase {
     Failed,
 }
 
-impl From<ChatSearchPhase> for SearchStatus {
+impl From<ChatSearchPhase> for SearchStateView {
     fn from(phase: ChatSearchPhase) -> Self {
         match phase {
             ChatSearchPhase::Idle => Self::Idle,
@@ -197,9 +197,9 @@ impl ChatSearchState {
     }
 
     /// What the bar shows (`Closed` when it is not open).
-    pub fn status(&self) -> SearchStatus {
+    pub fn status(&self) -> SearchStateView {
         self.open()
-            .map_or(SearchStatus::Closed, |open| open.phase.into())
+            .map_or(SearchStateView::Closed, |open| open.phase.into())
     }
 
     pub fn hits(&self) -> &[SearchMessageHit] {

@@ -63,12 +63,8 @@ fn an_emoji_list_failure_stays_on_its_tab_until_that_list_is_asked_again() {
 #[test]
 fn a_refused_view_of_trending_sets_keeps_their_unread_dots() {
     let mut t = Flaky::new();
-    t.driver
-        .session
-        .stickers
-        .stickers
-        .trending
-        .push(crate::telegram::envelope::StickerSetInfo {
+    t.driver.session.stickers.stickers.trending.sets.push(
+        crate::telegram::envelope::StickerSetInfo {
             id: 5,
             title: "Set".into(),
             name: "set".into(),
@@ -79,13 +75,14 @@ fn a_refused_view_of_trending_sets_keeps_their_unread_dots() {
             covers: Vec::new(),
             cover_files: Vec::new(),
             is_viewed: false,
-        });
+        },
+    );
     t.sender.refuse(&["viewTrendingStickerSets"]);
     assert!(t.driver.view_shown_trending_stickers().is_err());
-    assert!(!t.driver.session.stickers.stickers.trending[0].is_viewed);
+    assert!(!t.driver.session.stickers.stickers.trending.sets[0].is_viewed);
     t.sender.refuse(&[]);
     assert!(t.driver.view_shown_trending_stickers().unwrap().is_some());
-    assert!(t.driver.session.stickers.stickers.trending[0].is_viewed);
+    assert!(t.driver.session.stickers.stickers.trending.sets[0].is_viewed);
 }
 
 #[test]
@@ -160,7 +157,7 @@ fn a_sticker_set_edit_answer_ends_only_its_own_edit_and_every_toast_shows() {
     let session = &mut t.driver.session;
     session.stickers.sticker_set_view = Some(crate::state::StickerSetView::loading(
         77,
-        crate::ids::RequestId(800),
+        crate::ids::RequestId(700),
     ));
     let rename = |session: &mut crate::state::Session| {
         let id = session.request(

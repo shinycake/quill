@@ -680,34 +680,22 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
-    /// Download the sticker previews of the open set view, once.
+    /// Download the sticker previews of the open set view. `download_file`
+    /// skips a file already local, in flight or stalled, so the upkeep may
+    /// call this every frame; a refused send is asked again at the next one.
     pub fn ensure_sticker_set_view_files(&mut self) -> Result<(), ConnectSendError> {
-        let Some(view) = self.session.stickers.sticker_set_view.as_mut() else {
+        let Some(view) = self.session.stickers.sticker_set_view.as_ref() else {
             return Ok(());
         };
-        let crate::state::StickerSetViewStage::Ready {
-            stickers, files, ..
-        } = &mut view.stage
-        else {
+        let crate::state::StickerSetViewStage::Ready { stickers, .. } = &view.stage else {
             return Ok(());
         };
-        if *files == crate::state::SetFiles::Asked {
-            return Ok(());
-        }
         let wanted: Vec<crate::ids::FileId> = stickers
             .iter()
             .filter_map(|s| s.display_file_id())
             .take(60)
             .collect();
-        // Asked only once the downloads left: a refused send leaves the view
-        // to ask again at the next upkeep.
-        self.ensure_media_files(&wanted)?;
-        if let Some(view) = self.session.stickers.sticker_set_view.as_mut()
-            && let crate::state::StickerSetViewStage::Ready { files, .. } = &mut view.stage
-        {
-            *files = crate::state::SetFiles::Asked;
-        }
-        Ok(())
+        self.ensure_media_files(&wanted)
     }
 
     /// What a sticker message's menu needs to word its sticker items:

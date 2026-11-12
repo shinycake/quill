@@ -27,9 +27,7 @@ impl Session {
         {
             None => true,
             Some(history) => {
-                history.messages.is_empty()
-                    && !history.loaded_complete()
-                    && self.topic_page_in_flight(chat_id, forum_topic_id, WindowEnd::Oldest)
+                history.messages.is_empty() && !history.loaded_complete() && history.asking_older()
             }
         }
     }

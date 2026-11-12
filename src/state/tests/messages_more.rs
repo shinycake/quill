@@ -656,10 +656,12 @@ fn reschedule_ok_rewrites_the_scheduled_entry() {
     session
         .messages
         .scheduled_messages
+        .rows
         .push(scheduled_entry(70, 1000));
     session
         .messages
         .scheduled_messages
+        .rows
         .push(scheduled_entry(71, 2000));
     let extra = session.request(
         RequestPurpose::Messages(MessagesPurpose::EditMessageSchedulingState {
@@ -675,14 +677,14 @@ fn reschedule_ok_rewrites_the_scheduled_entry() {
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
     assert_eq!(
-        session.messages.scheduled_messages[0].scheduling_state,
+        session.messages.scheduled_messages.rows[0].scheduling_state,
         Some(MessageSchedulingState::SendAtDate {
             send_date: 5000,
             repeat_period: 0
         })
     );
     assert_eq!(
-        session.messages.scheduled_messages[1].scheduling_state,
+        session.messages.scheduled_messages.rows[1].scheduling_state,
         Some(MessageSchedulingState::SendAtDate {
             send_date: 2000,
             repeat_period: 0
@@ -698,10 +700,12 @@ fn send_now_ok_drops_the_scheduled_entry() {
     session
         .messages
         .scheduled_messages
+        .rows
         .push(scheduled_entry(70, 1000));
     session
         .messages
         .scheduled_messages
+        .rows
         .push(scheduled_entry(71, 2000));
     let extra = session.request(
         RequestPurpose::Messages(MessagesPurpose::EditMessageSchedulingState {
@@ -719,6 +723,7 @@ fn send_now_ok_drops_the_scheduled_entry() {
     let ids: Vec<i64> = session
         .messages
         .scheduled_messages
+        .rows
         .iter()
         .map(|m| m.id.0)
         .collect();
@@ -733,6 +738,7 @@ fn scheduling_edit_error_keeps_the_entry_and_surfaces() {
     session
         .messages
         .scheduled_messages
+        .rows
         .push(scheduled_entry(70, 1000));
     let extra = session.request(
         RequestPurpose::Messages(MessagesPurpose::EditMessageSchedulingState {
@@ -750,7 +756,7 @@ fn scheduling_edit_error_keeps_the_entry_and_surfaces() {
             extra.0
         ),
     );
-    assert_eq!(session.messages.scheduled_messages.len(), 1);
+    assert_eq!(session.messages.scheduled_messages.rows.len(), 1);
     let err = session
         .messages
         .resend_error
@@ -974,4 +980,63 @@ fn a_reactions_tab_pages_and_keeps_its_list_when_the_next_page_fails() {
     let audience = session.messages.message_audience.as_ref().unwrap();
     assert!(!audience.reactions.is_paging());
     assert!(audience.reactions.ready().unwrap().next_offset.is_empty());
+}
+
+#[test]
+fn a_tab_still_loading_keeps_its_request_when_a_next_page_is_marked() {
+    let (mut session, _sink) = session();
+    let (chat, message) = (ChatId(5), MessageId(9));
+    session.begin_message_audience(chat, message);
+    let ask = |session: &mut Session, append: bool| {
+        session.request(
+            RequestPurpose::Messages(MessagesPurpose::GetMessageAddedReactions {
+                chat_id: chat,
+                message_id: message,
+                filter: 0,
+                append,
+            }),
+            Some(chat),
+        )
+    };
+    let first = ask(&mut session, false);
+    session.audience_tab_loading(chat, message, 0, first);
+    // The first page is still out: a next-page mark finds nothing to page.
+    let next = ask(&mut session, true);
+    session.audience_tab_loading_more(chat, message, 0, next);
+    let audience = session.messages.message_audience.as_ref().unwrap();
+    assert!(
+        audience.reactions.is_loading(),
+        "the first page is still waited for"
+    );
+    let page = crate::telegram::envelope::AddedReactionsPage {
+        total_count: 1,
+        reactions: Vec::new(),
+        next_offset: String::new(),
+    };
+    session.accept_added_reactions(first, chat, message, 0, page);
+    let audience = session.messages.message_audience.as_ref().unwrap();
+    assert!(
+        audience.reactions.ready().is_some(),
+        "its own answer still lands"
+    );
+}
+
+#[test]
+fn an_older_delete_accounts_answer_does_not_settle_the_newer_one() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let older = session.request(RequestPurpose::DeleteAccount, None);
+    let newer = session.request(RequestPurpose::DeleteAccount, None);
+    session.settings.account_delete.begin();
+    session.settings.account_delete.sent(newer);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, older.0),
+    );
+    assert!(
+        session.settings.account_busy(),
+        "the newer delete still waits"
+    );
 }

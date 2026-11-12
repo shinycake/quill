@@ -5,6 +5,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// B14: `getCloseFriends`. Deduped while in flight.
     pub fn get_close_friends(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
+            self.session.stories.close_friends.refused();
             return Err(ConnectSendError::InvalidRequest);
         }
         let purpose = RequestPurpose::GetCloseFriends;

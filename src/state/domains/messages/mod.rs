@@ -6,6 +6,7 @@ mod error;
 mod menu_actions;
 mod notes;
 mod purpose;
+mod scheduled;
 mod state;
 
 pub use ai_answer::*;
@@ -13,5 +14,6 @@ pub use ai_compose::*;
 pub use menu_actions::*;
 pub use notes::*;
 pub use purpose::*;
+pub use scheduled::*;
 
 pub use state::*;

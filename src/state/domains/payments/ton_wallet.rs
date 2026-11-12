@@ -22,17 +22,25 @@ impl Session {
             // every change, so it applies whenever the wallet is on.
             TonWalletPayload::State(state) => {
                 if wallet.can_use {
-                    wallet.own = Some(state);
-                    wallet.state_fetch.succeed(());
+                    // The push is the result of the load in flight: it
+                    // settles that load. Without one it only replaces the
+                    // held state.
+                    match wallet.own {
+                        crate::state::fetch::Fetch::Loading {
+                            request: Some(asked),
+                            ..
+                        } => {
+                            wallet.own.answered(Some(asked), state);
+                        }
+                        _ => wallet.own.replace_data(state),
+                    }
                 }
             }
             TonWalletPayload::ExchangeRates(rates) => {
                 // Only the answer the fetch waits for: one that outlived a
                 // wallet switched off and on lands nowhere.
-                if purpose == Some(TonWalletPurpose::ExchangeRates)
-                    && wallet.rates_fetch.answered(pending.map(|p| p.id), ())
-                {
-                    wallet.rates = rates;
+                if purpose == Some(TonWalletPurpose::ExchangeRates) {
+                    wallet.rates.answered(pending.map(|p| p.id), rates);
                 }
             }
             TonWalletPayload::Transactions(page) => {
@@ -50,7 +58,7 @@ impl Session {
                 {
                     return;
                 }
-                if let Some(own) = wallet.own.as_mut() {
+                if let Some(own) = wallet.own.data_mut() {
                     own.gram_amount = page.gram_amount;
                 }
                 self.want_wallet_thumbs();
@@ -175,10 +183,10 @@ impl Session {
         let wallet = &mut self.ton_wallet;
         match purpose {
             TonWalletPurpose::LoadState => {
-                wallet.state_fetch.failed(request, reason, false);
+                wallet.own.failed(request, reason, false);
             }
             TonWalletPurpose::ExchangeRates => {
-                wallet.rates_fetch.failed(request, reason, false);
+                wallet.rates.failed(request, reason, false);
             }
             TonWalletPurpose::Transactions => {
                 if let Some(money) = wallet.money.as_mut() {
@@ -225,9 +233,16 @@ impl Session {
             TonWalletPurpose::LoadState,
         ))) = pending.map(|p| p.purpose)
         {
-            self.ton_wallet
-                .state_fetch
-                .answered(pending.map(|p| p.id), ());
+            // The update settles the load it belongs to. An `ok` that finds
+            // the load still waiting came with no update for it (whatever
+            // an earlier load left does not count), so the fetch fails and
+            // is asked again.
+            let wallet = &mut self.ton_wallet;
+            wallet.own.failed(
+                pending.map(|p| p.id),
+                "the wallet state did not arrive",
+                false,
+            );
         }
     }
 }

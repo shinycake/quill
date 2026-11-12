@@ -185,7 +185,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if self
             .session
-            .topic_page_in_flight(chat_id, forum_topic_id, WindowEnd::Oldest)
+            .threads
+            .topic_histories
+            .get(&key)
+            .is_some_and(|h| h.asking_older())
         {
             return Ok(None);
         }
@@ -214,7 +217,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             TOPIC_HISTORY_PAGE_SIZE,
             None,
         )) {
-            Ok(()) => Ok(Some(extra)),
+            Ok(()) => {
+                self.session
+                    .topic_older_asked(chat_id, forum_topic_id, extra);
+                Ok(Some(extra))
+            }
             Err(err) => {
                 self.session.requests.take(extra);
                 Err(err)

@@ -15,7 +15,6 @@ use quill::agent::ui_driver::keys::parse_sequence;
 use quill::agent::ui_driver::takeover::{self, Phase};
 use quill::ids::AccountKey;
 use std::sync::mpsc::Receiver;
-use std::time::Duration;
 
 const TEXT: &str = "hi there";
 
@@ -103,6 +102,10 @@ fn setup(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext, activ
     let (app, vcx) = new_app(cx);
     turn_on();
     takeover::reset_for_test();
+    // The banner and its Stop button live for `HOLD` after the last command:
+    // on a real clock a loaded machine ends the phase before the frame that
+    // draws it. Time stands still until a test moves it.
+    takeover::pin_clock(Some(1000));
     grant(11, Scope::ReadWrite);
     let presence = activity::connect("Test agent");
     (app, vcx, presence)
@@ -117,12 +120,9 @@ fn a_real_press_on_confirm_clears_the_box_and_never_pauses(cx: &mut TestAppConte
     type_and_enter(&app, vcx);
     assert!(matches!(takeover::current(), Phase::Driving { .. }));
 
-    let (id, rx) = ask_confirm(vcx);
+    let (_, rx) = ask_confirm(vcx);
     press_confirm(vcx);
-    assert_eq!(
-        prompts::wait(id, &rx, Duration::from_millis(10)),
-        Some(Decision::Allowed)
-    );
+    assert_eq!(rx.try_recv().ok(), Some(Decision::Allowed));
     assert!(!takeover::paused(), "Confirm answered the agent's prompt");
     // The hand leaves the button once the dialog closed: still the answer.
     vcx.simulate_mouse_move(point(px(900.), px(600.)), None, Modifiers::none());
@@ -156,10 +156,7 @@ fn stop_while_the_confirm_is_open_still_clears_a_confirmed_send(cx: &mut TestApp
         "Stop leaves the user's own confirm open"
     );
     press_confirm(vcx);
-    assert_eq!(
-        prompts::wait(id, &rx, Duration::from_millis(10)),
-        Some(Decision::Allowed)
-    );
+    assert_eq!(rx.try_recv().ok(), Some(Decision::Allowed));
     composer_sent(&app, vcx, TEXT);
     assert_eq!(draft(&app, vcx), "", "the confirmed send clears the box");
     assert!(takeover::stopped(), "and Stop holds");
