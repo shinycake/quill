@@ -146,14 +146,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.send_web_app_open(extra, &json)
     }
 
-    /// `getWebAppLinkUrl`: a named app link, after `searchWebApp` and the
-    /// open box.
+    /// `getWebAppLinkUrl`: a named app link (`link` is its short name and
+    /// start parameter), after `searchWebApp` and the open box.
     pub fn get_web_app_link_url(
         &mut self,
         chat_id: ChatId,
         bot_user_id: i64,
-        short_name: &str,
-        start_parameter: &str,
+        (short_name, start_parameter): (&str, &str),
         allow_write_access: bool,
         theme: &ThemeParams,
         window: Option<ChatId>,

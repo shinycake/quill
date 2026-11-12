@@ -629,8 +629,7 @@ impl QuillApp {
             } => live.driver.get_web_app_link_url(
                 chat_id.unwrap_or(ChatId(0)),
                 *bot_id,
-                short_name,
-                start_parameter,
+                (short_name, start_parameter),
                 allow_write,
                 &theme,
                 window,

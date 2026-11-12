@@ -4,7 +4,7 @@ use super::super::*;
 use super::*;
 use crate::diagnostics::DiagnosticSink;
 use crate::diagnostics::MemorySink;
-use crate::ids::{AccountKey, ChatId, RequestId};
+use crate::ids::{AccountKey, ChatId};
 use crate::platform::MemorySecretStore;
 use crate::state::{Session, WebAppOpenResult, WriteAccessResult, WriteAnswer};
 use crate::telegram::client::copy_and_parse;
@@ -603,7 +603,7 @@ fn named_app_links_search_first() {
     assert!(app.request_write_access);
     let theme = ThemeParams::light_default();
     h.driver
-        .get_web_app_link_url(ChatId(5), 42, "shop", "ref", true, &theme, None)
+        .get_web_app_link_url(ChatId(5), 42, ("shop", "ref"), true, &theme, None)
         .expect("sent");
     let sent = h.last("getWebAppLinkUrl");
     assert_eq!(sent["allow_write_access"], true);
