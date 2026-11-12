@@ -10225,7 +10225,7 @@ orders), `deep_link_routes_tests` (seek stays with its account).
 
 | Ids | What changed |
 | --- | --- |
-| g-073, g-075, g-074, g-077, g-079, g-072, g-080, g-078, g-085, g-071, g-068, g-084, g-083, g-396, g-390, g-070, g-393 | Enums that are a derived view or a fact, not a stage, say so by name or stop looking like work in flight: `SearchStatus` is `SearchStateView`, `StoryCardState` is `StoryCardView`, `ReplyState` is `ReplyTargetView`, `ClipState` is `ClipView`, `PaneMode` is `PaneView`, `MenuFile` is `MenuFileView`, `StartupStep` is `StartupOutcome`; `SendState` is `Delivered` / `Unconfirmed` / `Failed`, `ShutdownPhase::Running` is `Active`, `WorkerLife::Running` is `Alive`, `PlayHead::Waiting` is `Unstarted`, `Stage::Opening` is `Taken` (the draw worker holds the clip; its `WorkerEnd` fails it), `ThreadStatus::Starting` is `ChatOpen`, `SuggestedPostState::Pending` is `Proposed`, `TonConnectRequestState::Pending` is `Unanswered`, `DebugConfirm::Asking` is `Open`. The two `allow` lines for `MenuFile` and `StartupStep` are gone. |
+| g-073, g-075, g-074, g-077, g-079, g-072, g-080, g-078, g-085, g-071, g-068, g-084, g-083, g-396, g-390, g-070, g-393 | Enums that are a derived view or a fact, not a stage, say so by name or stop looking like work in flight: `SearchStatus` is `SearchStateView`, `StoryCardState` is `StoryCardView`, `ReplyState` is `ReplyTargetView`, `ClipState` is `ClipView`, `PaneMode` is `PaneView`, `MenuFile` is `MenuFileView`, `StartupStep` is `StartupOutcome`; `SendState` is `Delivered` / `Unconfirmed` / `Failed`, `ShutdownPhase::Running` is `Active`, `WorkerLife::Running` is `Alive`, `PlayHead::Waiting` is `Unstarted`, `Stage::Opening` is gone (round 4 folded it into `Stage::Decoding { by }`, the thread the clip was handed to), `ThreadStatus::Starting` is `ChatOpen`, `SuggestedPostState::Pending` is `Proposed`, `TonConnectRequestState::Pending` is `Unanswered`, `DebugConfirm::Asking` is `Open`. The two `allow` lines for `MenuFile` and `StartupStep` are gone. |
 | g-079, g-076 | `StickerSetViewStage::Loading { request }`: the view is made after its request exists (`view_sticker_set`, `fetch_attached_sticker_sets`), `accept_sticker_set_view` and `fail_sticker_set_view` act on that request only, and the error path hands them `pending.id`. `SetFiles` is gone: `download_file` already skips a file local, in flight or stalled, so the upkeep asks again without a flag (test `a_refused_preview_download_is_asked_again_for_the_set_view`). |
 | g-081, g-082, 10-003 | `StoryPageOpState` is `Checking`/`Sending`/`Succeeded`/`Failed { request, .. }`; `StoryPageOp` has no `request` field beside its state. The cap no longer drops a call in flight (finished ones go first; a list twice the cap sheds the oldest). |
 | g-086 | `AccentRead::Reading { deadline }`: a read still out past twice the query limit is taken for lost and another may start. |
@@ -10234,7 +10234,7 @@ orders), `deep_link_routes_tests` (seek stays with its account).
 | g-060, g-061 | `ChangeNumber::finish` returns the send/resend still out and the caller takes those requests by id, instead of `take_purpose`. |
 | g-059 | `CallsState::participant_mutes` (`ParticipantMuteToggles`): a mute toggle of a participant is on its way while its request is in the session's table. |
 | g-065, 09-002 | Network usage is answered and failed by its request (begun and `sent`); the reset's `ok` leaves the refetch alone. Test `a_reset_leaves_only_the_fetch_asked_after_it`. |
-| g-066, g-388 | `Fetch::pushed` is the value of a server push (an `updateSavedMessagesTags`, the demo session's auto-delete), whatever the stage; `succeed` stays for answers that name no request and is not called from these. |
+| g-066, g-388 | A server push or a local value (an `updateSavedMessagesTags`, the demo session's auto-delete) is not an answer: it goes through `Fetch::replace_data`, which swaps the held value and keeps the stage and its request. (Round 2 had `Fetch::pushed` and `set_local`; round 4 removed them.) |
 | g-067, g-063 | The GIF panel's saved list is asked with `saved_asked(request)` after the send (a refused send changes nothing), answered by `saved_answered(request, ..)` (or the answer an update outdated), and the search page by `search_answered(request)`. Test `a_saved_answer_nobody_waits_for_is_dropped`. |
 | g-398, g-397 | The agent bridge owns its wake task (`_wake`) and the read commands' tasks (`Reads`, removed when the read answers); neither is detached. |
 | g-394, 12-005 | `DebugConfirm::Open { logs_on }` is the question on screen. |
@@ -10250,7 +10250,7 @@ orders), `deep_link_routes_tests` (seek stays with its account).
 | 12-003 | `TonWalletState` keeps `explorer`, `own` and `rates` as `Fetch` values with the data inside; `ok` of `loadTonWalletState` with no update fails the fetch so it is asked again. |
 | 12-004 | `EventLogPage::{poll, typed, autoload}` are `EventLogPoll`, `EventLogTyped` (ends when the pause fires) and `EventLogAutoload`. |
 
-Left: the two `matches_generation` calls in `apply_found_chat_messages` and the calendar `generation` in `session_date_jump.rs` (g-057, g-058): the counter is `ChatSearchState::generation` / `HistoryCalendar::generation`, converted by r4-03 (04-001, 04-002, 08-002), which owns those types and removes `matches_generation`. The `allow` lines of `Launch`, `RunStage`, `CloseFriendsStage::Awaiting`, `Stage::Decoding` and the two owned-timers lines are unchanged: each names its owner and exit.
+Left: the two `matches_generation` calls in `apply_found_chat_messages` and the calendar `generation` in `session_date_jump.rs` (g-057, g-058): the counter is `ChatSearchState::generation` / `HistoryCalendar::generation`, converted by r4-03 (04-001, 04-002, 08-002), which owns those types and removes `matches_generation`. The `allow` lines of `Launch`, `RunStage`, `CloseFriendsStage::Awaiting`, `Stage::Decoding` and the two owned-timers lines are unchanged: each names its owner and exit. (Round 4: the `Stage::Decoding` line is back byte for byte; the others were never touched.)
 
 Tests: `state::profile_music`, `state::session_date_jump`, `state::submit`,
 `state::tests::{gif_panel_stages, topic_load}`, `connect::tests::{privacy_data,
@@ -10261,12 +10261,12 @@ sweep_r2_13}`, `ui::ai_compose::dialog_tests`, `ui::agent_driver_tests`
 
 | Ids | What changed |
 | --- | --- |
-| 09-001, date lookups | `DateAsks` and the single `date_jump` slot are one per-window `JumpLookups` (`JumpLookup::{Asking { request, chat }, Resolved(ViewJump), NotFound(note)}`). The main window leaving chat `c` forgets the main window's lookup for `c` (not the ask of `c`'s own window); a chat window closing forgets its own (`close_window_chat`); `None` clears all. The corner buttons' `JumpToUnread` shares it (`unread_jump` is gone): the older ask answering after a newer one began, or after an error, changes nothing. Tests in `state::session_date_jump`. |
+| 09-001, date lookups | `DateAsks` and the single `date_jump` slot are one per-window `JumpLookups` (`JumpLookup::{Asking { request, chat }, Resolved(ViewJump), NoMedia, Failed}`). The main window leaving chat `c` forgets the main window's lookup for `c` (not the ask of `c`'s own window); a chat window closing forgets its own (`close_window_chat`); `None` clears all. The corner buttons' `JumpToUnread` shares it (`unread_jump` is gone): the older ask answering after a newer one began, or after an error, changes nothing. Tests in `state::session_date_jump`. |
 | `saved_failed`, `saved_answered` while outdated | `Fetch::Outdated { held, asked }` keeps the request that was out when the change landed; `saved_failed(request)` acts only on the fetch the list waits for, `saved_answered` takes an outdated list's answer only from `asked`. A refused send begins and fails the request it took. Test `an_older_saved_error_or_answer_leaves_the_newer_ask_alone`. |
 | `ResetNetworkStatistics` error | `PrivacyData::network_reset` is `NetworkReset::{Idle, Sending(request), Failed(line)}`, matched by `pending.id`; `network` keeps its own fetch. Test `a_refused_reset_leaves_the_refetch_asked_after_it` (both orders). |
-| g-078 | `Stage::Opening { worker }` holds the draw worker that took the clip; the open lands only for that worker (`Job::Open { worker }`). The `allow` line is the same reason as `Decoding { opener }`. |
+| g-078 | The clip holds the thread it was handed to and the open lands only for that thread. Round 4: that is `Stage::Decoding { by: Taking }` for draw workers and openers alike (no `Opening` variant); only the engine state makes a `Taking` (`Job::Open { taking }`), and the `Decoding` allow line is the base one. |
 | g-086 | `AccentRead::Reading { read, .. }`: `ReadDone` and `finish` carry the read's token, so a lost read's late end settles nothing; `pending()` is false past the deadline. |
-| g-388 | `Fetch::set_local` for the demo's request-less value; `check-request-match.py` counts `.pushed(` callers (`pushed:` rule) and the three real ones (ton wallet update, `explorer_answered`, `apply_saved_tags`) are in its allow list. |
+| g-388 | Round 4: no `set_local`, no `pushed:` rule and no allow list. The demo's value, the ton wallet update and `apply_saved_tags` use `Fetch::replace_data`; `explorer_answered` writes only the answer of its own request. |
 | 12-001 | `ai_apply_in_flight` also holds while the answer waits in `apply_answers` (`Replies::has`). |
 | 12-004 | The poll tick that finds the page closed sets `EventLogPoll::Stopped`. |
 | 12-002 | `refresh_ai_compose_styles` drops `select_on_arrival` when the list changed without the name. |
@@ -10278,7 +10278,7 @@ sweep_r2_13}`, `ui::ai_compose::dialog_tests`, `ui::agent_driver_tests`
 | `fail_topic_page` | The `!asking_older()` fallback is gone. |
 | `accept_sticker_set_view` | `StickerSetEdits::Refreshing { refresh, out }`: the box takes the load it waits for or the refresh it asked, and no other answer. |
 | `apply_saved_tags` | `topic_tags` is a `Fetch` per topic, begun and `sent` by `load_saved_tags`, answered and failed by its request. |
-| hub | A timed-out `stop_within` puts the join handle back; the `allow` reason says `Joined` is the one stage with no handle. |
+| hub | A timed-out `stop_within` puts the join handle back; the `allow` reason is the base text (it was restored in round 3). |
 | `CloseFriendsStage::Awaiting` | `get_close_friends` that cannot start fails a never-loaded list (`CloseFriendsList::refused`), so the panel offers Retry. |
 | `forgotten_through` | The registry keeps the set of forgotten failure ids (bounded), not the highest. Test `newer_failures_do_not_flag_an_older_confirmed_request`. |
 | omarchy | A failed read keeps the generation it looked at (`note_stamp`). |
@@ -10294,3 +10294,19 @@ request their stage holds; the story lists, the trending sticker sets and the
 mini-app launch are one value each with the request in the stage; the invite
 results live in the conference call. The sidebar peek and the agent takeover
 tests run on clocks the test moves.
+
+Round 4 of r4-06: the decode stage is one variant, `Stage::Decoding { by: Taking
+}`; a `Taking` is made only by the engine state when it hands a clip out, so a
+thread cannot name another thread's clip, and `check-stage-enums.py` is the
+base script with the base `Decoding` allow line. `Fetch::pushed` and
+`Fetch::set_local` are gone: a push is not an answer, so `Fetch::replace_data`
+swaps the held value and leaves the stage and its request (the ton wallet's
+`ok` then settles the fetch from the pushed state); `explorer_answered` no
+longer writes from another request's answer. A failed date lookup is kept with
+its window (`JumpLookup::Failed`, taken by the poll) and its note shows in the
+window that asked (test `a_failed_date_lookup_toasts_in_the_window_that_asked`).
+The agent tests give up with `Ticket::give_up` and read prompts with
+`try_recv`, with no wall-clock wait. The trending page stage decides what is
+asked: a next page waits for the page out, and a first page replaces a later
+page out (test `a_first_page_asked_while_a_later_one_is_out_replaces_it`). No
+allow, baseline or hotspot line was added.
