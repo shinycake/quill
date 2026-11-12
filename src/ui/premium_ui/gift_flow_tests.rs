@@ -93,3 +93,31 @@ fn a_purchase_on_its_way_is_not_taken_over_by_another_chats_box(cx: &mut TestApp
         })
         .unwrap();
 }
+
+/// A finished purchase of an earlier box does not show in a fresh one for
+/// the same chat, and opening does not reset the session's copy by hand.
+#[gpui_kit::test]
+fn a_fresh_box_hides_the_purchase_of_an_earlier_one(cx: &mut TestAppContext) {
+    let window = demo(cx);
+    window
+        .update(cx, |app, window, cx| {
+            if let Some(session) = app.demo_session.as_mut() {
+                session.payments.marketplace_gift = Some(quill::marketplace::GiftPurchase {
+                    chat_id: ChatId(501),
+                    recipient: MessageSender::User { user_id: 501 },
+                    recipient_name: "Ada".into(),
+                    requested_name: "plush".into(),
+                    stage: quill::marketplace::GiftPurchaseStage::Failed("old".into()),
+                });
+            }
+            app.open_marketplace_for(Some(ChatId(501)), window, cx);
+            let draft = app.payments.marketplace.draft().cloned();
+            assert!(draft.is_some_and(|d| !d.shows(ChatId(501), "plush")));
+            assert!(
+                app.session()
+                    .is_some_and(|s| s.payments.marketplace_gift.is_some()),
+                "the session's copy is not reset by the box"
+            );
+        })
+        .unwrap();
+}

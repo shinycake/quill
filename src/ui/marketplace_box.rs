@@ -14,6 +14,11 @@ pub(super) struct MarketplaceDraft {
     /// "Comment and sender visible to the receiver only".
     pub(super) private: bool,
     pub(super) error: Option<String>,
+    /// The collectible name this draft asked the server for. The session's
+    /// purchase is this box's only when it is for this name and chat, so a
+    /// fresh draft shows no purchase of an earlier box (`shows`) and needs
+    /// no reset of the session's copy.
+    pub(super) asked_name: Option<String>,
 }
 
 impl MarketplaceDraft {
@@ -22,7 +27,14 @@ impl MarketplaceDraft {
             chat,
             private: true,
             error: None,
+            asked_name: None,
         }
+    }
+
+    /// Whether the session's purchase for `requested_name` in `chat_id` is
+    /// the one this draft asked for.
+    pub(super) fn shows(&self, chat_id: ChatId, requested_name: &str) -> bool {
+        self.chat == chat_id && self.asked_name.as_deref() == Some(requested_name)
     }
 }
 
@@ -85,6 +97,14 @@ impl MarketplaceBox {
         *self = Self::Closed;
     }
 
+    /// A load for `name` was sent from the open box.
+    pub(super) fn asked(&mut self, name: String) {
+        if let Some(draft) = self.open_draft_mut() {
+            draft.asked_name = Some(name);
+            draft.error = None;
+        }
+    }
+
     pub(super) fn set_error(&mut self, error: Option<String>) {
         if let Some(draft) = self.open_draft_mut() {
             draft.error = error;
@@ -121,6 +141,25 @@ mod tests {
         state.close();
         state.open_for(ChatId(6), true);
         assert_eq!(state.draft(), Some(&MarketplaceDraft::new(ChatId(6))));
+    }
+
+    #[test]
+    fn a_fresh_draft_shows_no_purchase_of_an_earlier_box() {
+        let mut state = MarketplaceBox::default();
+        state.open_for(ChatId(5), false);
+        state.asked("PlushPepe-1".into());
+        let shown = |state: &MarketplaceBox, chat, name| {
+            state.draft().is_some_and(|d| d.shows(ChatId(chat), name))
+        };
+        assert!(shown(&state, 5, "PlushPepe-1"));
+        assert!(!shown(&state, 6, "PlushPepe-1"), "another chat's purchase");
+        assert!(!shown(&state, 5, "PlushPepe-2"), "another name");
+        state.close();
+        state.open_for(ChatId(5), true);
+        assert!(shown(&state, 5, "PlushPepe-1"), "resumed with its purchase");
+        state.close();
+        state.open_for(ChatId(5), false);
+        assert!(!shown(&state, 5, "PlushPepe-1"), "fresh: the old quote hides");
     }
 
     #[test]

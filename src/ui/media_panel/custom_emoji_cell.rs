@@ -387,7 +387,7 @@ impl QuillApp {
                     .small()
                     .selected(tab == value)
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.set_media_panel_tab(value, cx);
+                        this.set_media_panel_tab(value, false, cx);
                     }))
             }),
         );

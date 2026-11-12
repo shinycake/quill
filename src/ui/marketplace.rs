@@ -48,11 +48,6 @@ impl QuillApp {
             self.payments
                 .marketplace_comment_input
                 .update(cx, |input, cx| input.set_value("", window, cx));
-            if let Some(live) = self.live.as_mut() {
-                live.driver.session.payments.marketplace_gift = None;
-            } else if let Some(session) = self.demo_session.as_mut() {
-                session.payments.marketplace_gift = None;
-            }
         }
         self.payments.marketplace.open_for(chat, running.is_some());
         self.open_box(DialogKind::Marketplace);
@@ -89,9 +84,10 @@ impl QuillApp {
                 .is_err()
                 .then(|| tr(keys::Q_MONEY_COULD_NOT_LOAD_GIFTS)),
         };
-        self.payments
-            .marketplace
-            .set_error(error.map(|text| text.to_string()));
+        match error {
+            None => self.payments.marketplace.asked(name),
+            Some(text) => self.payments.marketplace.set_error(Some(text.to_string())),
+        }
         cx.notify();
     }
     pub(super) fn build_marketplace_dialog(
@@ -106,13 +102,17 @@ impl QuillApp {
                 cx.notify();
             });
         app.update(cx, |this, cx| {
-            // The quote belongs to the chat the box was opened for: a purchase
-            // of another chat never shows here, whoever reset what.
-            let box_chat = this.payments.marketplace.chat();
+            // The quote is the one this box's draft asked for, for its chat:
+            // a purchase of another chat or an earlier box never shows here.
+            let draft = this.payments.marketplace.draft().cloned();
             let gift = this
                 .session()
                 .and_then(|s| s.payments.marketplace_gift.clone())
-                .filter(|gift| Some(gift.chat_id) == box_chat);
+                .filter(|gift| {
+                    draft
+                        .as_ref()
+                        .is_some_and(|d| d.shows(gift.chat_id, &gift.requested_name))
+                });
             let limit = this.session().and_then(|s| s.payments.gift_text_length_max);
             let marketplace_private = this.payments.marketplace.draft().is_none_or(|d| d.private);
             let busy = gift
@@ -140,12 +140,10 @@ impl QuillApp {
                         .disabled(busy)
                         .on_click(cx.listener(|this, _, _, cx| this.load_marketplace_gift(cx))),
                 );
-            if let Some(error) = this
-                .payments
-                .marketplace
-                .draft()
-                .and_then(|d| d.error.clone())
-            {
+            // One error line for the purchase: this box's own refusal, else
+            // the note the purchase's last try left.
+            let own_error = draft.as_ref().and_then(|d| d.error.clone());
+            if let Some(error) = own_error.clone() {
                 body = body.child(
                     div()
                         .id("gift-error")
@@ -171,7 +169,7 @@ impl QuillApp {
                 if gift.is_loading() {
                     body = body.child(div().child(tr(keys::Q_OPS_LOADING_THE_GIFT)));
                 }
-                if let Some(note) = gift.note() {
+                if let Some(note) = gift.note().filter(|_| own_error.is_none()) {
                     body = body.child(
                         div()
                             .id("gift-result")
