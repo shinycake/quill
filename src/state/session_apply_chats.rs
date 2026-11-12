@@ -70,7 +70,7 @@ impl Session {
                     .map(|_| user_id.0),
                 _ => None,
             };
-            self.location.venue_bot_resolved(pending.id.0, bot);
+            self.location.venue_bot_resolved(pending.id, bot);
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::ResolveGifSearchBot) {
             self.stickers.gifs.search_bot_user_id = match &kind {
@@ -129,15 +129,15 @@ impl Session {
         // `parity:platform-deep-links`: the `searchPublicChat` /
         // `createPrivateChat` answer for a deep-link follow-up. Any chat
         // object the server returns is the link's destination (the UI
-        // consumes `ChatReady` once to open it). Generation-guarded like
+        // consumes `ChatReady` once to open it). Matched by request like
         // the bot-resolve slot above.
         if let Some(p) = pending.as_ref()
-            && let RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve { generation }) = p.purpose
+            && p.purpose == RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve)
             && let Some(DeepLinkState::ResolvingChat {
                 action,
-                generation: slot_generation,
+                request: slot,
             }) = self.chats_state.deep_link_stage()
-            && *slot_generation == generation
+            && *slot == p.id
         {
             self.chats_state
                 .enter_deep_link_stage(DeepLinkState::ChatReady {
@@ -252,55 +252,24 @@ impl Session {
             .supergroup_member_status
             .insert(supergroup_id, status);
         self.adopt_supergroup_status(supergroup_id);
-        // Phase A1: `can_restrict_members` gates the slow-mode
-        // admin control; absent = unknown → treated as lacking.
-        self.groups
-            .supergroup_restrict_right
-            .insert(supergroup_id, can_restrict_members.unwrap_or(false));
-        // Phase D3a: `can_invite_users` gates invite-link /
-        // join-request management; absent = unknown → lacking.
-        self.groups
-            .supergroup_invite_right
-            .insert(supergroup_id, can_invite_users.unwrap_or(false));
-        // Phase D3b: `can_promote_members` gates admin
-        // management; absent = unknown → lacking.
-        self.groups
-            .supergroup_promote_right
-            .insert(supergroup_id, can_promote_members.unwrap_or(false));
-        // Slice G1: `can_manage_tags` gates custom-title
-        // changes for other members.
-        self.groups
-            .supergroup_manage_tags_right
-            .insert(supergroup_id, can_manage_tags.unwrap_or(false));
-        // Slice G2: forum-topic / sign-messages / welcome-message
-        // rights; absent = unknown → treated as lacking.
-        self.groups
-            .supergroup_manage_topics_right
-            .insert(supergroup_id, can_manage_topics.unwrap_or(false));
-        self.groups
-            .supergroup_change_info_right
-            .insert(supergroup_id, can_change_info.unwrap_or(false));
-        self.groups
-            .supergroup_send_welcome_right
-            .insert(supergroup_id, can_send_welcome_messages.unwrap_or(false));
-        // Slice G1: `supergroup.join_by_request` (schema 1.8.67,
-        // lines 2733/2746) drives the "Approve new members"
-        // toggle; `supergroup.is_broadcast_group` (lines
-        // 2736/2746) drives the broadcast-group toggle.
-        self.groups
-            .supergroup_join_by_request
-            .insert(supergroup_id, join_by_request);
-        self.groups
-            .supergroup_is_broadcast
-            .insert(supergroup_id, is_broadcast_group);
-        // Slice G2: `supergroup.sign_messages` /
-        // `show_message_sender` (schema 1.8.67, lines 2731/2746).
-        self.groups
-            .supergroup_sign_messages
-            .insert(supergroup_id, sign_messages);
-        self.groups
-            .supergroup_show_message_sender
-            .insert(supergroup_id, show_message_sender);
+        self.groups.set_supergroup_facts(
+            supergroup_id,
+            SupergroupFacts::from_update(
+                [
+                    can_restrict_members,
+                    can_invite_users,
+                    can_promote_members,
+                    can_manage_tags,
+                    can_manage_topics,
+                    can_change_info,
+                    can_send_welcome_messages,
+                ],
+                join_by_request,
+                is_broadcast_group,
+                sign_messages,
+                show_message_sender,
+            ),
+        );
     }
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn apply_supergroup(
@@ -332,50 +301,24 @@ impl Session {
                 .supergroup_member_status
                 .insert(supergroup_id, status);
             self.adopt_supergroup_status(supergroup_id);
-            self.groups
-                .supergroup_restrict_right
-                .insert(supergroup_id, can_restrict_members.unwrap_or(false));
-            // Phase D3a: `can_invite_users` gates invite-link /
-            // join-request management.
-            self.groups
-                .supergroup_invite_right
-                .insert(supergroup_id, can_invite_users.unwrap_or(false));
-            // Phase D3b: `can_promote_members` gates admin management.
-            self.groups
-                .supergroup_promote_right
-                .insert(supergroup_id, can_promote_members.unwrap_or(false));
-            // Slice G1: `can_manage_tags` gates custom-title
-            // changes for other members.
-            self.groups
-                .supergroup_manage_tags_right
-                .insert(supergroup_id, can_manage_tags.unwrap_or(false));
-            // Slice G2: forum-topic / sign-messages /
-            // welcome-message rights.
-            self.groups
-                .supergroup_manage_topics_right
-                .insert(supergroup_id, can_manage_topics.unwrap_or(false));
-            self.groups
-                .supergroup_change_info_right
-                .insert(supergroup_id, can_change_info.unwrap_or(false));
-            self.groups
-                .supergroup_send_welcome_right
-                .insert(supergroup_id, can_send_welcome_messages.unwrap_or(false));
-            // Slice G1: join-by-request + broadcast flags (schema
-            // 1.8.67, lines 2733/2736/2746).
-            self.groups
-                .supergroup_join_by_request
-                .insert(supergroup_id, join_by_request);
-            self.groups
-                .supergroup_is_broadcast
-                .insert(supergroup_id, is_broadcast_group);
-            // Slice G2: sign/show flags (schema 1.8.67, lines
-            // 2731/2746).
-            self.groups
-                .supergroup_sign_messages
-                .insert(supergroup_id, sign_messages);
-            self.groups
-                .supergroup_show_message_sender
-                .insert(supergroup_id, show_message_sender);
+            self.groups.set_supergroup_facts(
+                supergroup_id,
+                SupergroupFacts::from_update(
+                    [
+                        can_restrict_members,
+                        can_invite_users,
+                        can_promote_members,
+                        can_manage_tags,
+                        can_manage_topics,
+                        can_change_info,
+                        can_send_welcome_messages,
+                    ],
+                    join_by_request,
+                    is_broadcast_group,
+                    sign_messages,
+                    show_message_sender,
+                ),
+            );
         }
     }
     #[allow(clippy::too_many_arguments)]
@@ -502,7 +445,7 @@ impl Session {
         // request's `supergroup_id`.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSupergroupFullInfo)
             && let Some(pending) = pending
-            && let Some(supergroup_id) = pending.supergroup_id
+            && let Some(supergroup_id) = pending.supergroup_id()
         {
             self.groups.supergroup_full_infos.insert(
                 supergroup_id,
@@ -532,12 +475,13 @@ impl Session {
             );
             // Slice G2: anti-spam state for the manage-dialog
             // toggle.
-            self.groups
-                .supergroup_anti_spam_enabled
-                .insert(supergroup_id, has_aggressive_anti_spam_enabled);
-            self.groups
-                .supergroup_can_toggle_anti_spam
-                .insert(supergroup_id, can_toggle_aggressive_anti_spam);
+            self.groups.set_supergroup_anti_spam(
+                supergroup_id,
+                SupergroupAntiSpam {
+                    enabled: has_aggressive_anti_spam_enabled,
+                    can_toggle: can_toggle_aggressive_anti_spam,
+                },
+            );
         }
     }
     #[allow(clippy::too_many_arguments)]
@@ -584,12 +528,13 @@ impl Session {
             },
         );
         // Slice G2: anti-spam state for the manage-dialog toggle.
-        self.groups
-            .supergroup_anti_spam_enabled
-            .insert(supergroup_id, has_aggressive_anti_spam_enabled);
-        self.groups
-            .supergroup_can_toggle_anti_spam
-            .insert(supergroup_id, can_toggle_aggressive_anti_spam);
+        self.groups.set_supergroup_anti_spam(
+            supergroup_id,
+            SupergroupAntiSpam {
+                enabled: has_aggressive_anti_spam_enabled,
+                can_toggle: can_toggle_aggressive_anti_spam,
+            },
+        );
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -646,7 +591,7 @@ impl Session {
         // delete-confirm dialog (correlated via folder_id). Runs
         // before the search branch below consumes `chat_ids`.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatFolderChatsToLeave)
-            && let Some(folder_id) = pending.and_then(|p| p.folder_id)
+            && let Some(folder_id) = pending.and_then(|p| p.folder_id())
         {
             self.chat_list
                 .folder_chats_to_leave
@@ -659,7 +604,7 @@ impl Session {
         }
         // `getChatFolderNewChats` answer: the "N new chats" bar.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatFolderNewChats)
-            && let Some(folder_id) = pending.and_then(|p| p.folder_id)
+            && let Some(folder_id) = pending.and_then(|p| p.folder_id())
         {
             // Asked now that it answered: a request that never left is
             // asked again, one that answered waits out the update period.
@@ -675,7 +620,7 @@ impl Session {
             return;
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatsForFolderInviteLink)
-            && let Some(folder_id) = pending.and_then(|p| p.folder_id)
+            && let Some(folder_id) = pending.and_then(|p| p.folder_id())
         {
             self.chat_list
                 .folder_shares
@@ -707,7 +652,7 @@ impl Session {
         // answer — the scope is correlated via `pending.scope`
         // (the `chats` response carries no scope field).
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatNotificationSettingsExceptions)
-            && let Some(scope) = pending.and_then(|p| p.scope)
+            && let Some(scope) = pending.and_then(|p| p.scope())
         {
             // Only the ask that waits for it takes the list: an answer for a
             // list dropped as stale meanwhile is not the list now wanted.
@@ -746,13 +691,15 @@ impl Session {
             self.search.search.accept_recommended(chat_ids);
             return;
         }
-        if self.search.search.matches_generation(pending) {
+        if self.search.search.awaits(pending) {
             match pending.map(|p| p.purpose) {
                 Some(RequestPurpose::SearchChats | RequestPurpose::SearchRecentlyFoundChats) => {
                     self.search.search.accept_chats(chat_ids, false);
                 }
                 Some(RequestPurpose::SearchChatsOnServer) => {
-                    self.search.search.accept_server_chats(chat_ids);
+                    if let Some(pending) = pending {
+                        self.search.search.accept_server_chats(pending.id, chat_ids);
+                    }
                 }
                 Some(RequestPurpose::SearchPublicChats) => {
                     self.search.search.accept_public_chats(chat_ids, false);

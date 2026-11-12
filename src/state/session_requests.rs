@@ -23,20 +23,36 @@ impl Session {
         id
     }
 
-    /// A history page asked for `chat_id` belongs to the window it has now.
-    pub(crate) fn stamp_window_epoch(&mut self, id: RequestId, chat_id: Option<ChatId>) {
-        let epoch = chat_id
-            .and_then(|chat| self.histories.get(&chat.0))
-            .map_or(0, |history| history.window_epoch);
-        if let Some(pending) = self.requests.pending_mut(id) {
-            pending.window_epoch = Some(epoch);
-        }
+    /// A request whose answer names nothing it is for: it records
+    /// `correlation` when it is registered, so the answer is read against
+    /// what asked.
+    fn request_correlated(
+        &mut self,
+        purpose: RequestPurpose,
+        chat_id: Option<ChatId>,
+        correlation: Correlation,
+    ) -> RequestId {
+        let id = self.request(purpose, chat_id);
+        self.requests.correlate(id, correlation);
+        id
     }
 
-    /// Slice bots-games: like `request`, but also stamps the message id for
-    /// `GetGameHighScores` correlation (`PendingRequest::around_message_id`
-    /// — the pending record has no message field). `GetHistory` stamps its
-    /// `from_message_id` the same way.
+    /// A history page asked for `chat_id` belongs to the window it has now.
+    pub(crate) fn stamp_window_epoch(&mut self, id: RequestId, chat_id: Option<ChatId>) {
+        let window_epoch = chat_id
+            .and_then(|chat| self.histories.get(&chat.0))
+            .map_or(0, |history| history.window_epoch);
+        let from = self
+            .requests
+            .get(id)
+            .and_then(PendingRequest::around_message_id);
+        self.requests
+            .correlate(id, Correlation::HistoryPage { window_epoch, from });
+    }
+
+    /// Slice bots-games: like `request`, but also records the message id for
+    /// `GetGameHighScores` correlation (`Correlation::Message`). `GetHistory`
+    /// records its `from_message_id` in its `Correlation::HistoryPage`.
     pub fn request_for_message(
         &mut self,
         purpose: RequestPurpose,
@@ -44,97 +60,88 @@ impl Session {
         message_id: MessageId,
     ) -> RequestId {
         let extra = self.request(purpose, Some(chat_id));
-        if let Some(pending) = self.requests.pending_mut(extra) {
-            pending.around_message_id = Some(message_id);
-        }
+        let correlation = match self.requests.get(extra).map(|p| &p.correlation) {
+            Some(Correlation::HistoryPage { window_epoch, .. }) => Correlation::HistoryPage {
+                window_epoch: *window_epoch,
+                from: Some(message_id),
+            },
+            _ => Correlation::Message(message_id),
+        };
+        self.requests.correlate(extra, correlation);
         extra
     }
 
     /// Parity slice: like `request`, but also stamps the notification
     /// settings scope for `GetScopeNotificationSettings` /
-    /// `SetScopeNotificationSettings` correlation (`PendingRequest::scope`).
+    /// `SetScopeNotificationSettings` correlation (`Correlation::Scope`).
     pub fn request_for_scope(
         &mut self,
         purpose: RequestPurpose,
         scope: NotificationSettingsScope,
     ) -> RequestId {
-        let extra = self.request(purpose, None);
-        if let Some(pending) = self.requests.pending_mut(extra) {
-            pending.scope = Some(scope);
-        }
-        extra
+        self.request_correlated(purpose, None, Correlation::Scope(scope))
     }
 
     /// Phase 5.1: like `request`, but also stamps the forum topic id for
-    /// `GetTopicHistory` correlation (`PendingRequest::forum_topic_id`).
+    /// `GetTopicHistory` correlation (`Correlation::ForumTopic`).
     pub fn request_for_topic(
         &mut self,
         purpose: RequestPurpose,
         chat_id: Option<ChatId>,
         forum_topic_id: i32,
     ) -> RequestId {
-        let id = self.request(purpose, chat_id);
-        if let Some(pending) = self.requests.pending.get_mut(&id.0) {
-            pending.forum_topic_id = Some(forum_topic_id);
-        }
-        id
+        self.request_correlated(purpose, chat_id, Correlation::ForumTopic(forum_topic_id))
     }
 
     /// Phase 6: like `request`, but stamps the user id for user-scoped
     /// requests (`GetUserFullInfo` from the contacts panel, `AddContact`)
-    /// so id-less responses correlate (`PendingRequest::user_id`).
+    /// so id-less responses correlate (`Correlation::user_id`).
     pub fn request_for_user(&mut self, purpose: RequestPurpose, user_id: i64) -> RequestId {
-        let id = self.request(purpose, None);
-        if let Some(pending) = self.requests.pending.get_mut(&id.0) {
-            pending.user_id = Some(user_id);
-        }
-        id
+        self.request_correlated(purpose, None, Correlation::User(user_id))
+    }
+
+    /// Like [`Self::request_for_user`] for a request that also names its chat.
+    pub fn request_for_user_in_chat(
+        &mut self,
+        purpose: RequestPurpose,
+        chat_id: ChatId,
+        user_id: i64,
+    ) -> RequestId {
+        self.request_correlated(purpose, Some(chat_id), Correlation::User(user_id))
     }
 
     /// Phase 6: like `request`, but stamps the supergroup id for
     /// `GetSupergroupFullInfo` correlation
-    /// (`PendingRequest::supergroup_id`).
+    /// (`Correlation::supergroup_id`).
     pub fn request_for_supergroup(
         &mut self,
         purpose: RequestPurpose,
         supergroup_id: i64,
     ) -> RequestId {
-        let id = self.request(purpose, None);
-        if let Some(pending) = self.requests.pending.get_mut(&id.0) {
-            pending.supergroup_id = Some(supergroup_id);
-        }
-        id
+        self.request_correlated(purpose, None, Correlation::Supergroup(supergroup_id))
     }
 
     /// Slice (communities backend core): like `request`, but stamps the
     /// community id for `GetCommunityFullInfo` / `SetCommunityName`
-    /// correlation (`PendingRequest::community_id`).
+    /// correlation (`Correlation::community_id`).
     pub fn request_for_community(
         &mut self,
         purpose: RequestPurpose,
         community_id: i64,
     ) -> RequestId {
-        let id = self.request(purpose, None);
-        if let Some(pending) = self.requests.pending.get_mut(&id.0) {
-            pending.community_id = Some(community_id);
-        }
-        id
+        self.request_correlated(purpose, None, Correlation::Community(community_id))
     }
 
     /// Phase 9.1: like `request`, but stamps the chat id and story id for
     /// `GetStory` correlation and per-story in-flight dedupe
-    /// (`PendingRequest::story_id`).
+    /// (`Correlation::story_id`).
     pub fn request_for_story(
         &mut self,
         purpose: RequestPurpose,
         chat_id: ChatId,
         story_id: i32,
     ) -> RequestId {
-        let id = self.request(purpose, Some(chat_id));
-        if let Some(pending) = self.requests.pending.get_mut(&id.0) {
-            pending.story_id = Some(story_id);
-        }
-        id
+        self.request_correlated(purpose, Some(chat_id), Correlation::Story(story_id))
     }
 
     /// Phase 9.7: like `request`, but stamps the sent id lists for album
@@ -149,75 +156,86 @@ impl Session {
         story_ids: Option<Vec<i32>>,
         story_album_id: Option<i32>,
     ) -> RequestId {
-        let id = self.request(purpose, Some(chat_id));
-        if let Some(pending) = self.requests.pending.get_mut(&id.0) {
-            pending.story_ids = story_ids;
-            pending.story_album_id = story_album_id;
-        }
-        id
+        self.request_correlated(
+            purpose,
+            Some(chat_id),
+            Correlation::StoryAlbum {
+                story_ids,
+                album_id: story_album_id,
+            },
+        )
     }
 
     /// Like `request`, but stamps the user ids a `setCloseFriends` sent
-    /// (`PendingRequest::user_ids`); its `ok` carries none.
+    /// (`Correlation::user_ids`); its `ok` carries none.
     pub fn request_for_user_ids(&mut self, purpose: RequestPurpose, user_ids: &[i64]) -> RequestId {
-        let id = self.request(purpose, None);
-        if let Some(pending) = self.requests.pending.get_mut(&id.0) {
-            pending.user_ids = Some(user_ids.to_vec());
-        }
-        id
+        self.request_correlated(purpose, None, Correlation::UserIds(user_ids.to_vec()))
     }
 
     /// Like `request`, but stamps the invite link a link-scoped request
-    /// acts on (`PendingRequest::invite_link`); its `ok` carries none.
+    /// acts on (`Correlation::invite_link`); its `ok` carries none.
     pub fn request_for_invite_link(
         &mut self,
         purpose: RequestPurpose,
         chat_id: ChatId,
         invite_link: &str,
     ) -> RequestId {
-        let id = self.request(purpose, Some(chat_id));
-        if let Some(pending) = self.requests.pending.get_mut(&id.0) {
-            pending.invite_link = Some(invite_link.to_owned());
-        }
-        id
+        self.request_correlated(
+            purpose,
+            Some(chat_id),
+            Correlation::InviteLink(invite_link.to_owned()),
+        )
     }
 
     /// Like `request`, but stamps the string id of what it acts on
-    /// (`PendingRequest::subject_id`: the terms `acceptTermsOfService`
+    /// (`Correlation::subject_id`: the terms `acceptTermsOfService`
     /// accepts, the gift `sellGift` sells); its `ok` carries none.
     pub fn request_for_subject(&mut self, purpose: RequestPurpose, subject_id: &str) -> RequestId {
-        let id = self.request(purpose, None);
-        if let Some(pending) = self.requests.pending.get_mut(&id.0) {
-            pending.subject_id = Some(subject_id.to_owned());
-        }
-        id
+        self.request_for_subject_in(purpose, None, subject_id)
+    }
+
+    /// Like [`Self::request_for_subject`] for a request that may name a chat.
+    pub fn request_for_subject_in(
+        &mut self,
+        purpose: RequestPurpose,
+        chat_id: Option<ChatId>,
+        subject_id: &str,
+    ) -> RequestId {
+        self.request_correlated(
+            purpose,
+            chat_id,
+            Correlation::Subject(subject_id.to_owned()),
+        )
     }
 
     /// Phase B1: like `request`, but stamps the secret chat id for
     /// `GetSecretChat` / `CloseSecretChat` correlation
-    /// (`PendingRequest::secret_chat_id`) — the `secretChat` response and
+    /// (`Correlation::secret_chat_id`) — the `secretChat` response and
     /// the `ok` carry no chat id of their own.
     pub fn request_for_secret_chat(
         &mut self,
         purpose: RequestPurpose,
         secret_chat_id: i32,
     ) -> RequestId {
-        let id = self.request(purpose, None);
-        if let Some(pending) = self.requests.pending.get_mut(&id.0) {
-            pending.secret_chat_id = Some(secret_chat_id);
-        }
-        id
+        self.request_correlated(purpose, None, Correlation::SecretChat(secret_chat_id))
+    }
+
+    /// A page the shared-media gallery's Stories tab asks for
+    /// (`Correlation::GalleryTab`); the stories page asks for the same
+    /// purpose without it.
+    pub fn request_for_gallery_tab(
+        &mut self,
+        purpose: RequestPurpose,
+        chat_id: ChatId,
+    ) -> RequestId {
+        self.request_correlated(purpose, Some(chat_id), Correlation::GalleryTab)
     }
 
     /// Parity slice: like `request`, but stamps the folder id for
     /// folder-scoped requests (`GetChatFolder`, `EditChatFolder`,
     /// `DeleteChatFolder`, `LoadFolderChats`) so responses correlate
-    /// (`PendingRequest::folder_id`).
+    /// (`Correlation::folder_id`).
     pub fn request_for_folder(&mut self, purpose: RequestPurpose, folder_id: i32) -> RequestId {
-        let id = self.request(purpose, None);
-        if let Some(pending) = self.requests.pending.get_mut(&id.0) {
-            pending.folder_id = Some(folder_id);
-        }
-        id
+        self.request_correlated(purpose, None, Correlation::Folder(folder_id))
     }
 }

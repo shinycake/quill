@@ -55,13 +55,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .requests
                 .has_purpose(RequestPurpose::GetRecentStickers)
         {
-            let extra = self
-                .session
-                .request(RequestPurpose::GetRecentStickers, None);
-            if let Err(err) = self.sender.send_json(&get_recent_stickers(extra, false)) {
-                self.session.requests.take(extra);
-                return Err(err);
-            }
+            self.sticker_request(RequestPurpose::GetRecentStickers, |id| {
+                get_recent_stickers(id, false)
+            })?;
         }
         if self.session.stickers.stickers.favorites.is_empty() {
             self.sticker_request_favorites()?;
@@ -101,8 +97,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Ask which reactions `message_id` may get (the picker's strip and
-    /// full list). Drops the options of any other message. The app config,
-    /// with the per-user reaction limit, is asked for once too.
+    /// full list). Each message has its own entry, so a menu open on another
+    /// message (in another window) is not disturbed. The app config, with
+    /// the per-user reaction limit, is asked for once too.
     pub fn fetch_message_reactions(
         &mut self,
         chat_id: ChatId,
@@ -123,17 +120,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        self.session.stickers.message_reaction_options =
-            crate::state::MessageReactionsState::Loading {
-                chat_id,
-                message_id,
-            };
+        // Already asked: the entry waits for a request still in flight (one
+        // that was lost asks again).
+        if self
+            .session
+            .stickers
+            .message_reaction_options
+            .loading_request(chat_id, message_id)
+            .is_some_and(|request| self.session.requests.get(request).is_some())
+        {
+            return Ok(None);
+        }
         let purpose = RequestPurpose::Messages(MessagesPurpose::GetMessageAvailableReactions {
             message_id: message_id.0,
         });
-        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
-            return Ok(None);
-        }
         let extra = self.session.request(purpose, Some(chat_id));
         match self.sender.send_json(&get_message_available_reactions(
             extra,
@@ -141,11 +141,20 @@ impl<S: JsonSender> ConnectDriver<S> {
             message_id,
             REACTION_STRIP_SIZE,
         )) {
-            Ok(()) => Ok(Some(extra)),
+            Ok(()) => {
+                self.session
+                    .stickers
+                    .message_reaction_options
+                    .begin(chat_id, message_id, extra);
+                Ok(Some(extra))
+            }
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session
-                    .fail_message_reaction_options(chat_id, message_id);
+                self.session.stickers.message_reaction_options.set(
+                    chat_id,
+                    message_id,
+                    crate::state::MessageReactionsState::Unavailable,
+                );
                 Err(err)
             }
         }

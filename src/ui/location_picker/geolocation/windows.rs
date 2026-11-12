@@ -5,15 +5,61 @@
 //! (tdesktop returns no address here either).
 
 use quill::location_picker::{GeoOutcome, GeoPoint};
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
 use std::sync::mpsc::{Receiver, channel};
+use std::task::{Context, Poll, Wake, Waker};
 use windows::Devices::Geolocation::{
-    GeolocationAccessStatus, Geolocator, PositionAccuracy, PositionStatus,
+    GeolocationAccessStatus, Geolocator, Geoposition, PositionAccuracy, PositionStatus,
 };
+use windows_future::IAsyncOperation;
 
-fn lookup() -> GeoOutcome {
+/// Wakes the lookup thread parked in [`position_unless_dropped`].
+struct Unpark(std::thread::Thread);
+
+impl Wake for Unpark {
+    fn wake(self: Arc<Self>) {
+        self.0.unpark();
+    }
+}
+
+/// Waits for the position, or for the picker to drop its `Locating` (the
+/// cancel sender), whichever comes first. On the drop the operation in
+/// flight is cancelled, so the system stops locating when the picker closes.
+fn position_unless_dropped(
+    operation: IAsyncOperation<Geoposition>,
+    cancelled: &mut futures_channel::oneshot::Receiver<()>,
+) -> Option<windows::core::Result<Geoposition>> {
+    let mut answer = Box::pin(operation.clone().into_future());
+    let waker = Waker::from(Arc::new(Unpark(std::thread::current())));
+    let mut context = Context::from_waker(&waker);
+    loop {
+        if let Poll::Ready(result) = answer.as_mut().poll(&mut context) {
+            return Some(result);
+        }
+        if Pin::new(&mut *cancelled).poll(&mut context).is_ready() {
+            // The operation may already be done: Cancel then does nothing.
+            let _ = operation.Cancel();
+            return None;
+        }
+        std::thread::park();
+    }
+}
+
+/// The picker dropped its `Locating` (the cancel sender): stop before the next
+/// blocking call.
+fn dropped(cancelled: &mut futures_channel::oneshot::Receiver<()>) -> bool {
+    cancelled.try_recv().is_err()
+}
+
+fn lookup(mut cancelled: futures_channel::oneshot::Receiver<()>) -> GeoOutcome {
     let Ok(access) = Geolocator::RequestAccessAsync().and_then(|op| op.join()) else {
         return GeoOutcome::Unavailable;
     };
+    if dropped(&mut cancelled) {
+        return GeoOutcome::Unavailable;
+    }
     if access == GeolocationAccessStatus::Denied {
         return GeoOutcome::Denied;
     }
@@ -26,9 +72,16 @@ fn lookup() -> GeoOutcome {
         Ok(PositionStatus::NotAvailable) | Err(_) => return GeoOutcome::Unavailable,
         Ok(_) => {}
     }
-    let position = locator
-        .GetGeopositionAsync()
-        .and_then(|op| op.join())
+    if dropped(&mut cancelled) {
+        return GeoOutcome::Unavailable;
+    }
+    let Ok(operation) = locator.GetGeopositionAsync() else {
+        return GeoOutcome::Unavailable;
+    };
+    let Some(position) = position_unless_dropped(operation, &mut cancelled) else {
+        return GeoOutcome::Unavailable;
+    };
+    let position = position
         .and_then(|position| position.Coordinate())
         .and_then(|coordinate| coordinate.Point())
         .and_then(|point| point.Position());
@@ -41,11 +94,12 @@ fn lookup() -> GeoOutcome {
 
 pub(super) fn locate(
     _permission_prompt: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+    cancelled: futures_channel::oneshot::Receiver<()>,
 ) -> Receiver<GeoOutcome> {
     let (answer, receiver) = channel();
     let fallback = answer.clone();
     let spawned = quill::thread_guard::spawn_guarded("quill-geolocation", move || {
-        let _ = answer.send(lookup());
+        let _ = answer.send(lookup(cancelled));
     });
     if spawned.is_err() {
         let _ = fallback.send(GeoOutcome::Unavailable);
@@ -66,5 +120,7 @@ pub(super) fn system_country() -> Option<String> {
     String::from_utf16(buffer.get(..written)?).ok()
 }
 
-/// Nothing to stop: the lookup ends with its own thread.
+/// Nothing to do here: dropping the `Locating` drops the lookup's cancel
+/// sender, which `lookup` checks between its calls and while the position
+/// is pending (`position_unless_dropped` cancels the operation).
 pub(super) fn cancel(_lookup: &std::sync::Arc<std::sync::atomic::AtomicBool>) {}

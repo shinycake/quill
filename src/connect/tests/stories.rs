@@ -899,7 +899,7 @@ fn driver_b14_close_friends_hide_profile_and_share() {
             .requests
             .pending
             .values()
-            .any(|p| p.user_ids == Some(vec![4, 8]) && p.id.0.to_string() == extra)
+            .any(|p| p.user_ids() == Some(&[4, 8][..]) && p.id.0.to_string() == extra)
     );
 
     // Hide / unhide.

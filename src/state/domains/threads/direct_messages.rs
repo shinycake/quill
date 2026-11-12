@@ -5,6 +5,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
+use crate::ids::RequestId;
 use crate::telegram::envelope::DirectMessagesTopic;
 
 /// The conversations of every administered direct messages chat.
@@ -34,8 +35,11 @@ pub struct DirectMessagesTopics {
 /// How far loading one chat's conversations got.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TopicsLoad {
-    /// A page was asked for (and may have answered).
-    Asked,
+    /// A page is in flight as `request`; only its answer or error leaves
+    /// this stage.
+    Loading { request: RequestId },
+    /// The last page answered; the next one may be asked.
+    Loaded,
     /// The last page failed with an error that is not the end of the list.
     /// The update-driven preload does not ask again; opening the chat or
     /// scrolling the tabs does.
@@ -50,12 +54,17 @@ impl DirectMessagesTopics {
         self.loads.get(&chat_id) == Some(&TopicsLoad::Exhausted)
     }
 
+    /// A page of `chat_id` is in flight.
+    pub fn loading(&self, chat_id: i64) -> bool {
+        matches!(self.loads.get(&chat_id), Some(TopicsLoad::Loading { .. }))
+    }
+
     /// The first page went out and did not fail (or the list ended). A
     /// failed first page is not loaded: opening the chat asks again.
     pub fn preloaded(&self, chat_id: i64) -> bool {
         matches!(
             self.loads.get(&chat_id),
-            Some(TopicsLoad::Asked | TopicsLoad::Exhausted)
+            Some(TopicsLoad::Loading { .. } | TopicsLoad::Loaded | TopicsLoad::Exhausted)
         )
     }
 
@@ -65,22 +74,39 @@ impl DirectMessagesTopics {
         !self.loads.contains_key(&chat_id)
     }
 
-    /// A page went out.
-    pub fn page_asked(&mut self, chat_id: i64) {
-        let load = self.loads.entry(chat_id).or_insert(TopicsLoad::Asked);
-        if *load == TopicsLoad::Failed {
-            *load = TopicsLoad::Asked;
+    /// A page went out as `request`.
+    pub fn page_asked(&mut self, chat_id: i64, request: RequestId) {
+        self.loads.insert(chat_id, TopicsLoad::Loading { request });
+    }
+
+    /// The page `request` answered: the next one may be asked.
+    pub fn page_answered(&mut self, chat_id: i64, request: Option<RequestId>) {
+        if self.waits_for(chat_id, request) {
+            self.loads.insert(chat_id, TopicsLoad::Loaded);
         }
     }
 
-    /// A page failed with `code`: 404 is the end of the list.
-    pub fn page_failed(&mut self, chat_id: i64, code: i32) {
+    /// The page `request` failed with `code`: 404 is the end of the list.
+    /// `false` when `request` is not the page in flight (an older page's
+    /// error changes nothing).
+    pub fn page_failed(&mut self, chat_id: i64, request: Option<RequestId>, code: i32) -> bool {
+        if !self.waits_for(chat_id, request) {
+            return false;
+        }
         let load = if code == 404 {
             TopicsLoad::Exhausted
         } else {
             TopicsLoad::Failed
         };
         self.loads.insert(chat_id, load);
+        true
+    }
+
+    fn waits_for(&self, chat_id: i64, request: Option<RequestId>) -> bool {
+        matches!(
+            self.loads.get(&chat_id),
+            Some(TopicsLoad::Loading { request: asked }) if Some(*asked) == request
+        )
     }
 
     /// The conversations of one chat in list order: `order` descending.

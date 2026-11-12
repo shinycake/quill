@@ -94,7 +94,7 @@ impl QuillApp {
         // `QUILL_DEMO_STICKER_BOX=<state>` opens one of the editing states
         // for its screenshot: reorder, rename, delete, create, editor, video, panel.
         match std::env::var("QUILL_DEMO_STICKER_BOX").as_deref() {
-            Ok("reorder") => self.sticker_box.reordering = true,
+            Ok("reorder") => self.sticker_box.editing.begin_reordering(),
             Ok("rename") => {
                 self.sticker_box.rename_input.update(_cx, |input, cx| {
                     input.set_value("My doodles", _window, cx);
@@ -116,17 +116,19 @@ impl QuillApp {
                 }
             }
             Ok("create") => {
-                self.sticker_box.create = Some(super::state::CreateSticker {
-                    set_id: 78,
-                    kind: SetKind::Stickers,
-                    path: std::path::PathBuf::from(crate::ui::demo::demo_thumb_png_path()),
-                    format: quill::telegram::envelope::StickerFormat::Webp,
-                    preview: Some(std::path::PathBuf::from(
-                        crate::ui::demo::demo_thumb_png_path(),
-                    )),
-                    emojis: vec!["😀".into(), "🎨".into()],
-                    video: None,
-                });
+                self.sticker_box
+                    .editing
+                    .begin_create(super::state::CreateSticker {
+                        set_id: 78,
+                        kind: SetKind::Stickers,
+                        path: std::path::PathBuf::from(crate::ui::demo::demo_thumb_png_path()),
+                        format: quill::telegram::envelope::StickerFormat::Webp,
+                        preview: Some(std::path::PathBuf::from(
+                            crate::ui::demo::demo_thumb_png_path(),
+                        )),
+                        emojis: vec!["😀".into(), "🎨".into()],
+                        video: None,
+                    });
             }
             // The sticker editor on a wide image: the transparent canvas,
             // the rounded frame and the corners menu.

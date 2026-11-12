@@ -5,6 +5,7 @@
 use super::TranslateSource;
 use gpui_kit::component::input::TextareaState;
 use gpui_kit::{Entity, Subscription};
+use quill::ids::RequestId;
 
 /// Where the box's request stands. `Refused`: it could not be sent
 /// (offline, a closed client), so the box says it failed instead of
@@ -15,7 +16,7 @@ pub(super) enum TranslateAsk {
     /// key), or not yet.
     Idle,
     /// A selection's job.
-    Job(u64),
+    Job(RequestId),
     /// The request could not be sent.
     Refused,
 }
@@ -77,7 +78,7 @@ impl TranslateDialog {
     }
 
     /// The selection job the box waits on, to drop when the dialog goes.
-    pub(super) fn job(&self) -> Option<u64> {
+    pub(super) fn job(&self) -> Option<RequestId> {
         match self.current_box()?.ask {
             TranslateAsk::Job(job) => Some(job),
             TranslateAsk::Idle | TranslateAsk::Refused => None,

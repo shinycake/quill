@@ -56,11 +56,10 @@ pub enum RequestPurpose {
         message_id: MessageId,
     },
     /// Slice media-shared-gallery: one `searchChatMessages` page for a
-    /// gallery tab. `generation` is the `SharedMediaState` generation at
-    /// send time — late answers drop on mismatch.
+    /// gallery tab. The tab waits for this request's id
+    /// (`SharedMediaTabStatus::Loading`): any other answer drops.
     GetSharedMedia {
         tab: SharedMediaTab,
-        generation: u64,
     },
     /// `getChatInviteLinks` with another admin's `creator_user_id`.
     GetAdminChatInviteLinks {
@@ -139,11 +138,9 @@ impl std::fmt::Debug for RequestPurpose {
                 .field("chat_id", chat_id)
                 .field("message_id", message_id)
                 .finish(),
-            Self::GetSharedMedia { tab, generation } => f
-                .debug_struct("GetSharedMedia")
-                .field("tab", tab)
-                .field("generation", generation)
-                .finish(),
+            Self::GetSharedMedia { tab } => {
+                f.debug_struct("GetSharedMedia").field("tab", tab).finish()
+            }
             Self::GetAdminChatInviteLinks { revoked } => f
                 .debug_struct("GetAdminChatInviteLinks")
                 .field("revoked", revoked)

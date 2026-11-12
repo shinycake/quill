@@ -38,7 +38,7 @@ fn shown_dialog(shell: &Entity<QuillShell>, vcx: &mut VisualTestContext) -> Opti
     vcx.executor()
         .advance_clock(std::time::Duration::from_millis(400));
     vcx.update(|window, cx| window.render_frame(cx));
-    shell.read_with(vcx, |shell, _| shell.open_dialog)
+    shell.read_with(vcx, |shell, _| shell.open_dialog.kind())
 }
 
 fn labelled(vcx: &mut VisualTestContext, label: &str) -> bool {

@@ -135,6 +135,13 @@ impl KeybindingUi {
         self.end();
     }
 
+    /// The saved overrides changed but the keymap could not be rebuilt
+    /// (borrowed elsewhere): it carries nobody's, so the next poll applies
+    /// them again.
+    pub(in crate::ui) fn keymap_missed(&mut self) {
+        self.keymap = Keymap::Stale;
+    }
+
     /// The Calls page waits for the push-to-talk key.
     pub(in crate::ui) fn ptt_armed(&self) -> bool {
         self.capture.push_to_talk_armed()

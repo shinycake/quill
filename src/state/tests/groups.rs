@@ -225,8 +225,16 @@ fn invite_link_replace_failure_surfaces_and_broadcast_rolls_back() {
         is_channel: false,
     };
     session.chats.insert(14, chat);
-    session.groups.supergroup_is_broadcast.insert(14, true);
+    session
+        .groups
+        .edit_supergroup(14, |facts| facts.is_broadcast_group = true);
     let extra = session.request(RequestPurpose::ToggleBroadcastGroup, Some(ChatId(14)));
+    if let Some(pending) = session.requests.pending_mut(extra) {
+        pending.rollback = Some(crate::state::RequestRollback::BroadcastGroup {
+            supergroup_id: 14,
+            previous: None,
+        });
+    }
     apply_json(
         &mut session,
         &seq,
@@ -236,7 +244,29 @@ fn invite_link_replace_failure_surfaces_and_broadcast_rolls_back() {
             extra.0
         ),
     );
-    assert!(!session.groups.supergroup_is_broadcast.contains_key(&14));
+    assert!(!session.groups.supergroup(14).is_broadcast_group);
+
+    // 08-006: a flag that was known (`false`) comes back as it was.
+    session
+        .groups
+        .edit_supergroup(14, |facts| facts.is_broadcast_group = true);
+    let extra = session.request(RequestPurpose::ToggleBroadcastGroup, Some(ChatId(14)));
+    if let Some(pending) = session.requests.pending_mut(extra) {
+        pending.rollback = Some(crate::state::RequestRollback::BroadcastGroup {
+            supergroup_id: 14,
+            previous: Some(false),
+        });
+    }
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHAT_NOT_MODIFIED"}}"#,
+            extra.0
+        ),
+    );
+    assert!(!session.groups.supergroup(14).is_broadcast_group);
 }
 
 #[test]
@@ -265,7 +295,7 @@ fn forum_topics_response_is_cached_per_chat() {
         &sink,
         r#"{"@type":"updateNewChat","chat":{"id":16,"title":"Forum","type":{"@type":"chatTypeSupergroup","supergroup_id":16,"is_channel":false},"unread_count":0}}"#,
     );
-    let extra = session.request(RequestPurpose::GetForumTopics, Some(ChatId(16)));
+    let extra = session.ask_forum_topics(ChatId(16));
     let json = format!(
         r#"{{"@type":"forumTopics","@extra":"{}","total_count":2,"topics":[{{"info":{{"@type":"forumTopicInfo","chat_id":16,"forum_topic_id":2,"name":"Random","icon":{{"@type":"forumTopicIcon","color":0,"custom_emoji_id":"0"}},"creation_date":1,"creator_id":{{"@type":"messageSenderUser","user_id":6}},"is_general":false,"is_outgoing":false,"is_closed":false,"is_hidden":false,"is_name_implicit":false}},"last_message":null,"order":"100","is_pinned":false,"unread_count":5,"last_read_inbox_message_id":0,"last_read_outbox_message_id":0,"unread_mention_count":0,"unread_reaction_count":0,"unread_poll_vote_count":0,"notification_settings":{{"@type":"chatNotificationSettings"}},"draft_message":null}},{{"info":{{"@type":"forumTopicInfo","chat_id":16,"forum_topic_id":1,"name":"General","icon":{{"@type":"forumTopicIcon","color":0,"custom_emoji_id":"0"}},"creation_date":1,"creator_id":{{"@type":"messageSenderUser","user_id":5}},"is_general":true,"is_outgoing":false,"is_closed":false,"is_hidden":false,"is_name_implicit":false}},"last_message":null,"order":"900","is_pinned":false,"unread_count":0,"last_read_inbox_message_id":0,"last_read_outbox_message_id":0,"unread_mention_count":0,"unread_reaction_count":0,"unread_poll_vote_count":0,"notification_settings":{{"@type":"chatNotificationSettings"}},"draft_message":null}}],"next_offset_date":0,"next_offset_message_id":0,"next_offset_forum_topic_id":0}}"#,
         extra.0
@@ -1031,10 +1061,14 @@ fn can_manage_admins_gate() {
         .groups
         .supergroup_member_status
         .insert(15, ChannelMemberStatus::Administrator);
-    session.groups.supergroup_promote_right.insert(15, true);
+    session
+        .groups
+        .edit_supergroup(15, |facts| facts.can_promote_members = true);
     assert!(session.chat_can_manage_admins(ChatId(15)));
 
-    session.groups.supergroup_promote_right.insert(15, false);
+    session
+        .groups
+        .edit_supergroup(15, |facts| facts.can_promote_members = false);
     assert!(!session.chat_can_manage_admins(ChatId(15)));
 }
 

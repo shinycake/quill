@@ -26,8 +26,11 @@ impl Session {
                     .failed(extra, error_reason(err), false);
             }
             Some(RequestPurpose::GetUserFullInfo) => {
+                if let Some(request) = pending.map(|p| p.id) {
+                    self.userpic_full_info_failed(request, std::time::Instant::now());
+                }
                 let user = pending.and_then(|p| {
-                    p.user_id.or_else(|| {
+                    p.user_id().or_else(|| {
                         p.chat_id
                             .and_then(|chat_id| self.private_chat_user_id(chat_id))
                     })
@@ -61,18 +64,20 @@ impl Session {
                     self.users_state.peer_qr.backdrops.fail(pending.id);
                 }
             }
-            Some(RequestPurpose::Users(UsersPurpose::GetShareThemeGifts {
-                owner, serial, ..
-            })) => {
-                let gifts = &mut self.users_state.peer_qr.gifts;
-                if gifts.is_current(owner, serial) {
-                    gifts.fail();
+            Some(RequestPurpose::Users(UsersPurpose::GetShareThemeGifts { .. })) => {
+                if let Some(pending) = pending {
+                    let gifts = &mut self.users_state.peer_qr.gifts;
+                    if gifts.is_current(pending.id) {
+                        gifts.fail();
+                    }
                 }
             }
-            Some(RequestPurpose::Users(UsersPurpose::SetProfileShareTheme { ticket })) => {
-                self.users_state
-                    .peer_qr
-                    .fail_save(ticket, error_reason(err));
+            Some(RequestPurpose::Users(UsersPurpose::SetProfileShareTheme)) => {
+                if let Some(pending) = pending {
+                    self.users_state
+                        .peer_qr
+                        .fail_save(pending.id, error_reason(err));
+                }
             }
             Some(RequestPurpose::Users(UsersPurpose::GetUserLink { free })) => {
                 if let Some(id) = pending.map(|p| p.id) {
@@ -144,7 +149,7 @@ impl Session {
             // Slice A6: contacts mutations — the notice surfaces
             // in the contacts settings section.
             Some(RequestPurpose::RemoveContact) => {
-                let what = if pending.and_then(|p| p.user_id).is_some() {
+                let what = if pending.and_then(|p| p.user_id()).is_some() {
                     "the contact"
                 } else {
                     "synced contacts"

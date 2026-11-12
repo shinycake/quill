@@ -396,7 +396,10 @@ fn stars_past_the_balance_open_the_stars_top_up(cx: &mut TestAppContext) {
     app.read_with(vcx, |app, _| {
         let session = app.session().expect("the demo session");
         assert!(session.payments.hub.stars.is_open(), "the Stars box opens");
-        assert!(session.payments.star_packs.open, "with its packs");
+        assert!(
+            session.payments.hub.stars.packs_expanded(),
+            "with its packs"
+        );
         assert!(
             session
                 .stories

@@ -52,4 +52,15 @@ impl MemberListFilter {
             MemberListFilter::Restricted | MemberListFilter::Banned
         )
     }
+
+    /// The list a tab with this filter shows: without the right to
+    /// restrict, Restricted and Banned show Recent. The member dialog's
+    /// poll checks, and its refresh asks, this key.
+    pub fn shown_for(self, can_restrict: bool) -> Self {
+        if self.requires_restrict_right() && !can_restrict {
+            MemberListFilter::Recent
+        } else {
+            self
+        }
+    }
 }

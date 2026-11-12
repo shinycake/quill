@@ -1,6 +1,11 @@
 //! The proxy list's requests: the `getProxies` its list waits for and the
 //! one change in flight, as one value (split out of [`crate::proxy`]).
 use crate::ids::RequestId;
+use std::time::{Duration, Instant};
+
+/// How long a `getProxies` that could not be sent waits before the next
+/// ingest sends it again.
+pub const UNSENT_RETRY_AFTER: Duration = Duration::from_secs(5);
 
 /// Where the proxy list's `getProxies` is.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -17,13 +22,19 @@ pub enum ProxyFetch {
     Stale,
     /// This request is the one whose answer replaces the list.
     Loading(RequestId),
-    /// The request could not be sent (or its answer was an error): nothing
-    /// asks again by itself, only the dialog's open / Refresh (`Retry`).
+    /// The request's answer was an error: nothing asks again by itself,
+    /// only the dialog's open / Refresh (`Retry`); the box's error line
+    /// says so.
     Failed,
-    /// The refetch of a stale list could not be sent. Like `Failed`, nothing
-    /// asks again by itself, but the held list is still out of date, so the
-    /// state stays busy and nothing plans on it.
-    FailedStale,
+    /// The request could not be sent (the client is closing, a native
+    /// error) at `at`: the next ingest after [`UNSENT_RETRY_AFTER`] sends
+    /// it again, so a background account or a box nobody opens still
+    /// settles.
+    NotSent { at: Instant },
+    /// The refetch of a stale list could not be sent at `at`. Retried like
+    /// `NotSent`, but the held list is still out of date, so the state stays
+    /// busy and nothing plans on it.
+    NotSentStale { at: Instant },
 }
 
 impl ProxyFetch {
@@ -36,9 +47,21 @@ impl ProxyFetch {
         self == Self::Stale
     }
 
-    /// A `getProxies` should go out: never asked, or invalidated.
-    pub fn wanted(self) -> bool {
-        matches!(self, Self::NotAsked | Self::Stale)
+    /// A `getProxies` should go out at `now`: never asked, invalidated, or
+    /// one that could not be sent has waited out its retry.
+    pub fn wanted(self, now: Instant) -> bool {
+        match self {
+            Self::NotAsked | Self::Stale => true,
+            Self::NotSent { at } | Self::NotSentStale { at } => {
+                now.saturating_duration_since(at) >= UNSENT_RETRY_AFTER
+            }
+            _ => false,
+        }
+    }
+
+    /// The last send was refused (a retry is owed).
+    pub fn unsent(self) -> bool {
+        matches!(self, Self::NotSent { .. } | Self::NotSentStale { .. })
     }
 
     /// `request` is the fetch the list waits for.
@@ -69,7 +92,7 @@ impl ProxyListOps {
         self.changing()
             || self.fetch.loading()
             || self.fetch.stale()
-            || self.fetch == ProxyFetch::FailedStale
+            || matches!(self.fetch, ProxyFetch::NotSentStale { .. })
     }
 
     /// A change is in flight.
@@ -77,9 +100,15 @@ impl ProxyListOps {
         self.change.is_some()
     }
 
-    /// A `getProxies` should go out: never asked, or invalidated.
-    pub fn wanted(&self) -> bool {
-        self.fetch.wanted()
+    /// A `getProxies` should go out at `now`.
+    pub fn wanted(&self, now: Instant) -> bool {
+        self.fetch.wanted(now)
+    }
+
+    /// A fetch should go out because it is owed or its last send was
+    /// refused and has waited out its retry (what `ingest` checks).
+    pub fn refetch_due(&self, now: Instant) -> bool {
+        (self.fetch.stale() || self.fetch.unsent()) && self.fetch.wanted(now)
     }
 
     /// The list is out of date and no request is on its way for it.
@@ -110,13 +139,15 @@ impl ProxyListOps {
         self.fetch = ProxyFetch::Loading(request);
     }
 
-    /// `getProxies` could not be sent: nothing asks again by itself, only
-    /// the dialog's open / Refresh. A list that was owed a refetch stays
-    /// busy (`FailedStale`).
-    pub fn fetch_unsent(&mut self) {
+    /// `getProxies` could not be sent at `now`: the next ingest after the
+    /// retry wait sends it again. A list that was owed a refetch stays busy
+    /// (`NotSentStale`).
+    pub fn fetch_unsent(&mut self, now: Instant) {
         self.fetch = match self.fetch {
-            ProxyFetch::Stale | ProxyFetch::FailedStale => ProxyFetch::FailedStale,
-            _ => ProxyFetch::Failed,
+            ProxyFetch::Stale | ProxyFetch::NotSentStale { .. } => {
+                ProxyFetch::NotSentStale { at: now }
+            }
+            _ => ProxyFetch::NotSent { at: now },
         };
     }
 
@@ -170,8 +201,9 @@ mod tests {
 
     #[test]
     fn list_ops_move_together() {
+        let now = Instant::now();
         let mut ops = ProxyListOps::default();
-        assert!(ops.wanted() && !ops.busy());
+        assert!(ops.wanted(now) && !ops.busy());
         ops.fetch_sent(RequestId(1));
         ops.change_sent(RequestId(2));
         assert!(ops.busy() && ops.changing() && ops.loading());
@@ -182,12 +214,29 @@ mod tests {
         assert!(!ops.fetch_answered(RequestId(1)), "dropped with the change");
         ops.change_failed(Some(RequestId(2)));
         assert!(!ops.changing());
-        // A refetch that cannot be sent keeps the list busy, not owed.
-        ops.fetch_unsent();
-        assert_eq!(ops.fetch(), ProxyFetch::FailedStale);
-        assert!(ops.busy() && !ops.wanted());
+        // A refetch that cannot be sent keeps the list busy until it is
+        // asked again after the wait.
+        ops.fetch_unsent(now);
+        assert_eq!(ops.fetch(), ProxyFetch::NotSentStale { at: now });
+        assert!(ops.busy() && !ops.wanted(now));
+        assert!(!ops.refetch_due(now + UNSENT_RETRY_AFTER / 2));
+        assert!(ops.refetch_due(now + UNSENT_RETRY_AFTER));
         ops.fetch_sent(RequestId(3));
         assert!(ops.fetch_failed(RequestId(3)));
         assert_eq!(ops.fetch(), ProxyFetch::Failed);
+        assert!(
+            !ops.refetch_due(now + UNSENT_RETRY_AFTER * 9),
+            "an error answer waits for Refresh"
+        );
+    }
+
+    #[test]
+    fn a_first_fetch_that_cannot_be_sent_is_asked_again_after_the_wait() {
+        let now = Instant::now();
+        let mut ops = ProxyListOps::default();
+        ops.fetch_unsent(now);
+        assert!(!ops.busy(), "no list is held, nothing is out of date");
+        assert!(!ops.wanted(now));
+        assert!(ops.refetch_due(now + UNSENT_RETRY_AFTER));
     }
 }

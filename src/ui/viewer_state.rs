@@ -10,9 +10,9 @@ use quill::media_viewer::WheelNav;
 
 /// The editor opens on the photo of render `render` once it lands, unless
 /// the user has left the chat view `view` it was asked for in.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub(super) struct DeferredOpen {
-    pub(super) render: u64,
+    pub(super) render: quill::composer::RenderToken,
     pub(super) view: quill::ids::ViewGeneration,
 }
 

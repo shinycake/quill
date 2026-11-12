@@ -142,7 +142,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .request(RequestPurpose::GetPaidReactionSenders, Some(chat_id));
         let json = get_chat_available_paid_message_reaction_senders(extra, chat_id);
         self.send_json_request(extra, &json)?;
-        self.session.payments.paid.senders_asked(chat_id.0);
+        self.session.payments.paid.senders_asked(chat_id.0, extra);
         Ok(Some(extra))
     }
 
@@ -160,7 +160,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let json = get_star_payment_options(extra);
         match self.send_json_request(extra, &json) {
             Ok(id) => {
-                self.session.payments.star_packs.options.begin();
+                let options = &mut self.session.payments.star_packs.options;
+                options.begin();
+                options.sent(id);
                 Ok(Some(id))
             }
             Err(err) => Err(err),

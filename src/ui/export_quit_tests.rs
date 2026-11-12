@@ -213,8 +213,6 @@ fn the_quit_action_asks_while_an_export_runs(cx: &mut TestAppContext) {
     let dir = scratch("action");
     let export = running_chat_export(&dir);
     app.update(vcx, |app, _| {
-        let mut export = export;
-        export.view = quill::export::ExportView::Hidden;
         app.demo_session.as_mut().unwrap().settings.chat_export = Some(export);
     });
     settle(vcx);

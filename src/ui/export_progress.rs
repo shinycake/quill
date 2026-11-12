@@ -75,16 +75,15 @@ impl QuillApp {
 
     fn poll_one_chat_export(&mut self) -> RedrawNeed {
         let Some(export) = self.session().and_then(|s| s.settings.chat_export.as_ref()) else {
-            self.dialogs.chat_export.forget_seen();
+            self.dialogs.chat_export.end_progress();
             return RedrawNeed::Nothing;
         };
         let progress = export.progress();
-        let hidden = export.view == quill::export::ExportView::Hidden;
+        let hidden = !self.dialogs.chat_export.is_progress();
         if progress.is_settled() && hidden {
             if let Some(session) = self.session_mut() {
                 session.settings.chat_export = None;
             }
-            self.dialogs.chat_export.forget_seen();
             self.set_note(StatusNote::info(ended_note(&progress)));
             return RedrawNeed::Now;
         }
@@ -165,7 +164,7 @@ impl QuillApp {
                         if let Some(live) = this.live.as_mut() {
                             live.driver.session.settings.chat_export = None;
                         }
-                        this.dialogs.chat_export.forget_seen();
+                        this.dialogs.chat_export.close();
                         cx.notify();
                         this.close_kit_dialog_if_done(DialogKind::ChatExport, window, cx);
                     })),
@@ -177,7 +176,7 @@ impl QuillApp {
                         .label(tr(keys::Q_OPS_HIDE))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
-                            this.set_chat_export_view(quill::export::ExportView::Hidden);
+                            this.dialogs.chat_export.close();
                             cx.notify();
                             this.close_kit_dialog_if_done(DialogKind::ChatExport, window, cx);
                         })),

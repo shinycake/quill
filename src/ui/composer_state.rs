@@ -3,7 +3,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use quill::composer::DraftTopic;
-use quill::ids::ChatId;
+use quill::ids::{ChatId, MessageId, RequestId};
 use quill::telegram::envelope::ChatDraft;
 
 /// A draft to clear once a send is acknowledged. `sent` is the composer
@@ -13,21 +13,147 @@ use quill::telegram::envelope::ChatDraft;
 pub(super) struct DraftClear {
     pub(super) chat_id: ChatId,
     pub(super) sent: Option<String>,
+    stage: ClearStage,
+}
+
+/// Where the clear is. The messages of the send ride in the stage: an ack
+/// names its message by the temporary id TDLib gave it (the topic it names
+/// can differ from the composer's slot, as for a reply from a supergroup's
+/// main composer), so that id is how it finds the clear of the send it ends.
+/// A send of several messages (an album) keeps its entry until its last
+/// message has acked or failed, so a later ack of the same send finds it by
+/// id and never another send's.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ClearStage {
+    /// The send named no request (a menu command): only a slot match finds it.
+    Unasked,
+    /// The send's messages wait for their answers and acks; the first ack
+    /// clears the draft.
+    Armed(Vec<SentMessage>),
+    /// One message acked (the draft was cleared then) or failed (the draft
+    /// stays): the rest of the send's acks clear nothing. Done once the
+    /// list is empty.
+    Spent(Vec<SentMessage>),
+}
+
+/// One message of a send: asked for under a request, then made by it.
+/// A request that sends an album is answered once per message.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SentMessage {
+    Asked(RequestId),
+    Made {
+        request: RequestId,
+        message: MessageId,
+    },
+}
+
+impl ClearStage {
+    fn messages_mut(&mut self) -> Option<&mut Vec<SentMessage>> {
+        match self {
+            Self::Unasked => None,
+            Self::Armed(messages) | Self::Spent(messages) => Some(messages),
+        }
+    }
+
+    fn messages(&self) -> &[SentMessage] {
+        match self {
+            Self::Unasked => &[],
+            Self::Armed(messages) | Self::Spent(messages) => messages,
+        }
+    }
+
+    /// `message` left the send, acked or failed; the stage is `Spent`.
+    fn spend(&mut self, message: MessageId) {
+        let mut messages = match std::mem::replace(self, Self::Unasked) {
+            Self::Unasked => Vec::new(),
+            Self::Armed(messages) | Self::Spent(messages) => messages,
+        };
+        messages.retain(|m| !matches!(m, SentMessage::Made { message: id, .. } if *id == message));
+        *self = Self::Spent(messages);
+    }
 }
 
 impl DraftClear {
     pub(super) fn whole_composer(chat_id: ChatId) -> Self {
-        Self {
-            chat_id,
-            sent: None,
-        }
+        Self::new(chat_id, None)
     }
 
     pub(super) fn of_text(chat_id: ChatId, sent: &str) -> Self {
+        Self::new(chat_id, Some(sent.to_string()))
+    }
+
+    fn new(chat_id: ChatId, sent: Option<String>) -> Self {
         Self {
             chat_id,
-            sent: Some(sent.to_string()),
+            sent,
+            stage: ClearStage::Unasked,
         }
+    }
+
+    /// The send went out as `requests`.
+    pub(super) fn asked(mut self, requests: impl IntoIterator<Item = RequestId>) -> Self {
+        let asked: Vec<SentMessage> = requests.into_iter().map(SentMessage::Asked).collect();
+        if !asked.is_empty() {
+            self.stage = ClearStage::Armed(asked);
+        }
+        self
+    }
+
+    /// `request` was answered with the temporary message `made`: its first
+    /// answer replaces the ask, a later one (the next message of an album)
+    /// adds a message beside the ones made.
+    pub(super) fn answered(&mut self, request: RequestId, made: MessageId) {
+        let Some(messages) = self.stage.messages_mut() else {
+            return;
+        };
+        let new = SentMessage::Made {
+            request,
+            message: made,
+        };
+        if let Some(asked) = messages
+            .iter_mut()
+            .find(|m| **m == SentMessage::Asked(request))
+        {
+            *asked = new;
+        } else if messages
+            .iter()
+            .any(|m| matches!(m, SentMessage::Made { request: r, .. } if *r == request))
+            && !messages.contains(&new)
+        {
+            messages.push(new);
+        }
+    }
+
+    /// `message` is one the send made.
+    pub(super) fn made(&self, message: MessageId) -> bool {
+        self.stage
+            .messages()
+            .iter()
+            .any(|m| matches!(m, SentMessage::Made { message: id, .. } if *id == message))
+    }
+
+    /// Whether the send named no request: only a slot match can find it.
+    pub(super) fn is_unasked(&self) -> bool {
+        matches!(self.stage, ClearStage::Unasked)
+    }
+
+    /// `message` acked. True for the ack that clears the draft: the first
+    /// of the send. The message leaves the send either way.
+    pub(super) fn ack(&mut self, message: MessageId) -> bool {
+        let clears = matches!(self.stage, ClearStage::Armed(_));
+        self.stage.spend(message);
+        clears
+    }
+
+    /// `message` failed: the draft stays, and no later ack of the send
+    /// clears it.
+    pub(super) fn fail(&mut self, message: MessageId) {
+        self.stage.spend(message);
+    }
+
+    /// Every message of the send has acked or failed.
+    pub(super) fn is_settled(&self) -> bool {
+        matches!(&self.stage, ClearStage::Spent(messages) if messages.is_empty())
     }
 
     /// Whether the ack for `chat_id` may clear its draft, given the

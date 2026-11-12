@@ -40,21 +40,26 @@ impl Session {
         self.stickers.stickers.batch.finish_item(request, success);
     }
 
-    /// The box's change of the viewed set went out.
-    pub fn begin_set_change(&mut self, set_id: i64, change: SetChange) {
+    /// The box's change of the viewed set went out as `request`.
+    pub fn begin_set_change(&mut self, set_id: i64, change: SetChange, request: RequestId) {
         if let Some(view) = self.stickers.sticker_set_view.as_mut()
             && view.set_id == set_id
         {
-            view.change = SetChangeStage::Working(change);
+            view.change = SetChangeStage::Working { change, request };
         }
     }
 
-    /// The change box asked for answered (`ok`) or failed. Only the answer
-    /// to the change it waits on counts.
-    pub(crate) fn finish_set_change(&mut self, set_id: i64, change: SetChange, success: bool) {
+    /// The change `request` answered (`ok`) or failed. Only the answer to
+    /// the request the box waits on counts, not another request's that names
+    /// the same kind of change.
+    pub(crate) fn finish_set_change(&mut self, request: RequestId, set_id: i64, success: bool) {
         if let Some(view) = self.stickers.sticker_set_view.as_mut()
             && view.set_id == set_id
-            && view.change == SetChangeStage::Working(change)
+            && let SetChangeStage::Working {
+                change,
+                request: asked,
+            } = view.change
+            && asked == request
         {
             view.change = if success {
                 SetChangeStage::Done(change)
@@ -92,9 +97,10 @@ impl Session {
             .extend(sets.into_iter().filter(|set| ids.insert(set.id)));
     }
 
+    /// The installed sets the load that waits for them answered (the
+    /// caller checked the request, so an older answer never gets here).
     pub fn accept_installed_sticker_sets(&mut self, sets: Vec<StickerSetInfo>) {
         self.stickers.stickers.sets = sets;
-        self.stickers.stickers.lists.installed.succeed(());
         if self.stickers.stickers.tab != StickerTab::Installed {
             return;
         }

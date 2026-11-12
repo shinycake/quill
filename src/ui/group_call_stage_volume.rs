@@ -50,6 +50,10 @@ enum SliderStage {
         made: i32,
         request: RequestId,
     },
+    /// Released, and the send was refused: the server never got the dragged
+    /// value, so the slider serves nothing and is made again from the
+    /// server's level.
+    Refused(i32),
 }
 
 impl SliderStage {
@@ -60,6 +64,7 @@ impl SliderStage {
             SliderStage::Made(made) => made == level,
             SliderStage::Dragging(_) => true,
             SliderStage::Sent { request, .. } => in_flight(request),
+            SliderStage::Refused(_) => false,
         }
     }
 
@@ -67,6 +72,7 @@ impl SliderStage {
         match self {
             SliderStage::Made(level)
             | SliderStage::Dragging(level)
+            | SliderStage::Refused(level)
             | SliderStage::Sent { made: level, .. } => level,
         }
     }
@@ -153,9 +159,10 @@ impl QuillApp {
                         let made = volume.stage.made();
                         volume.stage = match stage {
                             (Some(request), _) => SliderStage::Sent { made, request },
-                            (None, true) => SliderStage::Made(made),
+                            (None, true) => SliderStage::Refused(made),
                             (None, false) => SliderStage::Dragging(made),
                         };
+                        cx.notify();
                     }
                 });
                 if let Some(view) = self.call_view_mut() {
@@ -212,6 +219,10 @@ mod tests {
         assert!(!sent.serves(15000, |_| false), "answered with a new level");
         assert!(SliderStage::Dragging(10000).serves(15000, |_| false));
         assert!(SliderStage::Made(10000).serves(10000, |_| false));
+        assert!(
+            !SliderStage::Refused(10000).serves(10000, |_| false),
+            "a refused send leaves no dragged value on the slider"
+        );
         assert!(!SliderStage::Made(10000).serves(15000, |_| false));
     }
 

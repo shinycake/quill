@@ -188,11 +188,10 @@ impl QuillApp {
             .as_ref()
             .and_then(|window| window.phone.waiting_on());
         // An answer that comes after this (a timed-out send) is nobody's.
-        if let Some(live) = self.live.as_mut() {
-            live.driver.session.bots.web_apps.phone_share = None;
-            if let Some(request) = waiting {
-                live.driver.session.acks.forget(request);
-            }
+        if let Some(live) = self.live.as_mut()
+            && let Some(request) = waiting
+        {
+            live.driver.session.acks.forget(request);
         }
         self.with_window(|window| {
             window.phone = PhoneFlow::Idle;
@@ -203,6 +202,19 @@ impl QuillApp {
 
     /// Moves a running phone request along; called by the mini app poll.
     pub(super) fn poll_phone(&mut self, cx: &mut Context<Self>) {
+        // Answers for a send nobody waits on are dropped by the take.
+        let waiting = self
+            .mini_apps
+            .window
+            .as_ref()
+            .and_then(|window| match window.phone {
+                PhoneFlow::Sending { request, .. } => Some(request),
+                _ => None,
+            });
+        let sent = self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.session.bots.web_apps.take_phone_share(waiting));
         let Some((flow, bot_id)) = self
             .mini_apps
             .window
@@ -223,18 +235,6 @@ impl QuillApp {
                 .map(|answer| matches!(answer, quill::state::Answer::Done)),
             _ => None,
         };
-        let sent = self.live.as_mut().and_then(|live| {
-            let share = &mut live.driver.session.bots.web_apps.phone_share;
-            match (*share, flow) {
-                (Some(answer), PhoneFlow::Sending { request, .. })
-                    if answer.request() == request =>
-                {
-                    *share = None;
-                    Some(answer.is_sent())
-                }
-                _ => None,
-            }
-        });
         match flow.step(Instant::now(), unblocked, sent) {
             PhoneStep::Wait => {}
             PhoneStep::Send => self.send_phone_contact(bot_id, cx),

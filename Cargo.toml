@@ -353,6 +353,8 @@ windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalizati
     "Win32_System_WinRT_Graphics_Capture",
     # Send Location (src/ui/location_picker/geolocation/windows.rs).
     "Devices_Geolocation"] }
+# `IAsyncOperation` of the generated WinRT methods lives here, not in `windows`.
+windows-future = "0.3"
 # OS notifications: the inline reply field and the sender picture ride beside
 # GPUI's `SystemNotification` through the Quill patch in the vendored platform
 # crate (`notification_extras`, docs/decisions/codex-notify-native.md). Same

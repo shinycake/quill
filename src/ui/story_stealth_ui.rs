@@ -208,8 +208,10 @@ impl QuillApp {
         true
     }
 
-    /// The server refused the activation this box sent: the box shows why,
-    /// and its button asks again.
+    /// The activation this box sent ended without stealth mode: the server
+    /// refused it, or the request is gone with no answer (the client
+    /// restarted, the continuation was dropped). The box shows why, and its
+    /// button asks again.
     fn take_stealth_refusal(&mut self, cx: &mut Context<Self>) {
         let Some(StealthStage::Activating(request)) =
             self.stories.stealth_box.as_ref().map(|b| b.stage.clone())
@@ -221,6 +223,10 @@ impl QuillApp {
             .and_then(|s| s.stories.stealth_refusal.as_ref())
             .filter(|(refused, _)| *refused == request)
             .map(|(_, reason)| reason.clone());
+        let reason = reason.or_else(|| {
+            (!self.story_request_pending(request))
+                .then(|| tr(keys::Q_MEDIA_COULD_NOT_ENABLE_STEALTH_MODE).to_string())
+        });
         if let Some(reason) = reason {
             if let Some(stealth_box) = self.stories.stealth_box.as_mut() {
                 stealth_box.stage = StealthStage::Failed(reason);

@@ -68,7 +68,7 @@ fn mixed_group(app: &Entity<QuillApp>, cx: &mut VisualTestContext) {
             .as_mut()
             .and_then(|session| session.histories.get_mut(&GROUP))
         {
-            history.unread_anchor = Some(MessageId(id(READ_UP_TO)));
+            history.unread_open.show_bar(MessageId(id(READ_UP_TO)));
         }
         cx.notify();
     });
@@ -440,7 +440,7 @@ fn a_new_first_unread_moves_the_divider_from_rows_further_down(cx: &mut TestAppC
             .as_mut()
             .and_then(|session| session.histories.get_mut(&GROUP))
         {
-            history.unread_anchor = Some(MessageId(id(8)));
+            history.unread_open.show_bar(MessageId(id(8)));
         }
         cx.notify();
     });

@@ -208,6 +208,18 @@ impl BackgroundAccounts {
             .collect()
     }
 
+    /// An account's start was refused for space and waits for a reading
+    /// with room.
+    pub(in crate::ui) fn has_refused_start(&self) -> bool {
+        self.prepare.any_refused()
+    }
+
+    /// A reading with room: the refused starts leave their stage, and the
+    /// pass that follows asks again.
+    pub(in crate::ui) fn release_refused_starts(&mut self) {
+        self.prepare.take_refused();
+    }
+
     fn has_work(&self) -> bool {
         self.prepare.any_wanted()
             || !self.closing.is_empty()
@@ -387,41 +399,68 @@ impl QuillApp {
             Self::spawn_app(cx, async move |this, cx| {
                 let prepared = prepared.await;
                 let _ = this.update(cx, |this, cx| {
-                    let wanted = this.background.prepare.finished(&key);
-                    // Stopped since: every start of that generation ends.
-                    if generation != this.background.generation {
-                        return;
-                    }
-                    // Removed since (it is no longer wanted), being wiped,
-                    // switched to meanwhile, or still closing: a second
-                    // client must never open the same database, nor one
-                    // whose folder is being deleted.
-                    if !wanted
-                        || this.background.wiping()
-                        || this.disk.is_full()
-                        || this.background.deleting.contains(&key)
-                        || active_account(&root) == key
-                        || this.background.client(&key).is_some()
-                        || this.background.closing.may_be_open(&key)
-                    {
-                        return;
-                    }
-                    // Prepared before a lock that cleared the key: it
-                    // starts again at the unlock, not as a failed account.
-                    if matches!(prepared, Err(ConnectBlocker::LockedStore))
-                        && this.refused_while_locked()
-                    {
-                        return;
-                    }
-                    let started = prepared.and_then(|prepared| {
-                        start_background_live_connect(credentials, prepared, Arc::new(DiscardSink))
-                    });
-                    this.finish_background_start(key, started, cx);
+                    this.finish_background_prepare(key, generation, root, credentials, prepared, cx)
                 });
             })
             .detach();
         }
         self.spawn_background_poll(cx);
+    }
+
+    /// A background preparation answered. Whatever came of it, the work
+    /// waiting on a preparation ending (a deletion) is settled.
+    fn finish_background_prepare(
+        &mut self,
+        key: AccountKey,
+        generation: u64,
+        root: std::path::PathBuf,
+        credentials: quill::credentials::TelegramCredentials,
+        prepared: Result<quill::connect::PreparedConnect, ConnectBlocker>,
+        cx: &mut Context<Self>,
+    ) {
+        self.apply_background_prepare(key, generation, root, credentials, prepared, cx);
+        self.settle_close_waiters(cx);
+    }
+
+    /// Start the client when it is still wanted. Every exit leaves the
+    /// preparation settled.
+    fn apply_background_prepare(
+        &mut self,
+        key: AccountKey,
+        generation: u64,
+        root: std::path::PathBuf,
+        credentials: quill::credentials::TelegramCredentials,
+        prepared: Result<quill::connect::PreparedConnect, ConnectBlocker>,
+        cx: &mut Context<Self>,
+    ) {
+        let wanted = self.background.prepare.finished(&key);
+        // Stopped since: every start of that generation ends.
+        if generation != self.background.generation {
+            return;
+        }
+        // Removed since (it is no longer wanted), being wiped,
+        // switched to meanwhile, or still closing: a second
+        // client must never open the same database, nor one
+        // whose folder is being deleted.
+        if !wanted
+            || self.background.wiping()
+            || self.disk.is_full()
+            || self.background.deleting.contains(&key)
+            || active_account(&root) == key
+            || self.background.client(&key).is_some()
+            || self.background.closing.may_be_open(&key)
+        {
+            return;
+        }
+        // Prepared before a lock that cleared the key: it
+        // starts again at the unlock, not as a failed account.
+        if matches!(prepared, Err(ConnectBlocker::LockedStore)) && self.refused_while_locked() {
+            return;
+        }
+        let started = prepared.and_then(|prepared| {
+            start_background_live_connect(credentials, prepared, Arc::new(DiscardSink))
+        });
+        self.finish_background_start(key, started, cx);
     }
 
     fn finish_background_start(
@@ -437,7 +476,7 @@ impl QuillApp {
                 (Some(live), BackgroundStatus::Connecting)
             }
             Err(ConnectBlocker::DiskFull) => {
-                self.disk.refused_start();
+                self.background.prepare.refuse(&key);
                 return;
             }
             Err(_) => {

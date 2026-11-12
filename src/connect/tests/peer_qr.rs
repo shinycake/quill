@@ -5,7 +5,7 @@ use super::*;
 use crate::diagnostics::DiagnosticSink;
 use crate::diagnostics::MemorySink;
 use crate::peer_qr::color::Rgb;
-use crate::peer_qr::free::{FreeRequest, FreeTicket};
+use crate::peer_qr::free::FreeRequest;
 use crate::peer_qr::link::{UserLinkData, UserLinkFetch};
 use crate::platform::MemorySecretStore;
 use crate::telegram::client::copy_and_parse;
@@ -119,7 +119,7 @@ fn failed_backdrops_can_be_asked_again() {
 #[test]
 fn contact_link_expires_relative_to_now() {
     let mut f = fixture();
-    f.1.fetch_own_user_link(None).unwrap();
+    f.1.fetch_own_contact_link().unwrap();
     let request = last_request(&f);
     assert_eq!(request["@type"], "getUserLink");
     assert_eq!(request["remove_messages_fee"], false);
@@ -147,17 +147,7 @@ fn contact_link_expires_relative_to_now() {
 #[test]
 fn free_codes_are_queued_for_the_box() {
     let mut f = fixture();
-    let reset = FreeTicket {
-        request: FreeRequest::ResetPermanent,
-        box_id: 1,
-        serial: 1,
-    };
-    let temporary = FreeTicket {
-        request: FreeRequest::Temporary,
-        box_id: 1,
-        serial: 2,
-    };
-    f.1.fetch_own_user_link(Some(reset)).unwrap();
+    let reset = f.1.fetch_free_code(FreeRequest::ResetPermanent).unwrap();
     let request = last_request(&f);
     assert_eq!(request["remove_messages_fee"], true);
     assert_eq!(request["return_permanent_link"], true);
@@ -170,7 +160,7 @@ fn free_codes_are_queued_for_the_box() {
             extra_of(&request)
         ),
     );
-    f.1.fetch_own_user_link(Some(temporary)).unwrap();
+    let temporary = f.1.fetch_free_code(FreeRequest::Temporary).unwrap();
     let failed = last_request(&f);
     ingest(
         &mut f,
@@ -207,7 +197,7 @@ fn free_codes_are_queued_for_the_box() {
 #[test]
 fn a_failed_contact_link_keeps_its_reason_and_is_asked_again() {
     let mut f = fixture();
-    f.1.fetch_own_user_link(None).unwrap();
+    f.1.fetch_own_contact_link().unwrap();
     let request = last_request(&f);
     ingest(
         &mut f,
@@ -226,7 +216,7 @@ fn a_failed_contact_link_keeps_its_reason_and_is_asked_again() {
     qr.retry_contact_link();
     assert_eq!(qr.contact_link, UserLinkFetch::Idle);
     let sent = f.2.snapshot().len();
-    f.1.fetch_own_user_link(None).unwrap();
+    f.1.fetch_own_contact_link().unwrap();
     assert_eq!(f.2.snapshot().len(), sent + 1);
     cleanup(f);
 }
@@ -277,7 +267,7 @@ fn rules_landing_after_the_box_opened_ask_for_the_contact_link() {
 #[test]
 fn a_contact_link_answer_of_an_older_request_is_ignored() {
     let mut f = fixture();
-    f.1.fetch_own_user_link(None).unwrap();
+    f.1.fetch_own_contact_link().unwrap();
     let request = last_request(&f);
     let UserLinkFetch::Loading(asked) = f.1.session.users_state.peer_qr.contact_link.clone() else {
         panic!("asking moves the link to loading");

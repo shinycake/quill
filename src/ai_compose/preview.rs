@@ -1,6 +1,7 @@
 //! The style link and the style preview's examples (tdesktop
 //! `boxes/preview_ai_tone_box.cpp`, `PreviewAiToneBox`).
 
+use crate::ids::RequestId;
 use std::time::Instant;
 
 /// tdesktop's example count before the server says
@@ -20,9 +21,9 @@ pub fn style_link(name: &str) -> Option<String> {
 enum ExampleFetch {
     #[default]
     Idle,
-    /// The request with this token runs since `at` (the refresh icon spins
-    /// from there); only its answer ends it.
-    Asked { token: u64, at: Instant },
+    /// The request runs since `at` (the refresh icon spins from there);
+    /// only its answer ends it.
+    Asked { request: RequestId, at: Instant },
 }
 
 /// The preview's examples: how many were shown and the request for the
@@ -43,20 +44,20 @@ impl StyleExamples {
         }
     }
 
-    /// The example number to ask for next, as the request `token` sent at
-    /// `now`, or `None` while one is loading.
-    pub fn start_next(&mut self, token: u64, now: Instant) -> Option<usize> {
-        if self.loading() {
-            return None;
-        }
-        self.fetch = ExampleFetch::Asked { token, at: now };
-        Some(self.shown)
+    /// The example number to ask for next, or `None` while one is loading.
+    pub fn next_number(&self) -> Option<usize> {
+        (!self.loading()).then_some(self.shown)
     }
 
-    /// The answer of the request with `token`: counts as shown. `false`
-    /// (and nothing changes) when another request is the one awaited.
-    pub fn loaded(&mut self, token: u64) -> bool {
-        if self.token() != Some(token) {
+    /// The example asked for went out as `request` at `now`.
+    pub fn begin(&mut self, request: RequestId, now: Instant) {
+        self.fetch = ExampleFetch::Asked { request, at: now };
+    }
+
+    /// The answer of `request`: counts as shown. `false` (and nothing
+    /// changes) when another request is the one awaited.
+    pub fn loaded(&mut self, request: RequestId) -> bool {
+        if self.request() != Some(request) {
             return false;
         }
         self.fetch = ExampleFetch::Idle;
@@ -64,9 +65,9 @@ impl StyleExamples {
         true
     }
 
-    /// The request with `token` failed. `false` when another is awaited.
-    pub fn failed(&mut self, token: u64) -> bool {
-        if self.token() != Some(token) {
+    /// `request` failed. `false` when another is awaited.
+    pub fn failed(&mut self, request: RequestId) -> bool {
+        if self.request() != Some(request) {
             return false;
         }
         self.fetch = ExampleFetch::Idle;
@@ -74,13 +75,13 @@ impl StyleExamples {
     }
 
     pub fn loading(&self) -> bool {
-        self.token().is_some()
+        self.request().is_some()
     }
 
-    /// The token of the request awaited.
-    pub fn token(&self) -> Option<u64> {
+    /// The request awaited.
+    pub fn request(&self) -> Option<RequestId> {
         match self.fetch {
-            ExampleFetch::Asked { token, .. } => Some(token),
+            ExampleFetch::Asked { request, .. } => Some(request),
             ExampleFetch::Idle => None,
         }
     }
@@ -102,7 +103,14 @@ impl StyleExamples {
 #[cfg(test)]
 mod tests {
     use super::{StyleExamples, style_link};
+    use crate::ids::RequestId;
     use std::time::Instant;
+
+    fn ask(examples: &mut StyleExamples, request: u64) -> Option<usize> {
+        let number = examples.next_number()?;
+        examples.begin(RequestId(request), Instant::now());
+        Some(number)
+    }
 
     #[test]
     fn style_link_needs_a_name() {
@@ -116,18 +124,18 @@ mod tests {
     #[test]
     fn a_style_without_an_example_loads_number_zero() {
         let mut examples = StyleExamples::new(false);
-        assert_eq!(examples.start_next(1, Instant::now()), Some(0));
-        assert_eq!(examples.start_next(1, Instant::now()), None);
-        examples.loaded(1);
-        assert_eq!(examples.start_next(1, Instant::now()), Some(1));
+        assert_eq!(ask(&mut examples, 1), Some(0));
+        assert_eq!(ask(&mut examples, 1), None);
+        examples.loaded(RequestId(1));
+        assert_eq!(ask(&mut examples, 1), Some(1));
     }
 
     #[test]
     fn the_first_example_counts_toward_the_limit() {
         let mut examples = StyleExamples::new(true);
         assert!(examples.can_show_another(Some(2)));
-        assert_eq!(examples.start_next(1, Instant::now()), Some(1));
-        examples.loaded(1);
+        assert_eq!(ask(&mut examples, 1), Some(1));
+        examples.loaded(RequestId(1));
         assert!(!examples.can_show_another(Some(2)));
         assert!(examples.can_show_another(None));
     }
@@ -135,24 +143,25 @@ mod tests {
     #[test]
     fn a_failed_example_can_be_asked_again() {
         let mut examples = StyleExamples::new(true);
-        assert_eq!(examples.start_next(1, Instant::now()), Some(1));
-        examples.failed(1);
+        assert_eq!(ask(&mut examples, 1), Some(1));
+        examples.failed(RequestId(1));
         assert!(!examples.loading());
-        assert_eq!(examples.start_next(1, Instant::now()), Some(1));
+        assert_eq!(ask(&mut examples, 1), Some(1));
     }
 
     #[test]
     fn only_the_awaited_requests_answer_counts() {
         let now = Instant::now();
         let mut examples = StyleExamples::new(true);
-        assert_eq!(examples.start_next(7, now), Some(1));
-        assert_eq!(examples.token(), Some(7));
+        assert_eq!(examples.next_number(), Some(1));
+        examples.begin(RequestId(7), now);
+        assert_eq!(examples.request(), Some(RequestId(7)));
         assert_eq!(examples.asked_at(), Some(now));
-        assert!(!examples.loaded(6), "an older request's answer");
-        assert!(!examples.failed(6));
+        assert!(!examples.loaded(RequestId(6)), "an older request's answer");
+        assert!(!examples.failed(RequestId(6)));
         assert!(examples.loading());
-        assert!(examples.failed(7));
+        assert!(examples.failed(RequestId(7)));
         assert!(!examples.loading() && examples.asked_at().is_none());
-        assert!(!examples.loaded(7), "nothing is awaited now");
+        assert!(!examples.loaded(RequestId(7)), "nothing is awaited now");
     }
 }

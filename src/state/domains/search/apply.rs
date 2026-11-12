@@ -18,7 +18,7 @@ impl Session {
                 next_offset,
                 ..
             } => {
-                if self.search.search.matches_generation(pending)
+                if self.search.search.awaits(pending)
                     && matches!(
                         pending.map(|p| p.purpose),
                         Some(
@@ -35,7 +35,7 @@ impl Session {
                         .search
                         .set_first_page_offset(next_offset.clone());
                     self.search.search.accept_messages(hits, false);
-                } else if self.search.search.matches_generation(pending)
+                } else if self.search.search.awaits(pending)
                     && pending.map(|p| p.purpose) == Some(RequestPurpose::SearchMessagesMore)
                 {
                     for message in &messages {
@@ -68,7 +68,7 @@ impl Session {
                 next_offset,
                 are_limits_exceeded,
             } => {
-                if self.search.search.matches_generation(pending)
+                if self.search.search.awaits(pending)
                     && pending.map(|p| p.purpose) == Some(RequestPurpose::SearchPublicPosts)
                 {
                     for message in &messages {
@@ -78,7 +78,7 @@ impl Session {
                     self.search.search.set_first_page_offset(next_offset);
                     self.search.search.accept_messages(hits, false);
                     self.search.search.note_public_limits(are_limits_exceeded);
-                } else if self.search.search.matches_generation(pending)
+                } else if self.search.search.awaits(pending)
                     && pending.map(|p| p.purpose) == Some(RequestPurpose::SearchPublicPostsMore)
                 {
                     for message in &messages {
@@ -98,16 +98,19 @@ impl Session {
             } => {
                 // Only the quota of the query on screen: an answer of an
                 // older query would price and label this one wrongly.
-                if self.search.search.matches_generation(pending)
+                if self.search.search.awaits(pending)
                     && pending.map(|p| p.purpose) == Some(RequestPurpose::GetPublicPostSearchLimits)
                 {
-                    self.search.search.tabs.limits = Some(PublicPostLimits {
-                        daily_free,
-                        remaining_free,
-                        next_free_in,
-                        star_count,
-                        current_query_free,
-                    });
+                    self.search.search.tabs.limits.answered(
+                        pending.map(|p| p.id),
+                        PublicPostLimits {
+                            daily_free,
+                            remaining_free,
+                            next_free_in,
+                            star_count,
+                            current_query_free,
+                        },
+                    );
                 }
             }
             SearchPayload::MessageCalendar { days, .. } => {

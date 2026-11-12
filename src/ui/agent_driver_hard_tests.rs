@@ -315,6 +315,42 @@ fn a_blocked_dialog_waits_for_the_shell_of_its_window(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn a_blocked_entry_ends_with_its_window(cx: &mut TestAppContext) {
+    let _guard = quill::locks::lock_or_recover(&TEST_LOCK);
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    turn_on();
+    grant(11, Scope::ReadWrite);
+    grant_everything();
+    let _presence = activity::connect("Test agent");
+    settle(vcx);
+    let message_id = add_star_reaction(&app, vcx);
+    let chat = quill::ids::ChatId(11);
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.windows.scope = Some(chat);
+            app.open_paid_box(chat, quill::ids::MessageId(message_id), cx);
+            crate::ui::agent_driver_surface::block_opened_by_agent(app, &[]);
+            app.windows.scope = None;
+            // The window closes before its next frame.
+            crate::ui::agent_driver_surface::window_closed(chat);
+        });
+        // A new window for the same chat finds nothing queued.
+        let taken = crate::ui::agent_driver_surface::take_blocked_closing_layers(
+            &app,
+            Some(chat),
+            window,
+            cx,
+        );
+        assert!(taken.is_empty(), "{taken:?}");
+    });
+    app.update(vcx, |app, cx| {
+        app.paid_reaction.boxed = None;
+        cx.notify();
+    });
+}
+
+#[gpui_kit::test]
 fn an_agent_neither_switches_accounts_nor_answers_a_call(cx: &mut TestAppContext) {
     let _guard = quill::locks::lock_or_recover(&TEST_LOCK);
     let (app, mut vcx) = new_app(cx);

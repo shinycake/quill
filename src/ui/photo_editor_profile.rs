@@ -322,7 +322,9 @@ impl QuillApp {
             move || {
                 let square = finish_square(job.render());
                 let saved = super::edit_media_tools::write_edited_png(&square)?;
-                Some((saved, preview_of(&square)))
+                // Dropped unclaimed (the screen went away, or the box
+                // closed first), the file goes with it.
+                Some((quill::scratch::TempFile::new(saved), preview_of(&square)))
             },
             move |this, done, cx| {
                 // The box that asked may have closed while the square
@@ -338,6 +340,7 @@ impl QuillApp {
                     );
                     return;
                 };
+                let saved = saved.claim();
                 let photo = ChosenPhoto {
                     input: ChatPhotoInput::Static {
                         path: saved.to_string_lossy().into_owned(),
@@ -345,6 +348,11 @@ impl QuillApp {
                     preview: Some(PhotoPreview::Image(preview)),
                 };
                 if let Err(note) = this.take_chosen_photo(target, photo) {
+                    // Nothing took the file: remove it off the UI thread.
+                    cx.background_spawn(async move {
+                        let _ = std::fs::remove_file(saved);
+                    })
+                    .detach();
                     this.photo_target_note(target, &note, cx);
                 }
                 cx.notify();

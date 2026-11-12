@@ -108,11 +108,14 @@ impl Session {
             // photo waiting for the community goes.
             Some(RequestPurpose::CreateCommunity) => {
                 self.communities.new_community_photo = None;
-                self.communities
-                    .outcomes
-                    .push_back(crate::state::CommunityOutcome::CreateFailed {
-                        reason: error_reason(err),
-                    });
+                if let Some(pending) = pending {
+                    self.communities.outcomes.push_back(
+                        crate::state::CommunityOutcome::CreateFailed {
+                            request: pending.id,
+                            reason: error_reason(err),
+                        },
+                    );
+                }
             }
             // TDLib 1.8.68 community management: surface refusals
             // ("Have not enough rights", a missing community) in the
@@ -196,7 +199,7 @@ impl Session {
             // A statistics panel waiting for this supergroup's full info
             // cannot learn whether the chat shows statistics: fail it.
             Some(RequestPurpose::GetSupergroupFullInfo) => {
-                if let Some(supergroup_id) = pending.and_then(|p| p.supergroup_id) {
+                if let Some(supergroup_id) = pending.and_then(|p| p.supergroup_id()) {
                     self.fail_statistics_waiting_for(supergroup_id);
                 }
             }
@@ -334,16 +337,9 @@ impl Session {
                     "Could not replace primary invite link",
                 ));
             }
-            // Slice G1: roll back the optimistic broadcast-group
-            // upgrade so the panel doesn't lie.
-            Some(RequestPurpose::ToggleBroadcastGroup) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id)
-                    && let Some(chat) = self.chats.get(&chat_id.0)
-                    && let ChatKind::Supergroup { supergroup_id, .. } = chat.kind
-                {
-                    self.groups.supergroup_is_broadcast.remove(&supergroup_id);
-                }
-            }
+            // Slice G1: the optimistic broadcast-group upgrade is rolled
+            // back by its `RequestRollback::BroadcastGroup` (the previous
+            // flag, not a removed entry).
             // Only the request the list waits for fails it, and it is
             // settled: an older search's error must not cover a newer
             // list, and a stale `latest` would drop every later answer.
@@ -593,16 +589,11 @@ impl Session {
             Some(RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembers { filter })) => {
                 if let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
-                    && self
-                        .groups
-                        .is_latest_member_request((chat_id.0, filter), pending)
                 {
-                    self.groups.supergroup_members.insert(
+                    self.groups.fail_member_first(
                         (chat_id.0, filter),
-                        SupergroupMembersFetch::Failed(call_request_error_line(
-                            err,
-                            "Could not load members",
-                        )),
+                        pending,
+                        call_request_error_line(err, "Could not load members"),
                     );
                 }
             }
@@ -611,38 +602,16 @@ impl Session {
             // spinning forever. A failed "load more" keeps the
             // already-loaded page so the button stays retryable.
             // A failed poll changes nothing shown; the next tick asks again.
-            Some(RequestPurpose::Groups(GroupsPurpose::PollChatEventLog)) => {
+            Some(
+                RequestPurpose::Groups(GroupsPurpose::PollChatEventLog)
+                | RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { .. }),
+            ) => {
                 if let Some(pending) = pending {
-                    self.take_event_log_wait(pending);
-                }
-            }
-            Some(RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { from_event_id })) => {
-                // Only the page the log waits for; one asked under an
-                // earlier query or filter changes nothing.
-                if let Some(chat_id) = pending
-                    .filter(|pending| self.take_event_log_wait(pending))
-                    .and_then(|p| p.chat_id)
-                {
-                    if from_event_id == 0
-                        || !matches!(
-                            self.groups.event_log_fetch(chat_id.0),
-                            Some(ChatEventLogFetch::Loaded(_))
-                        )
-                    {
-                        self.groups.set_event_log_fetch(
-                            chat_id.0,
-                            ChatEventLogFetch::Failed(call_request_error_line(
-                                err,
-                                "Could not load recent actions",
-                            )),
-                        );
-                    } else {
-                        // An older page: the loaded log stays, with Retry.
-                        self.fail_older_events(
-                            chat_id.0,
-                            call_request_error_line(err, "Could not load earlier actions"),
-                        );
-                    }
+                    self.fail_event_log_request(
+                        pending,
+                        || call_request_error_line(err, "Could not load recent actions"),
+                        || call_request_error_line(err, "Could not load earlier actions"),
+                    );
                 }
             }
             Some(RequestPurpose::Groups(GroupsPurpose::GetDirectMessagesMember { user_id })) => {
@@ -675,10 +644,11 @@ impl Session {
                 .welcome_messages
                 .entry(chat_id.0)
                 .or_default()
-                .fail(call_request_error_line(
-                    err,
-                    "Could not load welcome messages",
-                ));
+                .failed(
+                    pending.map(|p| p.id),
+                    call_request_error_line(err, "Could not load welcome messages"),
+                    false,
+                );
         }
         // A failed slots read or `boostChat` returns the boost box to its
         // counters with the reason (tdesktop shows the error as a toast),

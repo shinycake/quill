@@ -82,7 +82,7 @@ impl QuillApp {
         if std::env::var("QUILL_DEMO_SHARING").as_deref() == Ok("box")
             && let Some(session) = self.demo_session.as_mut()
         {
-            session.groups.private_sharing.enable = Some(EnableSharing::AskToRequest(ChatId(CHAT)));
+            session.groups.private_sharing.enable = EnableSharing::AskToRequest(ChatId(CHAT));
         }
         cx.notify();
     }

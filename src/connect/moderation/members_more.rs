@@ -45,7 +45,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             None => return Ok(None),
         };
         let loaded = matches!(
-            self.session.groups.supergroup_members.get(&(chat_id.0, filter)),
+            self.session.groups.member_fetch((chat_id.0, filter)),
             Some(SupergroupMembersFetch::Loaded { members, .. }) if members.len() as i32 == offset
         );
         // The page continues the list shown, so only for the query that

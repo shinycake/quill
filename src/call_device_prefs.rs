@@ -17,7 +17,7 @@ pub const SYSTEM_PREFS_TITLE: &str = "Open system sound preferences";
 pub fn current_session_accepts_calls(sessions: &[ParsedSession]) -> Option<(i64, bool)> {
     sessions
         .iter()
-        .find(|session| session.is_current)
+        .find(|session| session.is_current())
         .map(|session| (session.id, session.can_accept_calls))
 }
 
@@ -42,12 +42,16 @@ fn sound_target_for(mac: bool, windows: bool) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::{current_session_accepts_calls, sound_target_for};
-    use crate::telegram::envelope::ParsedSession;
+    use crate::telegram::envelope::{ParsedSession, SessionKind};
 
     fn session(id: i64, current: bool, calls: bool) -> ParsedSession {
         ParsedSession {
             id,
-            is_current: current,
+            kind: if current {
+                SessionKind::Current
+            } else {
+                SessionKind::Other
+            },
             can_accept_calls: calls,
             ..Default::default()
         }

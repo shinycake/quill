@@ -225,30 +225,9 @@ pub(super) fn export_error_text(error: &ExportError) -> SharedString {
     }
 }
 
-/// What a password box shows this frame (a view of the caller's own stage). The box is shown with its field
-/// ready for a password (`Idle`), or shown while a try is out (`Sending`).
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum ShowingView {
-    Off,
-    Sending,
-    Idle,
-}
-
-/// A password box's input and where its field stands: one value. It reads
-/// as the input (`Deref`).
+/// A password box's input. It reads as the input (`Deref`).
 pub(super) struct PasswordField {
     input: Entity<InputState>,
-    stage: FieldStage,
-}
-
-/// The field's stage. `Typing` is the idle phase after the field took the
-/// keyboard, so it takes it once per phase and not on every frame.
-enum FieldStage {
-    /// The box is off screen or a try is out (the field is disabled until
-    /// its answer): the keyboard is taken again when the box is idle.
-    Away,
-    /// Idle, and the field has taken the keyboard.
-    Typing,
 }
 
 impl std::ops::Deref for PasswordField {
@@ -260,28 +239,22 @@ impl std::ops::Deref for PasswordField {
 
 impl PasswordField {
     pub(super) fn new(input: Entity<InputState>) -> Self {
-        Self {
-            input,
-            stage: FieldStage::Away,
-        }
+        Self { input }
     }
 
-    /// Per frame: the field takes the keyboard when the idle box opens and
-    /// after each answer (tdesktop `PasscodeBox` focuses the field), and is
-    /// emptied whenever the box is not on screen.
-    pub(super) fn keep(&mut self, showing: ShowingView, window: &mut Window, cx: &mut App) {
-        self.stage = match (showing, &self.stage) {
-            (ShowingView::Idle, FieldStage::Typing) => FieldStage::Typing,
-            (ShowingView::Idle, _) => {
-                self.input.update(cx, |input, cx| input.focus(window, cx));
-                FieldStage::Typing
-            }
-            (ShowingView::Sending | ShowingView::Off, _) => FieldStage::Away,
-        };
-        if showing == ShowingView::Off && !self.input.read(cx).value().is_empty() {
+    /// Per frame: the field is emptied whenever the box is not on screen.
+    pub(super) fn keep(&self, on_screen: bool, window: &mut Window, cx: &mut App) {
+        if !on_screen && !self.input.read(cx).value().is_empty() {
             self.input
                 .update(cx, |input, cx| input.set_value("", window, cx));
         }
+    }
+
+    /// The field takes the keyboard (tdesktop `PasscodeBox` focuses it).
+    /// The code that returns the box to idle asks for it, when the box
+    /// opens and after each answer, so no frame has to guess the edge.
+    pub(super) fn focus_field(&self, window: &mut Window, cx: &mut App) {
+        self.input.update(cx, |input, cx| input.focus(window, cx));
     }
 }
 

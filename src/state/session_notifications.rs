@@ -309,7 +309,7 @@ impl Session {
         let Some(pending) = pending else { return };
         match pending.purpose {
             RequestPurpose::SetScopeNotificationSettings => {
-                let Some(scope) = pending.scope else { return };
+                let Some(scope) = pending.scope() else { return };
                 if let Some(back) = self
                     .settings
                     .scope_saves

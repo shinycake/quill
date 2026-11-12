@@ -22,10 +22,11 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<(), ConnectSendError> {
         let call = self.pump_call_engine(active_call_before, bridge_signaling);
         let group_call = self.pump_group_call_transport(group_calls_before);
-        self.pump_call_media(std::time::Instant::now());
+        let now = std::time::Instant::now();
+        self.pump_call_media(now);
         let parameters = self.maybe_send_parameters();
         let membership = self.probe_membership_everywhere();
-        self.claim_account_owner();
+        self.claim_account_owner(now);
         call.and(group_call).and(parameters).and(membership)
     }
 
@@ -45,18 +46,25 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// The account's user id is known: a folder last signed in as someone
     /// else drops what they left (`account_data::claim`), once per user.
-    pub(in crate::connect) fn claim_account_owner(&mut self) {
+    pub(in crate::connect) fn claim_account_owner(&mut self, now: std::time::Instant) {
         let Some(me) = self.session.my_user_id else {
             return;
         };
-        if self.owner_claim == OwnerClaim::Saved(me) {
-            return;
-        }
+        let retrying = match self.owner_claim {
+            OwnerClaim::Saved(user) if user == me => return,
+            OwnerClaim::Unsaved { user, retry_at } if user == me => {
+                if now < retry_at {
+                    return;
+                }
+                true
+            }
+            _ => false,
+        };
         // `<app root>/accounts/<key>`.
         let Some(app_root) = self.paths.root.parent().and_then(std::path::Path::parent) else {
             return;
         };
-        let owner_error = if self.owner_claim == OwnerClaim::Unsaved(me) {
+        let owner_error = if retrying {
             crate::account_data::write_owner(app_root, &self.session.account, me).err()
         } else {
             crate::account_data::claim(
@@ -72,12 +80,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             Some(err) => {
                 // Not silent: without the owner file the next start cannot
                 // tell whose the folder is, so it drops what is in it. The
-                // next ingest retries the write; it is reported once, not
-                // on every ingest while the folder cannot be written.
-                if self.owner_claim != OwnerClaim::Unsaved(me) {
+                // write is retried after `OWNER_RETRY`; it is reported
+                // once, not on every attempt while the folder cannot be
+                // written.
+                if !retrying {
                     eprintln!("quill: could not save the account owner: {err}");
                 }
-                OwnerClaim::Unsaved(me)
+                OwnerClaim::Unsaved {
+                    user: me,
+                    retry_at: now + OWNER_RETRY,
+                }
             }
         };
     }

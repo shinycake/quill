@@ -63,3 +63,25 @@ fn a_seek_is_dropped_when_its_chat_is_no_longer_shown(cx: &mut TestAppContext) {
         });
     });
 }
+
+/// Sweep r3-08 (15-001): the seek waits in the account's own screen state,
+/// so another account that shows the same chat id never fires or drops it.
+#[gpui_kit::test]
+fn a_seek_does_not_follow_an_account_switch(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            let shown = app
+                .session()
+                .and_then(|session| session.open_chat_id())
+                .unwrap_or(ChatId(1));
+            let give_up_at = Instant::now() + Duration::from_secs(12);
+            app.playback.pending_media_seek = Some((shown, MessageId(2), 5, give_up_at));
+            app.switch_account(&quill::ids::AccountKey("other".into()), "", window, cx);
+            assert!(
+                app.playback.pending_media_seek.is_none(),
+                "the other account's screen holds no seek of this one"
+            );
+        });
+    });
+}

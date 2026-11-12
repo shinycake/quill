@@ -97,6 +97,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         }
         let order = order.map(|ids| ids.into_iter().filter(|id| !removed.contains(id)).collect());
+        let first = self.session.stickers.manager.commits.is_empty();
         self.session
             .stickers
             .manager
@@ -106,7 +107,26 @@ impl<S: JsonSender> ConnectDriver<S> {
                 removed.into_iter().filter(|id| *id > 0),
                 order,
             ));
-        self.advance_manager_commit()
+        // Behind another change, this one waits its turn and the call
+        // succeeds. At the front its first send happens now: when that
+        // cannot go out the change is taken back, the call fails, and the
+        // box keeps its edits and tells the user itself.
+        if first {
+            // An earlier commit's failure the UI has not shown yet is not
+            // this call's to clear: set it aside while the send is tried.
+            let earlier = self.session.stickers.manager.take_failure();
+            let sent = self.advance_manager_commit();
+            let manager = &mut self.session.stickers.manager;
+            if sent.is_err() {
+                manager.commits.pop_back();
+                let _ = manager.take_failure();
+            }
+            if earlier.is_some() {
+                manager.failure = earlier;
+            }
+            return sent;
+        }
+        Ok(())
     }
 
     /// Send the next step of the oldest saved change once the one before it

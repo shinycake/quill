@@ -250,9 +250,9 @@ pub(super) fn chat_search_jump_note(session: &Session) -> StatusNote {
 pub(super) fn apply_ready_search(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     session.open_search();
-    let search_gen = session.search.search.begin_query("hello");
-    let chats_extra = session.request_search(RequestPurpose::SearchChats, search_gen);
-    let messages_extra = session.request_search(RequestPurpose::SearchMessages, search_gen);
+    session.search.search.begin_query("hello");
+    let chats_extra = session.request_search(RequestPurpose::SearchChats);
+    let messages_extra = session.request_search(RequestPurpose::SearchMessages);
     let jsons = [
         format!(
             r#"{{"@type":"chats","@extra":"{}","total_count":1,"chat_ids":[11]}}"#,

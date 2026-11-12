@@ -42,14 +42,14 @@ impl Session {
         // Share Folder: a failed fetch ends its stage in the error the box
         // draws with a Retry, and recommended folders say so in the toast.
         // (The box's own requests answer through `DialogAnswers`.)
-        match pending.map(|p| (p.purpose, p.folder_id)) {
+        match pending.map(|p| (p.purpose, p.folder_id())) {
             Some((RequestPurpose::GetChatFolderInviteLinks, Some(folder_id))) => {
                 self.chat_list
                     .folder_shares
                     .entry(folder_id)
                     .or_default()
                     .links
-                    .fail(error_reason(err));
+                    .failed(pending_id, error_reason(err), false);
             }
             // The Delete folder box ends in the error with a Retry instead
             // of waiting for a list that never comes.
@@ -137,7 +137,7 @@ impl Session {
             // The removals waiting for this spec are dropped: asking again
             // on every ingest would loop at round-trip speed.
             Some(RequestPurpose::GetChatFolder) => {
-                if let Some(folder_id) = pending.and_then(|p| p.folder_id) {
+                if let Some(folder_id) = pending.and_then(|p| p.folder_id()) {
                     self.chat_list.folder_specs.fail(
                         folder_id,
                         call_request_error_line(
@@ -170,7 +170,7 @@ impl Session {
             // Asked, so the poll waits out the update period instead of
             // asking again on every tick.
             Some(RequestPurpose::GetChatFolderNewChats) => {
-                if let Some(folder_id) = pending.and_then(|p| p.folder_id) {
+                if let Some(folder_id) = pending.and_then(|p| p.folder_id()) {
                     self.chat_list
                         .folder_new_chats_asked
                         .insert(folder_id, std::time::Instant::now());
@@ -247,7 +247,7 @@ impl Session {
         // main list — a 404 marks that folder exhausted, anything else
         // waits and asks again.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::LoadFolderChats)
-            && let Some(folder_id) = pending.and_then(|p| p.folder_id)
+            && let Some(folder_id) = pending.and_then(|p| p.folder_id())
         {
             self.chat_list.folder_page_failed(folder_id, err.code, now);
         }

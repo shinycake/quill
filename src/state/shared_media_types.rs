@@ -177,7 +177,11 @@ impl SharedMediaTab {
 pub enum SharedMediaTabStatus {
     #[default]
     Idle,
-    Loading,
+    /// The first page is in flight as `request`; only its answer or error
+    /// settles the tab.
+    Loading {
+        request: RequestId,
+    },
     /// The first page is in; `more` is where the next page stands.
     Ready {
         more: NextPage,
@@ -193,9 +197,9 @@ pub enum NextPage {
     /// Nothing is out (there may be no more pages).
     #[default]
     Idle,
-    /// An older page is in flight (the viewer pages toward the end of the
-    /// list and asks for more).
-    Loading,
+    /// An older page is in flight as `request` (the viewer pages toward the
+    /// end of the list and asks for more); only its answer or error settles it.
+    Loading { request: RequestId },
     /// The older page failed: the list shows a retry row, and nothing asks
     /// again on its own.
     Failed(String),
@@ -214,7 +218,7 @@ impl SharedMediaTabStatus {
     }
 
     pub fn is_loading(&self) -> bool {
-        matches!(self, Self::Loading)
+        matches!(self, Self::Loading { .. })
     }
 
     pub fn is_ready(&self) -> bool {
@@ -365,14 +369,16 @@ pub struct SharedMediaTabState {
     pub has_more: bool,
     /// The search query the tab's items answer; empty for the plain list.
     pub query: String,
-    /// The stamp of the request this tab waits on. An answer carrying any
-    /// other stamp is late and dropped; another tab's fetches never change
-    /// it.
-    pub generation: u64,
+    /// Which list the tab holds, for the UI to keep a scroll place per list:
+    /// it grows whenever the list is cleared or restarted (the gallery closed
+    /// and opened again, a search, a calendar jump). Answers are never
+    /// matched by it; they are matched by the request in `status`.
+    pub list_epoch: u64,
 }
 
 impl SharedMediaTabState {
     pub(crate) fn clear(&mut self) {
+        self.list_epoch = self.list_epoch.saturating_add(1);
         self.status = SharedMediaTabStatus::Idle;
         self.items.clear();
         self.total_count = 0;
@@ -396,8 +402,23 @@ impl SharedMediaTabState {
         matches!(
             self.status,
             SharedMediaTabStatus::Ready {
-                more: NextPage::Loading
+                more: NextPage::Loading { .. }
             }
+        )
+    }
+
+    /// Whether the first page waits for `request`.
+    pub(crate) fn first_page_waits_for(&self, request: RequestId) -> bool {
+        matches!(self.status, SharedMediaTabStatus::Loading { request: asked } if asked == request)
+    }
+
+    /// Whether an older page waits for `request`.
+    pub(crate) fn more_page_waits_for(&self, request: RequestId) -> bool {
+        matches!(
+            self.status,
+            SharedMediaTabStatus::Ready {
+                more: NextPage::Loading { request: asked }
+            } if asked == request
         )
     }
 
@@ -437,23 +458,32 @@ impl SharedMediaTabState {
         self.next_from.0 != 0 || self.has_more
     }
 
-    /// An older page is asked for: scrolled to, or the retry row pressed.
-    /// `false` when there is none or one is in flight.
-    pub(crate) fn start_more(&mut self) -> bool {
+    /// An older page went out as `request` (scrolled to, or the retry row
+    /// pressed). `false`, changing nothing, when there is none to ask for or
+    /// one is in flight.
+    pub(crate) fn start_more(&mut self, request: RequestId) -> bool {
         let askable = self.more_askable();
         if askable {
             self.status = SharedMediaTabStatus::Ready {
-                more: NextPage::Loading,
+                more: NextPage::Loading { request },
             };
         }
         askable
     }
 
-    /// The older page in flight failed. No effect when none is.
-    pub(crate) fn fail_more_page(&mut self, error: String) {
-        if let SharedMediaTabStatus::Ready { more } = &mut self.status
-            && *more == NextPage::Loading
+    /// The older page `request` failed. No effect when it is not the one
+    /// in flight.
+    pub(crate) fn fail_more_page(&mut self, request: RequestId, error: String) {
+        if self.more_page_waits_for(request)
+            && let SharedMediaTabStatus::Ready { more } = &mut self.status
         {
+            *more = NextPage::Failed(error);
+        }
+    }
+
+    /// An older page could not be sent: the list shows its retry row.
+    pub(crate) fn fail_more_unsent(&mut self, error: String) {
+        if let SharedMediaTabStatus::Ready { more } = &mut self.status {
             *more = NextPage::Failed(error);
         }
     }
@@ -482,8 +512,9 @@ pub enum SharedMediaView {
 }
 
 /// Slice media-shared-gallery: the gallery panel state. Opening for another
-/// chat or closing gives every tab a fresh stamp, so late
-/// `foundChatMessages` answers drop; a new fetch restamps only its own tab.
+/// chat or closing clears every tab, so late `foundChatMessages` answers
+/// (their request is no longer the one a tab waits for) drop; a new fetch
+/// replaces only its own tab's request.
 #[derive(Debug, Clone, Default)]
 pub struct SharedMediaState {
     /// The gallery, or the Playlist page over it, that is open.
@@ -493,8 +524,6 @@ pub struct SharedMediaState {
     /// Show Photos and Videos as two tabs instead of Media (tdesktop's
     /// "Expand" / "Collapse" action on the media tab).
     pub media_split: bool,
-    /// The last stamp handed out; stamps only grow, so none repeats.
-    pub generation: u64,
     /// The ticked rows and tiles, in the order they were ticked.
     pub selection: Vec<SelectedMedia>,
 }
@@ -571,39 +600,49 @@ impl SharedMediaState {
             other => other,
         };
         self.selection.clear();
-        self.restamp_all_tabs();
+        self.clear_all_tabs();
         self.active_tab
     }
 
-    /// A stamp no request in flight carries.
-    pub(crate) fn next_generation(&mut self) -> u64 {
-        self.generation = self.generation.saturating_add(1);
-        self.generation
-    }
-
-    /// Clear every tab and give each a stamp no request in flight carries.
-    fn restamp_all_tabs(&mut self) {
-        self.generation = self.generation.saturating_add(1);
-        let stamp = self.generation;
+    /// Clear every tab: no request in flight is the one any of them waits for.
+    fn clear_all_tabs(&mut self) {
         for tab in self.tabs.iter_mut() {
             tab.clear();
-            tab.generation = stamp;
         }
     }
 
-    /// Whether `generation` is the stamp `tab` waits on in the gallery open
-    /// for `chat_id`.
-    pub(crate) fn accepts(&self, chat_id: ChatId, tab: SharedMediaTab, generation: u64) -> bool {
+    /// Whether `request` is the first page `tab` waits for in the gallery
+    /// open for `chat_id`.
+    pub(crate) fn accepts_first(
+        &self,
+        chat_id: ChatId,
+        tab: SharedMediaTab,
+        request: RequestId,
+    ) -> bool {
         self.chat_id() == Some(chat_id)
             && self
                 .tab_at(tab)
-                .is_some_and(|state| state.generation == generation)
+                .is_some_and(|state| state.first_page_waits_for(request))
+    }
+
+    /// Whether `request` is the older page `tab` waits for in the gallery
+    /// open for `chat_id`.
+    pub(crate) fn accepts_more(
+        &self,
+        chat_id: ChatId,
+        tab: SharedMediaTab,
+        request: RequestId,
+    ) -> bool {
+        self.chat_id() == Some(chat_id)
+            && self
+                .tab_at(tab)
+                .is_some_and(|state| state.more_page_waits_for(request))
     }
 
     pub fn close(&mut self) {
         self.view = SharedMediaView::Closed;
         self.selection.clear();
-        self.restamp_all_tabs();
+        self.clear_all_tabs();
     }
 
     /// Select a tab; returns `true` when it was never fetched and the caller
@@ -616,31 +655,28 @@ impl SharedMediaState {
             .is_some_and(|t| t.status.is_idle())
     }
 
-    /// Mark the tab loading and restamp it; the caller stamps the returned
-    /// generation on the request purpose so late answers drop. A page of
-    /// this tab still on its way is superseded and stops counting as in
-    /// flight. Other tabs keep their stamps.
-    pub fn begin_fetch(&mut self, tab: SharedMediaTab) -> u64 {
-        let stamp = self.next_generation();
+    /// The first page of `tab` went out as `request`: the tab waits for it
+    /// alone. A page of this tab still on its way is superseded (its answer
+    /// is dropped). Other tabs keep their requests.
+    pub fn begin_fetch(&mut self, tab: SharedMediaTab, request: RequestId) {
         let state = self.tab_state(tab);
-        state.status = SharedMediaTabStatus::Loading;
+        state.list_epoch = state.list_epoch.saturating_add(1);
+        state.status = SharedMediaTabStatus::Loading { request };
         state.anchor_day = None;
-        state.generation = stamp;
-        stamp
     }
 
-    /// A `foundChatMessages` answer: applied only when the chat, tab, and
-    /// generation all match the open gallery.
+    /// A `foundChatMessages` answer: applied only when the chat matches the
+    /// open gallery and `request` is the first page the tab waits for.
     pub fn accept(
         &mut self,
         chat_id: ChatId,
         tab: SharedMediaTab,
-        generation: u64,
+        request: RequestId,
         items: Vec<SharedMediaItem>,
         total_count: i32,
         next_from: MessageId,
     ) {
-        if !self.accepts(chat_id, tab, generation) {
+        if !self.accepts_first(chat_id, tab, request) {
             return;
         }
         let state = self.tab_state(tab);
@@ -668,17 +704,17 @@ impl SharedMediaState {
         }
     }
 
-    /// Start fetching the next older page of `tab`: returns the generation
-    /// to stamp and the `from_message_id` to send, or `None` when there is
-    /// nothing more to load or a page is already in flight. The tab keeps
-    /// its stamp, so its own first page and other tabs' answers stay valid.
-    pub fn begin_fetch_more(&mut self, tab: SharedMediaTab) -> Option<(u64, MessageId)> {
-        let state = self.tab_state(tab);
-        let generation = state.generation;
-        if !state.start_more() {
-            return None;
-        }
-        Some((generation, state.next_from))
+    /// Where the next older page of `tab` starts (`from_message_id`), or
+    /// `None` when there is nothing more to load or a page is in flight.
+    pub fn more_from(&self, tab: SharedMediaTab) -> Option<MessageId> {
+        let state = self.tab_at(tab)?;
+        state.more_askable().then_some(state.next_from)
+    }
+
+    /// The next older page of `tab` went out as `request`: the tab waits for
+    /// it alone. `false`, changing nothing, when no page is askable.
+    pub fn begin_fetch_more(&mut self, tab: SharedMediaTab, request: RequestId) -> bool {
+        self.tab_state(tab).start_more(request)
     }
 
     /// An older page landed: append the messages not yet listed. A page
@@ -687,12 +723,12 @@ impl SharedMediaState {
         &mut self,
         chat_id: ChatId,
         tab: SharedMediaTab,
-        generation: u64,
+        request: RequestId,
         items: Vec<SharedMediaItem>,
         total_count: i32,
         next_from: MessageId,
     ) {
-        if !self.accepts(chat_id, tab, generation) {
+        if !self.accepts_more(chat_id, tab, request) {
             return;
         }
         let state = self.tab_state(tab);
@@ -718,17 +754,24 @@ impl SharedMediaState {
         &mut self,
         chat_id: ChatId,
         tab: SharedMediaTab,
-        generation: u64,
+        request: RequestId,
         error: String,
     ) {
-        if !self.accepts(chat_id, tab, generation) {
+        if !self.accepts_more(chat_id, tab, request) {
             return;
         }
-        self.tab_state(tab).fail_more_page(error);
+        self.tab_state(tab).fail_more_page(request, error);
     }
 
-    pub fn fail(&mut self, chat_id: ChatId, tab: SharedMediaTab, generation: u64, error: String) {
-        if !self.accepts(chat_id, tab, generation) {
+    /// The first page `request` failed.
+    pub fn fail(
+        &mut self,
+        chat_id: ChatId,
+        tab: SharedMediaTab,
+        request: RequestId,
+        error: String,
+    ) {
+        if !self.accepts_first(chat_id, tab, request) {
             return;
         }
         let state = self.tab_state(tab);

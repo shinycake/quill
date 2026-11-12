@@ -36,12 +36,19 @@ impl Session {
                 false,
             );
         }
-        if let Some(RequestPurpose::GetRepliedMessage {
-            chat_id,
-            message_id,
-        }) = pending.map(|p| p.purpose)
+        if let Some(pending) = pending
+            && let RequestPurpose::GetRepliedMessage {
+                chat_id,
+                message_id,
+            } = pending.purpose
         {
-            self.reject_replied_message(chat_id, message_id, err.code, std::time::Instant::now());
+            self.reject_replied_message(
+                pending.id,
+                chat_id,
+                message_id,
+                err.code,
+                std::time::Instant::now(),
+            );
         }
         if let Some(p) = pending
             && let RequestPurpose::Messages(MessagesPurpose::GetComposerReplyTarget {
@@ -100,20 +107,24 @@ impl Session {
                 );
             }
         }
-        if let Some(RequestPurpose::Messages(MessagesPurpose::GetMessageAvailableReactions {
-            message_id,
-        })) = pending.map(|p| p.purpose)
-            && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+        if let Some(pending) = pending
+            && let RequestPurpose::Messages(MessagesPurpose::GetMessageAvailableReactions {
+                message_id,
+            }) = pending.purpose
+            && let Some(chat_id) = pending.chat_id
         {
-            self.fail_message_reaction_options(chat_id, MessageId(message_id));
+            self.fail_message_reaction_options(pending.id, chat_id, MessageId(message_id));
         }
-        if let Some(RequestPurpose::Messages(MessagesPurpose::GetSharingProtection { chat_id })) =
-            pending.map(|p| p.purpose)
+        if let Some(pending) = pending
+            && matches!(
+                pending.purpose,
+                RequestPurpose::Messages(MessagesPurpose::GetSharingProtection { .. })
+            )
         {
             // Who protects the chat is unknown: turning protection off could
             // send the other person a request nobody confirmed, so the
             // "Send Request?" box asks first.
-            self.groups.private_sharing.enable = Some(EnableSharing::AskToRequest(chat_id));
+            self.groups.private_sharing.lookup_failed(pending.id);
         }
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::Messages(MessagesPurpose::AiCompose(purpose))) => {
@@ -129,13 +140,15 @@ impl Session {
                 }
             }
             Some(
-                purpose @ (RequestPurpose::Messages(MessagesPurpose::GetMessageViewers { .. })
+                RequestPurpose::Messages(MessagesPurpose::GetMessageViewers { .. })
                 | RequestPurpose::Messages(MessagesPurpose::GetMessageReadDate { .. })
                 | RequestPurpose::Messages(MessagesPurpose::GetMessageAuthor { .. })
-                | RequestPurpose::Messages(MessagesPurpose::GetMessageAddedReactions {
-                    ..
-                })),
-            ) => self.fail_audience(purpose),
+                | RequestPurpose::Messages(MessagesPurpose::GetMessageAddedReactions { .. }),
+            ) => {
+                if let Some(pending) = pending {
+                    self.fail_audience(pending);
+                }
+            }
             Some(RequestPurpose::GetChatAvailableMessageSenders) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
                     self.fail_message_senders(chat_id, pending.map(|p| p.id), error_reason(err));
@@ -271,10 +284,21 @@ impl Session {
                     _ => {}
                 }
             }
+            // The impression was not counted: the ads ask again with the
+            // next frame, up to `AD_VIEW_ATTEMPTS` times.
+            Some(RequestPurpose::ViewSponsoredMessages) => {
+                if let Some(p) = pending
+                    && let Some(chat_id) = p.chat_id
+                {
+                    self.settle_sponsored_views(chat_id, p.id, false);
+                }
+            }
             // A failed translation shows "Translate failed." where the text
             // would have gone, in the box and in the translated bubble alike.
-            Some(RequestPurpose::Messages(MessagesPurpose::TranslateJob { job })) => {
-                self.finish_translation(job, Translation::failed(error_reason(err)));
+            Some(RequestPurpose::Messages(MessagesPurpose::TranslateJob)) => {
+                if let Some(request) = pending.map(|p| p.id) {
+                    self.finish_translation(request, Translation::failed(error_reason(err)));
+                }
             }
             // M1 fix-up: a failed `resendMessages` surfaces in the
             // status note instead of vanishing into `_ => {}` —
@@ -362,10 +386,10 @@ impl Session {
         {
             self.fail_history_newer(pending);
         }
-        if pending.map(|p| p.purpose) == Some(RequestPurpose::GetHistoryAround)
-            && let Some(message_id) = pending.and_then(|p| p.around_message_id)
+        if let Some(pending) = pending
+            && pending.purpose == RequestPurpose::GetHistoryAround
         {
-            self.finish_history_around(pending, message_id, true, seq);
+            self.finish_history_around(pending, seq);
         }
         // A failed share box search ends that half with nothing found, as
         // "Add People" does, so the box says "No matching chats" instead of

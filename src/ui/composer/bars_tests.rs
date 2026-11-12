@@ -876,7 +876,7 @@ fn a_refused_send_drops_its_draft_clear_and_gives_back_the_text(cx: &mut TestApp
         })
     };
     app.update(vcx, |app, _| {
-        app.expect_draft_clear(DraftClear::whole_composer(GROUP));
+        app.expect_draft_clear(DraftClear::whole_composer(GROUP), RequestId(9));
         app.chat_ui.sent_text = SentText::Sent {
             request: RequestId(9),
             markup: "rich".into(),

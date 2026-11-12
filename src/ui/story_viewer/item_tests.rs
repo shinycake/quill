@@ -4,7 +4,7 @@
 //! `ready-story-viewer` demo, which opens on Leo's story 3.
 use super::icon_chrome::MenuAct;
 use super::open_tests::{frames, open_app};
-use crate::ui::stories_state::{PanelKind, ViewerPanel};
+use crate::ui::stories_state::{PanelKind, StoryMenu, ViewerPanel};
 use crate::ui::story_albums::StoryPrivacyEdit;
 use gpui_kit::TestAppContext;
 use quill::ids::ChatId;
@@ -28,14 +28,15 @@ fn privacy_edit() -> StoryPrivacyEdit {
 fn a_menu_answer_for_another_story_does_nothing(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_app(cx, "ready-story-viewer");
     app.update_in(&mut vcx, |app, window, cx| {
-        app.stories.with_viewer_ui(|open| open.menu_open = true);
+        app.stories
+            .with_viewer_ui(|open| open.menu.set((LEO, 2), true));
         app.run_story_menu(MenuAct::React, (LEO, 2), window, cx);
         let open = app.stories.viewer_ui();
         assert!(
             !open.is_open(PanelKind::ReactionPicker),
             "the menu was for story 2"
         );
-        assert!(!open.menu_open, "the menu closed");
+        assert_eq!(open.menu, StoryMenu::Closed, "the menu closed");
         app.run_story_menu(MenuAct::React, (LEO, 3), window, cx);
         assert!(app.stories.viewer_ui().is_open(PanelKind::ReactionPicker));
     });
@@ -46,9 +47,30 @@ fn the_open_menu_and_the_composer_pause_the_story(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_app(cx, "ready-story-viewer");
     app.update(&mut vcx, |app, _| {
         assert!(!app.story_playback_paused());
-        app.stories.with_viewer_ui(|open| open.menu_open = true);
+        let shown = app
+            .stories
+            .viewer
+            .current()
+            .map(quill::story_viewer::StoryViewerItem::key)
+            .expect("a story");
+        let other = (ChatId(shown.0.0 + 1), shown.1);
+        app.stories
+            .with_viewer_ui(|open| open.menu.set(other, true));
+        assert!(
+            !app.story_playback_paused(),
+            "a menu left open for another story holds nothing still"
+        );
+        app.stories
+            .with_viewer_ui(|open| open.menu.set(shown, true));
         assert!(app.story_playback_paused(), "the menu is open");
-        app.stories.with_viewer_ui(|open| open.menu_open = false);
+        app.stories
+            .with_viewer_ui(|open| open.menu.set(other, false));
+        assert!(
+            app.story_playback_paused(),
+            "another story's close does not close this menu"
+        );
+        app.stories
+            .with_viewer_ui(|open| open.menu.set(shown, false));
         *app.stories.composer = quill::story_composer::StoryComposer::open();
         assert!(
             app.story_playback_paused(),
@@ -63,7 +85,7 @@ fn a_step_drops_the_last_storys_editors(cx: &mut TestAppContext) {
     app.update(&mut vcx, |app, cx| {
         app.stories.with_viewer_ui(|open| {
             open.show(ViewerPanel::Privacy(privacy_edit()));
-            open.menu_open = true;
+            open.menu.set((LEO, 3), true);
         });
         app.step_story_viewer(1, cx);
     });
@@ -75,7 +97,7 @@ fn a_step_drops_the_last_storys_editors(cx: &mut TestAppContext) {
             Some(LEO)
         );
         assert!(open.privacy_edit().is_none(), "Leo's privacy editor");
-        assert!(!open.menu_open);
+        assert_eq!(open.menu, StoryMenu::Closed);
         assert!(!open.has_panel());
     });
 }

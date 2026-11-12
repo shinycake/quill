@@ -36,10 +36,10 @@ impl Session {
                 );
             }
             Some(RequestPurpose::OptimizeStorage) => {
-                self.settings.storage_clear = StorageClear::Failed(format!(
-                    "Couldn't clear the cache: {}",
-                    error_reason(err)
-                ));
+                self.settings.storage_clear.failed_by(
+                    extra,
+                    format!("Couldn't clear the cache: {}", error_reason(err)),
+                );
             }
             Some(RequestPurpose::SetStorageOption) => {
                 self.settings.data_storage_save.fail(
@@ -61,7 +61,7 @@ impl Session {
             Some(RequestPurpose::AcceptTermsOfService) => {
                 // The failure of an older terms' answer is not the current
                 // box's.
-                let asked = pending.and_then(|p| p.subject_id.as_deref());
+                let asked = pending.and_then(|p| p.subject_id());
                 self.settings.notices.terms.fail_accept_of(
                     asked,
                     &sessions_error_line("accept the terms of service", err),
@@ -148,10 +148,9 @@ impl Session {
             // Refresh button. The old cache stays visible.
             Some(RequestPurpose::ConfirmDeviceLogin) => {
                 if let Some(asked) = pending {
-                    self.settings.device_login = DeviceLogin::Done {
-                        request: asked.id,
-                        result: crate::auth::DeviceLoginResult::Failed,
-                    };
+                    self.settings
+                        .device_login
+                        .settle(asked.id, crate::auth::DeviceLoginResult::Failed);
                 }
                 self.settings.sessions_op.failed(pending.map(|p| p.id));
                 self.settings
@@ -295,7 +294,7 @@ impl Session {
         // nothing asks again by itself (every ingest would), the
         // Notifications page asks again when it opens.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetScopeNotificationSettings)
-            && let Some(scope) = pending.and_then(|p| p.scope)
+            && let Some(scope) = pending.and_then(|p| p.scope())
         {
             self.settings.scope_notification_settings.failed(
                 &scope,
@@ -307,7 +306,7 @@ impl Session {
         // loading stage: the list says so, with a Retry, and nothing asks
         // again by itself.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatNotificationSettingsExceptions)
-            && let Some(scope) = pending.and_then(|p| p.scope)
+            && let Some(scope) = pending.and_then(|p| p.scope())
             && let Some(list) = self.settings.notification_exceptions.get_mut(&scope)
         {
             list.failed(pending.map(|p| p.id), error_reason(err), false);

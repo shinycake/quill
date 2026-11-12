@@ -104,14 +104,13 @@ impl Session {
 
 impl SharedMediaState {
     /// Like [`Self::begin_fetch`], for a page that starts at `day_number`.
-    pub fn begin_fetch_at_day(&mut self, tab: SharedMediaTab, day_number: i64) -> u64 {
-        let generation = self.begin_fetch(tab);
+    pub fn begin_fetch_at_day(&mut self, tab: SharedMediaTab, day_number: i64, request: RequestId) {
+        self.begin_fetch(tab, request);
         let state = self.tab_state(tab);
         state.anchor_day = Some(day_number);
         // The jump asks for the plain list (no search text): the list answers
         // no query, so the tab says none either.
         state.query.clear();
-        generation
     }
 
     /// Whether the tab shows a window from a picked date instead of the
@@ -235,9 +234,9 @@ mod tests {
     fn jump_marks_the_tab_and_a_plain_fetch_clears_it() {
         let mut state = SharedMediaState::default();
         state.open_for(ChatId(1));
-        state.begin_fetch_at_day(SharedMediaTab::Media, 20_000);
+        state.begin_fetch_at_day(SharedMediaTab::Media, 20_000, RequestId(1));
         assert!(state.is_at_date(SharedMediaTab::Media));
-        state.begin_fetch(SharedMediaTab::Media);
+        state.begin_fetch(SharedMediaTab::Media, RequestId(2));
         assert!(!state.is_at_date(SharedMediaTab::Media));
     }
 
@@ -248,7 +247,7 @@ mod tests {
         let mut state = SharedMediaState::default();
         state.open_for(ChatId(1));
         state.tab_state(SharedMediaTab::Media).query = "cats".to_string();
-        state.begin_fetch_at_day(SharedMediaTab::Media, 20_000);
+        state.begin_fetch_at_day(SharedMediaTab::Media, 20_000, RequestId(1));
         assert!(state.tab_state(SharedMediaTab::Media).query.is_empty());
         assert!(state.is_at_date(SharedMediaTab::Media));
     }

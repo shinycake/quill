@@ -64,13 +64,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let due = self.session.take_sponsored_views(chat_id, shown);
-        if due.is_empty() {
+        let Some((extra, due)) = self.session.begin_sponsored_views(chat_id, shown) else {
             return Ok(None);
-        }
-        let extra = self
-            .session
-            .request(RequestPurpose::ViewSponsoredMessages, Some(chat_id));
+        };
         let ids: Vec<MessageId> = due.iter().copied().map(MessageId).collect();
         match self.sender.send_json(&view_messages(
             extra,
@@ -82,7 +78,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.untake_sponsored_views(chat_id, &due);
+                self.session.settle_sponsored_views(chat_id, extra, false);
                 Err(err)
             }
         }
@@ -115,6 +111,24 @@ impl<S: JsonSender> ConnectDriver<S> {
             Err(err) => {
                 self.session.requests.take(extra);
                 Err(err)
+            }
+        }
+    }
+
+    /// Asks for the own full info when hiding ads was confirmed before it
+    /// was cached (`Session::hide_own_sponsored`): its answer carries the
+    /// new setting. Called from the app's poll loop; a send that does not
+    /// leave fails the entry, so the pump never repeats it.
+    pub fn pump_wanted_full_infos(&mut self) {
+        if !self.chats_path_active() {
+            return;
+        }
+        for user_id in self.session.users_state.user_full_infos.wanted() {
+            if let Err(err) = self.fetch_user_full_info(user_id) {
+                self.session
+                    .users_state
+                    .user_full_infos
+                    .fail(user_id, format!("{err:?}"));
             }
         }
     }

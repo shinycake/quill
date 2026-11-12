@@ -207,14 +207,9 @@ impl Session {
         // The viewer is now a plain admin; TDLib confirms with
         // `updateChatMember`, but the cached admin list is stale already.
         if let Some(done) = done {
-            self.groups.admin_lists.remove(&done.chat_id);
-            self.groups
-                .supergroup_members
-                .retain(|(id, _), _| *id != done.chat_id);
-            self.groups.basic_group_members.remove(&done.chat_id);
-            // The lists on screen ask again (the poll's refetch), instead
-            // of drawing the old badges under "Loading..." for good.
-            self.groups.mark_member_list_stale(done.chat_id);
+            // The lists go `Stale` and the ones on screen ask again,
+            // instead of drawing the old badges for good.
+            self.groups.members_changed(done.chat_id);
         }
     }
 

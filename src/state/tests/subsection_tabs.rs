@@ -87,10 +87,10 @@ fn used_for_gating_matches_tdesktop() {
     apply_json(&mut session, &seq, &sink, &private_chat(43));
     assert!(session.chat_has_topics(ChatId(43)));
     assert!(!session.subsection_tabs_used_for(ChatId(43)));
-    let extra = session.request(RequestPurpose::GetForumTopics, Some(ChatId(43)));
+    let extra = session.ask_forum_topics(ChatId(43));
     apply_json(&mut session, &seq, &sink, &topics_answer(extra.0, 43, &[]));
     assert!(!session.subsection_tabs_used_for(ChatId(43)));
-    let extra = session.request(RequestPurpose::GetForumTopics, Some(ChatId(43)));
+    let extra = session.ask_forum_topics(ChatId(43));
     apply_json(&mut session, &seq, &sink, &topics_answer(extra.0, 43, &[2]));
     assert!(session.subsection_tabs_used_for(ChatId(43)));
 
@@ -155,7 +155,7 @@ fn topic_updates_keep_tabs_current() {
     let seq = AtomicU64::new(0);
     apply_json(&mut session, &seq, &sink, &bot_user(41, true, true));
     apply_json(&mut session, &seq, &sink, &private_chat(41));
-    let extra = session.request(RequestPurpose::GetForumTopics, Some(ChatId(41)));
+    let extra = session.ask_forum_topics(ChatId(41));
     apply_json(
         &mut session,
         &seq,
@@ -231,7 +231,7 @@ fn forum_topic_answer_replaces_unread_count() {
     let seq = AtomicU64::new(0);
     apply_json(&mut session, &seq, &sink, &bot_user(41, true, true));
     apply_json(&mut session, &seq, &sink, &private_chat(41));
-    let extra = session.request(RequestPurpose::GetForumTopics, Some(ChatId(41)));
+    let extra = session.ask_forum_topics(ChatId(41));
     apply_json(
         &mut session,
         &seq,
@@ -289,7 +289,7 @@ fn topic_badge_follows_tdesktop_for_unknown_read_position() {
             r#"{{"info":{{"@type":"forumTopicInfo","chat_id":41,"forum_topic_id":{id},"name":"T{id}","icon":{{"@type":"forumTopicIcon","color":0,"custom_emoji_id":"0"}},"is_general":false,"is_closed":false,"is_hidden":false}},"last_message":{{"id":{last},"chat_id":41,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"x","entities":[]}}}}}},"order":"{id}","is_pinned":false,"unread_count":{unread},"last_read_inbox_message_id":{read}}}"#
         )
     };
-    let extra = session.request(RequestPurpose::GetForumTopics, Some(ChatId(41)));
+    let extra = session.ask_forum_topics(ChatId(41));
     // The exact values from the live trace.
     let topics = [
         topic(482317, 11, 505806848000, 505859276800),
@@ -349,7 +349,7 @@ fn forum_rows_follow_display_as_forum() {
     apply_json(&mut session, &seq, &sink, &private_chat(43));
     assert!(session.chat_row_forum(ChatId(43)).is_none());
     assert_eq!(session.chat_row_lines(ChatId(43), 2), 2);
-    let extra = session.request(RequestPurpose::GetForumTopics, Some(ChatId(43)));
+    let extra = session.ask_forum_topics(ChatId(43));
     apply_json(
         &mut session,
         &seq,
@@ -393,7 +393,7 @@ fn forum_badge_counts_unmuted_topics_and_icons_are_resolved() {
     let seq = AtomicU64::new(0);
     apply_json(&mut session, &seq, &sink, &bot_user(43, true, true));
     apply_json(&mut session, &seq, &sink, &private_chat(43));
-    let extra = session.request(RequestPurpose::GetForumTopics, Some(ChatId(43)));
+    let extra = session.ask_forum_topics(ChatId(43));
     apply_json(
         &mut session,
         &seq,
@@ -444,7 +444,7 @@ fn forum_unread_follows_topic_updates() {
     let seq = AtomicU64::new(0);
     apply_json(&mut session, &seq, &sink, &bot_user(41, true, true));
     apply_json(&mut session, &seq, &sink, &private_chat(41));
-    let extra = session.request(RequestPurpose::GetForumTopics, Some(ChatId(41)));
+    let extra = session.ask_forum_topics(ChatId(41));
     apply_json(
         &mut session,
         &seq,

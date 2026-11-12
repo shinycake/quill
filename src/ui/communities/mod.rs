@@ -46,6 +46,23 @@ use std::time::Instant;
 pub(crate) use requests::UndoAction;
 pub(crate) use row_menu::RowMenu;
 
+/// Where the new community's `createCommunity` stands. The box holds the
+/// request it sent, so only its own answer ends the wait: another box's
+/// request (a second window, an earlier send) neither shows as this one's
+/// busy state nor settles it. Going back and forth between the identity
+/// and visibility boxes keeps the request with the draft.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CreateStep {
+    Choosing,
+    Creating { request: quill::ids::RequestId },
+}
+
+impl CreateStep {
+    fn waits_for(self, answer: quill::ids::RequestId) -> bool {
+        self == Self::Creating { request: answer }
+    }
+}
+
 pub(crate) enum CommunityBox {
     /// tdesktop `ShowAddToCommunityBox`: a chat picks its community —
     /// create one, or one of the joined communities.
@@ -60,13 +77,18 @@ pub(crate) enum CommunityBox {
     },
     /// tdesktop `CommunityIdentityBox`: a new community's photo and name,
     /// made around the chat that asked (`createCommunity`).
-    Create { chat_id: i64, draft: NewCommunity },
+    Create {
+        chat_id: i64,
+        draft: NewCommunity,
+        create: CreateStep,
+    },
     /// `ChooseVisibilityBox` for the new community's first chat; its
     /// confirm creates the community.
     CreateVisibility {
         chat_id: i64,
         draft: NewCommunity,
         hidden: bool,
+        create: CreateStep,
     },
     /// `ChooseVisibilityBox`: Visible or Hidden, chosen once.
     Visibility {
@@ -142,6 +164,10 @@ pub(crate) struct PendingBan {
     pub(crate) community_id: i64,
     pub(crate) member: CommunityMember,
     pub(crate) name: String,
+    /// The `getCommunityMemberChats` ask this wait is for. The answer
+    /// settles the wait only under this id; a newer ask for the same
+    /// member replaces it (`drain_pending_ban`).
+    pub(crate) request: quill::ids::RequestId,
     /// The box that was open when Ban was pressed (`open_dialog_name`):
     /// the warning opens only while it is still the one on screen.
     pub(crate) over: Option<&'static str>,
@@ -165,9 +191,11 @@ impl CommunitiesUi {
 #[derive(Default)]
 pub(crate) struct CommunitiesUi {
     pub(crate) open: Option<CommunityBox>,
-    /// The bans waiting for their member's chats, oldest first, with no box
-    /// of their own (`drain_pending_ban` settles the first). A newer ban
-    /// queues behind it: a confirmed ban is never replaced.
+    /// The bans waiting for their member's chats, each under the request
+    /// that asked (`drain_pending_ban` settles any whose ask answered). Each
+    /// leaves on its answer, when the box it was pressed from closes
+    /// (`drop_bans_over`), or when another box than that one is open at the
+    /// answer.
     pub(crate) ban_waits: std::collections::VecDeque<PendingBan>,
     /// "Create a New Chat" from this community's chooser: the new chat goes
     /// to the visibility box once made (`drain_new_community_chat`). Its own
@@ -335,9 +363,21 @@ impl QuillApp {
     ) {
         let back = match &self.admin.community.flow.open {
             Some(CommunityBox::Visibility { back, .. }) => *back,
-            Some(CommunityBox::CreateVisibility { chat_id, draft, .. }) => {
-                let (chat_id, draft) = (*chat_id, draft.clone());
-                self.show_community_box(CommunityBox::Create { chat_id, draft }, cx);
+            Some(CommunityBox::CreateVisibility {
+                chat_id,
+                draft,
+                create,
+                ..
+            }) => {
+                let (chat_id, draft, create) = (*chat_id, draft.clone(), *create);
+                self.show_community_box(
+                    CommunityBox::Create {
+                        chat_id,
+                        draft,
+                        create,
+                    },
+                    cx,
+                );
                 return;
             }
             _ => None,
@@ -478,7 +518,7 @@ impl QuillApp {
             .fetch_community_member_chats(community_id, member);
         let asking = ban::answer_coming(&live.driver.session, community_id, member);
         match ban::ban_start(sent, asking) {
-            ban::BanStart::Wait => {
+            ban::BanStart::Wait(request) => {
                 let waits = &mut self.admin.community.flow.ban_waits;
                 // Pressing Ban again on the member already waiting adds
                 // nothing.
@@ -490,6 +530,7 @@ impl QuillApp {
                         community_id,
                         member,
                         name,
+                        request,
                         over,
                     });
                 }

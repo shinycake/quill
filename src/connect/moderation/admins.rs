@@ -15,19 +15,25 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
+            if self.session.groups.admin_list_is_stale(chat_id.0) {
+                self.session.groups.admin_lists.insert(
+                    chat_id.0,
+                    AdminListFetch::Failed(send_failed_line("Could not load administrators")),
+                );
+            }
             return Err(ConnectSendError::InvalidRequest);
         }
         if !self.session.chat_can_manage_admins(chat_id) {
+            self.session.groups.drop_stale_admin_list(chat_id.0);
             return Ok(None);
         }
+        // The list says whether a request is out for it: a `Stale` list is
+        // asked even while an older request (dropped by the change) is on
+        // its way, whose answer finds nothing waiting for it.
         if matches!(
             self.session.groups.admin_lists.get(&chat_id.0),
             Some(AdminListFetch::Loading(_) | AdminListFetch::Loaded(_))
-        ) || self
-            .session
-            .requests
-            .has_purpose_for_chat(RequestPurpose::GetChatAdministrators, chat_id)
-        {
+        ) {
             return Ok(None);
         }
         self.send_chat_administrators(chat_id)
@@ -199,14 +205,27 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         chat_id: ChatId,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        if !matches!(
-            self.session.groups.event_log_fetch(chat_id.0),
-            Some(ChatEventLogFetch::Loaded(_))
-        ) || self.event_log_wait(chat_id).poll.is_some()
-        {
+        if !self.event_log_askable(chat_id, true, false) {
             return Ok(None);
         }
         self.send_chat_event_log_request(chat_id, 0, GroupsPurpose::PollChatEventLog)
+    }
+
+    /// Whether the log's stage lets this ask go out: a first page from an
+    /// empty or failed log, an older page or a poll only from a loaded page
+    /// that is not already waiting for one of its own.
+    fn event_log_askable(&self, chat_id: ChatId, polling: bool, first_page: bool) -> bool {
+        let fetch = self.session.groups.event_log_fetch(chat_id.0);
+        match fetch {
+            _ if first_page => {
+                fetch.is_none() || matches!(fetch, Some(ChatEventLogFetch::Failed(_)))
+            }
+            Some(ChatEventLogFetch::Loaded(page)) if polling => {
+                page.poll == crate::state::LogPoll::Idle
+            }
+            Some(ChatEventLogFetch::Loaded(page)) => page.can_ask_older(),
+            _ => false,
+        }
     }
 
     fn send_chat_event_log_request(
@@ -224,25 +243,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.session.chat_can_view_event_log(chat_id) {
             return Ok(None);
         }
-        if from_event_id == 0
-            && !polling
-            && matches!(
-                self.session.groups.event_log_fetch(chat_id.0),
-                Some(ChatEventLogFetch::Loading | ChatEventLogFetch::Loaded(_))
-            )
-        {
+        if !self.event_log_askable(chat_id, polling, first_page) {
             return Ok(None);
-        }
-        if !polling && self.event_log_wait(chat_id).page.is_some() {
-            return Ok(None);
-        }
-        if !polling && !first_page {
-            self.session.begin_older_events(chat_id.0);
-        }
-        if from_event_id == 0 && !polling {
-            self.session
-                .groups
-                .set_event_log_fetch(chat_id.0, ChatEventLogFetch::Loading);
         }
         let filters = self
             .session
@@ -267,18 +269,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.fail_event_log_send(chat_id, first_page, polling);
             return Err(err);
         }
-        let wait = &mut self
-            .session
+        self.session
             .groups
-            .event_logs
-            .entry(chat_id.0)
-            .or_default()
-            .wait;
-        if polling {
-            wait.poll = Some(extra);
-        } else {
-            wait.page = Some(extra);
-        }
+            .event_log_sent(chat_id.0, extra, polling, first_page);
         Ok(Some(extra))
     }
 
@@ -299,16 +292,6 @@ impl<S: JsonSender> ConnectDriver<S> {
                 send_failed_line("Could not load earlier actions"),
             );
         }
-    }
-
-    /// The requests `chat_id`'s event log waits for.
-    fn event_log_wait(&self, chat_id: ChatId) -> crate::state::EventLogWait {
-        self.session
-            .groups
-            .event_logs
-            .get(&chat_id.0)
-            .map(|log| log.wait)
-            .unwrap_or_default()
     }
 
     /// Phase D3b: shared `setChatMemberStatus` sender (TDLib 1.8.67,

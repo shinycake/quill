@@ -7,7 +7,7 @@
 //! the same split: a `MasksPanel` that never shares a slot with the regular
 //! sticker panel.
 use crate::state::fetch::Fetch;
-use crate::state::{PendingRequest, RequestPurpose, Session, StickersPurpose};
+use crate::state::{PendingRequest, RequestId, RequestPurpose, Session, StickersPurpose};
 use crate::telegram::envelope::{StickerItem, StickerSetInfo};
 use std::collections::HashMap;
 
@@ -119,17 +119,33 @@ impl MasksPanel {
 }
 
 impl Session {
-    pub fn accept_installed_mask_sets(&mut self, sets: Vec<StickerSetInfo>) {
-        self.stickers.masks.installed.succeed(sets);
+    /// The installed mask sets `request` brought: kept only while the list
+    /// waits for that request.
+    pub fn accept_installed_mask_sets(
+        &mut self,
+        request: Option<RequestId>,
+        sets: Vec<StickerSetInfo>,
+    ) {
+        self.stickers.masks.installed.answered(request, sets);
     }
 
-    pub fn accept_archived_mask_sets(&mut self, sets: Vec<StickerSetInfo>, first_page: bool) {
+    /// A page of archived mask sets: kept only while the list waits for
+    /// `request`.
+    pub fn accept_archived_mask_sets(
+        &mut self,
+        request: Option<RequestId>,
+        sets: Vec<StickerSetInfo>,
+        first_page: bool,
+    ) {
         let masks = &mut self.stickers.masks;
+        if !request.is_some_and(|request| masks.archived.waits_for(request)) {
+            return;
+        }
         let last = sets.last().map(|set| set.id).unwrap_or(0);
         let held = if first_page {
             ArchivedMasks::default()
         } else {
-            masks.archived.take_data().unwrap_or_default()
+            masks.archived.data().cloned().unwrap_or_default()
         };
         // A full page that moved on has a next one.
         let next_offset =
@@ -138,19 +154,27 @@ impl Session {
         let mut all = held.sets;
         let mut seen: std::collections::HashSet<i64> = all.iter().map(|set| set.id).collect();
         all.extend(sets.into_iter().filter(|set| seen.insert(set.id)));
-        masks.archived.succeed(ArchivedMasks {
-            sets: all,
-            next_offset,
-        });
+        masks.archived.answered(
+            request,
+            ArchivedMasks {
+                sets: all,
+                next_offset,
+            },
+        );
     }
 
-    pub(crate) fn accept_mask_set(&mut self, set_id: i64, stickers: Vec<StickerItem>) {
+    pub(crate) fn accept_mask_set(
+        &mut self,
+        request: Option<RequestId>,
+        set_id: i64,
+        stickers: Vec<StickerItem>,
+    ) {
         self.stickers
             .masks
             .sets
             .entry(set_id)
             .or_default()
-            .succeed(stickers);
+            .answered(request, stickers);
     }
 
     /// `updateInstalledStickerSets` for masks: apply TDLib's order in place.
@@ -228,13 +252,19 @@ impl Session {
         let masks = &mut self.stickers.masks;
         match purpose {
             Some(RequestPurpose::Stickers(StickersPurpose::GetMaskSet { set_id })) => {
-                masks.sets.entry(set_id).or_default().fail("failed");
+                if let Some(set) = masks.sets.get_mut(&set_id) {
+                    set.failed(pending.map(|p| p.id), "failed", false);
+                }
             }
             Some(RequestPurpose::Stickers(StickersPurpose::GetInstalledMaskSets)) => {
-                masks.installed.fail(MASK_LIST_FAILED);
+                masks
+                    .installed
+                    .failed(pending.map(|p| p.id), MASK_LIST_FAILED, false);
             }
             Some(RequestPurpose::Stickers(StickersPurpose::GetArchivedMaskSets { .. })) => {
-                masks.archived.fail(MASK_LIST_FAILED);
+                masks
+                    .archived
+                    .failed(pending.map(|p| p.id), MASK_LIST_FAILED, false);
             }
             Some(RequestPurpose::Stickers(
                 StickersPurpose::ChangeMaskSet { .. } | StickersPurpose::ReorderInstalledMaskSets,

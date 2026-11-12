@@ -67,11 +67,14 @@ impl QuillApp {
     ) -> PaletteRead {
         let themes = &mut self.preferences.app_theme;
         if let Some(palette) = themes.cached_palette(name) {
-            return PaletteRead::Read(palette.clone());
+            return PaletteRead::Read(palette);
         }
         let Some(shown) = themes.applied.clone() else {
+            // A failed read is not kept: the next pass reads it again.
             let palette = read_custom_palette(&Self::themes_dir(), name);
-            themes.cache_palette(name.to_string(), palette.clone());
+            if palette.is_some() {
+                themes.cache_palette(name.to_string(), palette.clone());
+            }
             return PaletteRead::Read(palette);
         };
         if !themes
@@ -89,8 +92,10 @@ impl QuillApp {
                 let _ = this.update(cx, |this, cx| {
                     let themes = &mut this.preferences.app_theme;
                     themes.palette_read = None;
-                    themes.cache_palette(wanted, palette);
+                    themes.cache_palette(wanted.clone(), palette);
                     this.apply_appearance(cx);
+                    // A failed read stood for this pass only.
+                    this.preferences.app_theme.forget_failed(&wanted);
                 });
             });
             themes.palette_read = Some((name.to_string(), task));

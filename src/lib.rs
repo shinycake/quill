@@ -284,6 +284,7 @@ pub mod suggested_posts;
 pub mod system_accent;
 pub mod system_proxy;
 pub mod system_text_replace;
+pub mod task_hold;
 pub mod telegram;
 pub mod text;
 pub mod text_split;

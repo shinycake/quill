@@ -30,8 +30,11 @@ pub(super) struct BotEditDialog {
 
 /// The box waits for the server's texts, then edits them.
 enum EditStage {
-    /// The fields are empty until the texts arrive; Save is off.
-    Loading,
+    /// The fields are empty until the texts arrive; Save is off. `asked`
+    /// is the two requests that load them: only that load fills the fields.
+    Loading {
+        asked: (quill::ids::RequestId, quill::ids::RequestId),
+    },
     /// The fields hold the server's texts. `check` is what the last Save
     /// press found before anything was sent.
     Editing(SaveCheck),
@@ -104,11 +107,11 @@ impl QuillApp {
             cx.notify();
             return;
         };
-        if live.driver.begin_bot_edit(bot_id).is_err() {
+        let Ok(asked) = live.driver.begin_bot_edit(bot_id) else {
             self.set_note(StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_LOAD_THE_BOT)));
             cx.notify();
             return;
-        }
+        };
         // The Toncoin, Stars and Affiliate Program rows.
         let _ = live.driver.ensure_earn_app_config();
         let _ = live
@@ -129,7 +132,7 @@ impl QuillApp {
             bot_id,
             name,
             about,
-            stage: EditStage::Loading,
+            stage: EditStage::Loading { asked },
         });
         self.open_box(DialogKind::BotEdit);
         cx.notify();
@@ -143,13 +146,13 @@ impl QuillApp {
         let Some(dialog) = self.dialogs.bot_edit_dialog.as_ref() else {
             return;
         };
-        if matches!(dialog.stage, EditStage::Editing(_)) {
+        let EditStage::Loading { asked } = dialog.stage else {
             return;
-        }
+        };
         let Some(edit) = self.session().and_then(|s| s.bots.owned.edit.clone()) else {
             return;
         };
-        if edit.load_failed() {
+        if edit.asked != asked || edit.load_failed() {
             return;
         }
         let (Some(name), Some(about)) = (edit.name.text(), edit.about.text()) else {
@@ -315,7 +318,7 @@ impl QuillApp {
             );
             let local_error = match &state.stage {
                 EditStage::Editing(check) => check.problem_for(&typed_name, &typed_about),
-                EditStage::Loading => None,
+                EditStage::Loading { .. } => None,
             };
             // "Saved" says the fields hold what the server has: an edit
             // after the save takes it away.

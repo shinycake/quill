@@ -154,7 +154,7 @@ fn a_chat_windows_gift_box_goes_on_without_the_main_window(cx: &mut TestAppConte
         if let Some(session) = app.demo_session.as_mut() {
             session.payments.gift_market.auction = quill::gift_market::AuctionFetch::Ready {
                 gift_id: 5,
-                request: 7,
+                request: quill::ids::RequestId(7),
             };
         }
     });
@@ -206,7 +206,7 @@ fn a_closed_boxs_video_pick_opens_no_editor(cx: &mut TestAppContext) {
     let h = new_app(cx);
     in_window(&h, h.main, None, cx, |app, window, cx| {
         app.sticker_box.host = crate::ui::sticker_set_box::state::SetBoxHost::Closed;
-        app.sticker_box.pending =
+        app.sticker_box.editing = crate::ui::sticker_set_box::state::SetEditing::Waiting(
             crate::ui::sticker_set_box::state::PickWait::Downloading(PendingVideo {
                 pick: PickExisting {
                     set_id: 78,
@@ -217,10 +217,11 @@ fn a_closed_boxs_video_pick_opens_no_editor(cx: &mut TestAppContext) {
                 file: PickedFile::Video,
                 emoji: None,
                 window: None,
-            });
+            }),
+        );
         app.sticker_box_window_upkeep(window, cx);
         assert!(
-            app.sticker_box.pending.downloading().is_none(),
+            app.sticker_box.editing.downloading().is_none(),
             "the pick is dropped"
         );
         assert!(app.composer_ui.send_box.video_editor.is_none());

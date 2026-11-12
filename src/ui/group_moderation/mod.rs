@@ -475,8 +475,8 @@ impl QuillApp {
     }
 
     /// Settle the member changes that were sent: a note when the request
-    /// is answered (the member page is fetched again by
-    /// `member_list_stale`), the error line when TDLib refused it. Called
+    /// is answered (the member page, `Stale` by then, is
+    /// fetched again), the error line when TDLib refused it. Called
     /// from `poll_live`.
     pub(in crate::ui) fn settle_member_changes(&mut self, cx: &mut Context<Self>) {
         if self.admin.member_changes.is_empty() {

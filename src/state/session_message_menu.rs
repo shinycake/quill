@@ -81,37 +81,66 @@ pub fn poll_option_key(option_id: &str) -> u64 {
     hash
 }
 
-/// One list the audience dialog loads.
+/// One list the audience dialog loads. Each in-flight stage holds the
+/// request it waits for: only that request's answer or failure moves it, so
+/// an older ask for the same message (the dialog closed and reopened, a tab
+/// asked twice) cannot settle the newer one.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum Audience<T> {
     #[default]
     NotAsked,
-    Loading,
+    /// The first page is in flight as `request`.
+    Loading {
+        request: RequestId,
+    },
     Ready(T),
-    /// Ready, and the next page is in flight.
-    Paging(T),
+    /// Ready, and the next page is in flight as `request`.
+    Paging {
+        page: T,
+        request: RequestId,
+    },
     Failed,
 }
 
 impl<T> Audience<T> {
     pub fn ready(&self) -> Option<&T> {
         match self {
-            Self::Ready(value) | Self::Paging(value) => Some(value),
+            Self::Ready(value) | Self::Paging { page: value, .. } => Some(value),
             _ => None,
         }
     }
 
     /// The next page of a ready list is on its way.
     pub fn is_paging(&self) -> bool {
-        matches!(self, Self::Paging(_))
+        matches!(self, Self::Paging { .. })
     }
 
     pub fn is_loading(&self) -> bool {
-        matches!(self, Self::Loading)
+        matches!(self, Self::Loading { .. })
     }
 
     pub fn is_failed(&self) -> bool {
         matches!(self, Self::Failed)
+    }
+
+    /// The first page of this list is waiting for `request`.
+    fn loading_for(&self, request: RequestId) -> bool {
+        matches!(self, Self::Loading { request: asked } if *asked == request)
+    }
+
+    /// The list is empty-handed and waits for `request`: the answer of the
+    /// first page fills it.
+    fn fill(&mut self, request: RequestId, value: T) {
+        if self.loading_for(request) {
+            *self = Self::Ready(value);
+        }
+    }
+
+    /// The first page failed, when it was the one waited for.
+    fn fail_first(&mut self, request: RequestId) {
+        if self.loading_for(request) {
+            *self = Self::Failed;
+        }
     }
 }
 
@@ -183,8 +212,12 @@ impl SetChange {
 pub enum SetChangeStage {
     #[default]
     Idle,
-    /// The request went out; the box waits for its answer.
-    Working(SetChange),
+    /// The request went out as `request`; only its answer or failure leaves
+    /// the stage.
+    Working {
+        change: SetChange,
+        request: RequestId,
+    },
     /// TDLib applied it.
     Done(SetChange),
     /// TDLib refused it, or the request was lost.
@@ -462,33 +495,49 @@ impl Session {
             .filter(|a| a.chat_id == chat_id && a.message_id == message_id)
     }
 
-    pub fn audience_viewers_loading(&mut self, chat_id: ChatId, message_id: MessageId) {
+    pub fn audience_viewers_loading(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        request: RequestId,
+    ) {
         if let Some(a) = self.audience_for(chat_id, message_id) {
-            a.viewers = Audience::Loading;
+            a.viewers = Audience::Loading { request };
         }
     }
 
-    pub fn audience_read_date_loading(&mut self, chat_id: ChatId, message_id: MessageId) {
+    pub fn audience_read_date_loading(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        request: RequestId,
+    ) {
         if let Some(a) = self.audience_for(chat_id, message_id) {
-            a.read_date = Audience::Loading;
+            a.read_date = Audience::Loading { request };
         }
     }
 
-    pub fn audience_author_loading(&mut self, chat_id: ChatId, message_id: MessageId) {
+    pub fn audience_author_loading(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        request: RequestId,
+    ) {
         if let Some(a) = self.audience_for(chat_id, message_id) {
-            a.author = Audience::Loading;
+            a.author = Audience::Loading { request };
         }
     }
 
-    /// `getMessageAuthor` answered with this user.
+    /// `getMessageAuthor` of `request` answered with this user.
     pub(crate) fn accept_message_author(
         &mut self,
+        request: RequestId,
         chat_id: ChatId,
         message_id: MessageId,
         user_id: i64,
     ) {
         if let Some(a) = self.audience_for(chat_id, message_id) {
-            a.author = Audience::Ready(user_id);
+            a.author.fill(request, user_id);
         }
     }
 
@@ -510,78 +559,104 @@ impl Session {
         });
     }
 
-    pub fn audience_reactions_loading(&mut self, chat_id: ChatId, message_id: MessageId) {
+    pub fn audience_reactions_loading(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        request: RequestId,
+    ) {
         if let Some(a) = self.audience_for(chat_id, message_id) {
-            a.reactions = Audience::Loading;
+            a.reactions = Audience::Loading { request };
         }
     }
 
     pub(crate) fn accept_message_viewers(
         &mut self,
+        request: RequestId,
         chat_id: ChatId,
         message_id: MessageId,
         viewers: Vec<MessageViewer>,
     ) {
         if let Some(a) = self.audience_for(chat_id, message_id) {
-            a.viewers = Audience::Ready(viewers);
+            a.viewers.fill(request, viewers);
         }
     }
 
     pub(crate) fn accept_message_read_date(
         &mut self,
+        request: RequestId,
         chat_id: ChatId,
         message_id: MessageId,
         date: MessageReadDate,
     ) {
         if let Some(a) = self.audience_for(chat_id, message_id) {
-            a.read_date = Audience::Ready(date);
+            a.read_date.fill(request, date);
         }
     }
 
+    /// A page of a "who reacted" tab answered `request`: the first page
+    /// fills a tab that waits for it, a further page joins a list that
+    /// waits for it. An older ask's page settles neither.
     pub(crate) fn accept_added_reactions(
         &mut self,
+        request: RequestId,
         chat_id: ChatId,
         message_id: MessageId,
         filter: u64,
-        append: bool,
         page: AddedReactionsPage,
     ) {
         let Some(a) = self.audience_for(chat_id, message_id) else {
             return;
         };
         let slot = if filter == 0 {
-            &mut a.reactions
+            Some(&mut a.reactions)
         } else {
-            a.filtered.entry(filter).or_default()
+            a.filtered.get_mut(&filter)
+        };
+        let Some(slot) = slot else {
+            return;
         };
         match std::mem::take(slot) {
-            Audience::Ready(mut existing) | Audience::Paging(mut existing) if append => {
+            Audience::Paging {
+                page: mut existing,
+                request: asked,
+            } if asked == request => {
                 existing.reactions.extend(page.reactions);
                 existing.total_count = page.total_count.max(existing.total_count);
                 existing.next_offset = page.next_offset;
                 *slot = Audience::Ready(existing);
             }
-            _ => *slot = Audience::Ready(page),
+            Audience::Loading { request: asked } if asked == request => {
+                *slot = Audience::Ready(page);
+            }
+            other => *slot = other,
         }
     }
 
-    /// A tab's first page is on its way.
-    pub fn audience_tab_loading(&mut self, chat_id: ChatId, message_id: MessageId, filter: u64) {
+    /// A tab's first page is on its way as `request`.
+    pub fn audience_tab_loading(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        filter: u64,
+        request: RequestId,
+    ) {
         if let Some(a) = self.audience_for(chat_id, message_id) {
             if filter == 0 {
-                a.reactions = Audience::Loading;
+                a.reactions = Audience::Loading { request };
             } else {
-                a.filtered.insert(filter, Audience::Loading);
+                a.filtered.insert(filter, Audience::Loading { request });
             }
         }
     }
 
-    /// A tab's next page is on its way.
+    /// A tab's next page is on its way as `request`.
     pub fn audience_tab_loading_more(
         &mut self,
         chat_id: ChatId,
         message_id: MessageId,
         filter: u64,
+        request: RequestId,
     ) {
         if let Some(a) = self.audience_for(chat_id, message_id) {
             let slot = if filter == 0 {
@@ -592,20 +667,22 @@ impl Session {
             if let Some(slot) = slot
                 && let Audience::Ready(page) = std::mem::take(slot)
             {
-                *slot = Audience::Paging(page);
+                *slot = Audience::Paging { page, request };
             }
         }
     }
 
-    /// The audience request failed (privacy, too old, not a group...).
-    pub(crate) fn fail_audience(&mut self, purpose: RequestPurpose) {
-        match purpose {
+    /// The audience request `pending` failed (privacy, too old, not a
+    /// group...). Only the list that waits for exactly this request fails.
+    pub(crate) fn fail_audience(&mut self, pending: &PendingRequest) {
+        let request = pending.id;
+        match pending.purpose {
             RequestPurpose::Messages(MessagesPurpose::GetMessageViewers {
                 chat_id,
                 message_id,
             }) => {
                 if let Some(a) = self.audience_for(chat_id, message_id) {
-                    a.viewers = Audience::Failed;
+                    a.viewers.fail_first(request);
                 }
             }
             RequestPurpose::Messages(MessagesPurpose::GetMessageReadDate {
@@ -613,7 +690,7 @@ impl Session {
                 message_id,
             }) => {
                 if let Some(a) = self.audience_for(chat_id, message_id) {
-                    a.read_date = Audience::Failed;
+                    a.read_date.fail_first(request);
                 }
             }
             RequestPurpose::Messages(MessagesPurpose::GetMessageAuthor {
@@ -621,14 +698,14 @@ impl Session {
                 message_id,
             }) => {
                 if let Some(a) = self.audience_for(chat_id, message_id) {
-                    a.author = Audience::Failed;
+                    a.author.fail_first(request);
                 }
             }
             RequestPurpose::Messages(MessagesPurpose::GetMessageAddedReactions {
                 chat_id,
                 message_id,
                 filter,
-                append,
+                ..
             }) => {
                 if let Some(a) = self.audience_for(chat_id, message_id) {
                     let slot = if filter == 0 {
@@ -636,17 +713,19 @@ impl Session {
                     } else {
                         a.filtered.get_mut(&filter)
                     };
+                    let Some(slot) = slot else {
+                        return;
+                    };
                     // A failed next page keeps what was already listed.
-                    if append {
-                        if let Some(slot) = slot
-                            && let Audience::Paging(page) = std::mem::take(slot)
-                        {
-                            *slot = Audience::Ready(page);
+                    match std::mem::take(slot) {
+                        Audience::Paging {
+                            page,
+                            request: asked,
+                        } if asked == request => *slot = Audience::Ready(page),
+                        Audience::Loading { request: asked } if asked == request => {
+                            *slot = Audience::Failed;
                         }
-                    } else if let Some(slot) = slot {
-                        *slot = Audience::Failed;
-                    } else {
-                        a.filtered.insert(filter, Audience::Failed);
+                        other => *slot = other,
                     }
                 }
             }

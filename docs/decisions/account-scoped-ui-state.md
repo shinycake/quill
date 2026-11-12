@@ -8946,6 +8946,8 @@ Review round and file-complete pass (round 2):
 | 13-037 | `StoryComposer::id` (never 0, new per opening); the file dialog's answer applies only to the composer that asked (`take_story_media_asked_by`). |
 | 14-002 | The timer's `recheck_for_updates` leaves `DownloadFailed` and `InstallFailed` for the button. |
 | 14-004 | `UpdateState::Checking(Job)`, `Downloading(.., Job)` and `Installing(.., Job)` own their tasks (`updater::Job`): replacing the stage cancels the check, the download wait and its redraw timer. The 4-hour loop is the app's own timer and ends with the app. |
+| 14-005 | A community ban waits as a `PendingBan` that holds its `RequestId` (from `fetch_community_member_chats`, or the one already in flight for the same member); a newer ask for the member is followed, and any wait whose ask answered settles (one still out no longer holds up another). A wait ends with the box it was pressed from (`drop_bans_over`, from the dialog close and the shell's replacement of the box), and, as before, when another box is open at the answer. Nothing is banned for a forgotten press. |
+| 14-004 | `take_draft_clear` no longer falls back to any clear of the chat. A pending `DraftClear` holds its send's messages (`Asked(RequestId)` from the send, `Made(MessageId)` once the answer to that request names the temporary message: `SendAnswered` in `MessagesState::sent_answers`). The ack (`SendAck { chat_id, slot, old_message_id }`) finds its clear by `old_message_id`, so a reply from a supergroup's main composer, acked under the replied-to message's topic, still clears the draft of the slot it was typed in (the clear returns that slot). With no message match only the clear of the very slot the ack names is taken, never a neighbour's. Tests: `a_reply_from_the_main_composer_is_acked_under_another_topic`, `a_send_answer_names_the_temporary_message_of_its_request`. |
 | 14-005 | `Installing` holds a 30 s watch: a quit that does not land ends in `InstallFailed` (`restart_did_not_land`). |
 | 14-003 | Already `Installed(release, ChangelogBanner)` from round 1. |
 
@@ -9817,3 +9819,404 @@ kept until sent, a refused refetch does not repeat), `state/account_notices`
 `connect/tests/stories.rs` (tray refresh on ingest),
 `connect/tests/chat_list/folder_removals.rs` (leaving a folder stops the
 retry; no wall clock), `state/tests/history_prune.rs` (translations pruned).
+
+### Sweep fixes (r3-07)
+
+Round 3 bundle for the audio engine, the account and appearance upkeep, the
+call sounds, the checklist and community boxes.
+
+| Entry | What changed |
+| --- | --- |
+| 12-001 | `ExportView` (the Shown/Hidden bit on `ChatExport` / `AccountExport`) is gone. `ExportBox` is `Closed` / `Progress { seen }` / `Options(draft)`, one value per account on screen: Hide, Cancel, close and Done go to `Closed`; opening over a running export or starting one goes to `Progress`. The dialog predicates read that value (and that an export exists); the poll treats a settled export as hidden when the box is not `Progress`. Switching accounts replaces the box, so it comes back closed and the export's end shows as a note. |
+| 12-006 | `agent_driver_surface::window_closed` drops what the queue holds for a chat window when `chat_window_closed` runs, so a later window for the same chat never takes the entry. |
+| 12-003 | The minute loop in `app_demo.rs` is gone. Scheduled auto-night holds one timer to the next boundary in `PreferencesUi::night_clock` (`NightClock::Waiting { _task }`, armed by every appearance pass, dropped when the schedule is off; `secs_until_night_change`). The background executor's clock stops while the machine sleeps and a long wait is an hour off across a DST change, so the appearance pass (which re-arms the clock) also runs from `cx.on_system_wake` and from window activation while the schedule is on. The OS light/dark setting is an observer (`observe_window_appearance`). `check-owned-timers.py` no longer skips `app_demo.rs` (`shape_guard.is_seeder`); the demo-only redraw loop is its own function, `QuillApp::spawn_stress_redraw`, and only that name is allowed. The wake is a platform signal with no fake, so it is not driven by a test. |
+| 12-004 | The theme cache holds `CachedPalette::{Ready, Failed}`. A failed read stands for the pass that read it and is forgotten right after (`forget_failed`), so the next appearance pass reads the file again; the startup read does not cache a failure. |
+| 12-005 | `AudioEngine`'s `track`, `building`, `backend` and `standing` are one `Playback::{Settled(Sound), Building { build, sound }, Simulated(SimRun)}` with `Sound::{Empty, Current, Stale, Failed}` holding the track. `fault` stays: it is the last-error log the row reads and is independent of the stage (a failed seek leaves the old sound playing). The build pieces moved to `engine_build.rs` (the file was at the size limit). |
+| 13-001 | `finish_background_prepare` settles the close waiters after every end of a preparation, so a deletion waiting on it is not left to the 60 s cap. |
+| 13-002 | `EditStage::Loading { asked }` holds the two requests of its load; `begin_bot_edit` returns them, `BotEditTexts::asked` carries them, and the fields fill only from that load. Baseline line `bare:EditStage::Loading` dropped. |
+| 13-003 | `sync_call_sounds` without a session keeps only a ring of another account, and the call screen's `Farewell` stops the loop, so a lost session never leaves the ring and its output hold. |
+| 13-004 | A device-access press dropped while another recording starts says "Finish the recording first" (the note `toggle_record_mode` already uses). Not driven by a test: the device-access answer (`capture_access::access`) is the platform's, and has no fake. |
+| 14-002 | `EditMode::replace_as_file` is gone: `ComposerEdit::replacement_as_file` reads the choice from the staged replacement (a document of a photo or video file), so dropping the replacement drops the choice. |
+| 14-001 | `ChecklistDialog::send` and `PollAddOption::send` are `DialogSend::{Editing, Sending { request }}`. Create / Add / Save keeps the box open with what was typed (the button shows loading); the request's answer (`session.acks`) closes it, a refusal returns it to editing with a note; closing the box or leaving the chat forgets the wait. `Session::settle_lost_request` (shared file `src/state/requests.rs`) now settles the request's ack as a failure, so a swept or abandoned request returns the box to editing instead of leaving the button spinning (`lost_requests.rs`). tdesktop closes the box when it sends; this keeps the typed text on a refusal, the smallest safe choice (the tdesktop source was not at hand). |
+| 14-003 | `CommunityBox::{Create, CreateVisibility}` hold `CreateStep::{Choosing, Creating { request }}`; the busy state and the answers read that request. `CommunityOutcome::{Created, CreateFailed}` carry the request. `check-request-match.py` also counts `has_purpose_for_chat` / `take_purpose_for_chat` in `src/ui`; the three hits already there are in the baseline. |
+| 14-005 | A waiting community ban whose answer lands while a box other than the one it was pressed from is open ends there (no warning pops up for a forgotten press); it is not sent. |
+
+Tests: `ui/export_box_tests.rs` and `ui/account_export_box_tests.rs` (the box value says whether the progress shows), `state/tests/lost_requests.rs` (a swept request settles its ack), `ui/communities/flow_tests.rs` (bans settle by request, in both orders; a ban ends with its box), `ui/audio/engine.rs` (the existing transition tests, on the new
+stage), `ui/communities/flow_tests.rs` (create waits for its own request;
+ban dropped), `ui/background_accounts/closing_tests.rs` (a preparation that
+ends settles its waiters), `ui/background_accounts/tests.rs` (ring ends with
+the session), `ui/agent_driver_hard_tests.rs` (blocked entry ends with its
+window), `ui/app_theme/ui_tests.rs` (failed theme read; night clock),
+`settings/appearance.rs` (`secs_until_night_change`), `composer/edit.rs`
+(as-file choice), `ui/dialogs/checklist.rs` (`DialogSend`),
+`connect/tests/owned_bots.rs` (asked requests).
+
+### Sweep fixes (r3-09)
+
+| Id | Fix |
+| --- | --- |
+| 16-012 | `CraftStage::Forging` holds the `RequestId` of the `craftGift` it was started for (`start_forge(since, request)`). `craft_frame_upkeep` ends it when the session's `CraftRun` is no longer `Crafting { request }` for that id (answered, refused, or the craft gone), so a forge cannot end on another run's state. `after_craft_pop` reads only the forge stage; it no longer also asks `craft.crafting()`. |
+| 16-009 | `GiftMarketUi::refused_files` (`RefusedFiles`) holds the sticker files whose `download_file` send the driver refused, for the files shown when they were refused. `gift_market_frame_upkeep` settles it against the shown set each upkeep (a different set forgets every refusal; the boxes closing resets it) and asks only files not refused, so a refused send is not re-sent every frame. A file that is downloading or downloaded is skipped by the session's own file state. |
+| 16-010 | `SliderStage::Refused(level)`: a release whose send was refused serves nothing, so the stage slider is made again from the server's level (and the view redraws). |
+| 16-011 | Skipped. `window_closed_by_user` is the user's decision about a call and is owned by the account's `GroupCallScreen`; `CallWindow` describes the one app-wide OS window (`GroupCall::window`). They are two owners: a dismissed call can have its window `Open` for the sync pass that removes it, and folding the call id into `CallWindow` would move per-account state into the app-wide window value (and lose the handle the sync needs). |
+| 16-008 | `StreamFacts::transport_failed` is gone (baseline line dropped). `settle_stream_join`, which runs with the window sync outside the draw, reads the call's `transport.error()` from the session. |
+| 17-001 | The Edit box holds `PackChanges { sticker, emoji }` (`PackAsk::Out(RequestId)`): the pack buttons are busy while one of this box's own requests is in the session's pending set, and the click handler refuses while busy. `settle_group_edit_box` returns an `Out` ask to `Idle` once its request is no longer pending. |
+| 17-004 | `save_group_edit_box` closes through `close_group_edit_box` on all three exits (nothing changed, demo mode, empty send list), so the emoji panel and the boost ask go with it. |
+| 17-002 | The HDR probe cache's `Entry::Probing { _job: Task<()> }` owns its probe: one foreground task awaits the background read, notifies, and replaces the entry with `Known` or `Unreadable`; dropping the entry cancels it. A path has at most one probe (no time-based re-probe, so a stalled drive piles up nothing), and a full cache keeps its running probes. The bare `Entry::Probing` baseline line stays removed because the variant now holds the task. |
+| 17-003 | `InlineBotUi` holds the user's acknowledgement as a plain value (the two-variant enum is gone): it is one fact, not a stage. |
+| 17-005 | The member list's `MembersFetchView` (renamed from `MembersStage`) is a view derived each frame from the session's `SupergroupMembersFetch`, which holds the request and is settled by its `RequestId`; the unused request field is gone. |
+| 17-006 | `State::unopenable` holds `Unopenable { path, windows }` for a clip whose file did not open, so a tile does not run `VideoPlayer::open` every frame. It follows the slot lifecycle: `retire` (used by `leave` and every pass) drops it with the same window rules as a player, and a row that keeps rendering refreshes its pass; a new path is tried again. A failed open has no player, so it cannot be a `Slot` state; it is a sibling record with the slot's windows and lifetime. |
+| 18-001 | `apply_custom_bindings` returns whether it rebuilt the keymap. `apply_pending_keybindings` records `Keymap::Applied` only then; the Shortcuts page marks the keymap `Stale` (`keymap_missed`) when its rebuild was skipped, so the next poll applies it. |
+| 18-002 | `install_language` drops a re-picked pack from `LanguageBox::removed`, so Restore is not offered for a row that is in the list again. |
+
+Tests: `language_box_tests` (a re-picked removed pack is not restored
+twice), `group_call_stage_volume` (a refused send serves nothing),
+`group_edit_box::extras` (pack buttons wait for their own request),
+`hdr_image::probe_cache` (a running probe is waited for, never restarted), `gift_market_state::refused_files_tests`, `inline_players::windows` (an unopenable clip leaves with its row).
+
+### Sweep fixes (r3-02)
+
+Bundle `r3-02` of the third full read. Each stage below is one value that
+holds its request, and a request the session no longer holds ends the stage
+that waited for it.
+
+| Ids | Fix |
+|---|---|
+| 05-001 | `GiftManageState::flow_sent(FlowForm, request)`: a collection form is marked sent by its own submit (`create`, `rename` or `delete_gift_collection`), not by matching the request's `PaymentsPurpose`, so a `ChangeGiftCollection` from the gifts list no longer takes over an open form. The Upgrade and resale forms of a gift panel are matched by the gift's id too (`GiftView::form_sent(gift, ..)`). |
+| 05-002 | `GiftMarketState::events: Vec<MarketEvent>` (`Note`, `Toast`, `BalanceLow`) replaces `notes`, `toasts` and `balance_low`; the UI drains it once, in the order the events happened. The market's stage fields that held a bare `u64` for a request (`AuctionFetch`, `AuctionFollow`, `CraftRun`, `PageLoad`, `ResaleBuy::waits_for`) now hold the `RequestId`. |
+| 05-004 | `BadgeStage::Failed { count, at }`: the same count that failed is pushed again after `FAILED_RETRY_AFTER`, a different count at once. A missing session bus no longer wakes the launcher worker on every pass. Review fix: the worker-end test retries relative to the real clock `WorkerEnd` stamps, not the process-wide `t0()`. |
+| 05-005 | The picker's stages hold their `RequestId` (`VenueBot::Resolving { request }`, `AskStage::InFlight { request }`, `TileState::Requested`, `IconState::Requested`), nothing is marked asked before the send went out, and `LocationSharing::forget_dropped` (run first in `pump_location_picker`) fails what the session no longer holds: the bot lookup and the venue query (the list shows its Retry), a tile (one more failed try), an icon (asked again). The venue `generation` counter is gone: an answer is matched by its request. |
+| 05-006 | `MediaViewer::origin: Origin` (`Closed`, `Chat`, `Shared { total }`, `Profile { owner, total }`, `Poll`) replaces `source` and `total`; the viewer is open exactly when it has an origin, and `retain` that empties the list closes it. |
+| 05-003 | `NewChatStage::{Creating { request, back }, Created, CreateRefused, CreateLost}`: `Session::settled_new_chat` folds the answer in and the request is not held past it. `CreateProgress` is gone. |
+| 06-002 | The QR box's `ThemeStage::Saving { request, choice }`, `FreeUi::Requesting { what, request }` and `GiftsAsk { request, at }` hold the `RequestId`; the counters (`save_serial`, `FreeState::last_serial`, `ThemeGifts::last_serial`) and the `SaveTicket` / `FreeTicket` are gone. The UI sends, then tells the box (`SaveSent` / `FreeSent`, or `SaveUnsent` / `FreeUnsent`); `PeerQrData::saves` is keyed by request; `qr_settle_dropped_requests` finds a waiting save or free code gone from the request table and settles it as a failure with no reason, and `PeerQrData::forget_dropped` lets go of the saves, the gifts page and the contact link; it returns whether it dropped anything, and `qr_settle_dropped_requests` reports progress only then, not on every poll while a request waits. |
+| 06-001 | `ProxyFetch::{NotSent { at }, NotSentStale { at }}` replace `Failed` / `FailedStale` for a `getProxies` that could not be sent: `refresh_proxies_if_stale` (every ingest) sends it again once `UNSENT_RETRY_AFTER` has passed, so a background account's list settles. An error answer is still `Failed` (the box's Refresh). |
+| 07-001 | A corrupt `accounts.json` that cannot be moved aside is marked unreadable and its default is cached under the file's stamp: a save refuses, and the file is not read, parsed and renamed again on every frame. Review fix: `load_registry_via` takes the cache slot and the write count, so the test owns both and no parallel test moves them. |
+| 07-002 | `Saver::writer: Writer { Idle, Running { thread } }`: one background writer takes the staged geometry until the slot is empty (checked under the writer lock), so a drag stages and does not spawn a thread per report; a failed write ends the writer with the state still staged. Review fix: `start_writer` treats a `Running` thread that `is_finished()` (it panicked) as `Idle` and starts a new one, and a poisoned `writer` lock is recovered instead of ending the writer. |
+| 07-006 | `ReviewItem::stage: ReviewItemStage { ToSend, InFlight(RequestId) }` replaces the `Option<RequestId>`. |
+| 07-003 | `ChatSummary::my_member: OwnMember` holds the restriction (`Unknown`, `NoRecord`, `Other`, `Restricted(Option<MemberRestriction>)`, `Administrator`); `my_restriction` is gone. A status change (`updateSupergroup`, leaving, rejoining) replaces the restriction with it, and `record_own_member` lands the status, rights and restriction together. Review fix: a status known only from `updateSupergroup` is `AdminRightsUnread` for an administrator and `Restricted(None)` for a restricted member (`adopt_status_only`; any other status is `Other`), which `rights_fetched` counts as not fetched, so the own-member probe is still sent and an administrator gets rights from its answer; `note_no_member_record` turns `Unknown`, `AdminRightsUnread` or `Restricted(None)` into `NoRecord(status)`, so a refused probe settles it and keeps the status. |
+| 07-004 | `HangUp::stage: HangUpStage { Discarding, EngineOwed, EngineTold }` replaces `engine_hang_up_due`; the driver pump settles `EngineOwed` with `take_engine_hang_up`. |
+
+Guard: `check-stage-enums.py` gained the `rawid` rule: a stage variant (not a
+`..Purpose`) with a `request`, `extra`, `request_id`, `generation` or `serial`
+field typed `u64` is rejected; the hits in the tree are in the baseline.
+
+Tests: `peer_qr/theme_tests` and `peer_qr/tests` (answers matched by request,
+a save or code that never left, a dropped request), `connect/tests/location_picker`
+and `location_picker/{picker,sharing}_tests` (dropped requests),
+`connect/tests/gift_manage` (a list change is not the form's request),
+`proxy_ops` and `connect/tests/sweep_s3_payments_1` (retry after the wait, on a
+fixed clock), `icon_badge` (backoff), `settings/{accounts,window_save}`,
+`state/tests/{calls,groups_more}`, `media_viewer`, `new_chat`.
+
+### Sweep fixes (r3-06)
+
+Bundle `r3-06` of the third full sweep (state: requests, search, sponsored,
+translate, web apps, shared media, statistics, story insights, threads; envelope:
+chats, giveaway, sessions). Every stage that waits for an answer holds the
+`RequestId` of its request, written in the same call that registers it; the
+answer is applied only when it is that request's.
+
+| ids | fix |
+| --- | --- |
+| 09-008 | `PendingRequest`'s eighteen optional correlation fields (`user_id`, `story_ids`, `around_message_id`, `window_epoch`, `scope`, `folder_id`, `file_id`, `search_generation`, ...) are one `Correlation` enum (`state/request_correlation.rs`), set once by the `request_for_*` builders through `RequestRegistry::correlate`. A history page is `HistoryPage { window_epoch, from }`; a request that is about a user is `User(id)` and no other reader sees a field it did not set. Readers use the accessors (`pending.user_id()`), which answer `None` for another purpose's data. `Correlation::GalleryTab` marks the shared-media gallery's Stories page, which shares its purpose with the stories page. |
+| 09-009 | `ChatSearchJump::Loading { request, message_id, then }`. `begin_jump` resets the window, registers the around page and writes the stage in one step and returns `ChatSearchJumpNeed::LoadAround { request, chat_id }` for the driver to send. `finish_history_around` and the error arm settle the jump only for the stage's own request, so jump A, jump B, jump A while the first page is out cannot be settled by the first page. `jump_serial` stays: it is the UI's highlight key for a repeated jump to the same row, never matched against an answer. |
+| 09-010 | `ChatSponsoredMessages::views: HashMap<ad, AdView>` with `AdView::{Counting { request, attempts }, Counted, Failed { attempts }}` replaces `viewed`. `begin_sponsored_views` registers `viewMessages` and marks the ads `Counting` together; the `ok` counts them, an error answer (or a send that went nowhere) makes them `Failed` and the next frame asks again until `AD_VIEW_ATTEMPTS`. A refetched list keeps `Counted` and `Counting`, and resets `Failed`. |
+| 09-012 | `Translation::Pending { request, attempts }`; `TranslateState::next_job` and the job numbers are gone (`TranslateJob` is a unit purpose, a selection translation is keyed by its `RequestId`). `finish_translation(request, ..)` finds the entry by the request; an older request of a replaced entry settles nothing. `fail_orphaned_translations` looks the request up in the registry instead of scanning by purpose. |
+| 09-013 | `WebApps::write_access` and `phone_share` are `Vec`s like the other one-shot queues; the send no longer clears them, the poll drains `write_access`, and `WebApps::take_phone_share(waiting)` drains `phone_share` every poll: the window's `Sending` request takes its answer, any other (timed-out send, window closed) is dropped. |
+| 09-014 | `SharedMediaTabStatus::Loading { request }` and `NextPage::Loading { request }`; the `generation` counters and `restamp_all_tabs` are gone (a cleared tab waits for nothing). `begin_fetch`, `begin_fetch_at_day`, `begin_fetch_more` and `begin_profile_*` take the request registered just before. The first-page and older-page answers are matched separately (`accepts_first`, `accepts_more`). `SharedMediaTabState::list_epoch` stays for the UI's scroll memory only (`PageKey`). The Stories tab's own request is `Correlation::GalleryTab`; a stale gallery page is dropped whole by asking the tab. |
+| 09-015 | `GraphFetch::Loading { request }`; `graph_requests` is gone (`accept_graph` / `fail_graph` find the graph waiting for the request). |
+| 09-016 | `fetch_message_statistics` adopts the request in flight for that post (`id_for_purpose_for_chat`) into `MessageStatsFetch::Loading { request }` instead of returning with the state left unwaiting; the baseline line for the purpose scan is gone. |
+| 09-017 | `MessageStatsFetch`, `StoryStatsFetch` and `PageFetch` are `Idle` until the request exists and `Loading { request }` after; no `Loading(None)`. `story_search_page_requested` is gone. |
+| 09-018 | `ThreadStatus::Resolving { request }`. `begin_thread_for` registers `getMessageThread` and returns it; `apply_message_thread_info` and `fail_thread` settle the thread only for that request. A replaced or closed view takes its resolve out of the registry. `SwitchingChat`, `Starting` and `ReloadNeeded` stay: they wait for a local action of the driver, not an answer, and leave by it, by `Failed` or by closing the thread. |
+| 10-001 | The deep-link stages hold the `RequestId` (`ResolvingInfo { request, original }`, `ResolvingChat { action, request }`, `Info { .. request }`, `InvitePreview { .. request }`); the `ChatsPurpose::DeepLink*` purposes carry nothing and `ChatsState::deep_link_seq` is gone. Confirming an invite starts the join under its own request; the invite box (`InviteBox::Open { request }`) and the Premium bot's `/start` (`PremiumAutoStart::request`) are tied to the request too. |
+| 10-002 | `GiveawaySummary::card: GiveawayCard::{Start, Results { info_message_id, unclaimed_count, was_refunded }}`; `finished` is gone. |
+| 11-001 | `ParsedSession::kind: SessionKind::{Current, PasswordPending, Other}` replaces `is_current` + `is_password_pending` (the running device wins). |
+
+Guards: `check-stage-enums.py` has a new `optional` rule (an in-flight
+variant whose only request is an `Option<RequestId>`), `check-request-match.py`
+a new `generation` rule (a purpose variant that carries `generation: u64`, on its own line or inline as `Variant { generation: u64 }`; the script self-tests both shapes on every run);
+the existing hits are in their baselines and only shrink. The purpose-scan
+baselines of `fetch_message_statistics` and `fail_orphaned_translations` and
+the stage baseline of `Translation::Pending` are removed.
+
+Tests: `state/tests/search.rs` (jump A, B, A), `connect/tests/sponsored.rs`
+(failed view asked again a bounded number of times, ok counts for good),
+`state/tests/history_prune.rs` (a replaced translation ignores the older
+request), `connect/tests/web_apps.rs` (two write-access answers survive),
+`state/tests/shared_media.rs` (duplicate older page), `connect/tests/stats.rs`
+(back on a post whose statistics are out), `state/tests/threads.rs` (reopened
+thread), `state/tests/deep_link_flow.rs`, `state/tests/premium_limit.rs`,
+`connect/tests/deep_links.rs`, `envelope/giveaway.rs`, `envelope/sessions_tests.rs`.
+
+### Sweep fixes (r3-10)
+
+| Id | Fix |
+| --- | --- |
+| 18-003 | `Locating` holds a `oneshot::Sender<()>`; the Linux lookup selects on the receiver beside its timer and fix wait, so closing the picker (or switching account) ends the wait at once and the GeoClue client is stopped and deleted instead of staying started for up to 20 s. The Windows lookup checks the receiver between its calls and waits on `GetGeopositionAsync` beside it (`position_unless_dropped`, a std-only park loop over the operation's future and the receiver); the drop calls `Cancel` on the operation in flight. `IAsyncOperation` comes from `windows-future` 0.3 (added under the Windows dependencies; `windows` 0.62 does not re-export it). The file type-checks for `x86_64-pc-windows-msvc` against windows 0.62.2 and windows-future 0.3.2 in a scratch crate (a full `cargo check` stops at the native `lib.exe` build step on Linux). macOS keeps its own `cancel`. |
+| 18-005 | `chat_preview_overlay` draws its skeleton from the `chat_preview_fetch` `Fetch` it already reads (`is_loading`), not from `has_purpose_for_chat`. |
+| 18-006 | `send_message_report_text` clears the details field only when the send was accepted; a refused send keeps the typed text and shows the note. |
+| 18-004 | `MessageUi`'s `Farewell` closes the Instant View reader (`messages.instant_view`) like its sibling session-held boxes, so it does not come back after switching accounts and back. |
+| 18-007 | `ParagraphText::targets: Vec<ClickTarget { range, action }>` replaces the three parallel vectors; `ClickTarget::is_link` is derived from the action, so there is no flag to forget. The consumer builds the click ranges, actions and underline flags from it in one place. |
+| 19-001 | Already fixed by 2ca5a1835: `show_scope_save` / `show_reaction_save` write the sent object into the snapshot, so a second toggle merges into the first (`state/tests/notification_saves.rs`, `two_quick_edits_do_not_revert_each_other`). |
+| 19-003 | `NotifyDelivery::avatar_decodes: HashMap<path, AvatarDecode { _job: Task, waiting }>` replaces the `DECODING` thread-local and its detached task. Notifications queue behind the entry; the task takes the entry when the decode lands; dropping the entry (or `forget_account`) ends the wait. |
+| 19-010 | `Shown::sending` is keyed by a per-call `Ticket`; `withdraw_sending(key)` marks every call of the chat, and each `land` consumes its own ticket, so two `Notify` calls for one chat both close when it was read. |
+| 19-011 | The capability probe is `Probe { Idle, Asking { thread, last }, Answered { service, at } }` (an `Asking` whose thread has finished without answering, because it panicked, is due again), started by the question (the Notifications page or a notification) and asked again by a question after `REPROBE` while the daemon is missing; no thread loops on a clock. `check-owned-timers.py` now counts a `thread::sleep` loop in `src/ui` as a poll (two existing sites baselined). |
+| 19-004 | `ConnectGeneration::poll: PollLoop { Stopped, Running { _task } }` owns the poll loop; `replace_client` (the one place the generation is bumped) drops it, so replacing the client ends the loop at once. The generation compare and the `detached:spawn_poll_loop` baseline line are gone. |
+| 19-002 | Pay passes the agreed `(chat, price)` as an argument: `confirm_paid_send` calls `submit_composer_agreed(.., Some(agreed))` (`submit_composer` is the `None` wrapper) down to `paid_send_waits`, which lets a send at that price through. No stage variant or slot holds it, so nothing is left to clear (the review's one-shot `Agreed` is gone). Pay without the "Don't ask me again" tick no longer reopens the same box. |
+| 19-007 | `CardInput::check` and `CardForm::country_check` are `FieldCheck { Fine, Rejected { judged } }`; the field shows the error only while it still holds the judged text, so the mark goes with the next edit without a reset. |
+| 19-006 | `DeleteEdit::Snapshot { before, press }`: the press number (`CardInput::presses`) names the press that took the snapshot. The clear runs inside the second nested defer (a defer queued from a defer runs after the input's Change in the same effect cycle), so it lands before any queued key; it clears only if the field still holds that press, so a newer press or the Change that took the snapshot is left alone. No task or oneshot outlives the press. Test: `an_older_presses_clear_leaves_a_newer_snapshot`. |
+
+Tests: `demos/code_highlight` (the farewell closes the reader),
+`paid_messages_tests` (the agreed price covers only its own resubmit; Pay on a priced chat sends and asks again next time),
+`payments/card_form_tests` (a rejected number is unmarked by its own edit),
+`notifications/reply_after_switch_tests` (a decode is held and queues),
+`notifications/linux_dbus` (two calls for one chat, probe schedule).
+
+### Sweep fixes (r3-12)
+
+| Ids | Fix |
+|---|---|
+| 21-001 | `ParsedSession::kind: SessionKind` replaces `is_current` and `is_password_pending` (merged with r3-06's 11-001: one enum `{ Current, PasswordPending, Other }`). It is parsed once (the current session wins when TDLib sets both); the Devices page, the session box and the terminate confirm match that one value. |
+| 12-002 | `AgentUi::shown: AgentBox { None, Consent(AllChatsConsent), ResetToken }` replaces `AgentUi::consent` and `AgentPageUi::reset_confirm`. Access off, a close or the next question replaces it whole; the Esc/cancel closers end only their own box. |
+| 21-002 | `QuillShell::open_dialog` is a `ShownDialog` cell the shell registers in `MainWindow::shown_dialogs` (by window id). Every closer (`on_close_kind`, `close_kit_dialog_if_done`, the account switch, the agent request's answer) moves that same cell, so the `dialogs_closed` mailbox is gone. `ChatWindows::dialogs_shown_by` is not the same fact (which window hosts a session-wide box, with its pending ask), and stays. |
+| 22-001 | `TileState::Building { _build: Task<()> }`: the spoiler tile's build is owned by the stage and started from the one frame callback that finds it idle. |
+| 22-002 | `StickerSetBoxUi::editing: SetEditing { Idle, Reordering, Picking, Waiting(PickWait), Creating { create, encoding } }` replaces `pick`, `pending`, `create`, `encoding` and `reordering`. `enter` ends the flow before it (a create box's files go, its encode stops); the closers end only their own flow. `PickWait::Decoding` holds its decode job and `Encoding::Running` holds its cancel flag (`CancelOnDrop`) and the continuation task, so leaving the stage stops them and the answer-by-token match is gone. "Edit Stickers" and the add cell are drawn disabled unless `editing.is_idle()`, so a press never ends a wait (opening the chooser would drop a waiting pick). The sticker video encode wraps its output in an `OwnedFile` inside the worker, so a step still running when the box closes removes its file. |
+| 22-005 | `commit_sticker_manager` fails when nothing was queued, and when the change is at the front of the queue and its first send is refused: it is then taken back off the queue and the failure it noted is cleared, so `finish_manager` keeps the box's removals and order and shows its own toast. A change behind another waits its turn (a step lost later is reported once through `manager.failure`). Opening the box no longer clears the edits. Round 2: an earlier commit's failure the UI has not shown yet is set aside while the first send is tried and put back after a take-back, so the take-back clears only the failure this call set. The ⋯ menu's "Reorder" is disabled unless `editing.is_idle()` (as the footer's "Edit Stickers" is), so the press is not dropped while a pick waits. |
+| 22-004 | `StoryViewerUi::menu: StoryMenu { Closed, Open { story } }` replaces `menu_open`. The pause reads `holds(current story)`, so a menu whose close the kit never reported cannot freeze another story, and another story's close does not close this menu. |
+| 22-003 | `take_stealth_refusal` also leaves `Activating(request)` for `Failed(generic)` when the request is gone with no refusal (the button asks again). |
+| 23-003 | `UsersState::userpic_full_info: HashMap<user, UserpicInfoAsk { photo_id, stage: Asked { request } \| Answered \| Failed { until } }>` replaces the `(user, photo)` set. It is recorded after the send went out, ended by the answer or error of its own request, retried after `USERPIC_INFO_RETRY` when refused (the next draw after the wait, no timer) or at once when its request vanished, and holds one entry per user. |
+| 23-002 | `State::sweep_due` is gone: every `begin_render` defers its sweep, the first one takes every pass mark and the rest find nothing, so no flag can stay set when a borrow fails. `timer` is `Option<(due, Task<()>)>`: an armed sweep a whole `RELEASE_AFTER` past its due time counts as spent (one due now may be running), so a clear lost to a failed borrow cannot stop a new one being armed, `history_listed` is a per-frame observation set by the pass and read and reset by `frame_start`, not a stage. |
+| 23-001 | `StillCut::Cutting { next, _cut: Task<()> }` and `EditorStage::Encoding { .., _job: Task<()> }`: the stage owns its worker's continuation, so leaving it (closing the editor, the screen replaced) cancels it; the token and the "serial" match for the cut are gone. `begin_encode` is `encode_serial` plus `start_encode(serial, info, job)` (the avatar encoder uses it too). Cut frames and encoded files are `OwnedFile`s from the worker on, so an answer nobody takes removes its file. |
+
+Skipped as not real: none. Also: `a_failed_clip_is_tried_again_on_a_different_file` asserted a synchronous refusal that only AVPlayer gives; off macOS the FFmpeg backend opens on its decode thread, so that half runs on macOS only.
+
+Guards: `check-stage-enums.py` now also reads `Building`, `Cutting`, `Encoding` and `Activating` as in-flight variant names (no new baseline lines; `PickWait::Decoding` and `Encoding::Running` left the baseline).
+
+Tests: `state/tests/userpic_video.rs` (refused ask waits and retries, error answer, vanished request, one entry per user), `connect/tests/sticker_manager.rs` (commit fails only when nothing queued or its first send is refused, and goes out once the link is back), `sticker_set_box/state.rs` (leaving the create stage cancels the encode, entering a flow ends the one before, a press of Edit Stickers keeps a waiting pick), `chat_window/dialog_host_tests.rs` (an app-side close moves the shell's value), `story_viewer/item_tests.rs` (menu for another story), `story_stealth_ui_tests.rs` (lost request), `spoiler_fx_window_tests.rs` (build ends Ready), `profile_photo_sources/tests.rs` (closing the editor stops the encode).
+
+### Sweep fixes (r3-04)
+
+Files: messages state, payments state and error, settings apply and language, stickers apply, stories state, bot threads, direct messages topics, forum topics map.
+
+| id | result |
+| --- | --- |
+| 08-011 | Kept, with the reason: `message_link` is a clipboard hand-off whose last answer wins like a second click (and is cleared when the account is away, `forget_screen_outcomes`); `instant_view` is set only in the view of the window that asked (`with_view`), and an answer needs its `InstantViewAsk` entry; `unread_jump` is set and taken inside one `ingest` call and carries the asking window (`ViewJump::for_request`), so it cannot outlive an answer. |
+| 08-012 | Kept, with the reason: `draft_clears` and `failed_sends` are event hand-offs drained whole by `finish_successful_sends` on every poll pass, locked or not (it runs outside the `lock_waits` gate); the state that waits for an ack is `ComposerSends::draft_clears`, keyed by the composer slot. Nothing accumulates, and a clear is applied only when `DraftClear::matches` the stored draft. |
+| 09-011 | `Messages::sponsored_hidden` is gone. `Session::sponsored_hidden()` is derived: a Premium account whose own cached `userFullInfo` has `has_sponsored_messages_enabled` false (no own full info: the server decides, ads are asked for). The `toggleHasSponsoredMessagesEnabled(false)` ok and `ReportSponsoredResult::AdsHidden` write `extras.sponsored_enabled = false` into that own full info. With none cached, no placeholder is stored (it would stop the real one being fetched, and the Business screens would read it as `Ready`): the own user is *wanted* in `UserFullInfos` (an idle entry), `sponsored_hidden()` holds while it is wanted, and `ConnectDriver::pump_wanted_full_infos` (poll loop) sends `getUserFullInfo(me)` once; its answer replaces the entry and carries the setting, a failed send or answer makes it `Failed`. An `updateUserFullInfo` that turns ads on, a `getUserFullInfo` answer, or an `updateUser` that ends Premium therefore show ads again with nothing to reset. Tests: `ads_turned_back_on_by_an_update_show_again`, `a_premium_lapse_shows_ads_again`, `hiding_ads_without_the_own_full_info_still_fetches_it`. |
+| review: PsaLabels epoch | `LanguagePurpose::PsaLabels` is a unit variant and `PsaPlan`/`PsaLabels` lost their `epoch`: `PsaLabels::store` writes the badge texts only when some `PsaAsk::Asking { request }` waits for the answering request, and a new pack clears the waiters, so an older pack's answer finds none. The `counter:LanguagePurpose` baseline line is removed, and the guard's `COUNTER` pattern now also matches `Option<u32>` (the old `SetOption { generation: Option<u32> }` shape). The unit tests own their request counter (`ask` takes `next: &mut u64`), no process-wide static. |
+| 08-015 | `GetGiftTextLimit` failing no longer clears a limit an `updateOption` set meanwhile. `GetStarPackOptions` and `GetWearableGifts` are sent with `Fetch::sent` and settled with `answered`/`failed` by their `RequestId` (an older answer or error lands nowhere). A failed `ToggleGiftSaved`, or another gift's sale, leaves the open sale confirmation alone; `GiftView::abandon_confirmation(gift)` closes only the confirmation of the gift the failed `SellGift` named (`subject_id`). |
+| 08-013 | Kept, with the reason: `PaymentsState::paying` holds one entry per `sendPaymentForm` with its own `RequestId`, invoice and form, and it outlives the checkout by design (tdesktop keeps one checkout process per invoice, so a closed checkout still pays and unlocks). A payment is never swept as lost (`is_sweepable` excludes mutations): a timer that freed Pay could charge twice. It leaves on the answer or error of its request. |
+| 08-019 | `StorageClear::Clearing { request }`: the `optimizeStorage` answer sets `Freed` and drops the statistics only for the clear that waits for it (`answered`), and its error fails only that clear (`failed_by`). The baseline line `bare:StorageClear::Clearing` is gone. |
+| 08-018 | `DeviceLogin::Waiting { request }` is set at send; `Done` comes only from `Waiting` with the same id (`settle`), and `discard` (the account went away) leaves `Idle`, so a late answer lands nowhere. The sessions page lock (`sessions_op`) still ends on every answer. A send that fails discards the stage. |
+| 08-016 | `LanguageSwitch` holds `pack: Fetch<Strings>` and `base: Fetch<Strings>`, each under the `RequestId` that asked, and `SwitchGuards` (the `language_pack_id` option and the synchronize requests, which refuse the switch). The generation counter, `SwitchStrings`, and the `generation`/`base` fields of `LanguagePurpose` are gone; an answer or refusal of a request an older switch sent changes nothing. `getLocalizationTargetInfo` is sent with `sent` and settled with `answered`/`failed`. `stage-enums-baseline` line `unkeyed:LanguageStage::Fetching` and `request-match-baseline` line `unmatched:Session::apply_language_payload` removed. |
+| 08-017 | The sticker lists (installed, archived, recent, favorites, trending, search sets, search stickers) write their data only when `lists.for_purpose(..).answered(Some(pending.id))` says the answer is the request the list waits for. The direct `getRecentStickers` in the media library goes through `sticker_request` so it is tracked. The mask lists (`installed`, `archived`, each mask set) are sent with `sent` and settled by id. Four `unmatched:` baseline lines and one `purpose:` line removed. | The group sticker-pack picker (`load_group_sticker_choices`) records the request it sent on both lists (`begin` then `sent`), so its answers are accepted and the picker leaves "Loading packs" (test in `driver_group_sticker_set_gates_and_shape`). |
+| 08-020 | `ActiveStoriesPaging::Loading { request, wait }`: the page in flight is in the stage, not found by `has_purpose`. Only its answer or error leaves it; a reset (`reset_active_stories_paging`) drops it so a late answer lands nowhere. A lost page settles as a failure the list waits out (`LoadActiveStories` and `LoadHiddenStories` are now sweepable; `requests.rs` is outside the bundle, one list entry). |
+| 08-023 | `AnswerBox<T>` replaces the two eight-entry queues: answers are kept per asking view (`AskingView`), at most four per window, dropped with a closed window, so another window's answers never push out the live one. |
+| 08-021 | `TopicsLoad::Loading { request }` / `Loaded` replace `Asked`: only the page in flight answers (`page_answered`, on `ok`) or fails (`page_failed`); an older page's 404 no longer ends the list, and a lost page settles as a failure (retried on open). The sender asks from the stage (`loading`), not by purpose. |
+| 08-022 | `ForumTopicsMap::answered` and `failed_request` settle only `Loading { request: Some(id) }` with the same id: a loaded list is never failed by an older error, and an answer after the list was forgotten lands nowhere. `Session::ask_forum_topics` registers an ask as the driver does, for fixtures and demos. |
+
+Tests: `state/tests/sweep_r3_04.rs` (each fix above that has a drivable exit), `state/tests/premium_hub.rs`, `tests/data_storage.rs`, `connect/tests/settings.rs` (device link waiting), the sticker, mask, story-paging and forum-topics tests that now register their asks.
+
+Guard, at the round 3 merge: r3-04's `counter` rule and r3-06's
+`generation` rule in `check-request-match.py` flagged the same purpose
+fields, so they are one rule, `counter`, keyed by enum and variant
+(`counter:BotsPurpose::CreateBot`); it keeps r3-04's reach (`generation`,
+`epoch` or `token`, any `uN` or `Option<uN>`, any `*Purpose` enum) and the
+self-tests of both.
+
+### Sweep fixes (r3-11)
+
+| Id | Fix |
+| --- | --- |
+| 19-005 | The Share render's worker returns the card file as a `scratch::TempFile`, a guard that removes the file when it is dropped unclaimed. A render whose task was dropped with the box therefore leaves no PNG; `done` claims it (`claim`) when the box still wants it, and removes it off the UI thread when it does not. |
+| 19-009 | The profile crop's worker returns its PNG as a `TempFile` too. Every early return of the callback (the target closed, the render failed, the screen went away) drops it, which removes the file; a `take_chosen_photo` refusal claims it and removes it in the background. |
+| 19-008 | The edit renders are owned by what waits for them. `task_hold::TaskHold` (an opaque, shared handle the lib can hold; the UI hands it its task) sits in `PhotoPrep::Rendering { render, hold, before }` and `EditRender::Rendering { number, hold }`: a newer Done, the card going or the tray going drops the older render's task, which cancels it. The worker returns a `TempFile`, so a render cancelled after it wrote its PNG removes it. The number stays as the key the landing is matched by (`waits_for`, `photo_render`). |
+| 20-002 | `load_created_public_chats` records a refused ask (chats path inactive) as `PublicChatsFetch::Failed`, as the failed send already did, so the list draws its Retry row and the render asks once, not on every frame. |
+| 20-001 | The packs section is part of the open view: `StarsView::{Closed, List { packs }, Detail { id, packs }}` with `PacksView::{Folded, Expanded}`. `StarPacksState::open` is gone; every way of closing the Stars box (`close`, an account switch, a Farewell) replaces the view, so the section folds with it. `toggle_packs` / `expand_packs` / `packs_expanded` are the only writers and readers; the story viewer's "needs more Stars" path expands through `expand_packs`. |
+| 20-003 | `PrivacyKeyState::editable_detail()` returns the rule only for `Ready`, `Saving` and `SaveFailed`; `mutate_privacy_detail` uses it, so an edit made while the rule is `Loading` or `Failed` is refused instead of being composed on a stale copy and overwriting another device's newer exceptions. The picker stays open on a refused edit. |
+| 20-004 | `GiftSave::{Idle, Saving(Saves<GiftSettings>)}` (in `PrivacyData::gift_save`) holds what the server is known to have and the saves in flight, each under its `RequestId`. The switch still shows the newest value at once; a refusal restores the next save still out, or the confirmed value, whichever order two saves fail in (`apply_privacy_data_error`), and an `ok` confirms. |
+| 20-005 | Already handled: `check_remembered_password` puts the card in `PasswordCheck::Failed` on an inactive path and on a refused send, and the card draws "Couldn't check the password". Now covered by a test. |
+| 20-006 | `fetch_suitable_personal_chats` records a refused ask (chats path inactive) as `ProfileChatsFetch::Failed`, so the picker draws its Retry row instead of Loading until the box is reopened. |
+| 20-007 | `PullUi` no longer keeps `Route` beside the machine. The machine's pull stage holds `found: Option<Found { next, via }>` (where the pull leads and the window of the gesture that found it) and `Stage::Jumping { pull, until, job: TaskHold }` holds the jump's task, so has-next, the hint and the jump cannot disagree and every way a pull ends (`reset_all`, the hold running out) takes all three along. `PullMachine<W>` is generic over the gesture's handle. |
+| 20-008 | `QuickRepliesDialog::watch` is gone. The poll is a `Poll` (resting on `quill::wake::APPLIED`, poked at the end of every `poll_live` pass after the drain (`UPDATES` is poked by the receive thread before the drain, so a pump woken by it found nothing and slept the full fallback), with a 2 s fallback via `sleep_or_wake`, not a bare timer; no allow-list line) inside `PaneStage::{Saving, Accepted, Deleting}`; `Saving` hands it on to `Accepted`, and leaving those stages (settled, another screen, the box closing) ends it, so the end-of-poll "a save went out as it ended" restart is not needed. While locked a request still out keeps being settled; a wait for an id is let go. |
+| 20-009 | `Chooser::Listing { target, epoch, _list: Task<()> }` owns the listing task and `OpenChooser::_thumbnails: Task<()>` the thumbnail task; the generation counters (`ScreenShareUi::generation`, `OpenChooser::generation`, the `Listing` copy) are gone. A closed or replaced chooser drops both tasks, so no old answer or picture can land in a later chooser. `epoch` stays: it names the screen a listing started on. |
+| 21-003 | The countdown badges have no task: `ensure_self_destruct_tick` (from render) asks the frame clock for a 1 fps tick, aimed at the conversation slice (`conversation_view_id`, not the whole app), while the open chat has a live timer and Quill is unlocked. The clock is app-gated, so a hidden, minimized or inactive window and a locked Quill get no tick; the next render asks again. `ChatUi::self_destruct_tick` and its owned-timers allow/baseline lines are gone. Tests: locked asks for no tick, a hidden window asks for none and the tick never targets the whole app; the quick-replies poll ignores an `UPDATES` poke and reads the answer on the `APPLIED` poke. Not checked against tdesktop: the badge text is the same either way. |
+
+New guard rules: `check-stage-enums.py` now treats `Rendering`, `Listing`, `Jumping`, `Encoding` and `Capturing` as in-flight variants and accepts a `TaskHold` as what ends one (two existing hits, `LookStage::Rendering` and `EditorStage::Encoding`, are baselined). `Step::started` left the implicit-state baseline (it is allowed with its reason). `check-owned-timers.py`: `quick_replies_watch` left the baseline and `quick_replies_poll` is allowed, owned by the stage.
+
+Tests: `connect/tests/group_type.rs`, `connect/tests/profile_panels.rs`, `connect/tests/privacy_data.rs` (refused asks are Failed; gift settings roll back in both failure orders; the password card), `privacy.rs` (stale rules are not editable), `premium_hub/tests.rs` (packs fold with the box), `pull_next/tests.rs` (found and jump end with the stage), `task_hold.rs`, `peer_qr/export.rs` (`TempFile`), `ui/quick_replies/tests.rs` (the poll lives in its stage), `ui/passcode/lock_gate_tests.rs` (no self-destruct tick while locked), `ui/screen_chooser_tests.rs`.
+
+At the round 3 merge, `unkeyed:EditorStage::Encoding` left the stage
+baseline (r3-12's 23-001 gave the stage its `_job: Task<()>`), and so did
+`rawid:Chooser::Listing` (20-009 dropped its generation).
+
+### Sweep fixes (r3-01)
+
+| ids | fix |
+| --- | --- |
+| 01-001 | `StyleList::recent` holds `Recent::Unlisted(name)` / `Recent::Listed(name)`. A name becomes `Listed` when a server list names it; `set_server` prunes only a `Listed` name a new list lacks (or lists as built-in). A created, edited or added style (`promote_front`, `promote_name`) stays `Unlisted`, so it keeps its front place across lists that do not carry it yet, however it was promoted. |
+| 02-001, 02-002 | `quill::composer::RenderJob { token, task }` (an opaque, droppable owner of the render's task) replaces the `NEXT_RENDER` counter. `EditRender::Rendering { job }` and `PhotoPrep::Rendering { job, before }` hold it, so a cancelled edit, a removed photo or a later Done drops the job and cancels the render. The identity others keep (the held Send's `waiting`, the deferred editor open) is the `RenderToken`, matched at landing (`EditRender::waits_for`, `end_render`, `take_deferred_for`). The edit bar follows `ComposerEdit::for_display` (the edit without its render job), so the stage is the only holder and a cancelled edit cancels the render at once, not when the bar's exit slide ends. Dropping the job marks its token cancelled (`RenderToken::is_cancelled`): a render already running off-thread checks it before and after writing and deletes its PNG (`a_photo_gone_from_the_tray_leaves_no_png`). |
+| 03-001 | `OwnerClaim::Unsaved { user, retry_at }`: a failed owner-file write is retried by the first ingest at or after `retry_at` (`OWNER_RETRY`, 30 s), not on every update; `claim_account_owner` takes `now`, so the test drives it without a clock. |
+| 03-002 | The Share Folder `links` list records its request (`sent`) and takes its answer and error by it (`answered`/`failed`), like `chats`. A link created, edited or deleted while the list loads outdates it (`ChatListState::outdate_loading_links`), so the in-flight answer, which predates the edit, is dropped; the list is fetched again once (`fetch_folder_share` dedupes on the list's own stage, not on the old request still in `requests`): every refetch goes out from the post-ingest hook `refetch_open_folder_links`, and `refetch_outdated_folder_links` holds it back while a `deleteChatFolderInviteLink` for the folder is in flight (MTProto does not order parallel queries, so a list read before the delete lands could bring the link back); a refused delete ends the list in the error with a Retry. |
+| 03-003 | The welcome pack and the group picker's installed sticker and emoji lists record their request after `begin()`; the pack's error and the emoji answer are matched by it. The sticker list's data is taken only when the load that waits for it answers (`installed_wanted` in `apply_stickers_payload`; every sender already goes through `sticker_request` or `begin()`+`sent()`, the demo seed now records its request too), and a sticker-set change outdates the list so the load it dropped is asked again whether or not the panel is open. `accept_installed_sticker_sets` left the baseline. |
+| new-01 | `PaidReactions::senders_asked(chat, request)` records the request; `set_senders` and `senders_failed` take the answer and error by it. Both lines left the request-match baseline. |
+| 03-004 | `StyleReply::Running { request }`; the style lookup and example answers and errors are taken only from the request the stage holds, and `SearchStyle`/`GetExample` are sweepable (`is_style_preview_lookup`), so a lost request fails the stage. The UI token stays: it names which preview asked, not which request answers. |
+| 03-005, 03-006 | The Star packs list, the sign-in app config and the wearable gifts list record their request and take answer and error by it. |
+| 04-001 | `send_web_app_custom_request` records the `custom_requests` entry after the send went out; a refused send leaves none. |
+| 04-002 | A refused `getMessagePublicForwards` send ends the list in `Failed` (`forwards_send_failed`); the page draws Retry when the first page failed (nothing to page from). |
+| 04-003 | A release that times out in the section path is a leftover (`Err(Tdlib)` is ignored), as in the chat path; only `Cancelled` and `Io` end the export. |
+| 04-004 | Skipped. `ExportView` is the user's show/hide choice and the worker's progress is the export's stage: they are written by different parties, every combination is valid, and nothing resets one when the other moves (the poll reads both once). It is not a stage kept in step by hand. |
+
+Guard: `check-request-match.py` has a third rule, `unsent`: a `Fetch::begin()` with no `.sent(..)` after it in the same function. The 21 hits in the tree are in its baseline; the senders of this bundle are off it.
+
+Tests: `composer::render_job`, `connect/tests/sweep_r3_01.rs` (late links answer, requests held, style lookup by request and lost, refused forwards, refused custom request), `connect/tests/sweep_r2_03.rs` (owner retry deadline), `ai_compose::style`, `export/account/tests.rs` (a release that never answers), `ui/composer_sends_tests.rs` (the tray photo owns its job).
+
+At the round 3 merge, r3-11's 19-008 and r3-01's 02-001/02-002 owned the
+same renders. The stages hold r3-01's `RenderJob` (its token replaces the
+render number, and the edit bar keeps `for_display`), and the job keeps its
+task in r3-11's `TaskHold`; the worker still returns r3-11's `TempFile`, so a
+PNG whose landing task was dropped after it wrote is removed as well.
+`check-stage-enums.py` accepts a `RenderJob` as what ends a `Rendering`
+variant. r3-04's 08-017 already gated every sticker list on
+`answered(Some(pending.id))`, so 03-003's `installed_wanted` is that same
+`current` check and was folded into it; the wearable gifts and Star pack
+options fixes (08-015 and 03-005/03-006) were the same change.
+
+### Sweep fixes (r3-03)
+
+| Id | Fix |
+| --- | --- |
+| 08-001, 08-003 | One `MemberList { query, fetch, more }` per (chat, filter) replaces `supergroup_members` + `member_asks.first/more`. The first-page request lives in `SupergroupMembersFetch::Loading { request }` (not an `Option`), the next page in `MoreMembers::Asking { request }`, and a new first page replaces the whole value. A first page answers or fails only a list that is `Loading` as that very request (`answer_member_first` / `fail_member_first`), so a search refused at send (`NotSent` under the new query, no request) is never filled by an older search's answer. A send that is refused puts back the list as it was (`restore_member_list`), except a stale one, which becomes `NotSent`. |
+| 08-002 | `members_added` and the one-shot `member_list_stale` queue are gone. `GroupsState::members_changed(chat)` makes every member list `SupergroupMembersFetch::Stale { last: Option<MembersPage> }` (a page stays drawn; a first load still out has no page yet; no request is out, so no answer can land on it; `Failed`/`NotSent` keep their Retry; nothing is deleted, so the poll and the readers always have a list to ask again). The poll refreshes exactly the key the dialog shows (`MemberListFilter::shown_for`: without the restrict right, Restricted and Banned show Recent) with the query it was asked with (`refresh_shown_member_dialog` uses `dialog.searched`; only the Search button and tab switches read the text box, so unsent text never makes the poll search) and an asked administrators list `AdminListFetch::Stale`. Whoever shows the list asks: the fetch functions no longer treat an older request of the same purpose as the list being asked, the poll refetches only the dialog's and the panel's stale list and the stale administrators, and a stale list that cannot be asked goes (`drop_stale_*`) or becomes `NotSent` so the poll does not repeat it. |
+| 08-004 | `DeepLinkState::ResolvingChat { action, request }` and `ResolvingInfo { request, original }` hold the request they wait for; `DeepLinkState::waits_for` / `resolving_action` compare it with `pending.id` (join, check, resolve, lookups, the sticker/user/chat answers and the error arm). The purposes lost their `generation`. The invite box is identified by a generation minted when the preview appears, and the Premium `/start` is tied to the follow-up's request (`PremiumAutoStart::request`). |
+| 08-005 | A missing `admin_lists` / `invite_links` entry no longer counts as waiting: an answer or error lands only on a list that is `Loading` as that request (every sender writes `Loading` first). |
+| 08-006 | `ToggleBroadcastGroup` rolls back through `RequestRollback::BroadcastGroup { previous }`, restoring the known flag instead of removing the entry. |
+| 08-007, 08-009 | `AiComposeState::style_edits` is a `Replies<_>` filed by request (a few kept); the editor takes the answer of its own request, so two answers in one drain overwrite nothing. Style notices are a bounded queue (`take_style_notices`), and the op failures a bounded list. |
+| 08-008 | The AI box, the apply-in-place shortcut, the style lookup and the example hold the `RequestId`: `CardState::Loading { request }` (set by `sent` once the driver returned the id, failed by `send_failed`), `ApplyInPlace::request`, `PreviewStage::LookingUp { request }`, `ExampleFetch::Asked { request }`, `StyleReply::Running { request }`. Answers are filed in `Replies` under the request (`box_answers`, `apply_answers`); a box that is gone drops them. The `u64` tokens and `fresh_token` are gone. |
+| 08-010 | `PrivateSharingState::enable` is one `EnableSharing { Idle, Asking { chat, request }, TurnOff, AskToRequest }`: set when the lookup went out, moved only by the answer or error of that request (`answered`, `lookup_failed`), left by the box closing; a second tap while it is out does nothing (no purpose check). |
+| 08-030 | The chat-wide list and a link's list are different scopes (search and paging vs. one link's page); both are edited only by `forget_join_request`, which now calls one `drop_request` helper for the row and the total. |
+| 07-005 | `ChatsState::background_error` is cleared by a wallpaper change that succeeds, a retry of the list, a preview opening and the gallery being left. |
+
+Guard: `check-request-match.py` has a third rule, `ticket`: a purpose
+variant carrying a `u64` `token`/`generation`/`seq` stands in for the
+`RequestId` (the existing ones are baselined). It scans the body of every
+`enum *Purpose` under `src/`, not only files named `purpose` (the location
+picker's `SearchVenues { generation }` is now baselined).
+
+Tests: `state/tests/sweep_r3_03.rs`, `connect/tests/sweep_r3_03.rs`
+(stale lists asked again while an older request is out, the poll not searching for unsent text, a refused search
+not filled by an older answer, the sharing lookup, the wallpaper line),
+`connect/tests/ai_compose.rs` (answers per request, older lookup ignored,
+notices kept together and bounded), `state/tests/premium_limit.rs`
+(join errors of an older request dropped), `state/tests/groups.rs` (the
+broadcast flag comes back as it was).
+
+At the round 3 merge, 08-004 and r3-06's 10-001 were the same deep-link
+fix. r3-06's shape stays: every stage that answers holds its request
+(`InvitePreview { request }` and `Info { request }` too, read by
+`DeepLinkState::request`), so the invite box is tied to the check that
+answered instead of a minted generation, and `PremiumAutoStart::request` is
+a plain `RequestId` (0, never allocated, in demos). r3-03's `waits_for`,
+`resolving_action`, `next_deep_link_generation` and `deep_link_request`
+are not kept; its test of an older Join's failure sits beside r3-06's in
+`state/tests/premium_limit.rs`. For 08-008, r3-03's `StyleReply::{Running,
+Answered}` (both carrying the request, settled by `settle`) replaces
+r3-01's, and r3-01's `is_style_preview_lookup` still makes a lost lookup or
+example sweepable, which settles it through the same error arm. The
+inline members match draws a `Stale` list like a refetch: its last page
+stays up, an empty one reads Loading, and the poll asks again. The `ticket`
+rule is folded into `counter` (its `ticket` and `seq` names joined
+`counter`'s; every `ticket:` hit was already a `counter:` key or gone).
+
+### Sweep fixes (r3-05)
+
+| Id | Fix |
+| --- | --- |
+| 08-027 | `SaveWatch` is a map keyed by `RequestId` (`entries`), not one slot: the profile box in a chat window, the main window's box and the proxy editor each watch their own request, so a second Save no longer makes the first box's outcome `Unknown`. Each box still ends its watch when it closes or is replaced (`forget`). |
+| 08-028 | `HistoryState::unread_open: UnreadOpen { Closed, Bar(anchor), Opened { bar } }` replaces `unread_anchor` + `opened_with_unread`. `unread_anchor()` and `opened_with_unread()` read it; deleting the bar's message (`drop_bar`) keeps reads held in `Opened`, jumping to the latest or sending (`end_unread_open`) closes both, and the jump-down button (`show_bar`) brings the bar back without holding reads. |
+| 08-029 | `EventLog::wait` and `EventLogWait` are gone. `ChatEventLogFetch::Loading { request }` holds the first page's request; the loaded page holds the older page in `OlderEvents::Loading { request }` and the poll in `LogPoll::Polling { request }`. A page or poll lands only when the stage still holds its id, so a refresh (`reset_event_log_fetch`) drops everything in flight with the stage. A failed older page keeps the list with Retry; a failed poll changes nothing shown. |
+| 08-024 | `MessageReactionBook` (`StickersState::message_reaction_options`) keeps one `MessageReactionsState` per message, so the main window's menu and a chat window's menu no longer replace each other's strip. `Loading { request }` is settled only by that request's answer or error; an older ask for the same message (a lost reply asked again) finds another id. A lost request is asked again (`fetch_message_reactions` skips only a request still in flight). Every exit of a menu forgets its message's entry through `QuillApp::close_message_menu` (`reset_message_reactions(chat, message)`): the close, a menu opened in another window (`close_message_menus_of_other_windows`) and the window closing (`forget_chat_window`). The book has no size cap, so a missing exit shows as a leftover entry in the test. |
+| 08-026 | `RequestRollback::ChatPinOrder` and `ArchiveChatListSettings` carry `shown` like the other rollbacks: a refusal puts back a chat's order, or the archive settings, only while the cached value is still the one the request showed. |
+| 08-025 | The fifteen correlation `Option`s of `PendingRequest` (file, message, topic, user, supergroup, community, story, story ids, user ids, album, folder, scope, secret chat, invite link, subject) are one value, set by exactly one `Session::request_for_*` constructor and read through typed accessors (`pending.user_id()`...). A request cannot carry two or half-stamp one, and `check-request-match.py` (rule `stamped`) fails any `Correlation::` or `.correlate(` outside the constructors (counted once per line). r3-05 named the enum `RequestKey`; at the merge it became r3-06's `Correlation` (`state/request_correlation.rs`), which also holds the history page's window epoch and `from` (`HistoryPage`), the search generation of the in-chat search and the shared-media tabs (`Search`) and the gallery's Stories page (`GalleryTab`, now asked through `request_for_gallery_tab`). `chat_id` and the view stamp stay fields. |
+| 09-001 | `SavedTopicsLoad::Loading { request }` (and `Loaded` between pages) replaces `Started`. `page_sent` / `page_answered` / `page_failed` take the request: the `ok` settles in `apply_ok`, the 404 and the error in the threads error arm, each only for the request held. The dedupe and the pane's spinner read the stage, not `has_purpose`. |
+| 09-002 | `SearchPaging::Loading { request }`; `begin_more` only reads the offset and the sender records the page with `page_sent` once it went out. A page's answer or error acts only when the stage holds its id (`SearchState::awaits`), so a page of a list that started over is dropped. |
+| 09-003 | `Leg::Pending { request }`; `Session::request_search(purpose)` registers the request and records it in the leg it belongs to (`leg_sent`). `matches_generation` is gone from the global search: answers of the legs, the paging, the server supplement (`server_chats: Fetch`) and the quota (`tabs.limits: Fetch`) are matched by id. `SearchState::generation` is now `epoch`, only the UI's scroll reset. A typed query waiting out its quiet window is `typed.armed()`; the panel reads `Searching` from it, so no stage of a leg waits for the debounce (and a cancelled debounce leaves none behind). `begin_query`, `begin_recents` and `begin_browse` return nothing. |
+| 09-004 | `GroupsState::supergroups: HashMap<id, SupergroupFacts>` holds the seven rights and four flags (`join_by_request`, `is_broadcast_group`, `sign_messages`, `show_message_sender`) of an `updateSupergroup` / `getSupergroup`, replaced whole by one `SupergroupFacts::from_update` in both appliers; `anti_spam: HashMap<id, SupergroupAntiSpam>` is the `supergroupFullInfo` pair, replaced whole in both appliers. The thirteen per-flag maps are gone. Quill never removes a chat summary before the account goes, so there is no earlier owner exit; the next update resets every right at once (test: a demotion). |
+| 09-005 | `Audience<T>::Loading { request }` and `Paging { page, request }`. The viewers, read date, author and each reactions tab take an answer or an error only from the request they hold (`fill`, `accept_added_reactions`, `fail_audience(&PendingRequest)`), and a failed next page returns to `Ready`. |
+| 09-006 | `SetChangeStage::Working { change, request }`; `finish_set_change(request, set_id, success)` settles only that request, so the first answer no longer ends the second change of the same kind. |
+| 09-007 | `accept_replied_message` and `reject_replied_message` take the request and act only on `ReplyTarget::Loading { request }` of that id: a late error of an older ask neither bumps the attempts nor makes the row Missing, a late answer neither fills it, and a row pruned meanwhile is not brought back. |
+
+Second round (08-024): the reaction selector is the other exit that keeps a
+message's options. `set_media_panel_mode` forgets them (`forget_message_reactions`,
+shared with `close_message_menu`) when it leaves `PanelMode::Reaction(target)` for
+anything but the same target, so a pick, a close and a mode change all end the
+entry; `forget_chat_window` closes a selector open in that window. Test:
+`window_menu_tests.rs` (open the selector from a menu, close it, the book holds
+no entry).
+
+Third round (08-024): `react_from_panel` reacts first and closes the selector
+after, because `toggle_reaction` reads the message's `premium_locked` options for the
+Premium gate and closing forgets them. A free account picking a locked reaction in the
+selector opens the Premium preview and sends nothing. Test:
+`reaction_rows_tests.rs` (`a_locked_reaction_in_the_selector_opens_the_premium_preview`,
+which also finds no book entry afterwards).
+
+Merged after r3-06 and r3-04: `RequestRollback::BroadcastGroup` (r3-06, 08-006)
+reads and restores `SupergroupFacts::is_broadcast_group` (09-004) instead of the
+removed `supergroup_is_broadcast` map, so the error arm for
+`ToggleBroadcastGroup` stays gone. The around-page jump keeps r3-06's
+`ChatSearchJump::Loading { request }` matching; the global search drops
+`matches_generation` (09-003) while the in-chat search keeps its baselined calls.
+
+Shared file touched: `src/state/session_apply_error.rs` reads `file_id()` where it read the
+field (08-025); nothing else of it changed.
+
+Guards: `check-request-match.py` gains `generation` (a call to
+`matches_generation`: an answer taken because it carries the query's counter,
+not the `RequestId` its stage holds; the in-chat search's four calls are
+baselined) and `stamped` (a `Correlation::` or `.correlate(` outside the request
+constructors).
+`check-stage-enums.py`'s baseline lost the six stages that now hold a request
+(`ChatEventLogFetch::Loading`, `MessageReactionsState::Loading`,
+`SetChangeStage::Working`, `SavedTopicsLoad::Started`, `SearchPaging::Loading`,
+`Leg::Pending`).
+
+Tests: `state/tests/event_log_poll.rs` (a refresh drops the page and poll
+asked before it; a poll and an older page settle on their own request),
+`connect/tests/media_library.rs` (two menus on two messages; an older request
+for the same message cannot settle the newer ask), `state/tests/rollback_shown.rs`
+(a newer position update and a newer fetch survive a refused rollback),
+`state/tests/forum_saved.rs` (an older page cannot settle the page now out),
+`state/tests/search_upgrades.rs` (a leg settles only on its request; a page of
+a closed list is dropped), `state/tests/bubble_headers.rs` (an older reply
+ask cannot settle the newer one), `state/tests/messages_more.rs` (the reactions
+tab pages with the older ask's failure ignored), `connect/tests/set_box_change.rs`
+(another request naming the same change), `state/tests/groups_more.rs` (a
+demotion resets rights and flags together),
+`state/domains/users/save_watch.rs` (two boxes save at once).
+### Sweep fixes (r3-08)
+
+| Ids | What changed |
+| --- | --- |
+| 15-002, 16-001 | `FolderLoad::Merging(RequestId)`. `start_folder_editor_merge` asks through `ask_chat_folder` (the same send as Loading, which also finds a fetch already out) and keeps the request in the stage. `settle_folder_editor_merge` waits on that request only: the spec arriving merges and saves, the folder's error or its own request ending with nothing puts the form back with the line (Retry is Save again). It no longer sends from upkeep and no longer asks `has_purpose_for_folder`, so another box's `GetChatFolder` is not its answer. `Merging` joins the in-flight names of `check-stage-enums.py`, so a bare one is rejected. |
+| 15-003 | The two refusal bools are gone, and so is the `Refused` enum that held them. A refused on-screen client is a stage of the connection that asked: `ConnectStage::DiskRefused`, set by `open_client` and left by `reconnect_after_disk` (which starts a connection, or clears it to `Idle` while the app is locked). A refused background start is a stage of that account in `PrepareSet` (`Prepare::DiskRefused`: no worker runs, so it blocks no deletion), set by `finish_background_start`, dropped by a stop, and released all at once by a reading with room (`release_refused_starts`) before the pass that asks again. `DiskUi` keeps only the readings. `disk.refused` leaves `scripts/app-wide-fields.txt`; the poll function is `watch_disk_space`, and the allow line in `owned-timers-allow.txt` names that, not a bare `watch`. |
+| 15-004 | `EarnLayer` is no longer `Closed`/`Open`: whether an earn page is open is the session's info column (`earn_layer_open`), and the layer keeps only what that column does not (back stack, covered panel, fade, refused page). Leaving, or opening over another panel, replaces the whole value (`EarnLayer::idle`, `covering`), so there is no second copy of "open" to drift. |
+| 16-007 | `DestRow::saved` leaves `scripts/implicit-state-baseline.txt`: the allow line already says it is a fact about the chat, read when the rows are built. |
+| 16-006 | `PasswordField` keeps no copy of the caller's view. The code that returns the box to idle queues the focus: `GiftManageState::password_ready` (a `GiftEvent::PasswordReady`, after a probe or a try that came back to the idle box, and a refused try) and `GramsHub::enter_withdraw` (every move into the idle box, which queues one `take_ready`). The frame upkeep gives the field the keyboard on that event and still empties it whenever the box is off screen. |
+| 16-005 | `GifTab::Asking { wanted, request }` (a request went out) settles to `GifTab::Asked(wanted)` when that request is gone from the session (`settle_gif_ask`, run by `gif_tab_upkeep`), whatever ended it, so another window's search cancelling it does not leave the tab waiting. A send with nothing to wait for is `Asked` at once. Asked only after the send went out; a send that failed is `Wants` again, as before. |
+| 14-004 | `take_draft_clear` takes the acked slot's own clear and nothing else. The chat-id fallback (HashMap order) is gone, so a send that set no clear cannot take another topic's. The ack names its slot with the same `draft_slot_of_message` the composer sends from. A TDLib ack carries no `RequestId` of the send (`updateMessageSendSucceeded` names the temporary message id), so the key stays the slot; keying by request would need the message id of each send recorded when its answer lands, which no path does yet. |
+| 15-001 | Not a bug as described: `PlaybackUi` lives in `OnScreen`, which an account switch replaces whole, so another account never reads or drops this account's seek (test `a_seek_does_not_follow_an_account_switch`). |
+| 15-005 | `DialogKind::DeepLinkInfo` is a per-window kind and its text is `MessageUi::deep_link_info`, set in the window the link was clicked in (`show_deep_link_info`; the main window when that one has closed). Two links resolved for two windows each keep their own text. The host-machinery tests that used it as their session-wide example use `BotAlert`. |
+| 16-002, 16-003 | Closing the Add folder box while the add is out, or the Share folder box while a link save or delete is out, hands the request to `FolderUi::closed_asks` (`ClosedAsk::{FolderAdded, LinkChange}`). `settle_closed_folder_asks` (run from `settle_folder_share`) takes the answer and ends in the same toast as the open box: failure line, "added" text with the chats joined, nothing for a limit hit (its box says it). The map is in the account's `OnScreen`. An entry whose request is gone from the session with no answer kept (the ring of 16 dropped it) ends without a toast (`a_closed_ask_ends_when_its_answer_was_evicted`). |
+| 16-004 | `TopicAction::Waiting(Vec<TopicWait>)`: each topic menu action keeps its own request, and the last answer leaves the stage (`Idle`). A second action no longer replaces the first one's wait. |
+| 14-004 (round 2, albums) | `SendMessageAlbum` answers now record one `SendAnswered { request, chat_id, message_id }` per returned message (`Session::record_send_answer`, the same 64 cap as text), so a captioned album sent as a reply from a main composer finds its draft clear by `old_message_id`. Test `an_album_answer_names_each_temporary_message_of_its_request`. |
+| 14-004 (round 3, album acks) | `DraftClear` records every message of a send as `SentMessage::Made { request, message }`: the first answer replaces the `Asked(request)`, later answers of the same request (the rest of an album) append. A `ClearStage` (`Armed` / `Spent`) keeps the entry after the first ack or failure until the last of its messages has acked or failed (`ack`, `fail`, `is_settled`), so a later ack finds it by id and clears nothing. The slot fallback now takes only a send that named no request (`is_unasked`), never a text send pending in the same slot; `fail_draft_clear` is the failure twin. Tests `a_later_album_ack_never_takes_a_neighbours_clear`, `a_later_album_failure_never_drops_a_neighbours_clear`. |
+| 14-004 (round 4, one stage value) | The message list moved into the variants: `ClearStage` is `Unasked` / `Armed(Vec<SentMessage>)` / `Spent(Vec<SentMessage>)`, and `DraftClear` has no separate `messages` field. `Unasked` is the only stage a slot match can take (`is_unasked`); `ack` and `fail` move `Armed(rest)` to `Spent(rest minus message)`, and `Spent` with an empty list is settled. The earlier `Waiting`/`Armed` rename is gone with the bare variant. Tests `album_acks_from_one_slot_never_take_the_texts_clear` and `album_failures_from_one_slot_never_drop_the_texts_clear` send an album then a text from one slot (the text's clear replaces the album's); the album's acks or failures leave the text's clear for its own ack. The two-slot helper is renamed `album_and_text_in_two_slots` to match what it builds. |
+| 15-003 (round 2) | `Prepare::DiskRefused { workers }` carries the workers still running. `refuse` turns `Cancelled { workers }` into it instead of keeping `Cancelled`, `finished` counts it down and keeps the refusal at 0, `running` and `keys` stay true while workers > 0, and `take_refused` / `cancel` hand the workers back as `Cancelled`. A refusal can no longer be lost when two workers overlap (test case in `a_refused_start_waits_without_blocking_deletion_and_leaves_on_a_retry`). |
+| 16-006 (round 2) | `GramsHub::ready: Vec<WithdrawReady>` is now `events: Vec<GramsEvent>` with a real `GramsEvent::PasswordReady`, drained by `take_events` (the way `GiftEvent` is); `take_ready() -> bool` is gone. |
+
+Tests: `folders::box_stage_tests` (merge waits for its own request; closed
+add and closed link save), `composer_sends_tests` (an ack never takes a
+neighbour's clear), `chat_window::asker_tests` (gif ask settles; two
+windows keep their own link text), `forum_extras::tests` (both answer
+orders), `deep_link_routes_tests` (seek stays with its account).

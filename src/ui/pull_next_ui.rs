@@ -17,8 +17,10 @@ use quill::ids::ChatId;
 use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
 use quill::pull_next::{
-    self as metrics, HintState, IndicatorLayout, IndicatorState, Mode, Phase, PullMachine, Step,
+    self as metrics, Found, HintState, IndicatorLayout, IndicatorState, Mode, Next, Phase,
+    PullMachine, Step,
 };
+use quill::task_hold::TaskHold;
 use std::time::{Duration, Instant};
 
 /// tdesktop `SlideAnimation` with `FromBottom`: `st::slideDuration * 2`,
@@ -48,83 +50,50 @@ struct Target {
     mode: Mode,
 }
 
-/// The pull's state, per history view.
+/// The pull's state, per history view. Where the pull leads, the gesture's
+/// window and the jump's task live inside the machine's stages, so a pull
+/// that ends takes all of them along.
 #[derive(Default)]
 pub(crate) struct PullUi {
-    machine: PullMachine,
+    machine: PullMachine<PullWindow>,
     epoch: Option<Instant>,
     target: Option<Target>,
-    /// Where the pull leads and, once released, the jump to it. Leaving
-    /// the pulled history replaces it, which drops the jump's task.
-    route: Route,
     /// The chat that slid in after a jump, until the slide is over.
     slide: Option<Slide>,
 }
 
-/// The chat or topic a pull leads to.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Next {
-    Chat(ChatId),
-    Topic(i32),
-}
-
-/// Where the pull leads, and whether the jump to it runs.
-#[derive(Default)]
-enum Route {
-    /// Nothing found (no pull yet, or nothing unread to go to).
-    #[default]
-    Unfound,
-    /// The unread chat or topic the pull leads to, and the window of the
-    /// gesture that found it (where its release opens it).
-    Found { next: Next, window: PullWindow },
-    /// The jump to it runs; dropping this stops it.
-    Jumping { next: Next, _task: Task<()> },
-}
-
-impl Route {
-    fn next(&self) -> Option<Next> {
-        match self {
-            Self::Unfound => None,
-            Self::Found { next, .. } | Self::Jumping { next, .. } => Some(*next),
-        }
+impl PullUi {
+    /// The release opens what the pull found: the machine holds the
+    /// indicator full and owns the task that opens it, together.
+    fn begin_jump(&mut self, task: Task<()>, now: u64) {
+        self.machine.begin_jump(now, TaskHold::new(task));
     }
 
+    /// The pulled history changed or the jump is over: the machine starts
+    /// over, dropping a jump's task and what the pull found.
+    fn restart(&mut self, now: u64) {
+        self.machine.reset_all(now);
+    }
+
+    /// The chat the pull leads to.
     fn next_chat(&self) -> Option<ChatId> {
-        match self.next()? {
+        match self.machine.found()?.next {
             Next::Chat(chat) => Some(chat),
             Next::Topic(_) => None,
         }
     }
 
-    /// The window the found pull was made in.
-    fn window(&self) -> Option<PullWindow> {
-        match self {
-            Self::Found { window, .. } => Some(*window),
-            Self::Unfound | Self::Jumping { .. } => None,
-        }
-    }
-
+    /// The topic the pull leads to.
     fn next_topic(&self) -> Option<i32> {
-        match self.next()? {
+        match self.machine.found()?.next {
             Next::Topic(topic) => Some(topic),
             Next::Chat(_) => None,
         }
     }
-}
 
-impl PullUi {
-    /// The release opens `next`: the machine holds the indicator full and
-    /// the route owns the task that opens it, together.
-    fn begin_jump(&mut self, next: Next, task: Task<()>, now: u64) {
-        self.machine.begin_jump(now);
-        self.route = Route::Jumping { next, _task: task };
-    }
-
-    /// The pulled history changed or the jump is over: the machine and the
-    /// route start over together (dropping a jump's task).
-    fn restart(&mut self, now: u64) {
-        self.machine.reset_all(now);
-        self.route = Route::Unfound;
+    /// The window the pull being released was made in.
+    fn release_window(&self) -> Option<PullWindow> {
+        self.machine.found_for_release().map(|found| found.via)
     }
 
     /// Milliseconds since the first call, `at` being the executor's clock
@@ -136,14 +105,14 @@ impl PullUi {
 
     #[cfg(test)]
     #[cfg(feature = "demo-capture")]
-    pub(super) fn machine_for_tests(&self) -> &PullMachine {
+    pub(super) fn machine_for_tests(&self) -> &PullMachine<PullWindow> {
         &self.machine
     }
 
     #[cfg(test)]
     #[cfg(feature = "demo-capture")]
     pub(super) fn next_chat_for_tests(&self) -> Option<ChatId> {
-        self.route.next_chat()
+        self.next_chat()
     }
 }
 
@@ -345,32 +314,32 @@ impl QuillApp {
                     target.chat,
                     self.chat_list.view.folder(),
                 );
-                self.history.pull.route = match (next, window) {
-                    (Some(chat), Some(window)) => Route::Found {
+                let found = match (next, window) {
+                    (Some(chat), Some(via)) => Some(Found {
                         next: Next::Chat(chat),
-                        window,
-                    },
-                    _ => Route::Unfound,
+                        via,
+                    }),
+                    _ => None,
                 };
                 if let Some(next) = next
                     && let Some(live) = self.live.as_mut()
                 {
                     let _ = live.driver.preload_next_channel(next);
                 }
-                self.history.pull.machine.set_has_next(next.is_some(), now);
+                self.history.pull.machine.set_found(found, now);
             }
             Mode::Topic => {
                 let next = target.topic.and_then(|current| {
                     quill::pull_next::find_next_unread_topic(session, target.chat, current)
                 });
-                self.history.pull.route = match (next, window) {
-                    (Some(topic), Some(window)) => Route::Found {
+                let found = match (next, window) {
+                    (Some(topic), Some(via)) => Some(Found {
                         next: Next::Topic(topic),
-                        window,
-                    },
-                    _ => Route::Unfound,
+                        via,
+                    }),
+                    _ => None,
                 };
-                self.history.pull.machine.set_has_next(next.is_some(), now);
+                self.history.pull.machine.set_found(found, now);
             }
         }
     }
@@ -381,14 +350,14 @@ impl QuillApp {
         let active = self.pull_active(target, cx);
         match target.mode {
             Mode::History => {
-                let Some(next) = self.history.pull.route.next_chat() else {
+                let Some(next) = self.history.pull.next_chat() else {
                     return;
                 };
                 let unread = self
                     .session()
                     .and_then(|s| s.chats.get(&next.0))
                     .is_some_and(|chat| chat.unread_count > 0);
-                let Some(window) = self.history.pull.route.window() else {
+                let Some(window) = self.history.pull.release_window() else {
                     return;
                 };
                 if !unread || !active {
@@ -397,7 +366,7 @@ impl QuillApp {
                 self.pull_jump_when_ready(next, window, cx);
             }
             Mode::Topic => {
-                let Some(next) = self.history.pull.route.next_topic() else {
+                let Some(next) = self.history.pull.next_topic() else {
                     return;
                 };
                 let unread = self.session().is_some_and(|s| {
@@ -405,7 +374,7 @@ impl QuillApp {
                         .iter()
                         .any(|topic| topic.forum_topic_id == next && topic.unread_count > 0)
                 });
-                let Some((handle, scope)) = self.history.pull.route.window() else {
+                let Some((handle, scope)) = self.history.pull.release_window() else {
                     return;
                 };
                 if !unread || !active || target.topic == Some(next) {
@@ -437,7 +406,7 @@ impl QuillApp {
                     }
                 });
                 let now = self.pull_now(cx);
-                self.history.pull.begin_jump(Next::Topic(next), task, now);
+                self.history.pull.begin_jump(task, now);
             }
         }
     }
@@ -523,7 +492,7 @@ impl QuillApp {
             }
         });
         let now = self.pull_now(cx);
-        self.history.pull.begin_jump(Next::Chat(next), task, now);
+        self.history.pull.begin_jump(task, now);
     }
 
     /// A jump's task is over: once the history follows the chat or topic
@@ -619,7 +588,6 @@ impl QuillApp {
             Mode::History => match self
                 .history
                 .pull
-                .route
                 .next_chat()
                 .and_then(|id| session?.chats.get(&id.0))
             {
@@ -641,7 +609,7 @@ impl QuillApp {
                 None => (metrics::nothing_left_text(Mode::History, ""), None, 0),
             },
             Mode::Topic => {
-                let topic = self.history.pull.route.next_topic().and_then(|id| {
+                let topic = self.history.pull.next_topic().and_then(|id| {
                     session?
                         .ordered_forum_topics(target.chat)
                         .into_iter()

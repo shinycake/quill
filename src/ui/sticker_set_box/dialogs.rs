@@ -267,17 +267,17 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::StickerCreate, |this, _, cx| {
-                this.sticker_box.discard_create();
+                this.sticker_box.editing.discard_create();
                 cx.notify();
             });
         app.update(cx, |this, cx| {
-            let Some(create) = this.sticker_box.create.clone() else {
+            let Some(create) = this.sticker_box.editing.create().cloned() else {
                 return dialog
                     .title(shell::dialog_title(tr(keys::Q_MEDIA_NEW_STICKER)))
                     .on_close(on_close);
             };
             let kind = create.kind;
-            let encoding = this.sticker_box.encoding.is_running();
+            let encoding = this.sticker_box.editing.encoding_running();
             let preview = this.create_preview_path();
             let search = this.sticker_box.emoji_search.clone();
             let query = search.read(cx).value().trim().to_string();
@@ -364,7 +364,7 @@ impl QuillApp {
                                 .label(tr(keys::CANCEL))
                                 .ghost()
                                 .on_click(cx.listener(|this, _, window, cx| {
-                                    this.sticker_box.discard_create();
+                                    this.sticker_box.editing.discard_create();
                                     this.close_kit_dialog_if_done(
                                         DialogKind::StickerCreate,
                                         window,
@@ -405,11 +405,11 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::StickerPick, |this, _, cx| {
-                this.sticker_box.pick = None;
+                this.sticker_box.editing.close_pick();
                 cx.notify();
             });
         app.update(cx, |this, cx| {
-            let Some(pick) = this.sticker_box.pick else {
+            let Some(pick) = this.sticker_box.editing.pick() else {
                 return dialog
                     .title(shell::dialog_title(tr(keys::Q_MEDIA_CHOOSE_A_STICKER)))
                     .on_close(on_close);
@@ -527,7 +527,7 @@ impl QuillApp {
                             .label(tr(keys::CANCEL))
                             .ghost()
                             .on_click(cx.listener(|this, _, window, cx| {
-                                this.sticker_box.pick = None;
+                                this.sticker_box.editing.close_pick();
                                 this.close_kit_dialog_if_done(DialogKind::StickerPick, window, cx);
                                 cx.notify();
                             })),
@@ -628,23 +628,23 @@ crate::ui::shell::register_dialogs! {
     /// The "New Sticker" / "New Emoji" emoji step.
     StickerCreate => DialogSpec::new(
         5650,
-        |app| super::sticker_box_shown(app) && app.sticker_box.create.is_some(),
+        |app| super::sticker_box_shown(app) && app.sticker_box.editing.create().is_some(),
         QuillApp::build_create_sticker_dialog,
     )
     .per_window()
     .close(|app, _, cx| {
-            app.sticker_box.discard_create();
+            app.sticker_box.editing.discard_create();
             cx.notify();
         }),
     /// "Add an Existing Sticker" / "Adapt from a Sticker".
     StickerPick => DialogSpec::new(
         5660,
-        |app| super::sticker_box_shown(app) && app.sticker_box.pick.is_some(),
+        |app| super::sticker_box_shown(app) && app.sticker_box.editing.pick().is_some(),
         QuillApp::build_pick_sticker_dialog,
     )
     .per_window()
     .close(|app, _, cx| {
-            app.sticker_box.pick = None;
+            app.sticker_box.editing.close_pick();
             cx.notify();
         }),
 }

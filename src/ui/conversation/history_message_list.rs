@@ -102,10 +102,9 @@ impl QuillApp {
                             .topic_histories
                             .get(&(chat.0, topic))
                             .map(|h| (None, h.has_newer(), h.window_epoch)),
-                        None => s
-                            .histories
-                            .get(&chat.0)
-                            .map(|h| (h.unread_anchor, s.history_has_newer(chat), h.window_epoch)),
+                        None => s.histories.get(&chat.0).map(|h| {
+                            (h.unread_anchor(), s.history_has_newer(chat), h.window_epoch)
+                        }),
                     }
                 })
                 .unwrap_or((None, false, 0)),

@@ -18,11 +18,10 @@ impl Session {
     pub(crate) fn apply_share_theme_gifts(
         &mut self,
         page: GiftsPage,
-        owner: ThemeOwner,
-        serial: u64,
+        request: RequestId,
         first: bool,
     ) {
-        if !self.users_state.peer_qr.gifts.is_current(owner, serial) {
+        if !self.users_state.peer_qr.gifts.is_current(request) {
             return;
         }
         let gifts: Vec<ThemeGift> = page
@@ -44,10 +43,10 @@ impl Session {
 
     /// `setProfileShareTheme` answered `ok`.
     pub(crate) fn apply_share_theme_ok(&mut self, pending: Option<&PendingRequest>) {
-        if let Some(RequestPurpose::Users(UsersPurpose::SetProfileShareTheme { ticket })) =
-            pending.map(|p| p.purpose)
+        if let Some(pending) = pending
+            && pending.purpose == RequestPurpose::Users(UsersPurpose::SetProfileShareTheme)
         {
-            self.users_state.peer_qr.finish_save(ticket);
+            self.users_state.peer_qr.finish_save(pending.id);
         }
     }
 

@@ -42,11 +42,7 @@ fn the_ownership_box_opened_while_sends_fail_shows_failures_to_retry() {
     ));
     for filter in [MemberListFilter::Administrators, MemberListFilter::Recent] {
         assert!(matches!(
-            driver
-                .session
-                .groups
-                .supergroup_members
-                .get(&(-100, filter)),
+            driver.session.groups.member_fetch((-100, filter)),
             Some(SupergroupMembersFetch::Failed(_))
         ));
     }
@@ -69,12 +65,8 @@ fn the_ownership_box_opened_while_sends_fail_shows_failures_to_retry() {
         driver
             .session
             .groups
-            .supergroup_members
-            .get(&(-100, MemberListFilter::Recent)),
-        Some(SupergroupMembersFetch::Loading {
-            request: Some(_),
-            ..
-        })
+            .member_fetch((-100, MemberListFilter::Recent)),
+        Some(SupergroupMembersFetch::Loading { .. })
     ));
 }
 

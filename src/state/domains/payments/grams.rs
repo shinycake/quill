@@ -26,7 +26,7 @@ impl Session {
                         }
                     }
                     Some((GramsPurpose::Page { append }, id))
-                        if self.payments.hub.grams.load.waits_for(id.0) =>
+                        if self.payments.hub.grams.load.waits_for(id) =>
                     {
                         self.remember_files(&files);
                         self.payments.hub.grams.apply_page(page, append);
@@ -70,7 +70,7 @@ impl Session {
                 }
             }
             GramsPurpose::Page { .. } => {
-                if pending.is_some_and(|p| grams.load.waits_for(p.id.0)) {
+                if pending.is_some_and(|p| grams.load.waits_for(p.id)) {
                     grams.load = crate::gift_market::PageLoad::Failed(error_reason(err));
                 }
             }
@@ -119,7 +119,7 @@ impl Session {
             grams.withdraw = Some(GramWithdraw::Finished(WithdrawOutcome::TooSmall));
             return;
         }
-        grams.withdraw = Some(match password_check_failure(err, &error_reason(err)) {
+        grams.enter_withdraw(match password_check_failure(err, &error_reason(err)) {
             PasswordCheckFailure::Field(error) => GramWithdraw::idle(Some(error)),
             PasswordCheckFailure::SecurityCheck { later } => GramWithdraw::SecurityCheck { later },
         });

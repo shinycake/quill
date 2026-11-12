@@ -489,20 +489,23 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        if let Some(live) = self.live.as_mut()
-            && live
-                .driver
+        let sent = self.live.as_mut().map(|live| {
+            live.driver
                 .report_messages(flow.chat_id, &flow.message_ids, &option_id, &text, None)
-                .is_err()
-        {
-            self.set_note(StatusNote::error(tr(
+        });
+        match sent {
+            Some(Err(_)) => self.set_note(StatusNote::error(tr(
                 keys::Q_CHAT_COULD_NOT_SEND_THE_REPORT,
-            )));
+            ))),
+            // The details stay typed when the send was refused: the flow is
+            // still on `TextRequired` and the user presses Report again.
+            Some(Ok(_)) | None => {
+                self.message_ui
+                    .menu_ui
+                    .report_text
+                    .update(cx, |input, cx| input.set_value("", window, cx));
+            }
         }
-        self.message_ui
-            .menu_ui
-            .report_text
-            .update(cx, |input, cx| input.set_value("", window, cx));
         cx.notify();
     }
 

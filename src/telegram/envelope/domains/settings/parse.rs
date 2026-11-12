@@ -325,7 +325,7 @@ pub(crate) fn parse_settings_payload(
             SettingsPayload::DeviceLoginResult {
                 result: parse_session(value)
                     .map(|session| {
-                        if session.is_password_pending {
+                        if session.is_password_pending() {
                             crate::auth::DeviceLoginResult::PasswordRequired
                         } else {
                             crate::auth::DeviceLoginResult::Linked

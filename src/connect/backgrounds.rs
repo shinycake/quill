@@ -77,6 +77,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .installed_backgrounds
             .theme_mut(for_dark_theme)
             .clear_error();
+        self.session.chats_state.background_error = None;
         self.fetch_installed_backgrounds(for_dark_theme)
     }
 

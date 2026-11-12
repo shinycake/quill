@@ -76,11 +76,7 @@ impl QuillApp {
                 .collect();
         }
         let failed = fetch.and_then(|fetch| fetch.error().map(str::to_owned));
-        let in_flight = session.is_some_and(|session| {
-            session
-                .requests
-                .has_purpose_for_chat(RequestPurpose::GetChatPreview, chat_id)
-        });
+        let in_flight = fetch.is_some_and(|fetch| fetch.is_loading());
         let mut body = div()
             .id(("chat-preview-scroll", chat_id.0 as u64))
             .flex()

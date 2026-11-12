@@ -2,7 +2,6 @@ use super::*;
 
 impl QuillApp {
     fn demo_reaction_packs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        use quill::state::MessageReactionsState;
         use quill::telegram::envelope::{StickerFormat, StickerSetInfo};
         let (chat_id, message_id) = (ChatId(11), MessageId(101));
         let Some(session) = self.demo_session.as_mut() else {
@@ -13,8 +12,10 @@ impl QuillApp {
             .store(session.last_seq, std::sync::atomic::Ordering::SeqCst);
         crate::ui::reactions::apply_ready_reactions(session, &self.demo_ui.sink, &self.demo_ui.seq);
         crate::ui::demos::reaction_fixtures::seed_reaction_options(session, chat_id, message_id);
-        if let MessageReactionsState::Ready(options) =
-            &mut session.stickers.message_reaction_options
+        if let Some(options) = session
+            .stickers
+            .message_reaction_options
+            .ready_mut(chat_id, message_id)
         {
             options.allow_custom_emoji = true;
         }

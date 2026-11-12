@@ -230,6 +230,19 @@ impl PrivacyKeyState {
         }
     }
 
+    /// The rule an edit may be composed on: one the server is known to
+    /// hold or that this device is saving. A rule being reloaded or that
+    /// failed to load is only the stale copy shown meanwhile; an edit built
+    /// on it would overwrite a newer rule from another device.
+    pub fn editable_detail(&self) -> Option<&PrivacyRuleDetail> {
+        match self {
+            Self::Ready(detail) | Self::Saving { detail, .. } | Self::SaveFailed { detail, .. } => {
+                Some(detail)
+            }
+            Self::Loading { .. } | Self::Failed { .. } => None,
+        }
+    }
+
     /// The refusal of the last save, until the next edit.
     pub fn save_error(&self) -> Option<&str> {
         match self {
@@ -576,6 +589,51 @@ impl NewChatPrivacyState {
     }
 }
 
+/// The own gift settings' saves in flight. The settings shown live in the
+/// own full info (written at once when a save goes out); this holds what
+/// the server is known to have, so a refusal puts that back.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum GiftSave {
+    #[default]
+    Idle,
+    Saving(crate::state::saves::Saves<GiftSettings>),
+}
+
+impl GiftSave {
+    /// A save goes out under `request` over `shown`, the value on screen.
+    pub fn save(&mut self, shown: GiftSettings, request: RequestId, next: GiftSettings) {
+        match self {
+            Self::Idle => {
+                *self = Self::Saving(crate::state::saves::Saves::first(shown, request, next));
+            }
+            Self::Saving(saves) => saves.push(request, next),
+        }
+    }
+
+    /// `request` was refused: the value to show now (the next save still
+    /// out, else the confirmed one), whatever order the saves fail in.
+    pub fn failed(&mut self, request: RequestId) -> Option<GiftSettings> {
+        let Self::Saving(saves) = self else {
+            return None;
+        };
+        if saves.fail(request) {
+            return Some(saves.value());
+        }
+        let confirmed = saves.confirmed();
+        *self = Self::Idle;
+        Some(confirmed)
+    }
+
+    /// `request` landed: the server holds its value.
+    pub fn landed(&mut self, request: RequestId) {
+        if let Self::Saving(saves) = self
+            && !saves.land(request)
+        {
+            *self = Self::Idle;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -689,6 +747,30 @@ mod tests {
         let state = &session.settings.privacy[&key];
         assert_eq!(state.detail(), Some(&who(PrivacyWho::Nobody)));
         assert!(state.save_error().is_some());
+    }
+
+    /// Sweep r3-11, 20-003: a rule that is reloading or failed to load
+    /// shows its stale copy but is not a base for an edit.
+    #[test]
+    fn a_stale_privacy_rule_is_shown_but_not_editable() {
+        let (mut session, _sink) = session();
+        let key = PrivacySettingKey::ShowStatus;
+        let request = session.request(
+            RequestPurpose::Settings(SettingsPurpose::SetPrivacyRules { key }),
+            None,
+        );
+        let stale = Some(who(PrivacyWho::Nobody));
+        let loading = PrivacyKeyState::Loading {
+            request,
+            stale: stale.clone(),
+        };
+        assert_eq!(loading.detail(), stale.as_ref());
+        assert_eq!(loading.editable_detail(), None);
+        let failed = PrivacyKeyState::Failed { stale };
+        assert!(failed.detail().is_some());
+        assert_eq!(failed.editable_detail(), None);
+        let ready = PrivacyKeyState::Ready(who(PrivacyWho::Nobody));
+        assert_eq!(ready.editable_detail(), ready.detail());
     }
 
     /// Two saves in flight: the first one's refusal does not touch the

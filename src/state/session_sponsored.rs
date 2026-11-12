@@ -48,13 +48,16 @@ impl Session {
             .sponsored
             .remove(&chat_id.0)
             .unwrap_or_default();
-        let keep = |ids: &std::collections::HashSet<i64>| -> std::collections::HashSet<i64> {
-            ids.iter()
-                .copied()
-                .filter(|id| messages.iter().any(|m| m.message_id == *id))
-                .collect()
-        };
-        let (viewed, dismissed) = (keep(&previous.viewed), keep(&previous.dismissed));
+        let listed = |id: &i64| messages.iter().any(|m| m.message_id == *id);
+        let dismissed: std::collections::HashSet<i64> =
+            previous.dismissed.iter().copied().filter(listed).collect();
+        // A failed view asks afresh with the new list.
+        let views = previous
+            .views
+            .iter()
+            .filter(|(id, view)| listed(id) && !matches!(view, AdView::Failed { .. }))
+            .map(|(id, view)| (*id, *view))
+            .collect();
         // Ads already in the history stay where they are.
         let placed = previous
             .placed
@@ -66,7 +69,7 @@ impl Session {
             ChatSponsoredMessages {
                 messages,
                 messages_between,
-                viewed,
+                views,
                 dismissed,
                 fetched_at: Some(std::time::Instant::now()),
                 placed,
@@ -96,7 +99,7 @@ impl Session {
     /// after the user hid ads, and not again within five minutes of the last
     /// response (tdesktop `TooEarlyForRequest`).
     pub fn sponsored_fetch_due(&self, chat_id: ChatId, now: std::time::Instant) -> bool {
-        if self.messages.sponsored_hidden {
+        if self.sponsored_hidden() {
             return false;
         }
         match self
@@ -113,7 +116,7 @@ impl Session {
     /// How the open chat's ads enter its history. `None` without a fetched
     /// list, after ads were hidden, and in topic views.
     pub fn open_sponsored_layout(&self) -> Option<SponsoredLayout> {
-        if self.messages.sponsored_hidden || self.open_forum_topic().is_some() {
+        if self.sponsored_hidden() || self.open_forum_topic().is_some() {
             return None;
         }
         let entry = self.messages.sponsored.get(&self.open_chat_id()?.0)?;
@@ -229,7 +232,7 @@ impl Session {
         }
         // `history->firstUnreadMessage()`: the message after the last read.
         let history = self.histories.get(&chat_id.0)?;
-        let anchor = history.unread_anchor?;
+        let anchor = history.unread_anchor()?;
         let first_unread = history
             .messages
             .range((
@@ -284,30 +287,65 @@ impl Session {
     }
 
     /// The UI shows these ads on screen (the whole text, button excluded).
-    /// Returns the ids not yet counted, marking them viewed so a scroll away
-    /// and back never sends a second `viewMessages`. Ids that are not in the
-    /// fetched list of an open chat are ignored.
-    pub fn take_sponsored_views(&mut self, chat_id: ChatId, shown: &[i64]) -> Vec<i64> {
+    /// Registers the `viewMessages` request for the ids not yet counted and
+    /// marks them `Counting` under it, so a scroll away and back never sends
+    /// a second one while it is out. Ids that are not in the fetched list of
+    /// an open chat are ignored. `None` when nothing is due.
+    pub fn begin_sponsored_views(
+        &mut self,
+        chat_id: ChatId,
+        shown: &[i64],
+    ) -> Option<(RequestId, Vec<i64>)> {
         if self.open_chat_id() != Some(chat_id) {
-            return Vec::new();
+            return None;
         }
-        let Some(entry) = self.messages.sponsored.get_mut(&chat_id.0) else {
-            return Vec::new();
-        };
-        let mut due = Vec::new();
+        let entry = self.messages.sponsored.get(&chat_id.0)?;
+        let mut due: Vec<i64> = Vec::new();
         for id in shown {
-            if entry.messages.iter().any(|m| m.message_id == *id) && entry.viewed.insert(*id) {
+            let listed = entry.messages.iter().any(|m| m.message_id == *id);
+            let asks = entry.views.get(id).is_none_or(|view| view.due());
+            if listed && asks && !due.contains(id) {
                 due.push(*id);
             }
         }
-        due
+        if due.is_empty() {
+            return None;
+        }
+        let request = self.request(RequestPurpose::ViewSponsoredMessages, Some(chat_id));
+        let entry = self.messages.sponsored.get_mut(&chat_id.0)?;
+        for id in &due {
+            let attempts = match entry.views.get(id) {
+                Some(AdView::Failed { attempts }) => *attempts,
+                _ => 0,
+            };
+            entry
+                .views
+                .insert(*id, AdView::Counting { request, attempts });
+        }
+        Some((request, due))
     }
 
-    /// A `viewMessages` send failed: let the next frame retry these ids.
-    pub fn untake_sponsored_views(&mut self, chat_id: ChatId, ids: &[i64]) {
-        if let Some(entry) = self.messages.sponsored.get_mut(&chat_id.0) {
-            for id in ids {
-                entry.viewed.remove(id);
+    /// The answer of a `viewMessages` for sponsored ads: its ads are counted
+    /// (`counted`) or fail one more time. An ad another request took over
+    /// since keeps that request.
+    pub fn settle_sponsored_views(&mut self, chat_id: ChatId, request: RequestId, counted: bool) {
+        let Some(entry) = self.messages.sponsored.get_mut(&chat_id.0) else {
+            return;
+        };
+        for view in entry.views.values_mut() {
+            if let AdView::Counting {
+                request: asked,
+                attempts,
+            } = *view
+                && asked == request
+            {
+                *view = if counted {
+                    AdView::Counted
+                } else {
+                    AdView::Failed {
+                        attempts: attempts.saturating_add(1),
+                    }
+                };
             }
         }
     }
@@ -340,10 +378,41 @@ impl Session {
         });
     }
 
+    /// Whether ads are off for this account: a Premium account whose own
+    /// full info says `has_sponsored_messages_enabled` is false, or whose
+    /// hiding was confirmed and whose own full info is on its way. Derived,
+    /// so an `updateUserFullInfo` that turns ads back on, or a Premium
+    /// lapse, shows them again with nothing to reset. Without the own full
+    /// info the server decides (ads are asked for).
+    pub fn sponsored_hidden(&self) -> bool {
+        let Some(me) = self.my_user_id.filter(|_| self.my_is_premium()) else {
+            return false;
+        };
+        match self.users_state.user_full_infos.get(&me) {
+            Some(info) => !info.extras.sponsored_enabled,
+            None => self.users_state.user_full_infos.is_wanted(&me),
+        }
+    }
+
+    /// Records the confirmed hiding in the own cached full info, where
+    /// [`Self::sponsored_hidden`] reads it. Without one cached, the own
+    /// full info is wanted: the driver asks for it, and its answer carries
+    /// the new setting. No placeholder is stored, so the real info is
+    /// still fetched.
+    fn hide_own_sponsored(&mut self) {
+        let Some(me) = self.my_user_id else {
+            return;
+        };
+        match self.users_state.user_full_infos.get_mut(&me) {
+            Some(info) => info.extras.sponsored_enabled = false,
+            None => self.users_state.user_full_infos.want(me),
+        }
+    }
+
     /// `toggleHasSponsoredMessagesEnabled(false)` answered `ok`: no ads are
     /// shown or fetched for the rest of the session.
     pub fn accept_sponsored_hidden(&mut self, chat_id: ChatId) {
-        self.messages.sponsored_hidden = true;
+        self.hide_own_sponsored();
         // A report in flight keeps its place: its answer is still awaited.
         if matches!(
             self.messages.sponsored_report,
@@ -457,7 +526,7 @@ impl Session {
                             .dismissed
                             .insert(message_id);
                     }
-                    ReportSponsoredResult::AdsHidden => self.messages.sponsored_hidden = true,
+                    ReportSponsoredResult::AdsHidden => self.hide_own_sponsored(),
                     ReportSponsoredResult::PremiumRequired => {
                         self.request_no_ads_preview(chat_id);
                         return;

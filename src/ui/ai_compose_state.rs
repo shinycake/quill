@@ -95,9 +95,10 @@ pub(crate) enum StyleSave {
 /// Where the style preview stands: the lookup its link started, the style
 /// it shows, and the Add, Remove or Delete sent from it.
 pub(crate) enum PreviewStage {
-    /// The `searchTextCompositionStyle` request with this token runs.
+    /// The `searchTextCompositionStyle` request runs as `request`; only its
+    /// answer or error leaves the stage.
     LookingUp {
-        token: u64,
+        request: RequestId,
     },
     Shown(TextCompositionStyle),
     /// Add Style was sent as `request`: the button waits, and only that
@@ -146,10 +147,10 @@ impl AiStylePreview {
         }
     }
 
-    /// The lookup's token while it runs.
-    pub(super) fn lookup_token(&self) -> Option<u64> {
+    /// The lookup's request while it runs.
+    pub(super) fn lookup_request(&self) -> Option<RequestId> {
         match self.stage {
-            PreviewStage::LookingUp { token } => Some(token),
+            PreviewStage::LookingUp { request } => Some(request),
             _ => None,
         }
     }
@@ -209,7 +210,8 @@ impl AiStylePreview {
 /// The apply-in-place shortcut's request (tdesktop `TriggerAiApplyInPlace`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ApplyInPlace {
-    pub(super) token: u64,
+    /// The request the shortcut waits for: only its answer lands.
+    pub(super) request: RequestId,
     /// The account whose style the shortcut used: a style-gone answer
     /// clears that account's binding and no other.
     pub(super) account: AccountKey,

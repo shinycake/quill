@@ -61,7 +61,7 @@ fn open_dialog(shell: &Entity<QuillShell>, vcx: &mut VisualTestContext) -> Optio
     vcx.executor()
         .advance_clock(std::time::Duration::from_millis(300));
     vcx.update(|window, cx| window.render_frame(cx));
-    shell.read_with(vcx, |shell, _| shell.open_dialog)
+    shell.read_with(vcx, |shell, _| shell.open_dialog.kind())
 }
 
 #[gpui_kit::test]

@@ -189,14 +189,15 @@ struct MediaTile {
     stamp: super::image_budget::PaintStamp,
 }
 
-/// Where the media tile stands. `Building` ends in `Ready` when the build
-/// answers; the app owns the build, so a closed window does not strand it.
-/// The build is claimed by the frame callback itself (`claim_build`), not
-/// by the ask: a window that closes before its next frame leaves the tile
-/// `Idle`, and the next window to paint asks again.
+/// Where the media tile stands. `Building` holds the build's task, so
+/// leaving the stage (the tile arrives, or the state is dropped) cancels
+/// it; it ends in `Ready` when the build answers. The build is claimed by
+/// the frame callback itself (`start_build`), not by the ask: a window
+/// that closes before its next frame leaves the tile `Idle`, and the next
+/// window to paint asks again.
 enum TileState {
     Idle,
-    Building,
+    Building { _build: gpui_kit::Task<()> },
     Ready(MediaTile),
 }
 
@@ -216,51 +217,48 @@ fn image_tile(window: &mut Window) -> Option<Arc<RenderImage>> {
             ready.stamp = super::image_budget::paint_stamp();
             Some(Some(ready.image.clone()))
         }
-        TileState::Building => Some(None),
+        TileState::Building { .. } => Some(None),
         TileState::Idle => None,
     });
     ready.unwrap_or_else(|| {
-        window.on_next_frame(|_, cx| {
-            if claim_build() {
-                build_tile_in_background(cx);
-            }
-        });
+        window.on_next_frame(|_, cx| start_build(cx));
         None
     })
 }
 
-/// Idle to `Building`: true for the one frame callback that starts it.
-fn claim_build() -> bool {
-    TILE.with(|tile| {
-        let mut tile = tile.borrow_mut();
-        let idle = matches!(&*tile, TileState::Idle);
-        if idle {
-            *tile = TileState::Building;
-        }
-        idle
-    })
-}
-
-/// Build the tile on the background executor and install it.
-fn build_tile_in_background(cx: &mut App) {
-    let task = cx.background_spawn(async move { build_image_tile() });
+/// Idle to `Building`, for the one frame callback that finds it idle: the
+/// tile is built on the background executor and installed when it answers.
+fn start_build(cx: &mut App) {
+    if !TILE.with(|tile| {
+        tile.try_borrow()
+            .is_ok_and(|tile| matches!(&*tile, TileState::Idle))
+    }) {
+        return;
+    }
+    let image = cx.background_spawn(async move { build_image_tile() });
     // window-scope: the tile is shared by every window; its arrival
     // redraws them all.
     // screen-scope: the tile belongs to no account.
-    cx.spawn(async move |cx| {
-        let image = task.await;
+    let build = cx.spawn(async move |cx| {
+        let image = image.await;
         cx.update(|cx| {
             TILE.with(|tile| {
-                *tile.borrow_mut() = TileState::Ready(MediaTile {
-                    image,
-                    painted: Instant::now(),
-                    stamp: super::image_budget::paint_stamp(),
-                });
+                if let Ok(mut tile) = tile.try_borrow_mut() {
+                    *tile = TileState::Ready(MediaTile {
+                        image,
+                        painted: Instant::now(),
+                        stamp: super::image_budget::paint_stamp(),
+                    });
+                }
             });
             cx.refresh_windows();
         });
-    })
-    .detach();
+    });
+    TILE.with(|tile| {
+        if let Ok(mut tile) = tile.try_borrow_mut() {
+            *tile = TileState::Building { _build: build };
+        }
+    });
 }
 
 /// Drop the media tile (and its atlas copy) once media spoilers have been
@@ -732,6 +730,13 @@ mod tests {
 #[cfg(feature = "demo-capture")]
 fn tile_is_idle() -> bool {
     TILE.with(|tile| matches!(&*tile.borrow(), TileState::Idle))
+}
+
+/// Whether the tile is built (tests).
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+fn tile_is_ready() -> bool {
+    TILE.with(|tile| matches!(&*tile.borrow(), TileState::Ready(_)))
 }
 
 #[cfg(test)]

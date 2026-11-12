@@ -165,7 +165,9 @@ fn picker_options_are_refetched_when_reactions_change() {
     let (mut driver, recorder, sink, seq) = driver();
     let chat = ChatId(11);
     let message = MessageId(101);
-    driver.session.stickers.message_reaction_options =
+    driver.session.stickers.message_reaction_options.set(
+        chat,
+        message,
         crate::state::MessageReactionsState::Ready(crate::state::MessageReactionOptions {
             chat_id: chat,
             message_id: message,
@@ -175,7 +177,8 @@ fn picker_options_are_refetched_when_reactions_change() {
             allow_custom_emoji: false,
             premium_locked: Vec::new(),
             paid_offered: false,
-        });
+        }),
+    );
     // Another chat's change leaves the options alone.
     feed(
         &mut driver,

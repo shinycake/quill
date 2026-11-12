@@ -107,17 +107,39 @@ pub(crate) fn seed_slow_mode_group(
 pub(crate) const SLOW_MODE_FIELDS: &str = r#""slow_mode_delay":30,"slow_mode_delay_expires_in":25.0,"my_boost_count":0,"unrestrict_boost_count":0"#;
 pub(crate) const MEMBER_STATUS: &str = r#"{"@type":"chatMemberStatusMember"}"#;
 
-/// Register an event-log page or poll as the driver does: the chat's log
-/// then waits for it (`EventLog::wait`).
+/// Register an event-log page or poll as the driver does: the stage that
+/// asked then holds its request.
 pub(crate) fn event_log_request(session: &mut Session, purpose: GroupsPurpose) -> RequestId {
     let extra = session.request(RequestPurpose::Groups(purpose), Some(ChatId(13)));
-    let wait = &mut session.groups.event_logs.entry(13).or_default().wait;
-    if purpose == GroupsPurpose::PollChatEventLog {
-        wait.poll = Some(extra);
-    } else {
-        wait.page = Some(extra);
-    }
+    let polling = purpose == GroupsPurpose::PollChatEventLog;
+    let first_page = purpose == (GroupsPurpose::GetChatEventLog { from_event_id: 0 });
+    session
+        .groups
+        .event_log_sent(13, extra, polling, first_page);
     extra
+}
+
+/// `getRepliedMessage` for the row sent and answered, as the driver does.
+pub(crate) fn accept_reply(
+    session: &mut Session,
+    chat_id: ChatId,
+    message_id: MessageId,
+    message: ParsedMessage,
+) {
+    let request = session.begin_reply_fetch(chat_id, message_id);
+    session.accept_replied_message(request, chat_id, message_id, message);
+}
+
+/// `getRepliedMessage` for the row sent and refused with `code`.
+pub(crate) fn reject_reply(
+    session: &mut Session,
+    chat_id: ChatId,
+    message_id: MessageId,
+    code: i32,
+    now: std::time::Instant,
+) {
+    let request = session.begin_reply_fetch(chat_id, message_id);
+    session.reject_replied_message(request, chat_id, message_id, code, now);
 }
 
 /// The invoice a test's checkout pays.

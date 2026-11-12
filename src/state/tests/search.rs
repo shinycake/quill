@@ -298,10 +298,10 @@ fn search_chats_and_messages_happy_path() {
         r#"{"@type":"updateChatPosition","chat_id":11,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"4","is_pinned":false}}"#,
     );
     session.open_search();
-    let search_gen = session.search.search.begin_query("hello");
-    let chats_extra = session.request_search(RequestPurpose::SearchChats, search_gen);
-    let messages_extra = session.request_search(RequestPurpose::SearchMessages, search_gen);
-    let public_extra = session.request_search(RequestPurpose::SearchPublicChats, search_gen);
+    session.search.search.begin_query("hello");
+    let chats_extra = session.request_search(RequestPurpose::SearchChats);
+    let messages_extra = session.request_search(RequestPurpose::SearchMessages);
+    let public_extra = session.request_search(RequestPurpose::SearchPublicChats);
     apply_json(
         &mut session,
         &seq,
@@ -358,10 +358,10 @@ fn search_chats_and_messages_happy_path() {
 fn search_empty_and_error_and_stale_generation() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    let search_gen = session.search.search.begin_query("zzz");
-    let chats_extra = session.request_search(RequestPurpose::SearchChats, search_gen);
-    let messages_extra = session.request_search(RequestPurpose::SearchMessages, search_gen);
-    let public_extra = session.request_search(RequestPurpose::SearchPublicChats, search_gen);
+    session.search.search.begin_query("zzz");
+    let chats_extra = session.request_search(RequestPurpose::SearchChats);
+    let messages_extra = session.request_search(RequestPurpose::SearchMessages);
+    let public_extra = session.request_search(RequestPurpose::SearchPublicChats);
     apply_json(
         &mut session,
         &seq,
@@ -393,13 +393,13 @@ fn search_empty_and_error_and_stale_generation() {
     );
     assert_eq!(session.search.search.status(), SearchStatus::Empty);
 
-    let stale = session.search.search.begin_query("old");
-    let stale_chats = session.request_search(RequestPurpose::SearchChats, stale);
-    let stale_messages = session.request_search(RequestPurpose::SearchMessages, stale);
-    let fresh = session.search.search.begin_query("new");
-    let _fresh_chats = session.request_search(RequestPurpose::SearchChats, fresh);
-    let fresh_messages = session.request_search(RequestPurpose::SearchMessages, fresh);
-    let fresh_public = session.request_search(RequestPurpose::SearchPublicChats, fresh);
+    session.search.search.begin_query("old");
+    let stale_chats = session.request_search(RequestPurpose::SearchChats);
+    let stale_messages = session.request_search(RequestPurpose::SearchMessages);
+    session.search.search.begin_query("new");
+    let _fresh_chats = session.request_search(RequestPurpose::SearchChats);
+    let fresh_messages = session.request_search(RequestPurpose::SearchMessages);
+    let fresh_public = session.request_search(RequestPurpose::SearchPublicChats);
     let _ = fresh_public;
     apply_json(
         &mut session,
@@ -430,9 +430,8 @@ fn search_empty_and_error_and_stale_generation() {
             fresh_messages.0
         ),
     );
-    let search_gen = session.search.search.generation;
-    let chats_extra = session.request_search(RequestPurpose::SearchChats, search_gen);
-    let public_extra = session.request_search(RequestPurpose::SearchPublicChats, search_gen);
+    let chats_extra = session.request_search(RequestPurpose::SearchChats);
+    let public_extra = session.request_search(RequestPurpose::SearchPublicChats);
     apply_json(
         &mut session,
         &seq,
@@ -472,9 +471,9 @@ fn search_recently_found_chats_empty_query() {
         &sink,
         r#"{"@type":"updateChatPosition","chat_id":11,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"4","is_pinned":false}}"#,
     );
-    let search_gen = session.search.search.begin_recents();
+    session.search.search.begin_recents();
     assert!(session.search.search.is_recents());
-    let extra = session.request_search(RequestPurpose::SearchRecentlyFoundChats, search_gen);
+    let extra = session.request_search(RequestPurpose::SearchRecentlyFoundChats);
     apply_json(
         &mut session,
         &seq,
@@ -487,8 +486,8 @@ fn search_recently_found_chats_empty_query() {
     assert_eq!(session.search.search.status(), SearchStatus::Ready);
     assert_eq!(session.search.search.chat_ids, vec![ChatId(11)]);
     assert!(session.search.search.messages.is_empty());
-    let empty_gen = session.search.search.begin_recents();
-    let empty_extra = session.request_search(RequestPurpose::SearchRecentlyFoundChats, empty_gen);
+    session.search.search.begin_recents();
+    let empty_extra = session.request_search(RequestPurpose::SearchRecentlyFoundChats);
     apply_json(
         &mut session,
         &seq,
@@ -549,11 +548,12 @@ fn chat_search_happy_empty_stale_and_jump() {
             message_id: MessageId(101)
         }
     );
-    assert_eq!(
-        session.begin_chat_search_jump(MessageId(90)),
-        ChatSearchJumpNeed::LoadAround
-    );
-    let around = session.request_history_around(ChatId(11), MessageId(90));
+    let ChatSearchJumpNeed::LoadAround {
+        request: around, ..
+    } = session.begin_chat_search_jump(MessageId(90))
+    else {
+        panic!("90 is outside the loaded window");
+    };
     apply_json(
         &mut session,
         &seq,
@@ -707,11 +707,12 @@ fn chat_search_jump_missing_deleted_and_inaccessible() {
             auto_delete: None,
             date: 0,
         });
-    assert_eq!(
-        session.begin_chat_search_jump(MessageId(80)),
-        ChatSearchJumpNeed::LoadAround
-    );
-    let around = session.request_history_around(ChatId(11), MessageId(80));
+    let ChatSearchJumpNeed::LoadAround {
+        request: around, ..
+    } = session.begin_chat_search_jump(MessageId(80))
+    else {
+        panic!("80 is outside the loaded window");
+    };
     apply_json(
         &mut session,
         &seq,
@@ -758,8 +759,10 @@ fn public_search_results_accepted() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     session.open_search();
-    let search_gen = session.search.search.begin_query("quill");
-    let public_extra = session.request_search(RequestPurpose::SearchPublicChats, search_gen);
+    session.search.search.begin_query("quill");
+    let public_extra = session.request_search(RequestPurpose::SearchPublicChats);
+    let chats_extra = session.request_search(RequestPurpose::SearchChats);
+    let messages_extra = session.request_search(RequestPurpose::SearchMessages);
     apply_json(
         &mut session,
         &seq,
@@ -772,8 +775,6 @@ fn public_search_results_accepted() {
     assert_eq!(session.search.search.public_chat_ids, vec![ChatId(42)]);
     // Still waiting on `searchChats` / `searchMessages` → still Searching.
     assert_eq!(session.search.search.status(), SearchStatus::Searching);
-    let chats_extra = session.request_search(RequestPurpose::SearchChats, search_gen);
-    let messages_extra = session.request_search(RequestPurpose::SearchMessages, search_gen);
     apply_json(
         &mut session,
         &seq,
@@ -800,10 +801,10 @@ fn public_search_error_resolves_status() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     session.open_search();
-    let search_gen = session.search.search.begin_query("zzz");
-    let public_extra = session.request_search(RequestPurpose::SearchPublicChats, search_gen);
-    let chats_extra = session.request_search(RequestPurpose::SearchChats, search_gen);
-    let messages_extra = session.request_search(RequestPurpose::SearchMessages, search_gen);
+    session.search.search.begin_query("zzz");
+    let public_extra = session.request_search(RequestPurpose::SearchPublicChats);
+    let chats_extra = session.request_search(RequestPurpose::SearchChats);
+    let messages_extra = session.request_search(RequestPurpose::SearchMessages);
     apply_json(
         &mut session,
         &seq,
@@ -1052,6 +1053,9 @@ fn an_error_on_one_leg_with_results_on_another_is_ready() {
     let mut search = SearchState::default();
     search.open_field();
     search.begin_query("ada");
+    search.leg_sent(RequestPurpose::SearchChats, RequestId(1));
+    search.leg_sent(RequestPurpose::SearchMessages, RequestId(2));
+    search.leg_sent(RequestPurpose::SearchPublicChats, RequestId(3));
     assert_eq!(search.status(), SearchStatus::Searching);
     search.accept_chats(Vec::new(), true);
     search.accept_public_chats(Vec::new(), false);
@@ -1071,11 +1075,13 @@ fn status_follows_open_and_the_legs() {
     search.open_field();
     assert_eq!(search.status(), SearchStatus::Idle);
     search.begin_recents();
+    search.leg_sent(RequestPurpose::SearchRecentlyFoundChats, RequestId(1));
     assert_eq!(search.status(), SearchStatus::Searching);
     search.accept_chats(Vec::new(), false);
     assert_eq!(search.status(), SearchStatus::Idle);
     search.begin_query("x");
     search.begin_public_scope();
+    search.leg_sent(RequestPurpose::SearchPublicPosts, RequestId(2));
     assert_eq!(search.status(), SearchStatus::Searching);
     search.accept_messages(Vec::new(), false);
     assert_eq!(search.status(), SearchStatus::Empty);
@@ -1319,15 +1325,15 @@ fn the_in_chat_search_bar_is_replaced_whole_on_close_and_on_another_chat() {
 }
 
 /// r2-18 05-085: the demo's local filter goes through the search's own
-/// transitions, so it starts a generation and drops a typed query waiting.
+/// transitions, so it starts a new list and drops a typed query waiting.
 #[test]
-fn the_local_global_filter_starts_a_new_generation() {
+fn the_local_global_filter_starts_a_new_epoch() {
     let (mut session, _sink) = session();
     session.search.search.open_field();
-    let before = session.search.search.generation;
+    let before = session.search.search.epoch;
     session.search.search.typed.arm("old".to_string());
     session.apply_local_search_filter("cats");
-    assert!(session.search.search.generation > before);
+    assert!(session.search.search.epoch > before);
     assert!(session.search.search.typed.armed().is_none());
     assert_eq!(session.search.search.query, "cats");
     assert!(session.search.search.is_open());
@@ -1345,10 +1351,13 @@ fn a_date_jump_waiting_for_its_window_lives_in_the_jump_stage() {
     let (mut session, _sink) = session();
     session.open_chat(ChatId(5));
     let need = session.begin_date_jump(MessageId(50), DateJumpMode::Next);
-    assert_eq!(need, ChatSearchJumpNeed::LoadAround);
+    let ChatSearchJumpNeed::LoadAround { request, .. } = need else {
+        panic!("50 is outside the loaded window");
+    };
     assert_eq!(
         session.search.chat_search.jump,
         ChatSearchJump::Loading {
+            request,
             message_id: MessageId(50),
             then: JumpLanding::Date {
                 chat_id: ChatId(5),
@@ -1369,6 +1378,7 @@ fn a_date_jump_waiting_for_its_window_lives_in_the_jump_stage() {
     assert_eq!(
         session.search.chat_search.jump,
         ChatSearchJump::Loading {
+            request,
             message_id: MessageId(50),
             then: JumpLanding::Message
         }
@@ -1412,4 +1422,57 @@ fn r2_an_older_pinned_fetch_neither_lands_nor_fails_over_the_newer_one() {
         }
         assert_eq!(session.pinned_list(ChatId(16)).len(), 1);
     }
+}
+
+/// r3-06 09-009: jump to A, jump to B, jump back to A while the first around
+/// page is still out. Only the newest request's answer settles the jump.
+#[test]
+fn an_older_around_page_for_the_same_message_does_not_settle_a_later_jump() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewChat","chat":{"id":11,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":11},"unread_count":0}}"#,
+    );
+    session.open_chat(ChatId(11));
+    let jump = |session: &mut Session, id: i64| match session.begin_chat_search_jump(MessageId(id))
+    {
+        ChatSearchJumpNeed::LoadAround { request, .. } => request,
+        other => panic!("{other:?}"),
+    };
+    let first = jump(&mut session, 50);
+    let _other = jump(&mut session, 60);
+    let again = jump(&mut session, 50);
+    assert_ne!(first, again);
+    assert_eq!(
+        session.search.chat_search.jump,
+        ChatSearchJump::Loading {
+            request: again,
+            message_id: MessageId(50),
+            then: JumpLanding::Message
+        }
+    );
+    let page = |extra: RequestId| {
+        format!(
+            r#"{{"@type":"messages","@extra":"{}","total_count":1,"messages":[{{"id":50,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"fifty","entities":[]}}}}}}]}}"#,
+            extra.0
+        )
+    };
+    apply_json(&mut session, &seq, &sink, &page(first));
+    assert!(
+        matches!(
+            session.search.chat_search.jump,
+            ChatSearchJump::Loading { request, .. } if request == again
+        ),
+        "the first request's page is not the answer to the third jump"
+    );
+    apply_json(&mut session, &seq, &sink, &page(again));
+    assert_eq!(
+        session.search.chat_search.jump,
+        ChatSearchJump::Ready {
+            message_id: MessageId(50)
+        }
+    );
 }

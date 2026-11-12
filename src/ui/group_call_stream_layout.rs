@@ -156,10 +156,6 @@ pub(crate) struct StreamFacts {
     pub(crate) server_known: bool,
     pub(crate) recording: bool,
     pub(crate) share_link: bool,
-    /// The call's transport failed. A join clears it, so while a join
-    /// waits it is that join's failure; a failed screen share is kept
-    /// apart (`screen_share_error`).
-    pub(crate) transport_failed: bool,
 }
 
 /// Whether `call` shows in the live stream layout: a running RTMP stream
@@ -239,7 +235,6 @@ impl QuillApp {
             server_known: call.rtmp.as_ref().is_some_and(|rtmp| !rtmp.url.is_empty()),
             recording: call.record_duration > 0,
             share_link: self.group_call_can_share_link(call),
-            transport_failed: call.transport.error().is_some(),
         })
     }
 
@@ -308,7 +303,16 @@ impl QuillApp {
             self.stream_join_failed();
         } else if facts.joined {
             self.group_call_screen.clear_stream_joining();
-        } else if facts.transport_failed {
+        } else if self.session().is_some_and(|session| {
+            // The call's transport failed: a join clears it, so while a
+            // join waits it is that join's failure (a failed screen share
+            // is kept apart, `screen_share_error`).
+            session
+                .calls
+                .active_group_call
+                .as_ref()
+                .is_some_and(|call| call.id == facts.id && call.transport.error().is_some())
+        }) {
             // The connect failed without a join error.
             self.stream_join_failed();
         } else if self

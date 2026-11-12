@@ -777,7 +777,11 @@ impl QuillApp {
                 .viewer
                 .waiting()
                 .is_some_and(|open| open.if_gone.is_some())
-            || self.stories.viewer_ui().menu_open
+            || self
+                .stories
+                .viewer_ui()
+                .menu
+                .holds(self.stories.viewer.current().map(StoryViewerItem::key))
             || self.stories.stealth_box.is_some()
             // Edit and Repost open the composer over the viewer: the story
             // under it must not play on, and TDLib must not mark the next

@@ -407,17 +407,18 @@ fn the_chooser_goes_with_its_video_chat(cx: &mut TestAppContext) {
 fn a_failed_listing_forgets_the_call_it_was_for(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, ScreenAccess::Granted);
     app.update_in(&mut vcx, |app, _, cx| {
-        let generation = app.screen_share.generation;
+        let backend = app.screen_backend().expect("the test backend");
+        let list = cx.spawn(async |_, _| {});
         app.screen_share.chooser = crate::ui::screen_share_state::Chooser::Listing {
             target: crate::ui::screen_share_state::ChooserTarget {
                 for_call: ScreenFor::Group,
                 group_call: None,
             },
             epoch: app.screen_epoch(),
-            generation,
+            _list: list,
         };
         let err = quill::calls::capture::CaptureError::Device("gone".into());
-        assert!(!app.screen_chooser_listed(generation, Err(err), cx));
+        assert!(!app.screen_chooser_listed(Err(err), backend, cx));
         assert!(app.screen_share.chooser.sharing_into().is_none());
         assert!(app.screen_share.window().is_none());
     });

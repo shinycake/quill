@@ -29,6 +29,7 @@ impl QuillApp {
         }
         if let Some(live) = self.live.as_mut() {
             live.driver.pump_psa_labels();
+            live.driver.pump_wanted_full_infos();
         }
         // M1: a `messageLink` response lands here (`getMessageLink`) —
         // copy the link to the clipboard, exactly like tdesktop's "Copy
@@ -195,33 +196,20 @@ impl QuillApp {
             self.set_note(StatusNote::info(note));
             progressed = true;
         }
-        // Slice G1 fix-up: `updateChatMember` dropped the member-list
-        // caches — refetch the open dialog's page so it shows the new
-        // membership instead of sticking on "Loading members…".
-        let stale_chats: Vec<i64> = self
-            .live
-            .as_mut()
-            .map(|live| std::mem::take(&mut live.driver.session.groups.member_list_stale))
-            .unwrap_or_default();
-        if self
-            .admin
-            .member_dialog
-            .as_ref()
-            .is_some_and(|dialog| stale_chats.contains(&dialog.chat_id.0))
-        {
-            self.refresh_member_dialog(cx);
+        // Slice G1 fix-up: a membership change made the member lists and
+        // the administrators `Stale`: the ones on screen ask again, so
+        // they show the new membership instead of sticking on "Loading
+        // members…". A list nobody shows stays `Stale` until it is shown.
+        if self.member_dialog_is_stale() {
+            self.refresh_shown_member_dialog(cx);
             progressed = true;
         }
-        self.inline_members_stale(&stale_chats, cx);
-        // The Administrators list of a stale chat asks again: it is fetched
-        // only on open, and would otherwise draw "Loading" forever.
-        if !stale_chats.is_empty()
-            && let Some(live) = self.live.as_mut()
-        {
-            for chat in &stale_chats {
-                if !live.driver.session.groups.admin_lists.contains_key(chat)
-                    && let Ok(Some(_)) = live.driver.fetch_chat_administrators(ChatId(*chat))
-                {
+        self.inline_members_refresh_stale(cx);
+        // The Administrators lists that went stale ask again: they are
+        // fetched only on open, and would otherwise draw "Loading" forever.
+        if let Some(live) = self.live.as_mut() {
+            for chat in live.driver.session.groups.stale_admin_chats() {
+                if let Ok(Some(_)) = live.driver.fetch_chat_administrators(ChatId(chat)) {
                     progressed = true;
                 }
             }

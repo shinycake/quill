@@ -15,7 +15,7 @@ use gpui_kit::{
 use quill::ai_compose::{StyleChoice, StyleLimitNotice, prefs};
 use quill::ids::RequestId;
 use quill::settings::CustomKeybinding;
-use quill::state::{StyleEditAnswer, StyleNotice};
+use quill::state::StyleNotice;
 
 /// The Create the editor under test waits on.
 const SAVE: RequestId = RequestId(41);
@@ -113,10 +113,9 @@ fn a_saved_style_closes_the_editor_and_is_selected(cx: &mut gpui_kit::TestAppCon
         };
         let ai = &mut session.messages.ai_compose;
         let pirate = ai.styles.find("pirate").cloned();
-        ai.style_edit = pirate.map(|style| StyleEditAnswer {
-            request: SAVE,
-            outcome: Ok(style),
-        });
+        if let Some(style) = pirate {
+            ai.style_edits.push(SAVE, Ok(style));
+        }
         // An answer to some other request would leave the editor open.
         if let Some(editor) = app.ai_style_editor_mut() {
             editor.save = StyleSave::Sent { request: SAVE };
@@ -145,10 +144,9 @@ fn another_requests_save_answer_leaves_the_editor_open(cx: &mut gpui_kit::TestAp
         };
         let ai = &mut session.messages.ai_compose;
         let pirate = ai.styles.find("pirate").cloned();
-        ai.style_edit = pirate.map(|style| StyleEditAnswer {
-            request: RequestId(SAVE.0 + 1),
-            outcome: Ok(style),
-        });
+        if let Some(style) = pirate {
+            ai.style_edits.push(RequestId(SAVE.0 + 1), Ok(style));
+        }
         if let Some(editor) = app.ai_style_editor_mut() {
             editor.save = StyleSave::Sent { request: SAVE };
         }
@@ -199,8 +197,10 @@ fn the_saved_style_limit_toasts_once(cx: &mut gpui_kit::TestAppContext) {
     let before = toasts(&mut main);
     app.update(&mut main, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.messages.ai_compose.style_notice =
-                Some(StyleNotice::Limit(StyleLimitNotice::Promo {
+            session
+                .messages
+                .ai_compose
+                .show_style_notice(StyleNotice::Limit(StyleLimitNotice::Promo {
                     count: 5,
                     premium_count: 20,
                 }));

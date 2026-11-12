@@ -97,6 +97,18 @@ fn resale_page(numbers: &[i32]) -> Value {
         "models": [], "symbols": [], "backdrops": [], "next_offset": "next"})
 }
 
+/// The success toasts (title, text) the market queued, oldest first.
+fn toasts(session: &mut crate::state::Session) -> Vec<(String, String)> {
+    session
+        .take_gift_market_events()
+        .into_iter()
+        .filter_map(|event| match event {
+            crate::gift_market::MarketEvent::Toast { title, text } => Some((title, text)),
+            _ => None,
+        })
+        .collect()
+}
+
 #[test]
 fn resale_search_sends_filters_and_pages() {
     let mut f = Fixture::new();
@@ -235,7 +247,7 @@ fn resale_buy_sends_the_confirmed_price_and_handles_a_change() {
     let market = &f.driver.session.payments.gift_market;
     assert!(market.buy.is_none());
     assert_eq!(market.resale.as_ref().unwrap().listings.len(), 1);
-    let toasts = f.driver.session.take_gift_market_toasts();
+    let toasts = toasts(&mut f.driver.session);
     assert_eq!(
         toasts,
         vec![(
@@ -341,7 +353,7 @@ fn auction_link_follow_and_bids() {
     f.answer("placeGiftAuctionBid", json!({"@type": "ok"}));
     assert!(f.driver.session.payments.gift_market.bidding.is_none());
     assert_eq!(
-        f.driver.session.take_gift_market_toasts()[0].0,
+        toasts(&mut f.driver.session)[0].0,
         "Your bid has been placed"
     );
     f.ingest(
@@ -605,7 +617,7 @@ fn craft_buys_a_listing_into_a_slot() {
     assert_eq!(craft.slots.len(), 2);
     assert_eq!(craft.slots[1].received_gift_id, "bought");
     assert!(craft.market.listings.is_empty());
-    assert!(f.driver.session.take_gift_market_toasts().is_empty());
+    assert!(toasts(&mut f.driver.session).is_empty());
 }
 
 /// A failed "your gifts" list in Select Gifts keeps its error for the box to
@@ -695,11 +707,7 @@ fn opening_the_resale_list_keeps_a_buy_that_is_out() {
         json!({"@type": "giftResaleResultOk", "received_gift_id": "rx"}),
     );
     assert!(f.driver.session.payments.gift_market.buy.is_none());
-    assert_eq!(
-        f.driver.session.take_gift_market_toasts().len(),
-        1,
-        "its answer landed"
-    );
+    assert_eq!(toasts(&mut f.driver.session).len(), 1, "its answer landed");
 }
 
 /// A bid owned by a channel can be raised (`increaseGiftAuctionBid` needs

@@ -238,6 +238,8 @@ pub struct PollAddOption {
     pub(crate) message_id: MessageId,
     pub(crate) input: Entity<TextareaState>,
     pub(crate) attach: OptionAttach,
+    /// Whether Add is out (`checklists.rs`).
+    pub(crate) send: super::checklist::DialogSend,
     /// The reason Add was refused, drawn under the field.
     error: Option<&'static str>,
     /// The field, until the dialog has mounted and focused it (the kit
@@ -258,6 +260,7 @@ impl PollAddOption {
             focus_on_mount: Some(input.clone()),
             input,
             attach: Default::default(),
+            send: Default::default(),
             error: None,
         }
     }

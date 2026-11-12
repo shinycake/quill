@@ -5,7 +5,7 @@ use crate::giveaway::{
     settle_gift_code_months, settle_premium, settle_stars,
 };
 use crate::telegram::envelope::{
-    GiveawayInfoData, GiveawayParticipantStatus, GiveawayPrize, GiveawaySummary,
+    GiveawayCard, GiveawayInfoData, GiveawayParticipantStatus, GiveawayPrize, GiveawaySummary,
     ParsedPrepaidGiveaway, PremiumGiveawayOption, SecretCode, StarGiveawayOption,
 };
 use serde_json::json;
@@ -157,17 +157,14 @@ fn a_prepaid_giveaway_fixes_prize_and_winners() {
 fn summary(prize: GiveawayPrize) -> GiveawaySummary {
     GiveawaySummary {
         boosted_chat_id: -1,
-        info_message_id: 0,
         additional_chat_count: 0,
         selection_date: 2,
         only_new_members: false,
         has_public_winners: true,
         prize_description: String::new(),
         winner_count: 5,
-        unclaimed_count: 0,
         prize,
-        finished: false,
-        was_refunded: false,
+        card: GiveawayCard::Start,
     }
 }
 

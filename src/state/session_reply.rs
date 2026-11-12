@@ -581,14 +581,29 @@ impl Session {
         wanted
     }
 
-    /// `getRepliedMessage` answer: keep the message beside the history
-    /// (it never enters the loaded window).
+    /// Whether the row `(chat_id, message_id)` waits for exactly `request`:
+    /// an older ask's answer or error (the row was asked again after a
+    /// failure), or one for a row pruned meanwhile, finds another stage.
+    fn reply_waits_for(&self, request: RequestId, chat_id: ChatId, message_id: MessageId) -> bool {
+        matches!(
+            self.messages.reply_targets.get(&(chat_id.0, message_id.0)),
+            Some(ReplyTarget::Loading { request: asked, .. }) if *asked == request
+        )
+    }
+
+    /// `getRepliedMessage` answer of `request`: keep the message beside the
+    /// history (it never enters the loaded window). Only the ask the row
+    /// waits for counts.
     pub(crate) fn accept_replied_message(
         &mut self,
+        request: RequestId,
         chat_id: ChatId,
         message_id: MessageId,
         message: ParsedMessage,
     ) {
+        if !self.reply_waits_for(request, chat_id, message_id) {
+            return;
+        }
         self.remember_files(&message.files);
         self.messages.reply_targets.insert(
             (chat_id.0, message_id.0),
@@ -711,22 +726,28 @@ impl Session {
         }
     }
 
-    /// `getRepliedMessage` failed with `code`. Only a not-found or invalid
-    /// answer means the original is gone; any other error is asked for
-    /// again after a wait, and the strip keeps loading meanwhile.
+    /// `getRepliedMessage` of `request` failed with `code`. Only a not-found
+    /// or invalid answer means the original is gone; any other error is
+    /// asked for again after a wait, and the strip keeps loading meanwhile.
+    /// Only the ask the row waits for counts: an older ask's late error
+    /// neither bumps the attempts nor flips the row to Missing.
     pub(crate) fn reject_replied_message(
         &mut self,
+        request: RequestId,
         chat_id: ChatId,
         message_id: MessageId,
         code: i32,
         now: std::time::Instant,
     ) {
-        let attempts = match self.messages.reply_targets.get(&(chat_id.0, message_id.0)) {
-            Some(ReplyTarget::Loading { attempts, .. } | ReplyTarget::Retry { attempts, .. }) => {
-                attempts.saturating_add(1)
-            }
-            _ => 1,
+        let Some(ReplyTarget::Loading { attempts, .. }) =
+            self.messages.reply_targets.get(&(chat_id.0, message_id.0))
+        else {
+            return;
         };
+        if !self.reply_waits_for(request, chat_id, message_id) {
+            return;
+        }
+        let attempts = attempts.saturating_add(1);
         let target = if matches!(code, 400 | 404) || attempts >= MAX_REPLY_ATTEMPTS {
             ReplyTarget::Missing
         } else {

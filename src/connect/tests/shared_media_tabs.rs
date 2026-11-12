@@ -64,10 +64,10 @@ fn opening_the_gallery_asks_for_counts_and_the_profile_tabs_of_a_user() {
     // Saved music is not a tab: it is asked for with the profile.
     assert!(!sent.contains(&"getUserProfileAudios".to_string()));
     let gallery = &driver.session.media.shared_media;
-    assert_eq!(
+    assert!(matches!(
         gallery.tabs[SharedMediaTab::Gifts.index()].status,
-        crate::state::SharedMediaTabStatus::Loading
-    );
+        crate::state::SharedMediaTabStatus::Loading { .. }
+    ));
     // Reopening keeps what was fetched and asks for nothing new.
     let before = recorder.snapshot().len();
     assert!(driver.open_shared_media().unwrap());

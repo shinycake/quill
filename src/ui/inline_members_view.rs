@@ -12,7 +12,6 @@ use gpui_kit::component::menu::ContextMenuExt as _;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::ids::RequestId;
 use quill::inline_members::{
     member_badge, members_title, online_sort_value, search_available, sort_online_first,
     sorts_by_online,
@@ -31,14 +30,12 @@ struct MemberRow {
     is_bot: bool,
 }
 
-/// Where the member list stands. `Loading` holds the last page while a
-/// membership change refetches it; `Failed` holds no rows.
-enum MembersStage {
-    /// The session's fetch is out as `request` (`None`: not sent yet).
-    Loading {
-        #[expect(dead_code, reason = "names the fetch the drawn rows wait for")]
-        request: Option<RequestId>,
-    },
+/// What the list draws, derived each frame from the session's
+/// `SupergroupMembersFetch` (which holds the request and is settled by its
+/// `RequestId`). `Fetching` keeps the last page up while a membership change
+/// refetches it; `Failed` holds no rows.
+enum MembersFetchView {
+    Fetching,
     Ready,
     Failed(String),
 }
@@ -47,7 +44,7 @@ enum MembersStage {
 struct MembersView {
     rows: Vec<MemberRow>,
     total: i32,
-    stage: MembersStage,
+    stage: MembersFetchView,
     /// The members are hidden from the viewer: this is the admin list.
     admins_only: bool,
 }
@@ -63,7 +60,9 @@ impl QuillApp {
         let session = self.session()?;
         let chat_id = shape.chat;
         let view = self.inline_members_view(shape);
-        if matches!(view.stage, MembersStage::Failed(_)) && shape.is_channel && view.rows.is_empty()
+        if matches!(view.stage, MembersFetchView::Failed(_))
+            && shape.is_channel
+            && view.rows.is_empty()
         {
             return None;
         }
@@ -143,28 +142,26 @@ impl QuillApp {
                 .child(text)
                 .into_any_element()
         };
-        if let (MembersStage::Failed(message), true) = (&view.stage, view.rows.is_empty()) {
+        if let (MembersFetchView::Failed(message), true) = (&view.stage, view.rows.is_empty()) {
             let message = message.clone();
             list = list.child(hint(message)).child(ghost_text_button(
                 "inline-members-retry",
                 tr(keys::Q_MEDIA_RETRY),
                 cx.listener(move |this, _, _, cx| {
-                    this.inline_members_stale(&[chat_id.0], cx);
+                    this.inline_members_retry(cx);
                 }),
             ));
         } else if view.rows.is_empty() {
-            list = list.child(hint(
-                if matches!(view.stage, MembersStage::Loading { .. }) {
-                    tr(keys::Q_MEDIA_LOADING_MEMBERS).to_string()
-                } else {
-                    tr(keys::Q_MEDIA_NO_MEMBERS).to_string()
-                },
-            ));
+            list = list.child(hint(if matches!(view.stage, MembersFetchView::Fetching) {
+                tr(keys::Q_MEDIA_LOADING_MEMBERS).to_string()
+            } else {
+                tr(keys::Q_MEDIA_NO_MEMBERS).to_string()
+            }));
         }
         for row in view.rows.iter().take(shown) {
             list = list.child(self.inline_member_row(chat_id, row, &roots, cx));
         }
-        if matches!(view.stage, MembersStage::Loading { .. }) && !view.rows.is_empty() {
+        if matches!(view.stage, MembersFetchView::Fetching) && !view.rows.is_empty() {
             list = list.child(hint(tr(keys::Q_MEDIA_LOADING).to_string()));
         }
         block = block.child(list);
@@ -183,7 +180,7 @@ impl QuillApp {
         let empty = MembersView {
             rows: Vec::new(),
             total: 0,
-            stage: MembersStage::Loading { request: None },
+            stage: MembersFetchView::Fetching,
             admins_only: false,
         };
         let Some(session) = self.session() else {
@@ -194,33 +191,36 @@ impl QuillApp {
         let fetch = if shape.is_basic {
             session.groups.basic_group_members.get(&shape.chat.0)
         } else {
-            session
-                .groups
-                .supergroup_members
-                .get(&(shape.chat.0, filter))
+            session.groups.member_fetch((shape.chat.0, filter))
         };
         let (members, total, stage) = match fetch {
             Some(SupergroupMembersFetch::Loaded {
                 members,
                 total_count,
-            }) => (members.clone(), *total_count, MembersStage::Ready),
+            }) => (members.clone(), *total_count, MembersFetchView::Ready),
             Some(
                 SupergroupMembersFetch::Failed(message) | SupergroupMembersFetch::NotSent(message),
-            ) => (Vec::new(), 0, MembersStage::Failed(message.clone())),
+            ) => (Vec::new(), 0, MembersFetchView::Failed(message.clone())),
             // The page a membership change dropped stays up while its
             // refetch runs.
             Some(SupergroupMembersFetch::Loading {
-                request,
-                last: Some(last),
+                last: Some(last), ..
             }) if !admins_only => (
                 last.members.clone(),
                 last.total_count,
-                MembersStage::Loading { request: *request },
+                MembersFetchView::Fetching,
             ),
-            Some(SupergroupMembersFetch::Loading { request, .. }) => {
-                (Vec::new(), 0, MembersStage::Loading { request: *request })
+            // A stale list keeps its last page up; whoever shows it (the
+            // poll, for the one on screen) asks again.
+            Some(SupergroupMembersFetch::Stale { last: Some(last) }) if !admins_only => (
+                last.members.clone(),
+                last.total_count,
+                MembersFetchView::Fetching,
+            ),
+            Some(SupergroupMembersFetch::Loading { .. } | SupergroupMembersFetch::Stale { .. }) => {
+                (Vec::new(), 0, MembersFetchView::Fetching)
             }
-            None => (Vec::new(), 0, MembersStage::Loading { request: None }),
+            None => (Vec::new(), 0, MembersFetchView::Fetching),
         };
         let mut rows: Vec<MemberRow> = members
             .into_iter()

@@ -147,7 +147,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Some(chat_id),
             );
             match self.send_audience(extra, &get_message_viewers(extra, chat_id, message_id)) {
-                Ok(()) => self.session.audience_viewers_loading(chat_id, message_id),
+                Ok(()) => self
+                    .session
+                    .audience_viewers_loading(chat_id, message_id, extra),
                 Err(err) => {
                     if let Some(a) = self.session.audience_for(chat_id, message_id) {
                         a.viewers = Audience::Failed;
@@ -165,7 +167,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Some(chat_id),
             );
             match self.send_audience(extra, &get_message_read_date(extra, chat_id, message_id)) {
-                Ok(()) => self.session.audience_read_date_loading(chat_id, message_id),
+                Ok(()) => self
+                    .session
+                    .audience_read_date_loading(chat_id, message_id, extra),
                 Err(err) => {
                     if let Some(a) = self.session.audience_for(chat_id, message_id) {
                         a.read_date = Audience::Failed;
@@ -183,7 +187,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Some(chat_id),
             );
             match self.send_audience(extra, &get_message_author(extra, chat_id, message_id)) {
-                Ok(()) => self.session.audience_author_loading(chat_id, message_id),
+                Ok(()) => self
+                    .session
+                    .audience_author_loading(chat_id, message_id, extra),
                 Err(err) => {
                     if let Some(a) = self.session.audience_for(chat_id, message_id) {
                         a.author = Audience::Failed;
@@ -211,7 +217,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                 ADDED_REACTIONS_PAGE,
             );
             match self.send_audience(extra, &json) {
-                Ok(()) => self.session.audience_reactions_loading(chat_id, message_id),
+                Ok(()) => self
+                    .session
+                    .audience_reactions_loading(chat_id, message_id, extra),
                 Err(err) => {
                     if let Some(a) = self.session.audience_for(chat_id, message_id) {
                         a.reactions = Audience::Failed;
@@ -293,10 +301,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         )?;
         if more {
             self.session
-                .audience_tab_loading_more(chat_id, message_id, filter);
+                .audience_tab_loading_more(chat_id, message_id, filter, extra);
         } else {
             self.session
-                .audience_tab_loading(chat_id, message_id, filter);
+                .audience_tab_loading(chat_id, message_id, filter, extra);
         }
         Ok(())
     }

@@ -90,10 +90,6 @@ pub(super) struct EditMode {
     pub(super) stashed_draft: String,
     /// Reply that belonged to the stashed draft, restored with it on leaving.
     pub(super) stashed_reply: Option<ComposerReplyTo>,
-    /// B5: "Send as a document" for the replacement file while editing
-    /// media (tdesktop `EditCaptionBox::_asFile`). The edit's own choice:
-    /// another edit starts without it.
-    pub(super) replace_as_file: bool,
 }
 
 /// One edit, told apart from every other (an edit cancelled and one started
@@ -231,10 +227,6 @@ pub(crate) struct ChatUi {
     /// chat and topic: another chat's strip with the same index, count and
     /// width starts at the old scroll offset until it is revealed.
     pub(super) tabs_revealed: std::cell::Cell<Option<super::folder_tabs_fit::RevealKey>>,
-    /// The 1 s tick task of this chat's self-destruct countdown badges
-    /// (phase B3). Held by the chat's value, so the chat changing drops it
-    /// and a return to the chat starts one task, not two.
-    pub(super) self_destruct_tick: Option<(ChatId, gpui_kit::Task<()>)>,
     /// Cross-fade timeline of the round Send / Record / Save button. A
     /// chat starts with none, so its button begins settled instead of
     /// fading from the chat before.
@@ -479,21 +471,15 @@ impl ChatUi {
             edit,
             stashed_draft,
             stashed_reply,
-            replace_as_file: false,
         });
     }
 
-    /// "Send as a document" ticked for the replacement of the edit in place.
+    /// "Send as a document" ticked for the replacement of the edit in place
+    /// (tdesktop `EditCaptionBox::_asFile`): the staged replacement's own
+    /// choice.
     pub(super) fn edit_replace_as_file(&self) -> bool {
-        self.edit_mode
-            .as_ref()
-            .is_some_and(|mode| mode.replace_as_file)
-    }
-
-    pub(super) fn set_edit_replace_as_file(&mut self, on: bool) {
-        if let Some(mode) = self.edit_mode.as_mut() {
-            mode.replace_as_file = on;
-        }
+        self.pending_edit()
+            .is_some_and(ComposerEdit::replacement_as_file)
     }
 
     /// Leave edit mode (and with it the cancel box), handing back what was
@@ -623,6 +609,14 @@ impl QuillApp {
         // A rich send still waiting goes on waiting off the view, so a
         // refusal after the chat changed still gives the text back.
         self.leave_sent_text(std::mem::take(&mut old.sent_text));
+        if let Some(request) = old
+            .checklist_dialog
+            .as_ref()
+            .and_then(|dialog| dialog.send.request())
+            && let Some(live) = self.live.as_mut()
+        {
+            live.driver.session.acks.forget(request);
+        }
         if let Some(request) = old.scheduled_box.loading()
             && let Some(live) = self.live.as_mut()
         {

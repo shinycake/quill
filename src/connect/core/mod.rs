@@ -428,7 +428,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .and_then(|id| self.session.requests.get(id))
             .and_then(|pending| {
                 (pending.purpose == RequestPurpose::SetCommunityName)
-                    .then_some(pending.community_id)
+                    .then_some(pending.community_id())
                     .flatten()
             });
         // Batch 6: a confirmed `optimizeStorage` drops the cached storage
@@ -867,6 +867,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if sticker_set_changed {
             self.drop_in_flight(RequestPurpose::GetInstalledStickerSets);
+            // The load that was out asked before the change: the list is
+            // fetched again whether or not the panel is open.
+            self.session.stickers.stickers.lists.installed.outdate();
             if self.session.stickers.stickers.open {
                 self.refresh_installed_sticker_sets()?;
             }

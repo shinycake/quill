@@ -21,6 +21,11 @@ impl Session {
         {
             self.finish_pending_bot_stop(chat_id, topic_id, draft_id);
         }
+        if let Some(pending) = pending
+            && pending.purpose == RequestPurpose::LoadSavedMessagesTopics
+        {
+            self.threads.saved.page_answered(pending.id);
+        }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::RemoveSavedNotificationSound) {
             self.mark_saved_sounds_stale();
         }
@@ -39,7 +44,11 @@ impl Session {
                 )
             )
         {
-            self.topic_action_answered(request, true);
+            self.topic_action_answered(
+                request,
+                pending.map(|p| p.asked_in).unwrap_or_default(),
+                true,
+            );
         }
         self.apply_gift_code_ok(pending);
         self.apply_giveaway_ok(pending);
@@ -58,6 +67,16 @@ impl Session {
         self.apply_sticker_creator_ok(pending);
         self.apply_gift_market_ok(pending);
         self.apply_stories_ok(pending);
+        // A page of a direct messages chat's conversations answered: the
+        // next one may be asked.
+        if let Some(pending) =
+            pending.filter(|p| p.purpose == RequestPurpose::LoadDirectMessagesChatTopics)
+            && let Some(chat_id) = pending.chat_id
+        {
+            self.threads
+                .direct
+                .page_answered(chat_id.0, Some(pending.id));
+        }
         self.apply_share_theme_ok(pending);
         self.apply_group_type_ok(pending);
         self.apply_ai_compose_ok(pending);
@@ -248,7 +267,7 @@ impl Session {
         ) {
             // Only the terms that were accepted: newer ones pushed while
             // the request was out stay for the user to answer.
-            let accepted = pending.and_then(|p| p.subject_id.as_deref());
+            let accepted = pending.and_then(|p| p.subject_id());
             self.settings.notices.terms.accepted(accepted);
         }
         // Batch 6: a 2FA step answered `ok` (cancel reset, login email
@@ -294,7 +313,7 @@ impl Session {
                 self.payments.hub.received.notice = None;
                 // The panel and the box close only when they are still the
                 // sold gift's: the user may have opened another meanwhile.
-                let sold = pending.and_then(|p| p.subject_id.as_deref());
+                let sold = pending.and_then(|p| p.subject_id());
                 self.payments.hub.received.view.close_if_selected(sold);
                 self.payments.hub.stars.page.invalidate();
             }
@@ -324,13 +343,13 @@ impl Session {
         if let Some(RequestPurpose::Stickers(StickersPurpose::ManageStickerSet {
             set_id,
             installed,
-            archived,
+            ..
         })) = pending.map(|p| p.purpose)
         {
             if let Some(request) = pending.map(|p| p.id) {
                 self.finish_sticker_batch_item(request, true);
+                self.finish_set_change(request, set_id, true);
             }
-            self.finish_set_change(set_id, SetChange::of(installed, archived), true);
             for sets in [
                 &mut self.stickers.stickers.trending,
                 &mut self.stickers.stickers.search.sets,
@@ -421,7 +440,7 @@ impl Session {
             // full-info pack so the driver refetches it; the new
             // name itself arrives via `updateCommunity`.
             Some(RequestPurpose::SetCommunityName) => {
-                if let Some(community_id) = pending.and_then(|p| p.community_id) {
+                if let Some(community_id) = pending.and_then(|p| p.community_id()) {
                     self.groups.community_full_infos.outdate(community_id);
                 }
             }
@@ -430,7 +449,7 @@ impl Session {
             // `updateCommunity` before this `ok`; a later one with
             // `have_access = false` is filtered out of the hub.)
             Some(RequestPurpose::DeleteCommunity) => {
-                if let Some(community_id) = pending.and_then(|p| p.community_id) {
+                if let Some(community_id) = pending.and_then(|p| p.community_id()) {
                     self.groups.communities.remove(&community_id);
                     self.groups.community_full_infos.remove(&community_id);
                 }
@@ -449,11 +468,11 @@ impl Session {
             }
             // Phase 9.7: `reorderStoryAlbums` confirmed — apply
             // the sent album order (correlated via
-            // `PendingRequest::story_ids`); albums missing from
+            // `Correlation::StoryAlbum`); albums missing from
             // the order keep their relative order at the end.
             Some(RequestPurpose::ReorderStoryAlbums) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id)
-                    && let Some(order) = pending.and_then(|p| p.story_ids.clone())
+                    && let Some(order) = pending.and_then(|p| p.story_ids().map(<[i32]>::to_vec))
                     && let Some(albums) = self.stories.albums.get_mut(&chat_id.0)
                 {
                     let mut reordered = Vec::with_capacity(albums.len());
@@ -477,7 +496,7 @@ impl Session {
             // story ids.
             Some(RequestPurpose::DeleteStoryAlbum) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id)
-                    && let Some(album_id) = pending.and_then(|p| p.story_album_id)
+                    && let Some(album_id) = pending.and_then(|p| p.story_album_id())
                 {
                     if let Some(albums) = self.stories.albums.get_mut(&chat_id.0) {
                         albums.retain(|a| a.id != album_id);
@@ -488,11 +507,11 @@ impl Session {
             }
             // Phase 9.7: `setChatPinnedStories` confirmed — the
             // sent story ids (correlated via
-            // `PendingRequest::story_ids`) are the new pinned
+            // `Correlation::StoryAlbum`) are the new pinned
             // list.
             Some(RequestPurpose::SetChatPinnedStories) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id)
-                    && let Some(ids) = pending.and_then(|p| p.story_ids.clone())
+                    && let Some(ids) = pending.and_then(|p| p.story_ids().map(<[i32]>::to_vec))
                 {
                     self.stories
                         .chat_page_stories
@@ -505,7 +524,7 @@ impl Session {
             // B14: `setCloseFriends` confirmed — the ids it carried are the
             // new list.
             Some(RequestPurpose::SetCloseFriends) => {
-                if let Some(ids) = pending.and_then(|p| p.user_ids.clone()) {
+                if let Some(ids) = pending.and_then(|p| p.user_ids().map(<[i64]>::to_vec)) {
                     self.stories.close_friends = CloseFriendsList::Ready(ids);
                 }
                 self.succeed_story_page_op(pending);
@@ -567,14 +586,14 @@ impl Session {
             Some(RequestPurpose::LoadChats) => self.chat_list.main_paging.page_ok(),
             Some(RequestPurpose::LoadArchiveChats) => self.chat_list.archive_paging.page_ok(),
             Some(RequestPurpose::LoadFolderChats) => {
-                if let Some(folder_id) = pending.and_then(|p| p.folder_id) {
+                if let Some(folder_id) = pending.and_then(|p| p.folder_id()) {
                     self.chat_list.folder_page_ok(folder_id);
                 }
             }
             _ => {}
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::DeleteChatFolder)
-            && let Some(folder_id) = pending.and_then(|p| p.folder_id)
+            && let Some(folder_id) = pending.and_then(|p| p.folder_id())
         {
             // Parity slice: `deleteChatFolder` confirmed — drop the
             // tab and any cached spec. `updateChatFolders` stays the
@@ -584,7 +603,7 @@ impl Session {
             self.chat_list.folder_paging.remove(&folder_id);
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::ProcessChatFolderNewChats)
-            && let Some(folder_id) = pending.and_then(|p| p.folder_id)
+            && let Some(folder_id) = pending.and_then(|p| p.folder_id())
         {
             // The offer is answered (joined or hidden): the bar goes.
             self.chat_list.folder_new_chats.remove(&folder_id);
@@ -599,6 +618,11 @@ impl Session {
         {
             self.accept_sponsored_hidden(chat_id);
         }
+        if let Some(view) = pending.filter(|p| p.purpose == RequestPurpose::ViewSponsoredMessages)
+            && let Some(chat_id) = view.chat_id
+        {
+            self.settle_sponsored_views(chat_id, view.id, true);
+        }
         if let Some(viewed) = pending.filter(|p| p.purpose == RequestPurpose::ViewMessages)
             && let Some(chat_id) = viewed.chat_id
         {
@@ -607,33 +631,14 @@ impl Session {
         // Phase D3b: `setChatMemberStatus` confirmed. TDLib sends
         // `updateChatMember` to bots only (td_api.tl), so the change
         // is ours to apply: the cached admin list and the member's
-        // rights are dropped and the chat is marked stale, which the
-        // poll turns into a refetch of what is on screen. Without the
-        // mark the lists drew "Loading…" with nothing in flight.
+        // rights are dropped and the lists go `Stale`, which the poll turns
+        // into a refetch of what is on screen.
         if let Some(RequestPurpose::Groups(GroupsPurpose::SetChatMemberStatus { user_id, .. })) =
             pending.map(|p| p.purpose)
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
         {
-            self.groups.admin_lists.remove(&chat_id.0);
             self.groups.admin_rights.remove(&(chat_id.0, user_id));
-            self.groups.mark_member_list_stale(chat_id.0);
-            // Slice G1: restrict/ban/unban change the member
-            // lists too — drop all cached pages for this chat.
-            if matches!(
-                pending.map(|p| p.purpose),
-                Some(RequestPurpose::Groups(GroupsPurpose::SetChatMemberStatus {
-                    kind: MemberStatusChange::Restrict
-                        | MemberStatusChange::Ban
-                        | MemberStatusChange::Unban
-                        | MemberStatusChange::Remove,
-                    ..
-                }))
-            ) {
-                self.groups
-                    .supergroup_members
-                    .retain(|(id, _), _| *id != chat_id.0);
-                self.groups.basic_group_members.remove(&chat_id.0);
-            }
+            self.groups.members_changed(chat_id.0);
         }
         // Slice G1: `setChatMemberTag` confirmed — the custom
         // title itself arrives via `updateChatMember`; drop
@@ -646,11 +651,7 @@ impl Session {
             ))
         ) && let Some(chat_id) = pending.and_then(|p| p.chat_id)
         {
-            self.groups
-                .supergroup_members
-                .retain(|(id, _), _| *id != chat_id.0);
-            self.groups.basic_group_members.remove(&chat_id.0);
-            self.groups.mark_member_list_stale(chat_id.0);
+            self.groups.members_changed(chat_id.0);
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::LeaveBeforeDelete)
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
@@ -693,7 +694,7 @@ impl Session {
             pending.map(|p| p.purpose)
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
         {
-            self.groups.members_added(chat_id.0);
+            self.groups.members_changed(chat_id.0);
             self.forget_join_request(chat_id, user_id);
         }
         // B8: bulk join-request processing and revoked-link deletion.
@@ -707,7 +708,7 @@ impl Session {
                 // another link opened meanwhile keeps its rows and page.
                 // That link's page asked before this went out would bring
                 // handled requests back, so it is dropped.
-                let link = pending.and_then(|p| p.invite_link.as_deref());
+                let link = pending.and_then(|p| p.invite_link());
                 if let Some(state) = self.groups.invite_pages.join_requests_mut(chat_id.0)
                     && link == Some(state.invite_link.as_str())
                 {
@@ -755,7 +756,7 @@ impl Session {
                 }
             }
             Some((RequestPurpose::DeleteAllRevokedChatInviteLinks, _, Some(chat_id)))
-                if pending.and_then(|p| p.user_id).is_some() =>
+                if pending.and_then(|p| p.user_id()).is_some() =>
             {
                 // Another admin's revoked links were deleted.
                 if let Some(state) = self.groups.invite_pages.admin_links_mut(chat_id.0) {
@@ -802,7 +803,7 @@ impl Session {
                 // must not read as a single delete (or overwrite
                 // the synced flow's own notice on arrival order).
                 self.users_state.contacts_notice =
-                    Some(if pending.and_then(|p| p.user_id).is_some() {
+                    Some(if pending.and_then(|p| p.user_id()).is_some() {
                         "Contact deleted.".to_string()
                     } else {
                         "Synced contacts deleted from the servers.".to_string()
@@ -811,7 +812,7 @@ impl Session {
                 // drop the contact flag on the cached user too so
                 // the info panel stops offering "Delete contact"
                 // before the refetched list arrives.
-                if let Some(user_id) = pending.and_then(|p| p.user_id)
+                if let Some(user_id) = pending.and_then(|p| p.user_id())
                     && let Some(user) = self.users.get_mut(&user_id)
                 {
                     user.is_contact = false;
@@ -850,7 +851,7 @@ impl Session {
         if let Some(p) = pending
             && let RequestPurpose::Users(UsersPurpose::SetMessageSenderBlockList { block }) =
                 p.purpose
-            && let Some(user_id) = p.user_id
+            && let Some(user_id) = p.user_id()
             && let Some(info) = self.users_state.user_full_infos.get_mut(&user_id)
         {
             info.blocked = block;

@@ -328,11 +328,11 @@ pub fn can_save(rights: SaveRights) -> bool {
     }
 }
 
-/// A gifts request on its way: which one (its serial) and when it was sent
+/// A gifts request on its way: which one (its request) and when it was sent
 /// (unix seconds).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GiftsAsk {
-    pub serial: u64,
+    pub request: RequestId,
     pub at: i64,
 }
 
@@ -400,23 +400,11 @@ pub struct ThemeGifts {
     pub owner: Option<ThemeOwner>,
     pub list: Vec<ThemeGift>,
     pub stage: GiftsStage,
-    /// The serial of the last request sent (an id generator: the stage
-    /// holds the serial that is current). It keeps counting when the list
-    /// moves to another owner, so a late page for the old owner never
-    /// matches.
-    pub last_serial: u64,
 }
 
 /// How long the gifts panel waits after a failed page before it asks for
 /// the next one again.
 pub const GIFTS_RETRY_SECS: i64 = 5;
-
-/// What a gifts request asks for: its serial and the offset to start from.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GiftsRequest {
-    pub serial: u64,
-    pub offset: String,
-}
 
 impl ThemeGifts {
     /// A list of `owner` that is shown as loaded: `list`, with the next
@@ -431,7 +419,6 @@ impl ThemeGifts {
             owner: Some(owner),
             list,
             stage: GiftsStage::Listed(rest),
-            last_serial: 0,
         }
     }
 
@@ -444,27 +431,33 @@ impl ThemeGifts {
         }
     }
 
-    /// A request for `owner`'s list: the first page again, or the next
-    /// one when there is one, none is on its way and none failed in the
-    /// last few seconds. A list for another owner starts empty.
-    pub fn start(&mut self, owner: ThemeOwner, more: bool, now: i64) -> Option<GiftsRequest> {
+    /// Whether a request for `owner`'s list should go out, and the offset
+    /// it starts from: the first page again, or the next one when there is
+    /// one, none is on its way and none failed in the last few seconds. A
+    /// list for another owner starts empty (and its late pages never match
+    /// the new stage).
+    pub fn plan(&mut self, owner: ThemeOwner, more: bool, now: i64) -> Option<String> {
         if self.owner != Some(owner) {
             *self = ThemeGifts {
                 owner: Some(owner),
-                last_serial: self.last_serial,
                 ..ThemeGifts::default()
             };
         }
         if more && !self.wants_more(now) {
             return None;
         }
-        self.last_serial += 1;
-        let ask = GiftsAsk {
-            serial: self.last_serial,
-            at: now,
-        };
-        let offset = self.offset().to_string();
-        // A refresh keeps showing the list it has until its page lands.
+        Some(if more {
+            self.offset().to_string()
+        } else {
+            String::new()
+        })
+    }
+
+    /// The request planned for `owner` went out as `request` at `now`: the
+    /// stage waits for it. A refresh keeps showing the list it has until
+    /// its page lands.
+    pub fn asked(&mut self, request: RequestId, now: i64) {
+        let ask = GiftsAsk { request, at: now };
         self.stage = match std::mem::take(&mut self.stage) {
             GiftsStage::Listed(rest) => GiftsStage::Listed(GiftsRest::Loading {
                 ask,
@@ -474,10 +467,6 @@ impl ThemeGifts {
                 GiftsStage::FirstAsking(ask)
             }
         };
-        Some(GiftsRequest {
-            serial: ask.serial,
-            offset: if more { offset } else { String::new() },
-        })
     }
 
     /// The panel may ask for the next page.
@@ -490,14 +479,37 @@ impl ThemeGifts {
     }
 
     /// A page or failure belongs to the request now on its way.
-    pub fn is_current(&self, owner: ThemeOwner, serial: u64) -> bool {
-        let ask = match &self.stage {
+    pub fn is_current(&self, request: RequestId) -> bool {
+        match &self.stage {
             GiftsStage::FirstAsking(ask) | GiftsStage::Listed(GiftsRest::Loading { ask, .. }) => {
-                ask
+                ask.request == request
             }
-            _ => return false,
+            _ => false,
+        }
+    }
+
+    /// A page is on its way.
+    pub fn asking(&self) -> bool {
+        matches!(
+            self.stage,
+            GiftsStage::FirstAsking(_) | GiftsStage::Listed(GiftsRest::Loading { .. })
+        )
+    }
+
+    /// The request on its way is no longer pending and nothing answered it
+    /// (a reconnect dropped it): it failed.
+    pub fn forget_dropped(&mut self, pending: &std::collections::HashSet<RequestId>) -> bool {
+        let out = match &self.stage {
+            GiftsStage::FirstAsking(ask) | GiftsStage::Listed(GiftsRest::Loading { ask, .. }) => {
+                Some(ask.request)
+            }
+            _ => None,
         };
-        self.owner == Some(owner) && ask.serial == serial
+        let dropped = out.is_some_and(|request| !pending.contains(&request));
+        if dropped {
+            self.fail();
+        }
+        dropped
     }
 
     /// The request failed. The list stays as it was; the empty state shows

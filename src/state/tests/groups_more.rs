@@ -217,15 +217,18 @@ fn event_log_failure_states() {
         "the failed older page draws its Retry"
     );
     assert!(loaded.has_more(), "Retry may ask again");
-    session.begin_older_events(13);
+    let again = event_log_request(
+        &mut session,
+        GroupsPurpose::GetChatEventLog { from_event_id: 50 },
+    );
     let ChatEventLogFetch::Loaded(loaded) = session.groups.event_log_fetch(13).expect("log loaded")
     else {
         panic!("expected loaded event log");
     };
     assert_eq!(
         loaded.older,
-        OlderEvents::Available,
-        "asking clears the line"
+        OlderEvents::Loading { request: again },
+        "asking replaces the line with the request"
     );
 }
 
@@ -328,23 +331,24 @@ fn set_chat_member_status_ok_invalidates_admin_list() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(!session.groups.admin_lists.contains_key(&13));
-    // `updateChatMember` reaches bots only: the `ok` itself marks the chat
-    // for the UI's refetch, so the list never waits on nothing.
-    assert_eq!(session.groups.member_list_stale, vec![13]);
+    // `updateChatMember` reaches bots only: the `ok` itself makes the list
+    // `Stale`, so it is asked again instead of waiting on nothing.
+    assert!(session.groups.admin_list_is_stale(13));
+    assert_eq!(session.groups.stale_admin_chats(), vec![13]);
 }
 
-/// The add's answer is the only word a user client gets: it marks the
-/// member lists stale so the dialog and the info panel ask again.
+/// The add's answer is the only word a user client gets: it makes the
+/// member lists `Stale` (a loaded page stays drawn) so the dialog and the
+/// info panel ask again.
 #[test]
 fn adding_members_marks_the_member_list_stale() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     session.groups.basic_group_members.insert(
         13,
-        crate::state::SupergroupMembersFetch::Loading {
-            request: None,
-            last: None,
+        crate::state::SupergroupMembersFetch::Loaded {
+            members: Vec::new(),
+            total_count: 0,
         },
     );
     let extra = session.request(RequestPurpose::AddChatMember, Some(ChatId(13)));
@@ -357,19 +361,22 @@ fn adding_members_marks_the_member_list_stale() {
             extra.0
         ),
     );
-    assert!(!session.groups.basic_group_members.contains_key(&13));
-    assert_eq!(session.groups.member_list_stale, vec![13]);
+    assert!(session.groups.basic_members_are_stale(13));
 }
 
-/// A finished ownership transfer drops the member caches and marks the
-/// chat stale, so the lists on screen refetch instead of loading forever.
+/// A finished ownership transfer makes the member caches `Stale`, so the
+/// lists on screen refetch instead of loading forever.
 #[test]
 fn an_ownership_transfer_marks_the_member_list_stale() {
     let (mut session, _sink) = session();
+    session
+        .groups
+        .admin_lists
+        .insert(13, AdminListFetch::Loaded(Vec::new()));
     let request = session.request(RequestPurpose::Other, None);
     session.begin_ownership_transfer(request, 13, 888, false);
     session.finish_ownership_transfer(Some(request), 888, Some(13));
-    assert_eq!(session.groups.member_list_stale, vec![13]);
+    assert!(session.groups.admin_list_is_stale(13));
 }
 
 #[test]
@@ -402,7 +409,7 @@ fn update_chat_member_invalidates_admin_list_and_own_rights() {
         &sink,
         r#"{"@type":"updateChatMember","chat_id":13,"actor_user_id":777,"date":1,"invite_link":null,"via_join_request":false,"via_chat_folder_invite_link":false,"old_chat_member":{"@type":"chatMember","member_id":{"@type":"messageSenderUser","user_id":888},"status":{"@type":"chatMemberStatusAdministrator","can_be_edited":true}},"new_chat_member":{"@type":"chatMember","member_id":{"@type":"messageSenderUser","user_id":888},"status":{"@type":"chatMemberStatusMember","member_until_date":0}}}"#,
     );
-    assert!(!session.groups.admin_lists.contains_key(&13));
+    assert!(session.groups.admin_list_is_stale(13));
 
     // Own promotion to administrator with the promote right.
     apply_json(
@@ -455,7 +462,47 @@ fn an_admin_list_asked_before_a_membership_change_is_dropped() {
             asked.0
         ),
     );
-    assert!(!session.groups.admin_lists.contains_key(&13));
+    assert!(
+        session.groups.admin_list_is_stale(13),
+        "the old answer fills nothing: the list waits to be asked again"
+    );
+}
+
+/// 08-005: an answer lands only on a list that is `Loading` as that very
+/// request: a missing entry (dropped by a closed box or a change) takes
+/// nothing, and neither does a list of another request.
+#[test]
+fn an_administrators_answer_needs_its_own_loading_list() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let answer = |extra: RequestId| {
+        format!(
+            r#"{{"@type":"chatAdministrators","@extra":"{}","administrators":[{{"@type":"chatAdministrator","user_id":888,"custom_title":"","is_owner":false,"can_be_edited":true}}]}}"#,
+            extra.0
+        )
+    };
+    let early = session.request(RequestPurpose::GetChatAdministrators, Some(ChatId(13)));
+    apply_json(&mut session, &seq, &sink, &answer(early));
+    assert!(
+        !session.groups.admin_lists.contains_key(&13),
+        "no list asked: nothing to fill"
+    );
+    let current = session.request(RequestPurpose::GetChatAdministrators, Some(ChatId(13)));
+    session
+        .groups
+        .admin_lists
+        .insert(13, AdminListFetch::Loading(current));
+    let other = session.request(RequestPurpose::GetChatAdministrators, Some(ChatId(13)));
+    apply_json(&mut session, &seq, &sink, &answer(other));
+    assert_eq!(
+        session.groups.admin_lists.get(&13),
+        Some(&AdminListFetch::Loading(current))
+    );
+    apply_json(&mut session, &seq, &sink, &answer(current));
+    assert!(matches!(
+        session.groups.admin_lists.get(&13),
+        Some(AdminListFetch::Loaded(_))
+    ));
 }
 
 #[test]
@@ -518,8 +565,7 @@ fn supergroup_members_fetch_caches() {
         total_count,
     } = session
         .groups
-        .supergroup_members
-        .get(&(13, MemberListFilter::Recent))
+        .member_fetch((13, MemberListFilter::Recent))
         .unwrap()
     else {
         panic!("members were not loaded");
@@ -540,7 +586,7 @@ fn basic_group_full_info_caches_members() {
     session.groups.basic_group_members.insert(
         13,
         SupergroupMembersFetch::Loading {
-            request: Some(extra),
+            request: extra,
             last: None,
         },
     );
@@ -589,26 +635,11 @@ fn g2_update_supergroup_caches_sign_flags_and_rights() {
         &sink,
         r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":25,"sign_messages":true,"show_message_sender":true,"status":{"@type":"chatMemberStatusAdministrator","rights":{"@type":"chatAdministratorRights","can_change_info":true,"can_manage_topics":true,"can_send_welcome_messages":true}}}}"#,
     );
-    assert_eq!(
-        session.groups.supergroup_sign_messages.get(&25),
-        Some(&true)
-    );
-    assert_eq!(
-        session.groups.supergroup_show_message_sender.get(&25),
-        Some(&true)
-    );
-    assert_eq!(
-        session.groups.supergroup_manage_topics_right.get(&25),
-        Some(&true)
-    );
-    assert_eq!(
-        session.groups.supergroup_change_info_right.get(&25),
-        Some(&true)
-    );
-    assert_eq!(
-        session.groups.supergroup_send_welcome_right.get(&25),
-        Some(&true)
-    );
+    assert!(session.groups.supergroup(25).sign_messages);
+    assert!(session.groups.supergroup(25).show_message_sender);
+    assert!(session.groups.supergroup(25).can_manage_topics);
+    assert!(session.groups.supergroup(25).can_change_info);
+    assert!(session.groups.supergroup(25).can_send_welcome_messages);
     assert!(session.chat_can_manage_topics(ChatId(13)));
     assert!(session.chat_can_change_info(ChatId(13)));
     assert!(session.chat_can_send_welcome_messages(ChatId(13)));
@@ -843,11 +874,12 @@ fn g2_sign_toggle_error_rolls_back() {
     // previous flags when TDLib answers `error`.
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.groups.supergroup_sign_messages.insert(25, false);
     session
         .groups
-        .supergroup_show_message_sender
-        .insert(25, false);
+        .edit_supergroup(25, |facts| facts.sign_messages = false);
+    session
+        .groups
+        .edit_supergroup(25, |facts| facts.show_message_sender = false);
     let extra = session.request(
         RequestPurpose::ToggleSupergroupSignMessages,
         Some(ChatId(13)),
@@ -863,11 +895,12 @@ fn g2_sign_toggle_error_rolls_back() {
         shown_sign: true,
         shown_show: true,
     });
-    session.groups.supergroup_sign_messages.insert(25, true);
     session
         .groups
-        .supergroup_show_message_sender
-        .insert(25, true);
+        .edit_supergroup(25, |facts| facts.sign_messages = true);
+    session
+        .groups
+        .edit_supergroup(25, |facts| facts.show_message_sender = true);
     apply_json(
         &mut session,
         &seq,
@@ -877,14 +910,8 @@ fn g2_sign_toggle_error_rolls_back() {
             extra.0
         ),
     );
-    assert_eq!(
-        session.groups.supergroup_sign_messages.get(&25),
-        Some(&false)
-    );
-    assert_eq!(
-        session.groups.supergroup_show_message_sender.get(&25),
-        Some(&false)
-    );
+    assert!(!session.groups.supergroup(25).sign_messages);
+    assert!(!session.groups.supergroup(25).show_message_sender);
 }
 
 #[test]
@@ -895,8 +922,7 @@ fn g2_anti_spam_toggle_error_rolls_back() {
     let seq = AtomicU64::new(0);
     session
         .groups
-        .supergroup_anti_spam_enabled
-        .insert(25, false);
+        .edit_supergroup_anti_spam(25, |anti| anti.enabled = false);
     let extra = session.request(
         RequestPurpose::ToggleSupergroupAggressiveAntiSpam,
         Some(ChatId(13)),
@@ -910,7 +936,9 @@ fn g2_anti_spam_toggle_error_rolls_back() {
         previous: Some(false),
         shown: true,
     });
-    session.groups.supergroup_anti_spam_enabled.insert(25, true);
+    session
+        .groups
+        .edit_supergroup_anti_spam(25, |anti| anti.enabled = true);
     apply_json(
         &mut session,
         &seq,
@@ -920,10 +948,7 @@ fn g2_anti_spam_toggle_error_rolls_back() {
             extra.0
         ),
     );
-    assert_eq!(
-        session.groups.supergroup_anti_spam_enabled.get(&25),
-        Some(&false)
-    );
+    assert!(!session.groups.supergroup_anti_spam(25).enabled);
 }
 
 #[test]
@@ -933,6 +958,9 @@ fn g2_welcome_fetch_error_marks_failed() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::LoadChatWelcomeMessages, Some(ChatId(13)));
+    let pack = session.groups.welcome_messages.entry(13).or_default();
+    pack.begin();
+    pack.sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -1029,6 +1057,7 @@ fn event_log_admin_ids_dedupes_and_skips_chat_senders() {
             event(4, MessageSender::User { user_id: 7 }),
         ],
         older: crate::state::OlderEvents::Exhausted,
+        poll: crate::state::LogPoll::Idle,
     };
     assert_eq!(page.admin_user_ids(), vec![7, 9]);
 }
@@ -1178,11 +1207,13 @@ fn a_refused_toggle_keeps_a_value_an_update_changed_meanwhile() {
         .expect("pending")
         .rollback = Some(RequestRollback::AntiSpam {
         supergroup_id: 25,
-        previous: Some(false),
+        previous: Some(true),
         shown: true,
     });
     // Another admin's change arrived: the flag is no longer what we showed.
-    session.groups.supergroup_anti_spam_enabled.remove(&25);
+    session
+        .groups
+        .edit_supergroup_anti_spam(25, |anti| anti.enabled = false);
     apply_json(
         &mut session,
         &seq,
@@ -1192,7 +1223,7 @@ fn a_refused_toggle_keeps_a_value_an_update_changed_meanwhile() {
             extra.0
         ),
     );
-    assert_eq!(session.groups.supergroup_anti_spam_enabled.get(&25), None);
+    assert!(!session.groups.supergroup_anti_spam(25).enabled);
 }
 
 #[test]
@@ -1217,16 +1248,41 @@ fn a_new_status_drops_the_rights_of_the_old_one() {
 
 #[test]
 fn the_own_restriction_is_unknown_then_one_of_two_answers() {
-    use crate::state::OwnRestriction;
+    use crate::state::AdminRights;
     let mut chat = placeholder_chat(ChatId(32));
     assert!(!chat.rights_fetched());
-    assert_eq!(chat.my_restriction, OwnRestriction::Unknown);
     // The probe found no member record: not restricted, and not asked again.
     chat.note_no_member_record();
     assert!(chat.rights_fetched());
     assert_eq!(chat.restriction(), None);
-    chat.set_my_restriction(None);
-    assert_eq!(chat.my_restriction, OwnRestriction::NotRestricted);
+    // A member record: the status and its restriction land together.
+    let restriction = crate::telegram::envelope::MemberRestriction {
+        until_date: 0,
+        permissions: Default::default(),
+    };
+    chat.record_own_member(
+        ChannelMemberStatus::Restricted,
+        AdminRights::default(),
+        Some(restriction),
+    );
+    assert!(chat.rights_fetched());
+    assert_eq!(chat.restriction(), Some(restriction));
+    // The admins lift it and updateSupergroup says Member before the own
+    // updateChatMember: the old restriction does not outlive its status.
+    chat.set_member_status(ChannelMemberStatus::Member, None);
+    assert_eq!(chat.restriction(), None);
+    // Leaving and rejoining does not bring it back either.
+    chat.set_member_status(ChannelMemberStatus::Left, None);
+    chat.set_member_status(ChannelMemberStatus::Member, None);
+    assert_eq!(chat.restriction(), None);
+    // The same restricted status again keeps the details it has.
+    chat.record_own_member(
+        ChannelMemberStatus::Restricted,
+        AdminRights::default(),
+        Some(restriction),
+    );
+    chat.set_member_status(ChannelMemberStatus::Restricted, None);
+    assert_eq!(chat.restriction(), Some(restriction));
 }
 
 /// Sweep r2-17 (05-066): ownership answers and errors land only on the stage
@@ -1278,5 +1334,34 @@ fn ownership_answers_are_matched_to_their_request() {
     assert_eq!(
         session.groups.ownership.owner_after_leaving.get(&13),
         Some(&crate::state::OwnerLookup::Loaded(5))
+    );
+}
+
+/// r3-05 09-004: the viewer's rights and the group's flags are one value
+/// per supergroup, replaced whole by the update that carries them.
+#[test]
+fn a_supergroup_update_replaces_the_rights_and_flags_together() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":26,"join_by_request":true,"sign_messages":true,"status":{"@type":"chatMemberStatusAdministrator","rights":{"@type":"chatAdministratorRights","can_change_info":true,"can_invite_users":true}}}}"#,
+    );
+    let first = session.groups.supergroup(26);
+    assert!(first.can_change_info && first.can_invite_users);
+    assert!(first.join_by_request && first.sign_messages);
+    // The viewer lost the administrator status: no right or flag of the
+    // earlier update survives next to the new ones.
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":26,"status":{"@type":"chatMemberStatusMember"}}}"#,
+    );
+    assert_eq!(
+        session.groups.supergroup(26),
+        crate::state::SupergroupFacts::default()
     );
 }

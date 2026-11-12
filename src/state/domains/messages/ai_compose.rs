@@ -1,6 +1,7 @@
 //! AI compose: the style list, the style limits from TDLib's options, and
 //! the answers the compose box, the apply-in-place shortcut and the style
-//! boxes wait for. Each answer slot is one-shot: the UI takes it.
+//! boxes wait for. Every answer is filed under the request that asked and
+//! taken by the stage that holds that request.
 use crate::ai_compose::{
     AiBoxError, AiResult, CUSTOM_STYLES_FALLBACK, CUSTOM_STYLES_LIMIT_TYPE, StyleExample,
     StyleLimitNotice, StyleList, TextCompositionStyle, style_limit_message,
@@ -11,22 +12,16 @@ use crate::telegram::envelope::{AiComposePayload, ErrorClass, OptionValue, TdErr
 use crate::text::TextEntity;
 
 /// In-flight AI compose requests; wrapped as [`MessagesPurpose::AiCompose`].
-/// Box and lookup purposes carry the token their answer is matched by; the
-/// name behind a style operation rides [`AiComposeState::op_names`].
+/// The stage that asked holds the request; the name behind a style
+/// operation rides [`AiComposeState::op_names`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AiComposePurpose {
     /// `composeTextWithAi` from the box; answered with `formattedText`.
-    BoxCompose {
-        token: u64,
-    },
+    BoxCompose,
     /// `fixTextWithAi` from the box; answered with `fixedText`.
-    BoxFix {
-        token: u64,
-    },
+    BoxFix,
     /// `composeTextWithAi` from the apply-in-place shortcut.
-    ApplyInPlace {
-        token: u64,
-    },
+    ApplyInPlace,
     /// `createTextCompositionStyle`; answered with `textCompositionStyle`.
     CreateStyle,
     /// `editTextCompositionStyle`; answered with `textCompositionStyle`.
@@ -34,14 +29,12 @@ pub enum AiComposePurpose {
     DeleteStyle,
     RemoveStyle,
     AddStyle,
-    /// `searchTextCompositionStyle` (the `addstyle/<name>` link).
-    SearchStyle {
-        token: u64,
-    },
-    /// `getTextCompositionStyleExample`.
-    GetExample {
-        token: u64,
-    },
+    /// `searchTextCompositionStyle` (the `addstyle/<name>` link); its
+    /// answer is taken by the request the lookup stage holds.
+    SearchStyle,
+    /// `getTextCompositionStyleExample`; its answer is taken by the request
+    /// the example stage holds.
+    GetExample,
 }
 
 /// Limits from `updateOption` (named in the method docs at
@@ -75,19 +68,60 @@ impl AiComposeLimits {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AiBoxAnswer {
-    pub token: u64,
-    pub outcome: Result<AiResult, AiBoxError>,
+/// The most answers kept for stages that are gone: an answer nobody takes
+/// leaves when newer ones push it out.
+const KEPT: usize = 8;
+
+/// Answers filed under the request that asked, taken by the stage that
+/// holds that request. One drain may hold several (two editors, two
+/// boxes): each stage takes its own, so none overwrites another.
+#[derive(Debug)]
+pub struct Replies<T> {
+    items: Vec<(RequestId, T)>,
 }
+
+impl<T> Default for Replies<T> {
+    fn default() -> Self {
+        Self { items: Vec::new() }
+    }
+}
+
+impl<T> Replies<T> {
+    /// File the answer of `request`.
+    pub fn push(&mut self, request: RequestId, answer: T) {
+        self.items.retain(|(held, _)| *held != request);
+        self.items.push((request, answer));
+        let extra = self.items.len().saturating_sub(KEPT);
+        self.items.drain(..extra);
+    }
+
+    /// The answer of `request`, taken.
+    pub fn take(&mut self, request: RequestId) -> Option<T> {
+        let at = self.items.iter().position(|(held, _)| *held == request)?;
+        Some(self.items.remove(at).1)
+    }
+
+    /// Whether `request` has answered.
+    pub fn has(&self, request: RequestId) -> bool {
+        self.items.iter().any(|(held, _)| *held == request)
+    }
+
+    /// Nothing waits for these any more (the box closed).
+    pub fn clear(&mut self) {
+        self.items.clear();
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+}
+
+/// The box's answer: the result card, or the error for its toast.
+pub type AiBoxOutcome = Result<AiResult, AiBoxError>;
 
 /// The apply-in-place shortcut's answer: the text and entities that replace
 /// the selection (or the whole field).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ApplyInPlaceAnswer {
-    pub token: u64,
-    pub outcome: Result<(String, Vec<TextEntity>), AiBoxError>,
-}
+pub type ApplyInPlaceOutcome = Result<(String, Vec<TextEntity>), AiBoxError>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StyleError {
@@ -99,30 +133,56 @@ pub enum StyleError {
     Other(String),
 }
 
-/// A request that runs, then answers once, with a value or the error.
+/// A request that runs as `request`, then answers once, with a value or the
+/// error.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StyleReply<T> {
-    Running,
-    Answered(Result<T, StyleError>),
+    /// Waiting for the answer of `request`; a lost request settles it as
+    /// an error (`RequestPurpose::is_sweepable`).
+    Running { request: RequestId },
+    Answered {
+        request: RequestId,
+        outcome: Result<T, StyleError>,
+    },
 }
 
 impl<T> StyleReply<T> {
+    /// Waiting for the answer of `request`.
+    pub fn waits_for(&self, request: RequestId) -> bool {
+        matches!(self, Self::Running { request: asked } if *asked == request)
+    }
+
     pub fn is_done(&self) -> bool {
-        matches!(self, Self::Answered(_))
+        matches!(self, Self::Answered { .. })
+    }
+
+    /// The request this reply is for.
+    pub fn request(&self) -> RequestId {
+        match self {
+            Self::Running { request } | Self::Answered { request, .. } => *request,
+        }
     }
 
     /// The answer, once there is one.
     pub fn done(self) -> Option<Result<T, StyleError>> {
         match self {
-            Self::Running => None,
-            Self::Answered(outcome) => Some(outcome),
+            Self::Running { .. } => None,
+            Self::Answered { outcome, .. } => Some(outcome),
         }
     }
 
     pub fn answer(&self) -> Option<&Result<T, StyleError>> {
         match self {
-            Self::Running => None,
-            Self::Answered(outcome) => Some(outcome),
+            Self::Running { .. } => None,
+            Self::Answered { outcome, .. } => Some(outcome),
+        }
+    }
+
+    /// `request` answered: the reply becomes `Answered`, only while it
+    /// runs as that very request.
+    fn settle(&mut self, request: RequestId, outcome: Result<T, StyleError>) {
+        if self.waits_for(request) {
+            *self = Self::Answered { request, outcome };
         }
     }
 }
@@ -130,7 +190,6 @@ impl<T> StyleReply<T> {
 /// The `addstyle/<name>` lookup.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StyleLookup {
-    pub token: u64,
     pub name: String,
     pub outcome: StyleReply<TextCompositionStyle>,
 }
@@ -138,19 +197,13 @@ pub struct StyleLookup {
 /// A style example for the preview box.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExampleAnswer {
-    pub token: u64,
     pub style_name: String,
     pub outcome: StyleReply<StyleExample>,
 }
 
-/// What a Create or Save answered, for the editor that sent `request` (the
-/// editor keeps the request it waits on; an answer to another one is not
-/// its own).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StyleEditAnswer {
-    pub request: RequestId,
-    pub outcome: Result<TextCompositionStyle, StyleError>,
-}
+/// What a Create or Save answered, for the editor that sent the request
+/// it is filed under.
+pub type StyleEditOutcome = Result<TextCompositionStyle, StyleError>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StyleNotice {
@@ -173,51 +226,65 @@ pub enum StyleNotice {
     Error(String),
 }
 
+/// Notices and failures not yet shown: the most kept when the UI is slow.
+const NOTICES_KEPT: usize = 8;
+
 #[derive(Debug, Default)]
 pub struct AiComposeState {
     /// The Style tabs, from `updateTextCompositionStyles`.
     pub styles: StyleList,
     pub limits: AiComposeLimits,
-    pub box_answer: Option<AiBoxAnswer>,
-    pub apply_in_place: Option<ApplyInPlaceAnswer>,
+    /// The compose box's answers, by the request its card waits for.
+    pub box_answers: Replies<AiBoxOutcome>,
+    /// The apply-in-place shortcut's answers, by request.
+    pub apply_answers: Replies<ApplyInPlaceOutcome>,
     pub style_lookup: Option<StyleLookup>,
     pub example: Option<ExampleAnswer>,
-    /// The newest Create or Save answer; the UI takes it and hands it to
-    /// the editor that sent that request, if it is still open.
-    pub style_edit: Option<StyleEditAnswer>,
-    pub style_notice: Option<StyleNotice>,
+    /// The Create and Save answers, by request; each editor takes the one
+    /// it sent.
+    pub style_edits: Replies<StyleEditOutcome>,
+    /// Toasts for style operations, oldest first: two that arrive before the
+    /// UI drains are both shown.
+    style_notices: Vec<StyleNotice>,
     /// Add, remove and delete requests that failed: the preview that waits
     /// on one leaves its in-flight stage (a delete's failure is silent).
-    pub style_op_failures: Vec<RequestId>,
+    style_op_failures: Vec<RequestId>,
     /// The style named by an in-flight delete, remove or add.
     pub(crate) op_names: HashMap<RequestId, String>,
 }
 
-/// An answer carrying the token of the request it answers.
-trait Tokened {
-    fn token(&self) -> u64;
-}
-
-impl Tokened for AiBoxAnswer {
-    fn token(&self) -> u64 {
-        self.token
+impl AiComposeState {
+    fn push_notice(&mut self, notice: StyleNotice) {
+        self.style_notices.push(notice);
+        let extra = self.style_notices.len().saturating_sub(NOTICES_KEPT);
+        self.style_notices.drain(..extra);
     }
-}
 
-impl Tokened for ApplyInPlaceAnswer {
-    fn token(&self) -> u64 {
-        self.token
+    fn push_failure(&mut self, request: RequestId) {
+        self.style_op_failures.push(request);
+        let extra = self.style_op_failures.len().saturating_sub(NOTICES_KEPT);
+        self.style_op_failures.drain(..extra);
     }
-}
 
-/// Tokens only grow, so an older answer landing in the same drain as a
-/// newer one must not replace it.
-fn keep_newest<T: Tokened>(slot: &mut Option<T>, answer: T) {
-    if slot
-        .as_ref()
-        .is_none_or(|held| held.token() <= answer.token())
-    {
-        *slot = Some(answer);
+    /// The style notices not yet shown, taken.
+    pub fn take_style_notices(&mut self) -> Vec<StyleNotice> {
+        std::mem::take(&mut self.style_notices)
+    }
+
+    /// The add, remove and delete requests that failed, taken.
+    pub fn take_style_op_failures(&mut self) -> Vec<RequestId> {
+        std::mem::take(&mut self.style_op_failures)
+    }
+
+    /// Queue a notice (tests and demos).
+    pub fn show_style_notice(&mut self, notice: StyleNotice) {
+        self.push_notice(notice);
+    }
+
+    /// No box or editor is open: whatever answered for them is dropped.
+    pub fn forget_stage_answers(&mut self) {
+        self.box_answers.clear();
+        self.style_edits.clear();
     }
 }
 
@@ -286,36 +353,31 @@ impl Session {
         pending: Option<&PendingRequest>,
     ) {
         let asked = ai_purpose(pending);
+        let request = pending.map(|p| p.id);
         let state = &mut self.messages.ai_compose;
         match payload {
             AiComposePayload::UpdateStyles { styles } => {
                 state.styles.set_server(styles);
             }
-            AiComposePayload::Style(style) => match asked {
-                Some(AiComposePurpose::SearchStyle { token }) => {
-                    if let Some(lookup) = state.style_lookup.as_mut()
-                        && lookup.token == token
-                    {
-                        lookup.outcome = StyleReply::Answered(Ok(style));
+            AiComposePayload::Style(style) => match (asked, request) {
+                (Some(AiComposePurpose::SearchStyle), Some(request)) => {
+                    if let Some(lookup) = state.style_lookup.as_mut() {
+                        lookup.outcome.settle(request, Ok(style));
                     }
                 }
-                Some(AiComposePurpose::CreateStyle | AiComposePurpose::EditStyle) => {
+                (Some(AiComposePurpose::CreateStyle | AiComposePurpose::EditStyle), request) => {
                     state.styles.promote_front(style.clone());
-                    if let Some(request) = pending.map(|p| p.id) {
-                        state.style_edit = Some(StyleEditAnswer {
-                            request,
-                            outcome: Ok(style),
-                        });
+                    if let Some(request) = request {
+                        state.style_edits.push(request, Ok(style));
                     }
                 }
                 _ => {}
             },
             AiComposePayload::StyleExample(example) => {
-                if let Some(AiComposePurpose::GetExample { token }) = asked
+                if let (Some(AiComposePurpose::GetExample), Some(request)) = (asked, request)
                     && let Some(answer) = state.example.as_mut()
-                    && answer.token == token
                 {
-                    answer.outcome = StyleReply::Answered(Ok(example));
+                    answer.outcome.settle(request, Ok(example));
                 }
             }
             AiComposePayload::FixedText {
@@ -323,17 +385,14 @@ impl Session {
                 entities,
                 diff,
             } => {
-                if let Some(AiComposePurpose::BoxFix { token }) = asked {
-                    keep_newest(
-                        &mut state.box_answer,
-                        AiBoxAnswer {
-                            token,
-                            outcome: Ok(AiResult {
-                                text,
-                                entities,
-                                diff: Some(diff),
-                            }),
-                        },
+                if let (Some(AiComposePurpose::BoxFix), Some(request)) = (asked, request) {
+                    state.box_answers.push(
+                        request,
+                        Ok(AiResult {
+                            text,
+                            entities,
+                            diff: Some(diff),
+                        }),
                     );
                 }
             }
@@ -348,29 +407,23 @@ impl Session {
         text: String,
         entities: Vec<TextEntity>,
     ) {
+        let Some(request) = pending.map(|p| p.id) else {
+            return;
+        };
         let state = &mut self.messages.ai_compose;
         match ai_purpose(pending) {
-            Some(AiComposePurpose::BoxCompose { token }) => {
-                keep_newest(
-                    &mut state.box_answer,
-                    AiBoxAnswer {
-                        token,
-                        outcome: Ok(AiResult {
-                            text,
-                            entities,
-                            diff: None,
-                        }),
-                    },
+            Some(AiComposePurpose::BoxCompose) => {
+                state.box_answers.push(
+                    request,
+                    Ok(AiResult {
+                        text,
+                        entities,
+                        diff: None,
+                    }),
                 );
             }
-            Some(AiComposePurpose::ApplyInPlace { token }) => {
-                keep_newest(
-                    &mut state.apply_in_place,
-                    ApplyInPlaceAnswer {
-                        token,
-                        outcome: Ok((text, entities)),
-                    },
-                );
+            Some(AiComposePurpose::ApplyInPlace) => {
+                state.apply_answers.push(request, Ok((text, entities)));
             }
             _ => {}
         }
@@ -388,21 +441,22 @@ impl Session {
         };
         let state = &mut self.messages.ai_compose;
         let name = state.op_names.remove(&request).unwrap_or_default();
-        state.style_notice = match purpose {
+        let notice = match purpose {
             AiComposePurpose::AddStyle => {
                 state.styles.promote_name(&name);
-                Some(StyleNotice::Added { name, request })
+                StyleNotice::Added { name, request }
             }
             AiComposePurpose::RemoveStyle => {
                 state.styles.forget(&name);
-                Some(StyleNotice::Removed { request })
+                StyleNotice::Removed { request }
             }
             AiComposePurpose::DeleteStyle => {
                 state.styles.forget(&name);
-                Some(StyleNotice::Deleted { request })
+                StyleNotice::Deleted { request }
             }
             _ => return,
         };
+        state.push_notice(notice);
     }
 
     /// A failed AI compose request. The box and the shortcut get the error
@@ -415,8 +469,9 @@ impl Session {
         err: &TdError,
         pending: Option<&PendingRequest>,
     ) {
-        if let Some(pending) = pending {
-            self.messages.ai_compose.op_names.remove(&pending.id);
+        let request = pending.map(|p| p.id);
+        if let Some(request) = request {
+            self.messages.ai_compose.op_names.remove(&request);
         }
         let error = style_error(err);
         let notice = match &error {
@@ -426,80 +481,45 @@ impl Session {
         };
         let state = &mut self.messages.ai_compose;
         match purpose {
-            AiComposePurpose::BoxCompose { token } | AiComposePurpose::BoxFix { token } => {
-                keep_newest(
-                    &mut state.box_answer,
-                    AiBoxAnswer {
-                        token,
-                        outcome: Err(box_error(err)),
-                    },
-                );
+            AiComposePurpose::BoxCompose | AiComposePurpose::BoxFix => {
+                if let Some(request) = request {
+                    state.box_answers.push(request, Err(box_error(err)));
+                }
             }
-            AiComposePurpose::ApplyInPlace { token } => {
-                keep_newest(
-                    &mut state.apply_in_place,
-                    ApplyInPlaceAnswer {
-                        token,
-                        outcome: Err(box_error(err)),
-                    },
-                );
+            AiComposePurpose::ApplyInPlace => {
+                if let Some(request) = request {
+                    state.apply_answers.push(request, Err(box_error(err)));
+                }
             }
             AiComposePurpose::CreateStyle | AiComposePurpose::EditStyle => {
                 if error == StyleError::SavedTooMany {
-                    state.style_notice = Some(notice);
+                    state.push_notice(notice);
                 }
-                if let Some(request) = pending.map(|p| p.id) {
-                    state.style_edit = Some(StyleEditAnswer {
-                        request,
-                        outcome: Err(error),
-                    });
+                if let Some(request) = request {
+                    state.style_edits.push(request, Err(error));
                 }
             }
             AiComposePurpose::AddStyle | AiComposePurpose::RemoveStyle => {
-                state.style_notice = Some(notice);
-                state.style_op_failures.extend(pending.map(|p| p.id));
+                state.push_notice(notice);
+                if let Some(request) = request {
+                    state.push_failure(request);
+                }
             }
             AiComposePurpose::DeleteStyle => {
-                state.style_op_failures.extend(pending.map(|p| p.id));
-            }
-            AiComposePurpose::SearchStyle { token } => {
-                if let Some(lookup) = state.style_lookup.as_mut()
-                    && lookup.token == token
-                {
-                    lookup.outcome = StyleReply::Answered(Err(error));
+                if let Some(request) = request {
+                    state.push_failure(request);
                 }
             }
-            AiComposePurpose::GetExample { token } => {
-                if let Some(answer) = state.example.as_mut()
-                    && answer.token == token
-                {
-                    answer.outcome = StyleReply::Answered(Err(error));
+            AiComposePurpose::SearchStyle => {
+                if let (Some(request), Some(lookup)) = (request, state.style_lookup.as_mut()) {
+                    lookup.outcome.settle(request, Err(error));
+                }
+            }
+            AiComposePurpose::GetExample => {
+                if let (Some(request), Some(answer)) = (request, state.example.as_mut()) {
+                    answer.outcome.settle(request, Err(error));
                 }
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod keep_newest_tests {
-    use super::{AiBoxAnswer, keep_newest};
-    use crate::ai_compose::AiBoxError;
-
-    fn answer(token: u64) -> AiBoxAnswer {
-        AiBoxAnswer {
-            token,
-            outcome: Err(AiBoxError::TooLong),
-        }
-    }
-
-    #[test]
-    fn an_older_answer_never_replaces_a_newer_one() {
-        let mut slot = None;
-        keep_newest(&mut slot, answer(2));
-        keep_newest(&mut slot, answer(1));
-        assert_eq!(slot.map(|held| held.token), Some(2));
-        let mut slot = Some(answer(1));
-        keep_newest(&mut slot, answer(3));
-        assert_eq!(slot.map(|held| held.token), Some(3));
     }
 }

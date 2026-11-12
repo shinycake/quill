@@ -66,7 +66,7 @@ fn notice(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<WalletS
 }
 
 fn dialog(shell: &Entity<QuillShell>, vcx: &mut VisualTestContext) -> Option<DialogKind> {
-    shell.read_with(vcx, |shell, _| shell.open_dialog)
+    shell.read_with(vcx, |shell, _| shell.open_dialog.kind())
 }
 
 fn transfer(id: &str, encrypted: bool) -> WalletTx {

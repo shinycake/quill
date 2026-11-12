@@ -8,7 +8,7 @@
 
 use super::app::QuillApp;
 use super::chat_theme::fill_muted;
-use super::gift_market_state::{FileAskOutcome, MarketBox};
+use super::gift_market_state::MarketBox;
 use super::premium_ui::sticker_tile;
 use super::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
@@ -19,7 +19,9 @@ use gpui_kit::component::notification::Notification;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::gift_market::{AuctionBoxChoice, AuctionFetch, GiftMarketState, auction_about_shown};
+use quill::gift_market::{
+    AuctionBoxChoice, AuctionFetch, GiftMarketState, MarketEvent, auction_about_shown,
+};
 use quill::ids::FileId;
 use quill::lang::{keys, tr};
 use quill::local_time::now_unix;
@@ -260,13 +262,13 @@ impl QuillApp {
                 else {
                     return None;
                 };
-                (answered == request.0).then(|| {
+                (answered == request).then(|| {
                     market.auction = AuctionFetch::Idle;
                     gift_id
                 })
             });
             let loading = self.session().is_some_and(|s| {
-                s.payments.gift_market.auction == (AuctionFetch::Loading { request: request.0 })
+                s.payments.gift_market.auction == (AuctionFetch::Loading { request })
             });
             let send_box_open = self
                 .session()
@@ -300,42 +302,26 @@ impl QuillApp {
         let mut files = self.market_sticker_files();
         files.sort_unstable_by_key(|file| file.0);
         files.dedup();
-        let asked = self.gift_market.requested_files.clone();
-        let same_set = asked.len() == files.len()
-            && asked
-                .iter()
-                .zip(&files)
-                .all(|((file, _), next)| file == next);
-        let next: Vec<(quill::ids::FileId, FileAskOutcome)> = match self.live.as_mut() {
-            Some(live) => {
-                let _ = live.driver.follow_gift_auction(follow);
-                // Each file is asked once: a refused send is marked, and
-                // tried again only when the set of files changes (or the
-                // boxes are reopened), never at every upkeep.
-                files
-                    .iter()
-                    .map(|file| {
-                        let ask = match asked.iter().find(|(asked, _)| asked == file) {
-                            Some((_, FileAskOutcome::Sent)) => FileAskOutcome::Sent,
-                            Some((_, FileAskOutcome::Refused)) if same_set => {
-                                FileAskOutcome::Refused
-                            }
-                            _ if live.driver.download_file(*file, 8).is_ok() => {
-                                FileAskOutcome::Sent
-                            }
-                            _ => FileAskOutcome::Refused,
-                        };
-                        (*file, ask)
-                    })
-                    .collect()
+        // The session's own file state skips a file that is downloading or
+        // downloaded; a send the driver refuses is remembered until the set
+        // of shown files changes, so it is never re-sent at every upkeep.
+        self.gift_market.refused_files.settle(&files);
+        let asks: Vec<_> = files
+            .iter()
+            .copied()
+            .filter(|file| !self.gift_market.refused_files.is_refused(*file))
+            .collect();
+        let mut refused = Vec::new();
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.follow_gift_auction(follow);
+            for file in asks {
+                if live.driver.download_file(file, 8).is_err() {
+                    refused.push(file);
+                }
             }
-            None => files
-                .iter()
-                .map(|file| (*file, FileAskOutcome::Sent))
-                .collect(),
-        };
-        if next != self.gift_market.requested_files {
-            self.gift_market.requested_files = next;
+        }
+        for file in refused {
+            self.gift_market.refused_files.refuse(file);
         }
     }
 
@@ -344,27 +330,27 @@ impl QuillApp {
         let Some(market) = self.gift_market_mut() else {
             return;
         };
-        let notes = std::mem::take(&mut market.notes);
-        let toasts = std::mem::take(&mut market.toasts);
-        let low = std::mem::take(&mut market.balance_low);
+        let events = std::mem::take(&mut market.events);
         // Every note toasts, one after another through the toast queue.
-        for note in notes {
-            self.set_note(StatusNote::info(note));
-        }
-        if low {
-            self.set_note(StatusNote::silent(tr(
-                keys::Q_MONEY_YOUR_STARS_BALANCE_IS_TOO,
-            )));
-            self.open_stars(cx);
-        }
-        for (title, text) in toasts {
-            cx.defer_in(window, move |_, window, cx| {
-                let mut toast = Notification::new().message(text);
-                if !title.is_empty() {
-                    toast = toast.title(title);
+        for event in events {
+            match event {
+                MarketEvent::Note(note) => self.set_note(StatusNote::info(note)),
+                MarketEvent::BalanceLow => {
+                    self.set_note(StatusNote::silent(tr(
+                        keys::Q_MONEY_YOUR_STARS_BALANCE_IS_TOO,
+                    )));
+                    self.open_stars(cx);
                 }
-                window.push_notification(toast, cx);
-            });
+                MarketEvent::Toast { title, text } => {
+                    cx.defer_in(window, move |_, window, cx| {
+                        let mut toast = Notification::new().message(text);
+                        if !title.is_empty() {
+                            toast = toast.title(title);
+                        }
+                        window.push_notification(toast, cx);
+                    });
+                }
+            }
         }
     }
 

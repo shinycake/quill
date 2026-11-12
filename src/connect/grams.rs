@@ -185,7 +185,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let grams = &mut self.session.payments.hub.grams;
         match sent {
             Ok(extra) => {
-                grams.load.begin(extra.0, append);
+                grams.load.begin(extra, append);
                 Ok(extra)
             }
             Err(err) => {
@@ -220,7 +220,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !auth.password_state_loading() {
             let _ = self.refresh_password_state();
         }
-        self.session.payments.hub.grams.withdraw = Some(GramWithdraw::open(has_password));
+        self.session
+            .payments
+            .hub
+            .grams
+            .enter_withdraw(GramWithdraw::open(has_password));
         Ok(())
     }
 
@@ -247,7 +251,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         });
         // Only this request's answer counts: a late answer to an earlier
         // try that was cancelled is dropped.
-        self.session.payments.hub.grams.withdraw = Some(match &sent {
+        self.session.payments.hub.grams.enter_withdraw(match &sent {
             Ok(request) => GramWithdraw::Sending(*request),
             // Nothing went out: the box says so and Submit can try again.
             Err(_) => {

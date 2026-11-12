@@ -18,7 +18,10 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Open the edit dialog's state for `bot_user_id` and load its name and
     /// about text in the default language.
-    pub fn begin_bot_edit(&mut self, bot_user_id: i64) -> Result<(), ConnectSendError> {
+    pub fn begin_bot_edit(
+        &mut self,
+        bot_user_id: i64,
+    ) -> Result<(RequestId, RequestId), ConnectSendError> {
         self.owned_bots_ready(bot_user_id)?;
         let mut ask = |about| {
             self.session.request(
@@ -43,7 +46,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 return Err(err);
             }
         }
-        Ok(())
+        Ok((name, about_extra))
     }
 
     /// Send the changed fields (`setBotName`, `setBotInfoShortDescription`).

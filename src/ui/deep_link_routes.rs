@@ -87,9 +87,8 @@ impl QuillApp {
             }
             DeepLinkUi::Proxy { link } => {
                 if !self.handle_proxy_link(&link, cx) {
-                    self.links.deep_link_dialog =
+                    self.message_ui.deep_link_info =
                         Some(tr(keys::Q_MISC_THIS_PROXY_LINK_IS_NOT).into());
-                    self.open_box(DialogKind::DeepLinkInfo);
                 }
             }
             DeepLinkUi::FolderInvite { link } => self.open_folder_invite(link, cx),

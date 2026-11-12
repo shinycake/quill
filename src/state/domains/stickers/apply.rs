@@ -14,15 +14,24 @@ impl Session {
     ) {
         // An answer ends its list's fetch, when it is the request the list
         // waits for; an update carries no request.
-        if let Some(pending) = pending
-            && let Some(list) = self.stickers.stickers.lists.for_purpose(pending.purpose)
-        {
-            list.answered(Some(pending.id), ());
-        }
+        // The list's data is written only by that request: an older answer
+        // (the list was refetched, cancelled or marked out of date since it
+        // was asked) is dropped with its fetch.
+        let current = pending
+            .and_then(|pending| {
+                self.stickers
+                    .stickers
+                    .lists
+                    .for_purpose(pending.purpose)
+                    .map(|list| list.answered(Some(pending.id), ()))
+            })
+            .unwrap_or(true);
         match payload {
             StickersPayload::UpdateActiveEmojiReactions { emojis } => {
                 self.stickers.active_reactions = emojis;
-                self.stickers.message_reaction_options.mark_stale();
+                self.stickers
+                    .message_reaction_options
+                    .mark_stale(|_, _| true);
             }
             StickersPayload::StickerSets { sets, .. } => {
                 for set in &sets {
@@ -48,22 +57,28 @@ impl Session {
                 } else if pending.map(|p| p.purpose)
                     == Some(RequestPurpose::GetInstalledStickerSets)
                 {
-                    self.accept_installed_sticker_sets(sets);
+                    if current {
+                        self.accept_installed_sticker_sets(sets);
+                    }
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetArchivedStickerSets)
                 {
-                    self.accept_archived_sticker_sets(sets);
+                    if current {
+                        self.accept_archived_sticker_sets(sets);
+                    }
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::SearchStickerSets) {
                     // Slice S8: `searchStickerSets` answers with `stickerSets`.
-                    self.accept_found_sticker_sets(sets);
+                    if current {
+                        self.accept_found_sticker_sets(sets);
+                    }
                 } else if pending.map(|p| p.purpose)
                     == Some(StickersPurpose::GetInstalledMaskSets.into())
                 {
-                    self.accept_installed_mask_sets(sets);
+                    self.accept_installed_mask_sets(pending.map(|p| p.id), sets);
                 } else if let Some(RequestPurpose::Stickers(
                     StickersPurpose::GetArchivedMaskSets { first_page },
                 )) = pending.map(|p| p.purpose)
                 {
-                    self.accept_archived_mask_sets(sets, first_page);
+                    self.accept_archived_mask_sets(pending.map(|p| p.id), sets, first_page);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetInstalledEmojiSets)
                 {
                     // Slice S10: emoji `stickerSets` land in the emoji panel (see emoji.rs).
@@ -138,8 +153,10 @@ impl Session {
                     self.remember_files(&set.cover_files);
                 }
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetTrendingStickerSets) {
-                    self.stickers.stickers.trending_total = total_count.max(0) as usize;
-                    self.accept_trending_sticker_sets(sets, is_premium);
+                    if current {
+                        self.stickers.stickers.trending_total = total_count.max(0) as usize;
+                        self.accept_trending_sticker_sets(sets, is_premium);
+                    }
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetTrendingEmojiSets) {
                     // Slice S10: emoji `trendingStickerSets` land in the emoji panel (see emoji.rs).
                     self.accept_trending_emoji_sets(
@@ -156,7 +173,9 @@ impl Session {
                 self.remember_files(&files);
                 let purpose = pending.map(|p| p.purpose);
                 if purpose == Some(RequestPurpose::SearchStickers) {
-                    self.accept_found_stickers(stickers);
+                    if current {
+                        self.accept_found_stickers(stickers);
+                    }
                 } else if purpose == Some(RequestPurpose::SuggestStickers) {
                     // Slice S12: composer suggestions land in their own
                     // slot — never the search UI's `found_stickers`. Only the
@@ -170,9 +189,13 @@ impl Session {
                         self.accept_sticker_suggestions(stickers);
                     }
                 } else if purpose == Some(RequestPurpose::GetFavoriteStickers) {
-                    self.accept_favorite_stickers(stickers);
+                    if current {
+                        self.accept_favorite_stickers(stickers);
+                    }
                 } else if purpose == Some(RequestPurpose::GetRecentStickers) {
-                    self.accept_recent_stickers(stickers);
+                    if current {
+                        self.accept_recent_stickers(stickers);
+                    }
                 } else if purpose == Some(RequestPurpose::GetPremiumStickerExamples) {
                     self.payments
                         .hub
@@ -247,15 +270,15 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::EmojiAnimations) {
                     self.remember_files(&files);
                     self.accept_emoji_animations(&stickers, &emojis);
-                } else if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve {
-                    generation,
-                })) = pending.map(|p| p.purpose)
+                } else if let Some(request) = pending
+                    .filter(|p| p.purpose == RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve))
+                    .map(|p| p.id)
                     && matches!(
                         self.chats_state.deep_link_stage(),
                         Some(DeepLinkState::ResolvingChat {
                             action: DeepLinkAction::StickerSet { .. },
-                            generation: slot,
-                        }) if *slot == generation
+                            request: slot,
+                        }) if *slot == request
                     )
                 {
                     // `addstickers` / `addemoji` link: hand the set id to the
@@ -308,7 +331,7 @@ impl Session {
                 })) = pending.map(|p| p.purpose)
                 {
                     self.remember_files(&files);
-                    self.accept_mask_set(set_id, stickers);
+                    self.accept_mask_set(pending.map(|p| p.id), set_id, stickers);
                 } else if let Some(RequestPurpose::Stickers(StickersPurpose::LoadLibrarySet {
                     set_id,
                 })) = pending.map(|p| p.purpose)

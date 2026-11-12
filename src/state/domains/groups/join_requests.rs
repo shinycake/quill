@@ -6,6 +6,16 @@ use crate::state::*;
 /// the user withdrew it, or another admin or device handled it first.
 const GONE: [&str; 2] = ["HIDE_REQUESTER_MISSING", "USER_ALREADY_PARTICIPANT"];
 
+/// `user_id`'s row leaves a list and its total with it (the one place both
+/// the chat-wide list and a link's list are edited).
+fn drop_request(requests: &mut Vec<ParsedChatJoinRequest>, total_count: &mut i32, user_id: i64) {
+    let before = requests.len();
+    requests.retain(|r| r.user_id != user_id);
+    if requests.len() < before {
+        *total_count = total_count.saturating_sub(1);
+    }
+}
+
 impl Session {
     /// Drop the chat-wide join-request pages in flight: their answers
     /// were asked before a bulk Approve all or Dismiss all and would bring
@@ -27,18 +37,10 @@ impl Session {
     pub(crate) fn forget_join_request(&mut self, chat_id: ChatId, user_id: i64) {
         if let Some(JoinRequestFetch::Loaded(list)) = self.groups.join_requests.get_mut(&chat_id.0)
         {
-            let before = list.requests.len();
-            list.requests.retain(|r| r.user_id != user_id);
-            if list.requests.len() < before {
-                list.total_count = list.total_count.saturating_sub(1);
-            }
+            drop_request(&mut list.requests, &mut list.total_count, user_id);
         }
         if let Some(state) = self.groups.invite_pages.join_requests_mut(chat_id.0) {
-            let before = state.requests.len();
-            state.requests.retain(|r| r.user_id != user_id);
-            if state.requests.len() < before {
-                state.total_count = state.total_count.saturating_sub(1);
-            }
+            drop_request(&mut state.requests, &mut state.total_count, user_id);
         }
     }
 

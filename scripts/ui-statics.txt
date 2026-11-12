@@ -57,7 +57,6 @@ src/ui/wallpaper_cache.rs CACHE,FADES,INLINE_SOURCES | keyed by wallpaper
 src/ui/emoji_sprites.rs ACTIVE | the emoji atlas
 src/ui/emoji_style_ui.rs PREVIEWS | an image cache
 src/ui/app_theme/mod.rs ACTIVE,COLORS | the app theme, the same in every window
-src/ui/notifications/avatar_icon.rs DECODING | decodes in flight, by file
 src/ui/touch_bar/mac/draw.rs FILES | an image cache
 
 # The app's own: not drawn per window.
@@ -73,7 +72,6 @@ src/ui/video_player/mod.rs NEXT | an id counter
 src/ui/video_player/decoder_load.rs LOADS,REFRESHES | counters
 src/ui/video_player/controls/pip/open.rs LATEST,WRITING | the one Picture-in-Picture
 src/ui/video_editor.rs OPENED | a counter
-src/ui/photo_editor_save.rs NEXT_RENDER | an id counter
 src/ui/presence.rs LAST_INPUT_MS | the app's last input, any window
 src/ui/tray_settings.rs WINDOW_SKIPS_TASKBAR | an app setting
 src/ui/window_control.rs CONNECTION | the X connection
@@ -94,3 +92,4 @@ src/ui/dialogs/poll.rs NEXT | a counter that only has to give each option slot a
 src/ui/profile_photo_sources/camera.rs SHOTS | a counter that only has to give each camera shot file a name no other shot has
 src/ui/notifications/linux_dbus.rs NOTIFIER | the process's one D-Bus session connection, not a window's
 src/ui/media_viewer/screen_cover.rs X11_LAST | one cached X11 work-area answer; the entry carries its WindowId and bounds, so another window's read misses and asks the server
+src/ui/notifications/linux_dbus.rs PROBE | the process's one notification-daemon capability probe, asked on demand; not a window's

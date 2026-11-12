@@ -306,11 +306,7 @@ impl Session {
     /// `supergroup_own_status` for that. Absent = unknown, treated as
     /// lacking the right (the admin control stays hidden).
     pub fn supergroup_can_restrict_members(&self, supergroup_id: i64) -> bool {
-        self.groups
-            .supergroup_restrict_right
-            .get(&supergroup_id)
-            .copied()
-            .unwrap_or(false)
+        self.groups.supergroup(supergroup_id).can_restrict_members
     }
 
     /// Phase D3a: whether the viewer's own administrator rights in a
@@ -319,11 +315,7 @@ impl Session {
     /// implicitly — check `supergroup_own_status` for that. Absent =
     /// unknown, treated as lacking the right.
     pub fn supergroup_can_invite_users(&self, supergroup_id: i64) -> bool {
-        self.groups
-            .supergroup_invite_right
-            .get(&supergroup_id)
-            .copied()
-            .unwrap_or(false)
+        self.groups.supergroup(supergroup_id).can_invite_users
     }
 
     /// Phase D3b: whether the viewer's own administrator rights in a
@@ -332,11 +324,7 @@ impl Session {
     /// implicitly — check `supergroup_own_status` for that. Absent =
     /// unknown, treated as lacking the right.
     pub fn supergroup_can_promote_members(&self, supergroup_id: i64) -> bool {
-        self.groups
-            .supergroup_promote_right
-            .get(&supergroup_id)
-            .copied()
-            .unwrap_or(false)
+        self.groups.supergroup(supergroup_id).can_promote_members
     }
 
     /// Slice G1: whether the viewer's own administrator rights in a
@@ -345,11 +333,7 @@ impl Session {
     /// hold all rights implicitly — check `supergroup_own_status` for
     /// that. Absent = unknown, treated as lacking the right.
     pub fn supergroup_can_manage_tags(&self, supergroup_id: i64) -> bool {
-        self.groups
-            .supergroup_manage_tags_right
-            .get(&supergroup_id)
-            .copied()
-            .unwrap_or(false)
+        self.groups.supergroup(supergroup_id).can_manage_tags
     }
 
     /// Slice G1: whether the viewer may set a member's custom title in
@@ -383,12 +367,7 @@ impl Session {
                 is_channel: false,
             } => {
                 self.supergroup_own_status(supergroup_id) == Some(ChannelMemberStatus::Creator)
-                    || self
-                        .groups
-                        .supergroup_manage_topics_right
-                        .get(&supergroup_id)
-                        .copied()
-                        .unwrap_or(false)
+                    || self.groups.supergroup(supergroup_id).can_manage_topics
             }
             _ => false,
         }
@@ -410,12 +389,7 @@ impl Session {
         match chat.kind {
             ChatKind::Supergroup { supergroup_id, .. } => {
                 self.supergroup_own_status(supergroup_id) == Some(ChannelMemberStatus::Creator)
-                    || self
-                        .groups
-                        .supergroup_change_info_right
-                        .get(&supergroup_id)
-                        .copied()
-                        .unwrap_or(false)
+                    || self.groups.supergroup(supergroup_id).can_change_info
             }
             // B7: basic group creator or administrator with the right.
             ChatKind::BasicGroup { basic_group_id } => {
@@ -461,10 +435,8 @@ impl Session {
                 self.supergroup_own_status(supergroup_id) == Some(ChannelMemberStatus::Creator)
                     || self
                         .groups
-                        .supergroup_send_welcome_right
-                        .get(&supergroup_id)
-                        .copied()
-                        .unwrap_or(false)
+                        .supergroup(supergroup_id)
+                        .can_send_welcome_messages
             }
             _ => false,
         }
@@ -473,51 +445,31 @@ impl Session {
     /// Slice G2: cached `supergroup.sign_messages` (schema 1.8.67, line
     /// 2746). Absent = unknown → shown off.
     pub fn chat_sign_messages(&self, chat_id: ChatId) -> bool {
-        self.chat_supergroup(chat_id).is_some_and(|id| {
-            self.groups
-                .supergroup_sign_messages
-                .get(&id)
-                .copied()
-                .unwrap_or(false)
-        })
+        self.chat_supergroup(chat_id)
+            .is_some_and(|id| self.groups.supergroup(id).sign_messages)
     }
 
     /// Slice G2: cached `supergroup.show_message_sender` (schema 1.8.67,
     /// line 2746).
     pub fn chat_show_message_sender(&self, chat_id: ChatId) -> bool {
-        self.chat_supergroup(chat_id).is_some_and(|id| {
-            self.groups
-                .supergroup_show_message_sender
-                .get(&id)
-                .copied()
-                .unwrap_or(false)
-        })
+        self.chat_supergroup(chat_id)
+            .is_some_and(|id| self.groups.supergroup(id).show_message_sender)
     }
 
     /// Slice G2: cached
     /// `supergroupFullInfo.has_aggressive_anti_spam_enabled` (schema
     /// 1.8.67, line 2792).
     pub fn chat_anti_spam_enabled(&self, chat_id: ChatId) -> bool {
-        self.chat_supergroup(chat_id).is_some_and(|id| {
-            self.groups
-                .supergroup_anti_spam_enabled
-                .get(&id)
-                .copied()
-                .unwrap_or(false)
-        })
+        self.chat_supergroup(chat_id)
+            .is_some_and(|id| self.groups.supergroup_anti_spam(id).enabled)
     }
 
     /// Slice G2: cached
     /// `supergroupFullInfo.can_toggle_aggressive_anti_spam` (schema
     /// 1.8.67, line 2792) — the only gate for the anti-spam toggle.
     pub fn chat_can_toggle_anti_spam(&self, chat_id: ChatId) -> bool {
-        self.chat_supergroup(chat_id).is_some_and(|id| {
-            self.groups
-                .supergroup_can_toggle_anti_spam
-                .get(&id)
-                .copied()
-                .unwrap_or(false)
-        })
+        self.chat_supergroup(chat_id)
+            .is_some_and(|id| self.groups.supergroup_anti_spam(id).can_toggle)
     }
 
     /// Slice S11: group sticker-set gate for a chat —

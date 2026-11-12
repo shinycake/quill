@@ -43,7 +43,7 @@ fn chat_window_shell(h: &Harness, cx: &mut TestAppContext) -> Entity<QuillShell>
 }
 
 fn shown(shell: &Entity<QuillShell>, cx: &mut TestAppContext) -> Option<DialogKind> {
-    shell.read_with(cx, |shell, _| shell.open_dialog)
+    shell.read_with(cx, |shell, _| shell.open_dialog.kind())
 }
 
 /// The window whose state is in place asks; inside `as_asked_by` the
@@ -104,6 +104,24 @@ fn a_queued_link_takes_the_asking_window_not_the_pointers(cx: &mut TestAppContex
     });
 }
 
+/// Sweep r3-08 (15-005): TDLib's text for a link belongs to the window the
+/// link was clicked in, so a second link's text never replaces the first's.
+#[gpui_kit::test]
+fn two_windows_keep_their_own_deep_link_text(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    let _chat_window = h.open_in_new_window(OTHER, cx);
+    h.app.update(cx, |app, cx| {
+        app.set_window_scope(None);
+        app.show_deep_link_info("first".into(), Some(OTHER), cx);
+        app.show_deep_link_info("second".into(), None, cx);
+        let in_chat_window = app.in_window_scope(Some(OTHER), cx, |app, _| {
+            app.message_ui.deep_link_info.clone()
+        });
+        assert_eq!(in_chat_window, Some(Some("first".to_string())));
+        assert_eq!(app.message_ui.deep_link_info.as_deref(), Some("second"));
+    });
+}
+
 /// Findings 4 and 5: a box opened where no window asked (the poll loop's
 /// pass, with the main window in place) shows in the window of the last
 /// press, not in the main window.
@@ -115,14 +133,14 @@ fn a_box_no_window_asked_for_shows_where_the_user_pressed(cx: &mut TestAppContex
         app.note_window_press(Some(OTHER));
         app.set_window_scope(None);
         app.unasked(|app| {
-            app.links.deep_link_dialog = Some("TDLib's text".into());
-            app.open_box(DialogKind::DeepLinkInfo);
+            app.links.bot_alert = Some("TDLib's text".into());
+            app.open_box(DialogKind::BotAlert);
         });
     });
     draw_both(&h, chat_window, cx);
     assert_eq!(shown(&h.shell, cx), None);
     let in_chat_window = chat_window_shell(&h, cx);
-    assert_eq!(shown(&in_chat_window, cx), Some(DialogKind::DeepLinkInfo));
+    assert_eq!(shown(&in_chat_window, cx), Some(DialogKind::BotAlert));
 }
 
 /// Finding 1: a typed link clicked in a chat window runs in that window's
@@ -751,6 +769,42 @@ fn closing_the_panel_drops_the_gif_typing_pause(cx: &mut TestAppContext) {
     cx.executor().advance_clock(Duration::from_secs(1));
     cx.run_until_parked();
     assert!(!fired.get(), "the dropped pause never fires");
+}
+
+/// Sweep r3-08 (16-005): an ask that sent a request waits for that request
+/// and settles to `Asked` when it ends, however it ended.
+#[gpui_kit::test]
+fn a_gif_ask_settles_when_its_own_request_ends(cx: &mut TestAppContext) {
+    use crate::ui::gifs_ui::{GifTab, GifWanted};
+    use quill::state::RequestPurpose;
+    let h = new_app(cx);
+    h.app.update(cx, |app, cx| {
+        let Some(request) = app
+            .demo_session
+            .as_mut()
+            .map(|s| s.request(RequestPurpose::GetChatFolder, None))
+        else {
+            return;
+        };
+        let wanted = GifWanted::Search("dogs".into());
+        app.pickers.gif_tab = GifTab::Asking {
+            wanted: wanted.clone(),
+            request,
+        };
+        app.gif_tab_upkeep(cx);
+        assert!(
+            matches!(&app.pickers.gif_tab, GifTab::Asking { request: r, .. } if *r == request),
+            "its request is still out"
+        );
+        if let Some(s) = app.demo_session.as_mut() {
+            s.requests.take(request);
+        }
+        app.gif_tab_upkeep(cx);
+        assert!(
+            matches!(&app.pickers.gif_tab, GifTab::Asked(shown) if *shown == wanted),
+            "the request ended: the ask is settled and is not asked again"
+        );
+    });
 }
 
 /// Sweep r2-27 (10-002, 10-003): while typed text waits for its pause, the

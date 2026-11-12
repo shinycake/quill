@@ -931,24 +931,44 @@ fn a_reactions_tab_pages_and_keeps_its_list_when_the_next_page_fails() {
         reactions: Vec::new(),
         next_offset: offset.to_string(),
     };
-    session.accept_added_reactions(chat, message, 0, false, page("2"));
-    session.audience_tab_loading_more(chat, message, 0);
+    let ask = |session: &mut Session, append: bool| {
+        session.request(
+            RequestPurpose::Messages(MessagesPurpose::GetMessageAddedReactions {
+                chat_id: chat,
+                message_id: message,
+                filter: 0,
+                append,
+            }),
+            Some(chat),
+        )
+    };
+    let first = ask(&mut session, false);
+    session.audience_tab_loading(chat, message, 0, first);
+    session.accept_added_reactions(first, chat, message, 0, page("2"));
+    let next = ask(&mut session, true);
+    session.audience_tab_loading_more(chat, message, 0, next);
     let audience = session.messages.message_audience.as_ref().unwrap();
     assert!(audience.reactions.is_paging());
     assert_eq!(audience.reactions.ready().unwrap().next_offset, "2");
-    session.fail_audience(RequestPurpose::Messages(
-        MessagesPurpose::GetMessageAddedReactions {
-            chat_id: chat,
-            message_id: message,
-            filter: 0,
-            append: true,
-        },
-    ));
+    // An older ask's failure does not end the page now out.
+    let old = ask(&mut session, true);
+    let old = session.requests.get(old).cloned().unwrap();
+    session.fail_audience(&old);
+    let audience = session.messages.message_audience.as_ref().unwrap();
+    assert!(audience.reactions.is_paging());
+    // The page's own failure does.
+    let pending = session.requests.get(next).cloned().unwrap();
+    session.fail_audience(&pending);
     let audience = session.messages.message_audience.as_ref().unwrap();
     assert!(!audience.reactions.is_paging(), "the failure ends the page");
     assert_eq!(audience.reactions.ready().unwrap().next_offset, "2");
-    session.audience_tab_loading_more(chat, message, 0);
-    session.accept_added_reactions(chat, message, 0, true, page(""));
+    let again = ask(&mut session, true);
+    session.audience_tab_loading_more(chat, message, 0, again);
+    // A late page of the failed ask is dropped; the new page's own lands.
+    session.accept_added_reactions(next, chat, message, 0, page("late"));
+    let audience = session.messages.message_audience.as_ref().unwrap();
+    assert!(audience.reactions.is_paging());
+    session.accept_added_reactions(again, chat, message, 0, page(""));
     let audience = session.messages.message_audience.as_ref().unwrap();
     assert!(!audience.reactions.is_paging());
     assert!(audience.reactions.ready().unwrap().next_offset.is_empty());

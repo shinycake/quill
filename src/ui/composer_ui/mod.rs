@@ -39,6 +39,7 @@ pub(super) fn apply_ready_stickers(session: &mut Session, sink: &Arc<MemorySink>
     session.stickers.stickers.open = true;
     let sets_extra = session.request(RequestPurpose::GetInstalledStickerSets, None);
     session.stickers.stickers.lists.installed.begin();
+    session.stickers.stickers.lists.installed.sent(sets_extra);
     let sets = format!(
         r#"{{"@type":"stickerSets","@extra":"{}","total_count":1,"sets":[{{"@type":"stickerSetInfo","id":"77","title":"Demo stickers","name":"DemoStickers","thumbnail":null,"thumbnail_outline":null,"is_owned":false,"is_installed":true,"is_archived":false,"is_official":true,"sticker_type":{{"@type":"stickerTypeRegular"}},"needs_repainting":false,"is_allowed_as_chat_emoji_status":false,"is_viewed":true,"size":2,"covers":[]}}]}}"#,
         sets_extra.0

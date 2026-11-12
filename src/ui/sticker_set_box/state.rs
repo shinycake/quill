@@ -112,21 +112,196 @@ pub(crate) struct PickExisting {
 pub(crate) struct StickerSetBoxUi {
     /// The window showing the dialog, if it is open.
     pub(crate) host: SetBoxHost,
-    /// "Edit Stickers" was pressed: cells drag to reorder, the footer is
-    /// "Done" (tdesktop `setReorderState`).
-    pub(crate) reordering: bool,
+    /// The one editing flow the box is in (reordering, choosing an
+    /// existing sticker, waiting for its file, creating a sticker).
+    pub(crate) editing: SetEditing,
     /// The confirmation or rename box over the set box, if any.
     pub(crate) confirm: SetConfirm,
     pub(crate) rename_input: Entity<InputState>,
-    /// The "New Sticker" / "New Emoji" box.
-    pub(crate) create: Option<CreateSticker>,
-    /// The box's "Done" is encoding a video sticker.
-    pub(crate) encoding: Encoding,
     pub(crate) emoji_search: Entity<InputState>,
-    /// The existing-sticker chooser.
-    pub(crate) pick: Option<PickExisting>,
+}
+
+/// The editing flow of the set box. One at a time: entering a flow ends
+/// the one before it (`SetEditing::enter`), so no flow can keep a chooser,
+/// a pending download or a create box over the wrong set. Every flow has
+/// a way out: its answer, a cancel, or the box closing (`reset`).
+#[derive(Default)]
+pub(crate) enum SetEditing {
+    #[default]
+    Idle,
+    /// "Edit Stickers" was pressed: cells drag to reorder, the footer is
+    /// "Done" (tdesktop `setReorderState`).
+    Reordering,
+    /// The existing-sticker chooser is open.
+    Picking(PickExisting),
     /// A chosen sticker or video on its way to the editor.
-    pub(crate) pending: PickWait,
+    Waiting(PickWait),
+    /// The "New Sticker" / "New Emoji" box, and the encode behind its
+    /// "Done" for a video.
+    Creating {
+        create: CreateSticker,
+        encoding: Encoding,
+    },
+}
+
+impl SetEditing {
+    /// Enter `next`, ending the flow before it: a create box's editor
+    /// files go and its encode stops.
+    pub(crate) fn enter(&mut self, next: SetEditing) {
+        self.discard_create();
+        *self = next;
+    }
+
+    /// At rest: nothing chosen is on its way and no box is open, so the
+    /// set box's controls act; any other stage would be ended by a press.
+    pub(crate) fn is_idle(&self) -> bool {
+        matches!(self, Self::Idle)
+    }
+
+    pub(crate) fn is_reordering(&self) -> bool {
+        matches!(self, Self::Reordering)
+    }
+
+    /// "Edit Stickers": only from rest, so a chosen file still on its way
+    /// is not dropped by a press.
+    pub(crate) fn begin_reordering(&mut self) {
+        if matches!(self, Self::Idle) {
+            *self = Self::Reordering;
+        }
+    }
+
+    pub(crate) fn finish_reordering(&mut self) {
+        if self.is_reordering() {
+            *self = Self::Idle;
+        }
+    }
+
+    pub(crate) fn pick(&self) -> Option<PickExisting> {
+        match self {
+            Self::Picking(pick) => Some(*pick),
+            _ => None,
+        }
+    }
+
+    /// The chooser closed; another flow stays.
+    pub(crate) fn close_pick(&mut self) {
+        if matches!(self, Self::Picking(_)) {
+            *self = Self::Idle;
+        }
+    }
+
+    pub(crate) fn create(&self) -> Option<&CreateSticker> {
+        match self {
+            Self::Creating { create, .. } => Some(create),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn create_mut(&mut self) -> Option<&mut CreateSticker> {
+        match self {
+            Self::Creating { create, .. } => Some(create),
+            _ => None,
+        }
+    }
+
+    /// The "New Sticker" box opens on `create`.
+    pub(crate) fn begin_create(&mut self, create: CreateSticker) {
+        self.enter(Self::Creating {
+            create,
+            encoding: Encoding::Idle,
+        });
+    }
+
+    /// Drop the "New Sticker" box's sticker: the encode that runs stops
+    /// (dropping its stage cancels it) and the editor's files go. Another
+    /// flow stays.
+    pub(crate) fn discard_create(&mut self) {
+        if matches!(self, Self::Creating { .. })
+            && let Self::Creating { create, encoding } = std::mem::take(self)
+        {
+            drop(encoding);
+            create.discard();
+        }
+    }
+
+    /// The sticker was handed to TDLib: the box is over (its encode, if
+    /// any, finished already).
+    pub(crate) fn finish_upload(&mut self) {
+        if matches!(self, Self::Creating { .. }) {
+            *self = Self::Idle;
+        }
+    }
+
+    pub(crate) fn encoding_running(&self) -> bool {
+        matches!(
+            self,
+            Self::Creating {
+                encoding: Encoding::Running { .. },
+                ..
+            }
+        )
+    }
+
+    /// "Done" starts the video encode of the create box; false when the
+    /// box is gone or one already runs.
+    pub(crate) fn start_encoding(&mut self, running: Encoding) -> bool {
+        match self {
+            Self::Creating { encoding, .. } if !encoding.is_running() => {
+                *encoding = running;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// The encode finished: whether it was running (a stage that left
+    /// cancelled its job, so the answer of an old one never lands).
+    pub(crate) fn finish_encoding(&mut self) -> bool {
+        match self {
+            Self::Creating { encoding, .. } if encoding.is_running() => {
+                *encoding = Encoding::Idle;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub(crate) fn downloading(&self) -> Option<&PendingVideo> {
+        match self {
+            Self::Waiting(wait) => wait.downloading(),
+            _ => None,
+        }
+    }
+
+    /// Stop waiting for the download, handing back what waited.
+    pub(crate) fn take_downloading(&mut self) -> Option<PendingVideo> {
+        self.downloading()?;
+        match std::mem::take(self) {
+            Self::Waiting(PickWait::Downloading(pending)) => Some(pending),
+            _ => None,
+        }
+    }
+
+    /// The wait for a download or a decode ends (the box closed, the file
+    /// failed); another flow stays.
+    pub(crate) fn end_wait(&mut self) {
+        if matches!(self, Self::Waiting(_)) {
+            *self = Self::Idle;
+        }
+    }
+
+    /// The decode of this pick landed: false when it is not the one
+    /// waited for (the box closed or another sticker was picked).
+    pub(crate) fn finish_decoding(&mut self, pick: PickExisting, file_id: FileId) -> bool {
+        let waited = matches!(
+            self,
+            Self::Waiting(PickWait::Decoding { pick: p, file_id: f, .. }) if *p == pick && *f == file_id
+        );
+        if waited {
+            *self = Self::Idle;
+        }
+        waited
+    }
 }
 
 /// The box over the set box (kit dialogs never stack, so one at a time).
@@ -198,87 +373,61 @@ impl SetConfirm {
 
 /// Where a chosen existing sticker is on its way to the editor: one pick
 /// at a time, so a new pick replaces whatever waited before it.
-#[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) enum PickWait {
-    #[default]
-    None,
     /// The file is downloading.
     Downloading(PendingVideo),
-    /// A still sticker is being decoded for the photo editor.
-    Decoding(PickExisting, FileId),
+    /// A still sticker is being decoded for the photo editor; the stage
+    /// holds the job, so leaving it cancels the decode.
+    Decoding {
+        pick: PickExisting,
+        file_id: FileId,
+        _job: Task<()>,
+    },
 }
 
 impl PickWait {
     pub(crate) fn downloading(&self) -> Option<&PendingVideo> {
         match self {
             Self::Downloading(pending) => Some(pending),
-            _ => None,
-        }
-    }
-
-    /// Stop waiting for the download, handing back what waited.
-    pub(crate) fn take_downloading(&mut self) -> Option<PendingVideo> {
-        match std::mem::take(self) {
-            Self::Downloading(pending) => Some(pending),
-            other => {
-                *self = other;
-                None
-            }
-        }
-    }
-
-    /// Stop waiting for the decode of this pick; false when it is not the
-    /// one waited for (the box closed or another sticker was picked).
-    pub(crate) fn finish_decoding(&mut self, pick: PickExisting, file_id: FileId) -> bool {
-        if *self == Self::Decoding(pick, file_id) {
-            *self = Self::None;
-            true
-        } else {
-            false
+            Self::Decoding { .. } => None,
         }
     }
 }
 
-/// The video encode behind "Done": at most one runs, and only the job that
-/// holds the encode's own cancel flag may end it, so an old job finishing
-/// after a cancel and a new "Done" leaves the new one alone.
+/// Stops the encode worker when its stage is dropped, whichever way the
+/// stage ended (the box closed, another set, the account replaced).
+pub(crate) struct CancelOnDrop(Arc<AtomicBool>);
+
+impl Drop for CancelOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+}
+
+/// The video encode behind "Done": at most one runs. The stage holds the
+/// worker's cancel flag and the task that lands its answer, so leaving the
+/// stage stops the worker (between quality steps) and drops the answer.
 #[derive(Default)]
 pub(crate) enum Encoding {
     #[default]
     Idle,
     Running {
-        cancel: Arc<AtomicBool>,
+        _cancel: CancelOnDrop,
+        _job: Task<()>,
     },
 }
 
 impl Encoding {
+    /// A running encode: `cancel` is the flag the worker polls.
+    pub(crate) fn running(cancel: Arc<AtomicBool>, job: Task<()>) -> Self {
+        Self::Running {
+            _cancel: CancelOnDrop(cancel),
+            _job: job,
+        }
+    }
+
     pub(crate) fn is_running(&self) -> bool {
         matches!(self, Self::Running { .. })
-    }
-
-    /// A job starts with its cancel flag.
-    pub(crate) fn start(&mut self, cancel: Arc<AtomicBool>) {
-        *self = Self::Running { cancel };
-    }
-
-    /// The job holding `cancel` finished: whether it is still the running
-    /// one (then the encode is over). A job that was cancelled or replaced
-    /// changes nothing.
-    pub(crate) fn finish(&mut self, cancel: &Arc<AtomicBool>) -> bool {
-        match self {
-            Self::Running { cancel: running } if Arc::ptr_eq(running, cancel) => {
-                *self = Self::Idle;
-                true
-            }
-            _ => false,
-        }
-    }
-
-    /// Stop the running job, if any, between quality steps.
-    pub(crate) fn cancel(&mut self) {
-        if let Self::Running { cancel } = std::mem::take(self) {
-            cancel.store(true, Ordering::Relaxed);
-        }
     }
 }
 
@@ -297,35 +446,19 @@ impl StickerSetBoxUi {
     pub(crate) fn new(window: &mut Window, cx: &mut App) -> Self {
         Self {
             host: SetBoxHost::Closed,
-            reordering: false,
+            editing: SetEditing::Idle,
             confirm: SetConfirm::None,
             rename_input: cx
                 .new(|cx| InputState::new(window, cx).placeholder(tr(keys::Q_MEDIA_SET_NAME))),
-            create: None,
-            encoding: Encoding::Idle,
             emoji_search: cx
                 .new(|cx| InputState::new(window, cx).placeholder(tr(keys::Q_MEDIA_SEARCH_EMOJI))),
-            pick: None,
-            pending: PickWait::None,
-        }
-    }
-
-    /// Drop the "New Sticker" box's sticker: stop an encode that runs and
-    /// remove the editor's files.
-    pub(crate) fn discard_create(&mut self) {
-        self.encoding.cancel();
-        if let Some(create) = self.create.take() {
-            create.discard();
         }
     }
 
     /// Leave every editing flow (the box closed or changed set).
     pub(crate) fn reset(&mut self) {
-        self.reordering = false;
         self.confirm = SetConfirm::None;
-        self.discard_create();
-        self.pick = None;
-        self.pending = PickWait::None;
+        self.editing.enter(SetEditing::Idle);
     }
 }
 
@@ -349,33 +482,75 @@ impl crate::ui::on_screen::Farewell for StickerSetBoxUi {
 
 #[cfg(test)]
 mod encoding_tests {
-    use super::Encoding;
+    use super::{CreateSticker, Encoding, SetEditing, SetKind};
+    use gpui_kit::Task;
+    use quill::telegram::envelope::StickerFormat;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
 
-    /// An old encode that finishes after a cancel and a new "Done" must not
-    /// clear the new encode, or "Done" would run a second one and the
-    /// first would lose its cancel.
+    fn create() -> CreateSticker {
+        CreateSticker {
+            set_id: 7,
+            kind: SetKind::Stickers,
+            path: "/nonexistent/sticker.webm".into(),
+            format: StickerFormat::Webm,
+            preview: None,
+            emojis: vec!["😀".into()],
+            video: None,
+        }
+    }
+
+    /// Whatever ends the create box (a close, another sticker, the box
+    /// closing) stops the worker: the stage holds its cancel flag.
     #[test]
-    fn a_finished_old_encode_leaves_the_newer_one_running() {
-        let mut encoding = Encoding::default();
+    fn leaving_the_create_stage_cancels_the_running_encode() {
+        let mut editing = SetEditing::default();
+        editing.begin_create(create());
         let old = Arc::new(AtomicBool::new(false));
-        encoding.start(old.clone());
-        encoding.cancel();
-        assert!(old.load(Ordering::Relaxed), "the close stopped the old job");
-        assert!(!encoding.is_running());
-        let newer = Arc::new(AtomicBool::new(false));
-        encoding.start(newer.clone());
-        assert!(!encoding.finish(&old), "the old job is not the running one");
-        assert!(encoding.is_running());
-        assert!(encoding.finish(&newer));
-        assert!(!encoding.is_running());
+        assert!(editing.start_encoding(Encoding::running(old.clone(), Task::ready(()))));
+        assert!(editing.encoding_running());
+        assert!(
+            !editing.start_encoding(Encoding::running(
+                Arc::new(AtomicBool::new(false)),
+                Task::ready(())
+            )),
+            "one encode at a time"
+        );
+        editing.discard_create();
+        assert!(old.load(Ordering::Relaxed), "the close stopped the job");
+        assert!(!editing.encoding_running());
+        assert!(editing.create().is_none());
+    }
+
+    /// A new sticker replaces the old box's encode, which stops; the new
+    /// box starts with no encode of its own.
+    #[test]
+    fn a_new_create_box_stops_the_old_boxs_encode_and_starts_idle() {
+        let mut editing = SetEditing::default();
+        editing.begin_create(create());
+        let old = Arc::new(AtomicBool::new(false));
+        editing.start_encoding(Encoding::running(old.clone(), Task::ready(())));
+        editing.begin_create(create());
+        assert!(old.load(Ordering::Relaxed));
+        assert!(!editing.encoding_running());
+        assert!(!editing.finish_encoding(), "nothing runs to finish");
+    }
+
+    #[test]
+    fn finishing_the_encode_ends_only_a_running_one() {
+        let mut editing = SetEditing::default();
+        editing.begin_create(create());
+        let job = Arc::new(AtomicBool::new(false));
+        editing.start_encoding(Encoding::running(job.clone(), Task::ready(())));
+        assert!(editing.finish_encoding());
+        assert!(!editing.finish_encoding());
+        assert!(editing.create().is_some(), "the box stays for another Done");
     }
 }
 
 #[cfg(test)]
 mod confirm_tests {
-    use super::{PickExisting, PickWait, SetConfirm, SetKind};
+    use super::{PickExisting, PickWait, SetConfirm, SetEditing, SetKind};
     use quill::ids::FileId;
 
     fn pick() -> PickExisting {
@@ -408,11 +583,41 @@ mod confirm_tests {
     }
 
     #[test]
-    fn a_new_pick_replaces_the_one_waiting_and_only_its_own_decode_lands() {
-        let mut wait = PickWait::Decoding(pick(), FileId(1));
-        assert!(!wait.finish_decoding(pick(), FileId(2)), "another sticker");
-        assert!(wait.finish_decoding(pick(), FileId(1)));
-        assert_eq!(wait, PickWait::None);
-        assert!(!wait.finish_decoding(pick(), FileId(1)), "already landed");
+    fn entering_a_flow_ends_the_one_before_it() {
+        let mut editing = SetEditing::default();
+        editing.enter(SetEditing::Picking(pick()));
+        assert_eq!(editing.pick(), Some(pick()));
+        editing.close_pick();
+        assert!(editing.pick().is_none());
+        editing.begin_reordering();
+        assert!(editing.is_reordering());
+        editing.enter(SetEditing::Picking(pick()));
+        assert!(!editing.is_reordering(), "the chooser replaced reordering");
+        editing.finish_reordering();
+        assert_eq!(
+            editing.pick(),
+            Some(pick()),
+            "another flow's end is not its own"
+        );
+    }
+
+    #[test]
+    fn a_press_of_edit_stickers_keeps_a_waiting_pick() {
+        let mut editing = SetEditing::Waiting(PickWait::Decoding {
+            pick: pick(),
+            file_id: FileId(1),
+            _job: gpui_kit::Task::ready(()),
+        });
+        editing.begin_reordering();
+        assert!(!editing.is_reordering());
+        assert!(
+            !editing.finish_decoding(pick(), FileId(2)),
+            "another sticker"
+        );
+        assert!(editing.finish_decoding(pick(), FileId(1)));
+        assert!(
+            !editing.finish_decoding(pick(), FileId(1)),
+            "already landed"
+        );
     }
 }

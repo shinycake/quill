@@ -68,11 +68,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         // The two halves are independent: a refused one fails its own list
         // (the box draws its error and Retry) and the other is still asked.
         let mut refused = None;
-        if !self
+        // The list's own stage says whether its fetch is out: a request a
+        // local edit outdated is no longer waited for, so the fetch goes
+        // out again and the old answer lands nowhere.
+        let links_loading = self
             .session
-            .requests
-            .has_purpose_for_folder(RequestPurpose::GetChatFolderInviteLinks, folder_id)
-        {
+            .chat_list
+            .folder_shares
+            .get(&folder_id)
+            .is_some_and(|share| share.links.is_loading());
+        if !links_loading {
             let extra = self
                 .session
                 .request_for_folder(RequestPurpose::GetChatFolderInviteLinks, folder_id);
@@ -83,6 +88,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .entry(folder_id)
                 .or_default();
             share.links.begin();
+            share.links.sent(extra);
             if let Err(err) =
                 self.send_folder_request(extra, get_chat_folder_invite_links(extra, folder_id))
             {
@@ -188,7 +194,35 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             links.retain(|link| link.invite_link != invite_link);
         }
+        // An answer of the list read before the delete lands may still hold
+        // the link: it is dropped now, and the list is fetched again once
+        // the delete is answered (`refetch_outdated_folder_links`).
+        self.session.chat_list.outdate_loading_links(folder_id);
         Ok(sent)
+    }
+
+    /// A link edit landed on a list whose fetch was still out: that fetch
+    /// asked before the edit, so it is fetched again. A refusal ends in the
+    /// error line the box draws with its Retry. A delete still in flight
+    /// holds the refetch back: queries are not ordered, so the list could
+    /// be read before the delete lands.
+    pub fn refetch_outdated_folder_links(&mut self, folder_id: i32) {
+        if self
+            .session
+            .requests
+            .has_purpose_for_folder(RequestPurpose::DeleteChatFolderInviteLink, folder_id)
+        {
+            return;
+        }
+        let due = self
+            .session
+            .chat_list
+            .folder_shares
+            .get(&folder_id)
+            .is_some_and(|share| share.links.is_outdated());
+        if due {
+            let _ = self.fetch_folder_share(folder_id);
+        }
     }
 
     /// `checkChatFolderInviteLink` for an `addlist` link; the box takes the

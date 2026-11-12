@@ -35,6 +35,27 @@ impl UserFullInfos {
         self.by_user.remove(user_id);
     }
 
+    /// This user's full info is needed and not cached: an idle entry the
+    /// driver's pump turns into a `getUserFullInfo`, which an answer
+    /// replaces and a failure turns into `Failed`.
+    pub fn want(&mut self, user_id: i64) {
+        self.by_user.entry(user_id).or_default();
+    }
+
+    /// Whether [`Self::want`] is still waiting for its answer.
+    pub fn is_wanted(&self, user_id: &i64) -> bool {
+        self.by_user.get(user_id).is_some_and(Fetch::is_idle)
+    }
+
+    /// Users that are wanted and not yet asked for or answered.
+    pub fn wanted(&self) -> Vec<i64> {
+        self.by_user
+            .iter()
+            .filter(|(_, entry)| entry.is_idle())
+            .map(|(id, _)| *id)
+            .collect()
+    }
+
     /// The ask for this user failed.
     pub fn fail(&mut self, user_id: i64, error: String) {
         self.by_user.entry(user_id).or_default().fail(error);
@@ -50,9 +71,11 @@ impl UserFullInfos {
         let Some(entry) = self.by_user.get_mut(user_id) else {
             return;
         };
-        entry.clear_error();
-        if entry.is_idle() {
-            self.by_user.remove(user_id);
+        if matches!(entry, Fetch::Failed { .. }) {
+            entry.clear_error();
+            if entry.is_idle() {
+                self.by_user.remove(user_id);
+            }
         }
     }
 }

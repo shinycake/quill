@@ -69,6 +69,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 &mut self.session.stickers.emoji.lists.installed
             };
             fetch.begin();
+            fetch.sent(extra);
         }
         Ok(())
     }
@@ -478,9 +479,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             || self
                 .session
                 .groups
-                .supergroup_is_broadcast
-                .get(&supergroup_id)
-                .is_some_and(|b| *b)
+                .supergroup(supergroup_id)
+                .is_broadcast_group
         {
             return Ok(None);
         }
@@ -497,11 +497,22 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         // Optimistic: the toggle is one-way, so a sent request means the
-        // group becomes a broadcast group barring a TDLib error.
+        // group becomes a broadcast group barring a TDLib error, which
+        // puts back what was known before.
+        let previous = self
+            .session
+            .groups
+            .supergroup(supergroup_id)
+            .is_broadcast_group;
         self.session
             .groups
-            .supergroup_is_broadcast
-            .insert(supergroup_id, true);
+            .edit_supergroup(supergroup_id, |facts| facts.is_broadcast_group = true);
+        if let Some(pending) = self.session.requests.pending_mut(extra) {
+            pending.rollback = Some(crate::state::RequestRollback::BroadcastGroup {
+                supergroup_id,
+                previous: Some(previous),
+            });
+        }
         Ok(Some(extra))
     }
 

@@ -97,7 +97,7 @@ pub(crate) struct EarnUi {
 /// The earn boxes (setup confirm, programs, join, link, revoke, the
 /// withdrawal) keep their state in the session's `payments.earn`, which
 /// goes to the background with the account: each closes here. The layer's
-/// open flag is the session's info column too, while its back stack and
+/// open state is the session's info column alone, while its back stack and
 /// the column it covered live in `EarnUi::layer`: it closes, giving that
 /// column back, or it would come back on switch-back with neither.
 impl crate::ui::on_screen::Farewell for EarnUi {
@@ -128,7 +128,7 @@ impl EarnUi {
                     .submit_on_enter(true)
             }),
             prefilled: None,
-            layer: super::earn::EarnLayer::Closed,
+            layer: super::earn::EarnLayer::idle(),
             learn: None,
             tx_box: TxBox::None,
             ask_boost: None,

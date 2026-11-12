@@ -3,6 +3,25 @@ use crate::state::*;
 use crate::telegram::envelope::MessagesPayload;
 
 impl Session {
+    /// Keep the temporary message TDLib made for send `request`, so the
+    /// composer's ack finds the clear of the send it ends. Nobody may be
+    /// looking (an agent session): keep the newest 64.
+    pub(crate) fn record_send_answer(
+        &mut self,
+        request: RequestId,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) {
+        if self.messages.sent_answers.len() >= 64 {
+            self.messages.sent_answers.remove(0);
+        }
+        self.messages.sent_answers.push(SendAnswered {
+            request,
+            chat_id,
+            message_id,
+        });
+    }
+
     /// Applies one messages payload; called by
     /// [`Session::apply_payload`].
     pub(crate) fn apply_messages_payload(
@@ -111,32 +130,35 @@ impl Session {
             }
             // The message menu's "N Seen" / "Seen at" / "N Reacted" rows.
             MessagesPayload::MessageViewers(viewers) => {
-                if let Some(RequestPurpose::Messages(MessagesPurpose::GetMessageViewers {
-                    chat_id,
-                    message_id,
-                })) = pending.map(|p| p.purpose)
+                if let Some(pending) = pending
+                    && let RequestPurpose::Messages(MessagesPurpose::GetMessageViewers {
+                        chat_id,
+                        message_id,
+                    }) = pending.purpose
                 {
-                    self.accept_message_viewers(chat_id, message_id, viewers);
+                    self.accept_message_viewers(pending.id, chat_id, message_id, viewers);
                 }
             }
             MessagesPayload::MessageReadDate(date) => {
-                if let Some(RequestPurpose::Messages(MessagesPurpose::GetMessageReadDate {
-                    chat_id,
-                    message_id,
-                })) = pending.map(|p| p.purpose)
+                if let Some(pending) = pending
+                    && let RequestPurpose::Messages(MessagesPurpose::GetMessageReadDate {
+                        chat_id,
+                        message_id,
+                    }) = pending.purpose
                 {
-                    self.accept_message_read_date(chat_id, message_id, date);
+                    self.accept_message_read_date(pending.id, chat_id, message_id, date);
                 }
             }
             MessagesPayload::AddedReactions(page) => {
-                if let Some(RequestPurpose::Messages(MessagesPurpose::GetMessageAddedReactions {
-                    chat_id,
-                    message_id,
-                    filter,
-                    append,
-                })) = pending.map(|p| p.purpose)
+                if let Some(pending) = pending
+                    && let RequestPurpose::Messages(MessagesPurpose::GetMessageAddedReactions {
+                        chat_id,
+                        message_id,
+                        filter,
+                        ..
+                    }) = pending.purpose
                 {
-                    self.accept_added_reactions(chat_id, message_id, filter, append, page);
+                    self.accept_added_reactions(pending.id, chat_id, message_id, filter, page);
                 }
             }
             MessagesPayload::UpdatePendingMessage {
@@ -233,7 +255,11 @@ impl Session {
                 // The draft of the slot the message went to (topic, thread
                 // or chat) is cleared once the composer is seen idle.
                 let slot = self.draft_slot_of_message(chat_id, topic_id, thread_id, direct_topic);
-                self.messages.draft_clears.push((chat_id, slot));
+                self.messages.draft_clears.push(SendAck {
+                    chat_id,
+                    slot,
+                    old_message_id,
+                });
             }
             MessagesPayload::UpdateMessageSendFailed {
                 message,
@@ -258,7 +284,11 @@ impl Session {
                     message.thread_id(),
                     message.extras.direct_messages_topic_id(),
                 );
-                self.messages.failed_sends.push((chat_id, slot));
+                self.messages.failed_sends.push(SendAck {
+                    chat_id,
+                    slot,
+                    old_message_id,
+                });
                 let failed = crate::telegram::envelope::MessageSendState::Failed {
                     can_retry: matches!(
                         message.send_state,
@@ -501,12 +531,13 @@ impl Session {
                         .accept_post(chat_id, message_id, pending.id, &message);
                     return;
                 }
-                if let Some(RequestPurpose::GetRepliedMessage {
-                    chat_id,
-                    message_id,
-                }) = pending.map(|p| p.purpose)
+                if let Some(pending) = pending
+                    && let RequestPurpose::GetRepliedMessage {
+                        chat_id,
+                        message_id,
+                    } = pending.purpose
                 {
-                    self.accept_replied_message(chat_id, message_id, message);
+                    self.accept_replied_message(pending.id, chat_id, message_id, message);
                     return;
                 }
                 if let Some(p) = pending
@@ -537,7 +568,10 @@ impl Session {
                     } else {
                         self.messages.scheduled_messages.push(message);
                     }
-                } else if pending.map(|p| p.purpose) == Some(RequestPurpose::SendMessage) {
+                } else if let Some(request) =
+                    pending.filter(|p| p.purpose == RequestPurpose::SendMessage)
+                {
+                    self.record_send_answer(request.id, message.chat_id, message.id);
                     self.upsert_message(message, true);
                 } else if matches!(
                     pending.map(|p| p.purpose),
@@ -558,7 +592,10 @@ impl Session {
                         RequestPurpose::Bots(BotsPurpose::SharePhoneWithMiniApp { .. })
                     )
                 }) {
-                    self.bots.web_apps.phone_share = Some(PhoneShare::Sent(request.id));
+                    self.bots
+                        .web_apps
+                        .phone_share
+                        .push(PhoneShare::Sent(request.id));
                     self.upsert_message(message, true);
                 } else {
                     self.upsert_message(message, false);
@@ -648,14 +685,13 @@ impl Session {
                     self.messages.menu_actions.set(chat_id, message_id, actions);
                 }
                 Some(RequestPurpose::Messages(MessagesPurpose::GetSharingProtection {
-                    chat_id,
+                    ..
                 })) => {
-                    self.groups.private_sharing.enable =
-                        Some(if actions.has_protected_content_by_other_user {
-                            EnableSharing::AskToRequest(chat_id)
-                        } else {
-                            EnableSharing::TurnOff(chat_id)
-                        });
+                    if let Some(pending) = pending {
+                        self.groups
+                            .private_sharing
+                            .answered(pending.id, actions.has_protected_content_by_other_user);
+                    }
                 }
                 _ => {}
             },

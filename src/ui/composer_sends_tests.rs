@@ -18,7 +18,7 @@ use gpui_kit::{
     VisualTestContext, Window, px, size,
 };
 use quill::composer::{AttachmentKind, ComposerAttachment, ComposerScheduling};
-use quill::ids::{AccountKey, ChatId, MessageId};
+use quill::ids::{AccountKey, ChatId, MessageId, RequestId};
 use quill::paid_messages::CanSend;
 use quill::telegram::requests::SelfDestructSend;
 use std::path::PathBuf;
@@ -554,7 +554,7 @@ fn pay_sends_only_in_the_chat_and_account_it_was_asked_in(cx: &mut TestAppContex
             false,
         );
         // Another chat by the time Pay is pressed: nothing is sent there.
-        assert!(app.paid_send_waits(A, "hello", Default::default(), cx));
+        assert!(app.paid_send_waits(A, "hello", Default::default(), None, cx));
         app.select_listed_chat(B, window, cx);
         let before = history_len(app, B);
         app.confirm_paid_send(window, cx);
@@ -563,14 +563,14 @@ fn pay_sends_only_in_the_chat_and_account_it_was_asked_in(cx: &mut TestAppContex
         // Another account with the same chat id open: nothing either.
         app.select_listed_chat(A, window, cx);
         let first = app.session().expect("demo").account.clone();
-        assert!(app.paid_send_waits(A, "hello", Default::default(), cx));
+        assert!(app.paid_send_waits(A, "hello", Default::default(), None, cx));
         become_account(app, &second_account());
         let before = history_len(app, A);
         app.confirm_paid_send(window, cx);
         assert_eq!(history_len(app, A), before);
         // In the chat it was asked in, Pay sends.
         become_account(app, &first);
-        assert!(app.paid_send_waits(A, "hello", Default::default(), cx));
+        assert!(app.paid_send_waits(A, "hello", Default::default(), None, cx));
         app.confirm_paid_send(window, cx);
         assert_eq!(history_len(app, A), before + 1);
     });
@@ -845,6 +845,12 @@ fn a_background_accounts_failed_preparation_does_not_toast_the_screen(cx: &mut T
     });
 }
 
+/// A render in flight: its token, and the job a tray photo holds.
+fn rendering() -> (quill::composer::RenderToken, quill::composer::RenderJob) {
+    let token = quill::composer::RenderToken::new();
+    (token.clone(), quill::composer::RenderJob::new(token, ()))
+}
+
 /// 09-003: a Send held for a photo edit goes with that render, and a tray
 /// that lost the rendering photo never lets a later render revive it.
 #[test]
@@ -852,11 +858,12 @@ fn a_held_send_holds_only_while_its_render_runs() {
     use crate::ui::composer_sends::{PendingSend, SendOnce};
     let mut send = PendingSend::default();
     send.attachments.push(photo("held-a.png"));
-    send.attachments[0].extras.begin_render(7);
+    let (first, job) = rendering();
+    send.attachments[0].extras.begin_render(job);
     assert!(send.hold_send("caption".into(), SendOnce::default()));
     assert!(send.send_is_held());
     let landed = send
-        .end_render(7, Some(std::path::Path::new("/tmp/held-a-edited.png")))
+        .end_render(&first, Some(std::path::Path::new("/tmp/held-a-edited.png")))
         .expect("the render is in the tray");
     assert_eq!(
         landed.held.map(|(text, _)| text),
@@ -868,13 +875,15 @@ fn a_held_send_holds_only_while_its_render_runs() {
     // The rendering photo is removed: nothing holds, and the entry can go.
     let mut send = PendingSend::default();
     send.attachments.push(photo("held-b.png"));
-    send.attachments[0].extras.begin_render(8);
+    let (_second, job) = rendering();
+    send.attachments[0].extras.begin_render(job);
     assert!(send.hold_send("gone".into(), SendOnce::default()));
     send.attachments.clear();
     assert!(!send.send_is_held());
     // A render started later is not the one the Send waited on.
     send.attachments.push(photo("held-c.png"));
-    send.attachments[0].extras.begin_render(9);
+    let (_third, job) = rendering();
+    send.attachments[0].extras.begin_render(job);
     assert!(!send.send_is_held(), "no revival by another render");
 }
 
@@ -884,9 +893,279 @@ fn a_failed_render_drops_the_held_send() {
     use crate::ui::composer_sends::{PendingSend, SendOnce};
     let mut send = PendingSend::default();
     send.attachments.push(photo("held-d.png"));
-    send.attachments[0].extras.begin_render(3);
+    let (failing, job) = rendering();
+    send.attachments[0].extras.begin_render(job);
     assert!(send.hold_send("text".into(), SendOnce::default()));
-    let landed = send.end_render(3, None).expect("the render is in the tray");
+    let landed = send
+        .end_render(&failing, None)
+        .expect("the render is in the tray");
     assert!(landed.held.is_none());
     assert!(!send.send_is_held());
+}
+
+/// 02-002: the tray photo owns its render, so removing the photo (or a
+/// later Done) drops the job and cancels the render.
+#[test]
+fn a_rendering_photo_owns_its_job() {
+    use crate::ui::composer_sends::PendingSend;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    struct Cancelled(Arc<AtomicBool>);
+    impl Drop for Cancelled {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+    let job = |flag: &Arc<AtomicBool>| {
+        quill::composer::RenderJob::new(
+            quill::composer::RenderToken::new(),
+            Cancelled(flag.clone()),
+        )
+    };
+    let removed = Arc::new(AtomicBool::new(false));
+    let mut send = PendingSend::default();
+    send.attachments.push(photo("owned-a.png"));
+    send.attachments[0].extras.begin_render(job(&removed));
+    assert!(!removed.load(Ordering::SeqCst));
+    send.attachments.clear();
+    assert!(removed.load(Ordering::SeqCst), "removing the photo cancels");
+
+    let first = Arc::new(AtomicBool::new(false));
+    let mut send = PendingSend::default();
+    send.attachments.push(photo("owned-b.png"));
+    send.attachments[0].extras.begin_render(job(&first));
+    send.attachments[0]
+        .extras
+        .begin_render(job(&Arc::new(AtomicBool::new(false))));
+    assert!(
+        first.load(Ordering::SeqCst),
+        "a later Done cancels the first"
+    );
+}
+
+/// A slot of chat 7's forum topic `topic`, for the draft-clear test.
+fn forum_slot(topic: i32) -> SendSlot {
+    SendSlot {
+        account: AccountKey("a".into()),
+        draft: quill::composer::DraftKey {
+            chat_id: 7,
+            topic: quill::composer::DraftTopic::Forum(topic),
+        },
+    }
+}
+
+/// Sweep r3-08 (14-004): an ack takes its own slot's pending clear and
+/// never a neighbouring topic's.
+#[test]
+fn an_ack_takes_its_own_topics_clear_and_never_a_neighbours() {
+    use crate::ui::composer_state::DraftClear;
+    let chat = ChatId(7);
+    let mut sends = crate::ui::composer_sends::ComposerSends::default();
+    let (first, second) = (forum_slot(1), forum_slot(2));
+    sends.set_draft_clear(&first, Some(DraftClear::of_text(chat, "one")));
+    sends.set_draft_clear(&second, Some(DraftClear::of_text(chat, "two")));
+    let account = first.account.clone();
+    let unknown = MessageId(-90);
+    // A third topic's send set no clear: its ack finds none, and the other
+    // two stay for their own acks.
+    assert_eq!(
+        sends.take_draft_clear(&account, unknown, forum_slot(3).draft),
+        None
+    );
+    assert!(sends.has_draft_clear(&first));
+    assert!(sends.has_draft_clear(&second));
+    assert_eq!(
+        sends.take_draft_clear(&account, unknown, second.draft),
+        Some((second.draft, DraftClear::of_text(chat, "two")))
+    );
+    assert_eq!(
+        sends.take_draft_clear(&account, unknown, first.draft),
+        Some((first.draft, DraftClear::of_text(chat, "one")))
+    );
+    assert!(!sends.has_draft_clear(&first));
+}
+
+/// Sweep r3-08 review (14-004): a reply sent from a supergroup's main
+/// composer is acked under the replied-to message's topic, not the slot
+/// the composer sent from. The ack finds the send by the temporary id its
+/// request's answer gave the message, takes that clear, and names the
+/// slot the draft is cleared in; a neighbour topic's clear stays.
+#[test]
+fn a_reply_from_the_main_composer_is_acked_under_another_topic() {
+    use crate::ui::composer_state::DraftClear;
+    let chat = ChatId(7);
+    let account = AccountKey("a".into());
+    let main = SendSlot {
+        account: account.clone(),
+        draft: quill::composer::DraftKey {
+            chat_id: 7,
+            topic: quill::composer::DraftTopic::Chat,
+        },
+    };
+    let other_topic = forum_slot(2);
+    let mut sends = crate::ui::composer_sends::ComposerSends::default();
+    sends.set_draft_clear(
+        &main,
+        Some(DraftClear::of_text(chat, "reply").asked([RequestId(11)])),
+    );
+    sends.set_draft_clear(
+        &other_topic,
+        Some(DraftClear::of_text(chat, "neighbour").asked([RequestId(12)])),
+    );
+    // TDLib answers the reply's request with the temporary message.
+    sends.note_send_answer(&account, RequestId(11), MessageId(-5));
+    // The ack names the message's topic (Forum 3), which has no clear of
+    // its own: the send's own clear is taken, from the main slot.
+    let taken = sends.take_draft_clear(&account, MessageId(-5), forum_slot(3).draft);
+    assert_eq!(
+        taken.map(|(slot, clear)| (slot, clear.sent)),
+        Some((main.draft, Some("reply".to_string())))
+    );
+    assert!(sends.has_draft_clear(&other_topic), "the neighbour stays");
+    // An ack of a message no send made takes nothing of a topic it does
+    // not name.
+    assert_eq!(
+        sends.take_draft_clear(&account, MessageId(-6), forum_slot(3).draft),
+        None
+    );
+}
+
+/// Sweep r3-08 round 3 (14-004): an album is one request answered once
+/// per message. A text send pending in another slot keeps its clear while
+/// the album's later items ack or fail, whichever order they arrive in.
+fn album_and_text_in_two_slots() -> (
+    crate::ui::composer_sends::ComposerSends,
+    AccountKey,
+    SendSlot,
+) {
+    use crate::ui::composer_state::DraftClear;
+    let chat = ChatId(7);
+    let main = forum_slot(1);
+    let account = main.account.clone();
+    let mut sends = crate::ui::composer_sends::ComposerSends::default();
+    // The album's clear waits in topic 2's slot, the text's in topic 1's.
+    let album_slot = forum_slot(2);
+    sends.set_draft_clear(
+        &album_slot,
+        Some(DraftClear::whole_composer(chat).asked([RequestId(1)])),
+    );
+    sends.set_draft_clear(
+        &main,
+        Some(DraftClear::of_text(chat, "text").asked([RequestId(2)])),
+    );
+    sends.note_send_answer(&account, RequestId(1), MessageId(-1));
+    sends.note_send_answer(&account, RequestId(1), MessageId(-2));
+    sends.note_send_answer(&account, RequestId(2), MessageId(-3));
+    (sends, account, main)
+}
+
+#[test]
+fn a_later_album_ack_never_takes_a_neighbours_clear() {
+    let (mut sends, account, main) = album_and_text_in_two_slots();
+    let album = forum_slot(2);
+    // The first item clears the album's draft, once.
+    assert!(
+        sends
+            .take_draft_clear(&account, MessageId(-1), main.draft)
+            .is_some()
+    );
+    // The second finds the spent entry by id: nothing to clear, and the
+    // text's clear (the ack names its slot) stays.
+    assert_eq!(
+        sends.take_draft_clear(&account, MessageId(-2), main.draft),
+        None
+    );
+    assert!(sends.has_draft_clear(&main));
+    assert!(!sends.has_draft_clear(&album), "the album's entry is gone");
+    let text = sends.take_draft_clear(&account, MessageId(-3), main.draft);
+    assert_eq!(
+        text.map(|(slot, clear)| (slot, clear.sent)),
+        Some((main.draft, Some("text".to_string())))
+    );
+}
+
+#[test]
+fn a_later_album_failure_never_drops_a_neighbours_clear() {
+    let (mut sends, account, main) = album_and_text_in_two_slots();
+    assert!(
+        sends
+            .take_draft_clear(&account, MessageId(-1), main.draft)
+            .is_some()
+    );
+    sends.fail_draft_clear(&account, MessageId(-2), main.draft);
+    assert!(sends.has_draft_clear(&main), "the text's clear survives");
+    assert!(
+        sends
+            .take_draft_clear(&account, MessageId(-3), main.draft)
+            .is_some()
+    );
+    // A failed first item: the draft stays, the later ack clears nothing.
+    let (mut sends, account, main) = album_and_text_in_two_slots();
+    sends.fail_draft_clear(&account, MessageId(-1), main.draft);
+    assert_eq!(
+        sends.take_draft_clear(&account, MessageId(-2), main.draft),
+        None
+    );
+    assert!(sends.has_draft_clear(&main));
+}
+
+/// An album and then a text sent from one composer slot: the text's clear
+/// replaces the album's in the slot, and the album's acks (which name that
+/// slot) find nothing to take, so the slot fallback never takes the text's
+/// asked clear.
+fn album_then_text_from_one_slot() -> (
+    crate::ui::composer_sends::ComposerSends,
+    AccountKey,
+    SendSlot,
+) {
+    use crate::ui::composer_state::DraftClear;
+    let chat = ChatId(7);
+    let slot = forum_slot(1);
+    let account = slot.account.clone();
+    let mut sends = crate::ui::composer_sends::ComposerSends::default();
+    sends.set_draft_clear(
+        &slot,
+        Some(DraftClear::whole_composer(chat).asked([RequestId(1)])),
+    );
+    sends.set_draft_clear(
+        &slot,
+        Some(DraftClear::of_text(chat, "text").asked([RequestId(2)])),
+    );
+    sends.note_send_answer(&account, RequestId(1), MessageId(-1));
+    sends.note_send_answer(&account, RequestId(1), MessageId(-2));
+    sends.note_send_answer(&account, RequestId(2), MessageId(-3));
+    (sends, account, slot)
+}
+
+#[test]
+fn album_acks_from_one_slot_never_take_the_texts_clear() {
+    let (mut sends, account, slot) = album_then_text_from_one_slot();
+    assert_eq!(
+        sends.take_draft_clear(&account, MessageId(-1), slot.draft),
+        None
+    );
+    assert_eq!(
+        sends.take_draft_clear(&account, MessageId(-2), slot.draft),
+        None
+    );
+    assert!(sends.has_draft_clear(&slot));
+    let text = sends.take_draft_clear(&account, MessageId(-3), slot.draft);
+    assert_eq!(
+        text.map(|(s, clear)| (s, clear.sent)),
+        Some((slot.draft, Some("text".to_string())))
+    );
+    assert!(!sends.has_draft_clear(&slot));
+}
+
+#[test]
+fn album_failures_from_one_slot_never_drop_the_texts_clear() {
+    let (mut sends, account, slot) = album_then_text_from_one_slot();
+    sends.fail_draft_clear(&account, MessageId(-1), slot.draft);
+    sends.fail_draft_clear(&account, MessageId(-2), slot.draft);
+    assert!(sends.has_draft_clear(&slot), "the text's clear survives");
+    assert!(
+        sends
+            .take_draft_clear(&account, MessageId(-3), slot.draft)
+            .is_some()
+    );
 }

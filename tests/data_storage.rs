@@ -141,7 +141,7 @@ fn optimize_storage_answer_drops_stats_and_reports_freed_bytes() {
     session.settings.storage_clear =
         quill::state::StorageClear::Failed("an earlier clear failed".into());
     let extra = session.request(RequestPurpose::OptimizeStorage, None);
-    session.settings.storage_clear = quill::state::StorageClear::Clearing;
+    session.settings.storage_clear = quill::state::StorageClear::Clearing { request: extra };
     apply_json(
         &mut session,
         &seq,
@@ -178,7 +178,7 @@ fn optimize_storage_error_keeps_stats() {
     );
     assert!(session.settings.storage_stats.data().is_some());
     let extra = session.request(RequestPurpose::OptimizeStorage, None);
-    session.settings.storage_clear = quill::state::StorageClear::Clearing;
+    session.settings.storage_clear = quill::state::StorageClear::Clearing { request: extra };
     apply_json(
         &mut session,
         &seq,

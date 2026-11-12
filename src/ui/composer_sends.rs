@@ -19,8 +19,9 @@ use super::composer::LeftSend;
 use super::composer_state::DraftClear;
 use quill::composer::{
     ComposerAttachment, ComposerScheduling, DraftKey, LinkPreviewChoice, PreviewMediaSize,
+    RenderToken,
 };
-use quill::ids::{AccountKey, ChatId, RequestId};
+use quill::ids::{AccountKey, ChatId, MessageId, RequestId};
 use quill::telegram::envelope::AuthorizationState;
 use quill::telegram::requests::SelfDestructSend;
 use std::collections::HashMap;
@@ -67,7 +68,7 @@ pub(super) enum TraySend {
     Held {
         text: String,
         once: SendOnce,
-        waiting: Vec<u64>,
+        waiting: Vec<RenderToken>,
     },
 }
 
@@ -128,10 +129,10 @@ impl PendingSend {
     }
 
     /// The renders in flight in this tray.
-    fn renders(&self) -> Vec<u64> {
+    fn renders(&self) -> Vec<RenderToken> {
         self.attachments
             .iter()
-            .filter_map(|attachment| attachment.extras.photo_render())
+            .filter_map(|attachment| attachment.extras.photo_render().cloned())
             .collect()
     }
 
@@ -154,7 +155,11 @@ impl PendingSend {
     /// `None` when it failed. The held Send goes out once no render is
     /// left, and a failed render of one it waits on drops it (it would
     /// carry the unedited photo).
-    pub(super) fn end_render(&mut self, render: u64, saved: Option<&Path>) -> Option<Landed> {
+    pub(super) fn end_render(
+        &mut self,
+        render: &RenderToken,
+        saved: Option<&Path>,
+    ) -> Option<Landed> {
         let waited = self.send_is_held();
         let attachment = self
             .attachments
@@ -199,8 +204,8 @@ impl PendingSend {
     }
 
     /// Whether the held Send waits on the render `render`.
-    fn waits_on(&self, render: u64) -> bool {
-        matches!(&self.send, TraySend::Held { waiting, .. } if waiting.contains(&render))
+    fn waits_on(&self, render: &RenderToken) -> bool {
+        matches!(&self.send, TraySend::Held { waiting, .. } if waiting.contains(render))
     }
 
     /// A Send is held for the renders: one it waits on still renders.
@@ -211,7 +216,7 @@ impl PendingSend {
                 attachment
                     .extras
                     .photo_render()
-                    .is_some_and(|render| waiting.contains(&render))
+                    .is_some_and(|render| waiting.contains(render))
             }),
         }
     }
@@ -479,27 +484,101 @@ impl ComposerSends {
         }
     }
 
-    /// The pending clear for an ack of `draft` in `account`: the slot's own,
-    /// else the one of another topic of the same chat (the ack names the
-    /// message's topic, which can differ from the composer's slot).
+    /// A send was answered: `request` made the temporary message `made`.
+    /// The pending clear that holds the request learns the message.
+    pub(super) fn note_send_answer(
+        &mut self,
+        account: &AccountKey,
+        request: RequestId,
+        made: MessageId,
+    ) {
+        if let Some(sends) = self.accounts.get_mut(account) {
+            for clear in sends.draft_clears.values_mut() {
+                clear.answered(request, made);
+            }
+        }
+    }
+
+    /// The clear for the ack of `message` in `account`, with the slot it
+    /// waits in: the send that made the message (the ack names the
+    /// message's own topic, which can differ from the composer's slot, as
+    /// for a reply from a supergroup's main composer). Only the first ack
+    /// of a send returns its clear; the entry stays until the send's last
+    /// message has acked, so a later ack of an album finds it by id. A
+    /// send that named no request (a menu command) is found by the slot
+    /// the ack names, once. Never another send's.
     pub(super) fn take_draft_clear(
         &mut self,
         account: &AccountKey,
-        draft: DraftKey,
-    ) -> Option<DraftClear> {
+        message: MessageId,
+        ack_slot: DraftKey,
+    ) -> Option<(DraftKey, DraftClear)> {
         let sends = self.accounts.get_mut(account)?;
-        let key = if sends.draft_clears.contains_key(&draft) {
-            Some(draft)
-        } else {
-            sends
+        let by_id = sends
+            .draft_clears
+            .iter()
+            .find_map(|(slot, clear)| clear.made(message).then_some(*slot));
+        let taken = match by_id {
+            Some(slot) => {
+                let clear = sends.draft_clears.get_mut(&slot);
+                let taken = clear.map(|clear| {
+                    let before = clear.clone();
+                    (clear.ack(message), before, clear.is_settled())
+                });
+                taken.and_then(|(clears, before, settled)| {
+                    if settled {
+                        sends.draft_clears.remove(&slot);
+                    }
+                    clears.then_some((slot, before))
+                })
+            }
+            None => sends
                 .draft_clears
-                .keys()
-                .find(|key| key.chat_id == draft.chat_id)
-                .copied()
+                .get(&ack_slot)
+                .is_some_and(DraftClear::is_unasked)
+                .then(|| sends.draft_clears.remove(&ack_slot))
+                .flatten()
+                .map(|clear| (ack_slot, clear)),
         };
-        let clear = key.and_then(|key| sends.draft_clears.remove(&key));
         self.drop_if_empty(account);
-        clear
+        taken
+    }
+
+    /// The send of `message` failed: its draft stays, and no later ack of
+    /// the same send (the rest of an album) clears it.
+    pub(super) fn fail_draft_clear(
+        &mut self,
+        account: &AccountKey,
+        message: MessageId,
+        ack_slot: DraftKey,
+    ) {
+        let Some(sends) = self.accounts.get_mut(account) else {
+            return;
+        };
+        let by_id = sends
+            .draft_clears
+            .iter()
+            .find_map(|(slot, clear)| clear.made(message).then_some(*slot));
+        match by_id {
+            Some(slot) => {
+                if let Some(clear) = sends.draft_clears.get_mut(&slot) {
+                    clear.fail(message);
+                    if clear.is_settled() {
+                        sends.draft_clears.remove(&slot);
+                    }
+                }
+            }
+            None => {
+                if sends
+                    .draft_clears
+                    .get(&ack_slot)
+                    .is_some_and(DraftClear::is_unasked)
+                {
+                    sends.draft_clears.remove(&ack_slot);
+                }
+            }
+        }
+        self.drop_if_empty(account);
     }
 
     /// Whether `slot` has a send waiting for its ack to clear the draft.
@@ -563,9 +642,10 @@ fn session_ended(prev: &AuthorizationState, now: &AuthorizationState) -> bool {
 impl QuillApp {
     /// The send just made from the composer in place clears its slot's draft
     /// when it is acknowledged (`finish_successful_sends`).
-    pub(super) fn expect_draft_clear(&mut self, clear: DraftClear) {
+    pub(super) fn expect_draft_clear(&mut self, clear: DraftClear, request: RequestId) {
         if let Some(slot) = self.send_slot() {
-            self.composer_sends.set_draft_clear(&slot, Some(clear));
+            self.composer_sends
+                .set_draft_clear(&slot, Some(clear.asked([request])));
         }
     }
 

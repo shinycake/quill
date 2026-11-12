@@ -147,3 +147,47 @@ fn a_removed_recent_pack_stays_out_of_every_save(cx: &mut TestAppContext) {
         assert!(app.language.recent.iter().any(|c| c.pack_id == "xa"));
     });
 }
+
+/// A recent pack deleted and then picked again is a kept row again: its
+/// Restore must not put a second copy beside it.
+#[gpui_kit::test]
+fn a_repicked_removed_pack_is_not_restored_twice(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, window, cx| {
+        app.language.recent = vec![recent_pack("xa"), recent_pack("xb")];
+        app.navigate(NavigationAction::Language, window, cx);
+    });
+    vcx.run_until_parked();
+    app.update_in(vcx, |app, _, cx| {
+        app.remove_recent_language("xa", false, cx);
+        let mut info = pack("pt-br");
+        info.id = "xa".into();
+        info.is_official = false;
+        app.install_language(
+            quill::state::LanguageReady {
+                info,
+                pack: Vec::new(),
+                base: Vec::new(),
+            },
+            cx,
+        );
+        // Restore asked for the same pack must find nothing to restore.
+        app.remove_recent_language("xa", true, cx);
+    });
+    app.read_with(vcx, |app, _| {
+        let xa = app
+            .language
+            .recent
+            .iter()
+            .filter(|c| c.pack_id == "xa")
+            .count();
+        assert_eq!(xa, 1, "one row for the pack");
+        let shown = app
+            .shown_recent_languages()
+            .iter()
+            .filter(|c| c.pack_id == "xa")
+            .count();
+        assert_eq!(shown, 1);
+    });
+}

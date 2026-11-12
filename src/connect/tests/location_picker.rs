@@ -173,6 +173,46 @@ fn a_resting_map_asks_for_its_tile_once_and_downloads_it() {
     assert_eq!(f.sent("getMapThumbnailFile").len(), 2);
 }
 
+/// Sweep r3-02 (05-005): a lookup and a tile the client dropped (a
+/// reconnect or restart sends no error) fail on the next pump instead of
+/// leaving the list and the map waiting until the picker is reopened.
+#[test]
+fn requests_a_reconnect_dropped_fail_on_the_next_pump() {
+    let mut f = Fixture::new();
+    f.driver.open_location_picker(ChatId(7), None).unwrap();
+    if let Some(picker) = f.driver.session.location.picker_mut() {
+        picker.set_map_size(MapSize::new(364., 220., 2.));
+    }
+    f.driver
+        .location_picker_geolocated(GeoOutcome::Found(here()))
+        .unwrap();
+    let lookup = f.last("searchPublicChat");
+    let tile = f.last("getMapThumbnailFile");
+    let waiting = |f: &Fixture| {
+        f.driver
+            .session
+            .location
+            .picker()
+            .map(|p| p.venues().clone())
+    };
+    assert_eq!(waiting(&f), Some(VenueList::Loading));
+    f.driver.pump_location_picker().unwrap();
+    assert_eq!(waiting(&f), Some(VenueList::Loading), "both still pending");
+    assert_eq!(f.sent("getMapThumbnailFile").len(), 1);
+    // The client drops both requests without a word.
+    for request in [&lookup, &tile] {
+        let id: crate::ids::RequestId = extra(request).parse().expect("extra");
+        f.driver.session.requests.take(id);
+    }
+    f.driver.pump_location_picker().unwrap();
+    assert_eq!(waiting(&f), Some(VenueList::Failed));
+    assert_eq!(
+        f.sent("getMapThumbnailFile").len(),
+        2,
+        "the tile is asked again"
+    );
+}
+
 #[test]
 fn a_failed_venue_bot_lookup_shows_the_failed_list() {
     let mut f = Fixture::new();

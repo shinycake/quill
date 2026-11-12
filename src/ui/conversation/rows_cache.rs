@@ -199,7 +199,7 @@ impl QuillApp {
             messages: history.map(|h| &h.messages),
             extra: hash_of((joined, new_thread_date)),
             window_epoch: history.map_or(0, |h| h.window_epoch),
-            unread_anchor: history.and_then(|h| h.unread_anchor),
+            unread_anchor: history.and_then(|h| h.unread_anchor()),
             translated: chat,
             tail: Some(
                 usize::from(chat.is_some() && joined.is_some()) + usize::from(new_thread.is_some()),

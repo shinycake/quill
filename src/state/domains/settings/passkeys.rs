@@ -17,7 +17,11 @@ impl Session {
     /// The sign-in screens' own `getApplicationConfig` answered.
     pub(crate) fn login_config_answered(&mut self, pending: Option<&PendingRequest>) {
         if passkeys_purpose(pending.map(|p| p.purpose)) == Some(PasskeysPurpose::LoginConfig) {
-            self.settings.passkeys.login.config.succeed(());
+            self.settings
+                .passkeys
+                .login
+                .config
+                .answered(pending.map(|p| p.id), ());
         }
     }
 
@@ -118,7 +122,10 @@ impl Session {
                 true
             }
             Some(PasskeysPurpose::LoginConfig) => {
-                passkeys.login.config.fail(login_error_text(err));
+                passkeys
+                    .login
+                    .config
+                    .failed(id, login_error_text(err), false);
                 true
             }
             Some(PasskeysPurpose::LoginParameters | PasskeysPurpose::CheckLogin) => {

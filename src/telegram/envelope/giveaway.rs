@@ -50,9 +50,6 @@ impl GiveawayPrize {
 pub struct GiveawaySummary {
     /// The chat the giveaway boosts.
     pub boosted_chat_id: i64,
-    /// Message to ask `getGiveawayInfo` about; 0 means the message the
-    /// card sits on (a `messageGiveawayWinners` names the original one).
-    pub info_message_id: i64,
     /// Other chats users must have joined.
     pub additional_chat_count: i32,
     /// When winners are (or were) selected.
@@ -61,11 +58,25 @@ pub struct GiveawaySummary {
     pub has_public_winners: bool,
     pub prize_description: String,
     pub winner_count: i32,
-    pub unclaimed_count: i32,
     pub prize: GiveawayPrize,
-    /// The card belongs to the winners announcement.
-    pub finished: bool,
-    pub was_refunded: bool,
+    /// Whether the card is the start message or the winners announcement.
+    pub card: GiveawayCard,
+}
+
+/// Which message a [`GiveawaySummary`] was read from; the winners
+/// announcement alone carries the results fields.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GiveawayCard {
+    /// `messageGiveaway`.
+    Start,
+    /// `messageGiveawayWinners`.
+    Results {
+        /// The original giveaway message to ask `getGiveawayInfo` about.
+        info_message_id: i64,
+        /// Prizes nobody claimed.
+        unclaimed_count: i32,
+        was_refunded: bool,
+    },
 }
 
 impl GiveawaySummary {
@@ -74,7 +85,6 @@ impl GiveawaySummary {
         let params = value.get("parameters").unwrap_or(&Value::Null);
         Self {
             boosted_chat_id: int53_or_zero(params.get("boosted_chat_id")),
-            info_message_id: 0,
             additional_chat_count: params
                 .get("additional_chat_ids")
                 .and_then(Value::as_array)
@@ -84,10 +94,8 @@ impl GiveawaySummary {
             has_public_winners: json_bool(params.get("has_public_winners"), false),
             prize_description: json_field_str(params, "prize_description"),
             winner_count: json_i32(value.get("winner_count"), 0),
-            unclaimed_count: 0,
             prize: GiveawayPrize::parse(value.get("prize")),
-            finished: false,
-            was_refunded: false,
+            card: GiveawayCard::Start,
         }
     }
 
@@ -95,24 +103,46 @@ impl GiveawaySummary {
     pub(crate) fn parse_results(value: &Value) -> Self {
         Self {
             boosted_chat_id: int53_or_zero(value.get("boosted_chat_id")),
-            info_message_id: int53_or_zero(value.get("giveaway_message_id")),
             additional_chat_count: json_i32(value.get("additional_chat_count"), 0),
             selection_date: json_i32(value.get("actual_winners_selection_date"), 0),
             only_new_members: json_bool(value.get("only_new_members"), false),
             has_public_winners: true,
             prize_description: json_field_str(value, "prize_description"),
             winner_count: json_i32(value.get("winner_count"), 0),
-            unclaimed_count: json_i32(value.get("unclaimed_prize_count"), 0),
             prize: GiveawayPrize::parse(value.get("prize")),
-            finished: true,
-            was_refunded: json_bool(value.get("was_refunded"), false),
+            card: GiveawayCard::Results {
+                info_message_id: int53_or_zero(value.get("giveaway_message_id")),
+                unclaimed_count: json_i32(value.get("unclaimed_prize_count"), 0),
+                was_refunded: json_bool(value.get("was_refunded"), false),
+            },
+        }
+    }
+
+    /// Message to ask `getGiveawayInfo` about; 0 means the message the
+    /// card sits on (a `messageGiveawayWinners` names the original one).
+    pub fn info_message_id(&self) -> i64 {
+        match self.card {
+            GiveawayCard::Start => 0,
+            GiveawayCard::Results {
+                info_message_id, ..
+            } => info_message_id,
+        }
+    }
+
+    /// Prizes nobody claimed (none on a start card).
+    pub fn unclaimed_count(&self) -> i32 {
+        match self.card {
+            GiveawayCard::Start => 0,
+            GiveawayCard::Results {
+                unclaimed_count, ..
+            } => unclaimed_count,
         }
     }
 
     /// Winners plus prizes nobody claimed: how many prizes the admins
     /// bought (tdesktop `winnersCount + unclaimedCount`).
     pub fn quantity(&self) -> i32 {
-        self.winner_count.saturating_add(self.unclaimed_count)
+        self.winner_count.saturating_add(self.unclaimed_count())
     }
 }
 
@@ -387,15 +417,15 @@ mod tests {
         assert_eq!(start.boosted_chat_id, -1002);
         assert_eq!(start.additional_chat_count, 2);
         assert_eq!(start.prize, GiveawayPrize::Premium { month_count: 6 });
-        assert!(start.only_new_members && !start.finished);
+        assert!(start.only_new_members && start.card == GiveawayCard::Start);
         let results = GiveawaySummary::parse_results(&json!({
             "boosted_chat_id": -1002, "giveaway_message_id": 77, "additional_chat_count": 1,
             "actual_winners_selection_date": 1200, "winner_count": 4, "unclaimed_prize_count": 1,
             "prize": {"@type": "giveawayPrizeStars", "star_count": 500}
         }));
-        assert_eq!(results.info_message_id, 77);
+        assert_eq!(results.info_message_id(), 77);
         assert_eq!(results.quantity(), 5);
-        assert!(results.prize.is_stars() && results.finished);
+        assert!(results.prize.is_stars() && matches!(results.card, GiveawayCard::Results { .. }));
     }
 
     #[test]

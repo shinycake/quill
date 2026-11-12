@@ -110,6 +110,7 @@ fn a_running_export_shows_its_progress_and_hides(cx: &mut TestAppContext) {
             !app.dialogs.account_export.is_options(),
             "progress, not options"
         );
+        assert!(app.dialogs.account_export.is_progress());
         let export = app
             .session()
             .unwrap()
@@ -120,7 +121,7 @@ fn a_running_export_shows_its_progress_and_hides(cx: &mut TestAppContext) {
         assert!(!export.progress().is_settled());
     });
     app.update_in(vcx, |app, _, cx| {
-        app.set_account_export_view(quill::export::ExportView::Hidden);
+        app.dialogs.account_export.close();
         cx.notify();
     });
     vcx.run_until_parked();
@@ -143,7 +144,7 @@ fn a_folder_pick_goes_to_the_draft_that_asked(cx: &mut TestAppContext) {
     });
     // The box is cancelled and opened again while the first dialog is up.
     app.update_in(vcx, |app, _, cx| {
-        app.dialogs.account_export.reset();
+        app.dialogs.account_export.close();
         app.open_account_export(cx);
     });
     let picked = std::path::PathBuf::from("/picked-by-the-first-dialog");

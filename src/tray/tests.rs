@@ -64,7 +64,6 @@ fn chat(id: i64, unread_count: i32) -> ChatSummary {
         sender_actions: Vec::new(),
         draft: None,
         my_member: Default::default(),
-        my_restriction: Default::default(),
         is_forum: None,
         photo_file_id: None,
         permissions: None,

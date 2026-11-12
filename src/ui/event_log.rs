@@ -374,7 +374,7 @@ impl QuillApp {
         );
 
         let content = match fetch {
-            None | Some(ChatEventLogFetch::Idle | ChatEventLogFetch::Loading) => {
+            None | Some(ChatEventLogFetch::Idle | ChatEventLogFetch::Loading { .. }) => {
                 self.event_log_reset_list();
                 self.event_log_centered(
                     div()

@@ -239,34 +239,63 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Phase 9.7: `getChatPostedToChatPageStories` (schema 1.8.67, line
     /// 13776). The first page (`from_story_id == 0`) also carries
-    /// `pinned_story_ids`; the reducer accumulates pages. The gallery's
-    /// Stories tab passes its `generation`: only a request with the same
-    /// stamp counts as already in flight, and an answer for another stamp
-    /// is dropped. The stories page itself passes `None`.
+    /// `pinned_story_ids`; the reducer accumulates pages. This is the
+    /// stories page's ask; the gallery's Stories tab asks through
+    /// [`Self::fetch_gallery_stories_page`].
     pub fn get_chat_posted_to_chat_page_stories(
         &mut self,
         chat_id: ChatId,
         from_story_id: i32,
         limit: i32,
-        generation: Option<u64>,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.send_chat_page_stories(chat_id, from_story_id, limit, None)
+    }
+
+    /// The same request for the shared-media gallery's Stories tab, which
+    /// waits for it alone (`append`: the page after the loaded ones). Its
+    /// answer fills the tab only while the tab still waits for it.
+    pub(crate) fn fetch_gallery_stories_page(
+        &mut self,
+        chat_id: ChatId,
+        from_story_id: i32,
+        limit: i32,
+        append: bool,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.send_chat_page_stories(chat_id, from_story_id, limit, Some(append))
+    }
+
+    fn send_chat_page_stories(
+        &mut self,
+        chat_id: ChatId,
+        from_story_id: i32,
+        limit: i32,
+        gallery: Option<bool>,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.story_page_chat(chat_id) || from_story_id < 0 || limit <= 0 {
             return Err(ConnectSendError::InvalidRequest);
         }
         let purpose = RequestPurpose::GetChatPostedToChatPageStories;
-        // Only a request of the same stamp stands for this one: the
-        // gallery's after a reopen is not answered by the old gallery's.
-        if self.session.requests.pending.values().any(|p| {
-            p.purpose == purpose && p.chat_id == Some(chat_id) && p.search_generation == generation
-        }) {
+        // The stories page does not ask again while its own page is out (the
+        // gallery's tab keeps track of its own requests).
+        if gallery.is_none()
+            && self.session.requests.pending.values().any(|p| {
+                p.purpose == purpose && p.chat_id == Some(chat_id) && !p.is_gallery_tab_page()
+            })
+        {
             return Ok(None);
         }
-        let extra = match generation {
-            Some(generation) => self
-                .session
-                .request_chat_search(purpose, chat_id, generation),
+        let extra = match gallery {
+            Some(_) => self.session.request_for_gallery_tab(purpose, chat_id),
             None => self.session.request(purpose, Some(chat_id)),
         };
+        if let Some(append) = gallery {
+            let tab = &mut self.session.media.shared_media;
+            if append {
+                tab.begin_profile_more(crate::state::SharedMediaTab::Stories, extra);
+            } else {
+                tab.begin_profile_fetch(crate::state::SharedMediaTab::Stories, extra);
+            }
+        }
         self.session
             .begin_story_page_check(story_page_op_label(purpose), extra);
         let json = get_chat_posted_to_chat_page_stories(extra, chat_id, from_story_id, limit);

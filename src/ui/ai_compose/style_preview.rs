@@ -19,7 +19,7 @@ use gpui_kit::component::skeleton::Skeleton;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::ai_compose::{StyleExample, StyleExamples, TextCompositionStyle, fresh_token};
+use quill::ai_compose::{StyleExample, StyleExamples, TextCompositionStyle};
 use quill::lang::{keys, tr, tr_with, trn_with};
 use quill::state::StyleError;
 use quill::telegram::envelope::MessageSender;
@@ -57,22 +57,22 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let token = fresh_token();
         let sent = match self.live.as_mut() {
-            Some(live) => live
-                .driver
-                .search_text_composition_style(&name, token)
-                .is_ok(),
-            // A screenshot demo answers through its session.
-            None => !self.ai_compose_offline(),
+            Some(live) => live.driver.search_text_composition_style(&name).ok(),
+            // A screenshot demo answers through its session, to a request of
+            // its own.
+            None => self
+                .demo_session
+                .as_mut()
+                .map(|session| session.request(quill::state::RequestPurpose::Other, None)),
         };
-        if !sent {
+        let Some(request) = sent else {
             self.push_ai_toast(text_toast(tr(keys::AI_COMPOSE_TONE_INVALID)), window, cx);
             return;
-        }
+        };
         self.ai_compose.preview = Some(AiStylePreview {
             name,
-            stage: PreviewStage::LookingUp { token },
+            stage: PreviewStage::LookingUp { request },
             examples: StyleExamples::new(false),
             example: None,
         });
@@ -126,19 +126,19 @@ impl QuillApp {
     }
 
     fn ai_style_lookup_upkeep(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(token) = self
+        let Some(request) = self
             .ai_compose
             .preview
             .as_ref()
-            .and_then(AiStylePreview::lookup_token)
+            .and_then(AiStylePreview::lookup_request)
         else {
             return;
         };
         let outcome = session_mut(self).and_then(|s| {
             let slot = &mut s.messages.ai_compose.style_lookup;
-            let answered = slot
-                .as_ref()
-                .is_some_and(|lookup| lookup.token == token && lookup.outcome.is_done());
+            let answered = slot.as_ref().is_some_and(|lookup| {
+                lookup.outcome.request() == request && lookup.outcome.is_done()
+            });
             if answered {
                 slot.take()?.outcome.done()
             } else {
@@ -179,19 +179,19 @@ impl QuillApp {
     }
 
     fn ai_style_example_upkeep(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(token) = self
+        let Some(request) = self
             .ai_compose
             .preview
             .as_ref()
-            .and_then(|preview| preview.examples.token())
+            .and_then(|preview| preview.examples.request())
         else {
             return;
         };
         let outcome = session_mut(self).and_then(|s| {
             let slot = &mut s.messages.ai_compose.example;
-            let answered = slot
-                .as_ref()
-                .is_some_and(|answer| answer.token == token && answer.outcome.is_done());
+            let answered = slot.as_ref().is_some_and(|answer| {
+                answer.outcome.request() == request && answer.outcome.is_done()
+            });
             if answered {
                 slot.take()?.outcome.done()
             } else {
@@ -206,12 +206,12 @@ impl QuillApp {
         };
         match outcome {
             Ok(example) => {
-                if preview.examples.loaded(token) {
+                if preview.examples.loaded(request) {
                     preview.example = Some(example);
                 }
             }
             Err(error) => {
-                if !preview.examples.failed(token) {
+                if !preview.examples.failed(request) {
                     return;
                 }
                 let kind = match error {
@@ -231,21 +231,24 @@ impl QuillApp {
         if preview.examples.loading() {
             return;
         }
-        let token = fresh_token();
-        let Some(number) = preview.examples.start_next(token, Instant::now()) else {
+        let Some(number) = preview.examples.next_number() else {
             return;
         };
         let name = preview.name.clone();
         cx.notify();
         let number = i32::try_from(number).unwrap_or(i32::MAX);
-        let sent = self.live.as_mut().is_some_and(|live| {
+        let sent = self.live.as_mut().and_then(|live| {
             live.driver
-                .get_text_composition_style_example(&name, number, token)
-                .is_ok()
+                .get_text_composition_style_example(&name, number)
+                .ok()
         });
-        if !sent && let Some(preview) = self.ai_compose.preview.as_mut() {
-            preview.examples.failed(token);
-            self.push_ai_toast(text_toast(""), window, cx);
+        match sent {
+            Some(request) => {
+                if let Some(preview) = self.ai_compose.preview.as_mut() {
+                    preview.examples.begin(request, Instant::now());
+                }
+            }
+            None => self.push_ai_toast(text_toast(""), window, cx),
         }
     }
 

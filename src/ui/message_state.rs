@@ -31,6 +31,10 @@ pub(crate) struct MessageUi {
     /// What the latest right-press was over (a link, a task or a poll
     /// option), until the press ends.
     pub(super) right_press: RightPress,
+    /// TDLib's info / error text for a deep link, shown in this window's
+    /// box (`DialogKind::DeepLinkInfo`): each window has its own, so a
+    /// second link's text never replaces the first window's.
+    pub(super) deep_link_info: Option<String>,
     /// The "Open this link?" box (`DialogKind::OpenLink`).
     pub(super) open_link_confirm: Option<super::entity_links::OpenLinkConfirm>,
     /// A clicked message entity (mention, hashtag, link…) waiting for
@@ -84,6 +88,7 @@ impl MessageUi {
             menu: Default::default(),
             menu_ui: super::message_menu_ui::MessageMenuUi::new(window, cx),
             right_press: RightPress::None,
+            deep_link_info: None,
             open_link_confirm: None,
             pending_link: None,
             selection_drag: Default::default(),
@@ -107,7 +112,8 @@ impl MessageUi {
 /// Nothing to say: its state is the account's only app-side.
 /// The Block from replies box keeps its target in the session
 /// (`users_state.replies_block`), which goes to the background with the
-/// account.
+/// account, and the Instant View reader in `messages.instant_view`, closed here
+/// so it does not come back over the restored screen.
 impl super::on_screen::Farewell for MessageUi {
     fn farewell(
         app: &mut super::app::QuillApp,
@@ -120,6 +126,9 @@ impl super::on_screen::Farewell for MessageUi {
             .is_some_and(|session| session.messages.message_report.is_some())
         {
             app.close_message_report(window, cx);
+        }
+        if let Some(session) = app.session_mut() {
+            session.messages.instant_view = None;
         }
         if app
             .session()

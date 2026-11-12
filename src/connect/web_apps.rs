@@ -238,7 +238,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Bots(BotsPurpose::CanBotSendMessages { bot_user_id }),
             None,
         )?;
-        self.session.bots.web_apps.write_access = None;
         let json = can_bot_send_messages(extra, bot_user_id);
         self.send_json_request(extra, &json)
     }
@@ -252,7 +251,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Bots(BotsPurpose::AllowBotToSendMessages { bot_user_id }),
             None,
         )?;
-        self.session.bots.web_apps.write_access = None;
         let json = allow_bot_to_send_messages(extra, bot_user_id);
         self.send_json_request(extra, &json)
     }
@@ -273,7 +271,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Bots(BotsPurpose::SharePhoneWithMiniApp { bot_user_id }),
             Some(chat_id),
         )?;
-        self.session.bots.web_apps.phone_share = None;
         let json = send_contact_card(extra, chat_id, None, contact, None, &SendOptions::default());
         self.send_json_request(extra, &json)
     }
@@ -388,12 +385,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         parameters: &str,
     ) -> Result<RequestId, ConnectSendError> {
         let extra = self.web_app_extra(RequestPurpose::SendWebAppCustomRequest, None)?;
+        let json = send_web_app_custom_request(extra, bot_user_id, method, parameters);
+        let sent = self.send_json_request(extra, &json)?;
+        // Recorded once the send went out, so a refused one leaves no entry
+        // (its answer cannot arrive before this returns).
         self.session
             .bots
             .web_apps
             .custom_requests
             .insert(extra.0, (launch_id, req_id.to_string()));
-        let json = send_web_app_custom_request(extra, bot_user_id, method, parameters);
-        self.send_json_request(extra, &json)
+        Ok(sent)
     }
 }

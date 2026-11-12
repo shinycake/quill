@@ -6,6 +6,15 @@ use crate::ui::dialogs::InviteStage;
 use quill::lang::{keys, tr, tr_with, trn};
 use quill::state::DialogAnswer;
 
+/// The toast of a shared folder that was added, with the chats joined.
+pub(super) fn folder_added_note(folder: &str, joined: usize) -> StatusNote {
+    let added = tr_with(keys::FILTERS_ADDED_TITLE, &[("folder", folder)]);
+    match joined {
+        0 => StatusNote::silent(added),
+        n => StatusNote::silent(format!("{added} {}", trn(keys::FILTERS_ADDED_ALSO, n))),
+    }
+}
+
 impl QuillApp {
     /// `addlist` link opened: show the box and check the link. A check that
     /// cannot be sent ends the box in the error, not in "Checking link...".
@@ -34,9 +43,21 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Closing the box while the add is out hands that request to
+    /// `closed_asks`: its answer still says whether the folder was added.
     pub(in crate::ui) fn close_folder_invite(&mut self, cx: &mut Context<Self>) {
         self.drop_folder_invite_check();
-        self.folders.invite = None;
+        if let Some(dialog) = self.folders.invite.take()
+            && let InviteStage::Adding { request, info } = dialog.stage
+        {
+            self.folders.closed_asks.insert(
+                request,
+                ClosedAsk::FolderAdded {
+                    folder: info.folder.name.to_string(),
+                    joined: dialog.selected.len(),
+                },
+            );
+        }
         cx.notify();
     }
 
@@ -138,17 +159,7 @@ impl QuillApp {
                 let joined = dialog.selected.len();
                 let name = info.folder.name.clone();
                 self.folders.invite = None;
-                self.set_note(match joined {
-                    0 => StatusNote::silent(tr_with(
-                        keys::FILTERS_ADDED_TITLE,
-                        &[("folder", &name.to_string())],
-                    )),
-                    n => StatusNote::silent(format!(
-                        "{} {}",
-                        tr_with(keys::FILTERS_ADDED_TITLE, &[("folder", &name.to_string())]),
-                        trn(keys::FILTERS_ADDED_ALSO, n)
-                    )),
-                });
+                self.set_note(folder_added_note(&name.to_string(), joined));
                 true
             }
             // An answer that is not for this stage changes nothing.

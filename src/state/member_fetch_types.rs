@@ -7,13 +7,18 @@ use super::*;
 /// Loading-guard convention.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SupergroupMembersFetch {
-    /// Asked as `request` (`None` while a page a membership change dropped
-    /// waits for its refetch to go out). `last` is the page it replaces,
-    /// still drawn until the answer.
+    /// Asked as `request`: only that request's answer or error leaves the
+    /// stage. `last` is the page it replaces, still drawn until the answer.
     Loading {
-        request: Option<RequestId>,
+        request: RequestId,
         last: Option<MembersPage>,
     },
+    /// A membership change made `last` out of date and nobody asked again
+    /// yet: the page stays drawn, and whoever shows the list (or the
+    /// poll, for the lists on screen) asks, which moves it to `Loading`.
+    /// No request is out, so no answer can land on it.
+    /// `last` is `None` when the list was still on its first load.
+    Stale { last: Option<MembersPage> },
     Loaded {
         members: Vec<ParsedChatMember>,
         total_count: i32,
@@ -46,23 +51,39 @@ impl SupergroupMembersFetch {
                 total_count,
             }),
             Some(Self::Loading { last, .. }) => last,
+            Some(Self::Stale { last }) => last,
             Some(Self::Failed(_) | Self::NotSent(_)) | None => None,
         };
-        Self::Loading {
-            request: Some(request),
-            last,
-        }
+        Self::Loading { request, last }
     }
 
-    /// Whether the fetch is out, or waits for its send.
+    /// Whether the fetch is out.
     pub fn in_flight(&self) -> bool {
-        matches!(
-            self,
-            Self::Loading {
-                request: Some(_),
-                ..
-            }
-        )
+        matches!(self, Self::Loading { .. })
+    }
+
+    /// Whether the fetch is `Loading` as `request`.
+    pub fn waits_for(&self, request: RequestId) -> bool {
+        matches!(self, Self::Loading { request: asked, .. } if *asked == request)
+    }
+
+    /// A membership change made this out of date: a page, or a first load
+    /// that was still out, becomes `Stale` (its ask owed, so the poll and
+    /// the next reader ask again); a failed list keeps its Retry.
+    pub fn made_stale(self) -> Self {
+        match self {
+            Self::Loaded {
+                members,
+                total_count,
+            } => Self::Stale {
+                last: Some(MembersPage {
+                    members,
+                    total_count,
+                }),
+            },
+            Self::Loading { last, .. } => Self::Stale { last },
+            other @ (Self::Stale { .. } | Self::Failed(_) | Self::NotSent(_)) => other,
+        }
     }
 }
 
@@ -92,11 +113,35 @@ impl MoreMembers {
     }
 }
 
-/// How one member list was asked: the first-page request (`None` when the
-/// list was filled without one), the query, and the next page.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct MemberAsk {
-    pub first: Option<RequestId>,
+/// One member list of a chat and a filter: the query it was asked with,
+/// where its first page stands (the request it waits for is inside the
+/// stage), and the next page. A new first page replaces the whole value,
+/// so a next page of an older query or an older answer finds itself gone.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MemberList {
     pub query: String,
+    pub fetch: SupergroupMembersFetch,
+    /// Only meaningful while `fetch` is `Loaded` (a page that goes takes
+    /// its next page with it).
     pub more: MoreMembers,
+}
+
+impl MemberList {
+    /// A first page asked as `request` for `query`, over the list `previous`.
+    pub fn asked(previous: Option<Self>, request: RequestId, query: &str) -> Self {
+        Self {
+            query: query.to_string(),
+            fetch: SupergroupMembersFetch::asked(previous.map(|list| list.fetch), request),
+            more: MoreMembers::Idle,
+        }
+    }
+
+    /// A list that holds `fetch` as it was filled, with no next page.
+    pub fn of(query: &str, fetch: SupergroupMembersFetch) -> Self {
+        Self {
+            query: query.to_string(),
+            fetch,
+            more: MoreMembers::Idle,
+        }
+    }
 }

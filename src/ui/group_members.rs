@@ -95,10 +95,27 @@ impl QuillApp {
     /// shows. Basic groups read `getBasicGroupFullInfo`; supergroups
     /// read the matching `getSupergroupMembers` filter.
     pub(super) fn refresh_member_dialog(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = self.admin.member_dialog.as_mut() else {
+        let Some(dialog) = self.admin.member_dialog.as_ref() else {
             return;
         };
         let query = dialog.search_input.read(cx).value().trim().to_string();
+        self.refresh_member_dialog_list(query, cx);
+    }
+
+    /// Ask again for the list the dialog shows (its `searched` query), not
+    /// for the text typed since: the poll uses this for a `Stale` list.
+    pub(super) fn refresh_shown_member_dialog(&mut self, cx: &mut Context<Self>) {
+        let Some(dialog) = self.admin.member_dialog.as_ref() else {
+            return;
+        };
+        let query = dialog.searched.clone();
+        self.refresh_member_dialog_list(query, cx);
+    }
+
+    fn refresh_member_dialog_list(&mut self, query: String, cx: &mut Context<Self>) {
+        let Some(dialog) = self.admin.member_dialog.as_ref() else {
+            return;
+        };
         let (chat_id, is_basic_group, tab) = (dialog.chat_id, dialog.is_basic_group, dialog.tab);
         let Some(live) = self.live.as_mut() else {
             if let Some(dialog) = self.admin.member_dialog.as_mut() {
@@ -113,7 +130,11 @@ impl QuillApp {
                 .refresh_supergroup_members(chat_id, MemberListFilter::Search, &query)
                 .map(|_| ())
         } else {
-            let filter = tab.filter().unwrap_or(MemberListFilter::Recent);
+            let can_restrict = live.driver.session.chat_can_restrict_members(chat_id);
+            let filter = tab
+                .filter()
+                .unwrap_or(MemberListFilter::Recent)
+                .shown_for(can_restrict);
             live.driver
                 .refresh_supergroup_members(chat_id, filter, &query)
                 .map(|_| ())
@@ -346,7 +367,10 @@ impl QuillApp {
                 .track_scroll(&dialog_state.scroll)
                 .on_scroll(cx.listener(|this, _, _, _| this.member_dialog_load_more()));
             match fetch {
-                None | Some(SupergroupMembersFetch::Loading { .. }) => {
+                None
+                | Some(
+                    SupergroupMembersFetch::Loading { .. } | SupergroupMembersFetch::Stale { .. },
+                ) => {
                     list = list.child(
                         div()
                             .text_sm()
@@ -613,9 +637,25 @@ impl QuillApp {
         let filter = self.member_dialog_filter()?;
         session
             .groups
-            .supergroup_members
-            .get(&(dialog.chat_id.0, filter))
+            .member_fetch((dialog.chat_id.0, filter))
             .cloned()
+    }
+
+    /// Whether the page the dialog's current tab shows is `Stale` (a
+    /// membership change made it out of date and nobody asked again yet).
+    pub(super) fn member_dialog_is_stale(&self) -> bool {
+        let (Some(dialog), Some(session)) = (self.admin.member_dialog.as_ref(), self.session())
+        else {
+            return false;
+        };
+        if dialog.is_basic_group {
+            return session.groups.basic_members_are_stale(dialog.chat_id.0);
+        }
+        self.member_dialog_filter().is_some_and(|filter| {
+            session
+                .groups
+                .member_list_is_stale((dialog.chat_id.0, filter))
+        })
     }
 
     /// The supergroup list the dialog's tab and search show.
@@ -628,15 +668,7 @@ impl QuillApp {
             None if query.trim().is_empty() => MemberListFilter::Recent,
             None => MemberListFilter::Search,
         };
-        if !session.chat_can_restrict_members(dialog.chat_id)
-            && matches!(
-                filter,
-                MemberListFilter::Restricted | MemberListFilter::Banned
-            )
-        {
-            return Some(MemberListFilter::Recent);
-        }
-        Some(filter)
+        Some(filter.shown_for(session.chat_can_restrict_members(dialog.chat_id)))
     }
 
     /// The member dialog scrolled: near the end of the list, ask for the
@@ -669,7 +701,7 @@ impl QuillApp {
             return;
         }
         let loaded = self.session().and_then(|session| {
-            match session.groups.supergroup_members.get(&(chat_id.0, filter)) {
+            match session.groups.member_fetch((chat_id.0, filter)) {
                 Some(SupergroupMembersFetch::Loaded {
                     members,
                     total_count,

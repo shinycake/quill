@@ -10,11 +10,13 @@ impl Session {
         _extra: Option<RequestId>,
         _seq: u64,
     ) {
-        if let Some(RequestPurpose::Media(MediaPurpose::LocationPicker(
-            crate::location_picker::LocationPickerPurpose::SearchVenues { generation },
-        ))) = pending.map(|p| p.purpose)
+        if let Some(pending) = pending
+            && pending.purpose
+                == RequestPurpose::Media(MediaPurpose::LocationPicker(
+                    crate::location_picker::LocationPickerPurpose::SearchVenues,
+                ))
         {
-            self.location.venues_answered(generation, page.venues);
+            self.location.venues_answered(pending.id, page.venues);
             return;
         }
         if let Some(RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
@@ -198,7 +200,7 @@ impl Session {
             self.remember_busy_declined(id);
         } else if let Some(pending) = pending
             && let RequestPurpose::Calls(CallsPurpose::CreateCall { is_video }) = pending.purpose
-            && let Some(user_id) = pending.user_id
+            && let Some(user_id) = pending.user_id()
         {
             self.calls.active_call = Some(ActiveCall {
                 id,

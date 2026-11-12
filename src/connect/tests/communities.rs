@@ -658,6 +658,7 @@ fn a_created_community_gets_the_photo_its_box_chose() {
     assert_eq!(
         rig.outcome(),
         Some(CommunityOutcome::Created {
+            request: extra,
             community_id: 44,
             chat_id: Some(-1007),
         })

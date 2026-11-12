@@ -491,9 +491,8 @@ impl Session {
     /// What the info panel of `chat_id` loaded: its media counts and member
     /// lists. The info panel and the boxes that read member lists hold
     /// their chat (`ui::history_holds`), and a gallery shows its view's open
-    /// chat, so none of them reaches here. A list that goes marks the chat
-    /// in `member_list_stale`, as a membership change does, so any reader
-    /// asks again.
+    /// chat, so none of them reaches here. A reader that opens later finds
+    /// no list and asks.
     fn forget_info_panel_data(&mut self, chat_id: ChatId) {
         // A count answer only fills the entry its fetch opened, so one
         // still on its way cannot bring this back.
@@ -510,16 +509,10 @@ impl Session {
             self.requests.take(extra);
         }
         let groups = &mut self.groups;
-        let members = groups.supergroup_members.len();
         groups
             .supergroup_members
             .retain(|(chat, _), _| *chat != chat_id.0);
-        groups.member_asks.retain(|(chat, _), _| *chat != chat_id.0);
-        let dropped = groups.basic_group_members.remove(&chat_id.0).is_some()
-            || groups.supergroup_members.len() != members;
-        if dropped && !groups.member_list_stale.contains(&chat_id.0) {
-            groups.member_list_stale.push(chat_id.0);
-        }
+        groups.basic_group_members.remove(&chat_id.0);
     }
 
     /// A chat that was left or deleted: its histories go when no view

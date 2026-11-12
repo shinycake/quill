@@ -131,7 +131,9 @@ fn the_craft_info_does_not_replace_a_running_forge(cx: &mut TestAppContext) {
             .craft_session()
             .and_then(|craft| craft.slots.get(1).cloned())
             .expect("a second gift");
-        app.gift_market.craft.start_forge(Instant::now());
+        app.gift_market
+            .craft
+            .start_forge(Instant::now(), quill::ids::RequestId(0));
         app.open_craft_info(other, cx);
         assert!(app.gift_market.craft.forge_since().is_some());
         assert_ne!(app.gift_market.top(), Some(&MarketBox::CraftInfo));
@@ -153,7 +155,9 @@ fn the_forge_ends_in_the_result(cx: &mut TestAppContext) {
         if let Some(since) =
             Instant::now().checked_sub(Duration::from_secs_f32(FORGE_SECONDS + 0.1))
         {
-            app.gift_market.craft.start_forge(since);
+            app.gift_market
+                .craft
+                .start_forge(since, quill::ids::RequestId(0));
         }
         app.craft_frame_upkeep(cx);
         assert!(app.gift_market.craft.forge_since().is_none());
@@ -186,7 +190,12 @@ fn answer_forge(app: &mut QuillApp, result: CraftResult) {
         craft.run = quill::gift_market::CraftRun::Done(result);
     }
     if let Some(since) = Instant::now().checked_sub(Duration::from_secs_f32(FORGE_SECONDS + 0.1)) {
-        app.gift_market.craft.start_forge(since);
+        let request = app
+            .gift_market
+            .craft
+            .forge_request()
+            .unwrap_or(quill::ids::RequestId(0));
+        app.gift_market.craft.start_forge(since, request);
     }
 }
 

@@ -29,11 +29,12 @@ fn sweeping_a_shared_media_page_allows_the_next_page_request() {
     let state = media.tab_state(tab);
     state.status = SharedMediaTabStatus::ready();
     state.next_from = MessageId(40);
-    let (generation, _) = media.begin_fetch_more(tab).expect("page starts");
-    session.request(
-        RequestPurpose::Media(MediaPurpose::GetSharedMediaMore { tab, generation }),
+    assert!(media.more_from(tab).is_some(), "page starts");
+    let request = session.request(
+        RequestPurpose::Media(MediaPurpose::GetSharedMediaMore { tab }),
         Some(chat),
     );
+    session.media.shared_media.begin_fetch_more(tab, request);
     assert!(!session.media.shared_media.tab_state(tab).can_load_more());
 
     assert!(sweep(&mut session));
@@ -80,11 +81,9 @@ fn every_sweepable_purpose_leaves_the_registry_and_the_session_alive() {
         RequestPurpose::SearchPublicChats,
         RequestPurpose::GetSharedMedia {
             tab: SharedMediaTab::default(),
-            generation: 0,
         },
         RequestPurpose::Media(MediaPurpose::GetSharedMediaMore {
             tab: SharedMediaTab::default(),
-            generation: 0,
         }),
         RequestPurpose::GetPinnedMessages,
         RequestPurpose::GetUserFullInfo,
@@ -368,8 +367,7 @@ fn sweeping_a_lost_panel_request_ends_its_loading_stage() {
     );
     session
         .groups
-        .set_event_log_fetch(13, ChatEventLogFetch::Loading);
-    session.groups.event_logs.entry(13).or_default().wait.page = Some(log);
+        .set_event_log_fetch(13, ChatEventLogFetch::Loading { request: log });
     let owner = asked(&mut session, RequestPurpose::GetChatOwnerAfterLeaving);
     session.begin_owner_lookup(13, owner);
     let voters = asked(
@@ -434,4 +432,21 @@ fn sweeping_a_lost_panel_request_ends_its_loading_stage() {
         session.bots.inline_query.as_ref().map(|slot| &slot.fetch),
         Some(InlineQueryFetch::Failed(_))
     ));
+}
+
+#[test]
+fn a_swept_request_settles_the_box_waiting_on_it() {
+    let mut session = ready_session();
+    let generation = session.account_generation;
+    let request =
+        session
+            .requests
+            .register(generation, RequestPurpose::GetUserFullInfo, None, None);
+    session.acks.expect(request);
+    assert_eq!(session.acks.take(request), None, "still out");
+    assert!(sweep(&mut session));
+    assert!(
+        matches!(session.acks.take(request), Some(Answer::Failed(_))),
+        "the sweep refuses it, so the dialog returns to editing"
+    );
 }

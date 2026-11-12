@@ -249,9 +249,9 @@ impl QuillApp {
                 target.reply_to(),
                 play_once,
             );
-            if sent.is_ok() {
+            if let Ok(request) = sent {
                 self.set_note(StatusNote::silent(tr(keys::Q_MISC_SENDING_VOICE_NOTE)));
-                self.expect_draft_clear(DraftClear::whole_composer(target.chat_id));
+                self.expect_draft_clear(DraftClear::whole_composer(target.chat_id), request);
             } else {
                 let _ = std::fs::remove_file(&draft.path);
                 self.restore_composer_after_failed_send(target, window, cx);
@@ -356,9 +356,9 @@ impl QuillApp {
                 &draft,
                 target.reply_to(),
             );
-            if sent.is_ok() {
+            if let Ok(request) = sent {
                 self.set_note(StatusNote::silent(tr(keys::Q_MISC_SENDING_VIDEO_NOTE)));
-                self.expect_draft_clear(DraftClear::whole_composer(target.chat_id));
+                self.expect_draft_clear(DraftClear::whole_composer(target.chat_id), request);
             } else {
                 let _ = std::fs::remove_file(&draft.path);
                 self.restore_composer_after_failed_send(target, window, cx);

@@ -18,8 +18,7 @@ fn sessions_parse_current_other_and_password_pending() {
         EnvelopePayload::Settings(SettingsPayload::Sessions { sessions, .. }) => {
             assert_eq!(sessions.len(), 3);
             let current = sessions.iter().find(|s| s.id == 11).expect("current");
-            assert!(current.is_current);
-            assert!(!current.is_password_pending);
+            assert_eq!(current.kind, SessionKind::Current);
             assert_eq!(current.device_model, "Linux desktop");
             assert_eq!(current.application_name, "Quill");
             assert_eq!(current.application_version, "0.1");
@@ -28,12 +27,11 @@ fn sessions_parse_current_other_and_password_pending() {
             assert_eq!(current.ip_address, "1.2.3.4");
             assert_eq!(current.location, "Austin, United States");
             let other = sessions.iter().find(|s| s.id == 22).expect("other");
-            assert!(!other.is_current);
-            assert!(!other.is_password_pending);
+            assert_eq!(other.kind, SessionKind::Other);
             assert_eq!(current.device_type, SessionDevice::Desktop);
             assert_eq!(other.device_type, SessionDevice::Phone);
             let pending = sessions.iter().find(|s| s.id == 33).expect("pending");
-            assert!(pending.is_password_pending);
+            assert_eq!(pending.kind, SessionKind::PasswordPending);
             assert_eq!(pending.location, "");
             assert_eq!(pending.device_type, SessionDevice::Other, "no device_type");
         }

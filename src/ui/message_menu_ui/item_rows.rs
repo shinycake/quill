@@ -307,7 +307,7 @@ impl QuillApp {
             .as_ref()
             .filter(|a| a.chat_id == chat_id && a.message_id == message_id)?;
         match &audience.author {
-            Audience::Loading => Some(info_row(
+            Audience::Loading { .. } => Some(info_row(
                 order::SENT + 2,
                 "menu-author-loading",
                 Some(IconName::User),

@@ -13,11 +13,7 @@ fn msg(id: i64, chat: i64, thread: i64, text: &str) -> String {
 fn resolved() -> (Session, Arc<MemorySink>, AtomicU64) {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.begin_thread(ChatId(13), MessageId(101));
-    let extra = session.request(
-        RequestPurpose::GetMessageThread { message_id: 101 },
-        Some(ChatId(13)),
-    );
+    let extra = session.begin_thread(ChatId(13), MessageId(101));
     apply_json(
         &mut session,
         &seq,
@@ -240,11 +236,7 @@ fn unread_thread_places_the_divider_anchor_and_failed_pages_keep_ready() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     {
-        session.begin_thread(ChatId(14), MessageId(40));
-        let extra = session.request(
-            RequestPurpose::GetMessageThread { message_id: 40 },
-            Some(ChatId(14)),
-        );
+        let extra = session.begin_thread(ChatId(14), MessageId(40));
         apply_json(
             &mut session,
             &seq,
@@ -327,11 +319,7 @@ fn opening_another_chat_leaves_the_thread() {
 fn unread_group_thread() -> (Session, Arc<MemorySink>, AtomicU64) {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.begin_thread(ChatId(14), MessageId(40));
-    let extra = session.request(
-        RequestPurpose::GetMessageThread { message_id: 40 },
-        Some(ChatId(14)),
-    );
+    let extra = session.begin_thread(ChatId(14), MessageId(40));
     apply_json(
         &mut session,
         &seq,
@@ -543,11 +531,7 @@ fn reading_comments_clears_the_posts_unread_dot_and_follows_server_read_marks() 
             .expect("post reply info")
     };
     assert!(reply_info(&session).has_unread());
-    session.begin_thread(ChatId(13), MessageId(101));
-    let extra = session.request(
-        RequestPurpose::GetMessageThread { message_id: 101 },
-        Some(ChatId(13)),
-    );
+    let extra = session.begin_thread(ChatId(13), MessageId(101));
     apply_json(
         &mut session,
         &seq,
@@ -834,7 +818,7 @@ fn a_page_asked_by_a_replaced_view_does_not_land_in_the_new_one() {
         Some(ChatId(13)),
     );
     // The same post is opened again before the first page answered.
-    session.begin_thread(ChatId(13), MessageId(101));
+    let again = session.begin_thread(ChatId(13), MessageId(101));
     apply_json(
         &mut session,
         &seq,
@@ -847,5 +831,33 @@ fn a_page_asked_by_a_replaced_view_does_not_land_in_the_new_one() {
     );
     let thread = session.threads.thread.as_ref().unwrap();
     assert!(!thread.history.messages.contains_key(&503));
-    assert_eq!(thread.status, ThreadStatus::Resolving);
+    assert_eq!(thread.status, ThreadStatus::Resolving { request: again });
+}
+
+/// r3-06 09-018: the same post opened, closed and opened again before the
+/// first resolve answered: the first answer cannot resolve the new view; the
+/// second one does.
+#[test]
+fn an_earlier_resolve_answer_does_not_resolve_a_reopened_thread() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let first = session.begin_thread(ChatId(13), MessageId(101));
+    session.close_thread();
+    let second = session.begin_thread(ChatId(13), MessageId(101));
+    assert_ne!(first, second);
+    let info = |extra: RequestId, thread_id: i64| {
+        format!(
+            r#"{{"@type":"messageThreadInfo","@extra":"{}","chat_id":14,"message_thread_id":{thread_id},"reply_info":{{"@type":"messageReplyInfo","reply_count":2,"recent_replier_ids":[],"last_read_inbox_message_id":0,"last_read_outbox_message_id":0,"last_message_id":503}},"unread_message_count":0,"messages":[{}]}}"#,
+            extra.0,
+            msg(thread_id, 14, thread_id, "root")
+        )
+    };
+    apply_json(&mut session, &seq, &sink, &info(first, 111));
+    let thread = session.threads.thread.as_ref().unwrap();
+    assert_eq!(thread.thread_id, 0, "the first request's answer is stale");
+    assert_eq!(thread.status, ThreadStatus::Resolving { request: second });
+    apply_json(&mut session, &seq, &sink, &info(second, 501));
+    let thread = session.threads.thread.as_ref().unwrap();
+    assert_eq!(thread.thread_id, 501);
+    assert_ne!(thread.status, ThreadStatus::Resolving { request: second });
 }

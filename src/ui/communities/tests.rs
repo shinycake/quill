@@ -129,19 +129,22 @@ fn a_ban_waits_only_for_an_ask_that_will_answer() {
     use quill::connect::ConnectSendError;
     use quill::ids::RequestId;
     assert!(matches!(
-        ban_start(Ok(Some(RequestId(9))), false),
-        BanStart::Wait
+        ban_start(Ok(Some(RequestId(9))), None),
+        BanStart::Wait(RequestId(9))
     ));
     assert!(
-        matches!(ban_start(Ok(None), true), BanStart::Wait),
-        "the same ask is already in flight"
+        matches!(
+            ban_start(Ok(None), Some(RequestId(4))),
+            BanStart::Wait(RequestId(4))
+        ),
+        "the same ask is already in flight: the wait is for its request"
     );
     assert!(
-        matches!(ban_start(Ok(None), false), BanStart::Refused),
+        matches!(ban_start(Ok(None), None), BanStart::Refused),
         "nothing went: the community is gone or not accessible"
     );
     assert!(matches!(
-        ban_start(Err(ConnectSendError::InvalidRequest), false),
+        ban_start(Err(ConnectSendError::InvalidRequest), None),
         BanStart::Failed(_)
     ));
 }

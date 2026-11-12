@@ -237,6 +237,13 @@ fn key_of(language: &str, text: &str) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     language.hash(&mut hasher);
     text.hash(&mut hasher);
+    // Tests run in parallel, each app on its own thread with its own
+    // executor, but the cache is process-wide: a test that ends while its
+    // highlight is still pending would leave the entry pending for every
+    // other test of the same block. Lookups, landings and `ready` all run
+    // on the test's own thread, so its id keeps each test's entries apart.
+    #[cfg(test)]
+    std::thread::current().id().hash(&mut hasher);
     hasher.finish()
 }
 

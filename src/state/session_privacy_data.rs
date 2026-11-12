@@ -4,7 +4,7 @@
 //! "Do you still remember your password?" check.
 use super::*;
 use crate::network_usage::NetworkUsage;
-use crate::privacy::{NewChatPrivacy, NewChatPrivacyState};
+use crate::privacy::{GiftSave, NewChatPrivacy, NewChatPrivacyState};
 use crate::state::saves::Optimistic;
 use crate::telegram::envelope::SettingsPayload;
 
@@ -62,6 +62,8 @@ pub struct PrivacyData {
     /// failed (a failed reset lands here too).
     pub network: crate::state::fetch::Fetch<NetworkUsage>,
     pub password_check: PasswordCheck,
+    /// The own gift settings' saves in flight, over the confirmed value.
+    pub gift_save: GiftSave,
     /// The last failure of each control's request, shown where that
     /// control is (never as a toast). A control's success or retry clears
     /// only its own line.
@@ -127,7 +129,7 @@ impl Session {
             SettingsPayload::CanSendMessageToUser(answer) => {
                 if purpose == Some(RequestPurpose::CanSendMessageToUser)
                     && let Some(pending) = pending
-                    && let Some(user_id) = pending.user_id
+                    && let Some(user_id) = pending.user_id()
                 {
                     self.payments.paid_messages.accept_answer(
                         user_id,
@@ -140,7 +142,7 @@ impl Session {
             }
             SettingsPayload::StarCount(stars) => {
                 if purpose == Some(RequestPurpose::GetPaidMessageRevenue)
-                    && let Some(user_id) = pending.and_then(|p| p.user_id)
+                    && let Some(user_id) = pending.and_then(|p| p.user_id())
                 {
                     self.payments.paid_messages.revenue.insert(user_id, *stars);
                 }
@@ -210,6 +212,11 @@ impl Session {
                 }
                 data.clear_error(PrivacyControl::SessionTtl);
             }
+            Some(RequestPurpose::SetGiftSettings) => {
+                if let Some(id) = pending.map(|p| p.id) {
+                    self.settings.privacy_data.gift_save.landed(id);
+                }
+            }
             Some(RequestPurpose::Settings(SettingsPurpose::SetNewChatPrivacy)) => {
                 if let Some(id) = pending.map(|p| p.id)
                     && let Some(state) = self.settings.privacy_data.new_chat.as_mut()
@@ -224,7 +231,7 @@ impl Session {
             Some(RequestPurpose::AllowUnpaidMessages) => {
                 if let Some(pending) = pending {
                     self.payments.paid_messages.save.settle(pending.id);
-                    if let Some(user_id) = pending.user_id {
+                    if let Some(user_id) = pending.user_id() {
                         self.finish_unpaid_exception(user_id);
                     }
                 }
@@ -306,6 +313,11 @@ impl Session {
                 );
             }
             RequestPurpose::SetGiftSettings => {
+                let shown = pending.and_then(|p| data.gift_save.failed(p.id));
+                if let Some(shown) = shown {
+                    self.set_my_gift_settings_local(shown);
+                }
+                let data = &mut self.settings.privacy_data;
                 data.fail(
                     PrivacyControl::Gifts,
                     sessions_error_line("change the gift settings", err),
@@ -335,7 +347,7 @@ impl Session {
             RequestPurpose::CanSendMessageToUser => {
                 // The chat stays as it was; the next open asks again.
                 if let Some(pending) = pending
-                    && let Some(user_id) = pending.user_id
+                    && let Some(user_id) = pending.user_id()
                 {
                     self.payments
                         .paid_messages

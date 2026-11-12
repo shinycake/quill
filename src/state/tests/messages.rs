@@ -727,11 +727,12 @@ fn reply_to_message_preview_and_jump() {
         session.reply_quote_preview(quoted).as_deref(),
         Some("manual quote")
     );
-    assert_eq!(
-        session.begin_chat_search_jump(MessageId(90)),
-        ChatSearchJumpNeed::LoadAround
-    );
-    let around = session.request_history_around(ChatId(11), MessageId(90));
+    let ChatSearchJumpNeed::LoadAround {
+        request: around, ..
+    } = session.begin_chat_search_jump(MessageId(90))
+    else {
+        panic!("90 is outside the loaded window");
+    };
     apply_json(
         &mut session,
         &seq,

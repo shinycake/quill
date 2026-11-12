@@ -129,6 +129,15 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        // The value on screen is what a refusal returns to; without one
+        // (the full info never arrived) the write below is a no-op too.
+        if let Some(shown) = self.session.my_gift_settings() {
+            self.session
+                .settings
+                .privacy_data
+                .gift_save
+                .save(shown, extra, settings);
+        }
         self.session.set_my_gift_settings_local(settings);
         Ok(extra)
     }

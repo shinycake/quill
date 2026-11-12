@@ -256,8 +256,7 @@ impl Session {
         history.view_generation = view_generation;
         history.views.restart();
         history.reader = ReaderPosition::Tail;
-        history.unread_anchor = unread_anchor;
-        history.opened_with_unread = history.unread_anchor.is_some();
+        history.unread_open = UnreadOpen::opened_at(unread_anchor);
     }
 
     /// Message ids of the open history that are due for `viewMessages`
@@ -279,7 +278,7 @@ impl Session {
         }
         // Opened at the first unread message: nothing is read until the
         // UI reports what is actually on screen.
-        if history.opened_with_unread {
+        if history.opened_with_unread() {
             return Vec::new();
         }
         history

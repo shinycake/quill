@@ -448,7 +448,7 @@ impl QuillApp {
         }
         page = page.child(overview_grid(cells));
         match state.map(|s| &s.statistics) {
-            None | Some(MessageStatsFetch::Loading(_)) => {
+            None | Some(MessageStatsFetch::Idle | MessageStatsFetch::Loading { .. }) => {
                 page = page.child(loading_line(tr(keys::Q_MONEY_LOADING_STATISTICS)));
             }
             Some(MessageStatsFetch::Failed(message)) => {
@@ -552,19 +552,43 @@ impl QuillApp {
         }
         if let Some(state) = state {
             let forwards = &state.forwards;
-            let more = (!forwards.next_offset().is_empty()).then(|| {
-                Button::new("message-forwards-more")
-                    .label(tr(keys::Q_MONEY_SHOW_MORE))
-                    .ghost()
-                    .small()
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        if let Some(live) = this.live.as_mut() {
-                            let _ = live.driver.load_more_message_forwards();
-                        }
-                        cx.notify();
-                    }))
-                    .into_any_element()
-            });
+            let more = if !forwards.next_offset().is_empty() {
+                Some(
+                    Button::new("message-forwards-more")
+                        .label(tr(keys::Q_MONEY_SHOW_MORE))
+                        .ghost()
+                        .small()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            if let Some(live) = this.live.as_mut() {
+                                let _ = live.driver.load_more_message_forwards();
+                            }
+                            cx.notify();
+                        }))
+                        .into_any_element(),
+                )
+            } else if forwards.error().is_some() {
+                // The first page failed: nothing to page from, so Retry
+                // asks for it again.
+                Some(
+                    Button::new("message-forwards-retry")
+                        .label(tr(keys::Q_MONEY_RETRY))
+                        .ghost()
+                        .small()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if let Some(live) = this.live.as_mut() {
+                                let _ = live.driver.fetch_message_public_forwards(
+                                    ChatId(chat_id),
+                                    MessageId(message_id),
+                                    "",
+                                );
+                            }
+                            cx.notify();
+                        }))
+                        .into_any_element(),
+                )
+            } else {
+                None
+            };
             page = page.child(self.public_shares(
                 "message-forward",
                 forwards.total(),
@@ -647,7 +671,7 @@ impl QuillApp {
                 .into_any_element();
         };
         match &state.statistics {
-            StoryStatsFetch::Loading(_) => {
+            StoryStatsFetch::Idle | StoryStatsFetch::Loading { .. } => {
                 page = page.child(loading_line(tr(keys::Q_MONEY_LOADING_STATISTICS)))
             }
             StoryStatsFetch::Failed(message) => {

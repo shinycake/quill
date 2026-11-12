@@ -169,7 +169,10 @@ fn has_usage_description() -> bool {
             .is_some()
 }
 
-pub(super) fn locate(prompt_open: &Arc<AtomicBool>) -> Receiver<GeoOutcome> {
+pub(super) fn locate(
+    prompt_open: &Arc<AtomicBool>,
+    _cancelled: futures_channel::oneshot::Receiver<()>,
+) -> Receiver<GeoOutcome> {
     let (answer, receiver) = channel();
     let Some(mtm) = MainThreadMarker::new() else {
         let _ = answer.send(GeoOutcome::Unavailable);

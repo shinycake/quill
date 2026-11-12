@@ -2,8 +2,67 @@ use super::super::app::QuillApp;
 use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::*;
 use quill::checklist::{CHECKLIST_TASKS_MAX, ChecklistDraft};
-use quill::ids::{ChatId, MessageId};
+use quill::ids::{ChatId, MessageId, RequestId};
 use quill::lang::{keys, tr};
+use quill::state::{Answer, RequestAcks};
+
+/// Where a dialog's Create / Add stands. The dialog stays open, with what
+/// was typed, while its request is out: the matching answer closes it, a
+/// refusal returns it to editing. Closing the dialog ends the wait.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum DialogSend {
+    #[default]
+    Editing,
+    Sending {
+        request: RequestId,
+    },
+}
+
+impl DialogSend {
+    pub(crate) fn request(self) -> Option<RequestId> {
+        match self {
+            Self::Editing => None,
+            Self::Sending { request } => Some(request),
+        }
+    }
+
+    /// Take the answer of the request waited for: the stage goes back to
+    /// editing, and the answer is returned. `None` while nothing came.
+    pub(crate) fn settle(&mut self, acks: &mut RequestAcks) -> Option<Answer> {
+        let request = self.request()?;
+        let answer = acks.take(request)?;
+        *self = Self::Editing;
+        Some(answer)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DialogSend;
+    use quill::ids::RequestId;
+    use quill::state::{Answer, RequestAcks};
+
+    #[test]
+    fn a_refusal_returns_the_dialog_to_editing_and_only_its_own_answer_counts() {
+        let mut acks = RequestAcks::default();
+        acks.expect(RequestId(7));
+        acks.expect(RequestId(8));
+        let mut send = DialogSend::Sending {
+            request: RequestId(7),
+        };
+        // Another request's answer is not this dialog's.
+        acks.settle(RequestId(8), Answer::Done);
+        assert_eq!(send.settle(&mut acks), None);
+        assert_eq!(send.request(), Some(RequestId(7)));
+        acks.settle(RequestId(7), Answer::Failed("SLOWMODE_WAIT_5".into()));
+        assert_eq!(
+            send.settle(&mut acks),
+            Some(Answer::Failed("SLOWMODE_WAIT_5".into()))
+        );
+        assert_eq!(send, DialogSend::Editing, "the box can be sent again");
+        assert_eq!(send.settle(&mut acks), None);
+    }
+}
 
 /// B15: the checklist composer ("New Checklist") or, with `add_to` set, the
 /// "Add Tasks" box for an existing list. Mirrors tdesktop's
@@ -17,6 +76,8 @@ pub struct ChecklistDialog {
     pub(crate) title_input: Entity<TextareaState>,
     pub(crate) task_inputs: Vec<Entity<TextareaState>>,
     pub(crate) others: OthersMay,
+    /// Whether Create / Add is out (`checklists.rs`).
+    pub(crate) send: DialogSend,
     /// The last refused Create, drawn under the fields; any edit to the
     /// title or a task clears it (see `watch`).
     pub(crate) error: Option<&'static str>,
@@ -53,6 +114,7 @@ impl ChecklistDialog {
             task_inputs,
             focus_on_mount,
             others: OthersMay::default(),
+            send: DialogSend::Editing,
             error: None,
             watchers: Vec::new(),
         };

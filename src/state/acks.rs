@@ -38,6 +38,14 @@ impl RequestAcks {
         }
     }
 
+    /// `id` will never be answered (swept, or abandoned with its account):
+    /// a surface waiting for it takes the loss as a refusal. Settling again
+    /// is harmless, only a waited request keeps an answer.
+    pub fn settle_lost(&mut self, id: RequestId) {
+        let why = crate::lang::tr(crate::lang::keys::Q_OPS_ERR_REQUEST_LOST).to_string();
+        self.settle(id, Answer::Failed(why));
+    }
+
     /// The answer to `id`, once, if it came.
     pub fn take(&mut self, id: RequestId) -> Option<Answer> {
         self.settled.remove(&id)

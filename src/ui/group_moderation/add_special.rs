@@ -237,8 +237,7 @@ impl QuillApp {
         let fetch = self.session().and_then(|session| {
             session
                 .groups
-                .supergroup_members
-                .get(&(state.chat_id.0, filter))
+                .member_fetch((state.chat_id.0, filter))
                 .cloned()
         });
         let mut list = div()
@@ -253,7 +252,9 @@ impl QuillApp {
         let message =
             |text: &'static str| div().px_2().py_2().text_sm().text_color(muted).child(text);
         match fetch {
-            None | Some(SupergroupMembersFetch::Loading { .. }) => {
+            None
+            | Some(SupergroupMembersFetch::Loading { .. } | SupergroupMembersFetch::Stale { .. }) =>
+            {
                 list = list.child(message(tr(keys::CONTACTS_LOADING)));
             }
             Some(

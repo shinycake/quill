@@ -156,7 +156,7 @@ impl QuillApp {
 
         let tab_name = active_tab.label_in(is_channel).to_lowercase();
         let content: AnyElement = match status {
-            SharedMediaTabStatus::Idle | SharedMediaTabStatus::Loading => {
+            SharedMediaTabStatus::Idle | SharedMediaTabStatus::Loading { .. } => {
                 EmptyState::loading("shared-media-loading")
                     .hint(tr_with(
                         keys::Q_OPS_LOADING_2,

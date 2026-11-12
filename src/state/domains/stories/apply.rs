@@ -153,6 +153,7 @@ impl Session {
                     && let Some(chat_id) = pending.chat_id
                 {
                     self.accept_message_reaction_options(
+                        pending.id,
                         chat_id,
                         MessageId(message_id),
                         reactions,
@@ -240,7 +241,9 @@ impl Session {
     /// A stories request answered `ok`.
     pub(crate) fn apply_stories_ok(&mut self, pending: Option<&PendingRequest>) {
         if let Some(list) = pending.and_then(|p| story_list_of(p.purpose)) {
-            self.stories.paging_mut(list).answered();
+            self.stories
+                .paging_mut(list)
+                .answered(pending.map(|p| p.id));
         }
     }
 }

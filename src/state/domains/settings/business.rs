@@ -118,7 +118,7 @@ impl Session {
         let Some(pending) = pending.filter(|p| p.purpose == RequestPurpose::GetUserFullInfo) else {
             return;
         };
-        if pending.user_id.is_some() && pending.user_id == self.my_user_id {
+        if pending.user_id().is_some() && pending.user_id() == self.my_user_id {
             self.settings.business.own_info_error = Some(error_reason(err));
         }
     }

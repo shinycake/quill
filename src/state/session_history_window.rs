@@ -234,7 +234,7 @@ impl Session {
     /// Whether `pending` was issued for a window that has since been
     /// replaced.
     pub(crate) fn history_request_stale(&self, pending: &PendingRequest) -> bool {
-        let Some(asked) = pending.window_epoch else {
+        let Some(asked) = pending.window_epoch() else {
             return false;
         };
         let current = pending
@@ -272,7 +272,7 @@ impl Session {
 
     /// Which edge of the window a history page request extends.
     fn window_edge(pending: &PendingRequest) -> WindowEdge {
-        let from = pending.around_message_id.map_or(0, |id| id.0);
+        let from = pending.around_message_id().map_or(0, |id| id.0);
         match pending.purpose {
             RequestPurpose::GetHistory if from != 0 => WindowEdge::Older(from),
             RequestPurpose::GetHistoryNewer => WindowEdge::Newer(from),
@@ -391,7 +391,7 @@ impl Session {
             history.clear_load_failed();
         }
         let keep = !has_newer
-            && match history.unread_anchor {
+            && match history.unread_anchor() {
                 // A tail window that reaches back to the boundary shows the
                 // unread run as is.
                 Some(anchor) => {
@@ -422,7 +422,7 @@ impl Session {
         {
             thread.unread_anchor = None;
         } else if let Some(history) = self.histories.get_mut(&chat_id.0) {
-            history.unread_anchor = None;
+            history.unread_open.drop_bar();
         }
     }
 
@@ -438,7 +438,7 @@ impl Session {
             .get(&chat_id.0)
             .and_then(ChatSummary::unread_anchor)?;
         let history = self.histories.entry(chat_id.0).or_default();
-        history.unread_anchor = Some(anchor);
+        history.unread_open.show_bar(anchor);
         let covered = history.unread_bar_message().is_some()
             && (history.loaded_complete()
                 || history
@@ -467,7 +467,7 @@ impl Session {
         let Some(chat_id) = pending.chat_id else {
             return;
         };
-        let from = pending.around_message_id.map_or(0, |id| id.0);
+        let from = pending.around_message_id().map_or(0, |id| id.0);
         let any_newer = messages.iter().any(|m| m.id.0 > from);
         for message in messages {
             self.upsert_message(message, false);

@@ -25,8 +25,8 @@ use quill::group_type::{GroupTypeData, USERNAME_MAX, plan_group_type_save};
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
 use quill::new_chat::{
-    CreateProgress, NewChatBack, NewChatInvalid, NewChatKind, NewChatStage, NewChatStep,
-    NewChatView, TypeSaveStage, plan_new_chat, view,
+    NewChatBack, NewChatInvalid, NewChatKind, NewChatStage, NewChatStep, NewChatView,
+    TypeSaveStage, plan_new_chat, view,
 };
 
 /// The description shows three lines and grows to eight.
@@ -401,14 +401,7 @@ impl QuillApp {
                 if let Some(dialog) = self.admin.create_chat_dialog.as_mut() {
                     dialog.title = TitleCheck::Sent(title);
                 }
-                self.set_new_chat_stage(
-                    NewChatStage::Creating {
-                        request,
-                        back,
-                        progress: CreateProgress::InFlight,
-                    },
-                    cx,
-                );
+                self.set_new_chat_stage(NewChatStage::Creating { request, back }, cx);
             }
             Ok(None) => {}
             Err(err) => {

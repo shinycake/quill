@@ -165,7 +165,7 @@ impl Session {
             RequestPurpose::Threads(ThreadsPurpose::GetTopicHistoryNewer) => true,
             _ => return,
         };
-        let (Some(chat_id), Some(topic)) = (pending.chat_id, pending.forum_topic_id) else {
+        let (Some(chat_id), Some(topic)) = (pending.chat_id, pending.forum_topic_id()) else {
             return;
         };
         for message in &messages {
@@ -218,7 +218,7 @@ impl Session {
     /// A topic page failed. A failed newer page stops auto-paging until a
     /// jump; a failed first page offers Retry.
     pub(crate) fn fail_topic_page(&mut self, pending: &PendingRequest) {
-        let (Some(chat_id), Some(topic)) = (pending.chat_id, pending.forum_topic_id) else {
+        let (Some(chat_id), Some(topic)) = (pending.chat_id, pending.forum_topic_id()) else {
             return;
         };
         match pending.purpose {
@@ -245,7 +245,7 @@ impl Session {
         self.requests
             .ids_for_chat(&purposes, chat_id)
             .into_iter()
-            .filter(|id| self.requests.get(*id).and_then(|p| p.forum_topic_id) == Some(topic))
+            .filter(|id| self.requests.get(*id).and_then(|p| p.forum_topic_id()) == Some(topic))
             .map(|id| id.0)
             .collect()
     }

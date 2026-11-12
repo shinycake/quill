@@ -9,6 +9,8 @@ fn s8_sticker_backend_purpose_gated_dispatch() {
 
     // Trending sets land under GetTrendingStickerSets.
     let extra = with_purpose.request(RequestPurpose::GetTrendingStickerSets, None);
+    with_purpose.stickers.stickers.lists.trending.begin();
+    with_purpose.stickers.stickers.lists.trending.sent(extra);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -36,6 +38,8 @@ fn s8_sticker_backend_purpose_gated_dispatch() {
     // Favorites arrive as the bare `stickers` type under
     // GetFavoriteStickers.
     let extra = with_purpose.request(RequestPurpose::GetFavoriteStickers, None);
+    with_purpose.stickers.stickers.lists.favorites.begin();
+    with_purpose.stickers.stickers.lists.favorites.sent(extra);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -51,6 +55,8 @@ fn s8_sticker_backend_purpose_gated_dispatch() {
     // searchStickerSets answers with `stickerSets` under
     // SearchStickerSets (not the installed-sets slot).
     let extra = with_purpose.request(RequestPurpose::SearchStickerSets, None);
+    with_purpose.stickers.stickers.lists.search.begin();
+    with_purpose.stickers.stickers.lists.search.sent(extra);
     apply_json(
         &mut with_purpose,
         &seq,

@@ -48,6 +48,10 @@ impl BotSave {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BotEditTexts {
     pub bot_id: i64,
+    /// The `getBotName` and `getBotInfoShortDescription` requests that
+    /// asked for these texts, so a dialog fills its fields only from the
+    /// load it started.
+    pub asked: (RequestId, RequestId),
     pub name: BotText,
     pub about: BotText,
     pub name_save: BotSave,
@@ -157,6 +161,7 @@ impl BotEditTexts {
     pub fn new(bot_id: i64, name: RequestId, about: RequestId) -> Self {
         Self {
             bot_id,
+            asked: (name, about),
             name: BotText::Loading(name),
             about: BotText::Loading(about),
             name_save: BotSave::Idle,

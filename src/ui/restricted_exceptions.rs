@@ -22,8 +22,7 @@ impl QuillApp {
         let session = self.session()?;
         let fetch = session
             .groups
-            .supergroup_members
-            .get(&(chat_id.0, MemberListFilter::Restricted))?;
+            .member_fetch((chat_id.0, MemberListFilter::Restricted))?;
         let SupergroupMembersFetch::Loaded { members, .. } = fetch else {
             return None;
         };
@@ -52,8 +51,7 @@ impl QuillApp {
         let session = self.session()?;
         let fetch = session
             .groups
-            .supergroup_members
-            .get(&(chat_id.0, MemberListFilter::Restricted))?;
+            .member_fetch((chat_id.0, MemberListFilter::Restricted))?;
         let SupergroupMembersFetch::Loaded { members, .. } = fetch else {
             return None;
         };

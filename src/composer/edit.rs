@@ -33,6 +33,21 @@ pub struct ComposerEdit {
     pub link_preview: LinkPreviewChoice,
 }
 
+impl ComposerEdit {
+    /// What the edit bar keeps and draws while it slides in and out: this
+    /// edit without its render job, so a cancelled edit cancels the render
+    /// at once and not when the bar's exit slide ends.
+    pub fn for_display(&self) -> Self {
+        Self {
+            media_edit: MediaEdit {
+                render: EditRender::Idle,
+                ..self.media_edit.clone()
+            },
+            ..self.clone()
+        }
+    }
+}
+
 /// B5: the media currently on an edited message, as far as tdesktop's
 /// `Media::allowsEditMedia` + `ComputeAlbumType` care.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -153,15 +168,22 @@ impl EditMediaReplacement {
 }
 
 /// Where the photo editor's Done for this message edit stands. The render
-/// that lands is applied only while the edit still waits for its number; a
-/// cancelled edit takes the stage with it.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// that lands is applied only while the edit still holds its job; a
+/// cancelled edit or a later Done drops the job, which cancels the render.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum EditRender {
     #[default]
     Idle,
-    /// The render numbered so goes off the UI thread; a later Done replaces
-    /// the number, so only the latest render lands.
-    Rendering(u64),
+    /// The render goes off the UI thread; the job owns its task, so only
+    /// the latest render lands.
+    Rendering { job: super::RenderJob },
+}
+
+impl EditRender {
+    /// Whether the render named `token` is the one this edit waits for.
+    pub fn waits_for(&self, token: &super::RenderToken) -> bool {
+        matches!(self, Self::Rendering { job } if job.token() == token)
+    }
 }
 
 /// B5: per-message media-edit state.
@@ -315,6 +337,16 @@ impl ComposerEdit {
         !self.media_edit.in_album
             && replacement.kind != EditMediaKind::Audio
             && direct_media_kind_for(&replacement.path).is_some()
+    }
+
+    /// Whether "Send as a document" is ticked for the staged replacement: it
+    /// is the replacement's own choice, read from what was staged, so
+    /// dropping the replacement drops the choice with it.
+    pub fn replacement_as_file(&self) -> bool {
+        self.media_edit
+            .replacement
+            .as_ref()
+            .is_some_and(|rep| self.can_toggle_as_file(rep) && rep.kind == EditMediaKind::Document)
     }
 
     /// Whether the (possibly replaced) media carries the caption-position flag.
@@ -518,6 +550,21 @@ mod tests {
     }
 
     #[test]
+    fn the_edit_bar_copy_does_not_keep_the_render_alive() {
+        let token = crate::composer::RenderToken::new();
+        let mut edit = edit_with(Some(EditableMedia::Photo), false);
+        edit.media_edit.render = EditRender::Rendering {
+            job: crate::composer::RenderJob::new(token.clone(), ()),
+        };
+        let bar_copy = edit.for_display();
+        assert_eq!(bar_copy.media_edit.media, edit.media_edit.media);
+        // The edit is cancelled while the bar still slides shut.
+        drop(edit);
+        assert!(token.is_cancelled());
+        assert_eq!(bar_copy.media_edit.render, EditRender::Idle);
+    }
+
+    #[test]
     fn replace_is_offered_only_for_replaceable_media() {
         // tdesktop `allowsEditMedia`: not voice, video notes, stickers.
         assert!(edit_with(Some(EditableMedia::Photo), false).allows_replace());
@@ -526,6 +573,26 @@ mod tests {
         let mut scheduled = edit_with(Some(EditableMedia::Photo), false);
         scheduled.scheduled = true;
         assert!(!scheduled.allows_replace());
+    }
+
+    #[test]
+    fn the_as_file_choice_goes_with_the_staged_replacement() {
+        let mut edit = edit_with(Some(EditableMedia::Document), false);
+        assert!(!edit.replacement_as_file(), "nothing staged");
+        let png = temp_file("e.png");
+        edit.media_edit.replacement = edit.replacement_for(&png, true).ok();
+        assert!(edit.replacement_as_file());
+        edit.media_edit.replacement = edit.replacement_for(&png, false).ok();
+        assert!(!edit.replacement_as_file());
+        // A plain file is a document without the box being ticked.
+        let txt = temp_file("f.txt");
+        edit.media_edit.replacement = edit.replacement_for(&txt, false).ok();
+        assert!(!edit.replacement_as_file());
+        // Dropping the replacement drops the choice: the next file starts
+        // unticked.
+        edit.media_edit.replacement = edit.replacement_for(&png, true).ok();
+        edit.media_edit.replacement = None;
+        assert!(!edit.replacement_as_file());
     }
 
     #[test]

@@ -35,13 +35,13 @@ impl Session {
                     .fail(format!("error {}", err.code));
             }
             Some(RequestPurpose::SearchMessagesMore | RequestPurpose::SearchPublicPostsMore)
-                if self.search.search.matches_generation(pending) =>
+                if self.search.search.awaits(pending) =>
             {
                 self.search.search.fail_page();
             }
             _ => {}
         }
-        if self.search.search.matches_generation(pending) {
+        if self.search.search.awaits(pending) {
             match pending.map(|p| p.purpose) {
                 Some(RequestPurpose::SearchChats | RequestPurpose::SearchRecentlyFoundChats) => {
                     self.search.search.accept_chats(Vec::new(), true);
@@ -54,7 +54,13 @@ impl Session {
                     self.search.search.accept_messages(Vec::new(), true);
                 }
                 // The supplement failing changes nothing the user sees.
-                Some(RequestPurpose::SearchChatsOnServer) => {}
+                Some(RequestPurpose::SearchChatsOnServer) => {
+                    self.search.search.server_chats.cancel();
+                }
+                // No quota line: the search goes on without it.
+                Some(RequestPurpose::GetPublicPostSearchLimits) => {
+                    self.search.search.tabs.limits.cancel();
+                }
                 Some(RequestPurpose::SearchPublicChats) => {
                     self.search.search.accept_public_chats(Vec::new(), true);
                 }

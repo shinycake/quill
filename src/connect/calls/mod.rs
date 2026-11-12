@@ -456,7 +456,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // TDLib took the hang-up before its terminal update: the call is
         // over for the engine.
         if let Some(hang_up) = self.session.calls.hang_up_mut()
-            && std::mem::take(&mut hang_up.engine_hang_up_due)
+            && hang_up.take_engine_hang_up()
         {
             let call_id = hang_up.call_id;
             self.log_call_sound_summary(call_id);

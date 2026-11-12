@@ -26,6 +26,18 @@ pub enum SessionDevice {
     Other,
 }
 
+impl ParsedSession {
+    /// This device's own session.
+    pub fn is_current(&self) -> bool {
+        self.kind == SessionKind::Current
+    }
+
+    /// A login that still needs its 2-step verification password.
+    pub fn is_password_pending(&self) -> bool {
+        self.kind == SessionKind::PasswordPending
+    }
+}
+
 impl SessionDevice {
     fn from_type(tag: &str) -> Self {
         match tag.strip_prefix("sessionDeviceType").unwrap_or_default() {
@@ -41,11 +53,39 @@ impl SessionDevice {
     }
 }
 
+/// Which row of the sessions list a session belongs to. TDLib reports it as
+/// the flags `is_current` and `is_password_pending`; the running device wins
+/// when both are set, since it is by definition signed in.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SessionKind {
+    /// This device.
+    Current,
+    /// An incomplete login attempt: a 2-step verification password is still
+    /// needed (TGX's "Incomplete Login Attempts").
+    PasswordPending,
+    /// Another signed-in device.
+    #[default]
+    Other,
+}
+
+impl SessionKind {
+    pub fn from_flags(is_current: bool, is_password_pending: bool) -> Self {
+        if is_current {
+            Self::Current
+        } else if is_password_pending {
+            Self::PasswordPending
+        } else {
+            Self::Other
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ParsedSession {
     pub id: i64,
-    pub is_current: bool,
-    pub is_password_pending: bool,
+    /// Whether this device is the running one, a login still waiting for its
+    /// password, or any other signed-in device.
+    pub kind: SessionKind,
     /// Batch 4: `is_unconfirmed` — a login the user has not confirmed
     /// from another device (the new-login alert).
     pub is_unconfirmed: bool,
@@ -113,8 +153,7 @@ pub(crate) fn parse_session(value: &Value) -> Option<ParsedSession> {
     let bool_field = |name: &str| value.get(name).and_then(Value::as_bool).unwrap_or(false);
     Some(ParsedSession {
         id,
-        is_current: bool_field("is_current"),
-        is_password_pending: bool_field("is_password_pending"),
+        kind: SessionKind::from_flags(bool_field("is_current"), bool_field("is_password_pending")),
         is_unconfirmed: bool_field("is_unconfirmed"),
         can_accept_secret_chats: bool_field("can_accept_secret_chats"),
         can_accept_calls: bool_field("can_accept_calls"),

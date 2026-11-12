@@ -7,28 +7,11 @@
 
 use super::*;
 use quill::lang::{keys, tr, tr_with};
-use quill::star_packs::StarPacksState;
 use quill::telegram::envelope::format_payment_price;
 
 impl QuillApp {
-    pub(super) fn packs_mut(&mut self) -> Option<&mut StarPacksState> {
-        if let Some(live) = self.live.as_mut() {
-            Some(&mut live.driver.session.payments.star_packs)
-        } else {
-            self.demo_session
-                .as_mut()
-                .map(|s| &mut s.payments.star_packs)
-        }
-    }
-
     pub(super) fn toggle_star_packs(&mut self, cx: &mut Context<Self>) {
-        let open = match self.packs_mut() {
-            Some(packs) => {
-                packs.open = !packs.open;
-                packs.open
-            }
-            None => false,
-        };
+        let open = self.hub_mut().is_some_and(|hub| hub.stars.toggle_packs());
         if open && let Some(live) = self.live.as_mut() {
             let _ = live.driver.maybe_fetch_star_packs();
         }
@@ -39,16 +22,17 @@ impl QuillApp {
 /// The "Buy more Stars" button and, when open, the pack list.
 pub(super) fn star_packs_section(session: &Session, cx: &mut Context<QuillApp>) -> AnyElement {
     let packs = &session.payments.star_packs;
+    let expanded = session.payments.hub.stars.packs_expanded();
     let muted = cx.theme().muted_foreground;
     let mut section = div().flex().flex_col().gap_2().child(
         Button::new("stars-buy-more")
             .label(tr(keys::Q_MONEY_BUY_MORE_STARS))
             .small()
-            .when(packs.open, |b| b.primary())
-            .when(!packs.open, |b| b.ghost())
+            .when(expanded, |b| b.primary())
+            .when(!expanded, |b| b.ghost())
             .on_click(cx.listener(|this, _, _, cx| this.toggle_star_packs(cx))),
     );
-    if !packs.open {
+    if !expanded {
         return section.into_any_element();
     }
     if packs.options.is_loading() {

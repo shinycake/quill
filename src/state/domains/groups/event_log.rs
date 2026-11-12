@@ -14,104 +14,118 @@ impl Session {
         events: Vec<ParsedChatEvent>,
         pending: Option<&PendingRequest>,
     ) {
-        // Only the requests the log waits for (`event_log_waits`): a page
-        // or poll asked under an earlier query or filter is dropped.
-        let Some(pending) = pending.filter(|pending| self.take_event_log_wait(pending)) else {
+        // Only the request the log's stage holds: a page or poll asked under
+        // an earlier query or filter finds another stage and is dropped.
+        let Some(pending) = pending else {
             return;
         };
-        let pending = Some(pending);
-        if let Some(pending) = pending
-            && pending.purpose == RequestPurpose::Groups(GroupsPurpose::PollChatEventLog)
-            && let Some(chat_id) = pending.chat_id
-        {
-            // The live poll: new events join the loaded page; with
-            // no loaded page (a filter change cleared it) the
-            // answer is stale and dropped.
-            if let Some(ChatEventLogFetch::Loaded(page)) = self.groups.event_log_fetch(chat_id.0) {
-                let mut merged = page.events.clone();
-                crate::state::paging::append_new_by_id(&mut merged, events, |event| event.id);
-                merged.sort_by_key(|event| std::cmp::Reverse(event.id));
-                let older = page.older.clone();
-                self.groups.set_event_log_fetch(
-                    chat_id.0,
-                    ChatEventLogFetch::Loaded(ChatEventLogPage {
-                        events: merged,
-                        older,
-                    }),
-                );
-            }
-        } else if let Some(pending) = pending
-            && let RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { from_event_id }) =
-                pending.purpose
-            && let Some(chat_id) = pending.chat_id
-        {
-            let older = if events.len() as i32 >= CHAT_EVENT_LOG_PAGE_SIZE {
-                OlderEvents::Available
-            } else {
-                OlderEvents::Exhausted
-            };
-            let mut merged = match (from_event_id, self.groups.event_log_fetch(chat_id.0)) {
-                (0, _) => events,
-                (_, Some(ChatEventLogFetch::Loaded(page))) => {
-                    let mut merged = page.events.clone();
-                    crate::state::paging::append_new_by_id(&mut merged, events, |event| event.id);
-                    merged
+        let Some(chat_id) = pending.chat_id else {
+            return;
+        };
+        let (chat, id) = (chat_id.0, pending.id);
+        match pending.purpose {
+            RequestPurpose::Groups(GroupsPurpose::PollChatEventLog) => {
+                // New events join the loaded page; with no loaded page (a
+                // filter change cleared it) the answer is stale.
+                if let Some(page) = self.groups.loaded_event_log_mut(chat)
+                    && page.poll == (LogPoll::Polling { request: id })
+                {
+                    page.poll = LogPoll::Idle;
+                    merge_events(&mut page.events, events);
                 }
-                _ => events,
-            };
-            merged.sort_by_key(|event| std::cmp::Reverse(event.id));
-            self.groups.set_event_log_fetch(
-                chat_id.0,
-                ChatEventLogFetch::Loaded(ChatEventLogPage {
-                    events: merged,
-                    older,
-                }),
-            );
+            }
+            RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { from_event_id: 0 }) => {
+                if let Some(ChatEventLogFetch::Loading { request }) =
+                    self.groups.event_log_fetch(chat)
+                    && *request == id
+                {
+                    let older = older_after(&events);
+                    let mut events = events;
+                    events.sort_by_key(|event| std::cmp::Reverse(event.id));
+                    self.groups.set_event_log_fetch(
+                        chat,
+                        ChatEventLogFetch::Loaded(ChatEventLogPage {
+                            events,
+                            older,
+                            poll: LogPoll::Idle,
+                        }),
+                    );
+                }
+            }
+            RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { .. }) => {
+                if let Some(page) = self.groups.loaded_event_log_mut(chat)
+                    && page.older == (OlderEvents::Loading { request: id })
+                {
+                    page.older = older_after(&events);
+                    merge_events(&mut page.events, events);
+                }
+            }
+            _ => {}
         }
     }
 
     /// The older page of `chat`'s loaded log was refused or never sent: the
     /// log keeps what it has and draws Retry. Nothing else changes.
     pub(crate) fn fail_older_events(&mut self, chat: i64, line: String) {
-        if let Some(ChatEventLogFetch::Loaded(page)) = self.groups.event_log_fetch(chat) {
-            let mut page = page.clone();
+        if let Some(page) = self.groups.loaded_event_log_mut(chat) {
             page.older = OlderEvents::Failed(line);
-            self.groups
-                .set_event_log_fetch(chat, ChatEventLogFetch::Loaded(page));
         }
     }
 
-    /// An older page goes out again: the failed line is gone.
-    pub(crate) fn begin_older_events(&mut self, chat: i64) {
-        if let Some(ChatEventLogFetch::Loaded(page)) = self.groups.event_log_fetch(chat)
-            && matches!(page.older, OlderEvents::Failed(_))
-        {
-            let mut page = page.clone();
-            page.older = OlderEvents::Available;
-            self.groups
-                .set_event_log_fetch(chat, ChatEventLogFetch::Loaded(page));
-        }
-    }
-
-    /// Whether `pending` is a `getChatEventLog` page or poll its chat's log
-    /// still waits for; if so the log stops waiting for it.
-    pub(super) fn take_event_log_wait(&mut self, pending: &PendingRequest) -> bool {
+    /// The `getChatEventLog` request `pending` failed. The stage that holds
+    /// its id settles: the first page fails the log (`first_line`), an older
+    /// page keeps the loaded log with Retry (`older_line`), a poll changes
+    /// nothing shown (the next tick asks again). Any other request is
+    /// dropped.
+    pub(super) fn fail_event_log_request(
+        &mut self,
+        pending: &PendingRequest,
+        first_line: impl FnOnce() -> String,
+        older_line: impl FnOnce() -> String,
+    ) {
         let Some(chat_id) = pending.chat_id else {
-            return false;
+            return;
         };
-        let Some(log) = self.groups.event_logs.get_mut(&chat_id.0) else {
-            return false;
-        };
-        let wait = &mut log.wait;
-        let slot = match pending.purpose {
-            RequestPurpose::Groups(GroupsPurpose::PollChatEventLog) => &mut wait.poll,
-            RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { .. }) => &mut wait.page,
-            _ => return false,
-        };
-        if *slot != Some(pending.id) {
-            return false;
+        let (chat, id) = (chat_id.0, pending.id);
+        match pending.purpose {
+            RequestPurpose::Groups(GroupsPurpose::PollChatEventLog) => {
+                if let Some(page) = self.groups.loaded_event_log_mut(chat)
+                    && page.poll == (LogPoll::Polling { request: id })
+                {
+                    page.poll = LogPoll::Idle;
+                }
+            }
+            RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { .. }) => {
+                if let Some(ChatEventLogFetch::Loading { request }) =
+                    self.groups.event_log_fetch(chat)
+                {
+                    if *request == id {
+                        self.groups
+                            .set_event_log_fetch(chat, ChatEventLogFetch::Failed(first_line()));
+                    }
+                } else if let Some(page) = self.groups.loaded_event_log_mut(chat)
+                    && page.older == (OlderEvents::Loading { request: id })
+                {
+                    page.older = OlderEvents::Failed(older_line());
+                }
+            }
+            _ => {}
         }
-        *slot = None;
-        true
     }
+}
+
+/// Whether an older page is worth asking after `events` came back: a full
+/// page says yes, a short one exhausts the log.
+fn older_after(events: &[ParsedChatEvent]) -> OlderEvents {
+    if events.len() as i32 >= CHAT_EVENT_LOG_PAGE_SIZE {
+        OlderEvents::Available
+    } else {
+        OlderEvents::Exhausted
+    }
+}
+
+/// `events` join `loaded`, deduped by event id, newest first.
+fn merge_events(loaded: &mut Vec<ParsedChatEvent>, events: Vec<ParsedChatEvent>) {
+    crate::state::paging::append_new_by_id(loaded, events, |event| event.id);
+    loaded.sort_by_key(|event| std::cmp::Reverse(event.id));
 }

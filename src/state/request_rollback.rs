@@ -21,6 +21,12 @@ pub enum RequestRollback {
         previous: Option<bool>,
         shown: bool,
     },
+    /// `toggleSupergroupIsBroadcastGroup` (one way, shown as `true`): the
+    /// previous flag (`None` = unknown), put back while `true` still shows.
+    BroadcastGroup {
+        supergroup_id: i64,
+        previous: Option<bool>,
+    },
     /// `setSupergroupUsername`: the previous username (`None` = none set).
     SupergroupUsername {
         supergroup_id: i64,
@@ -115,18 +121,24 @@ pub enum RequestRollback {
     },
     /// Slice CL2: `setPinnedChats` — the previous `(chat_id, order)`
     /// pairs of the pinned chats in the list (`archived` = archive
-    /// list). The reorder swaps `order` values among the pinned chats
-    /// so `rebuild_main_order` keeps the new arrangement until the
-    /// authoritative `updateChatPosition` orders arrive.
+    /// list) and the pairs the reorder showed instead. The reorder swaps
+    /// `order` values among the pinned chats so `rebuild_main_order` keeps
+    /// the new arrangement until the authoritative `updateChatPosition`
+    /// orders arrive. A refusal puts back only the chats whose order is
+    /// still the shown one: an `updateChatPosition` that landed since
+    /// is the server's truth.
     ChatPinOrder {
         previous: Vec<(i64, i64)>,
+        shown: Vec<(i64, i64)>,
         archived: bool,
     },
     /// Slice CL2: `setArchiveChatListSettings` — the previous settings
     /// (`None` = never fetched; the optimistic value is dropped and
-    /// the panel re-fetches).
+    /// the panel re-fetches) and the ones the flip showed. Restored only
+    /// while the cache still holds `shown` (a fetch since is the truth).
     ArchiveChatListSettings {
         previous: Option<ArchiveChatListSettings>,
+        shown: ArchiveChatListSettings,
     },
     /// The tab menu's Mute / Unmute (`setForumTopicNotificationSettings`):
     /// the topic's settings before it and the ones it showed instead.
@@ -192,13 +204,24 @@ impl Session {
             }
             // Restore the pre-reorder `order` values the server refused,
             // then rebuild the list order.
-            RequestRollback::ChatPinOrder { previous, archived } => {
+            RequestRollback::ChatPinOrder {
+                previous,
+                shown,
+                archived,
+            } => {
                 for (chat_id, order) in previous {
+                    let shown_order = shown
+                        .iter()
+                        .find(|(id, _)| *id == chat_id)
+                        .map(|(_, order)| *order);
                     if let Some(chat) = self.chats.get_mut(&chat_id) {
-                        if archived {
-                            chat.archive_order = order;
+                        let slot = if archived {
+                            &mut chat.archive_order
                         } else {
-                            chat.order = order;
+                            &mut chat.order
+                        };
+                        if Some(*slot) == shown_order {
+                            *slot = order;
                         }
                     }
                 }
@@ -206,8 +229,10 @@ impl Session {
             }
             // Drop the refused archive-settings flip; the panel
             // re-fetches the truth on next open.
-            RequestRollback::ArchiveChatListSettings { previous } => {
-                self.chat_list.edit_archive_settings(previous);
+            RequestRollback::ArchiveChatListSettings { previous, shown } => {
+                if self.chat_list.archive_chat_list_settings() == Some(shown) {
+                    self.chat_list.edit_archive_settings(previous);
+                }
             }
             RequestRollback::ForumTopicMute {
                 chat_id,
@@ -286,9 +311,20 @@ impl Session {
                 previous,
                 shown,
             } => {
-                let flags = &mut self.groups.supergroup_join_by_request;
-                if flags.get(&supergroup_id) == Some(&shown) {
-                    restore_flag(flags, supergroup_id, previous);
+                if self.groups.supergroup(supergroup_id).join_by_request == shown {
+                    self.groups.edit_supergroup(supergroup_id, |facts| {
+                        facts.join_by_request = previous.unwrap_or(false);
+                    });
+                }
+            }
+            RequestRollback::BroadcastGroup {
+                supergroup_id,
+                previous,
+            } => {
+                if self.groups.supergroup(supergroup_id).is_broadcast_group {
+                    self.groups.edit_supergroup(supergroup_id, |facts| {
+                        facts.is_broadcast_group = previous.unwrap_or(false);
+                    });
                 }
             }
             RequestRollback::SignMessages {
@@ -298,23 +334,12 @@ impl Session {
                 shown_sign,
                 shown_show,
             } => {
-                if self.groups.supergroup_sign_messages.get(&supergroup_id) == Some(&shown_sign)
-                    && self
-                        .groups
-                        .supergroup_show_message_sender
-                        .get(&supergroup_id)
-                        == Some(&shown_show)
-                {
-                    restore_flag(
-                        &mut self.groups.supergroup_sign_messages,
-                        supergroup_id,
-                        previous_sign,
-                    );
-                    restore_flag(
-                        &mut self.groups.supergroup_show_message_sender,
-                        supergroup_id,
-                        previous_show,
-                    );
+                let now = self.groups.supergroup(supergroup_id);
+                if now.sign_messages == shown_sign && now.show_message_sender == shown_show {
+                    self.groups.edit_supergroup(supergroup_id, |facts| {
+                        facts.sign_messages = previous_sign.unwrap_or(false);
+                        facts.show_message_sender = previous_show.unwrap_or(false);
+                    });
                 }
             }
             RequestRollback::AntiSpam {
@@ -322,9 +347,11 @@ impl Session {
                 previous,
                 shown,
             } => {
-                let flags = &mut self.groups.supergroup_anti_spam_enabled;
-                if flags.get(&supergroup_id) == Some(&shown) {
-                    restore_flag(flags, supergroup_id, previous);
+                if self.groups.supergroup_anti_spam(supergroup_id).enabled == shown {
+                    self.groups
+                        .edit_supergroup_anti_spam(supergroup_id, |anti_spam| {
+                            anti_spam.enabled = previous.unwrap_or(false);
+                        });
                 }
             }
             RequestRollback::ChatIsTranslatable {
@@ -441,23 +468,6 @@ impl Session {
                     }
                 }
             }
-        }
-    }
-}
-
-/// Put a remembered flag back: its old value, or no value when it was
-/// unknown.
-fn restore_flag(
-    flags: &mut std::collections::HashMap<i64, bool>,
-    key: i64,
-    previous: Option<bool>,
-) {
-    match previous {
-        Some(flag) => {
-            flags.insert(key, flag);
-        }
-        None => {
-            flags.remove(&key);
         }
     }
 }

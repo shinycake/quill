@@ -104,7 +104,7 @@ fn chat_row_updates_of_other_chats_only_touch_the_chat_list() {
 fn the_comment_thread_counts_as_shown() {
     let mut session = two_chats();
     session.open = crate::state::OpenView::of(Some(ChatId(12)));
-    let mut thread = ThreadView::resolving(ChatId(12), MessageId(1));
+    let mut thread = ThreadView::resolving(ChatId(12), MessageId(1), RequestId(1));
     thread.chat_id = ChatId(77);
     thread.status = ThreadStatus::Ready;
     session.threads.thread = Some(thread);
@@ -505,7 +505,7 @@ fn a_chat_windows_thread_counts_as_shown() {
     let mut session = two_chats();
     session.open_window_chat(ChatId(12));
     assert!(session.enter_view(Some(ChatId(12))));
-    let mut thread = ThreadView::resolving(ChatId(12), MessageId(1));
+    let mut thread = ThreadView::resolving(ChatId(12), MessageId(1), RequestId(1));
     thread.chat_id = ChatId(77);
     session.threads.thread = Some(thread);
     assert!(session.enter_view(None));

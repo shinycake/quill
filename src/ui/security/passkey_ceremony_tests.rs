@@ -46,7 +46,7 @@ pub(super) fn shown_dialog(
     vcx.executor()
         .advance_clock(std::time::Duration::from_millis(400));
     vcx.update(|window, cx| window.render_frame(cx));
-    shell.read_with(vcx, |shell, _| shell.open_dialog)
+    shell.read_with(vcx, |shell, _| shell.open_dialog.kind())
 }
 
 pub(super) fn sheet(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<CeremonySheet> {

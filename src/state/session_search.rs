@@ -2,9 +2,12 @@
 use super::*;
 
 impl Session {
-    pub fn request_search(&mut self, purpose: RequestPurpose, search_generation: u64) -> RequestId {
-        self.requests
-            .register_search(self.account_generation, purpose, search_generation)
+    /// A request of the open global search: the leg (or the supplement) it
+    /// belongs to waits for exactly this request.
+    pub fn request_search(&mut self, purpose: RequestPurpose) -> RequestId {
+        let id = self.request(purpose, None);
+        self.search.search.leg_sent(purpose, id);
+        id
     }
 
     pub fn request_chat_search(
@@ -70,9 +73,7 @@ impl Session {
             // a topic switch) or left: the jump it served ends with it,
             // rather than wait on "Loading message..." for an answer that
             // was just dropped.
-            if let Some(message_id) = pending.around_message_id {
-                self.abandon_history_around(pending.chat_id, message_id);
-            }
+            self.abandon_history_around(pending);
             return;
         }
         let Some(chat_id) = pending.chat_id else {
@@ -81,47 +82,38 @@ impl Session {
         // Nothing older in an around page means only that TDLib's run in
         // memory ends there: older pages still ask the server.
         self.store_first_page(chat_id, messages);
-        if let Some(message_id) = pending.around_message_id {
-            self.finish_history_around(Some(pending), message_id, false, seq);
-        }
+        self.finish_history_around(pending, seq);
     }
 
-    /// The around page for `message_id` in `chat_id` was dropped unused:
-    /// the search jump and the date jump waiting on it end.
-    fn abandon_history_around(&mut self, chat_id: Option<ChatId>, message_id: MessageId) {
+    /// The around page `pending` asked for was dropped unused: the search
+    /// jump and the date jump waiting on that request end.
+    fn abandon_history_around(&mut self, pending: &PendingRequest) {
         let search = &mut self.search.chat_search;
         if matches!(
             search.jump,
-            ChatSearchJump::Loading { message_id: current, .. } if current == message_id
-        ) && (search.chat_id().is_none() || search.chat_id() == chat_id)
-        {
+            ChatSearchJump::Loading { request, .. } if request == pending.id
+        ) {
             search.jump = ChatSearchJump::None;
         }
     }
 
-    pub(crate) fn finish_history_around(
-        &mut self,
-        pending: Option<&PendingRequest>,
-        message_id: MessageId,
-        _error: bool,
-        seq: u64,
-    ) {
+    /// The answer (or error) of the around page `pending` asked for settles
+    /// the jump waiting on that request; any other request's answer is stale.
+    pub(crate) fn finish_history_around(&mut self, pending: &PendingRequest, seq: u64) {
         let ChatSearchJump::Loading {
-            message_id: current,
+            request,
+            message_id,
             then,
         } = self.search.chat_search.jump
         else {
             self.record_stale_search_jump(pending, seq);
             return;
         };
-        if current != message_id {
+        if request != pending.id {
             self.record_stale_search_jump(pending, seq);
             return;
         }
-        let Some(chat_id) = pending
-            .and_then(|p| p.chat_id)
-            .or(self.search.chat_search.chat_id())
-        else {
+        let Some(chat_id) = pending.chat_id.or(self.search.chat_search.chat_id()) else {
             // Nothing to load into: the jump ends rather than wait on
             // "Loading message..." for good.
             self.search.chat_search.jump = ChatSearchJump::Missing { message_id };
@@ -139,11 +131,11 @@ impl Session {
         }
     }
 
-    fn record_stale_search_jump(&mut self, pending: Option<&PendingRequest>, seq: u64) {
+    fn record_stale_search_jump(&mut self, pending: &PendingRequest, seq: u64) {
         self.diagnostics.record(Diagnostic {
             category: "reducer",
             type_name: Some("messages".into()),
-            extra: pending.map(|p| p.id.0),
+            extra: Some(pending.id.0),
             seq: Some(seq),
             note: "stale-chat-search-jump",
         });

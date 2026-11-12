@@ -19,9 +19,8 @@ fn replay_global_search_happy_empty_and_error() {
             r#"{"@type":"updateChatPosition","chat_id":7,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"9","is_pinned":false}}"#,
         ],
     );
-    let recents_gen = session.search.search.begin_recents();
-    let recents_extra =
-        session.request_search(RequestPurpose::SearchRecentlyFoundChats, recents_gen);
+    session.search.search.begin_recents();
+    let recents_extra = session.request_search(RequestPurpose::SearchRecentlyFoundChats);
     apply_all_seq(
         &mut session,
         &sink,
@@ -38,10 +37,10 @@ fn replay_global_search_happy_empty_and_error() {
     assert!(session.search.search.is_recents());
     assert_eq!(session.search.search.chat_ids[0].0, 7);
 
-    let search_gen = session.search.search.begin_query("hello");
-    let chats_extra = session.request_search(RequestPurpose::SearchChats, search_gen);
-    let messages_extra = session.request_search(RequestPurpose::SearchMessages, search_gen);
-    let public_extra = session.request_search(RequestPurpose::SearchPublicChats, search_gen);
+    session.search.search.begin_query("hello");
+    let chats_extra = session.request_search(RequestPurpose::SearchChats);
+    let messages_extra = session.request_search(RequestPurpose::SearchMessages);
+    let public_extra = session.request_search(RequestPurpose::SearchPublicChats);
     apply_all_seq(
         &mut session,
         &sink,
@@ -80,10 +79,10 @@ fn replay_global_search_happy_empty_and_error() {
             .contains_key(&50)
     );
 
-    let search_gen = session.search.search.begin_query("zzz");
-    let chats_extra = session.request_search(RequestPurpose::SearchChats, search_gen);
-    let messages_extra = session.request_search(RequestPurpose::SearchMessages, search_gen);
-    let public_extra = session.request_search(RequestPurpose::SearchPublicChats, search_gen);
+    session.search.search.begin_query("zzz");
+    let chats_extra = session.request_search(RequestPurpose::SearchChats);
+    let messages_extra = session.request_search(RequestPurpose::SearchMessages);
+    let public_extra = session.request_search(RequestPurpose::SearchPublicChats);
     apply_all_seq(
         &mut session,
         &sink,
@@ -108,10 +107,10 @@ fn replay_global_search_happy_empty_and_error() {
         quill::state::SearchStatus::Empty
     );
 
-    let search_gen = session.search.search.begin_query("nope");
-    let chats_extra = session.request_search(RequestPurpose::SearchChats, search_gen);
-    let messages_extra = session.request_search(RequestPurpose::SearchMessages, search_gen);
-    let public_extra = session.request_search(RequestPurpose::SearchPublicChats, search_gen);
+    session.search.search.begin_query("nope");
+    let chats_extra = session.request_search(RequestPurpose::SearchChats);
+    let messages_extra = session.request_search(RequestPurpose::SearchMessages);
+    let public_extra = session.request_search(RequestPurpose::SearchPublicChats);
     apply_all_seq(
         &mut session,
         &sink,
@@ -186,11 +185,12 @@ fn replay_chat_search_generation_jump_and_empty() {
         session.begin_chat_search_jump(quill::ids::MessageId(50)),
         quill::state::ChatSearchJumpNeed::AlreadyReady
     );
-    assert_eq!(
-        session.begin_chat_search_jump(quill::ids::MessageId(40)),
-        quill::state::ChatSearchJumpNeed::LoadAround
-    );
-    let around = session.request_history_around(quill::ids::ChatId(7), quill::ids::MessageId(40));
+    let quill::state::ChatSearchJumpNeed::LoadAround {
+        request: around, ..
+    } = session.begin_chat_search_jump(quill::ids::MessageId(40))
+    else {
+        panic!("40 is outside the loaded window");
+    };
     apply_all_seq(
         &mut session,
         &sink,

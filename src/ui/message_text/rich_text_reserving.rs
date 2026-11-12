@@ -202,9 +202,7 @@ pub(super) fn inline_paragraph(
         mut text,
         mut highlights,
         mono,
-        click_ranges,
-        actions,
-        link_flags,
+        targets,
         spoilers,
         inline_emoji,
         source,
@@ -240,7 +238,9 @@ pub(super) fn inline_paragraph(
         .with_highlights(highlights)
         .with_font_family_overrides(mono);
     let owner = cx.entity().downgrade();
-    let actions = Rc::new(actions);
+    let click_ranges = targets.iter().map(|t| t.range.clone()).collect();
+    let link_flags = targets.iter().map(ClickTarget::is_link).collect();
+    let actions = Rc::new(targets.into_iter().map(|t| t.action).collect::<Vec<_>>());
     let press_actions = actions.clone();
     let press_owner = owner.clone();
     let hover_actions = actions.clone();

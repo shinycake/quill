@@ -137,7 +137,10 @@ impl QuillApp {
             match live.driver.manage_sticker_set(set_id, install, false) {
                 // Asked: the box waits for TDLib's answer, then closes
                 // (`sticker_set_box_tick`).
-                Ok(Some(_)) => live.driver.session.begin_set_change(set_id, change),
+                Ok(Some(request)) => live
+                    .driver
+                    .session
+                    .begin_set_change(set_id, change, request),
                 // Skipped as busy (another change of the set is still on
                 // its way): nothing was sent, so nothing is reported done.
                 Ok(None) | Err(_) => self.set_note(StatusNote::error(tr(
@@ -191,10 +194,11 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             match live.driver.manage_sticker_set(set_id, false, true) {
                 // Asked: the box closes once TDLib archived it.
-                Ok(Some(_)) => live
-                    .driver
-                    .session
-                    .begin_set_change(set_id, SetChange::Archive),
+                Ok(Some(request)) => {
+                    live.driver
+                        .session
+                        .begin_set_change(set_id, SetChange::Archive, request)
+                }
                 Ok(None) | Err(_) => self.set_note(StatusNote::error(tr(
                     keys::Q_MEDIA_COULD_NOT_ARCHIVE_THE_STICKER,
                 ))),
@@ -254,7 +258,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let still = self.panel_still(item);
-        let reordering = self.sticker_box.reordering;
+        let reordering = self.sticker_box.editing.is_reordering();
         let file_id = item.file_id;
         let cell = div()
             .id(("sticker-set-cell", index as u64))
@@ -426,17 +430,22 @@ impl QuillApp {
                     let set_id = view.set_id;
                     let kind = SetKind::of(is_emoji);
                     let count = stickers.len();
-                    let reordering = this.sticker_box.reordering;
+                    let reordering = this.sticker_box.editing.is_reordering();
                     // Add / Remove / Archive asked, answer not here yet:
                     // the button waits instead of asking twice.
-                    let change_working = matches!(view.change, SetChangeStage::Working(_));
+                    let change_working = matches!(view.change, SetChangeStage::Working { .. });
                     let mut grid = div().flex().flex_wrap().gap_1().w(px(380.)).max_w_full();
                     for (index, item) in stickers.iter().enumerate() {
                         grid = grid
                             .child(this.sticker_set_cell(set_id, kind, is_owned, index, item, cx));
                     }
                     if !reordering && has_add_cell(is_owned, count, kind) {
-                        grid = grid.child(this.sticker_set_add_cell(set_id, kind, cx));
+                        grid = grid.child(this.sticker_set_add_cell(
+                            set_id,
+                            kind,
+                            this.sticker_box.editing.is_idle(),
+                            cx,
+                        ));
                     }
                     let more: Option<AnyElement> = set_link(&name, kind).map(|link| {
                         this.sticker_set_more_button(
@@ -445,6 +454,7 @@ impl QuillApp {
                             link,
                             can_archive(installed, kind),
                             is_owned,
+                            this.sticker_box.editing.is_idle(),
                             cx,
                         )
                         .into_any_element()
@@ -494,6 +504,7 @@ impl QuillApp {
                                         Button::new("sticker-set-edit")
                                             .label(kind.edit_label())
                                             .primary()
+                                            .disabled(!this.sticker_box.editing.is_idle())
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 this.begin_edit_stickers(cx);
                                             })),

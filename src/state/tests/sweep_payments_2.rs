@@ -121,7 +121,7 @@ fn market_failures_hit_only_the_request_that_failed() {
     );
     let market = &mut session.payments.gift_market;
     let mut resale = ResaleSearch::new(5, ResaleFilter::default(), false);
-    resale.load.begin(new.0, false);
+    resale.load.begin(new, false);
     market.resale = Some(resale);
     fail(&mut session, old, &sink);
     let resale = session.payments.gift_market.resale.as_ref().unwrap();
@@ -147,14 +147,14 @@ fn market_failures_hit_only_the_request_that_failed() {
         None,
     );
     let market = &mut session.payments.gift_market;
-    market.auction = crate::gift_market::AuctionFetch::Loading { request: b.0 };
+    market.auction = crate::gift_market::AuctionFetch::Loading { request: b };
     fail(&mut session, a, &sink);
     let market = &session.payments.gift_market;
     assert!(
         matches!(
             market.auction,
             crate::gift_market::AuctionFetch::Loading { .. }
-        ) && market.notes.is_empty()
+        ) && market.events.is_empty()
     );
     fail(&mut session, b, &sink);
     assert_eq!(
@@ -174,7 +174,7 @@ fn market_failures_hit_only_the_request_that_failed() {
     );
     session.payments.gift_market.craft = Some(CraftSession {
         candidates_load: PageLoad::Loading {
-            request: live.0,
+            request: live,
             more: false,
         },
         ..CraftSession::default()

@@ -81,19 +81,23 @@ impl Session {
                 }
             }
             Some(RequestPurpose::LoadActiveStories) => {
-                self.stories
-                    .main_paging
-                    .failed(err.code, std::time::Instant::now());
+                self.stories.main_paging.failed(
+                    pending.map(|p| p.id),
+                    err.code,
+                    std::time::Instant::now(),
+                );
             }
             Some(RequestPurpose::LoadHiddenStories) => {
-                self.stories
-                    .hidden_paging
-                    .failed(err.code, std::time::Instant::now());
+                self.stories.hidden_paging.failed(
+                    pending.map(|p| p.id),
+                    err.code,
+                    std::time::Instant::now(),
+                );
             }
             // Only a not-found or invalid answer means the story is gone; a
             // timeout, FLOOD_WAIT or 500 is asked for again after a wait.
             Some(RequestPurpose::GetStory) => {
-                if let Some(story) = pending.and_then(|p| Some((p.chat_id?.0, p.story_id?))) {
+                if let Some(story) = pending.and_then(|p| Some((p.chat_id?.0, p.story_id()?))) {
                     if matches!(err.code, 400 | 404) {
                         self.stories.story_fetch.gone(story);
                     } else {
@@ -176,12 +180,12 @@ impl Session {
                 // too: it fails instead of loading forever.
                 if purpose == RequestPurpose::GetChatPostedToChatPageStories
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
-                    && let Some(generation) = pending.and_then(|p| p.search_generation)
+                    && let Some(request) = pending.map(|p| p.id)
                 {
                     self.fail_profile_tab(
                         chat_id,
                         SharedMediaTab::Stories,
-                        generation,
+                        request,
                         crate::state::request_errors::call_request_error_line(
                             err,
                             "Could not load this tab",

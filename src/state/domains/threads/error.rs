@@ -18,7 +18,11 @@ impl Session {
                 if let Some(request) = extra {
                     let line =
                         call_request_error_line(err, tr(keys::Q_CHAT_COULDN_T_START_A_NEW_THREAD));
-                    self.bot_thread_answered(request, Err(line));
+                    self.bot_thread_answered(
+                        request,
+                        pending.map(|p| p.asked_in).unwrap_or_default(),
+                        Err(line),
+                    );
                 }
             }
             // tdesktop `SublistsPinsLimitBox`: Saved Messages has its own
@@ -36,12 +40,12 @@ impl Session {
             // Saved Messages: a 404 from `loadSavedMessagesTopics` says all
             // sublists were loaded; it is not a failure.
             Some(RequestPurpose::LoadSavedMessagesTopics) => {
-                if err.code == 404 {
-                    self.threads.saved.topics_load = SavedTopicsLoad::Exhausted;
-                } else {
+                let asked = pending.is_some_and(|pending| {
+                    self.threads.saved.page_failed(pending.id, err.code == 404)
+                });
+                if asked && err.code != 404 {
                     // Not sent as far as the pump goes: it asks again when
                     // the connection is back or Saved Messages opens again.
-                    self.threads.saved.topics_load = SavedTopicsLoad::Retry;
                     self.chats_state
                         .chat_action_error
                         .push(call_request_error_line(err, "Could not load saved chats"));
@@ -61,8 +65,12 @@ impl Session {
                     ));
             }
             Some(RequestPurpose::LoadDirectMessagesChatTopics) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.threads.direct.page_failed(chat_id.0, err.code);
+                if let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                    && self
+                        .threads
+                        .direct
+                        .page_failed(chat_id.0, pending.map(|p| p.id), err.code)
+                {
                     if err.code == 404 {
                         self.view_generation.bump();
                     } else {
@@ -114,7 +122,11 @@ impl Session {
                 | RequestPurpose::SearchSavedMessages { .. },
             ) => {
                 if let Some(request) = extra {
-                    self.topic_action_answered(request, false);
+                    self.topic_action_answered(
+                        request,
+                        pending.map(|p| p.asked_in).unwrap_or_default(),
+                        false,
+                    );
                 }
                 self.chats_state
                     .chat_action_error

@@ -542,8 +542,7 @@ impl QuillApp {
                 }
             }
             Err(issue) => {
-                self.links.deep_link_dialog = Some(issue.message().into());
-                self.open_box(crate::ui::shell::DialogKind::DeepLinkInfo);
+                self.message_ui.deep_link_info = Some(issue.message().into());
             }
         }
         cx.notify();

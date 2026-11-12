@@ -19,13 +19,12 @@ use super::app::QuillApp;
 use super::gift_manage_ui::{hint, stars};
 use super::gift_transfer_view::{StageView, stage_view};
 use super::shell::{DialogKind, QuillShell};
-use crate::ui::fragment_password::ShowingView;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::gift_manage::{
-    ExportSend, GiftEvent, ProbeOutcome, TransferPicker, TransferStage, fragment_gift_url,
+    GiftEvent, ProbeOutcome, TransferPicker, TransferStage, fragment_gift_url,
 };
 use quill::lang::{keys, tr, tr_with};
 use quill::local_time::now_unix;
@@ -94,6 +93,19 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Like `edit_transfer`, for an edit that returns the picker to the
+    /// idle password box: its field takes the keyboard.
+    fn edit_transfer_to_password(
+        &mut self,
+        cx: &mut Context<Self>,
+        edit: impl FnOnce(&mut TransferPicker),
+    ) {
+        self.edit_transfer(cx, edit);
+        if let Some(manage) = self.gift_manage_mut() {
+            manage.password_ready();
+        }
+    }
+
     /// Cancel or OK on a step: back to the list, the way closing a box
     /// in tdesktop shows the picker under it.
     pub(super) fn transfer_step_back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -149,7 +161,7 @@ impl QuillApp {
                 cx.notify();
             }
             // The demo has no connection: straight to the password box.
-            None => self.edit_transfer(cx, |picker| {
+            None => self.edit_transfer_to_password(cx, |picker| {
                 let probe = quill::ids::RequestId(0);
                 picker.open_fragment(probe);
                 picker.probe_failed(Some(probe), ProbeOutcome::Other, None);
@@ -194,7 +206,7 @@ impl QuillApp {
             Some(Ok(_)) => {}
             // Refused before sending: say so under the field, where it is
             // seen (a note would sit behind the picker).
-            Some(Err(_)) => self.edit_transfer(cx, TransferPicker::export_refused),
+            Some(Err(_)) => self.edit_transfer_to_password(cx, TransferPicker::export_refused),
             None => self.note_gift_refused(tr(keys::Q_MONEY_DEMO_MODE_THIS_NEEDS_A)),
         }
         cx.notify();
@@ -242,38 +254,30 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (events, in_password, idle_password) = match self.gift_manage_mut() {
+        let (events, in_password) = match self.gift_manage_mut() {
             Some(manage) => {
-                let stage = manage.transfer().map(|p| &p.stage);
-                let in_password = matches!(stage, Some(TransferStage::Password { .. }));
-                let idle = matches!(
-                    stage,
-                    Some(TransferStage::Password {
-                        send: ExportSend::Idle,
-                        ..
-                    })
+                let in_password = matches!(
+                    manage.transfer().map(|p| &p.stage),
+                    Some(TransferStage::Password { .. })
                 );
-                (manage.take_events(), in_password, idle)
+                (manage.take_events(), in_password)
             }
-            None => (Vec::new(), false, false),
+            None => (Vec::new(), false),
         };
-        let (mut url, mut done, mut deleted) = (None, None, false);
+        let (mut url, mut done, mut deleted, mut ready) = (None, None, false, false);
         for event in events {
             match event {
                 GiftEvent::ExportUrl(found) => url = Some(found),
                 GiftEvent::Transferred(found) => done = Some(found),
                 GiftEvent::Deleted => deleted = true,
+                GiftEvent::PasswordReady => ready = true,
             }
         }
-        let field = match (in_password, idle_password) {
-            (false, _) => ShowingView::Off,
-            (true, true) => ShowingView::Idle,
-            (true, false) => ShowingView::Sending,
-        };
-        self.screen
-            .payments
-            .gift_export_password
-            .keep(field, window, cx);
+        let field = &self.screen.payments.gift_export_password;
+        field.keep(in_password, window, cx);
+        if ready && in_password {
+            field.focus_field(window, cx);
+        }
         if let Some(url) = url {
             self.open_fragment_url(&url, cx);
             self.clear_transfer_inputs(window, cx);

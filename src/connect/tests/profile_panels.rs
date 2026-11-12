@@ -223,3 +223,25 @@ fn a_refused_profile_list_send_leaves_the_list_failed() {
     assert!(driver.fetch_similar_chats(ChatId(5)).unwrap().is_some());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// Sweep r3-11, 20-006: a personal-channel list the driver refuses to ask
+/// for (chats path inactive) is a failed list, which the picker draws with
+/// Retry, not a missing entry drawn as Loading.
+#[test]
+fn a_refused_personal_chats_ask_is_a_failed_list() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let session = crate::state::Session::new(crate::ids::AccountKey::primary(), sink);
+    let mut driver = ConnectDriver::new(session, recorder, test_credentials(), prepared);
+    assert!(driver.fetch_suitable_personal_chats().is_err());
+    assert!(matches!(
+        driver
+            .session
+            .users_state
+            .profile_chat_lists
+            .get(&(ProfileChatsKind::SuitablePersonalChats, 0)),
+        Some(ProfileChatsFetch::Failed(_))
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+}

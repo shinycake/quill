@@ -496,6 +496,10 @@ pub enum AdminListFetch {
     Loading(RequestId),
     Loaded(Vec<ChatAdministratorEntry>),
     Failed(String),
+    /// A membership change made the list out of date and nobody asked
+    /// again yet; no request is out. Whoever shows the list (or the poll,
+    /// for the one on screen) asks, which moves it to `Loading`.
+    Stale,
 }
 
 /// B4: one `getPollVoters` page (schema 1.8.67, line 12941) backing the
@@ -643,21 +647,28 @@ pub enum InlineBotResolve {
 pub const CHAT_EVENT_LOG_PAGE_SIZE: i32 = 100;
 
 /// Phase D3c: fetch state for one chat's `getChatEventLog` result
-/// (schema 1.8.67, line 15252). Keyed by chat id. `Loading` is the
-/// in-flight guard — the driver never sends a second request while one
-/// is outstanding.
+/// (schema 1.8.67, line 15252). Keyed by chat id. Every stage that waits
+/// holds the request it waits for: the first page in `Loading`, an older
+/// page in `OlderEvents::Loading` and the live poll in `LogPoll::Polling`
+/// (both inside the loaded page). Only the answer of that request moves the
+/// stage, so a page or poll asked under an earlier query or filter lands on
+/// a log that no longer holds its id and is dropped. A refresh drops the
+/// whole stage (`Idle`).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub enum ChatEventLogFetch {
     /// Never asked, or cleared by a refresh.
     #[default]
     Idle,
-    Loading,
+    /// The first page is in flight.
+    Loading {
+        request: crate::ids::RequestId,
+    },
     Loaded(ChatEventLogPage),
     Failed(String),
 }
 
 /// One chat's recent actions: what it is asked for (kept across
-/// refreshes), where the asking stands, and the requests it waits for.
+/// refreshes) and where the asking stands.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct EventLog {
     /// The text search (`getChatEventLog.query`); empty = no search.
@@ -667,19 +678,15 @@ pub struct EventLog {
     /// The `user_ids` filter; empty = every admin.
     pub users: Vec<i64>,
     pub fetch: ChatEventLogFetch,
-    pub wait: EventLogWait,
 }
 
-/// The `getChatEventLog` requests one chat's log waits for
-/// (`GroupsState::event_log_waits`). Only their answers fill the list: a
-/// refresh (a new search query or filter) forgets both, so a page or poll
-/// asked under the previous query is dropped when it lands.
+/// The live poll of a loaded log (tdesktop checks every five seconds).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct EventLogWait {
-    /// The first or older page in flight.
-    pub page: Option<crate::ids::RequestId>,
-    /// The live poll in flight.
-    pub poll: Option<crate::ids::RequestId>,
+pub enum LogPoll {
+    #[default]
+    Idle,
+    /// The newest page is in flight.
+    Polling { request: crate::ids::RequestId },
 }
 
 /// Phase D3c: one cached `getChatEventLog` result. Events arrive in
@@ -690,6 +697,7 @@ pub struct EventLogWait {
 pub struct ChatEventLogPage {
     pub events: Vec<ParsedChatEvent>,
     pub older: OlderEvents,
+    pub poll: LogPoll,
 }
 
 /// Where the log's older events stand. A full last page is `Available`; a
@@ -700,6 +708,10 @@ pub enum OlderEvents {
     #[default]
     Exhausted,
     Available,
+    /// The older page is in flight.
+    Loading {
+        request: crate::ids::RequestId,
+    },
     Failed(String),
 }
 
@@ -707,6 +719,11 @@ impl ChatEventLogPage {
     /// Older events may exist (also after a failed ask: Retry asks again).
     pub fn has_more(&self) -> bool {
         !matches!(self.older, OlderEvents::Exhausted)
+    }
+
+    /// An older page may be asked for now: one exists and none is in flight.
+    pub fn can_ask_older(&self) -> bool {
+        matches!(self.older, OlderEvents::Available | OlderEvents::Failed(_))
     }
 
     /// Slice G2: distinct admin user ids (first-seen order) from a loaded
@@ -885,13 +902,18 @@ pub enum DeepLinkState {
         member_count: i32,
         creates_join_request: bool,
         is_channel: bool,
-        generation: u64,
+        /// The `checkChatInviteLink` request that answered; the box is up
+        /// for it.
+        request: RequestId,
     },
-    /// `getDeepLinkInfo` / `getInternalLinkType` in flight; `generation`
-    /// drops stale answers. `original` is the link text a
-    /// `getInternalLinkType` lookup resolves (the proxy hand-off and the
+    /// `getDeepLinkInfo` / `getInternalLinkType` in flight as `request`;
+    /// only its answer or error moves the flow. `original` is the link text
+    /// a `getInternalLinkType` lookup resolves (the proxy hand-off and the
     /// web fallback need it back); empty for a `getDeepLinkInfo` lookup.
-    ResolvingInfo { generation: u64, original: String },
+    ResolvingInfo {
+        request: RequestId,
+        original: String,
+    },
     /// `deepLinkInfo` answer parsed. The UI consumes this once: with an
     /// action it fires the follow-up request, otherwise (or when
     /// `need_update`) it shows `text` in a dialog.
@@ -899,13 +921,15 @@ pub enum DeepLinkState {
         text: String,
         need_update: bool,
         action: Option<DeepLinkAction>,
-        generation: u64,
+        /// The lookup request that answered.
+        request: RequestId,
     },
     /// Follow-up request (`searchPublicChat` / `createPrivateChat` /
     /// `checkChatInviteLink` / confirmed `joinChatByInviteLink` / `getChat`) in flight.
+    /// Only the answer or error of `request` leaves this stage.
     ResolvingChat {
         action: DeepLinkAction,
-        generation: u64,
+        request: RequestId,
     },
     /// Follow-up resolved to a chat; the UI consumes this once to open
     /// the chat (and jump / prefill / open the story per `action`).
@@ -937,14 +961,14 @@ pub struct DeepLinkFlow {
 }
 
 impl DeepLinkState {
-    /// The flow generation of a stage that belongs to one; answers of an
-    /// older flow are dropped by comparing it.
-    pub fn generation(&self) -> Option<u64> {
+    /// The request a stage belongs to; answers of an older flow's requests
+    /// are dropped by comparing it.
+    pub fn request(&self) -> Option<RequestId> {
         match self {
-            Self::InvitePreview { generation, .. }
-            | Self::ResolvingInfo { generation, .. }
-            | Self::Info { generation, .. }
-            | Self::ResolvingChat { generation, .. } => Some(*generation),
+            Self::InvitePreview { request, .. }
+            | Self::ResolvingInfo { request, .. }
+            | Self::Info { request, .. }
+            | Self::ResolvingChat { request, .. } => Some(*request),
             Self::ChatReady { .. } | Self::ShowText(_) | Self::Ui(_) | Self::Unknown { .. } => None,
         }
     }

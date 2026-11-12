@@ -300,3 +300,28 @@ fn a_transfer_settles_only_on_its_own_request() {
         }
     );
 }
+
+/// Sweep r3-08 review (16-006): the code that returns the password box to
+/// idle queues the focus event for its field; a box still waiting on a
+/// request queues none.
+#[test]
+fn the_idle_password_box_queues_its_focus_and_a_waiting_one_does_not() {
+    use crate::gift_manage::{GiftEvent, GiftFlow, GiftManageState};
+    let mut manage = GiftManageState::default();
+    let mut picker = TransferPicker::new("g", "Gift", "slug");
+    picker.stage = TransferStage::Password {
+        send: ExportSend::Out(RequestId(4)),
+        error: None,
+    };
+    manage.flow = Some(GiftFlow::Transfer(picker));
+    manage.password_ready();
+    assert!(manage.take_events().is_empty(), "still waiting on its try");
+    if let Some(picker) = manage.transfer_mut() {
+        picker.stage = TransferStage::Password {
+            send: ExportSend::Idle,
+            error: None,
+        };
+    }
+    manage.password_ready();
+    assert_eq!(manage.take_events(), vec![GiftEvent::PasswordReady]);
+}

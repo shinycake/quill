@@ -130,13 +130,8 @@ impl QuillApp {
             self.settle_folder_editor_save(*request, window, cx);
             return;
         }
-        if self
-            .folders
-            .editor
-            .as_ref()
-            .is_some_and(|d| matches!(d.load, FolderLoad::Merging))
-        {
-            self.settle_folder_editor_merge(cx);
+        if let Some(FolderLoad::Merging(request)) = self.folders.editor.as_ref().map(|d| &d.load) {
+            self.settle_folder_editor_merge(*request, cx);
             return;
         }
         let (folder_id, request) = match self.folders.editor.as_ref() {
@@ -177,7 +172,10 @@ impl QuillApp {
     /// Ask for the full folder; the request now out for it. A fetch already
     /// out for this folder is the one to wait for. Without a connection or
     /// when the send fails, the line the form shows.
-    fn ask_chat_folder(&mut self, folder_id: i32) -> Result<quill::ids::RequestId, String> {
+    pub(super) fn ask_chat_folder(
+        &mut self,
+        folder_id: i32,
+    ) -> Result<quill::ids::RequestId, String> {
         let line = |err| user_error_for(keys::Q_NOTES_FAILED_FOLDER, &err);
         let live = self
             .live
@@ -195,19 +193,28 @@ impl QuillApp {
         .ok_or_else(|| line(quill::connect::ConnectSendError::InvalidRequest))
     }
 
-    /// Save found no fresh copy of the folder and asked for it
+    /// Save found no fresh copy of the folder and asked for it as `request`
     /// (`start_folder_editor_merge`). Once it is here the edits go onto it
-    /// and the save goes out; a failed fetch puts the form back with the
-    /// error and the edits kept. Nothing is asked here while the request
-    /// is in flight; only a copy that went stale again with nothing in
-    /// flight is asked for once more, and a send that fails ends the stage.
-    fn settle_folder_editor_merge(&mut self, cx: &mut Context<Self>) {
+    /// and the save goes out; a failed fetch, or a request that ended with
+    /// nothing, puts the form back with the error and the edits kept.
+    /// Nothing is asked here: the stage only waits for its own request.
+    fn settle_folder_editor_merge(
+        &mut self,
+        request: quill::ids::RequestId,
+        cx: &mut Context<Self>,
+    ) {
         let Some(folder_id) = self.folders.editor.as_ref().and_then(|d| d.folder_id) else {
             return;
         };
-        let fresh = self
-            .session()
-            .and_then(|s| s.chat_list.fresh_spec(folder_id).cloned());
+        let session = self.session();
+        let fresh = session.and_then(|s| s.chat_list.fresh_spec(folder_id).cloned());
+        let waiting = session.is_some_and(|s| s.requests.get(request).is_some());
+        let error = session.and_then(|s| {
+            s.chat_list
+                .folder_specs
+                .error(folder_id)
+                .map(str::to_string)
+        });
         if fresh.is_some() {
             let merged = self
                 .folders
@@ -221,33 +228,13 @@ impl QuillApp {
             self.send_folder_editor_spec(Some(folder_id), spec, cx);
             return;
         }
-        let error = self.session().and_then(|s| {
-            s.chat_list
-                .folder_specs
-                .error(folder_id)
-                .map(str::to_string)
-        });
-        let in_flight = self.session().is_some_and(|s| {
-            s.requests
-                .has_purpose_for_folder(quill::state::RequestPurpose::GetChatFolder, folder_id)
-        });
-        let error = match error {
+        let line = match error {
             Some(error) => error,
-            None if in_flight => return,
-            None => {
-                let sent = self
-                    .live
-                    .as_mut()
-                    .map(|live| live.driver.fetch_chat_folder(folder_id));
-                match sent {
-                    Some(Ok(_)) => return,
-                    Some(Err(err)) => user_error_for(keys::Q_NOTES_FAILED_FOLDER, &err),
-                    None => return,
-                }
-            }
+            None if waiting => return,
+            None => tr(keys::Q_NOTES_FAILED_FOLDER).to_string(),
         };
         if let Some(dialog) = self.folders.editor.as_mut() {
-            dialog.load = FolderLoad::refused(error);
+            dialog.load = FolderLoad::refused(line);
         }
         cx.notify();
     }

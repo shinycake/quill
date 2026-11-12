@@ -30,6 +30,9 @@ pub enum ConnectStage {
     Connecting { _task: Task<()> },
     /// No API credentials: the synthetic pane.
     NeedCredentials,
+    /// The disk is below the open floor: the full-disk screen says so, and
+    /// a reading with room connects again (`reconnect_after_disk`).
+    DiskRefused,
     /// The client could not start: the card says why, with Retry.
     Blocked(StartupFailure),
     /// An authorization state shown by the card: a screenshot demo's
@@ -42,7 +45,9 @@ impl ConnectStage {
     /// session answers for it.
     pub fn auth(&self) -> AuthorizationState {
         match self {
-            Self::Idle | Self::Connecting { .. } => AuthorizationState::WaitTdlibParameters,
+            Self::Idle | Self::Connecting { .. } | Self::DiskRefused => {
+                AuthorizationState::WaitTdlibParameters
+            }
             Self::NeedCredentials => AuthorizationState::WaitPhoneNumber,
             Self::Blocked(failure) => AuthorizationState::StartupFailed(failure.clone()),
             Self::Shown(auth) => auth.clone(),
@@ -217,7 +222,7 @@ impl super::app::QuillApp {
             return;
         }
         quill::startup_trace::mark("connect_start");
-        self.connect.generation += 1;
+        self.connect.replace_client();
         let credentials = self.credentials.clone();
         // A connection already being made ends with its stage.
         self.auth_demo.stage = ConnectStage::Idle;

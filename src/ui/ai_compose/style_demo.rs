@@ -113,8 +113,10 @@ impl QuillApp {
             }
             "limit" => {
                 if let Some(session) = session_mut(self) {
-                    session.messages.ai_compose.style_notice =
-                        Some(StyleNotice::Limit(StyleLimitNotice::Promo {
+                    session
+                        .messages
+                        .ai_compose
+                        .show_style_notice(StyleNotice::Limit(StyleLimitNotice::Promo {
                             count: 5,
                             premium_count: 20,
                         }));
@@ -202,18 +204,20 @@ impl QuillApp {
             session.messages.ai_compose.styles.set_server(list);
         }
         self.open_ai_style_preview(style.name.clone(), window, cx);
-        let token = self
+        let request = self
             .ai_compose
             .preview
             .as_ref()
-            .and_then(|p| p.lookup_token());
+            .and_then(|p| p.lookup_request());
         if variant != "preview-loading"
-            && let (Some(token), Some(session)) = (token, session_mut(self))
+            && let (Some(request), Some(session)) = (request, session_mut(self))
         {
             session.messages.ai_compose.style_lookup = Some(StyleLookup {
-                token,
                 name: style.name.clone(),
-                outcome: StyleReply::Answered(Ok(style)),
+                outcome: StyleReply::Answered {
+                    request,
+                    outcome: Ok(style),
+                },
             });
         }
         cx.notify();

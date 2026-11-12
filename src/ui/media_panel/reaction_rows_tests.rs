@@ -10,7 +10,7 @@ use quill::ids::{ChatId, MessageId};
 use quill::premium_hub::PremiumFeature;
 use quill::premium_hub::promo::{PreviewOpen, PromoPage};
 use quill::reaction_limit::ReactionLimits;
-use quill::state::{MessageReactionsState, ReactionChoice};
+use quill::state::ReactionChoice;
 
 const CHAT: ChatId = ChatId(11);
 const MESSAGE: MessageId = MessageId(101);
@@ -81,8 +81,10 @@ fn open_menu(app: &Entity<QuillApp>, cx: &mut VisualTestContext) {
             );
             if let Some(session) = app.demo_session.as_mut() {
                 crate::ui::demos::reaction_fixtures::seed_reaction_options(session, CHAT, MESSAGE);
-                if let MessageReactionsState::Ready(options) =
-                    &mut session.stickers.message_reaction_options
+                if let Some(options) = session
+                    .stickers
+                    .message_reaction_options
+                    .ready_mut(CHAT, MESSAGE)
                 {
                     options.top.truncate(6);
                     options.top.push(ReactionChoice::CustomEmoji(77));
@@ -146,6 +148,34 @@ fn a_locked_reaction_in_the_strip_opens_the_premium_preview(cx: &mut TestAppCont
     frames(vcx);
     assert_eq!(premium_page(&app, vcx), Some(REACTIONS_PREVIEW));
     assert_eq!(reactions(&app, vcx), before, "nothing was sent");
+}
+
+#[gpui_kit::test]
+fn a_locked_reaction_in_the_selector_opens_the_premium_preview(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-reactions");
+    let vcx = &mut vcx;
+    free_account(&app, vcx);
+    open_menu(&app, vcx);
+    let before = reactions(&app, vcx);
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.open_reaction_selector(CHAT, MESSAGE, point(px(420.), px(300.)), window, cx);
+        });
+    });
+    frames(vcx);
+    let picked = app.update(vcx, |app, cx| {
+        app.react_from_panel(ReactionChoice::CustomEmoji(77), cx)
+    });
+    frames(vcx);
+    assert!(picked);
+    assert_eq!(premium_page(&app, vcx), Some(REACTIONS_PREVIEW));
+    assert_eq!(reactions(&app, vcx), before, "nothing was sent");
+    let kept = app.read_with(vcx, |app, _| {
+        app.session()
+            .and_then(|s| s.stickers.message_reaction_options.ready_for(CHAT, MESSAGE))
+            .is_some()
+    });
+    assert!(!kept, "the closed selector forgot the options");
 }
 
 #[gpui_kit::test]

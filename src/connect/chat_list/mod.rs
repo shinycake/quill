@@ -302,8 +302,26 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.reorder_pinned_chats(archived, &restored);
             return Err(err);
         }
+        let shown = previous
+            .iter()
+            .filter_map(|(id, _)| {
+                let chat = self.session.chats.get(id)?;
+                Some((
+                    *id,
+                    if archived {
+                        chat.archive_order
+                    } else {
+                        chat.order
+                    },
+                ))
+            })
+            .collect();
         if let Some(pending) = self.session.requests.pending_mut(extra) {
-            pending.rollback = Some(RequestRollback::ChatPinOrder { previous, archived });
+            pending.rollback = Some(RequestRollback::ChatPinOrder {
+                previous,
+                shown,
+                archived,
+            });
         }
         Ok(Some(extra))
     }
@@ -457,6 +475,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some(pending) = self.session.requests.pending_mut(extra) {
             pending.rollback = Some(RequestRollback::ArchiveChatListSettings {
                 previous: Some(current),
+                shown: settings,
             });
         }
         Ok(Some(extra))

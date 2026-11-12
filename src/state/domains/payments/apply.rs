@@ -202,13 +202,10 @@ impl Session {
             }
             PaymentsPayload::ReceivedGifts(page) => {
                 if let Some(p) = pending
-                    && let RequestPurpose::Users(UsersPurpose::GetShareThemeGifts {
-                        owner,
-                        serial,
-                        first,
-                    }) = p.purpose
+                    && let RequestPurpose::Users(UsersPurpose::GetShareThemeGifts { first }) =
+                        p.purpose
                 {
-                    self.apply_share_theme_gifts(page, owner, serial, first);
+                    self.apply_share_theme_gifts(page, p.id, first);
                 } else if let Some(p) = pending
                     && matches!(
                         p.purpose,
@@ -225,7 +222,10 @@ impl Session {
                         .flat_map(|gift| gift.gift.files.iter().cloned())
                         .collect();
                     self.remember_files(&files);
-                    self.users_state.wearable_gifts.succeed(
+                    // Only the request the box waits for lands: an older
+                    // answer of a closed-and-reopened box is dropped.
+                    self.users_state.wearable_gifts.answered(
+                        Some(p.id),
                         page.gifts
                             .into_iter()
                             .filter(|gift| gift.gift.colors.is_some())
@@ -283,7 +283,7 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStarGiftOptions) {
                     self.payments.stars_gift.answer(extra, options);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStarPackOptions) {
-                    self.payments.star_packs.options.succeed(options);
+                    self.payments.star_packs.options.answered(extra, options);
                 }
             }
             PaymentsPayload::GiftManage(payload) => self.apply_gift_manage(payload, pending),

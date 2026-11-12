@@ -123,10 +123,11 @@ impl Session {
                 );
             }
             Some(RequestPurpose::GetStarPackOptions) => {
-                self.payments
-                    .star_packs
-                    .options
-                    .fail_dropping_data(format!("Couldn't load Star packs: {}", error_reason(err)));
+                self.payments.star_packs.options.failed(
+                    extra,
+                    format!("Couldn't load Star packs: {}", error_reason(err)),
+                    true,
+                );
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::AddPendingPaidReaction { .. })) => {
                 if let Some(id) = extra {
@@ -162,9 +163,10 @@ impl Session {
                     format!("Couldn't undo the Stars: {}", error_reason(err)),
                 );
             }
-            Some(RequestPurpose::GetGiftTextLimit) => {
-                self.payments.gift_text_length_max = None;
-            }
+            // The limit is a server option, also pushed by `updateOption`:
+            // a failed ask holds no value to clear (a value that arrived
+            // meanwhile stays), and the next send that needs it asks again.
+            Some(RequestPurpose::GetGiftTextLimit) => {}
             // Slice `parity:bots-payment-recurring`: a subscriptions
             // request failed — surface the reason in the dialog
             // instead of spinning forever; a failed mutation also
@@ -180,7 +182,9 @@ impl Session {
                 }
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::GetWearableGifts)) => {
-                self.users_state.wearable_gifts.fail(error_reason(err));
+                self.users_state
+                    .wearable_gifts
+                    .failed(extra, error_reason(err), false);
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::GetReceivedGifts { .. })) => {
                 // Only the newest page's error counts (an older page's is
@@ -204,7 +208,15 @@ impl Session {
                 | RequestPurpose::SellGift,
             ) => {
                 self.payments.hub.received.op.failed(pending.map(|p| p.id));
-                self.payments.hub.received.view.abandon_confirmation();
+                // Only the failed sale's own confirmation closes: a failed
+                // save toggle or another gift's sale leaves it showing.
+                if matches!(pending.map(|p| p.purpose), Some(RequestPurpose::SellGift)) {
+                    self.payments
+                        .hub
+                        .received
+                        .view
+                        .abandon_confirmation(pending.and_then(|p| p.subject_id()));
+                }
                 self.payments.hub.received.notice =
                     Some(format!("Couldn't update the gift: {}", error_reason(err)));
             }
@@ -265,7 +277,7 @@ impl Session {
                 .apply_ton_wallet_error(
                     err,
                     purpose,
-                    pending.and_then(|p| p.user_id),
+                    pending.and_then(|p| p.user_id()),
                     pending.map(|p| p.id),
                 ),
             Some(RequestPurpose::Payments(PaymentsPurpose::Earn(purpose))) => {

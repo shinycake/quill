@@ -8,14 +8,25 @@ request's, and still cannot cancel its work when it is replaced. The
 re-sweep of 2026-11-11 recorded 205 such renames.
 
 This check reads every enum outside test code. A variant whose name says
-work is in flight (`Loading`, `Asking`, `Sending`, `Sent`, `Waiting`,
+work is in flight (`Loading`, `Asking`, `Merging`, `Sending`, `Sent`, `Waiting`,
 `Pending`, `Running`, `Resolving`, ...: the `IN_FLIGHT` list below) must
 hold what ends it:
 
 - `bare`: the variant has no data at all;
 - `unkeyed`: the variant has data, but no `RequestId`, `Task`,
   `JoinHandle`, `Subscription`, channel end or deadline in it, or in the
-  types it names.
+  types it names;
+- `optional`: the only request in it is an `Option<RequestId>`: a stage
+  that is `Loading(None)` until a second call fills the request in is the
+  "asked but not sent" flag again. Hold `Idle` until the request exists
+  and write `Loading { request }` together with the registry entry.
+
+Any variant, in flight or not, is also checked for `rawid`: a field named
+`request`, `extra`, `request_id`, `generation` or `serial` typed `u64`,
+a counter standing in for the `RequestId` of the request the stage waits
+for. A stage holds the `RequestId` itself, so a request the session's table
+dropped can be tied to the stage that waits for it. (A `..Purpose` enum is
+the request's own data and keeps its generation.)
 
 The variants in the tree when the check was added are in
 scripts/stage-enums-baseline.txt as `rule:Enum::Variant`. That list is
@@ -61,15 +72,18 @@ IN_FLIGHT = set(
     "Joining Leaving Connecting Probing Preparing Starting Stopping Opening Closing Running "
     "Busy InFlight Applying Verifying Refreshing Syncing Creating Deleting Looking Searching "
     "Importing Exporting Queued InProgress Mutating Processing Retrying Reading Writing "
-    "Installing Paying Buying Transferring Upgrading Lingering Decoding Clearing".split()
+    "Installing Paying Buying Transferring Upgrading Lingering Decoding Clearing Merging "
+    "Building Cutting Encoding Activating Rendering Listing Jumping Capturing".split()
 )
 CARRIER = re.compile(
-    r"\b(?:RequestId|Task|JoinHandle|Subscription|Receiver|Sender|Instant|SystemTime)\b"
+    r"\b(?:RequestId|Task|TaskHold|RenderJob|JoinHandle|Subscription|Receiver|Sender|Instant|SystemTime)\b"
 )
+OPTIONAL_REQUEST = re.compile(r"Option\s*<\s*(?:[\w:]*::)?RequestId\s*>")
 # Enums that name a message, a reason or a derived view, not a stored stage.
 NOT_A_STAGE = re.compile(
     r"(?:View|Action|Event|Command|Refusal|Reason|Error|Outcome|Result|Label|Line|Icon|Demo|Reply)$"
 )
+RAW_ID = re.compile(r"\b(?:request|extra|request_id|generation|serial)\s*:\s*(?:Option\s*<\s*)?[ui]64\b")
 TYPE = re.compile(r"\b(?:struct|enum)\s+([A-Z]\w*)\s*(?:<[^{;(]*>)?\s*(?:where[^{;(]*)?([({])")
 ENUM = re.compile(r"\benum\s+([A-Z]\w*)\s*(?:<[^{;]*>)?\s*(?:where[^{;]*)?\{")
 ATTR = re.compile(r"#\[[^\]]*\]")
@@ -129,13 +143,18 @@ def hits(root):
             body = text[brace + 1 : shape_guard.closing(text, brace)]
             offset = brace + 1
             for name, data in variants(body):
-                if name not in IN_FLIGHT:
-                    continue
                 found = re.search(rf"\b{name}\b", text[offset:])
                 at = offset + (found.start() if found else 0)
                 line = shape_guard.line_of(text, at)
+                if RAW_ID.search(data) and not match.group(1).endswith("Purpose"):
+                    yield f"rawid:{match.group(1)}::{name}", path, line
+                if name not in IN_FLIGHT:
+                    continue
+                optional = OPTIONAL_REQUEST.findall(data)
                 if not data:
                     yield f"bare:{match.group(1)}::{name}", path, line
+                elif optional and len(optional) == len(re.findall(r"\bRequestId\b", data)):
+                    yield f"optional:{match.group(1)}::{name}", path, line
                 elif not carries(data, types):
                     yield f"unkeyed:{match.group(1)}::{name}", path, line
 

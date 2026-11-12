@@ -22,18 +22,24 @@ fn sponsored_tail_views_count_once() {
     // Fetch -> store: the first text ad is the first to join the history.
     assert_eq!(shown(&mut session), Some(9001));
     // Visible -> view: counted once, however often it is reported.
-    assert_eq!(session.take_sponsored_views(chat_id, &[9001]), vec![9001]);
-    assert!(session.take_sponsored_views(chat_id, &[9001]).is_empty());
+    let (first, ids) = session
+        .begin_sponsored_views(chat_id, &[9001])
+        .expect("due");
+    assert_eq!(ids, vec![9001]);
+    assert!(session.begin_sponsored_views(chat_id, &[9001]).is_none());
     // Unknown ids and other chats are ignored.
-    assert!(session.take_sponsored_views(chat_id, &[1234]).is_empty());
+    assert!(session.begin_sponsored_views(chat_id, &[1234]).is_none());
     assert!(
         session
-            .take_sponsored_views(quill::ids::ChatId(99), &[9001])
-            .is_empty()
+            .begin_sponsored_views(quill::ids::ChatId(99), &[9001])
+            .is_none()
     );
     // A failed send releases the id for a retry.
-    session.untake_sponsored_views(chat_id, &[9001]);
-    assert_eq!(session.take_sponsored_views(chat_id, &[9001]), vec![9001]);
+    session.settle_sponsored_views(chat_id, first, false);
+    let (_, ids) = session
+        .begin_sponsored_views(chat_id, &[9001])
+        .expect("asked again");
+    assert_eq!(ids, vec![9001]);
 
     // Within five minutes no refetch is due; after, one is.
     let now = std::time::Instant::now();
@@ -79,7 +85,7 @@ fn sponsored_tail_hides_after_report_and_hide() {
             chat_id
         ))
     );
-    assert!(!session.messages.sponsored_hidden);
+    assert!(!session.sponsored_hidden());
 
     // Premium: the driver sends toggleHasSponsoredMessagesEnabled(false);
     // `ok` hides everything.
@@ -91,6 +97,7 @@ fn sponsored_tail_hides_after_report_and_hide() {
             r#"{"@type":"updateOption","name":"is_premium","value":{"@type":"optionValueBoolean","value":true}}"#,
         ],
     );
+    session.my_user_id = Some(5);
     assert_eq!(session.begin_sponsored_hide(chat_id, 9002), Some(true));
     let extra = session.request(
         RequestPurpose::ToggleHasSponsoredMessagesEnabled,
@@ -102,7 +109,7 @@ fn sponsored_tail_hides_after_report_and_hide() {
         &seq,
         &[&format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0)],
     );
-    assert!(session.messages.sponsored_hidden);
+    assert!(session.sponsored_hidden());
     assert_eq!(shown(&mut session), None);
     assert!(!session.sponsored_fetch_due(chat_id, std::time::Instant::now()));
 }

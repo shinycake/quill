@@ -364,3 +364,66 @@ fn opening_a_forum_retries_a_failed_topic_list_but_the_rows_do_not() {
     rig.driver.fetch_open_chat_extras(ChatId(13)).unwrap();
     assert_eq!(rig.sent("getForumTopics").len(), 2);
 }
+
+fn supergroup_rig(status: &str) -> Rig {
+    let mut rig = Rig::new();
+    rig.ingest(
+        r#"{"@type":"updateNewChat","chat":{"id":9,"title":"g","type":{"@type":"chatTypeSupergroup","supergroup_id":9,"is_channel":false},"unread_count":0}}"#,
+    );
+    rig.ingest(&format!(
+        r#"{{"@type":"updateSupergroup","supergroup":{{"@type":"supergroup","id":9,"status":{status}}}}}"#
+    ));
+    rig.driver.session.my_user_id = Some(5);
+    rig.driver.session.open_chat(ChatId(9));
+    rig
+}
+
+/// Sweep r3-02 (07-003): a status known only from `updateSupergroup` carries
+/// no rights, so the own-member probe is still sent and its answer gives them.
+#[test]
+fn a_supergroup_admin_status_still_sends_the_probe_and_takes_its_rights() {
+    let mut rig = supergroup_rig(r#"{"@type":"chatMemberStatusAdministrator"}"#);
+    let chat = ChatId(9);
+    assert!(!rig.driver.session.chats[&9].can_invite_users());
+    rig.driver.maybe_probe_channel_membership().unwrap();
+    let asks = rig.sent("getChatMember");
+    assert_eq!(asks.len(), 1, "the status alone does not settle the probe");
+    rig.ingest(&format!(
+        r#"{{"@type":"chatMember","@extra":"{}","member_id":{{"@type":"messageSenderUser","user_id":5}},"inviter_user_id":0,"joined_chat_date":0,"status":{{"@type":"chatMemberStatusAdministrator","rights":{{"@type":"chatAdministratorRights","can_invite_users":true}}}}}}"#,
+        extra_of(&asks[0])
+    ));
+    assert!(rig.driver.session.chats[&chat.0].can_invite_users());
+    rig.driver.maybe_probe_channel_membership().unwrap();
+    assert_eq!(
+        rig.sent("getChatMember").len(),
+        1,
+        "answered: not asked again"
+    );
+}
+
+/// Sweep r3-02 (07-003): a refused probe settles a chat whose status came
+/// from `updateSupergroup` as restricted, and the status is kept.
+#[test]
+fn a_refused_probe_settles_a_supergroup_restricted_status() {
+    let mut rig = supergroup_rig(r#"{"@type":"chatMemberStatusRestricted","is_member":true}"#);
+    rig.driver.maybe_probe_channel_membership().unwrap();
+    let asks = rig.sent("getChatMember");
+    assert_eq!(asks.len(), 1);
+    rig.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHANNEL_PRIVATE"}}"#,
+        extra_of(&asks[0])
+    ));
+    rig.driver.maybe_probe_channel_membership().unwrap();
+    rig.driver.maybe_probe_channel_membership().unwrap();
+    assert_eq!(
+        rig.sent("getChatMember").len(),
+        1,
+        "no re-ask after the refusal"
+    );
+    let chat = &rig.driver.session.chats[&9];
+    assert!(chat.rights_fetched());
+    assert_eq!(
+        chat.member_status(),
+        Some(crate::telegram::envelope::ChannelMemberStatus::Restricted)
+    );
+}

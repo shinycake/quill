@@ -8,7 +8,7 @@ use crate::ui::ai_compose_state::ApplyInPlace;
 use crate::ui::app::QuillApp;
 use crate::ui::composer_field::{doc_content, field_doc};
 use gpui_kit::*;
-use quill::ai_compose::{AiBoxError, fresh_token, prefs};
+use quill::ai_compose::{AiBoxError, prefs};
 use quill::composer_doc::ComposerDoc;
 use quill::lang::{keys, tr};
 
@@ -50,17 +50,15 @@ impl QuillApp {
         let Some(live) = self.live.as_mut() else {
             return true;
         };
-        let token = fresh_token();
-        if live
+        let Ok(request) = live
             .driver
-            .ai_apply_in_place(chat_id, &part.to_markup(), &style_name, token)
-            .is_err()
-        {
+            .ai_apply_in_place(chat_id, &part.to_markup(), &style_name)
+        else {
             self.ai_compose_error_toast(&AiBoxError::Other(String::new()), window, cx);
             return true;
-        }
+        };
         self.ai_compose.apply_in_place = Some(ApplyInPlace {
-            token,
+            request,
             account,
             field: self.composer.read(cx).value().to_string(),
             conversation,
@@ -87,23 +85,32 @@ impl QuillApp {
         if elsewhere {
             return;
         }
-        let Some(answer) =
-            session_mut(self).and_then(|s| s.messages.ai_compose.apply_in_place.take())
+        // The answer of the request the shortcut waits for; with nothing
+        // waiting the answers are dropped.
+        let Some(waiting) = self
+            .ai_compose
+            .apply_in_place
+            .as_ref()
+            .map(|asked| asked.request)
+        else {
+            if let Some(session) = session_mut(self) {
+                session.messages.ai_compose.apply_answers.clear();
+            }
+            return;
+        };
+        let Some(outcome) =
+            session_mut(self).and_then(|s| s.messages.ai_compose.apply_answers.take(waiting))
         else {
             return;
         };
-        let Some(asked) = self
-            .ai_compose
-            .apply_in_place
-            .take_if(|asked| asked.token == answer.token)
-        else {
+        let Some(asked) = self.ai_compose.apply_in_place.take() else {
             return;
         };
         if asked.window != here {
             // Its window closed.
             return;
         }
-        let (text, entities) = match answer.outcome {
+        let (text, entities) = match outcome {
             Ok(result) => result,
             Err(AiBoxError::StyleInvalid(_)) => {
                 prefs::update(|prefs| prefs.bind_style(&asked.account, None));

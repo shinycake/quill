@@ -20,6 +20,9 @@ players.volume * | the playback volume preference, and the level the unmute clic
 delivery.notify_clicks | OS notification clicks; each `ChatClick` names its account
 delivery.notify_inflight | how many notification previews are being built, for the process
 delivery.next_preview_wait | the delay before the next preview build, for the process
+delivery.avatar_decodes | avatar decodes in flight by photo path; each waiting notification names its account
+delivery.avatar_decodes._job | the decode's task, owned by its entry: dropping the entry ends the wait
+delivery.avatar_decodes.waiting | the notifications waiting on the decode, each with its own account
 delivery.notification_sounds * | the notification sound output device and player
 delivery.polled_redraw * | when the poll loop last redrew: timing, no ids
 delivery.windows * | Quill's notification windows; the queue is keyed by `(AccountKey, ChatId)` and each shown popup by its key
@@ -29,6 +32,7 @@ preferences.keybinding.capture | the action being recorded
 preferences.keybinding.refusals | the chords the page refused, per row; gone with the page, a lock or an account change
 preferences.keybinding.keymap | the account whose overrides the process keymap carries
 preferences.appearance_applied | the theme, accent and font last applied to the windows
+preferences.night_clock * | the wake for scheduled auto-night: the schedule is an app-wide setting, so its timer is the process's, held by this stage and dropped when the schedule is off
 preferences.app_theme * | the app theme: custom themes, palettes, the theme editor, Omarchy; files on disk, not per account
 preferences.system_accent | the OS accent color
 preferences.system_accent.Read.0 | the OS accent color once read
@@ -96,17 +100,17 @@ agent_bridge.driver | the UI driver runs agents' input commands one at a time fo
 takeover.wake | the timer that redraws the takeover banner at its next phase change
 connect.generation | which prepared connection may open
 connect.closed_noted | the generation whose close was noted
+connect.poll | the poll loop draining the client on screen: the process's, replaced with the client (`replace_client`)
+connect.poll.Running._task | the poll loop's task, owned by the stage: dropped when the client is replaced
 disk.stage | the disk space level, a doubted drop below close and a call holding the on-screen client at Full, for the data folder
 disk.seen | what the last reading found: the free space and whether the data folder can be written
 disk.floors | the floors for that level
 disk.waited | how long the disk has been short
 disk._watcher | the disk poll, which ends with the disk state
-disk.screen_refused | the on-screen client was refused for space; `disk.on_screen` names it
 disk.full_notices | how many full-disk notices were shown
 disk.cache_folder | the cache folder measured
 disk.database_bytes | the database size measured
 disk.main_window | the window the space notice opens on
-disk.start_refused | a client start was refused for space; retried for every account
 demo_ui.call_devices | the screenshot demos' call devices
 demo_ui.selected_devices | the screenshot demos' chosen devices
 demo_ui.selected_camera | the screenshot demos' chosen camera
@@ -169,7 +173,6 @@ group_call.tile_overlays * | tile control fades by `LiveKey`, pruned with the pl
 group_call.stream * | the stream window's player, photo and controls (the box over it is the call view's `CallBox`); `clear` runs when the call shown is no stream; the join wait is the screen's (`group_call_screen.stream_joining`)
 group_call.live_pip * | the live picture-in-picture link; it carries its account (`account`), and enlarge closes it for any other
 screen_share.chooser * | the share chooser: its listing (tagged with the screen that asked: another screen's never blocks), its window (closed by the screen's goodbye, `CallScreen`), the windows and screens listed, the source picked, and the screen recording permission box; each names the call it shares into (one, or the video chat), and another call or none closes them
-screen_share.generation | which listing may land
 screen_share.backend | the capture backend
 screen_share.demo_active | the screenshot demos' running share
 screen_share.demo_active.source | the screenshot demos' shared source
@@ -190,7 +193,7 @@ composer_sends.reads * | what was read about the files of every tray (sound trac
 pending_deep_link.link | a link waiting for the deep-link pump: one from outside Quill (launch, OS) is taken by whichever account is on screen; one clicked in an account is followed only by that account (`QueuedLink::account`, `for_screen`) and dropped once another is on screen
 pending_deep_link.window | the chat window the link was clicked in; followed only with its account (`QueuedLink::for_screen`)
 pending_deep_link.by_agent | an agent's step queued the link; followed only with its account (`QueuedLink::for_screen`)
-main_window.dialogs_closed | windows whose kit dialog the app closed, for the shell that shows it to forget its `open_dialog` (the kit layer names no dialog, so the shell cannot ask it); a window's entry is taken by that shell's next sync and dropped when the window closes
+main_window.shown_dialogs | each window's shown kit dialog by window id, so a closer that holds only the app (an account switch, an action) moves the value its shell reads; a window's entry is dropped when the window closes
 preferences.link_handler_recheck * | the re-reads of the operating system's tg: link handler after "Make Quill the default": the handler is one per OS user, so the stage is the process's; leaving Settings' System page or a second click drops its task
 calls.tick * | the 1 s call clock: one task for the process, which reads the screen and every background account's ring on each beat and ends by itself when neither wants it
 background.close_waiters * | the work waiting on closing clients of every account (`after_closing`): each task is held here, ends by itself and gives up after its cap

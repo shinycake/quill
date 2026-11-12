@@ -44,26 +44,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         // Optimistic: the previous flags ride on the pending entry so
         // the error arm can roll back.
-        let previous_sign = self
-            .session
-            .groups
-            .supergroup_sign_messages
-            .get(&supergroup_id)
-            .copied();
-        let previous_show = self
-            .session
-            .groups
-            .supergroup_show_message_sender
-            .get(&supergroup_id)
-            .copied();
-        self.session
-            .groups
-            .supergroup_sign_messages
-            .insert(supergroup_id, sign_messages);
-        self.session
-            .groups
-            .supergroup_show_message_sender
-            .insert(supergroup_id, sign_messages && show_message_sender);
+        let known = self.session.groups.supergroups.get(&supergroup_id).copied();
+        let previous_sign = known.map(|facts| facts.sign_messages);
+        let previous_show = known.map(|facts| facts.show_message_sender);
+        self.session.groups.edit_supergroup(supergroup_id, |facts| {
+            facts.sign_messages = sign_messages;
+            facts.show_message_sender = sign_messages && show_message_sender;
+        });
         if let Some(pending) = self.session.requests.pending_mut(extra) {
             pending.rollback = Some(RequestRollback::SignMessages {
                 supergroup_id,
@@ -122,13 +109,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         let previous = self
             .session
             .groups
-            .supergroup_anti_spam_enabled
+            .anti_spam
             .get(&supergroup_id)
-            .copied();
+            .map(|anti_spam| anti_spam.enabled);
         self.session
             .groups
-            .supergroup_anti_spam_enabled
-            .insert(supergroup_id, enabled);
+            .edit_supergroup_anti_spam(supergroup_id, |anti_spam| anti_spam.enabled = enabled);
         if let Some(pending) = self.session.requests.pending_mut(extra) {
             pending.rollback = Some(RequestRollback::AntiSpam {
                 supergroup_id,

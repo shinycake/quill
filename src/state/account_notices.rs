@@ -31,7 +31,16 @@ pub enum LoginReview {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReviewItem {
     pub entry: UnconfirmedEntry,
-    pub request: Option<RequestId>,
+    pub stage: ReviewItemStage,
+}
+
+/// Where one session of a review is. `ToSend` leaves when the send goes out
+/// (`InFlight`) or fails ([`Session::login_review_unsent`] settles the
+/// item); `InFlight` leaves with its own request's answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReviewItemStage {
+    ToSend,
+    InFlight(RequestId),
 }
 
 /// The new-login review ("Yes, it's me" / "No, it's not me!"): one
@@ -413,7 +422,7 @@ impl Session {
             .iter()
             .map(|entry| ReviewItem {
                 entry: entry.clone(),
-                request: None,
+                stage: ReviewItemStage::ToSend,
             })
             .collect();
         self.settings.notices.review = ReviewStage::Reviewing {
@@ -429,9 +438,9 @@ impl Session {
         if let ReviewStage::Reviewing { items, .. } = &mut self.settings.notices.review
             && let Some(item) = items
                 .iter_mut()
-                .find(|item| item.request.is_none() && item.entry.id == id)
+                .find(|item| item.stage == ReviewItemStage::ToSend && item.entry.id == id)
         {
-            item.request = Some(request);
+            item.stage = ReviewItemStage::InFlight(request);
         }
     }
 
@@ -440,7 +449,7 @@ impl Session {
         let at = match &self.settings.notices.review {
             ReviewStage::Reviewing { items, .. } => items
                 .iter()
-                .position(|item| item.request.is_none() && item.entry.id == id),
+                .position(|item| item.stage == ReviewItemStage::ToSend && item.entry.id == id),
             _ => None,
         };
         if let Some(at) = at {
@@ -456,9 +465,9 @@ impl Session {
         error: Option<String>,
     ) {
         let at = match (&self.settings.notices.review, request) {
-            (ReviewStage::Reviewing { items, .. }, Some(id)) => {
-                items.iter().position(|item| item.request == Some(id))
-            }
+            (ReviewStage::Reviewing { items, .. }, Some(id)) => items
+                .iter()
+                .position(|item| item.stage == ReviewItemStage::InFlight(id)),
             _ => None,
         };
         if let Some(at) = at {

@@ -141,7 +141,7 @@ fn ads_between_posts_count_from_the_first_unread_post() {
     assert!(!session.place_sponsored_at_end(Instant::now()), "no end ad");
     assert_eq!(session.sponsored_inject_start(), None, "nothing unread");
     if let Some(history) = session.histories.get_mut(&1) {
-        history.unread_anchor = Some(MessageId(2));
+        history.unread_open.show_bar(MessageId(2));
     }
     assert_eq!(
         session.sponsored_inject_start(),

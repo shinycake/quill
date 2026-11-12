@@ -441,7 +441,7 @@ impl QuillApp {
         let render = self
             .pending_attachments()
             .get(index)
-            .and_then(|attachment| attachment.extras.photo_render());
+            .and_then(|attachment| attachment.extras.photo_render().cloned());
         if let Some(render) = render {
             let view = self
                 .session()

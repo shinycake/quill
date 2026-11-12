@@ -36,7 +36,7 @@ fn chat_window_shell(h: &Harness, cx: &mut TestAppContext) -> Entity<QuillShell>
 }
 
 fn shown(shell: &Entity<QuillShell>, cx: &mut TestAppContext) -> Option<DialogKind> {
-    shell.read_with(cx, |shell, _| shell.open_dialog)
+    shell.read_with(cx, |shell, _| shell.open_dialog.kind())
 }
 
 /// Close the chat window from inside it (its title bar close), so its own
@@ -199,17 +199,17 @@ fn an_answer_shows_in_the_window_that_asked(cx: &mut TestAppContext) {
     h.app.update(cx, |app, cx| {
         app.note_window_press(Some(OTHER));
         app.in_window_scope(Some(OTHER), cx, |app, _| {
-            app.open_box(DialogKind::DeepLinkInfo);
+            app.open_box(DialogKind::BotAlert);
         });
         app.note_window_pointer(None);
         // The answer, from the poll loop.
         app.set_window_scope(None);
-        app.links.deep_link_dialog = Some("TDLib's text".into());
+        app.links.bot_alert = Some("TDLib's text".into());
     });
     draw_both(&h, chat_window, cx);
     assert_eq!(shown(&h.shell, cx), None, "not where the pointer went");
     let in_chat_window = chat_window_shell(&h, cx);
-    assert_eq!(shown(&in_chat_window, cx), Some(DialogKind::DeepLinkInfo));
+    assert_eq!(shown(&in_chat_window, cx), Some(DialogKind::BotAlert));
 }
 
 /// Finding 3: pointer moves and scrolls are not input for the boxes. An
@@ -227,10 +227,10 @@ fn a_pointer_move_is_not_a_press(cx: &mut TestAppContext) {
             assert_eq!(app.asking_window_or_last_press(), None, "toasts stay too");
         });
         app.set_window_scope(None);
-        app.links.deep_link_dialog = Some("TDLib's text".into());
+        app.links.bot_alert = Some("TDLib's text".into());
     });
     draw_both(&h, chat_window, cx);
-    assert_eq!(shown(&h.shell, cx), Some(DialogKind::DeepLinkInfo));
+    assert_eq!(shown(&h.shell, cx), Some(DialogKind::BotAlert));
     let in_chat_window = chat_window_shell(&h, cx);
     assert_eq!(shown(&in_chat_window, cx), None);
 }

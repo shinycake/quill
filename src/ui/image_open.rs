@@ -60,12 +60,22 @@ impl QuillApp {
         done: impl FnOnce(&mut Self, T, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) {
+        self.run_off_ui_scoped_task(work, done, cx).detach();
+    }
+
+    /// [`Self::run_off_ui_scoped_then`] for a stage that owns the job:
+    /// dropping the returned task cancels the work and its answer.
+    pub(super) fn run_off_ui_scoped_task<T: Send + 'static>(
+        &mut self,
+        work: impl FnOnce() -> T + Send + 'static,
+        done: impl FnOnce(&mut Self, T, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) -> Task<()> {
         let task = cx.background_spawn(async move { work() });
         self.spawn_scoped(cx, async move |app, cx| {
             let result = task.await;
             let _ = app.update(cx, |this, cx| done(this, result, cx));
         })
-        .detach();
     }
 }
 

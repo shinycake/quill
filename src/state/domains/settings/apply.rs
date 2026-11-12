@@ -84,7 +84,9 @@ impl Session {
             } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPaidReactionSenders) {
                     if let Some(chat) = pending.and_then(|p| p.chat_id) {
-                        self.payments.paid.set_senders(chat.0, &senders);
+                        self.payments
+                            .paid
+                            .set_senders(chat.0, pending.map(|p| p.id), &senders);
                     }
                 } else if let Some(RequestPurpose::Calls(
                     CallsPurpose::GetVideoChatAvailableParticipants { group_call_id },
@@ -163,8 +165,14 @@ impl Session {
                 // of the files it deleted. Drop the usage cache so the
                 // driver refetches the post-clear numbers on this same
                 // ingest.
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::OptimizeStorage) {
-                    self.settings.storage_clear = StorageClear::Freed(total_size);
+                // Only the clear that waits for this answer takes it: a late
+                // answer of a clear that was settled leaves the page alone.
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::OptimizeStorage)
+                    && self
+                        .settings
+                        .storage_clear
+                        .answered(pending.map(|p| p.id), total_size)
+                {
                     self.settings.storage_stats = Default::default();
                 }
             }
@@ -228,10 +236,7 @@ impl Session {
                 if let Some(asked) =
                     pending.filter(|p| p.purpose == RequestPurpose::ConfirmDeviceLogin)
                 {
-                    self.settings.device_login = DeviceLogin::Done {
-                        request: asked.id,
-                        result,
-                    };
+                    self.settings.device_login.settle(asked.id, result);
                     if result != crate::auth::DeviceLoginResult::Failed {
                         self.settings.sessions_op.changed(pending.map(|p| p.id));
                         self.settings.sessions.clear_error();
@@ -319,7 +324,7 @@ impl Session {
                 // scope is correlated via the pending request (the response
                 // carries no scope field).
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetScopeNotificationSettings)
-                    && let Some(scope) = pending.and_then(|p| p.scope)
+                    && let Some(scope) = pending.and_then(|p| p.scope())
                 {
                     self.settings.scope_notification_settings.answered(
                         scope,

@@ -66,7 +66,7 @@ fn joined(parts: [&str; 2], separator: &str) -> String {
 
 /// "Online" for this device, otherwise when it was last active.
 fn activity(s: &ParsedSession) -> String {
-    if s.is_current {
+    if s.is_current() {
         tr(keys::Q_PREFS_ONLINE).to_string()
     } else {
         format_session_last_active(s.last_active_date)
@@ -84,7 +84,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let session_id = s.id;
-        let incomplete = s.is_password_pending;
+        let incomplete = s.is_password_pending();
         let title = session_title(s);
         let app = joined(
             [
@@ -142,7 +142,7 @@ impl QuillApp {
             .gap_1()
             .w_full()
             .child(div().flex_1().min_w_0().child(row))
-            .when(!s.is_current, |this| {
+            .when(!s.is_current(), |this| {
                 this.child(
                     Button::new(format!("terminate-session-{session_id}"))
                         .icon(IconName::X)
@@ -240,11 +240,11 @@ impl QuillApp {
     /// The session box body: the device, its info rows and, for a signed
     /// in session, the switches that pick what it accepts.
     fn session_box_body(&self, s: &ParsedSession, cx: &mut Context<Self>) -> Div {
-        if s.is_current && self.privacy.devices.renaming() {
+        if s.is_current() && self.privacy.devices.renaming() {
             return self.rename_device_fields(cx);
         }
         let muted = cx.theme().muted_foreground;
-        let date = if s.is_current {
+        let date = if s.is_current() {
             activity(s)
         } else {
             tr_with(keys::Q_LEFTOVERS_LAST_ACTIVE, &[("date", &activity(s))])
@@ -329,7 +329,7 @@ impl QuillApp {
                 .text_color(muted)
                 .child(tr(keys::SESSIONS_LOCATION_ABOUT)),
         );
-        if !s.is_password_pending {
+        if !s.is_password_pending() {
             let session_id = s.id;
             let (secret_on, calls_on) = (s.can_accept_secret_chats, s.can_accept_calls);
             let owner = cx.entity().downgrade();
@@ -390,9 +390,9 @@ impl QuillApp {
     /// for any other. Renaming swaps them for Cancel and Save.
     fn session_box_footer(&self, s: &ParsedSession, mutating: bool, cx: &mut Context<Self>) -> Div {
         let session_id = s.id;
-        let incomplete = s.is_password_pending;
+        let incomplete = s.is_password_pending();
         let footer = div().flex().items_center().gap_2().w_full();
-        if s.is_current && self.privacy.devices.renaming() {
+        if s.is_current() && self.privacy.devices.renaming() {
             return footer
                 .justify_end()
                 .child(
@@ -411,7 +411,7 @@ impl QuillApp {
                         .on_click(cx.listener(|this, _, _, cx| this.save_device_name(cx))),
                 );
         }
-        let left = if s.is_current {
+        let left = if s.is_current() {
             Button::new("session-details-rename")
                 .label(tr(keys::Q_PREFS_RENAME))
                 .ghost()

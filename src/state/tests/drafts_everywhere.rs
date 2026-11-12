@@ -71,7 +71,7 @@ fn forum(session: &mut Session, seq: &AtomicU64, sink: &Arc<MemorySink>) {
         true,
         r#"{"@type":"chatMemberStatusMember"}"#,
     );
-    let extra = session.request(RequestPurpose::GetForumTopics, Some(ChatId(16)));
+    let extra = session.ask_forum_topics(ChatId(16));
     apply_json(
         session,
         seq,
@@ -291,7 +291,7 @@ fn topic_slots_store_and_dirty_independently() {
         Some(&text_draft("remote four"))
     );
     // A refetched topic list keeps the dirty topic's draft too.
-    let extra = session.request(RequestPurpose::GetForumTopics, Some(ChatId(16)));
+    let extra = session.ask_forum_topics(ChatId(16));
     apply_json(
         &mut session,
         &seq,
@@ -328,7 +328,7 @@ fn topic_draft_preview_hides_behind_unread_and_shows_reply_only() {
         16,
         r#"{"@type":"chatTypeSupergroup","supergroup_id":16,"is_channel":false}"#,
     );
-    let extra = session.request(RequestPurpose::GetForumTopics, Some(ChatId(16)));
+    let extra = session.ask_forum_topics(ChatId(16));
     let reply_only = r#"{"@type":"draftMessage","reply_to":{"@type":"inputMessageReplyToMessage","message_id":9,"quote":null,"checklist_task_id":0,"poll_option_id":""},"date":5,"content":{"@type":"draftMessageContentText","text":{"@type":"formattedText","text":"","entities":[]},"link_preview_options":null},"effect_id":"0","suggested_post_info":null}"#;
     apply_json(
         &mut session,
@@ -379,13 +379,9 @@ fn a_thread_restores_its_draft_from_message_thread_info() {
         r#"{"@type":"chatTypeSupergroup","supergroup_id":14,"is_channel":false}"#,
     );
     session.open_chat(ChatId(13));
-    session.begin_thread(ChatId(13), MessageId(101));
+    let extra = session.begin_thread(ChatId(13), MessageId(101));
     // Resolving: the thread is not a slot yet.
     assert_eq!(session.open_draft_topic(ChatId(13)), DraftTopic::Chat);
-    let extra = session.request(
-        RequestPurpose::GetMessageThread { message_id: 101 },
-        Some(ChatId(13)),
-    );
     let reply_draft = r#"{"@type":"draftMessage","reply_to":{"@type":"inputMessageReplyToMessage","message_id":502,"quote":null,"checklist_task_id":0,"poll_option_id":""},"date":5,"content":{"@type":"draftMessageContentText","text":{"@type":"formattedText","text":"in the thread","entities":[]},"link_preview_options":null},"effect_id":"0","suggested_post_info":null}"#;
     apply_json(
         &mut session,
@@ -457,11 +453,7 @@ fn a_thread_inside_a_forum_topic_uses_the_topic_slot() {
     forum(&mut session, &seq, &sink);
     session.open_chat(ChatId(16));
     session.select_topic(ChatId(16), 3);
-    session.begin_thread(ChatId(16), MessageId(77));
-    let extra = session.request(
-        RequestPurpose::GetMessageThread { message_id: 77 },
-        Some(ChatId(16)),
-    );
+    let extra = session.begin_thread(ChatId(16), MessageId(77));
     apply_json(
         &mut session,
         &seq,
@@ -507,9 +499,21 @@ fn a_sent_message_clears_the_slot_it_went_to() {
     assert_eq!(
         session.messages.draft_clears,
         vec![
-            (ChatId(9), DraftTopic::Chat),
-            (ChatId(9), DraftTopic::Forum(3)),
-            (ChatId(9), DraftTopic::Thread(501)),
+            SendAck {
+                chat_id: ChatId(9),
+                slot: DraftTopic::Chat,
+                old_message_id: MessageId(-1)
+            },
+            SendAck {
+                chat_id: ChatId(9),
+                slot: DraftTopic::Forum(3),
+                old_message_id: MessageId(-1)
+            },
+            SendAck {
+                chat_id: ChatId(9),
+                slot: DraftTopic::Thread(501),
+                old_message_id: MessageId(-1)
+            },
         ]
     );
 }
@@ -533,7 +537,11 @@ fn a_failed_send_names_the_slot_whose_draft_clear_is_dropped() {
     );
     assert_eq!(
         session.messages.failed_sends,
-        vec![(ChatId(9), DraftTopic::Forum(3))]
+        vec![SendAck {
+            chat_id: ChatId(9),
+            slot: DraftTopic::Forum(3),
+            old_message_id: MessageId(-1)
+        }]
     );
     assert!(session.messages.draft_clears.is_empty());
 }
@@ -637,4 +645,81 @@ fn a_remote_draft_change_moves_the_revision_and_an_echo_does_not() {
     );
     assert_ne!(session.remote_draft_revision(), after_remote);
     assert_eq!(session.draft_for(ChatId(8), DraftTopic::Chat), None);
+}
+
+/// Sweep r3-08 review (14-004): the answer to a send names the temporary
+/// message its request made, so the composer can match the ack
+/// (`old_message_id`) to the send; another request's answer is not kept.
+#[test]
+fn a_send_answer_names_the_temporary_message_of_its_request() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    new_chat(
+        &mut session,
+        &seq,
+        &sink,
+        9,
+        r#"{"@type":"chatTypeSupergroup","supergroup_id":9,"is_channel":false}"#,
+    );
+    let send = session.request(RequestPurpose::SendMessage, Some(ChatId(9)));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"message","@extra":"{}","id":-5,"chat_id":9,"is_outgoing":true,"sending_state":{{"@type":"messageSendingStatePending"}},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"x","entities":[]}}}}}}"#,
+            send.0
+        ),
+    );
+    assert_eq!(
+        session.messages.sent_answers,
+        vec![SendAnswered {
+            request: send,
+            chat_id: ChatId(9),
+            message_id: MessageId(-5),
+        }]
+    );
+}
+
+/// Sweep r3-08 round 2 (14-004): an album's answer names the temporary
+/// message of each photo under the album's request, so a captioned album
+/// sent from a main composer finds its draft clear too.
+#[test]
+fn an_album_answer_names_each_temporary_message_of_its_request() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    new_chat(
+        &mut session,
+        &seq,
+        &sink,
+        9,
+        r#"{"@type":"chatTypeSupergroup","supergroup_id":9,"is_channel":false}"#,
+    );
+    let album = session.request(RequestPurpose::SendMessageAlbum, Some(ChatId(9)));
+    let photo = |id: i64| {
+        format!(
+            r#"{{"id":{id},"chat_id":9,"is_outgoing":true,"sending_state":{{"@type":"messageSendingStatePending"}},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"x","entities":[]}}}}}}"#
+        )
+    };
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"messages","@extra":"{}","total_count":2,"messages":[{},{}]}}"#,
+            album.0,
+            photo(-5),
+            photo(-6)
+        ),
+    );
+    let answers: Vec<_> = session
+        .messages
+        .sent_answers
+        .iter()
+        .map(|a| (a.request, a.message_id))
+        .collect();
+    assert_eq!(
+        answers,
+        vec![(album, MessageId(-5)), (album, MessageId(-6))]
+    );
 }

@@ -355,6 +355,37 @@ fn other_discard_errors_leave_the_hang_up_alone() {
     assert!(session.calls.hang_up().is_some());
 }
 
+#[test]
+fn engine_hang_up_is_owed_once_after_tdlib_takes_the_discard() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(&mut session, &seq, &sink, &swap_active_json(77, 41));
+    let request = hanging_up(&mut session, 77);
+    let owed = |s: &mut Session| {
+        s.calls
+            .hang_up_mut()
+            .is_some_and(|h| h.take_engine_hang_up())
+    };
+    // Nothing is owed while the discard is in flight.
+    assert!(!owed(&mut session));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, request.as_extra()),
+    );
+    assert!(owed(&mut session));
+    // A second pass, or a second ok, owes nothing more.
+    assert!(!owed(&mut session));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, request.as_extra()),
+    );
+    assert!(!owed(&mut session));
+}
+
 fn rated_summary(session: &mut Session, seq: &AtomicU64, sink: &Arc<MemorySink>) {
     apply_json(session, seq, sink, &swap_active_json(77, 41));
     apply_json(

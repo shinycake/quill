@@ -44,18 +44,18 @@ fn the_box_closes_on_the_answer_and_not_on_a_request_skipped_as_busy() {
     driver.session.stickers.sticker_set_view = Some(StickerSetView::loading(77));
 
     let install = driver.manage_sticker_set(77, true, false).unwrap().unwrap();
-    driver.session.begin_set_change(77, SetChange::Install);
-    assert_eq!(
-        change(&driver),
-        Some(SetChangeStage::Working(SetChange::Install))
-    );
+    driver
+        .session
+        .begin_set_change(77, SetChange::Install, install);
+    let working = Some(SetChangeStage::Working {
+        change: SetChange::Install,
+        request: install,
+    });
+    assert_eq!(change(&driver), working);
     // A second press while it is on its way sends nothing: the box has
     // nothing to report as done.
     assert_eq!(driver.manage_sticker_set(77, false, true).unwrap(), None);
-    assert_eq!(
-        change(&driver),
-        Some(SetChangeStage::Working(SetChange::Install))
-    );
+    assert_eq!(change(&driver), working);
 
     answer(&mut driver, &seq, &sink, install, json!({"@type":"ok"}));
     assert_eq!(
@@ -70,7 +70,9 @@ fn the_box_closes_on_the_answer_and_not_on_a_request_skipped_as_busy() {
         .manage_sticker_set(77, false, false)
         .unwrap()
         .unwrap();
-    driver.session.begin_set_change(77, SetChange::Remove);
+    driver
+        .session
+        .begin_set_change(77, SetChange::Remove, remove);
     answer(
         &mut driver,
         &seq,
@@ -93,20 +95,26 @@ fn an_answer_for_another_change_does_not_finish_the_one_waited_on() {
     let seq = AtomicU64::new(0);
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
     driver.session.stickers.sticker_set_view = Some(StickerSetView::loading(77));
-    driver.session.begin_set_change(77, SetChange::Archive);
+    let archive = crate::ids::RequestId(900);
     driver
         .session
-        .finish_set_change(77, SetChange::Install, true);
-    assert_eq!(
-        change(&driver),
-        Some(SetChangeStage::Working(SetChange::Archive))
-    );
+        .begin_set_change(77, SetChange::Archive, archive);
+    let working = Some(SetChangeStage::Working {
+        change: SetChange::Archive,
+        request: archive,
+    });
+    // Another request's answer (here one that names the same change, as
+    // the second press of Add then Archive would) leaves the stage alone.
     driver
         .session
-        .finish_set_change(78, SetChange::Archive, true);
+        .finish_set_change(crate::ids::RequestId(901), 77, true);
+    assert_eq!(change(&driver), working);
+    driver.session.finish_set_change(archive, 78, true);
+    assert_eq!(change(&driver), working);
+    driver.session.finish_set_change(archive, 77, true);
     assert_eq!(
         change(&driver),
-        Some(SetChangeStage::Working(SetChange::Archive))
+        Some(SetChangeStage::Done(SetChange::Archive))
     );
     let _ = std::fs::remove_dir_all(dir);
 }

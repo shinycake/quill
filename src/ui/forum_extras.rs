@@ -25,16 +25,55 @@ pub(super) enum TopicExtra {
     Edit,
 }
 
-/// A topic action sent from the menu, until its answer settles the note.
+/// One topic action sent from the menu: its answer shows `done`, or the
+/// error note when it failed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct TopicWait {
+    pub(super) request: quill::ids::RequestId,
+    pub(super) done: String,
+}
+
+/// The topic actions sent from the menu, until their answers settle the
+/// notes. Each action keeps its own request, so a second one never
+/// replaces the first. `Waiting` is never empty: the last answer leaves it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) enum TopicAction {
     #[default]
     Idle,
-    /// Its answer shows `done`, or the error note when it failed.
-    Waiting {
-        request: quill::ids::RequestId,
-        done: String,
-    },
+    Waiting(Vec<TopicWait>),
+}
+
+impl TopicAction {
+    /// An action went out as `wait.request`.
+    fn add(&mut self, wait: TopicWait) {
+        match self {
+            Self::Waiting(waits) => waits.push(wait),
+            Self::Idle => *self = Self::Waiting(vec![wait]),
+        }
+    }
+
+    /// Settle every wait `answer` has a word for; each comes back as its
+    /// `done` text and whether it succeeded. Idle once none is left.
+    fn settle(
+        &mut self,
+        mut answer: impl FnMut(quill::ids::RequestId) -> Option<bool>,
+    ) -> Vec<(String, bool)> {
+        let Self::Waiting(waits) = self else {
+            return Vec::new();
+        };
+        let mut settled = Vec::new();
+        waits.retain(|wait| match answer(wait.request) {
+            Some(ok) => {
+                settled.push((wait.done.clone(), ok));
+                false
+            }
+            None => true,
+        });
+        if waits.is_empty() {
+            *self = Self::Idle;
+        }
+        settled
+    }
 }
 
 /// Which extras apply to a topic right now.
@@ -155,10 +194,10 @@ impl QuillApp {
             }
             // The note says it worked when the answer does.
             Ok(Some(request)) => {
-                self.chat_ui.topic_action = TopicAction::Waiting {
+                self.chat_ui.topic_action.add(TopicWait {
                     request,
                     done: done.to_string(),
-                };
+                });
             }
             // Nothing needed sending (a pinned topic already at the end).
             Ok(None) => {}
@@ -171,21 +210,24 @@ impl QuillApp {
     /// failure already has its own error note (the session's action
     /// errors), so only a success is shown here.
     pub(in crate::ui) fn topic_action_upkeep(&mut self, cx: &mut Context<Self>) {
-        let TopicAction::Waiting { request, .. } = &self.chat_ui.topic_action else {
+        if self.chat_ui.topic_action == TopicAction::Idle {
             return;
+        }
+        let mut action = std::mem::take(&mut self.chat_ui.topic_action);
+        let settled = match self.live.as_mut() {
+            Some(live) => {
+                action.settle(|request| live.driver.session.take_topic_action_answer(request))
+            }
+            None => action.settle(|_| Some(false)),
         };
-        let request = *request;
-        let answer = match self.live.as_mut() {
-            Some(live) => live.driver.session.take_topic_action_answer(request),
-            None => Some(false),
-        };
-        let Some(ok) = answer else {
+        self.chat_ui.topic_action = action;
+        if settled.is_empty() {
             return;
-        };
-        if let TopicAction::Waiting { done, .. } = std::mem::take(&mut self.chat_ui.topic_action)
-            && ok
-        {
-            self.set_note(StatusNote::info(done));
+        }
+        for (done, ok) in settled {
+            if ok {
+                self.set_note(StatusNote::info(done));
+            }
         }
         cx.notify();
     }
@@ -263,7 +305,38 @@ pub(super) fn add_topic_extras(
 
 #[cfg(test)]
 mod tests {
-    use super::TopicExtras;
+    use super::{TopicAction, TopicExtras, TopicWait};
+    use quill::ids::RequestId;
+
+    fn wait(request: u64, done: &str) -> TopicWait {
+        TopicWait {
+            request: RequestId(request),
+            done: done.into(),
+        }
+    }
+
+    #[test]
+    fn a_second_action_keeps_the_first_ones_wait() {
+        let mut action = TopicAction::Idle;
+        action.add(wait(1, "mentions read"));
+        action.add(wait(2, "unpinned"));
+        // The second answers first; the first is still waiting.
+        let settled = action.settle(|request| (request == RequestId(2)).then_some(true));
+        assert_eq!(settled, vec![("unpinned".to_string(), true)]);
+        assert_ne!(action, TopicAction::Idle);
+        // The first fails: no toast text of its own, and nothing is left.
+        let settled = action.settle(|request| (request == RequestId(1)).then_some(false));
+        assert_eq!(settled, vec![("mentions read".to_string(), false)]);
+        assert_eq!(action, TopicAction::Idle);
+    }
+
+    #[test]
+    fn an_answer_for_another_request_settles_nothing() {
+        let mut action = TopicAction::Idle;
+        action.add(wait(1, "done"));
+        assert!(action.settle(|_| None).is_empty());
+        assert_eq!(action, TopicAction::Waiting(vec![wait(1, "done")]));
+    }
 
     #[test]
     fn extras_report_when_any_applies() {

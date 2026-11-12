@@ -11,7 +11,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
-use crate::ui::fragment_password::{PasswordBox, PasswordView, SecurityCheck, ShowingView};
+use crate::ui::fragment_password::{PasswordBox, PasswordView, SecurityCheck};
 use crate::ui::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
@@ -21,7 +21,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::gift_manage::ExportError;
 use quill::lang::{keys, tr};
-use quill::premium_hub::ton::{GramWithdraw, WithdrawOutcome};
+use quill::premium_hub::ton::{GramWithdraw, GramsEvent, WithdrawOutcome};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -83,7 +83,7 @@ impl QuillApp {
             }
         } else if let Some(grams) = self.grams_mut() {
             // The demo has no password state: the password box.
-            grams.withdraw = Some(GramWithdraw::open(None));
+            grams.enter_withdraw(GramWithdraw::open(None));
         }
         self.open_box(DialogKind::GramsWithdraw);
         cx.notify();
@@ -112,10 +112,15 @@ impl QuillApp {
             Some(Ok(_)) => {}
             // Refused before sending: say so under the field.
             Some(Err(_)) => {
-                if let Some(withdraw) = self.grams_mut().and_then(|g| g.withdraw.as_mut())
-                    && withdraw.can_submit()
+                if let Some(grams) = self.grams_mut()
+                    && grams
+                        .withdraw
+                        .as_ref()
+                        .is_some_and(GramWithdraw::can_submit)
                 {
-                    *withdraw = GramWithdraw::idle(Some(ExportError::Other(String::new())));
+                    grams.enter_withdraw(GramWithdraw::idle(Some(ExportError::Other(
+                        String::new(),
+                    ))));
                 }
             }
             None => self.set_note(StatusNote::info(tr(keys::Q_MONEY_DEMO_MODE_THIS_NEEDS_A))),
@@ -156,31 +161,23 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (outcome, field) = match self.grams_mut() {
+        let (outcome, showing, ready) = match self.grams_mut() {
             Some(grams) => {
                 let showing = grams.open
                     && grams
                         .withdraw
                         .as_ref()
                         .is_some_and(GramWithdraw::shows_password);
-                let idle = grams.open
-                    && grams
-                        .withdraw
-                        .as_ref()
-                        .is_some_and(GramWithdraw::can_submit);
-                let field = match (showing, idle) {
-                    (false, _) => ShowingView::Off,
-                    (true, true) => ShowingView::Idle,
-                    (true, false) => ShowingView::Sending,
-                };
-                (grams.take_withdraw_outcome(), field)
+                let ready = grams.take_events().contains(&GramsEvent::PasswordReady);
+                (grams.take_withdraw_outcome(), showing, ready)
             }
-            None => (None, ShowingView::Off),
+            None => (None, false, false),
         };
-        self.screen
-            .payments
-            .grams_withdraw_password
-            .keep(field, window, cx);
+        let field = &self.screen.payments.grams_withdraw_password;
+        field.keep(showing, window, cx);
+        if ready && showing {
+            field.focus_field(window, cx);
+        }
         match outcome {
             Some(WithdrawOutcome::Url(url)) => {
                 self.open_fragment_url(&url, cx);

@@ -1,24 +1,29 @@
 //! The export boxes' stage, one value per account screen.
 //!
 //! "Export chat history" and "Export Telegram data" share a shape: an
-//! options box with a draft, then the running export's progress. Whether
-//! the progress is on screen or hidden lives with the export itself
-//! (`ExportView`, held by the account's session), and whether an export
-//! exists is read from the session.
+//! options box with a draft, then the running export's progress. The box
+//! is one value: closed (a running export goes on, its result shows as a
+//! note), the options form, or the progress. Whether an export exists is
+//! read from the session. The value belongs to the account on screen, so
+//! switching accounts closes the box; the export keeps running.
 
-/// What the box shows besides a running export.
+/// What the box shows.
 pub(super) enum ExportBox<D, P> {
-    /// No options draft: the running export's progress shows (when the
-    /// export is not hidden). `seen` is the last progress drawn, so the
-    /// poll redraws only when it changes.
+    /// Not on screen ("Hide", Cancel, close). A running export is not
+    /// shown; when it ends, the poll says how it went.
+    Closed,
+    /// The running export's progress is on screen. `seen` is the last
+    /// progress drawn, so the poll redraws only when it changes.
     Progress { seen: Option<P> },
     /// The options form, with the user's choices so far.
     Options(D),
 }
 
+// A derive would demand `D: Default` and `P: Default` of the draft and progress.
+#[allow(clippy::derivable_impls)]
 impl<D, P> Default for ExportBox<D, P> {
     fn default() -> Self {
-        Self::Progress { seen: None }
+        Self::Closed
     }
 }
 
@@ -26,14 +31,14 @@ impl<D, P: PartialEq> ExportBox<D, P> {
     pub(super) fn draft(&self) -> Option<&D> {
         match self {
             Self::Options(draft) => Some(draft),
-            Self::Progress { .. } => None,
+            Self::Closed | Self::Progress { .. } => None,
         }
     }
 
     pub(super) fn draft_mut(&mut self) -> Option<&mut D> {
         match self {
             Self::Options(draft) => Some(draft),
-            Self::Progress { .. } => None,
+            Self::Closed | Self::Progress { .. } => None,
         }
     }
 
@@ -41,10 +46,27 @@ impl<D, P: PartialEq> ExportBox<D, P> {
         matches!(self, Self::Options(_))
     }
 
-    /// Leave the options form (Cancel, close, started) and forget the
-    /// progress drawn.
-    pub(super) fn reset(&mut self) {
-        *self = Self::default();
+    /// Whether the running export's progress is on screen.
+    pub(super) fn is_progress(&self) -> bool {
+        matches!(self, Self::Progress { .. })
+    }
+
+    /// Leave the box (Cancel, close, Hide, Done, the export is gone).
+    pub(super) fn close(&mut self) {
+        *self = Self::Closed;
+    }
+
+    /// The export is gone: close the progress, but leave an options form.
+    pub(super) fn end_progress(&mut self) {
+        if self.is_progress() {
+            *self = Self::Closed;
+        }
+    }
+
+    /// Show the running export's progress (an export started, or the box
+    /// opened over a running one).
+    pub(super) fn show_progress(&mut self) {
+        *self = Self::Progress { seen: None };
     }
 
     /// Record `progress` as drawn; whether it differs from the last one.
@@ -55,14 +77,7 @@ impl<D, P: PartialEq> ExportBox<D, P> {
                 *seen = Some(progress);
                 changed
             }
-            Self::Options(_) => false,
-        }
-    }
-
-    /// Forget the progress drawn (the export is gone).
-    pub(super) fn forget_seen(&mut self) {
-        if let Self::Progress { seen } = self {
-            *seen = None;
+            Self::Closed | Self::Options(_) => false,
         }
     }
 }

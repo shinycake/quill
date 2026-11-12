@@ -61,7 +61,7 @@ fn frames(cx: &mut VisualTestContext) {
 fn show_menu_with(
     app: &Entity<QuillApp>,
     cx: &mut VisualTestContext,
-    state: MessageReactionsState,
+    state: Option<MessageReactionsState>,
 ) {
     cx.update(|window, cx| {
         app.update(cx, |app, cx| {
@@ -75,7 +75,11 @@ fn show_menu_with(
                 cx,
             );
             if let Some(session) = app.demo_session.as_mut() {
-                session.stickers.message_reaction_options = state;
+                let book = &mut session.stickers.message_reaction_options;
+                match state {
+                    Some(state) => book.set(CHAT, MESSAGE, state),
+                    None => book.forget(CHAT, MESSAGE),
+                }
             }
             cx.notify();
         });
@@ -91,14 +95,7 @@ fn has(cx: &mut VisualTestContext, id: &'static str) -> bool {
 fn strip_is_absent_when_the_options_are_unavailable(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
-    show_menu_with(
-        &app,
-        vcx,
-        MessageReactionsState::Unavailable {
-            chat_id: CHAT,
-            message_id: MESSAGE,
-        },
-    );
+    show_menu_with(&app, vcx, Some(MessageReactionsState::Unavailable));
     assert!(has(vcx, "menu-reply"));
     assert!(!has(vcx, "reaction-strip"));
     assert!(!has(vcx, "reaction-strip-loading"));
@@ -108,7 +105,7 @@ fn strip_is_absent_when_the_options_are_unavailable(cx: &mut TestAppContext) {
 fn strip_is_absent_when_nothing_was_asked(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
-    show_menu_with(&app, vcx, MessageReactionsState::Idle);
+    show_menu_with(&app, vcx, None);
     assert!(has(vcx, "menu-reply"));
     assert!(!has(vcx, "reaction-strip"));
     assert!(!has(vcx, "reaction-strip-loading"));
@@ -121,10 +118,9 @@ fn placeholder_shows_only_while_loading(cx: &mut TestAppContext) {
     show_menu_with(
         &app,
         vcx,
-        MessageReactionsState::Loading {
-            chat_id: CHAT,
-            message_id: MESSAGE,
-        },
+        Some(MessageReactionsState::Loading {
+            request: quill::ids::RequestId(1),
+        }),
     );
     assert!(has(vcx, "reaction-strip-loading"));
     assert!(!has(vcx, "reaction-strip"));
@@ -134,7 +130,7 @@ fn placeholder_shows_only_while_loading(cx: &mut TestAppContext) {
 fn strip_shows_once_the_options_are_ready(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
-    show_menu_with(&app, vcx, MessageReactionsState::Idle);
+    show_menu_with(&app, vcx, None);
     app.update(vcx, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {
             crate::ui::demos::reaction_fixtures::seed_reaction_options(session, CHAT, MESSAGE);
@@ -150,7 +146,7 @@ fn strip_shows_once_the_options_are_ready(cx: &mut TestAppContext) {
 fn ready_options_of_another_message_draw_no_strip(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
-    show_menu_with(&app, vcx, MessageReactionsState::Idle);
+    show_menu_with(&app, vcx, None);
     app.update(vcx, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {
             crate::ui::demos::reaction_fixtures::seed_reaction_options(
@@ -191,11 +187,14 @@ fn opening_the_menu_shows_the_strip_and_closing_it_resets_the_options(cx: &mut T
     });
     frames(vcx);
     let state = app.read_with(vcx, |app, _| {
-        app.demo_session
-            .as_ref()
-            .map(|s| s.stickers.message_reaction_options.clone())
+        app.demo_session.as_ref().map(|s| {
+            s.stickers
+                .message_reaction_options
+                .state(CHAT, MESSAGE)
+                .cloned()
+        })
     });
-    assert_eq!(state, Some(MessageReactionsState::Idle));
+    assert_eq!(state, Some(None));
     assert!(!has(vcx, "reaction-strip"));
 }
 
@@ -206,10 +205,9 @@ fn clicking_away_resets_the_options_like_escape(cx: &mut TestAppContext) {
     show_menu_with(
         &app,
         vcx,
-        MessageReactionsState::Loading {
-            chat_id: CHAT,
-            message_id: MESSAGE,
-        },
+        Some(MessageReactionsState::Loading {
+            request: quill::ids::RequestId(1),
+        }),
     );
     assert!(has(vcx, "reaction-strip-loading"));
     vcx.simulate_click(point(px(20.), px(20.)), Modifiers::default());
@@ -217,18 +215,21 @@ fn clicking_away_resets_the_options_like_escape(cx: &mut TestAppContext) {
     let (menu_open, state) = app.read_with(vcx, |app, _| {
         (
             app.message_ui.menu.is_open(),
-            app.demo_session
-                .as_ref()
-                .map(|s| s.stickers.message_reaction_options.clone()),
+            app.demo_session.as_ref().map(|s| {
+                s.stickers
+                    .message_reaction_options
+                    .state(CHAT, MESSAGE)
+                    .cloned()
+            }),
         )
     });
     assert!(!menu_open);
-    assert_eq!(state, Some(MessageReactionsState::Idle));
+    assert_eq!(state, Some(None));
     assert!(!has(vcx, "reaction-strip-loading"));
 }
 
 /// The reducer state a real driver reaches: ask, then ingest TDLib's reply.
-fn driver_state(answer: bool) -> MessageReactionsState {
+fn driver_state(answer: bool) -> Option<MessageReactionsState> {
     let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
     let recorder = Arc::new(RecordingSender::new());
     let credentials = TelegramCredentials {
@@ -275,7 +276,12 @@ fn driver_state(answer: bool) -> MessageReactionsState {
             ),
         );
     }
-    driver.session.stickers.message_reaction_options.clone()
+    driver
+        .session
+        .stickers
+        .message_reaction_options
+        .state(CHAT, MESSAGE)
+        .cloned()
 }
 
 fn show_driver_state(cx: &mut TestAppContext, answer: bool) -> (bool, bool) {

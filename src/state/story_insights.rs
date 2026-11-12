@@ -7,41 +7,42 @@ use crate::telegram::requests_story_insights::StoryLocationAddress;
 
 /// Fetch state of the `getStoryStatistics` answer. Only the answer or the
 /// error of the request it waits for moves it.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub enum StoryStatsFetch {
-    /// The request waited for; `None` until it is sent.
-    Loading(Option<RequestId>),
+    /// Not asked for yet; the driver sends the request in the same call that
+    /// starts the insights, which moves it to `Loading` (or `Failed`).
+    #[default]
+    Idle,
+    /// The request waited for.
+    Loading {
+        request: RequestId,
+    },
     Loaded(StoryStatisticsView),
     Failed(String),
-}
-
-impl Default for StoryStatsFetch {
-    fn default() -> Self {
-        Self::Loading(None)
-    }
 }
 
 impl StoryStatsFetch {
     /// Whether `request` is the one this fetch waits for.
     pub(crate) fn waits_for(&self, request: RequestId) -> bool {
-        matches!(self, Self::Loading(Some(waiting)) if *waiting == request)
+        matches!(self, Self::Loading { request: waiting } if *waiting == request)
     }
 }
 
-/// One page request of a paged list: idle, waiting for its own answer
-/// (`None` between starting the list and sending the request), or failed
-/// with the text the panel draws.
+/// One page request of a paged list: idle, waiting for its own answer, or
+/// failed with the text the panel draws.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub enum PageFetch {
     #[default]
     Idle,
-    Loading(Option<RequestId>),
+    Loading {
+        request: RequestId,
+    },
     Failed(String),
 }
 
 impl PageFetch {
     pub fn is_loading(&self) -> bool {
-        matches!(self, Self::Loading(_))
+        matches!(self, Self::Loading { .. })
     }
 
     pub fn error(&self) -> Option<&str> {
@@ -53,7 +54,7 @@ impl PageFetch {
 
     /// Whether `id` is the request this page waits for.
     pub(crate) fn waits_for(&self, id: RequestId) -> bool {
-        matches!(self, Self::Loading(Some(waiting)) if *waiting == id)
+        matches!(self, Self::Loading { request: waiting } if *waiting == id)
     }
 }
 
@@ -197,7 +198,7 @@ impl Session {
             && state.chat_id == chat_id
             && state.story_id == story_id
         {
-            state.statistics = StoryStatsFetch::Loading(Some(request));
+            state.statistics = StoryStatsFetch::Loading { request };
         }
     }
 
@@ -235,7 +236,7 @@ impl Session {
     }
 
     fn insights_for(&mut self, pending: &PendingRequest) -> Option<&mut StoryInsightsState> {
-        let (chat_id, story_id) = (pending.chat_id?, pending.story_id?);
+        let (chat_id, story_id) = (pending.chat_id?, pending.story_id()?);
         self.stories
             .insights
             .as_mut()
@@ -306,14 +307,14 @@ impl Session {
             stories: Vec::new(),
             total_count: 0,
             next_offset: String::new(),
-            page: PageFetch::Loading(None),
+            page: PageFetch::Idle,
         });
     }
 
     /// The open search sent `request` for its next page.
     pub fn story_search_sent(&mut self, request: RequestId) {
         if let Some(search) = self.stories.search.as_mut() {
-            search.page = PageFetch::Loading(Some(request));
+            search.page = PageFetch::Loading { request };
         }
     }
 
@@ -323,13 +324,6 @@ impl Session {
             .search
             .as_mut()
             .filter(|search| search.page.waits_for(pending.id))
-    }
-
-    /// Mark the next page of the open search as requested.
-    pub fn story_search_page_requested(&mut self) {
-        if let Some(search) = self.stories.search.as_mut() {
-            search.page = PageFetch::Loading(None);
-        }
     }
 
     /// The open search could not send its page: the pages stay and the

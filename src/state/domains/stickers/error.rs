@@ -119,13 +119,11 @@ impl Session {
         {
             self.finish_sticker_batch_item(pending.id, false);
         }
-        if let Some(RequestPurpose::Stickers(StickersPurpose::ManageStickerSet {
-            set_id,
-            installed,
-            archived,
-        })) = pending.map(|p| p.purpose)
+        if let Some(pending) = pending
+            && let RequestPurpose::Stickers(StickersPurpose::ManageStickerSet { set_id, .. }) =
+                pending.purpose
         {
-            self.finish_set_change(set_id, SetChange::of(installed, archived), false);
+            self.finish_set_change(pending.id, set_id, false);
         }
         self.fail_mask_request(pending);
         self.fail_sticker_creator(err, pending);

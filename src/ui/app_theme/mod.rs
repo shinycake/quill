@@ -158,10 +158,10 @@ pub(crate) struct AppThemeUi {
     /// Custom themes in the themes folder, read when the chooser first
     /// shows and after every change.
     pub(super) custom: CustomThemes,
-    /// The custom themes read last, the newest at the end: name and
-    /// palette (`None` when the file could not be read). Two, so a custom
-    /// day theme and a custom night theme both stay read.
-    custom_cache: Vec<(String, Option<Palette>)>,
+    /// The custom themes read last, the newest at the end: name and what
+    /// the read gave. Two, so a custom day theme and a custom night theme
+    /// both stay read.
+    custom_cache: Vec<(String, CachedPalette)>,
     /// The custom theme being read off the UI thread, by name.
     palette_read: Option<(String, Task<()>)>,
     /// The theme and palette applied last (outside high contrast).
@@ -189,12 +189,24 @@ pub(super) enum CustomThemes {
     Read(Vec<CustomTheme>),
 }
 
+/// What the read of one custom theme file gave.
+enum CachedPalette {
+    Ready(Palette),
+    /// The file could not be read. It stands for the appearance pass that
+    /// read it and is forgotten right after (`forget_failed`), so the next
+    /// pass reads the file again.
+    Failed,
+}
+
 impl AppThemeUi {
-    fn cached_palette(&self, name: &str) -> Option<&Option<Palette>> {
+    fn cached_palette(&self, name: &str) -> Option<Option<Palette>> {
         self.custom_cache
             .iter()
             .find(|(cached, _)| cached == name)
-            .map(|(_, palette)| palette)
+            .map(|(_, cached)| match cached {
+                CachedPalette::Ready(palette) => Some(palette.clone()),
+                CachedPalette::Failed => None,
+            })
     }
 
     fn cache_palette(&mut self, name: String, palette: Option<Palette>) {
@@ -202,7 +214,15 @@ impl AppThemeUi {
         if self.custom_cache.len() >= 2 {
             self.custom_cache.remove(0);
         }
-        self.custom_cache.push((name, palette));
+        let cached = palette.map_or(CachedPalette::Failed, CachedPalette::Ready);
+        self.custom_cache.push((name, cached));
+    }
+
+    /// Forget a failed read of `name`, so the next appearance pass reads it
+    /// again.
+    fn forget_failed(&mut self, name: &str) {
+        self.custom_cache
+            .retain(|(cached, state)| cached != name || !matches!(state, CachedPalette::Failed));
     }
 }
 

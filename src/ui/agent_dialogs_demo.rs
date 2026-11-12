@@ -2,7 +2,7 @@
 //! over the ready chat list (injected, no live Telegram).
 #![deny(clippy::indexing_slicing)]
 
-use super::agent_state::AllChatsConsent;
+use super::agent_state::{AgentBox, AllChatsConsent};
 use super::app::QuillApp;
 use gpui_kit::*;
 use quill::agent::grants::Scope;
@@ -62,7 +62,7 @@ fn demo_consent(app: &mut QuillApp, _: &mut Window, cx: &mut Context<QuillApp>) 
     quill::fast_buttons::set_persistence(false);
     quill::agent::access::set_enabled(true);
     app.open_settings(Some(quill::settings_catalog::Page::AgentAccess), cx);
-    app.agent_ui.consent = Some(AllChatsConsent {
+    app.agent_ui.shown = AgentBox::Consent(AllChatsConsent {
         account: super::agent_state::active_account(),
         scope: Scope::Read,
     });

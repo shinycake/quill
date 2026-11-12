@@ -271,6 +271,13 @@ impl super::app::QuillApp {
     pub(super) fn sync_call_sounds(&mut self) {
         use quill::telegram::envelope::CallState;
         let Some(session) = self.session() else {
+            // No session to ring for: only a call ringing on a background
+            // account keeps the loop, so a lost session never leaves its
+            // ring (and the output hold) behind.
+            let ring = self.background_ring_audible();
+            self.calls
+                .sounds
+                .keep_looping(ring.then_some(CallSound::Incoming));
             return;
         };
         let (call, summary) = (

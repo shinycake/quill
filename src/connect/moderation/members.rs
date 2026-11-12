@@ -32,24 +32,31 @@ impl<S: JsonSender> ConnectDriver<S> {
         query: &str,
         refresh: bool,
     ) -> Result<Option<RequestId>, ConnectSendError> {
+        let key = (chat_id.0, filter);
         if !self.chats_path_active() {
-            self.session.groups.supergroup_members.insert(
-                (chat_id.0, filter),
+            self.session.groups.set_member_fetch(
+                key,
                 SupergroupMembersFetch::NotSent(send_failed_line("Could not load members")),
             );
             return Err(ConnectSendError::InvalidRequest);
         }
         if filter.requires_restrict_right() && !self.session.chat_can_restrict_members(chat_id) {
+            self.session.groups.drop_stale_member_list(key);
             return Ok(None);
         }
         let supergroup_id = match self.session.chats.get(&chat_id.0) {
             Some(chat) => match chat.kind {
                 ChatKind::Supergroup { supergroup_id, .. } => supergroup_id,
-                _ => return Ok(None),
+                _ => {
+                    self.session.groups.drop_stale_member_list(key);
+                    return Ok(None);
+                }
             },
-            None => return Ok(None),
+            None => {
+                self.session.groups.drop_stale_member_list(key);
+                return Ok(None);
+            }
         };
-        let key = (chat_id.0, filter);
         let purpose = RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembers { filter });
         // The same list for the same query is asked once; a search for
         // another query is sent even while the last one is in flight, and
@@ -58,15 +65,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         if same_query
             && !refresh
             && (matches!(
-                self.session.groups.supergroup_members.get(&key),
+                self.session.groups.member_fetch(key),
                 Some(SupergroupMembersFetch::Loaded { .. })
             ) || self
                 .session
                 .groups
-                .supergroup_members
-                .get(&key)
-                .is_some_and(SupergroupMembersFetch::in_flight)
-                || self.session.requests.has_purpose_for_chat(purpose, chat_id))
+                .member_fetch(key)
+                .is_some_and(SupergroupMembersFetch::in_flight))
         {
             return Ok(None);
         }
@@ -74,12 +79,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // while this one is out; a send that is refused puts back what was
         // there, with how it was asked.
         let previous = self.session.groups.supergroup_members.get(&key).cloned();
-        let previous_ask = self.session.groups.member_asks.get(&key).cloned();
         let extra = self.session.request(purpose, Some(chat_id));
-        self.session
-            .groups
-            .supergroup_members
-            .insert(key, SupergroupMembersFetch::asked(previous.clone(), extra));
         self.session.groups.note_member_first(key, extra, query);
         let filter_json = match filter {
             MemberListFilter::Recent => supergroup_members_filter_recent_json(),
@@ -103,20 +103,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             // so the box that asked draws Retry instead of "Loading".
             let groups = &mut self.session.groups;
             match previous {
-                Some(page) => {
-                    groups.supergroup_members.insert(key, page);
-                    match previous_ask {
-                        Some(ask) => groups.member_asks.insert(key, ask),
-                        None => groups.member_asks.remove(&key),
-                    };
+                // A stale list the send could not refresh is not stale for
+                // good: it says so with Retry instead of asking every poll.
+                Some(list) if !matches!(list.fetch, SupergroupMembersFetch::Stale { .. }) => {
+                    groups.restore_member_list(key, Some(list))
                 }
-                None => {
-                    groups.supergroup_members.insert(
-                        key,
-                        SupergroupMembersFetch::NotSent(send_failed_line("Could not load members")),
-                    );
-                    groups.note_member_refused(key, query);
-                }
+                _ => groups.note_member_refused(key, query),
             }
             return Err(err);
         }
@@ -151,9 +143,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         let basic_group_id = match self.session.chats.get(&chat_id.0) {
             Some(chat) => match chat.kind {
                 ChatKind::BasicGroup { basic_group_id } => basic_group_id,
-                _ => return Ok(None),
+                _ => {
+                    self.session.groups.drop_stale_basic_members(chat_id.0);
+                    return Ok(None);
+                }
             },
-            None => return Ok(None),
+            None => {
+                self.session.groups.drop_stale_basic_members(chat_id.0);
+                return Ok(None);
+            }
         };
         let purpose = RequestPurpose::GetBasicGroupFullInfo;
         if self
@@ -164,7 +162,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             .is_some_and(|fetch| {
                 matches!(fetch, SupergroupMembersFetch::Loaded { .. }) || fetch.in_flight()
             })
-            || self.session.requests.has_purpose_for_chat(purpose, chat_id)
         {
             return Ok(None);
         }

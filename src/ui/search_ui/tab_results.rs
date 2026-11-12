@@ -264,7 +264,7 @@ impl QuillApp {
 
     /// The Posts tab's "N free searches left today".
     pub(super) fn posts_quota_line(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let limits = self.session()?.search.search.tabs.limits?;
+        let limits = self.session()?.search.search.tabs.limits()?;
         Some(
             div()
                 .id("search-posts-quota")
@@ -385,7 +385,7 @@ impl QuillApp {
                     .into_any_element(),
             );
         }
-        let limits = search.tabs.limits?;
+        let limits = search.tabs.limits()?;
         if limits.star_count <= 0 {
             return None;
         }

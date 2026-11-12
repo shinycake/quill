@@ -1,6 +1,6 @@
 //! State reducer tests: histories of chats nobody is looking at are
 //! bounded (`state::history_prune`).
-use super::common::{AtomicU64, MemorySink, apply_json, session};
+use super::common::{AtomicU64, MemorySink, accept_reply, apply_json, reject_reply, session};
 use super::{
     Arc, CLOSED_CHATS_MAX, CLOSED_TAIL_CAP, CLOSED_TAIL_KEEP, CLOSED_TOPICS_MAX,
     ChannelMemberStatus, ChatId, HashMap, InfoPanelTarget, MemberListFilter, MessageContent,
@@ -225,9 +225,15 @@ fn a_kept_tail_keeps_the_replied_messages_of_rows_paged_out() {
     feed(&mut session, 7, 200);
     // Rows 10 and 190 reply to messages outside the window; 50's original
     // is gone.
-    session.accept_replied_message(ChatId(7), MessageId(10), live(7, 3));
-    session.accept_replied_message(ChatId(7), MessageId(190), live(7, 4));
-    session.reject_replied_message(ChatId(7), MessageId(50), 400, std::time::Instant::now());
+    accept_reply(&mut session, ChatId(7), MessageId(10), live(7, 3));
+    accept_reply(&mut session, ChatId(7), MessageId(190), live(7, 4));
+    reject_reply(
+        &mut session,
+        ChatId(7),
+        MessageId(50),
+        400,
+        std::time::Instant::now(),
+    );
     switch(&mut session, 8);
     assert_eq!(len(&session, 7), CLOSED_TAIL_KEEP);
     // Coming back scrolled up pages rows 10 and 50 in again: their strips
@@ -248,8 +254,8 @@ fn a_dropped_chat_forgets_its_pinned_list_and_replied_messages() {
         switch(&mut session, chat);
         feed(&mut session, chat, 80);
         // Row 5 leaves with the tail trim, row 80 stays in the tail.
-        session.accept_replied_message(ChatId(chat), MessageId(5), live(chat, 1));
-        session.accept_replied_message(ChatId(chat), MessageId(80), live(chat, 2));
+        accept_reply(&mut session, ChatId(chat), MessageId(5), live(chat, 1));
+        accept_reply(&mut session, ChatId(chat), MessageId(80), live(chat, 2));
         let pinned = session.histories[&chat].messages[&80].clone();
         session
             .messages
@@ -271,7 +277,7 @@ fn translate(session: &mut Session, chat: i64, message: i64) {
         chat_id: chat,
         message_id: message,
     };
-    let (job, _) = session.begin_translation(target, "en", Some(ChatId(chat)));
+    let job = session.begin_translation(target, "en", Some(ChatId(chat)));
     let done = Translation::Done {
         text: "t".into(),
         entities: Vec::new(),
@@ -302,7 +308,7 @@ fn a_dropped_chat_forgets_its_translations() {
         chat_id: 1,
         message_id: 7,
     };
-    let (late, _) = session.begin_translation(target, "en", Some(ChatId(1)));
+    let late = session.begin_translation(target, "en", Some(ChatId(1)));
     leave(&mut session);
     assert!(!session.histories.contains_key(&1), "the oldest went");
     assert!(!translated(&session, 1, 5));
@@ -323,7 +329,7 @@ fn a_forum_keeps_its_replied_messages_until_its_last_topic_goes() {
     let (mut session, _sink) = session();
     session.topic_history_entry(ChatId(70), 1);
     session.topic_history_entry(ChatId(70), 2);
-    session.accept_replied_message(ChatId(70), MessageId(5), live(70, 1));
+    accept_reply(&mut session, ChatId(70), MessageId(5), live(70, 1));
     // Topics of other chats push chat 70's topics out of the LRU, oldest
     // first.
     session.topic_history_entry(ChatId(71), 1);
@@ -631,7 +637,7 @@ fn fill_side_tables(session: &mut Session, seq: &AtomicU64, sink: &Arc<MemorySin
         session
             .groups
             .supergroup_members
-            .insert((chat, filter), loaded());
+            .insert((chat, filter), crate::state::MemberList::of("", loaded()));
     }
     session.groups.basic_group_members.insert(chat, loaded());
 }
@@ -694,11 +700,6 @@ fn side_tables_of_dropped_chats_go_back_to_empty() {
     for (table, chats) in side_table_chats(&session).iter().enumerate() {
         assert!(chats.is_empty(), "table {table} still holds {chats:?}");
     }
-    let stale = &session.groups.member_list_stale;
-    assert!(
-        (1..=visited).all(|chat| stale.contains(&chat)),
-        "an open member dialog of a dropped chat asks again"
-    );
 }
 
 /// The UI holds the group the info panel shows (`ui::history_holds`): a
@@ -782,7 +783,6 @@ fn a_chat_an_open_box_holds_keeps_its_member_lists() {
         held.iter().all(|chats| chats.contains(&1)),
         "the box's lists stay: {held:?}"
     );
-    assert!(!session.groups.member_list_stale.contains(&1));
     // The box closes: the chat is an ordinary closed tail from then on.
     session.set_history_holds([]);
     churn(&mut session, 100);
@@ -804,10 +804,13 @@ fn a_forum_forgets_its_side_tables_with_its_last_topic() {
         .insert(70, HashMap::from([(0, 3)]));
     session.groups.supergroup_members.insert(
         (70, MemberListFilter::Recent),
-        SupergroupMembersFetch::Loaded {
-            members: Vec::new(),
-            total_count: 200,
-        },
+        crate::state::MemberList::of(
+            "",
+            SupergroupMembersFetch::Loaded {
+                members: Vec::new(),
+                total_count: 200,
+            },
+        ),
     );
     assert!(side_table_chats(&session)[0].contains(&70));
     for topic in 1..=CLOSED_TOPICS_MAX as i32 {
@@ -964,17 +967,17 @@ fn a_translation_job_whose_request_is_gone_fails_and_frees_its_place() {
         chat_id: 1,
         message_id,
     };
-    let (lost, lost_request) = session.begin_translation(target(5), "en", Some(ChatId(1)));
-    let (live, _live_request) = session.begin_translation(target(6), "en", Some(ChatId(1)));
+    let lost = session.begin_translation(target(5), "en", Some(ChatId(1)));
+    let live = session.begin_translation(target(6), "en", Some(ChatId(1)));
     // The first request left without an answer (a restarted client).
-    session.requests.take(lost_request);
+    session.requests.take(lost);
     session.fail_orphaned_translations();
     assert!(
         !session
             .messages
             .translate
-            .pending_jobs()
-            .any(|job| job == lost)
+            .pending_requests()
+            .any(|request| request == lost)
     );
     assert!(matches!(
         session.message_translation(ChatId(1), MessageId(5), "en"),
@@ -984,8 +987,8 @@ fn a_translation_job_whose_request_is_gone_fails_and_frees_its_place() {
         session
             .messages
             .translate
-            .pending_jobs()
-            .any(|job| job == live),
+            .pending_requests()
+            .any(|request| request == live),
         "a job still asking keeps its place"
     );
 }
@@ -997,7 +1000,7 @@ fn a_failed_translation_is_asked_again_by_the_pump_a_bounded_number_of_times() {
     let (chat, message) = (ChatId(5), MessageId(9));
     assert!(session.needs_translation(chat, message, "en"));
     for round in 1..=TRANSLATE_PUMP_ATTEMPTS {
-        let (job, _) = session.begin_translation(
+        let job = session.begin_translation(
             TranslateTarget::Message {
                 chat_id: chat.0,
                 message_id: message.0,
@@ -1032,4 +1035,41 @@ fn hiding_ads_does_not_drop_a_report_in_flight() {
         Some(report),
         "the report still waits for its answer"
     );
+}
+
+#[test]
+fn a_replaced_translation_ignores_the_older_request_s_answer() {
+    let (mut session, _sink) = session();
+    let target = || TranslateTarget::Message {
+        chat_id: 1,
+        message_id: 5,
+    };
+    let older = session.begin_translation(target(), "en", Some(ChatId(1)));
+    let newer = session.begin_translation(target(), "en", Some(ChatId(1)));
+    session.finish_translation(
+        older,
+        Translation::Done {
+            text: "old".into(),
+            entities: Vec::new(),
+        },
+    );
+    assert_eq!(
+        session.message_translation(ChatId(1), MessageId(5), "en"),
+        Some(&Translation::Pending {
+            request: newer,
+            attempts: 0
+        }),
+        "the older answer does not settle the newer ask"
+    );
+    session.finish_translation(
+        newer,
+        Translation::Done {
+            text: "new".into(),
+            entities: Vec::new(),
+        },
+    );
+    assert!(matches!(
+        session.message_translation(ChatId(1), MessageId(5), "en"),
+        Some(Translation::Done { text, .. }) if text == "new"
+    ));
 }

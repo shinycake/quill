@@ -12,6 +12,7 @@
 #[cfg(test)]
 mod cpal_stream_tests;
 pub(super) mod engine;
+mod engine_build;
 mod opus;
 mod output;
 mod tempo;

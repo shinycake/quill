@@ -22,27 +22,28 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.sticker_box.encoding.is_running() {
+        if self.sticker_box.editing.encoding_running()
+            || self.sticker_box.editing.create().is_none()
+        {
             return false;
         }
         let cancel = Arc::new(AtomicBool::new(false));
-        self.sticker_box.encoding.start(cancel.clone());
         self.set_note(StatusNote::silent(ENCODING_NOTE));
         let kind = create.kind;
-        let mine = cancel.clone();
+        let flag = cancel.clone();
         let worker = cx.background_spawn(async move {
+            // Owned from the worker on: a step already running when the
+            // box closes still finishes, and dropping the result removes it.
             encode_sticker(&job.source, &job.edits, &job.info, kind, &cancel)
+                .map(|encoded| quill::scratch::OwnedFile::new(encoded.path))
         });
-        self.spawn_screen_in(window, cx, async move |this, cx| {
-            // Removed with the continuation when the screen is gone.
-            let result = worker
-                .await
-                .map(|encoded| quill::scratch::OwnedFile::new(encoded.path));
+        let job = self.spawn_screen_in(window, cx, async move |this, cx| {
+            let result = worker.await;
             let _ = this.update_in(cx, |this, window, cx| {
-                // The box moved on (closed, or another sticker): the
-                // result is nobody's.
-                let running = this.sticker_box.encoding.finish(&mine);
-                let current = this.sticker_box.create.as_ref() == Some(&create) && running;
+                // The box moved on (closed, or another sticker) cancels
+                // this task with its stage, so what lands here is the
+                // running encode's.
+                let current = this.sticker_box.editing.finish_encoding();
                 match result {
                     Ok(encoded) if current => {
                         let uploaded = CreateSticker {
@@ -68,8 +69,10 @@ impl QuillApp {
                 }
                 cx.notify();
             });
-        })
-        .detach();
+        });
+        self.sticker_box
+            .editing
+            .start_encoding(super::state::Encoding::running(flag, job));
         cx.notify();
         false
     }
@@ -84,19 +87,19 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(pending) = self.sticker_box.pending.downloading() else {
+        let Some(pending) = self.sticker_box.editing.downloading() else {
             return;
         };
         let host = pending.window;
         if host.is_some_and(|chat| !self.windows.has(chat)) {
-            self.sticker_box.pending = crate::ui::sticker_set_box::state::PickWait::None;
+            self.sticker_box.editing.end_wait();
             return;
         }
         if host != self.windows.scope {
             return;
         }
         if !self.sticker_set_open() {
-            self.sticker_box.pending = crate::ui::sticker_set_box::state::PickWait::None;
+            self.sticker_box.editing.end_wait();
             return;
         }
         let Some(path) = self.local_media_path(pending.file_id) else {
@@ -110,7 +113,7 @@ impl QuillApp {
                     .ended_without_file(ended.0, &session.media.files)
             });
             if failed {
-                self.sticker_box.pending = crate::ui::sticker_set_box::state::PickWait::None;
+                self.sticker_box.editing.end_wait();
                 self.set_note(StatusNote::error(tr(
                     keys::Q_OPS_COULD_NOT_DOWNLOAD_PLEASE_TRY,
                 )));
@@ -118,7 +121,7 @@ impl QuillApp {
             }
             return;
         };
-        let Some(pending) = self.sticker_box.pending.take_downloading() else {
+        let Some(pending) = self.sticker_box.editing.take_downloading() else {
             return;
         };
         let super::state::PendingVideo {

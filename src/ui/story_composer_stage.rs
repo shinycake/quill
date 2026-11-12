@@ -37,7 +37,7 @@ impl QuillApp {
     }
 
     /// `request` is still waiting for TDLib's answer.
-    fn story_request_pending(&self, request: RequestId) -> bool {
+    pub(super) fn story_request_pending(&self, request: RequestId) -> bool {
         self.session()
             .is_some_and(|s| s.requests.get(request).is_some())
     }

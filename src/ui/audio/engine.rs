@@ -17,15 +17,21 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::sync::atomic::AtomicBool;
+#[cfg(test)]
+use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(test)]
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::{self, TryRecvError};
 use std::time::{Duration, Instant};
 
 use quill::playback::PlaybackClock;
-use rodio::{ChannelCount, SampleRate, Source};
 
-use super::tempo::{SharedSpeed, Tempo};
-use super::{AudioError, Outlet, OutputPlayer, SharedOutput, open_decoded};
+use super::engine_build::{
+    BuildEnd, Building, Built, CancelOnDrop, Landing, Track, build_paused_player,
+};
+use super::tempo::SharedSpeed;
+use super::{AudioError, SharedOutput};
 
 /// What the engine is doing right now.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -84,227 +90,131 @@ impl EngineClock {
     }
 }
 
-/// Frames the mixer has taken from a track, as an absolute position.
-#[derive(Debug, Default)]
-struct Probe {
-    frames: AtomicU64,
-    /// Of `frames`, those the speed stretcher has read but not yet played.
-    lag: Arc<AtomicU64>,
-    rate: AtomicU32,
-}
-
-impl Probe {
-    fn secs(&self) -> f64 {
-        let rate = self.rate.load(Ordering::Relaxed).max(1);
-        let played = self
-            .frames
-            .load(Ordering::Relaxed)
-            .saturating_sub(self.lag.load(Ordering::Relaxed));
-        played as f64 / f64::from(rate)
-    }
-}
-
-/// Frames are published in batches, so the audio thread does one atomic add
-/// per few milliseconds of sound.
-const PUBLISH_FRAMES: u64 = 256;
-
-/// Counts the frames pulled through it. Sits below the speed stretcher, so
-/// the count is in track time whatever the speed, and the stretcher reports
-/// how far it has read ahead ([`Probe::lag`]).
-struct Counted<S: Source> {
-    inner: S,
-    probe: Arc<Probe>,
-    channels: u64,
-    samples: u64,
-    pending: u64,
-}
-
-impl<S: Source> Counted<S> {
-    /// `start_secs` is where `inner` already sits.
-    fn new(inner: S, probe: Arc<Probe>, start_secs: f64) -> Self {
-        let rate = inner.sample_rate().get();
-        probe.rate.store(rate, Ordering::Relaxed);
-        probe
-            .frames
-            .store((start_secs * f64::from(rate)) as u64, Ordering::Relaxed);
-        let channels = u64::from(inner.channels().get());
-        Self {
-            inner,
-            probe,
-            channels,
-            samples: 0,
-            pending: 0,
-        }
-    }
-
-    fn publish(&mut self) {
-        if self.pending > 0 {
-            self.probe.frames.fetch_add(self.pending, Ordering::Relaxed);
-            self.pending = 0;
-        }
-    }
-}
-
-impl<S: Source> Iterator for Counted<S> {
-    type Item = f32;
-
-    fn next(&mut self) -> Option<f32> {
-        let sample = self.inner.next();
-        if sample.is_some() {
-            self.samples += 1;
-            if self.samples >= self.channels {
-                self.samples = 0;
-                self.pending += 1;
-                if self.pending >= PUBLISH_FRAMES {
-                    self.publish();
-                }
-            }
-        } else {
-            self.publish();
-        }
-        sample
-    }
-}
-
-impl<S: Source> Source for Counted<S> {
-    fn current_span_len(&self) -> Option<usize> {
-        self.inner.current_span_len()
-    }
-
-    fn channels(&self) -> ChannelCount {
-        self.inner.channels()
-    }
-
-    fn sample_rate(&self) -> SampleRate {
-        self.inner.sample_rate()
-    }
-
-    fn total_duration(&self) -> Option<Duration> {
-        self.inner.total_duration()
-    }
-}
-
-/// A freshly built player and the probe counting its frames.
-struct Built {
-    player: Arc<OutputPlayer>,
-    probe: Arc<Probe>,
-}
-
-/// One loaded track: its player and its position probe. Dropping it stops
-/// the sound.
-struct Track {
-    player: Arc<OutputPlayer>,
-    probe: Arc<Probe>,
-}
-
-impl Drop for Track {
-    fn drop(&mut self) {
-        self.player.stop();
-    }
-}
-
-/// What the sound a build brings does once it lands, and so what the old
-/// sound does meanwhile: `AudioEngine::set_landing` sets both.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Landing {
-    /// It plays on landing; the old sound plays on until then.
-    Playing,
-    /// It lands paused; the old sound is paused already.
-    Held,
-}
-
-struct Building {
-    built_for: f64,
-    latest_target: f64,
-    landing: Landing,
-    built: Receiver<Result<Built, AudioError>>,
-    _cancel: CancelOnDrop,
-}
-
-/// Tells the build thread nobody waits for it any more (a stop, a newer
-/// start), so it skips the seek scan and the player.
-struct CancelOnDrop(Arc<AtomicBool>);
-
-impl Drop for CancelOnDrop {
-    fn drop(&mut self) {
-        self.0.store(true, Ordering::Relaxed);
-    }
-}
-
-/// The build thread's end. Dropped on a return and on a panic alike, it
-/// closes the channel before it wakes the app, so the landing the wake
-/// brings finds the result or the dead thread.
-struct BuildEnd {
-    done: Option<mpsc::Sender<Result<Built, AudioError>>>,
-    wake: Option<fn()>,
-}
-
-impl BuildEnd {
-    fn send(&self, result: Result<Built, AudioError>) {
-        if let Some(done) = &self.done {
-            let _ = done.send(result);
-        }
-    }
-}
-
-impl Drop for BuildEnd {
-    fn drop(&mut self) {
-        self.done = None;
-        if let Some(wake) = self.wake {
-            wake();
-        }
-    }
-}
-
-fn build_paused_player(
-    outlet: &Outlet,
-    path: &Path,
-    offset: f64,
-    speed: &SharedSpeed,
-    cancelled: &AtomicBool,
-) -> Result<Built, AudioError> {
-    // A cancelled build's answer goes nowhere, so any error will do.
-    let check = || {
-        if cancelled.load(Ordering::Relaxed) {
-            Err(AudioError::Open)
-        } else {
-            Ok(())
-        }
-    };
-    check()?;
-    let probe = Arc::new(Probe::default());
-    let mut decoded = open_decoded(path, cancelled)?;
-    check()?;
-    // Seeked below `Counted`, so its `try_seek` answers only the player's
-    // seeks. A source that can't seek starts from the top.
-    let start = if offset > 0.05 && decoded.try_seek(Duration::from_secs_f64(offset)).is_ok() {
-        offset
-    } else {
-        0.0
-    };
-    check()?;
-    let source = Tempo::new(Counted::new(decoded, probe.clone(), start), speed.clone())
-        .reporting_lag(probe.lag.clone());
-    let player = outlet.player();
-    player.pause();
-    player.append(source);
-    Ok(Built {
-        player: Arc::new(player),
-        probe,
-    })
-}
-
-/// Whether the sound is where the track is.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Standing {
+/// The sound of a device run and whether it is where the track is. One
+/// value, so a track and its standing cannot disagree.
+#[derive(Default)]
+enum Sound {
+    /// Nothing loaded.
+    #[default]
+    Empty,
     /// The sound is the track's: the position reads from it.
-    Current,
+    Current(Track),
     /// Seeked while paused: the sound still sits at the old position, so
     /// resuming restarts it at `parked_secs`.
-    Stale,
+    Stale(Track),
     /// The start or the last build failed: nothing plays, the position is
-    /// parked.
-    Failed,
+    /// parked. The track that ran out stays loaded, when there was one.
+    Failed(Option<Track>),
+}
+
+impl Sound {
+    fn track(&self) -> Option<&Track> {
+        match self {
+            Self::Current(track) | Self::Stale(track) => Some(track),
+            Self::Failed(track) => track.as_ref(),
+            Self::Empty => None,
+        }
+    }
+
+    fn is_failed(&self) -> bool {
+        matches!(self, Self::Failed(_))
+    }
+
+    /// The sound is the track's (or there is none).
+    fn is_current(&self) -> bool {
+        matches!(self, Self::Empty | Self::Current(_))
+    }
+
+    /// Nothing is consuming the track: none loaded, or it ran out.
+    fn ended(&self) -> bool {
+        self.track().is_none_or(|track| track.player.empty())
+    }
+
+    /// A start is on its way: a failure no longer stands.
+    fn recovered(self) -> Self {
+        match self {
+            Self::Failed(Some(track)) => Self::Current(track),
+            Self::Failed(None) => Self::Empty,
+            other => other,
+        }
+    }
+}
+
+/// What the engine has: the device's sound, the same sound with a build on
+/// its way, or the device-less demo run. One value, so no build can run
+/// beside a simulation and a landing replaces the sound in one step.
+enum Playback {
+    Settled(Sound),
+    /// A start or seek is being built; `sound` plays on meanwhile.
+    Building {
+        build: Building,
+        sound: Sound,
+    },
+    Simulated(SimRun),
+}
+
+impl Playback {
+    fn sound(&self) -> Option<&Sound> {
+        match self {
+            Self::Settled(sound) | Self::Building { sound, .. } => Some(sound),
+            Self::Simulated(_) => None,
+        }
+    }
+
+    fn track(&self) -> Option<&Track> {
+        self.sound().and_then(Sound::track)
+    }
+
+    fn building(&self) -> Option<&Building> {
+        match self {
+            Self::Building { build, .. } => Some(build),
+            _ => None,
+        }
+    }
+
+    fn building_mut(&mut self) -> Option<&mut Building> {
+        match self {
+            Self::Building { build, .. } => Some(build),
+            _ => None,
+        }
+    }
+
+    fn run(&self) -> Option<&SimRun> {
+        match self {
+            Self::Simulated(run) => Some(run),
+            _ => None,
+        }
+    }
+
+    fn run_mut(&mut self) -> Option<&mut SimRun> {
+        match self {
+            Self::Simulated(run) => Some(run),
+            _ => None,
+        }
+    }
+
+    /// The sound, leaving a settled empty one: a running build is dropped
+    /// (it is cancelled) and a simulation goes.
+    fn take_sound(&mut self) -> Sound {
+        match std::mem::replace(self, Self::Settled(Sound::Empty)) {
+            Self::Settled(sound) | Self::Building { sound, .. } => sound,
+            Self::Simulated(_) => Sound::Empty,
+        }
+    }
+
+    /// The running build, leaving its sound settled.
+    fn take_build(&mut self) -> Option<Building> {
+        match std::mem::replace(self, Self::Settled(Sound::Empty)) {
+            Self::Building { build, sound } => {
+                *self = Self::Settled(sound);
+                Some(build)
+            }
+            other => {
+                *self = other;
+                None
+            }
+        }
+    }
 }
 
 /// Why the last start, resume or seek did not work, and whether the start
@@ -351,14 +261,6 @@ impl Fault {
     }
 }
 
-/// The backend a track was started on, chosen at `begin`.
-enum Backend {
-    /// The audio device (`track` and `building`).
-    Device,
-    /// The device-less demo run.
-    Simulated(SimRun),
-}
-
 /// A simulated track: its clock, and when the first seek that hangs was
 /// posted (it ends with the run).
 struct SimRun {
@@ -366,45 +268,26 @@ struct SimRun {
     stalled_since: Option<Duration>,
 }
 
-impl Backend {
-    fn run(&self) -> Option<&SimRun> {
-        match self {
-            Self::Simulated(run) => Some(run),
-            Self::Device => None,
-        }
-    }
-
-    fn run_mut(&mut self) -> Option<&mut SimRun> {
-        match self {
-            Self::Simulated(run) => Some(run),
-            Self::Device => None,
-        }
-    }
-}
-
 /// One track's player: play, pause, seek, volume and speed.
 pub(in crate::ui) struct AudioEngine {
     output: SharedOutput,
-    track: Option<Track>,
-    building: Option<Building>,
+    /// The track, its build and its sound: one stage.
+    playback: Playback,
     on_built: Option<fn()>,
     clock: EngineClock,
     /// The track, kept after a failed start so Play can try again.
     path: Option<PathBuf>,
     speed: SharedSpeed,
     volume: f32,
-    /// Whether the sound is where the track is.
-    standing: Standing,
     /// Where the track is when no player is consuming it (stopped, failed,
     /// seeked while paused).
     parked_secs: f64,
-    /// Why the last start, resume or seek did not work. The row's error line
-    /// reads only this.
+    /// Why the last start, resume or seek did not work: a log the row's
+    /// error line reads, independent of the stage (a failed seek leaves the
+    /// old sound playing).
     fault: Fault,
     /// Set by the screenshot demos only.
     simulation: Option<Simulation>,
-    /// Which sound backend the running track uses.
-    backend: Backend,
     /// The time the simulation keeps: the app's clock (`set_sim_time`),
     /// which tests drive; the wall clock until one is set.
     sim_time: Option<Box<dyn Fn() -> Instant>>,
@@ -422,18 +305,15 @@ impl AudioEngine {
     pub(in crate::ui) fn new(output: SharedOutput) -> Self {
         Self {
             output,
-            track: None,
-            building: None,
+            playback: Playback::Settled(Sound::Empty),
             on_built: None,
             clock: EngineClock::new(),
             path: None,
             speed: SharedSpeed::new(1.0),
             volume: 1.0,
-            standing: Standing::Current,
             parked_secs: 0.0,
             fault: Fault::None,
             simulation: None,
-            backend: Backend::Device,
             sim_time: None,
             sim_duration: 0.0,
             #[cfg(test)]
@@ -479,7 +359,7 @@ impl AudioEngine {
 
     fn sim_stalled(&self) -> bool {
         let now = self.clock.now();
-        self.backend
+        self.playback
             .run()
             .and_then(|run| run.stalled_since)
             .is_some_and(|since| now.saturating_sub(since) >= SIM_STALL_AFTER)
@@ -494,60 +374,55 @@ impl AudioEngine {
 
     /// What the track is doing, read from the sound itself.
     pub(in crate::ui) fn state(&self) -> EngineState {
-        if self.standing == Standing::Failed {
-            return EngineState::Failed;
-        }
-        if let Some(run) = self.backend.run() {
-            let clock = &run.clock;
-            return if clock.finished_at(self.sim_now()) {
-                EngineState::Ended
-            } else if clock.is_playing() {
-                EngineState::Playing
-            } else {
-                EngineState::Paused
-            };
-        }
-        if let Some(building) = &self.building {
-            return if building.landing == Landing::Held {
-                EngineState::Paused
-            } else {
-                EngineState::Loading
-            };
-        }
-        match self.track.as_ref().map(|t| &t.player) {
-            None => EngineState::Idle,
+        let sound = match &self.playback {
+            Playback::Simulated(run) => {
+                let clock = &run.clock;
+                return if clock.finished_at(self.sim_now()) {
+                    EngineState::Ended
+                } else if clock.is_playing() {
+                    EngineState::Playing
+                } else {
+                    EngineState::Paused
+                };
+            }
+            Playback::Building { build, sound } => {
+                return if sound.is_failed() {
+                    EngineState::Failed
+                } else if build.landing == Landing::Held {
+                    EngineState::Paused
+                } else {
+                    EngineState::Loading
+                };
+            }
+            Playback::Settled(sound) => sound,
+        };
+        match sound {
+            Sound::Empty => EngineState::Idle,
+            Sound::Failed(_) => EngineState::Failed,
             // Seeked while paused: the sound still sits at the old position
             // (a track that ran out reads empty), and Play restarts it.
-            Some(_) if self.standing == Standing::Stale => EngineState::Paused,
-            Some(player) if player.is_paused() => EngineState::Paused,
-            Some(player) if player.empty() => EngineState::Ended,
-            Some(_) => EngineState::Playing,
+            Sound::Stale(_) => EngineState::Paused,
+            Sound::Current(track) if track.player.is_paused() => EngineState::Paused,
+            Sound::Current(track) if track.player.empty() => EngineState::Ended,
+            Sound::Current(_) => EngineState::Playing,
         }
     }
 
     /// Where the track is, in seconds of the track: frames the mixer took,
     /// or the parked position when nothing is consuming it.
     pub(in crate::ui) fn position_secs(&self) -> f64 {
-        if let Some(run) = self.backend.run() {
-            return run.clock.elapsed_secs_at(self.sim_now());
+        match &self.playback {
+            Playback::Simulated(run) => run.clock.elapsed_secs_at(self.sim_now()),
+            Playback::Building { build, .. } => build.latest_target,
+            Playback::Settled(Sound::Current(track)) => track.probe.secs(),
+            Playback::Settled(_) => self.parked_secs,
         }
-        if let Some(building) = &self.building {
-            return building.latest_target;
-        }
-        let Some(track) = self
-            .track
-            .as_ref()
-            .filter(|_| self.standing == Standing::Current)
-        else {
-            return self.parked_secs;
-        };
-        track.probe.secs()
     }
 
     /// A start or seek is being built; the position is its target until
     /// it lands.
     pub(in crate::ui) fn seek_pending(&self) -> bool {
-        self.building.is_some()
+        self.playback.building().is_some()
     }
 
     /// Tests: an engine whose clock is the returned handle (milliseconds).
@@ -575,7 +450,7 @@ impl AudioEngine {
 
     #[cfg(test)]
     pub(in crate::ui) fn await_build_done(&mut self) {
-        if let Some(building) = self.building.as_mut() {
+        if let Some(building) = self.playback.building_mut() {
             let result = building.built.recv().unwrap_or(Err(AudioError::Open));
             let (done, built) = mpsc::channel();
             let _ = done.send(result);
@@ -585,7 +460,7 @@ impl AudioEngine {
 
     #[cfg(test)]
     pub(in crate::ui) fn await_landing(&mut self) {
-        while let Some(building) = &self.building {
+        while let Some(building) = self.playback.building() {
             let result = building.built.recv().unwrap_or(Err(AudioError::Open));
             self.land(result);
         }
@@ -599,7 +474,7 @@ impl AudioEngine {
         self.land_build();
         // Starts and resumes return while the device opens off the UI
         // thread; this is where one that couldn't open shows.
-        if let Some(track) = self.track.as_ref().filter(|t| t.player.lost()) {
+        if let Some(track) = self.playback.track().filter(|t| t.player.lost()) {
             track.player.pause();
             self.fault.seen(AudioError::NoOutput);
         }
@@ -635,18 +510,22 @@ impl AudioEngine {
         #[cfg(not(test))]
         drop(thread);
         self.fault.build_started();
-        self.building = Some(Building {
-            built_for: target,
-            latest_target: target,
-            landing,
-            built,
-            _cancel: cancel,
-        });
+        let sound = self.playback.take_sound();
+        self.playback = Playback::Building {
+            build: Building {
+                built_for: target,
+                latest_target: target,
+                landing,
+                built,
+                _cancel: cancel,
+            },
+            sound,
+        };
         Ok(())
     }
 
     fn land_build(&mut self) {
-        let Some(building) = &self.building else {
+        let Some(building) = self.playback.building() else {
             return;
         };
         match building.built.try_recv() {
@@ -662,7 +541,7 @@ impl AudioEngine {
             latest_target: target,
             landing,
             ..
-        }) = self.building.take()
+        }) = self.playback.take_build()
         else {
             return;
         };
@@ -677,11 +556,10 @@ impl AudioEngine {
                 if !playing {
                     built.player.pause();
                 }
-                self.track = Some(Track {
+                self.playback = Playback::Settled(Sound::Current(Track {
                     player: built.player,
                     probe: built.probe,
-                });
-                self.standing = Standing::Current;
+                }));
                 if playing {
                     self.fault.worked();
                 } else {
@@ -692,16 +570,20 @@ impl AudioEngine {
     }
 
     fn fail_build(&mut self, error: AudioError, target: f64) {
-        let ended = self.track.as_ref().is_none_or(|t| t.player.empty());
-        let silent = ended || self.standing == Standing::Stale;
+        let Playback::Settled(sound) = &mut self.playback else {
+            return;
+        };
+        let ended = sound.ended();
+        let silent = ended || matches!(sound, Sound::Stale(_));
         if silent {
             self.parked_secs = target;
         }
-        if ended {
-            self.standing = Standing::Failed;
-        } else if self.standing == Standing::Failed {
-            self.standing = Standing::Current;
-        }
+        // Nothing is playing: the track that ran out stays, failed.
+        *sound = match std::mem::take(sound) {
+            Sound::Current(track) | Sound::Stale(track) if ended => Sound::Failed(Some(track)),
+            Sound::Empty => Sound::Failed(None),
+            other => other,
+        };
         self.fault = if silent {
             Fault::Unseen(error)
         } else {
@@ -738,11 +620,9 @@ impl AudioEngine {
         let offset = offset_secs.max(0.0);
         self.parked_secs = offset;
         let started = self.begin(offset);
-        self.standing = if started.is_err() {
-            Standing::Failed
-        } else {
-            Standing::Current
-        };
+        if started.is_err() {
+            self.playback = Playback::Settled(Sound::Failed(None));
+        }
         self.note(&started);
         started
     }
@@ -758,7 +638,7 @@ impl AudioEngine {
             clock.set_rate_at(f64::from(self.speed.get()), now);
             clock.seek_at(offset, now);
             clock.resume_at(now);
-            self.backend = Backend::Simulated(SimRun {
+            self.playback = Playback::Simulated(SimRun {
                 clock,
                 stalled_since: None,
             });
@@ -769,7 +649,10 @@ impl AudioEngine {
 
     /// True while a track is loaded (playing or paused, ended or not).
     pub(in crate::ui) fn is_loaded(&self) -> bool {
-        self.track.is_some() || self.building.is_some() || self.backend.run().is_some()
+        match &self.playback {
+            Playback::Settled(sound) => sound.track().is_some(),
+            Playback::Building { .. } | Playback::Simulated(_) => true,
+        }
     }
 
     /// The loaded track played to its end.
@@ -780,11 +663,11 @@ impl AudioEngine {
     pub(in crate::ui) fn pause(&mut self) {
         self.settle();
         let now = self.sim_now();
-        if let Some(run) = self.backend.run_mut() {
+        if let Some(run) = self.playback.run_mut() {
             run.clock.pause_at(now);
         }
         self.set_landing(Landing::Held);
-        if let Some(track) = &self.track {
+        if let Some(track) = self.playback.track() {
             track.player.pause();
         }
     }
@@ -792,20 +675,29 @@ impl AudioEngine {
     /// While a build runs: what its sound does on landing, and the old
     /// sound with it, so the two cannot disagree. No build, no change.
     fn set_landing(&mut self, landing: Landing) {
-        let Some(building) = self.building.as_mut() else {
+        let Playback::Building { build, sound } = &mut self.playback else {
             return;
         };
-        building.landing = landing;
-        let Some(track) = &self.track else {
+        build.landing = landing;
+        let Some(track) = sound.track() else {
             return;
         };
         match landing {
             Landing::Held => track.player.pause(),
-            Landing::Playing if self.standing != Standing::Stale => {
+            Landing::Playing if !matches!(sound, Sound::Stale(_)) => {
                 track.player.play();
             }
             Landing::Playing => {}
         }
+    }
+
+    /// A start went out: a failure of the sound no longer stands.
+    fn recover_sound(&mut self) {
+        let sound = match &mut self.playback {
+            Playback::Settled(sound) | Playback::Building { sound, .. } => sound,
+            Playback::Simulated(_) => return,
+        };
+        *sound = std::mem::take(sound).recovered();
     }
 
     /// Continue from the pause; restarts at `offset_secs` when the sound is
@@ -815,7 +707,7 @@ impl AudioEngine {
     pub(in crate::ui) fn resume(&mut self, offset_secs: f64) -> Result<(), AudioError> {
         self.settle();
         let now = self.sim_now();
-        if let Some(run) = self.backend.run_mut() {
+        if let Some(run) = self.playback.run_mut() {
             if run.clock.finished_at(now) {
                 run.clock.seek_at(0.0, now);
             }
@@ -823,29 +715,32 @@ impl AudioEngine {
             self.fault.worked();
             return Ok(());
         }
-        if self.building.is_some() {
+        if self.playback.building().is_some() {
             self.set_landing(Landing::Playing);
             self.fault.worked();
             return Ok(());
         }
-        let ended = self.track.as_ref().is_none_or(|t| t.player.empty());
-        if self.standing != Standing::Current || ended {
+        let Some(sound) = self.playback.sound() else {
+            return Ok(());
+        };
+        let (ended, current) = (sound.ended(), sound.is_current());
+        if !current || ended {
             if self.path.is_none() {
                 return Ok(());
             }
-            let at = if ended && self.standing == Standing::Current {
+            let at = if ended && current {
                 0.0
             } else {
                 offset_secs.max(0.0)
             };
             let started = self.begin(at);
-            if started.is_ok() && self.standing == Standing::Failed {
-                self.standing = Standing::Current;
+            if started.is_ok() {
+                self.recover_sound();
             }
             self.note(&started);
             return started;
         }
-        if let Some(track) = &self.track
+        if let Some(track) = self.playback.track()
             && !track.player.play()
         {
             track.player.pause();
@@ -876,20 +771,23 @@ impl AudioEngine {
     fn seek_to(&mut self, offset_secs: f64, playing: bool) -> Result<(), AudioError> {
         let offset = offset_secs.max(0.0);
         let now = self.sim_now();
-        if let Some(run) = self.backend.run_mut() {
+        if let Some(run) = self.playback.run_mut() {
             run.clock.seek_at(offset, now);
             if self.simulation.is_some_and(|simulation| simulation.stall) {
                 run.stalled_since.get_or_insert(self.clock.now());
             }
             return Ok(());
         }
-        if let Some(building) = self.building.as_mut() {
+        if let Some(building) = self.playback.building_mut() {
             building.latest_target = offset;
             return Ok(());
         }
         if !playing {
-            if self.standing == Standing::Current {
-                self.standing = Standing::Stale;
+            if let Playback::Settled(sound) = &mut self.playback {
+                *sound = match std::mem::take(sound) {
+                    Sound::Current(track) => Sound::Stale(track),
+                    other => other,
+                };
             }
             self.parked_secs = offset;
             return Ok(());
@@ -902,7 +800,7 @@ impl AudioEngine {
 
     pub(in crate::ui) fn set_volume(&mut self, volume: f32) {
         self.volume = volume.clamp(0.0, 1.0);
-        if let Some(track) = &self.track {
+        if let Some(track) = self.playback.track() {
             track.player.set_volume(self.volume);
         }
     }
@@ -911,18 +809,15 @@ impl AudioEngine {
     pub(in crate::ui) fn set_speed(&mut self, speed: f64) {
         self.speed.set(speed);
         let now = self.sim_now();
-        if let Some(run) = self.backend.run_mut() {
+        if let Some(run) = self.playback.run_mut() {
             run.clock.set_rate_at(speed, now);
         }
     }
 
     pub(in crate::ui) fn stop(&mut self) {
         self.parked_secs = self.position_secs();
-        self.track = None;
-        self.building = None;
-        self.backend = Backend::Device;
+        self.playback = Playback::Settled(Sound::Empty);
         self.path = None;
-        self.standing = Standing::Current;
         self.fault = Fault::None;
     }
 }
@@ -1155,7 +1050,7 @@ mod tests {
         let _open = engine.gate_builds();
         let path = track("loading-died.wav", 4);
         engine.start(&path, 1.0, 1.0, 1.0, 4.0).unwrap();
-        if let Some(building) = engine.building.as_mut() {
+        if let Some(building) = engine.playback.building_mut() {
             building.built = mpsc::channel().1;
         }
         engine.settle();
@@ -1187,7 +1082,7 @@ mod tests {
         let open = engine.gate_builds();
         let path = track("loading-after-died.wav", 4);
         engine.start(&path, 1.0, 1.0, 1.0, 4.0).unwrap();
-        if let Some(building) = engine.building.as_mut() {
+        if let Some(building) = engine.playback.building_mut() {
             building.built = mpsc::channel().1;
         }
         engine.settle();

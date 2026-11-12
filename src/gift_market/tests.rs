@@ -138,7 +138,7 @@ fn resale_page_parses_and_sorts_counts() {
     assert_eq!(page.attributes.models[0].item.name, "B");
     assert_eq!(page.attributes.backdrops[0].item.name, "Onyx");
     let mut search = ResaleSearch::new(55, ResaleFilter::default(), true);
-    search.load.begin(1, false);
+    search.load.begin(crate::ids::RequestId(1), false);
     search.apply(page.clone(), Some(42), false);
     // Craft mode drops the user's own listings (owner 42 here).
     assert!(search.listings.is_empty());
@@ -157,7 +157,7 @@ fn a_failed_second_page_still_offers_show_more() {
     assert!(!search.has_more());
     search.load = PageLoad::Idle;
     search.next_offset = "50".into();
-    search.load.begin(1, false);
+    search.load.begin(crate::ids::RequestId(1), false);
     assert!(!search.has_more(), "a page in flight is not asked again");
     search.load = PageLoad::Ready;
     assert!(search.has_more(), "page 1 landed");
@@ -670,11 +670,15 @@ fn the_buy_box_is_one_stage_from_view_to_the_purchase_and_back() {
     buy.go(BuyStep::Confirm);
     assert_eq!(buy.stage, BuyStage::Confirm);
     buy.begin_send(5);
-    assert!(buy.sending() && buy.waits_for(5) && !buy.waits_for(6));
+    assert!(
+        buy.sending()
+            && buy.waits_for(crate::ids::RequestId(5))
+            && !buy.waits_for(crate::ids::RequestId(6))
+    );
     assert_eq!(buy.step(), BuyStep::Confirm);
     // Back during the purchase leaves it out; its answer still lands.
     buy.go(BuyStep::Send);
-    assert!(buy.waits_for(5));
+    assert!(buy.waits_for(crate::ids::RequestId(5)));
     // A refusal with a new price shows it and moves to Grams for TON.
     buy.price_increased(Some(GiftPrice::TonCents(250)));
     assert_eq!(buy.price_changed(), Some(GiftPrice::TonCents(250)));

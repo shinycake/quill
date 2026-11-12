@@ -266,6 +266,55 @@ class Requests(unittest.TestCase):
             ["purpose:Driver::fetch", "purpose:Driver::fetch", "unmatched:Session::apply"],
         )
 
+    def test_a_counter_in_a_purpose_variant_fails(self):
+        files = {
+            "src/state/domains/a/purpose.rs": (
+                "pub enum ChatsPurpose {\n"
+                "    DeepLinkInfo { generation: u64 },\n"
+                "    Labels {\n        epoch: Option<u32>,\n    },\n"
+                "    Plain { request: RequestId },\n"
+                "    Id(u64),\n"
+                "}\n"
+                "pub enum Stage { Jump { generation: u64 } }\n"
+            ),
+            "src/ui/a_demo.rs": "pub enum DemoPurpose { Seed { token: u8 } }\n",
+        }
+        self.assertEqual(
+            keys(requests, files),
+            ["counter:ChatsPurpose::DeepLinkInfo", "counter:ChatsPurpose::Labels"],
+        )
+
+
+    def test_a_purpose_with_a_counter_stands_in_for_the_request_id(self):
+        files = {
+            "src/state/domains/a/purpose.rs": (
+                "pub enum APurpose {\n"
+                "    Lookup { generation: u64 },\n"
+                "    Resolve,\n"
+                "    Box { token: u64 },\n"
+                "    Keyed { chat_id: i64, offset: i32 },\n"
+                "}\n"
+            ),
+            "src/state/domains/a/state.rs": "pub struct S { pub token: u64 }\n",
+            # A purpose enum in a file whose name has no "purpose" in it.
+            "src/feature/mod.rs": (
+                "pub struct Own { pub generation: u64 }\n"
+                "pub enum PickerPurpose {\n"
+                "    Search { generation: u64 },\n"
+                "    Tile,\n"
+                "}\n"
+                "pub enum Plain { Go { token: u64 } }\n"
+            ),
+        }
+        self.assertEqual(
+            keys(requests, files),
+            [
+                "counter:APurpose::Box",
+                "counter:APurpose::Lookup",
+                "counter:PickerPurpose::Search",
+            ],
+        )
+
 
 class Enums(unittest.TestCase):
     def test_in_flight_variants_must_hold_a_request_or_a_task(self):
@@ -281,6 +330,27 @@ class Enums(unittest.TestCase):
             "src/telegram/envelope/a.rs": "pub enum CallState { Pending, Ready }\n",
         }
         self.assertEqual(keys(enums, files), ["bare:Load::Loading", "unkeyed:Gate::Asking"])
+
+    def test_a_u64_standing_in_for_a_request_id_fails(self):
+        files = {
+            "src/state/a.rs": (
+                "pub enum Fetch { Idle, Loading { request: u64 } }\n"
+                "pub enum Fetch2 { Idle, Waiting { chat: ChatId, serial: u64 } }\n"
+                "pub enum Sound { Idle, Ready { generation: u64 } }\n"
+                "pub enum Good { Idle, Loading { request: RequestId }, Ready { count: u64 } }\n"
+                "pub enum UsersPurpose { Check { generation: u64 } }\n"
+            ),
+        }
+        self.assertEqual(
+            keys(enums, files),
+            [
+                "rawid:Fetch2::Waiting",
+                "rawid:Fetch::Loading",
+                "rawid:Sound::Ready",
+                "unkeyed:Fetch2::Waiting",
+                "unkeyed:Fetch::Loading",
+            ],
+        )
 
 
 if __name__ == "__main__":
