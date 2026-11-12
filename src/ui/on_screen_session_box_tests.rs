@@ -249,7 +249,7 @@ fn refusal_after_leaving(
         cx.notify();
     });
     app.update(vcx, |app, cx| reopen(app, cx));
-    let after_reopen = app.read_with(vcx, |app, _| app.demo_session.as_ref().and_then(&line));
+    let after_reopen = app.read_with(vcx, |app, _| app.demo_session.as_deref().and_then(&line));
     after_reopen
 }
 
