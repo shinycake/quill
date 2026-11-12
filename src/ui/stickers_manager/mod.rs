@@ -201,7 +201,7 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             session.stickers.stickers.open = true;
             session.stickers.stickers.tab = StickerTab::Installed;
-            session.stickers.manager.open = true;
+            session.stickers.manager.covers.show();
         }
         cx.notify();
     }
@@ -269,7 +269,7 @@ impl QuillApp {
             }
             live.driver.set_sticker_manager_open(false);
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.stickers.manager.open = false;
+            session.stickers.manager.covers.hide();
             apply_demo_commit(session, kind, &removed, order.as_deref());
         }
         if sent {

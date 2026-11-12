@@ -10220,3 +10220,58 @@ add and closed link save), `composer_sends_tests` (an ack never takes a
 neighbour's clear), `chat_window::asker_tests` (gif ask settles; two
 windows keep their own link text), `forum_extras::tests` (both answer
 orders), `deep_link_routes_tests` (seek stays with its account).
+
+### Sweep fixes (r4-05)
+
+| Ids | What changed |
+| --- | --- |
+| g-030, g-029 | `CarrierStage` is a value under a lock, not a byte in an atomic: `Starting { deadline }` carries the start budget (`overdue` reads it) and `Closing` is `Closed` (Quill closed it; nothing is in flight). |
+| g-043 | `WebRowState` is `WebRowView`: the row's text and colour, computed on every draw from the entry and the carrier report, never stored. |
+| 07-002, g-038 | `RichHtmlStage::Running { done: Receiver }`: the worker's end is the channel. A worker that dies drops its sender, which reads as `Failed`; the guard that wrote `Failed` by hand is gone. |
+| 07-001 | Skipped: `EndGuard` runs on every way the watcher thread ends (return, a caught panic, a thread that did not start), which `a_watcher_that_panics_still_ends_its_watch` drives. A thread that never runs the guard cannot happen outside process exit. |
+| g-037 | `PinTarget::NotLoaded`: a lookup result (the pinned message is not in the cache), not work in flight. |
+| 07-005, g-056 | `Writer::Running { drainer, in_flight }` holds the writer's `JoinHandle` (or `Caller` when `flush` drains itself). A thread that finished without clearing the stage reads as not running, so the next submit starts a writer. |
+| 07-003, g-046 | `Beats::Running { waiting: Vec<Waiter> }`: a launch waits on a channel the UI beat sends on; `stop` drops the senders (answered), and a launch that gave up is pruned by its deadline. The beat counter is gone. |
+| 07-006 | `spell_catalog::install` writes both files as `.part`, moves the old `.aff` aside, and puts it back when the `.dic` cannot be placed (test `a_failed_dic_rename_restores_the_old_aff`). |
+| 07-004, g-053, g-054 | `RowState` / `RowDownload` are `RowView` / `RowDownloadView`: inputs and outputs of `build_rows`, drawn per frame. The download itself is the manager's `DictDownload`, which holds the task. |
+| g-032 | `spell_download::Progress::start()` returns the progress and a `Worker`; the stage is `Running { ended: Receiver }`, `Cancelling { ended }`, `Done`, `Cancelled`, settled when the worker's end drops (return, panic, or a job that never ran). The atomic byte and `finish()` are gone; the emoji set download uses the same pair. |
+| g-047 | `BotStopStage::Streaming { can_stop }`: TDLib's own pending state, not a request of ours. |
+| g-027, g-028 | `CallRating::Rated` and `CallUpload::Uploaded` are the finished states. |
+| g-049 | `CallTransport::Attempt(CallLink)`: the engine's own report, ended by its next state report. |
+| 07-007 | `settle_lost_request` removes the `InstantViewAsk` of a lost `getWebPageInstantView` and queues the browser fallback, as an error answer does (test `a_swept_instant_view_request_falls_back_to_the_browser`). |
+| g-035, g-039, g-040 | `OutboxReceiptView` and `RowStatusIcon`: marks derived on every draw. |
+| g-031, g-050 | `ConferenceStage::Standalone` and `Handover(ConferenceUpgrade)`. |
+| g-017 | The countries fetch records its request (`begin_with`) and the answer is taken through `answered`. |
+| 08-003 | `BotText` names the request of each stage (`Loading`, `Loaded`, `Saved`, `Failed`); `BotEditTexts::asked` and the `saved` counter are derived from them (`asked()`, `has_saved()`). |
+| 08-001, g-045, g-048, g-051, g-001, g-002 | `BotUsernameCheck::Checking { request, username }` and `CreateStage::Creating { request, submission }`; `CheckBotUsername` / `CreateBot` purposes carry nothing, and the three generation counters are gone. A reset replaces the state, so an older answer finds no request (test `each_create_waits_for_its_own_request_and_a_reset_never_adopts_an_older_one`). |
+| g-003 | Widget queries are answered by `WidgetAnswer::Query { request }`; the UI maps the request to the runtime's token (`Live::queries`). The process-wide token counter is gone. |
+| g-018 | `chat_lists_for_add` records its request and takes the answer through `answered`. |
+| 08-004 | `ChatListState::archive_settings_open` is gone: the box is `SettingsBox::ArchiveSettings` in the account's `SettingsUi`, which the farewell closes. |
+| 08-005 | A handled add-chat request is marked only while a page is out and the mark goes with that page's answer, so a chat that asks again is listed (test `a_chat_that_asks_again_after_being_handled_is_listed`). |
+| g-042 | `TypeSave` stages name their request; `NewChatState::type_saves` is a private list with `watch_type_save`, `type_save_done`, `type_save_failed`. |
+| g-011 | `PrivateSharingState::answering` records each Accept / Reject under its request; the answer, error or loss frees the buttons. |
+| 08-018 | `GroupsState::member_actions` (`MemberActions { since, error, add_failed }`) replaces `add_members_failed` and `member_action_error`; the dialog opening sets `since`, and a failure of an earlier request lands nowhere (test `a_late_member_action_error_never_lands_on_a_newer_dialog`). |
+| g-014, g-016, g-019, g-015, g-021, g-020 | Pushed truth (`welcome pack`, `unpin all`, `donors`, `ton wallet state`) is `Fetch::pushed`; answers (`earn` self stats, quick reply shortcuts) are taken by `answered` with the request their sender records. |
+| g-036, g-033 | `Phase::Wanted` (an intent, not a request) and `DownloadStatusView` (derived). |
+| 08-006 | `DiskSearch::Failed { until, wait }` backs off (doubling) instead of going back to `NotAsked` (test `a_refused_saved_pause_search_backs_off`). |
+| 08-016 | The poll option menu's `properties` fetch holds the request (`begin_with`); a reopened menu takes only the newer ask's answer (test `a_reopened_option_menu_takes_only_its_newer_answer`). |
+| 08-017 | Not a bug: opening the menu calls `fetch_message_menu_actions`, which forgets the fail-closed answer before asking again (test `a_failed_menu_ask_is_forgotten_when_the_menu_opens_again`). |
+| g-024, g-025, g-034 | The giveaway options begin each list next to its request (`retarget` + `begin_with`); `GiveawayLaunch::NeedsVerification` waits on the person at the provider, not on a request. |
+| g-012 | `SuggestedPostsState::deciding` records each approve or decline under its request; answer, error or loss frees the post. |
+| g-007, g-008 | The in-chat search holds its request in the stage: `ChatSearchPhase::Typing` (quiet window) then `Searching { request }`, and `ChatSearchPaging::Loading { from, request }`. `ChatSearchState::generation`, `Correlation::Search` and `matches_generation` are gone; `search_waits_for` / `more_waits_for` compare the request. |
+| g-004, 08-007, 08-015, g-026 | `CalendarPaging::Loading { request }`; `HistoryCalendar::accept(request, ..)` / `fail(request)` take only the request that asked. The calendar generation counter is gone. |
+| 08-008, g-006 | `BotLookup` has no generation: the three fetches hold their requests and a new lookup replaces them. |
+| 08-009, g-005, g-022, g-023 | The blocked-senders page is taken by the fetch that waits for it (`apply_blocked_page(.., request, ..)`); a restart replaces the fetch. |
+| g-010, g-009 | A list that changed forgets the request its fetch waited for (`outdate`, a replaced fetch); the registry entry is no longer taken by purpose, and the saved-sounds sender asks by `wants_fetch`. |
+| 08-014, g-055 | `StoryFetch::Asked { request, wait }`; `getStory` records the ask where it sends, and only that request's failure acts. |
+| g-013 | `ForumTopicsMap::insert` is a fixture (`cfg(test)` / demo); the answer is `answered`. |
+| g-041 | `SaveWatch` keeps one `SaveAnswer` per request, each naming it. |
+| 08-011 | `SettingsState::pending_alerts: Vec<OsAlert>` (queued once, taken by the notifier) replaces `pending_attention`. |
+| 08-010 | `DataStorageDisk::{Saved, Due, Unsaved}` replaces `data_storage_dirty`. |
+| g-052 | The unused `ListEdit` is deleted (`ListOp` is the type in use). |
+| 08-012 | `StickersManager::covers: ManagerCovers { Hidden, Shown { requested } }` replaces `open` + `covers_requested`. `EmojiPanel::open` is skipped: the dialog's predicate, the driver and the farewell all read that one flag; nothing mirrors it. |
+| g-ia-ignore_battery_saving | `BatterySaver::{Follow, Ignore}` (stored as the bool it was). |
+| 08-013, g-044 | `Fetch::Loading { request: RequestId }`, built by `begin_with(request)`; `begin()` and `sent()` are gone. About 180 call sites moved from `begin(); .. sent(x)` to `begin_with(x)` where the request is registered; a few derived views (`business_own_info`, the GIF search, the stat chart) take the request from the registry or hold `Idle`. |
+
+Guards: nothing added; `Fetch::pushed` is the named path for pushed values, so `succeed` stays counted by `check-request-match.py`.
+

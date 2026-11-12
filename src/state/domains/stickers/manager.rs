@@ -34,13 +34,55 @@ pub enum CommitStage {
     Sent(RequestId),
 }
 
+/// The thumbnails of the manager box: wanted while a box is on screen, with
+/// the sets already asked for (once each), which go when the box does.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ManagerCovers {
+    #[default]
+    Hidden,
+    Shown {
+        requested: HashSet<i64>,
+    },
+}
+
+impl ManagerCovers {
+    /// A manager box is on screen.
+    pub fn shown(&self) -> bool {
+        matches!(self, Self::Shown { .. })
+    }
+
+    /// The set was already asked for while the box is on screen.
+    pub fn requested(&self, set_id: i64) -> bool {
+        matches!(self, Self::Shown { requested } if requested.contains(&set_id))
+    }
+
+    /// The box is on screen; a box that already is keeps what it asked.
+    pub fn show(&mut self) {
+        if !self.shown() {
+            *self = Self::Shown {
+                requested: HashSet::new(),
+            };
+        }
+    }
+
+    pub fn hide(&mut self) {
+        *self = Self::Hidden;
+    }
+
+    /// The set's first sticker was asked for.
+    pub fn note_requested(&mut self, set_id: i64) {
+        if let Self::Shown { requested } = self {
+            requested.insert(set_id);
+        }
+    }
+}
+
 /// What the manager box needs from the driver.
 #[derive(Debug, Clone, Default)]
 pub struct StickersManager {
-    /// The box is on screen: set thumbnails download.
-    pub open: bool,
-    /// Sets whose first sticker has been asked for, once each.
-    pub covers_requested: HashSet<i64>,
+    /// Whether a manager box is on screen (set thumbnails download), and
+    /// the sets whose first sticker was asked for while it is.
+    pub covers: ManagerCovers,
     /// Saved changes not yet sent, oldest first.
     pub commits: VecDeque<ManagerCommit>,
     /// A step of a saved change that did not go through (a refused
@@ -189,5 +231,28 @@ mod commit_stage_tests {
         assert!(!manager.step_out());
         assert_eq!(manager.take_failure(), Some(CommitFailure { masks: false }));
         assert_eq!(manager.take_failure(), None);
+    }
+}
+
+#[cfg(test)]
+mod covers_tests {
+    use super::ManagerCovers;
+
+    /// Sweep 08-012: the thumbnails wanted and the sets already asked for are
+    /// one value, so closing the box forgets the asks and a box that is
+    /// already shown keeps them.
+    #[test]
+    fn the_asked_sets_leave_with_the_box() {
+        let mut covers = ManagerCovers::default();
+        assert!(!covers.shown());
+        covers.note_requested(3);
+        assert!(!covers.requested(3), "nothing is asked while hidden");
+        covers.show();
+        covers.note_requested(3);
+        covers.show();
+        assert!(covers.requested(3), "a box shown twice keeps its asks");
+        covers.hide();
+        covers.show();
+        assert!(covers.shown() && !covers.requested(3));
     }
 }
