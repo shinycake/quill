@@ -10310,3 +10310,10 @@ The agent tests give up with `Ticket::give_up` and read prompts with
 asked: a next page waits for the page out, and a first page replaces a later
 page out (test `a_first_page_asked_while_a_later_one_is_out_replaces_it`). No
 allow, baseline or hotspot line was added.
+
+Round 4 also undid two renames that edited hotspot files (`PaneMode` to
+`PaneView` in `ui/app.rs` and `ui/shell.rs`, `StartupStep` to `StartupOutcome`
+in `main.rs`): those files are the base again, and the baseline line of
+`PaneMode::Connecting` and the allow line of `StartupStep::Waiting` are back
+byte for byte. Earlier rows that name `PaneView` or `StartupOutcome` are
+superseded by this.
