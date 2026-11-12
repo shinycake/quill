@@ -41,6 +41,8 @@ impl QuillApp {
         self.settle_sent_text(window, cx);
         self.settle_checklist_dialog(cx);
         self.settle_poll_add_option(cx);
+        // The poll the voters box shows changed: its list is asked again.
+        self.poll_voters_upkeep();
         self.settle_left_sends(cx);
         self.settle_scheduled_load(cx);
         self.settle_scheduled_deletes(cx);

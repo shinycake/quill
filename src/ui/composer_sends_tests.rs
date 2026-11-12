@@ -53,6 +53,7 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
 
 fn photo(name: &str) -> ComposerAttachment {
     ComposerAttachment {
+        id: Default::default(),
         path: std::env::temp_dir().join(name),
         kind: AttachmentKind::Photo,
         file_name: name.into(),
@@ -294,6 +295,7 @@ fn picture(name: &str) -> PathBuf {
 
 fn attachment_at(path: PathBuf, kind: AttachmentKind) -> ComposerAttachment {
     ComposerAttachment {
+        id: Default::default(),
         file_name: path
             .file_name()
             .and_then(|name| name.to_str())
@@ -1222,4 +1224,46 @@ fn a_recording_alone_in_its_slot_clears_on_its_ack_or_releases() {
         sends.take_draft_clear(&account, MessageId(-9), slot.draft),
         None
     );
+}
+
+/// Sweep r4-10: a tile is found by the identity of its tray entry. The same
+/// photo attached twice is two entries, so after another window removes the
+/// first file the tile drawn for the original does not act on the twin that
+/// slid into its place.
+#[test]
+fn a_tile_finds_its_entry_by_identity_not_by_index_or_path() {
+    use crate::ui::composer_sends::TrayItem;
+    let slot = forum_slot(1);
+    let mut sends = crate::ui::composer_sends::ComposerSends::default();
+    sends.update(&slot, |send| {
+        for name in ["a.jpg", "b.jpg", "b.jpg"] {
+            ComposerAttachment::push_attachment(&mut send.attachments, photo(name));
+        }
+    });
+    let tile = |index: usize| {
+        let attachment = sends.get(&slot).attachments.get(index).expect("an entry");
+        TrayItem {
+            slot: slot.clone(),
+            id: attachment.id,
+            path: attachment.path.clone(),
+        }
+    };
+    let (original, twin) = (tile(1), tile(2));
+    assert_ne!(original, twin, "one file twice is two entries");
+    assert_eq!(sends.tray_index_of(&original), Some(1));
+    sends.update(&slot, |send| {
+        send.attachments.remove(0);
+    });
+    assert_eq!(
+        sends.tray_index_of(&original),
+        Some(0),
+        "found where it moved"
+    );
+    assert_eq!(sends.tray_index_of(&twin), Some(1));
+    sends.update(&slot, |send| {
+        send.attachments.remove(0);
+    });
+    assert_eq!(sends.tray_index_of(&original), None, "gone: no stand-in");
+    assert_eq!(sends.update_item(&original, |_| ()), None);
+    assert!(sends.holds_item(&twin));
 }

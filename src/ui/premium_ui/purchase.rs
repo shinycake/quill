@@ -4,7 +4,7 @@
 
 use super::*;
 use crate::ui::status_note::StatusNote;
-use quill::ids::ChatId;
+use quill::ids::{ChatId, RequestId};
 use quill::lang::{keys, tr};
 use quill::premium_hub::PremiumAutoStart;
 use quill::premium_hub::promo::PromoPage;
@@ -105,6 +105,7 @@ impl QuillApp {
         &mut self,
         chat_id: ChatId,
         action: &DeepLinkAction,
+        flow: Option<RequestId>,
         cx: &mut Context<Self>,
     ) -> bool {
         let DeepLinkAction::OpenUsername { domain, .. } = action else {
@@ -119,10 +120,11 @@ impl QuillApp {
             .hub
             .auto_start
             .as_ref()
-            .is_some_and(|auto| auto.username.eq_ignore_ascii_case(domain));
+            .is_some_and(|auto| auto.is_for(domain, flow));
         if !matches_bot {
-            // Another link opened a chat: the Premium link's flow is over,
-            // and its `/start` must not wait for a later visit to the bot.
+            // Another link (or another flow to the same bot) opened a chat:
+            // the Premium link's flow is over, and its `/start` must not
+            // wait for a later visit to the bot.
             session.payments.hub.auto_start = None;
             return false;
         }

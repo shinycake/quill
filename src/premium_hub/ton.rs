@@ -534,10 +534,36 @@ impl<'a> IntoIterator for &'a TxRows {
     }
 }
 
+/// What the Grams box shows: nothing, the list, or one row's receipt over
+/// it. The receipt exists only while the box is open, so closing takes it
+/// along.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum GramsView {
+    #[default]
+    Closed,
+    List,
+    /// The receipt of the row with this key (`TonTx::key`).
+    Receipt(String),
+}
+
+impl GramsView {
+    pub fn is_open(&self) -> bool {
+        !matches!(self, Self::Closed)
+    }
+
+    /// The key of the row whose receipt is showing.
+    pub fn receipt(&self) -> Option<&str> {
+        match self {
+            Self::Receipt(key) => Some(key),
+            _ => None,
+        }
+    }
+}
+
 /// The Grams screen and the Settings row's balance.
 #[derive(Debug, Clone, Default)]
 pub struct GramsHub {
-    pub open: bool,
+    pub view: GramsView,
     /// Known after the first answer (probe or page).
     pub balance_nano: Option<i64>,
     /// The Settings probe of the balance: asked on a Settings open, never
@@ -555,8 +581,6 @@ pub struct GramsHub {
     /// tabs only when both directions exist).
     pub has_in: bool,
     pub has_out: bool,
-    /// Key of the transaction whose receipt is showing.
-    pub selected: Option<String>,
     pub revenue: Option<GramRevenue>,
     /// Users and chats the history names that the session did not know:
     /// each asked once per session, then refused or learned.
@@ -602,14 +626,34 @@ impl GramsHub {
         self.rows.clear();
         self.next_offset.clear();
         self.load = crate::gift_market::PageLoad::Idle;
-        self.selected = None;
+        self.show_list();
+    }
+
+    /// The box opens on its list (a box already open keeps what it shows).
+    pub fn open_list(&mut self) {
+        if !self.view.is_open() {
+            self.view = GramsView::List;
+        }
+    }
+
+    /// Back to the list from a receipt; a closed box stays closed.
+    pub fn show_list(&mut self) {
+        if self.view.is_open() {
+            self.view = GramsView::List;
+        }
+    }
+
+    /// Show the receipt of the row with `key`; a closed box shows nothing.
+    pub fn show_receipt(&mut self, key: String) {
+        if self.view.is_open() {
+            self.view = GramsView::Receipt(key);
+        }
     }
 
     /// The Grams screen was closed: the receipt and Collect's box (with an
     /// outcome it had not acted on) go with it, in one place.
     pub fn close(&mut self) {
-        self.open = false;
-        self.selected = None;
+        self.view = GramsView::Closed;
         self.withdraw = None;
     }
 
@@ -678,7 +722,7 @@ impl GramsHub {
     }
 
     pub fn selected_tx(&self) -> Option<&TonTx> {
-        let key = self.selected.as_deref()?;
+        let key = self.view.receipt()?;
         self.rows.iter().find(|tx| tx.key == key)
     }
 

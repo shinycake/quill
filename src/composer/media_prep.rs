@@ -204,6 +204,7 @@ mod tests {
 
     fn attachment(name: &str, kind: AttachmentKind) -> ComposerAttachment {
         ComposerAttachment {
+            id: Default::default(),
             path: PathBuf::from(name),
             kind,
             file_name: name.into(),

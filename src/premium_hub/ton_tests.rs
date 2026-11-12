@@ -1,8 +1,8 @@
 use super::{
-    GramRevenue, GramsEvent, GramsHub, GramsPayload, TonTxKind, TonTxPage, WithdrawalState,
-    get_gram_revenue_statistics, get_ton_transactions, get_user, gram_amount_2dp, gram_balance,
-    gram_balance_short, parse_kind, parse_payload, parse_ton_transactions, signed_gram_amount,
-    usd_line,
+    GramRevenue, GramsEvent, GramsHub, GramsPayload, GramsView, TonTxKind, TonTxPage,
+    WithdrawalState, get_gram_revenue_statistics, get_ton_transactions, get_user, gram_amount_2dp,
+    gram_balance, gram_balance_short, parse_kind, parse_payload, parse_ton_transactions,
+    signed_gram_amount, usd_line,
 };
 use crate::ids::RequestId;
 use crate::premium_hub::TxFilter;
@@ -126,7 +126,8 @@ fn keys_stay_unique_when_ids_are_empty_or_repeat() {
     );
     let keys: Vec<&str> = hub.rows.iter().map(|tx| tx.key.as_str()).collect();
     assert_eq!(keys, ["0-10", "a", "2-12", "3-10"]);
-    hub.selected = Some("2-12".into());
+    hub.open_list();
+    hub.show_receipt("2-12".into());
     assert_eq!(hub.selected_tx().map(|tx| tx.gram_nano), Some(3));
     assert_eq!(
         hub.rows.peers_checked(),
@@ -268,7 +269,7 @@ fn paging_appends_and_a_fresh_page_replaces() {
     );
     assert!(!one_way.shows_tabs());
     assert!(!one_way.shows_settings_row());
-    hub.selected = Some("z".into());
+    hub.show_receipt("z".into());
     assert!(hub.selected_tx().is_none());
 }
 
@@ -410,13 +411,12 @@ fn a_peer_refusal_matches_its_request() {
 fn closing_the_screen_drops_an_unacted_outcome() {
     use super::{GramWithdraw, WithdrawOutcome};
     let mut hub = GramsHub {
-        open: true,
-        selected: Some("t".into()),
+        view: GramsView::Receipt("t".into()),
         withdraw: Some(GramWithdraw::Finished(WithdrawOutcome::Url("u".into()))),
         ..GramsHub::default()
     };
     hub.close();
-    assert!(!hub.open && hub.selected.is_none());
+    assert_eq!(hub.view, GramsView::Closed);
     assert_eq!(hub.take_withdraw_outcome(), None);
 }
 
@@ -433,4 +433,25 @@ fn entering_the_idle_password_box_queues_its_focus_once() {
     assert!(hub.take_events().is_empty(), "taken once");
     hub.enter_withdraw(GramWithdraw::SecurityCheck { later: false });
     assert!(hub.take_events().is_empty());
+}
+
+#[test]
+fn the_receipt_exists_only_while_the_box_is_open() {
+    let mut hub = GramsHub::default();
+    hub.show_receipt("a".into());
+    assert_eq!(hub.view, GramsView::Closed, "a shut box takes no receipt");
+    hub.open_list();
+    hub.show_receipt("a".into());
+    assert_eq!(hub.view.receipt(), Some("a"));
+    hub.open_list();
+    assert_eq!(
+        hub.view.receipt(),
+        Some("a"),
+        "opening again keeps the view"
+    );
+    hub.restart(TxFilter::All);
+    assert_eq!(hub.view, GramsView::List, "a new list shows the list");
+    hub.close();
+    hub.restart(TxFilter::All);
+    assert_eq!(hub.view, GramsView::Closed, "a restart does not open it");
 }

@@ -13,9 +13,29 @@ pub enum AttachmentKind {
     VideoNote,
 }
 
+/// Which tray entry an attachment is: the same file attached twice is two
+/// entries, so a path (or an index that another window can shift) cannot
+/// tell them apart. Assigned when the entry joins a tray.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct AttachmentId(u64);
+
+impl AttachmentId {
+    pub fn fresh() -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        Self(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+    }
+}
+
+impl Default for AttachmentId {
+    fn default() -> Self {
+        Self::fresh()
+    }
+}
+
 /// A local file the user explicitly attached. Path is canonical at pick time.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ComposerAttachment {
+    pub id: AttachmentId,
     pub path: PathBuf,
     pub kind: AttachmentKind,
     pub file_name: String,
@@ -313,6 +333,7 @@ impl ComposerAttachment {
             .unwrap_or("file")
             .to_string();
         Some(Self {
+            id: AttachmentId::fresh(),
             path,
             kind,
             file_name,
@@ -323,7 +344,8 @@ impl ComposerAttachment {
 
     /// Add a picked file. A document replaces the list (documents are not mixed
     /// into a photo/video album). Photos and videos accumulate.
-    pub fn push_attachment(list: &mut Vec<Self>, next: Self) {
+    pub fn push_attachment(list: &mut Vec<Self>, mut next: Self) {
+        next.id = AttachmentId::fresh();
         match next.kind {
             AttachmentKind::Document | AttachmentKind::VideoNote => {
                 list.clear();
@@ -387,6 +409,7 @@ mod tests {
 
     fn attachment(name: &str, kind: AttachmentKind) -> ComposerAttachment {
         ComposerAttachment {
+            id: Default::default(),
             path: PathBuf::from(format!("/tmp/{name}")),
             kind,
             file_name: name.to_string(),
@@ -434,6 +457,7 @@ mod tests {
     #[test]
     fn a_file_only_attachment_is_not_offered_compression() {
         let mut list = vec![ComposerAttachment {
+            id: Default::default(),
             path: PathBuf::from("/a/moving.webp"),
             kind: AttachmentKind::Photo,
             file_name: "moving.webp".into(),
@@ -471,6 +495,7 @@ mod tests {
     #[test]
     fn files_and_media_do_not_share_an_album() {
         let item = |name: &str, kind| ComposerAttachment {
+            id: Default::default(),
             path: PathBuf::from(name),
             kind,
             file_name: name.into(),

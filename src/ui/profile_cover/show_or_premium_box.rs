@@ -95,10 +95,20 @@ impl QuillApp {
         user_id: i64,
         cx: &mut Context<Self>,
     ) {
+        // The change of this kind is already out: opening again shows the
+        // same wait, so its answer's toast is not lost.
+        let stage = match self.profile_cover.show_or_premium {
+            Some(ShowOrPremiumBox {
+                kind: open,
+                stage: saving @ ShowStage::Saving(_),
+                ..
+            }) if open == kind => saving,
+            _ => ShowStage::Choosing,
+        };
         self.profile_cover.show_or_premium = Some(ShowOrPremiumBox {
             kind,
             user_id,
-            stage: ShowStage::Choosing,
+            stage,
         });
         self.open_box(DialogKind::ShowOrPremium);
         cx.notify();

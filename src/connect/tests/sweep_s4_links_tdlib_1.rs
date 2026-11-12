@@ -72,7 +72,7 @@ fn a_refused_withdrawal_shows_an_error_in_the_box() {
     use crate::premium_hub::ton::GramWithdraw;
     let (_dir, mut driver, sender, _sink, _seq) = toggle_driver();
     let grams = &mut driver.session.payments.hub.grams;
-    grams.open = true;
+    grams.open_list();
     grams.withdraw = Some(GramWithdraw::idle(None));
     sender.refuse(true);
     assert!(driver.submit_gram_withdrawal("pw").is_err());

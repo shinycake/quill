@@ -31,7 +31,7 @@ crate::ui::shell::register_dialogs! {
         3804,
         |app| {
             app.session().is_some_and(|s| {
-                s.payments.hub.grams.open
+                s.payments.hub.grams.view.is_open()
                     && s.payments
                         .hub
                         .grams
@@ -163,7 +163,7 @@ impl QuillApp {
     ) {
         let (outcome, showing, ready) = match self.grams_mut() {
             Some(grams) => {
-                let showing = grams.open
+                let showing = grams.view.is_open()
                     && grams
                         .withdraw
                         .as_ref()

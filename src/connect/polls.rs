@@ -212,6 +212,31 @@ impl<S: JsonSender> ConnectDriver<S> {
         option_index: usize,
         offset: i32,
     ) -> Result<Option<RequestId>, ConnectSendError> {
+        let sent = self.send_poll_voters_page(chat_id, message_id, option_index, offset);
+        // A refused ask of a stale list ends it as `Failed`, which the
+        // dialog draws with a Retry; left `Stale`, it would ask every frame.
+        let key = (chat_id.0, message_id.0, option_index as i32);
+        if sent.is_err()
+            && matches!(
+                self.session.messages.poll_voters.get(&key),
+                Some(PollVotersFetch::Stale)
+            )
+        {
+            self.session.messages.poll_voters.insert(
+                key,
+                PollVotersFetch::Failed(crate::state::send_failed_line("Could not load voters")),
+            );
+        }
+        sent
+    }
+
+    fn send_poll_voters_page(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        option_index: usize,
+        offset: i32,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -293,7 +318,12 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session.requests.take(extra);
                 match self.session.messages.poll_voters.get_mut(&key) {
                     Some(PollVotersFetch::Loading(id)) if *id == extra => {
-                        self.session.messages.poll_voters.remove(&key);
+                        self.session.messages.poll_voters.insert(
+                            key,
+                            PollVotersFetch::Failed(crate::state::send_failed_line(
+                                "Could not load voters",
+                            )),
+                        );
                     }
                     Some(PollVotersFetch::Loaded { more, .. })
                         if *more == VotersMore::Asking(extra) =>

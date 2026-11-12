@@ -120,6 +120,8 @@ pub(crate) struct RecordingUi {
     stage: RecordStage,
     next_start: u64,
     pub(super) open_voice: Arc<dyn Fn() -> Result<VoiceCapture, String> + Send + Sync>,
+    /// What the OS says about the microphone and camera, and its prompt.
+    pub(super) device_os: super::capture_access::DeviceOs,
     /// The 100 ms tick that moves the record bar and the preview; it ends
     /// itself (and clears this) when nothing needs it, and dropping the
     /// owner stops it.
@@ -205,6 +207,7 @@ impl RecordingUi {
             stage: RecordStage::Idle,
             next_start: 0,
             open_voice: Arc::new(VoiceCapture::start),
+            device_os: Default::default(),
             tick: None,
         }
     }

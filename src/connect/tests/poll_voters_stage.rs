@@ -149,3 +149,79 @@ fn a_failed_next_page_keeps_the_list_and_frees_the_next_ask() {
     assert_eq!(recorder.snapshot().len(), sent + 1);
     std::fs::remove_dir_all(dir).ok();
 }
+
+fn update_poll() -> String {
+    let option = |id: &str, votes: i32| {
+        format!(
+            r#"{{"@type":"pollOption","id":"{id}","text":{{"@type":"formattedText","text":"{id}","entities":[]}},"voter_count":{votes},"vote_percentage":50,"is_chosen":false}}"#
+        )
+    };
+    format!(
+        r#"{{"@type":"updatePoll","poll":{{"@type":"poll","id":9004,"question":{{"@type":"formattedText","text":"Q","entities":[]}},"options":[{},{}],"total_voter_count":3,"is_anonymous":false,"allows_multiple_answers":false,"allows_revoting":true,"is_closed":false,"can_get_voters":true,"type":{{"@type":"pollTypeRegular"}}}}}}"#,
+        option("a", 2),
+        option("b", 1),
+    )
+}
+
+/// Sweep r4-10: a vote moving the poll must not leave the open dialog on
+/// "Select an option": the entry goes stale, the dialog's list is asked
+/// again, and the answer to the page that was in flight is dropped.
+#[test]
+fn a_poll_update_makes_the_list_stale_and_the_ask_again_fills_it() {
+    let (dir, mut driver, _recorder, _sink, dyn_sink, seq) = poll_driver();
+    seed_poll(&mut driver, &seq, &dyn_sink);
+    let (chat, message) = (ChatId(7), MessageId(108));
+    let first = driver.fetch_poll_voters(chat, message, 0).unwrap().unwrap();
+    driver
+        .ingest(copy_and_parse(&voters_page(first, &[1, 2]), &seq, &dyn_sink).unwrap())
+        .unwrap();
+    let next = driver
+        .load_more_poll_voters(chat, message, 0)
+        .unwrap()
+        .unwrap();
+
+    driver
+        .ingest(copy_and_parse(&update_poll(), &seq, &dyn_sink).unwrap())
+        .unwrap();
+    assert_eq!(stage(&driver), Some(PollVotersFetch::Stale));
+    // The page that was in flight answers into nothing.
+    driver
+        .ingest(copy_and_parse(&voters_page(next, &[3]), &seq, &dyn_sink).unwrap())
+        .unwrap();
+    assert_eq!(stage(&driver), Some(PollVotersFetch::Stale));
+
+    let again = driver.fetch_poll_voters(chat, message, 0).unwrap().unwrap();
+    assert_eq!(stage(&driver), Some(PollVotersFetch::Loading(again)));
+    driver
+        .ingest(copy_and_parse(&voters_page(again, &[1, 2, 3]), &seq, &dyn_sink).unwrap())
+        .unwrap();
+    assert!(matches!(
+        stage(&driver),
+        Some(PollVotersFetch::Loaded { voters, .. }) if voters.len() == 3
+    ));
+    std::fs::remove_dir_all(dir).ok();
+}
+
+/// A stale list whose ask cannot be sent ends as `Failed` (drawn with a
+/// Retry), not as a stage the dialog asks again every frame; a failed send
+/// of a first ask does the same.
+#[test]
+fn a_stale_list_whose_ask_cannot_go_ends_as_failed() {
+    let (dir, mut driver, recorder, _sink, dyn_sink, seq) = poll_driver();
+    seed_poll(&mut driver, &seq, &dyn_sink);
+    let (chat, message) = (ChatId(7), MessageId(108));
+    let first = driver.fetch_poll_voters(chat, message, 0).unwrap().unwrap();
+    driver
+        .ingest(copy_and_parse(&voters_page(first, &[1]), &seq, &dyn_sink).unwrap())
+        .unwrap();
+    driver
+        .ingest(copy_and_parse(&update_poll(), &seq, &dyn_sink).unwrap())
+        .unwrap();
+    recorder.refuse_sends(true);
+    assert!(driver.fetch_poll_voters(chat, message, 0).is_err());
+    assert!(matches!(stage(&driver), Some(PollVotersFetch::Failed(_))));
+    recorder.refuse_sends(false);
+    let retry = driver.fetch_poll_voters(chat, message, 0).unwrap().unwrap();
+    assert_eq!(stage(&driver), Some(PollVotersFetch::Loading(retry)));
+    std::fs::remove_dir_all(dir).ok();
+}

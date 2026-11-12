@@ -168,6 +168,7 @@ fn driver_send_snapshot_rejects_overlong_caption() {
         driver.session.view_generation,
         "toolong",
         Some(ComposerAttachment {
+            id: Default::default(),
             path: std::path::PathBuf::from("/tmp/does-not-exist.png"),
             kind: AttachmentKind::Photo,
             file_name: "does-not-exist.png".to_string(),
@@ -190,6 +191,7 @@ fn driver_send_snapshot_rejects_overlong_caption() {
         driver.session.view_generation,
         "1234567",
         Some(ComposerAttachment {
+            id: Default::default(),
             path: std::path::PathBuf::from("/tmp/does-not-exist.png"),
             kind: AttachmentKind::Photo,
             file_name: "does-not-exist.png".to_string(),
@@ -226,6 +228,7 @@ fn driver_send_album_rejects_overlong_caption() {
         "toolong",
         vec![
             ComposerAttachment {
+                id: Default::default(),
                 path: std::path::PathBuf::from("/tmp/a.png"),
                 kind: AttachmentKind::Photo,
                 file_name: "a.png".to_string(),
@@ -233,6 +236,7 @@ fn driver_send_album_rejects_overlong_caption() {
                 extras: Default::default(),
             },
             ComposerAttachment {
+                id: Default::default(),
                 path: std::path::PathBuf::from("/tmp/b.png"),
                 kind: AttachmentKind::Photo,
                 file_name: "b.png".to_string(),

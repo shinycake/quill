@@ -18,8 +18,8 @@ use super::app::QuillApp;
 use super::composer::LeftSend;
 use super::composer_state::{DraftClear, Reservation};
 use quill::composer::{
-    ComposerAttachment, ComposerScheduling, DraftKey, LinkPreviewChoice, PreviewMediaSize,
-    RenderToken,
+    AttachmentId, ComposerAttachment, ComposerScheduling, DraftKey, LinkPreviewChoice,
+    PreviewMediaSize, RenderToken,
 };
 use quill::ids::{AccountKey, ChatId, MessageId, RequestId};
 use quill::telegram::envelope::AuthorizationState;
@@ -264,11 +264,11 @@ pub(crate) struct SendSlot {
 
 /// A tray item as it was when a step that answers later started (a
 /// picker, an editor). Its result lands only in that slot, and only while
-/// the item at `index` is still the same file.
+/// the entry with that `id` is still in its tray, wherever it moved to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TrayItem {
     pub(super) slot: SendSlot,
-    pub(super) index: usize,
+    pub(super) id: AttachmentId,
     pub(super) path: PathBuf,
 }
 
@@ -413,7 +413,7 @@ impl ComposerSends {
     }
 
     /// Change the tray item `item` names, if it is still there: `None`
-    /// when that slot's tray no longer holds the same file at that place.
+    /// when that slot's tray no longer holds that entry.
     pub(super) fn update_item<R>(
         &mut self,
         item: &TrayItem,
@@ -425,17 +425,22 @@ impl ComposerSends {
             .slots
             .get_mut(&item.slot.draft)?;
         send.attachments
-            .get_mut(item.index)
-            .filter(|attachment| attachment.path == item.path)
+            .iter_mut()
+            .find(|attachment| attachment.id == item.id)
             .map(f)
     }
 
-    /// Whether `item` is still in its tray, as the same file.
+    /// Whether `item` is still in its tray.
     pub(super) fn holds_item(&self, item: &TrayItem) -> bool {
+        self.tray_index_of(item).is_some()
+    }
+
+    /// Where the entry `item` names is in its slot's tray now.
+    pub(super) fn tray_index_of(&self, item: &TrayItem) -> Option<usize> {
         self.get(&item.slot)
             .attachments
-            .get(item.index)
-            .is_some_and(|attachment| attachment.path == item.path)
+            .iter()
+            .position(|attachment| attachment.id == item.id)
     }
 
     /// The slot's send went: hand back what it held.
@@ -745,14 +750,12 @@ impl QuillApp {
     /// The open slot's tray item at `index`, for a step that answers later.
     pub(super) fn tray_item(&self, index: usize) -> Option<TrayItem> {
         let slot = self.send_slot()?;
-        let path = self
-            .composer_sends
-            .get(&slot)
-            .attachments
-            .get(index)?
-            .path
-            .clone();
-        Some(TrayItem { slot, index, path })
+        let attachment = self.composer_sends.get(&slot).attachments.get(index)?;
+        Some(TrayItem {
+            id: attachment.id,
+            path: attachment.path.clone(),
+            slot,
+        })
     }
 
     /// A screenshot demo starts with these in the open chat's tray.

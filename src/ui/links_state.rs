@@ -14,6 +14,9 @@ pub(super) struct PendingOpen {
     /// An agent's step queued the link: render re-checks the open as part
     /// of that step.
     pub(super) from_agent: bool,
+    /// The deep-link flow's follow-up request that resolved the chat; `None`
+    /// for an open that no flow resolved.
+    pub(super) flow: Option<quill::ids::RequestId>,
 }
 
 impl PendingOpen {
@@ -23,6 +26,7 @@ impl PendingOpen {
             chat_id,
             action,
             from_agent: false,
+            flow: None,
         }
     }
 }

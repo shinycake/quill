@@ -1098,6 +1098,7 @@ fn a_photo_edit_whose_chat_window_closed_still_lands_in_its_tray(cx: &mut TestAp
             app.in_window_of(window, cx, |app, window, cx| {
                 app.update_pending_attachments(|tray| {
                     tray.push(ComposerAttachment {
+                        id: Default::default(),
                         file_name: "closing.png".into(),
                         path: path.clone(),
                         kind: AttachmentKind::Photo,
@@ -1201,6 +1202,7 @@ fn a_held_send_whose_chat_window_closed_says_it_did_not_go(cx: &mut TestAppConte
             app.in_window_of(window, cx, |app, window, cx| {
                 app.update_pending_attachments(|tray| {
                     tray.push(ComposerAttachment {
+                        id: Default::default(),
                         file_name: "held-closing.png".into(),
                         path: path.clone(),
                         kind: AttachmentKind::Photo,

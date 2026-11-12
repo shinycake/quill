@@ -143,6 +143,7 @@ impl Session {
                 .enter_deep_link_stage(DeepLinkState::ChatReady {
                     chat_id,
                     action: action.clone(),
+                    request: p.id,
                 });
         }
         if let ChatKind::Supergroup { supergroup_id, .. } = kind {

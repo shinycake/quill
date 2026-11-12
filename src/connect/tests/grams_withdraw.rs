@@ -294,7 +294,7 @@ fn closing_the_screen_refuses_the_request() {
     let mut p = parts();
     open_screen(&mut p, "15000000000");
     p.0.start_gram_withdrawal().unwrap();
-    p.0.session.payments.hub.grams.open = false;
+    p.0.session.payments.hub.grams.view = crate::premium_hub::ton::GramsView::Closed;
     assert!(p.0.submit_gram_withdrawal(PASSWORD).is_err());
     assert_eq!(count(&p.1, "getGramWithdrawalUrl"), 0);
 }

@@ -82,7 +82,7 @@ fn launch_links_resolve_locally_instead_of_get_deep_link_info() {
         );
         assert!(matches!(
             driver.session.chats_state.deep_link_stage().cloned(),
-            Some(DeepLinkState::ChatReady { chat_id, action: DeepLinkAction::OpenUsername { ref domain, .. } })
+            Some(DeepLinkState::ChatReady { chat_id, action: DeepLinkAction::OpenUsername { ref domain, .. }, .. })
                 if chat_id.0 == 42 && domain == "durov"
         ));
     }

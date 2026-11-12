@@ -197,6 +197,7 @@ mod tests {
 
     fn item(name: &str, kind: AttachmentKind) -> ComposerAttachment {
         ComposerAttachment {
+            id: Default::default(),
             path: PathBuf::from(name),
             kind,
             file_name: name.to_string(),

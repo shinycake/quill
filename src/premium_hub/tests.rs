@@ -356,3 +356,18 @@ fn opening_gifts_of_another_owner_replaces_the_list_but_keeps_a_change_in_flight
     closed.view.select(Some("x".into()));
     assert!(closed.view.selected().is_none());
 }
+
+/// Sweep r4-10: the Premium `/start` goes only for the flow that resolved
+/// the bot; a second link to the same bot is another flow.
+#[test]
+fn the_premium_start_belongs_to_the_flow_that_resolved_the_bot() {
+    let auto = PremiumAutoStart {
+        username: "premiumbot".into(),
+        start_ref: "x".into(),
+        request: crate::ids::RequestId(5),
+    };
+    assert!(auto.is_for("PremiumBot", Some(crate::ids::RequestId(5))));
+    assert!(!auto.is_for("PremiumBot", Some(crate::ids::RequestId(6))));
+    assert!(!auto.is_for("PremiumBot", None));
+    assert!(!auto.is_for("other", Some(crate::ids::RequestId(5))));
+}

@@ -147,6 +147,46 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Frame upkeep: the poll the dialog shows changed, which made the
+    /// list it shows `Stale`: ask for it again. The ask turns the stage
+    /// into `Loading`, or into `Failed` when it cannot go, so this asks once.
+    pub(in crate::ui) fn poll_voters_upkeep(&mut self) {
+        let Some(dialog) = self.message_ui.poll_voters_dialog.as_ref() else {
+            return;
+        };
+        let (chat_id, message_id) = (dialog.chat_id, dialog.message_id);
+        let option = dialog.view.option().unwrap_or(0);
+        let stale = self.session().is_some_and(|session| {
+            matches!(
+                session
+                    .messages
+                    .poll_voters
+                    .get(&(chat_id.0, message_id.0, option as i32)),
+                Some(PollVotersFetch::Stale)
+            )
+        });
+        if stale && let Some(live) = self.live.as_mut() {
+            let _ = live.driver.fetch_poll_voters(chat_id, message_id, option);
+        }
+    }
+
+    /// The stats Retry: only the vote graph is asked again; the dialog
+    /// stays as it is, with the option the user chose.
+    fn retry_poll_stats(&mut self, chat_id: ChatId, message_id: MessageId, cx: &mut Context<Self>) {
+        let is_dark = super::chat_theme::is_dark_palette();
+        if let Some(live) = self.live.as_mut()
+            && live
+                .driver
+                .fetch_poll_vote_statistics(chat_id, message_id, is_dark)
+                .is_err()
+        {
+            self.set_note(StatusNote::error(tr(
+                keys::Q_MEDIA_COULD_NOT_LOAD_POLL_STATS,
+            )));
+        }
+        cx.notify();
+    }
+
     pub(super) fn close_poll_voters_dialog(&mut self, cx: &mut Context<Self>) {
         self.message_ui.poll_voters_dialog = None;
         cx.notify();
@@ -274,7 +314,7 @@ impl QuillApp {
                     .text_color(text_muted())
                     .child(tr(keys::Q_MEDIA_SELECT_AN_OPTION_TO_SEE)),
             ),
-            Some(PollVotersFetch::Loading(_)) => body.child(
+            Some(PollVotersFetch::Loading(_) | PollVotersFetch::Stale) => body.child(
                 div()
                     .flex()
                     .items_center()
@@ -375,7 +415,7 @@ impl QuillApp {
                         .label(tr(keys::Q_MEDIA_RETRY))
                         .ghost()
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            this.open_poll_stats_dialog(chat_id, message_id, cx);
+                            this.retry_poll_stats(chat_id, message_id, cx);
                         })),
                 ),
             Some(PollStatsFetch::Loaded(graph)) => {
@@ -870,3 +910,6 @@ mod poll_settings;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod settings_tests;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod stats_retry_tests;
