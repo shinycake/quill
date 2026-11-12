@@ -68,6 +68,11 @@ impl NetworkReset {
         }
     }
 
+    /// The reset is out and waits for its answer.
+    pub fn is_sending(&self) -> bool {
+        matches!(self, Self::Sending(_))
+    }
+
     fn waits_for(&self, request: RequestId) -> bool {
         matches!(self, Self::Sending(asked) if *asked == request)
     }

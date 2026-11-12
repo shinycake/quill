@@ -157,7 +157,12 @@ impl StarSubscriptionsList {
 
     /// The edit answered `ok`: the server list is the truth now. The old
     /// cache stays visible until the refetch replaces it.
-    pub fn edit_done(&mut self) {
+    /// Only the edit in flight settles: an answer of another request
+    /// changes nothing.
+    pub fn edit_done(&mut self, request: RequestId) {
+        if !matches!(self.edit, SubsEdit::Editing { request: asked } if asked == request) {
+            return;
+        }
         self.edit = SubsEdit::Idle;
         self.load = match self.load {
             SubsLoad::Loading { request, .. } => SubsLoad::Loading {
@@ -168,8 +173,12 @@ impl StarSubscriptionsList {
         };
     }
 
-    /// The edit failed with `reason`.
-    pub fn edit_failed(&mut self, reason: String) {
+    /// The edit `request` failed with `reason`; only the edit in flight
+    /// fails.
+    pub fn edit_failed(&mut self, request: RequestId, reason: String) {
+        if !matches!(self.edit, SubsEdit::Editing { request: asked } if asked == request) {
+            return;
+        }
         self.edit = SubsEdit::Failed(reason);
     }
 
@@ -203,7 +212,8 @@ mod tests {
     fn an_edit_landing_while_a_page_is_out_makes_its_answer_stale() {
         let mut list = StarSubscriptionsList::default();
         list.begin_load(RequestId(1));
-        list.edit_done();
+        list.begin_edit(RequestId(2));
+        list.edit_done(RequestId(2));
         assert!(
             list.is_loading(),
             "the page in flight stays the one waited for"
@@ -218,7 +228,7 @@ mod tests {
         let mut list = StarSubscriptionsList::default();
         list.begin_load(RequestId(1));
         list.begin_edit(RequestId(2));
-        list.edit_failed("no".into());
+        list.edit_failed(RequestId(2), "no".into());
         assert!(!list.is_editing());
         assert_eq!(list.error(), Some("no"));
         list.page_answered(RequestId(1), false, page("more"));
@@ -243,5 +253,17 @@ mod tests {
             !list.is_stale(),
             "a failed list is not asked again by itself"
         );
+    }
+
+    #[test]
+    fn only_the_edit_in_flight_settles() {
+        let mut list = StarSubscriptionsList::default();
+        list.begin_edit(RequestId(2));
+        list.edit_done(RequestId(1));
+        list.edit_failed(RequestId(1), "old".into());
+        assert!(list.is_editing(), "another request's answer changes nothing");
+        assert!(list.error().is_none());
+        list.edit_failed(RequestId(2), "no".into());
+        assert_eq!(list.error(), Some("no"));
     }
 }

@@ -249,9 +249,11 @@ impl Session {
                 );
             }
             Some(RequestPurpose::DeleteAccount) => {
-                self.settings
-                    .account_delete
-                    .fail(sessions_error_line("update the account", err));
+                self.settings.account_delete.failed(
+                    extra,
+                    sessions_error_line("update the account", err),
+                    false,
+                );
             }
             // A refused saved-sound list is not asked for again by itself;
             // the next change of the list does.

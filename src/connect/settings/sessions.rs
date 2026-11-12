@@ -170,15 +170,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.session.settings.account_ttl.clear_error();
         let extra = self.session.request(RequestPurpose::DeleteAccount, None);
-        self.session.settings.account_delete.begin();
         match self
             .sender
             .send_json(&delete_account(extra, reason, password))
         {
-            Ok(()) => Ok(extra),
+            Ok(()) => {
+                let delete = &mut self.session.settings.account_delete;
+                delete.begin();
+                delete.sent(extra);
+                Ok(extra)
+            }
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.account_delete.cancel();
                 Err(err)
             }
         }

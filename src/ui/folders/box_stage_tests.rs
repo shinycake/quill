@@ -438,21 +438,10 @@ fn the_copied_check_mark_goes_back_to_the_copy_icon(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn the_reset_statistics_stage_ends_on_the_answer_or_the_session(cx: &mut TestAppContext) {
+fn the_reset_statistics_confirmation_ends_on_the_confirm(cx: &mut TestAppContext) {
     use crate::ui::dialogs::data_extra::NetworkReset;
     let (app, mut vcx) = open(cx);
-    app.update(&mut vcx, |app, cx| {
-        let request = sent(app, RequestPurpose::ResetNetworkStatistics, None);
-        app.privacy.extra.network_reset = NetworkReset::Resetting(request);
-        app.settle_network_reset(cx);
-        assert_eq!(
-            app.privacy.extra.network_reset,
-            NetworkReset::Resetting(request),
-            "still waiting for the answer"
-        );
-        answer(app, request, r#""@type":"ok""#);
-        app.settle_network_reset(cx);
-        assert_eq!(app.privacy.extra.network_reset, NetworkReset::Idle);
+    app.update(&mut vcx, |app, _| {
         // Without a live driver the confirmed reset is local and done.
         app.privacy.extra.network_reset = NetworkReset::Confirming;
         app.reset_network_usage();

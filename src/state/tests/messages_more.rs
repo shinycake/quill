@@ -474,8 +474,9 @@ fn delete_account_ok_clears_mutating_without_local_teardown() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     session.settings.account_delete.fail("stale");
-    session.settings.account_delete.begin();
     let extra = session.request(RequestPurpose::DeleteAccount, None);
+    session.settings.account_delete.begin();
+    session.settings.account_delete.sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -490,8 +491,9 @@ fn delete_account_ok_clears_mutating_without_local_teardown() {
 fn delete_account_error_surfaces_honestly() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.settings.account_delete.begin();
     let extra = session.request(RequestPurpose::DeleteAccount, None);
+    session.settings.account_delete.begin();
+    session.settings.account_delete.sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -1011,4 +1013,21 @@ fn a_tab_still_loading_keeps_its_request_when_a_next_page_is_marked() {
     session.accept_added_reactions(first, chat, message, 0, page);
     let audience = session.messages.message_audience.as_ref().unwrap();
     assert!(audience.reactions.ready().is_some(), "its own answer still lands");
+}
+
+#[test]
+fn an_older_delete_accounts_answer_does_not_settle_the_newer_one() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let older = session.request(RequestPurpose::DeleteAccount, None);
+    let newer = session.request(RequestPurpose::DeleteAccount, None);
+    session.settings.account_delete.begin();
+    session.settings.account_delete.sent(newer);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, older.0),
+    );
+    assert!(session.settings.account_busy(), "the newer delete still waits");
 }
