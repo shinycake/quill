@@ -80,3 +80,14 @@ src/connect/message_link_at.rs 44 read
 src/connect/message_menu.rs 714 read
 src/connect/messages/ai.rs 185 read
 src/connect/messages/ai_compose.rs 226 read
+src/connect/messages/deferred_caption.rs 176 read
+src/connect/messages/delete_forward.rs 199 read
+src/connect/messages/edit.rs 329 read
+src/connect/messages/export.rs 158 read
+src/connect/messages/export_files.rs 109 read
+src/connect/messages/media_options.rs 230 read
+src/connect/messages/media_send.rs 443 read
+src/connect/messages/mod.rs 601 read
+src/connect/messages/rich_html.rs 89 read
+src/connect/messages/send_place.rs 69 read
+src/connect/mod.rs 136 read
