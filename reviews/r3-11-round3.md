@@ -1,0 +1,11 @@
+# Re-review of r3-11 second fix round (Opus, 2026-11-12). Verdict: merge
+
+Line numbers are on origin/claude/sweep-r3-11.
+
+Status of the items from reviews/r3-11-round2.md:
+- 20-008 (poll woke before the apply): resolved. There is a new signal, `quill::wake::APPLIED` (src/wake.rs:189). Only the main poll pass pokes it, after it has drained and applied everything (src/ui/notifications/mod.rs:544). Every live pass reaches that line: the only early return is the no-live case at :358, and the demo has no drain. The quick-replies poll now rests on `APPLIED` and re-reads its epoch before each pump (src/ui/quick_replies/mod.rs:354-369), so the pump runs after the answer is in the session. The test `the_poll_reads_the_answer_after_the_pass_applied_it` (src/ui/quick_replies/tests.rs:393) pokes `UPDATES` first, then applies, then pokes `APPLIED`, and the wait ends without the 2 s fallback. Under the old `UPDATES` rest the wait would have stayed in place, so the test tells the two apart. The wrong comment is replaced.
+- 21-003 (1 fps tick redrew the whole app): resolved. The badge tick targets `conversation_view_id()` (src/ui/secret_chats.rs:124, src/ui/app_slice.rs:419-422), the slice `notify_conversation` uses. It falls back to `None` only before the slices exist. Re-asking still works: GPUI re-renders the ancestors of a dirty slice, so the root `QuillApp` render (main window) or `ChatWindowView::render` (chat window) runs `per_window_upkeep` again, and that calls `ensure_self_destruct_tick` (src/ui/app_render/window_upkeep.rs:81). The tick is still app-gated. The hidden-window test now also checks that no `None` target was asked (src/ui/passcode/lock_gate_tests.rs:244-248).
+
+New commits: no renamed bools, no new tasks or timers, no unwrap/expect/indexing, no new allow-list or baseline lines. All guards pass on the tip (check-bundle-dlopen.py needs a bundle argument and was not run).
+
+Notes: the new test pokes the process-wide `UPDATES` and `APPLIED` signals. Other tests already poke `UPDATES`, `CHROME` and `BACKGROUND_UPDATES` this way, and a stray poke from a parallel test can only add a wake, never hold back the one the test waits for, so the result stays deterministic. `APPLIED` fires on every poll pass, including passes that run only for redraw deadlines. While a quick-reply save waits, that means one cheap pump check per pass.

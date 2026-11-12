@@ -1,0 +1,11 @@
+# Re-review of r3-04 second fix round (Opus, 2026-11-12). Verdict: merge
+
+Line numbers are on origin/claude/sweep-r3-04.
+
+Status of the items from reviews/r3-04-round2.md:
+- Placeholder own full info: resolved. `hide_own_sponsored` no longer inserts a default (src/state/session_sponsored.rs:364-372). With none cached it marks the own user wanted (an `Idle` entry, src/state/domains/users/full_infos.rs:41-57). `sponsored_hidden()` holds while that entry is wanted (session_sponsored.rs:349-357). `send_user_full_info` is not blocked, because `contains_key` reads only data (full_infos.rs:25-27). `ConnectDriver::pump_wanted_full_infos` (src/connect/search/sponsored.rs:126-138) runs from the poll pass (src/ui/notifications/poll_drains.rs:32) and sends `getUserFullInfo(me)` once. A repeat is deduped by `has_purpose_for_user`, a failed send fails the entry, and an error answer fails it too (src/state/domains/users/error.rs:28-39). `business_own_info()` stays non-Ready until the answer lands. The new test hides ads with nothing cached, checks that exactly one `getUserFullInfo(5)` goes out, that Business is not Ready before the answer and is Ready after it, and that the real bio lands (src/connect/tests/hidden_ads_own_info.rs:7-44). `forget_failure` now leaves a wanted entry alone (full_infos.rs:70-80). The existing tests (`hiding_ads_keeps_a_report_in_flight`, `a_premium_lapse_shows_ads_again`) now pass through the wanted path rather than a fake info, and their assertions still hold. The decision row is updated.
+- PsaLabels process-wide counter: resolved. The static is gone, and `ask` takes a counter each test owns (src/promotion.rs:293-304).
+
+New commits: no renamed bools, no unwrap/expect/indexing, no new allow-list or baseline lines. All guards pass on the tip (check-bundle-dlopen.py needs a bundle argument and was not run).
+
+Notes: the doc on `accept_sponsored_hidden` (src/state/session_sponsored.rs:374-375) still says ads are hidden "for the rest of the session". Since round 1 the value is derived and an update or a Premium lapse brings ads back, so reword it the next time this file changes. `pump_wanted_full_infos` scans every cached full info on each poll pass (`wanted()`), which is a small linear walk. A `wanted: Option<i64>` or a check of only `my_user_id` would avoid it, but it is not a defect.
