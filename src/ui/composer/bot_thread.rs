@@ -115,6 +115,16 @@ impl QuillApp {
                 return;
             }
         };
+        // What was typed while the thread was being made goes with the
+        // text: the field still holds what Send took, plus the new typing.
+        // A field that no longer starts with it (the user rewrote it) is
+        // kept for the thread's field, and the Send's own text goes.
+        let current = self.composer_markup(cx);
+        let (text, rest) = if current.starts_with(text.as_str()) {
+            (current, String::new())
+        } else {
+            (text, current)
+        };
         // The field leaves "All" empty: the draft saved there on the way
         // out is nothing.
         self.composer
@@ -127,6 +137,9 @@ impl QuillApp {
             self.update_pending_send(|send| *send = tray);
         }
         self.submit_composer(text, once, window, cx);
+        if !rest.is_empty() {
+            self.set_composer_markup(&rest, window, cx);
+        }
     }
 
     /// The demo has no TDLib: the thread is made from the answer TDLib

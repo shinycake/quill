@@ -150,3 +150,35 @@ fn a_lost_new_thread_request_gives_the_send_back(cx: &mut TestAppContext) {
         assert!(matches!(app.chat_ui.bot_thread, BotThreadStart::Idle));
     });
 }
+
+/// Text typed while the new thread is being made goes with the message.
+#[gpui_kit::test]
+fn text_typed_while_the_thread_is_made_is_sent_with_it(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.composer
+                .update(cx, |input, cx| input.set_value("Plan a trip", window, cx));
+            app.submit_composer("Plan a trip".to_string(), Default::default(), window, cx);
+            // Before the thread's answer comes.
+            app.composer.update(cx, |input, cx| {
+                input.set_value("Plan a trip for two", window, cx)
+            });
+        });
+    });
+    frames(&mut vcx);
+    app.read_with(&vcx, |app, cx| {
+        let session = app.session().unwrap();
+        let topic = session.open_forum_topic().expect("the new thread is open");
+        let history = session
+            .threads
+            .topic_histories
+            .get(&(BOT.0, topic))
+            .unwrap();
+        assert_eq!(
+            texts(history.messages.values().cloned()),
+            ["Plan a trip for two"]
+        );
+        assert_eq!(app.composer.read(cx).value().to_string(), "");
+    });
+}

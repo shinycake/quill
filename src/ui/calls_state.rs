@@ -56,32 +56,33 @@ impl CallWindow {
 /// The ended call the window lingers on.
 #[derive(Debug, Default)]
 pub(crate) enum CallEnd {
+    /// A screen no sync has looked at: a call summary the session already
+    /// holds (the screen was built after the call ended, as on a switch
+    /// back to the account) is not a new ending. The first sync seeds the
+    /// stage from the target.
     #[default]
+    Unobserved,
     NotEnded,
     /// The call ended; the window lingers on "call ended" until the timer
     /// fires. The stage holds the timer, so a new call or a switch of
     /// account drops it.
-    Lingering { call_id: i32, _timer: Task<()> },
-    /// An outgoing call met a busy line: the window stays until Cancel or
-    /// Redial dismisses the summary.
-    BusyLine { call_id: i32 },
-    /// The linger is over.
-    Over { call_id: i32 },
+    Lingering {
+        call_id: i32,
+        _timer: Task<()>,
+    },
+    /// The linger is over, or the summary was there before this screen
+    /// looked.
+    Over {
+        call_id: i32,
+    },
 }
 
 impl CallEnd {
     pub(crate) fn call_id(&self) -> Option<i32> {
         match self {
-            CallEnd::NotEnded => None,
-            CallEnd::Lingering { call_id, .. }
-            | CallEnd::BusyLine { call_id }
-            | CallEnd::Over { call_id } => Some(*call_id),
+            CallEnd::Unobserved | CallEnd::NotEnded => None,
+            CallEnd::Lingering { call_id, .. } | CallEnd::Over { call_id } => Some(*call_id),
         }
-    }
-
-    /// The window of the ended call may still show.
-    pub(crate) fn lingers(&self) -> bool {
-        matches!(self, CallEnd::Lingering { .. } | CallEnd::BusyLine { .. })
     }
 }
 

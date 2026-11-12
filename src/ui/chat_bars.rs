@@ -389,7 +389,10 @@ impl QuillApp {
     /// for a group or a channel. The box is the window's: OK reports from
     /// the chat that window shows.
     fn bar_report_spam(&mut self, chat_id: ChatId, window: &mut Window, cx: &mut Context<Self>) {
-        let kind = self.session().and_then(|s| s.chats.get(&chat_id.0)).map(|c| &c.kind);
+        let kind = self
+            .session()
+            .and_then(|s| s.chats.get(&chat_id.0))
+            .map(|c| &c.kind);
         let text = match kind {
             Some(kind) if kind.is_channel() => tr(keys::REPORT_SPAM_SURE_CHANNEL),
             Some(kind) if kind.can_be_left() => tr(keys::REPORT_SPAM_SURE_GROUP),

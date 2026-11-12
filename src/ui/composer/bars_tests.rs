@@ -858,6 +858,48 @@ fn a_refused_rich_send_gives_the_text_back(cx: &mut TestAppContext) {
     assert_eq!(field(&app, vcx), "# Title\nbody\ntyped meanwhile");
 }
 
+/// A rich send refused while another message is being edited goes in front
+/// of the draft set aside for the edit, so cancelling the edit gives the
+/// text back instead of losing it to the next keystroke.
+#[gpui_kit::test]
+fn a_refused_send_during_an_edit_returns_with_the_stashed_draft(cx: &mut TestAppContext) {
+    use crate::ui::composer::SentText;
+    use quill::composer::{ComposerEdit, ComposerEditKind};
+    use quill::ids::RequestId;
+    use quill::state::Answer;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_chat(&app, vcx, GROUP);
+    app.update(vcx, |app, cx| {
+        let edit = ComposerEdit {
+            chat_id: GROUP,
+            message_id: MessageId(20),
+            kind: ComposerEditKind::Text,
+            scheduled: false,
+            caption_above: false,
+            media_edit: Default::default(),
+            link_preview: Default::default(),
+        };
+        app.chat_ui.enter_edit(edit, String::new(), None);
+        app.chat_ui.sent_text = SentText::Sent {
+            request: RequestId(9),
+            markup: "A".into(),
+            slot: None,
+        };
+        cx.notify();
+    });
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.apply_sent_text_answer(&Answer::Failed("FLOOD".into()), window, cx)
+        })
+    });
+    app.read_with(vcx, |app, _| {
+        assert_eq!(app.chat_ui.stashed_draft(), Some("A"));
+    });
+    vcx.update(|window, cx| app.update(cx, |app, cx| app.clear_edit(window, cx)));
+    assert_eq!(field(&app, vcx), "A", "cancelling the edit restores it");
+}
+
 /// Sweep 08-149/150: a refused rich send keeps no draft clear, so a later
 /// send of the chat cannot delete the text it gave back. A refused inline
 /// pick (10-116) gives the `@bot query` back too.

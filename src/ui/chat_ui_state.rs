@@ -490,6 +490,20 @@ impl ChatUi {
         self.edit_mode.take()
     }
 
+    /// A refused send's text goes in front of the draft set aside for the
+    /// edit in place. `false` when no message is being edited.
+    pub(super) fn put_before_stashed_draft(&mut self, markup: &str) -> bool {
+        let Some(mode) = self.edit_mode.as_mut() else {
+            return false;
+        };
+        mode.stashed_draft = if mode.stashed_draft.is_empty() {
+            markup.to_string()
+        } else {
+            format!("{markup}\n{}", mode.stashed_draft)
+        };
+        true
+    }
+
     pub(super) fn stashed_draft(&self) -> Option<&str> {
         self.edit_mode
             .as_ref()

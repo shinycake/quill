@@ -178,8 +178,10 @@ impl QuillApp {
         }
     }
 
-    /// Frame upkeep: a refused rich send puts its text back in the field,
-    /// (in front of whatever the user typed since); an accepted one lets it go.
+    /// Frame upkeep: a refused rich send puts its text back in the field
+    /// (in front of whatever the user typed since), or, while another
+    /// message is edited, in front of the draft set aside for the edit; an
+    /// accepted one lets it go.
     pub(in crate::ui) fn settle_sent_text(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(request) = self.chat_ui.sent_text.request() else {
             return;
@@ -214,19 +216,11 @@ impl QuillApp {
         if rich && let Some(slot) = self.send_slot() {
             self.composer_sends.set_draft_clear(&slot, None);
         }
-        if self.chat_ui.is_editing() {
-            // The field holds an edit of another message: the refused text
-            // waits as the chat's draft, as for a send left behind.
-            if let Some(slot) = self.send_slot() {
-                self.save_chat_draft(
-                    ChatId(slot.draft.chat_id),
-                    slot.draft.topic,
-                    quill::composer::DraftContent::Text(markup),
-                    None,
-                    false,
-                    cx,
-                );
-            }
+        if self.chat_ui.put_before_stashed_draft(&markup) {
+            // The field holds an edit of another message, and the revision
+            // of the slot's draft is consumed while editing: the refused
+            // text waits in front of the draft set aside for the edit, and
+            // cancelling the edit puts it back in the field.
             return;
         }
         // The refused text goes back in front of anything typed since, so

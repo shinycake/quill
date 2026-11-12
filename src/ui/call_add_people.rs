@@ -19,7 +19,7 @@ use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{Icon, Sizable, h_flex};
 use gpui_kit::*;
 use quill::lang::{keys, tr};
-use quill::state::{AddPeopleEmpty, AddPeopleRow, AddPeopleView};
+use quill::state::{AddPeopleEmpty, AddPeopleRow, AddPeopleView, ContactsView};
 use quill::telegram::envelope::CallState;
 
 /// A row's userpic (tdesktop `groupCallInviteMembersList` 42 px items
@@ -351,16 +351,17 @@ impl QuillApp {
         for row in &view.global {
             rows = rows.child(self.call_add_people_row(row, true, cx));
         }
-        if let Some(empty) = view.empty {
-            let message = tr(match empty {
-                AddPeopleEmpty::ContactsLoading | AddPeopleEmpty::SearchLoading => {
-                    keys::CONTACTS_LOADING
-                }
-                AddPeopleEmpty::ContactsFailed => keys::Q_PEOPLE_COULDN_T_LOAD_CONTACTS,
-                AddPeopleEmpty::NoContacts => keys::CONTACTS_NOT_FOUND,
-                AddPeopleEmpty::NoResults => keys::BLOCKED_LIST_NOT_FOUND,
-            });
-            let retry = (empty == AddPeopleEmpty::ContactsFailed).then(|| {
+        let status = match (view.empty, view.contacts) {
+            (Some(AddPeopleEmpty::SearchLoading), _) | (None, ContactsView::Loading) => {
+                Some(keys::CONTACTS_LOADING)
+            }
+            (None, ContactsView::Failed) => Some(keys::Q_PEOPLE_COULDN_T_LOAD_CONTACTS),
+            (Some(AddPeopleEmpty::NoContacts), _) => Some(keys::CONTACTS_NOT_FOUND),
+            (Some(AddPeopleEmpty::NoResults), _) => Some(keys::BLOCKED_LIST_NOT_FOUND),
+            (None, ContactsView::Ready) => None,
+        };
+        if let Some(message) = status.map(tr) {
+            let retry = (view.contacts == ContactsView::Failed).then(|| {
                 Button::new("call-add-people-retry")
                     .debug_selector(|| "call-add-people-retry".into())
                     .label(tr(keys::Q_MONEY_RETRY))

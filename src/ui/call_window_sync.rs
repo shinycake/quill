@@ -60,6 +60,19 @@ impl CallWindowTarget {
         }
     }
 
+    /// The window of the ended call may still show: its linger is on, or
+    /// it is a busy line's summary (which stays until Cancel or Redial)
+    /// that this screen has not seen before.
+    fn lingers(self, end: &CallEnd) -> bool {
+        match self {
+            Self::Ended { id } => {
+                matches!(end, CallEnd::Lingering { call_id, .. } if *call_id == id)
+            }
+            Self::BusyLine { id } => end.call_id() != Some(id),
+            _ => false,
+        }
+    }
+
     /// The call has ended (its summary shows).
     fn ended(self) -> bool {
         matches!(self, Self::Ended { .. } | Self::BusyLine { .. })
@@ -89,7 +102,7 @@ impl QuillApp {
             self.call_screen.wanted = WindowWanted::Open;
         }
         let ended = target.ended();
-        let lingering = self.call_screen.end.lingers();
+        let lingering = target.lingers(&self.call_screen.end);
         let wanted = call_id.filter(|id| {
             (!ended || lingering) && window_allowed(*id, self.call_screen.wanted, second.is_some())
         });
@@ -116,15 +129,25 @@ impl QuillApp {
     /// the stage holds (a busy line stays until its buttons dismiss it); a
     /// call still going, or none, ends the stage and drops the timer.
     fn follow_call_end(&mut self, target: CallWindowTarget, cx: &mut Context<Self>) {
+        let end = &self.call_screen.end;
+        if matches!(end, CallEnd::Unobserved) {
+            self.call_screen.end = match target {
+                CallWindowTarget::Ended { id } | CallWindowTarget::BusyLine { id } => {
+                    CallEnd::Over { call_id: id }
+                }
+                _ => CallEnd::NotEnded,
+            };
+            return;
+        }
         match target {
-            CallWindowTarget::Ended { id } if self.call_screen.end.call_id() != Some(id) => {
+            CallWindowTarget::Ended { id } if end.call_id() != Some(id) => {
                 self.call_screen.end = CallEnd::Lingering {
                     call_id: id,
                     _timer: self.linger_timer(cx),
                 };
             }
-            CallWindowTarget::BusyLine { id } if self.call_screen.end.call_id() != Some(id) => {
-                self.call_screen.end = CallEnd::BusyLine { call_id: id };
+            CallWindowTarget::BusyLine { id } if end.call_id() != Some(id) => {
+                self.call_screen.end = CallEnd::NotEnded;
             }
             CallWindowTarget::Ended { .. } | CallWindowTarget::BusyLine { .. } => {}
             _ => self.call_screen.end = CallEnd::NotEnded,
