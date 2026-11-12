@@ -17,6 +17,39 @@ pub struct ChatPageStories {
     pub story_ids: Vec<i32>,
     pub pinned_story_ids: Vec<i32>,
     pub total_count: i32,
+    pub page: StoryPaging,
+}
+
+impl ChatPageStories {
+    /// A page request went out as `request`, from `from` (0: the newest).
+    pub fn ask(&mut self, request: RequestId, from: i32) {
+        self.page = StoryPaging::Asking { request, from };
+    }
+
+    /// The page `request` answered: only the page this list waits for
+    /// lands, and a first page restarts the list. `Some(first)` when it
+    /// landed, with whether it was the first page.
+    pub fn land(&mut self, request: RequestId, ids: &[i32], total_count: i32) -> Option<bool> {
+        let first = self.page.settle(request)? == 0;
+        if first {
+            self.story_ids.clear();
+            self.pinned_story_ids.clear();
+        }
+        land_ids(&mut self.story_ids, ids);
+        self.total_count = total_count;
+        self.page = StoryPaging::more_after(&self.story_ids);
+        Some(first)
+    }
+
+    /// The page `request` failed: the list asks again from where it was.
+    pub fn failed(&mut self, request: RequestId) {
+        self.page.fail(request);
+    }
+
+    /// The cursor for the next page (0 before the first).
+    pub fn next_from(&self) -> i32 {
+        self.page.next_from()
+    }
 }
 
 /// Phase 9.7: one chat's `getChatArchivedStories` state — accumulated
@@ -26,7 +59,101 @@ pub struct ChatPageStories {
 pub struct ArchivedStories {
     pub story_ids: Vec<i32>,
     pub total_count: i32,
-    pub next_from_story_id: Option<i32>,
+    pub page: StoryPaging,
+}
+
+impl ArchivedStories {
+    /// A page request went out as `request`, from `from` (0: the newest).
+    pub fn ask(&mut self, request: RequestId, from: i32) {
+        self.page = StoryPaging::Asking { request, from };
+    }
+
+    /// The page `request` answered: only the page this list waits for
+    /// lands, and a first page restarts the list. Whether it landed.
+    pub fn land(&mut self, request: RequestId, ids: &[i32], total_count: i32) -> bool {
+        let Some(from) = self.page.settle(request) else {
+            return false;
+        };
+        if from == 0 {
+            self.story_ids.clear();
+        }
+        land_ids(&mut self.story_ids, ids);
+        self.total_count = total_count;
+        self.page = StoryPaging::more_after(&self.story_ids);
+        true
+    }
+
+    /// The page `request` failed: the list asks again from where it was.
+    pub fn failed(&mut self, request: RequestId) {
+        self.page.fail(request);
+    }
+
+    /// The cursor for the next page (0 before the first).
+    pub fn next_from(&self) -> i32 {
+        self.page.next_from()
+    }
+}
+
+/// Server order across pages: append new ids, dedupe, never re-sort.
+fn land_ids(into: &mut Vec<i32>, ids: &[i32]) {
+    for id in ids {
+        if !into.contains(id) {
+            into.push(*id);
+        }
+    }
+}
+
+/// Where a chat's story list stands in its paging. A page is matched by
+/// the `RequestId` it was asked as, so an older ask answering after a newer
+/// one (the gallery's first page after the stories page's second) lands
+/// nowhere. Leaves with the page's answer or error; a reasked page replaces
+/// it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StoryPaging {
+    /// No page is out; the next one starts below `next` (0: the newest).
+    More { next: i32 },
+    /// The page asked from `from` is out as `request`.
+    Asking { request: RequestId, from: i32 },
+}
+
+impl Default for StoryPaging {
+    fn default() -> Self {
+        Self::More { next: 0 }
+    }
+}
+
+impl StoryPaging {
+    /// `from_story_id` returns stories below it: the smallest loaded id.
+    fn more_after(ids: &[i32]) -> Self {
+        Self::More {
+            next: ids.iter().copied().min().unwrap_or(0),
+        }
+    }
+
+    /// `request` answered: the cursor it was asked from, when it is the
+    /// page waited for.
+    fn settle(&self, request: RequestId) -> Option<i32> {
+        match *self {
+            Self::Asking {
+                request: asked,
+                from,
+            } if asked == request => Some(from),
+            _ => None,
+        }
+    }
+
+    fn fail(&mut self, request: RequestId) {
+        if let Some(from) = self.settle(request) {
+            *self = Self::More { next: from };
+        }
+    }
+
+    fn next_from(&self) -> i32 {
+        match *self {
+            Self::More { next } => next,
+            Self::Asking { from, .. } => from,
+        }
+    }
 }
 
 /// Phase 9.7: honest album/pin mutation states on the story page.
@@ -459,6 +586,12 @@ mod tests {
             RequestPurpose::GetChatPostedToChatPageStories,
             Some(ChatId(11)),
         );
+        session
+            .stories
+            .chat_page_stories
+            .entry(11)
+            .or_default()
+            .ask(extra, 0);
         apply_json(
             &mut session,
             &seq,
@@ -469,6 +602,12 @@ mod tests {
             RequestPurpose::GetChatPostedToChatPageStories,
             Some(ChatId(11)),
         );
+        session
+            .stories
+            .chat_page_stories
+            .entry(11)
+            .or_default()
+            .ask(extra, 301);
         apply_json(
             &mut session,
             &seq,
@@ -488,6 +627,12 @@ mod tests {
         let (mut session, sink) = session();
         let seq = AtomicU64::new(1);
         let extra = session.request(RequestPurpose::GetChatArchivedStories, Some(ChatId(11)));
+        session
+            .stories
+            .archived_stories
+            .entry(11)
+            .or_default()
+            .ask(extra, 0);
         session.begin_story_page_check(
             story_page_op_label(RequestPurpose::GetChatArchivedStories),
             extra,
@@ -507,7 +652,7 @@ mod tests {
         );
         let archived = &session.stories.archived_stories[&11];
         assert_eq!(archived.story_ids, vec![202, 201]);
-        assert_eq!(archived.next_from_story_id, Some(201));
+        assert_eq!(archived.next_from(), 201);
         assert!(session.stories.page_ops.is_empty());
     }
 
@@ -567,5 +712,52 @@ mod tests {
             session.stories.page_ops.latest().map(|op| &op.state),
             Some(StoryPageOpState::Failed { .. })
         ));
+    }
+
+    #[test]
+    fn a_page_asked_before_a_newer_first_page_lands_nowhere() {
+        // The stories page asks page 2; before it answers the gallery asks a
+        // first page, which restarts the list. Page 2 answering first must
+        // not land ahead of the first page, and the first page lands whole.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(1);
+        let page = |extra: RequestId, ids: &[i32]| {
+            let list: Vec<String> = ids
+                .iter()
+                .map(|id| format!(r#"{{"@type":"story","id":{id},"poster_chat_id":11}}"#))
+                .collect();
+            format!(
+                r#"{{"@type":"stories","@extra":"{}","total_count":4,"stories":[{}]}}"#,
+                extra.0,
+                list.join(",")
+            )
+        };
+        let ask = |session: &mut Session, from: i32| {
+            let extra = session.request(
+                RequestPurpose::GetChatPostedToChatPageStories,
+                Some(ChatId(11)),
+            );
+            session
+                .stories
+                .chat_page_stories
+                .entry(11)
+                .or_default()
+                .ask(extra, from);
+            extra
+        };
+        let first_page = ask(&mut session, 0);
+        apply_json(&mut session, &seq, &sink, &page(first_page, &[40, 30]));
+        let second = ask(&mut session, 30);
+        let restart = ask(&mut session, 0);
+        apply_json(&mut session, &seq, &sink, &page(second, &[20, 10]));
+        assert_eq!(
+            session.stories.chat_page_stories[&11].story_ids,
+            vec![40, 30],
+            "the older ask's page is dropped"
+        );
+        apply_json(&mut session, &seq, &sink, &page(restart, &[40, 30]));
+        let state = &session.stories.chat_page_stories[&11];
+        assert_eq!(state.story_ids, vec![40, 30]);
+        assert_eq!(state.next_from(), 30);
     }
 }

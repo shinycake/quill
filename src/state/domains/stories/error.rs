@@ -178,6 +178,24 @@ impl Session {
                 }
                 // The profile gallery's Stories tab loads from this request
                 // too: it fails instead of loading forever.
+                if let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                    && let Some(request) = pending.map(|p| p.id)
+                {
+                    match purpose {
+                        RequestPurpose::GetChatArchivedStories => {
+                            if let Some(entry) = self.stories.archived_stories.get_mut(&chat_id.0) {
+                                entry.failed(request);
+                            }
+                        }
+                        RequestPurpose::GetChatPostedToChatPageStories => {
+                            if let Some(entry) = self.stories.chat_page_stories.get_mut(&chat_id.0)
+                            {
+                                entry.failed(request);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
                 if purpose == RequestPurpose::GetChatPostedToChatPageStories
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
                     && let Some(request) = pending.map(|p| p.id)
