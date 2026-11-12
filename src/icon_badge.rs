@@ -40,6 +40,11 @@ pub fn app_uri() -> String {
     )
 }
 
+/// How long a failed push waits before the same count is pushed again, so a
+/// missing session bus (or a taskbar button that does not exist yet) does not
+/// wake the worker on every pass.
+const FAILED_RETRY_AFTER: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// What the dock shows, from the UI's point of view: one stage for every
 /// platform. The count the UI wants is asked of the platform through
 /// [`BadgeStage::request`]; a platform that answers later (the Linux
@@ -55,21 +60,28 @@ enum BadgeStage {
     Pending(u32),
     /// The platform showed it.
     Delivered(u32),
-    /// The platform could not show it.
-    Failed(u32),
+    /// The platform could not show it at `at`: the same count is asked again
+    /// after [`FAILED_RETRY_AFTER`], a different one at once.
+    Failed { count: u32, at: std::time::Instant },
 }
 
 impl BadgeStage {
-    /// The UI wants `unread` shown: whether to push it now. A count already
-    /// shown, or in flight, is not pushed again.
-    fn request(&mut self, unread: u32) -> bool {
+    /// The UI wants `unread` shown at `now`: whether to push it now. A count
+    /// already shown, or in flight, or one that just failed, is not pushed
+    /// again.
+    fn request(&mut self, unread: u32, now: std::time::Instant) -> bool {
         match *self {
             BadgeStage::Delivered(shown) if shown == unread => false,
             BadgeStage::Pending(asked) if asked == unread => false,
+            BadgeStage::Failed { count, at }
+                if count == unread && now.saturating_duration_since(at) < FAILED_RETRY_AFTER =>
+            {
+                false
+            }
             BadgeStage::Idle
             | BadgeStage::Pending(_)
             | BadgeStage::Delivered(_)
-            | BadgeStage::Failed(_) => {
+            | BadgeStage::Failed { .. } => {
                 *self = BadgeStage::Pending(unread);
                 true
             }
@@ -78,22 +90,22 @@ impl BadgeStage {
 
     /// The platform's answer for `count`; a newer request that overtook it
     /// stays pending.
-    fn answered(&mut self, count: u32, shown: bool) {
+    fn answered(&mut self, count: u32, shown: bool, now: std::time::Instant) {
         if *self == BadgeStage::Pending(count) {
             *self = if shown {
                 BadgeStage::Delivered(count)
             } else {
-                BadgeStage::Failed(count)
+                BadgeStage::Failed { count, at: now }
             };
         }
     }
 
     /// The platform can no longer answer what is in flight (its worker is
-    /// gone): ask again on the next tick.
+    /// gone): ask again after the wait.
     #[cfg(any(all(target_os = "linux", feature = "ui"), test))]
-    fn abandoned(&mut self) {
+    fn abandoned(&mut self, now: std::time::Instant) {
         if let BadgeStage::Pending(count) = *self {
-            *self = BadgeStage::Failed(count);
+            *self = BadgeStage::Failed { count, at: now };
         }
     }
 
@@ -116,7 +128,7 @@ enum Push {
     Done,
     /// Handed to a worker that settles it through `BADGE`.
     Handed,
-    /// Could not be shown now: asked again on the next tick.
+    /// Could not be shown now: asked again after the retry wait.
     Failed,
 }
 
@@ -148,7 +160,7 @@ fn trace(line: &str) {
 /// tray timer); emits only on change.
 pub fn sync_icon_badge(session: Option<&Session>) {
     let unread = crate::notify_accounts::total_unread(session).count;
-    sync_with(&BADGE, unread, push_badge);
+    sync_with(&BADGE, unread, std::time::Instant::now(), push_badge);
 }
 
 /// The OS may have lost or reset the badge without telling us (the app
@@ -160,8 +172,13 @@ pub fn invalidate_icon_badge() {
     crate::wake::CHROME.poke();
 }
 
-fn sync_with(badge: &std::sync::Mutex<BadgeStage>, unread: u32, push: impl FnOnce(u32) -> Push) {
-    if !crate::locks::lock_or_recover(badge).request(unread) {
+fn sync_with(
+    badge: &std::sync::Mutex<BadgeStage>,
+    unread: u32,
+    now: std::time::Instant,
+    push: impl FnOnce(u32) -> Push,
+) {
+    if !crate::locks::lock_or_recover(badge).request(unread, now) {
         return;
     }
     // The push runs without the lock: a worker answers through it.
@@ -171,8 +188,8 @@ fn sync_with(badge: &std::sync::Mutex<BadgeStage>, unread: u32, push: impl FnOnc
         !matches!(pushed, Push::Failed)
     ));
     match pushed {
-        Push::Done => crate::locks::lock_or_recover(badge).answered(unread, true),
-        Push::Failed => crate::locks::lock_or_recover(badge).answered(unread, false),
+        Push::Done => crate::locks::lock_or_recover(badge).answered(unread, true, now),
+        Push::Failed => crate::locks::lock_or_recover(badge).answered(unread, false, now),
         Push::Handed => {}
     }
 }
@@ -431,7 +448,7 @@ struct WorkerEnd<'a>(&'a std::sync::Mutex<BadgeStage>);
 #[cfg(any(all(target_os = "linux", feature = "ui"), test))]
 impl Drop for WorkerEnd<'_> {
     fn drop(&mut self) {
-        crate::locks::lock_or_recover(self.0).abandoned();
+        crate::locks::lock_or_recover(self.0).abandoned(std::time::Instant::now());
     }
 }
 
@@ -460,7 +477,7 @@ fn launcher_loop() {
             connection = zbus::blocking::Connection::session().ok();
         }
         let Some(conn) = &connection else {
-            crate::locks::lock_or_recover(&BADGE).answered(count, false);
+            crate::locks::lock_or_recover(&BADGE).answered(count, false, std::time::Instant::now());
             continue;
         };
         let mut props: std::collections::HashMap<&str, zbus::zvariant::Value> =
@@ -477,14 +494,14 @@ fn launcher_loop() {
         if sent.is_err() {
             connection = None;
         }
-        crate::locks::lock_or_recover(&BADGE).answered(count, sent.is_ok());
+        crate::locks::lock_or_recover(&BADGE).answered(count, sent.is_ok(), std::time::Instant::now());
     }
 }
 
 /// Hands the count to a worker thread that owns the session-bus connection
 /// and emits the signal, so the UI thread never waits on D-Bus. The worker
 /// starts on first use and again after it died; any failure (no session
-/// bus, no listening dock, no thread) is asked again on the next tick
+/// bus, no listening dock, no thread) is asked again after a wait
 /// (`BadgeStage::Failed`).
 #[cfg(target_os = "linux")]
 fn emit_launcher_entry(unread: u32) -> Push {
@@ -509,6 +526,11 @@ mod tests {
 
     use std::sync::Mutex;
 
+    fn t0() -> std::time::Instant {
+        static T0: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+        *T0.get_or_init(std::time::Instant::now)
+    }
+
     #[test]
     fn badge_is_repushed_after_invalidation_but_deduped_otherwise() {
         let badge = Mutex::new(BadgeStage::Idle);
@@ -517,25 +539,25 @@ mod tests {
             pushes.set(pushes.get() + 1);
             Push::Done
         };
-        sync_with(&badge, 4, push);
-        sync_with(&badge, 4, push);
+        sync_with(&badge, 4, t0(), push);
+        sync_with(&badge, 4, t0(), push);
         assert_eq!(pushes.get(), 1, "same count is deduped");
         badge.lock().unwrap().invalidate();
-        sync_with(&badge, 4, push);
+        sync_with(&badge, 4, t0(), push);
         assert_eq!(pushes.get(), 2, "re-activation pushes the same count again");
-        sync_with(&badge, 4, push);
+        sync_with(&badge, 4, t0(), push);
         assert_eq!(pushes.get(), 2);
     }
 
     #[test]
-    fn a_push_that_failed_is_asked_again_on_the_next_tick() {
+    fn a_push_that_failed_is_asked_again_after_the_wait() {
         let badge = Mutex::new(BadgeStage::Idle);
         let pushes = std::cell::Cell::new(0);
-        sync_with(&badge, 2, |_| {
+        sync_with(&badge, 2, t0(), |_| {
             pushes.set(pushes.get() + 1);
             Push::Failed
         });
-        sync_with(&badge, 2, |_| {
+        sync_with(&badge, 2, t0() + FAILED_RETRY_AFTER, |_| {
             pushes.set(pushes.get() + 1);
             Push::Done
         });
@@ -551,38 +573,59 @@ mod tests {
             handed.set(handed.get() + 1);
             Push::Handed
         };
-        sync_with(&badge, 3, push);
-        sync_with(&badge, 3, push);
+        sync_with(&badge, 3, t0(), push);
+        sync_with(&badge, 3, t0(), push);
         assert_eq!(handed.get(), 1, "in flight: not asked twice");
-        badge.lock().unwrap().answered(3, false);
-        sync_with(&badge, 3, push);
-        assert_eq!(handed.get(), 2, "failed: asked again");
-        badge.lock().unwrap().answered(3, true);
-        sync_with(&badge, 3, push);
+        badge.lock().unwrap().answered(3, false, t0());
+        sync_with(&badge, 3, t0(), push);
+        assert_eq!(handed.get(), 1, "failed: not asked on every pass");
+        sync_with(&badge, 3, t0() + FAILED_RETRY_AFTER, push);
+        assert_eq!(handed.get(), 2, "failed: asked again after the wait");
+        badge.lock().unwrap().answered(3, true, t0());
+        sync_with(&badge, 3, t0(), push);
         assert_eq!(handed.get(), 2, "emitted: known shown");
-        sync_with(&badge, 0, push);
+        sync_with(&badge, 0, t0(), push);
         assert_eq!(handed.get(), 3, "a new count goes out");
+    }
+
+    #[test]
+    fn a_failed_count_waits_but_a_new_count_goes_out_at_once() {
+        let badge = Mutex::new(BadgeStage::Idle);
+        let pushes = std::cell::Cell::new(0);
+        let fail = |_| {
+            pushes.set(pushes.get() + 1);
+            Push::Failed
+        };
+        for _ in 0..5 {
+            sync_with(&badge, 4, t0(), fail);
+        }
+        assert_eq!(pushes.get(), 1, "a missing bus is not asked on every pass");
+        sync_with(&badge, 5, t0(), fail);
+        assert_eq!(pushes.get(), 2, "a new count is not held back");
     }
 
     #[test]
     fn an_old_answer_does_not_settle_a_newer_request() {
         let mut stage = BadgeStage::Idle;
-        assert!(stage.request(1));
-        assert!(stage.request(2));
-        stage.answered(1, true);
-        assert!(!stage.request(2), "2 is still pending");
-        stage.answered(2, true);
-        assert!(!stage.request(2));
+        assert!(stage.request(1, t0()));
+        assert!(stage.request(2, t0()));
+        stage.answered(1, true, t0());
+        assert!(!stage.request(2, t0()), "2 is still pending");
+        stage.answered(2, true, t0());
+        assert!(!stage.request(2, t0()));
     }
 
     #[test]
     fn a_worker_that_ends_hands_its_pending_count_back() {
         let badge = Mutex::new(BadgeStage::Idle);
-        sync_with(&badge, 5, |_| Push::Handed);
+        sync_with(&badge, 5, t0(), |_| Push::Handed);
         drop(WorkerEnd(&badge));
-        assert_eq!(*badge.lock().unwrap(), BadgeStage::Failed(5));
+        assert!(matches!(
+            *badge.lock().unwrap(),
+            BadgeStage::Failed { count: 5, .. }
+        ));
         let pushes = std::cell::Cell::new(0);
-        sync_with(&badge, 5, |_| {
+        sync_with(&badge, 5, t0() + FAILED_RETRY_AFTER * 2, |_| {
             pushes.set(pushes.get() + 1);
             Push::Handed
         });
