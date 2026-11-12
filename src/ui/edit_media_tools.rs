@@ -176,7 +176,7 @@ impl QuillApp {
     /// The photo isn't on disk yet: ask TDLib for it; the editor opens
     /// when it lands (`edit_image_upkeep`), or a note says it failed.
     fn request_edit_image_download(&mut self, cx: &mut Context<Self>) {
-        let file_id = self.chat_ui.pending_edit().and_then(|edit| {
+        let target = self.chat_ui.pending_edit().and_then(|edit| {
             let message = self
                 .session()?
                 .histories
@@ -184,20 +184,29 @@ impl QuillApp {
                 .messages
                 .get(&edit.message_id.0)?;
             match &message.content {
-                quill::telegram::envelope::MessageContent::Photo(photo) => photo.open_file_id(),
+                quill::telegram::envelope::MessageContent::Photo(photo) => photo
+                    .open_file_id()
+                    .map(|file_id| (file_id, edit.chat_id, edit.message_id)),
                 _ => None,
             }
         });
-        let asked = match (file_id, self.live.as_mut()) {
-            (Some(file_id), Some(live)) => {
-                live.driver.download_file(file_id, 8).map(|_| file_id).ok()
-            }
+        // A user download: `Ok(None)` means the file is already requested or
+        // running (an auto download from the history row or viewer), so the
+        // edit waits for that one; an ended auto download is asked again
+        // rather than left stalled. Only a refused send is a failure.
+        let waiting = match (target, self.live.as_mut()) {
+            (Some((file_id, chat_id, message_id)), Some(live)) => EditImageFetch::asked(
+                file_id,
+                &live
+                    .driver
+                    .download_user_file(file_id, Some((chat_id, message_id.0))),
+            ),
             _ => None,
         };
-        match asked {
-            Some(file_id) => {
+        match waiting {
+            Some(stage) => {
                 if let Some(edit) = self.chat_ui.pending_edit_mut() {
-                    edit.media_edit.image = EditImageFetch::Downloading { file_id };
+                    edit.media_edit.image = stage;
                 }
                 self.set_note(StatusNote::silent(tr(keys::Q_MISC_DOWNLOADING)));
             }
@@ -215,7 +224,7 @@ impl QuillApp {
         let Some(edit) = self.chat_ui.pending_edit() else {
             return;
         };
-        let EditImageFetch::Downloading { file_id } = edit.media_edit.image else {
+        let EditImageFetch::Tracked { file_id } = edit.media_edit.image else {
             return;
         };
         let landed = self
@@ -226,7 +235,7 @@ impl QuillApp {
                 session
                     .media
                     .downloads
-                    .ended_without_file(file_id.0, &session.media.files)
+                    .gave_up(file_id.0, &session.media.files)
             });
         if !landed && !failed {
             return;

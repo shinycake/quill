@@ -10220,3 +10220,25 @@ add and closed link save), `composer_sends_tests` (an ack never takes a
 neighbour's clear), `chat_window::asker_tests` (gif ask settles; two
 windows keep their own link text), `forum_extras::tests` (both answer
 orders), `deep_link_routes_tests` (seek stays with its account).
+
+### Sweep fixes (r4-01)
+
+| Ids | What changed |
+| --- | --- |
+| 01-001, g-487 | The web view's `armed` flag is derived from `Phase` in one place: `enter` is the only writer of the phase and stores "is `Relaying`" for the callbacks' threads. `Phase::Relaying` is a unit variant: Quill holds no request for the page load, and the relay owns its load clock (`load_started`). |
+| 01-002 | The `quill://unread` watcher no longer sleeps on a 10 s timer while Quill is locked or signed out. It parks on the message condvar (`events::park`), which new messages, lock and unlock, and `Subscription::stop` wake; the 10 minute cap is only a safety net. Test `a_stop_ends_a_watcher_parked_with_nothing_to_look_at`. |
+| 01-003 | `td_offset::forget_account` runs from `account_data::forget`, so a logged-out account's `quill-offset:` tokens expire and a later sign-in under the same key cannot replay them. Test `a_logged_out_accounts_tokens_expire`. |
+| 01-004 | `ArchiveReload`, `note_sent` and `note_reload_failed` are deleted: they mirrored `ChatListState::archive_settings` (`Fetch`) by hand. `suggestion_due` reads that `Fetch` (not loading, cached copy off). Tests `a_reload_in_flight_holds_the_box_and_a_failed_one_releases_it`, `the_suggestion_waits_for_the_settings_and_skips_when_on`. |
+| 02-004 | `SoundSlot` owns the device thread and the landing token in one stage (`Closed`, `Opening { thread, token }`, `Open`). `clear()` and a new open drop the old thread with its token, so an open can only land while its own thread is the slot's; `P2pCall::sound` and `GroupCall::sound` are deleted. |
+| 02-001, g-ia-output_failed | The stream player stores `OutputState` in an atomic cell (`OutputCell`, `AtomicU8`) and the health snapshot reads it straight; `output_failed: AtomicBool` is gone. |
+| 02-003, g-501 | `ReplacementProbe::Probing { job: RenderJob }`: the probe's task lives in the stage, so a newer probe, a cleared replacement or the edit ending cancels the old one. Answers compare the job's `RenderToken`. A just-staged video is `Staged` until `probe_edit_replacement` starts its probe in the same call. `ProbeJob` is deleted. Tests `each_probe_of_a_replacement_has_its_own_job`, `replacing_the_probe_cancels_the_one_running`. |
+| 02-002, g-499 | `EditImageFetch::Tracked { file_id }`: the download tracker owns the transfer, so the stage holds no request and ends on the file landing or `gave_up`. `Ok(None)` (already requested or running) waits like a fresh request, and the download goes out as a user download so an ended automatic one gets a fresh transfer. Test `edit_image_waits_for_a_photo_already_downloading`. |
+| g-490, g-491 | The bridge `Stage` has one `Undecided` stage where `Queued` and `Running` were (nothing read the difference). |
+| g-489 | `Run::Active { last_ms }` carries the session's last step; `Session::last_ms` is gone, so a cut-short session has no stale step time. |
+| g-481, g-497 | `CallLinkStep::OtherCallOn` (a plan, not a wait). `LeavingCall::Private { call_id, request }` holds the hang-up's `RequestId`; `drop_waiting_for(request)` matches by it. |
+| g-484, g-498 | `DeviceRun::Opening(Arc<DeviceThread>)` / `Running { thread, running }`: the stage owns the device thread and turns into the running one in place (no stand-in thread), so the `capture`/`mic` field beside `run` is gone in `call_screen.rs` and `call_capture.rs`. |
+| g-488, g-480 | `PhoneSuggestion::Offered`; `BottomBar::Starting { request }`. A fresh close-birthdays list no longer overwrites a `Hiding { request }` card (test `a_fresh_list_does_not_undo_a_hide_on_its_way`). |
+| g-483, g-486, g-493, g-492, g-482, g-494, g-485, g-500, g-495, g-496 | Steady or mirrored states are named for what they are, not as work in flight: `CardState::Idle`, mic `Health::{Fine, Failed}`, pipewire `StreamState::Linking` (mirrors `PW_STREAM_STATE_CONNECTING`), `StreamPhase::NoFrameYet`, `CaptureStage::Live`, engine `StreamState::Joined`, `FeederState::Listed`, `P2pStage::Unconnected`, `TransportState::Establishing`, `Waker::Missed`. None of them waits for a request Quill sent. |
+| g-502, g-503 | `current_agent` reads its cell with `try_borrow`; `retain_community_chats` calls the `Borrow` trait by path (it was never a `RefCell`). |
+
+Five stale lines left `scripts/stage-enums-allow.txt` (their variants hold a request now or are gone).

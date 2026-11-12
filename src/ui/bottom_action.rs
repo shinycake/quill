@@ -85,7 +85,7 @@ impl QuillApp {
         match bottom_bar(&self.bottom_bar_facts(session, chat))? {
             bar @ (BottomBar::Unblock { .. }
             | BottomBar::Start
-            | BottomBar::Starting
+            | BottomBar::Starting { .. }
             | BottomBar::PremiumRequired
             | BottomBar::JoinGroup
             | BottomBar::ApplyToJoin) => Some(bar),
@@ -127,7 +127,7 @@ impl QuillApp {
                     Button::new("bottom-action")
                         .label(bar.label())
                         .primary()
-                        .disabled(bar == BottomBar::Starting)
+                        .disabled(matches!(bar, BottomBar::Starting { .. }))
                         .w_full()
                         .max_w(px(360.))
                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -142,7 +142,7 @@ impl QuillApp {
         match bar {
             BottomBar::Unblock { restart } => self.unblock_peer(chat_id, restart, cx),
             BottomBar::Start => self.start_bot_from_bar(chat_id, cx),
-            BottomBar::Starting => {}
+            BottomBar::Starting { .. } => {}
             BottomBar::PremiumRequired => self.open_premium_from("require_premium", cx),
             BottomBar::JoinGroup | BottomBar::ApplyToJoin => {
                 // Only a send that went out gets its own wording: a failed

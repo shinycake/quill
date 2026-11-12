@@ -164,7 +164,7 @@ impl GroupMedia {
         if mode.is_stream() {
             Self::Stream {
                 mode,
-                state: StreamState::Connecting,
+                state: StreamState::Joined,
             }
         } else {
             Self::Rtc
@@ -182,10 +182,10 @@ impl GroupMedia {
         matches!(self, Self::Stream { .. })
     }
 
-    /// The stream's state; a call without a stream reads `Connecting`.
+    /// The stream's state; a call without a stream reads `Joined`.
     pub fn stream_state(&self) -> StreamState {
         match self {
-            Self::Rtc => StreamState::Connecting,
+            Self::Rtc => StreamState::Joined,
             Self::Stream { state, .. } => *state,
         }
     }

@@ -52,7 +52,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     invite_hash: invite_hash.to_string(),
                 });
             }
-            CallLinkStep::Busy => {
+            CallLinkStep::OtherCallOn => {
                 let leave = if private_call {
                     LeaveKind::PrivateCall
                 } else {
@@ -82,37 +82,34 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(confirm) = self.session.calls.call_link_stage.take_confirm() else {
             return Ok(());
         };
-        let leaving = match confirm.leave {
-            LeaveKind::PrivateCall => self
-                .session
-                .calls
-                .active_call
-                .as_ref()
-                .map(|call| LeavingCall::Private(call.id)),
+        let call = match confirm.leave {
+            LeaveKind::PrivateCall => self.session.calls.active_call.as_ref().map(|call| call.id),
             LeaveKind::GroupCall { .. } => self
                 .session
                 .calls
                 .active_group_call
                 .as_ref()
-                .map(|call| LeavingCall::Group(call.id)),
+                .map(|call| call.id),
         };
         // The call may have ended while the question was open.
-        let Some(leaving) = leaving else {
+        let Some(call) = call else {
             return self.offer_confirmed_link(confirm);
         };
-        match leaving {
+        let leaving = match confirm.leave {
             // A hang-up TDLib was not sent leaves the call up: no link
             // waits for it to end.
-            LeavingCall::Private(_) => {
-                self.discard_call()?;
-            }
+            LeaveKind::PrivateCall => LeavingCall::Private {
+                call_id: call,
+                request: self.discard_call()?,
+            },
             // The group call is dropped here whether or not the leave went
             // out, as the call screen's own Leave does.
-            LeavingCall::Group(_) => {
+            LeaveKind::GroupCall { .. } => {
                 let _ = self.leave_group_call();
                 self.drop_group_call_locally();
+                LeavingCall::Group(call)
             }
-        }
+        };
         self.session.calls.call_link_stage = CallLinkStage::Leaving(CallLinkLeaving {
             link: confirm,
             leaving,
@@ -142,7 +139,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .map(|call| call.id);
         if private.is_some() || group.is_some() {
             let same = match waiting.leaving {
-                LeavingCall::Private(id) => private == Some(id) && group.is_none(),
+                LeavingCall::Private { call_id, .. } => private == Some(call_id) && group.is_none(),
                 LeavingCall::Group(id) => group == Some(id) && private.is_none(),
             };
             if !same {

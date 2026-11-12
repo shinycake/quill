@@ -5,6 +5,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use crate::calls::engine::StreamState;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::{Duration, Instant};
 
 pub const NO_SOUND_LIMIT: Duration = Duration::from_secs(5);
@@ -18,7 +19,37 @@ pub struct PlaybackHealth {
     pub frames: u64,
     /// The loudest sample so far (absolute), so silent frames show.
     pub peak: u16,
-    pub output_failed: bool,
+    pub output: OutputState,
+}
+
+/// Whether the sound output still runs, as the last sample saw it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OutputState {
+    #[default]
+    Open,
+    /// The stream ended (the device went away); it needs a reopen.
+    Failed,
+}
+
+/// An [`OutputState`] the audio thread and the poll loop share. It only
+/// ever moves from `Open` to `Failed`.
+#[derive(Default)]
+pub struct OutputCell(AtomicU8);
+
+impl OutputCell {
+    const OPEN: u8 = 0;
+    const FAILED: u8 = 1;
+
+    pub fn get(&self) -> OutputState {
+        match self.0.load(Ordering::Relaxed) {
+            Self::OPEN => OutputState::Open,
+            _ => OutputState::Failed,
+        }
+    }
+
+    pub fn fail(&self) {
+        self.0.store(Self::FAILED, Ordering::Relaxed);
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,7 +114,7 @@ impl PlaybackWatch {
             }
             WatchStage::Watching { live_since } => live_since,
         };
-        let reason = if health.output_failed {
+        let reason = if health.output == OutputState::Failed {
             Some(FallBack::OutputFailed)
         } else if health.frames > 0 || state != StreamState::Live {
             *live_since = None;
@@ -121,14 +152,16 @@ impl PlaybackWatch {
 
 #[cfg(test)]
 mod tests {
-    use super::{FallBack, NO_SOUND_LIMIT, PlaybackHealth, PlaybackWatch, REOPEN_RETRY};
-    use crate::calls::engine::StreamState::{Connecting, Live, NoStream};
+    use super::{
+        FallBack, NO_SOUND_LIMIT, OutputState, PlaybackHealth, PlaybackWatch, REOPEN_RETRY,
+    };
+    use crate::calls::engine::StreamState::{Joined, Live, NoStream};
     use std::time::{Duration, Instant};
 
     const SILENT: PlaybackHealth = PlaybackHealth {
         frames: 0,
         peak: 0,
-        output_failed: false,
+        output: OutputState::Open,
     };
 
     #[test]
@@ -154,7 +187,7 @@ mod tests {
         let start = Instant::now();
         let mut watch = PlaybackWatch::default();
         assert_eq!(
-            watch.observe(start + Duration::from_secs(10), Connecting, SILENT),
+            watch.observe(start + Duration::from_secs(10), Joined, SILENT),
             None
         );
         let live = start + Duration::from_secs(11);
@@ -182,7 +215,7 @@ mod tests {
         let playing = PlaybackHealth {
             frames: 3,
             peak: 0,
-            output_failed: false,
+            output: OutputState::Open,
         };
         assert_eq!(watch.observe(start, Live, playing), None);
         assert_eq!(
@@ -198,7 +231,7 @@ mod tests {
         let playing = PlaybackHealth {
             frames: 40,
             peak: 0,
-            output_failed: false,
+            output: OutputState::Open,
         };
         assert_eq!(watch.observe(start, Live, SILENT), None);
         assert_eq!(
@@ -224,7 +257,7 @@ mod tests {
         let failed = PlaybackHealth {
             frames: 500,
             peak: 0,
-            output_failed: true,
+            output: OutputState::Failed,
         };
         assert_eq!(
             watch.observe(start, Live, failed),
@@ -237,7 +270,7 @@ mod tests {
     fn a_failed_reopen_is_tried_again_a_few_times_then_dropped() {
         let start = Instant::now();
         let failed = PlaybackHealth {
-            output_failed: true,
+            output: OutputState::Failed,
             ..SILENT
         };
         let mut watch = PlaybackWatch::default();
@@ -274,7 +307,7 @@ mod tests {
     fn a_reopen_that_worked_is_not_asked_again() {
         let start = Instant::now();
         let failed = PlaybackHealth {
-            output_failed: true,
+            output: OutputState::Failed,
             ..SILENT
         };
         let mut watch = PlaybackWatch::default();

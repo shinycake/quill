@@ -7,7 +7,6 @@
 //! microphone capture pushes 10 ms frames in (the external frame sender),
 //! and the call's sound comes out to a `StreamPlayer`.
 use super::*;
-use crate::calls::capture::device_thread::DeviceThread;
 use quill_calls_sys::{Loader, qc_p2p, qc_video_capture};
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
@@ -86,7 +85,7 @@ impl<T> Native<T> {
 enum P2pStage {
     /// Before `connect`, or after a retry retired the instance: TDLib
     /// signaling that arrived meanwhile waits here, in order.
-    Waiting {
+    Unconnected {
         pending_signaling: Vec<Vec<u8>>,
     },
     Live {
@@ -106,7 +105,6 @@ struct P2pCall {
     /// The external source a screen share pushes into, owned by Quill: the
     /// gate borrows it, so it's freed only after the gate lets go.
     screen: Option<Native<qc_video_capture>>,
-    sound: Option<DeviceThread>,
 }
 
 pub struct TgcallsEngine {
@@ -177,12 +175,9 @@ impl TgcallsEngine {
         let hold = self.reaper.hold();
         let call = self.call_mut(call_id)?;
         let name = devices::speaker_name(call.media.speaker.as_deref());
-        call.sound = None;
-        call.sound = Some(
-            call.context
-                .sound
-                .open(call_id.to_string(), name, 1.0, false, hold),
-        );
+        call.context
+            .sound
+            .open(call_id.to_string(), name, 1.0, false, hold);
         Ok(())
     }
 
@@ -260,7 +255,7 @@ impl P2pCall {
     fn handle(&self) -> Option<Native<qc_p2p>> {
         match self.stage {
             P2pStage::Live { handle } => Some(handle),
-            P2pStage::Waiting { .. } => None,
+            P2pStage::Unconnected { .. } => None,
         }
     }
 
@@ -268,7 +263,7 @@ impl P2pCall {
         let Some(handle) = self.handle() else {
             return;
         };
-        self.stage = P2pStage::Waiting {
+        self.stage = P2pStage::Unconnected {
             pending_signaling: Vec::new(),
         };
         let fresh = CallContext::new(self.context.call_id, &self.context.shared);
@@ -276,7 +271,6 @@ impl P2pCall {
         old.retire();
         self.gate.close();
         old.sound.clear();
-        self.sound = None;
         if let Some(camera) = self.camera {
             // SAFETY: Quill's live reference; the new context stays in the
             // call until the preview is cleared (`stop_camera`).
@@ -301,14 +295,13 @@ fn retire(api: &'static Loader, reaper: &Reaper, mut call: P2pCall) {
     call.context.retire();
     call.gate.close();
     call.context.sound.clear();
-    call.sound = None;
     stop_camera(api, &mut call);
     reaper.hand_off(move || destroy(api, &mut call));
 }
 
 fn destroy(api: &Loader, call: &mut P2pCall) {
     if let Some(handle) = call.handle() {
-        call.stage = P2pStage::Waiting {
+        call.stage = P2pStage::Unconnected {
             pending_signaling: Vec::new(),
         };
         crate::advanced::debug_mode::call_log(&format!(
@@ -359,7 +352,7 @@ fn take_string(api: &Loader, raw: *mut std::ffi::c_char) -> Option<String> {
 fn new_call(call_id: i32, shared: &Arc<CallbackShared>) -> P2pCall {
     P2pCall {
         context: Arc::new(CallContext::new(call_id, shared)),
-        stage: P2pStage::Waiting {
+        stage: P2pStage::Unconnected {
             pending_signaling: Vec::new(),
         },
         gate: Arc::new(sender::Gate::default()),
@@ -371,7 +364,6 @@ fn new_call(call_id: i32, shared: &Arc<CallbackShared>) -> P2pCall {
         muted: false,
         camera: None,
         screen: None,
-        sound: None,
     }
 }
 

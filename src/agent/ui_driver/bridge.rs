@@ -212,10 +212,9 @@ pub struct Pending {
 /// true of the same moment: whichever comes first decides.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Stage {
-    /// In the queue; the UI has not taken it.
-    Queued,
-    /// The UI took it; no input went in yet.
-    Running,
+    /// No input went in yet and the tool has not given up (in the queue, or
+    /// taken by the UI): whichever comes first decides.
+    Undecided,
     /// The UI injected input (a click, keys, text) for it.
     Injected,
     /// The tool stopped waiting before any input went in.
@@ -252,7 +251,7 @@ impl Pending {
     /// command counts as run, so a timeout after this is reported as such.
     pub fn begin_input(&self) -> bool {
         let now = Stage::change(&self.stage, |stage| match stage {
-            Stage::Queued | Stage::Running | Stage::Injected => Stage::Injected,
+            Stage::Undecided | Stage::Injected => Stage::Injected,
             gave_up => gave_up,
         });
         now == Stage::Injected
@@ -346,7 +345,7 @@ pub fn post_with_shot(
     }
     let id = NEXT_ID.fetch_add(1, Ordering::SeqCst).wrapping_add(1);
     let (reply, rx) = mpsc::sync_channel(1);
-    let stage = Arc::new(Mutex::new(Stage::Queued));
+    let stage = Arc::new(Mutex::new(Stage::Undecided));
     queue.push_back(Pending {
         request: UiRequest {
             id,
@@ -368,14 +367,7 @@ fn withdraw(id: u64) {
 
 /// Every command waiting, oldest first. The UI thread answers each.
 pub fn take() -> Vec<Pending> {
-    let taken: Vec<Pending> = crate::locks::lock_or_recover(&QUEUE).drain(..).collect();
-    for pending in &taken {
-        Stage::change(&pending.stage, |stage| match stage {
-            Stage::Queued => Stage::Running,
-            other => other,
-        });
-    }
-    taken
+    crate::locks::lock_or_recover(&QUEUE).drain(..).collect()
 }
 
 /// How many commands wait for the UI.

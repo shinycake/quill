@@ -151,7 +151,7 @@ fn stream_feed_change(state: StreamState) -> Option<Result<LiveState, LiveEnd>> 
         StreamState::Live => Some(Ok(LiveState::Active)),
         StreamState::NoStream => Some(Ok(LiveState::Inactive)),
         StreamState::Ended => Some(Err(LiveEnd::Over)),
-        StreamState::Connecting => None,
+        StreamState::Joined => None,
     }
 }
 
@@ -349,6 +349,6 @@ mod tests {
             stream_feed_change(StreamState::Ended),
             Some(Err(LiveEnd::Over))
         );
-        assert_eq!(stream_feed_change(StreamState::Connecting), None);
+        assert_eq!(stream_feed_change(StreamState::Joined), None);
     }
 }

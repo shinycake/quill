@@ -178,7 +178,6 @@ impl Session {
                 for name in removed {
                     self.chat_list.suggestions.remove_action(name);
                 }
-                self.chat_list.archive_mute.note_suggested(added);
                 true
             }
             _ => false,

@@ -302,6 +302,23 @@ fn an_ended_automatic_download_reads_as_ended_without_a_file() {
 }
 
 #[test]
+fn a_download_waiter_leaves_when_the_transfer_is_cancelled_or_never_registered() {
+    let (mut session, _sink) = session();
+    let gave_up = |s: &Session, id| s.media.downloads.gave_up(id, &s.media.files);
+    // Nothing asked for the file: a waiter has nothing to wait on.
+    assert!(gave_up(&session, 71));
+    session.begin_download(FileId(71));
+    assert!(!gave_up(&session, 71));
+    // Cancelled from another surface: the waiter leaves too.
+    session.media.downloads.cancel(71);
+    assert!(gave_up(&session, 71));
+    session.begin_download(FileId(71));
+    assert!(!gave_up(&session, 71));
+    session.media.downloads.end(71);
+    assert!(gave_up(&session, 71));
+}
+
+#[test]
 fn a_profile_box_saves_on_the_answer_not_on_the_request_leaving_flight() {
     use crate::state::SaveOutcome;
     let (mut session, sink) = session();

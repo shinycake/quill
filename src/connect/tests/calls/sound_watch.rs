@@ -1,6 +1,6 @@
 //! Driver tests: the 1:1 call's sound watch (`connect::calls::sound_watch`).
 use super::*;
-use crate::calls::stream_audio::watch::{NO_SOUND_LIMIT, PlaybackHealth};
+use crate::calls::stream_audio::watch::{NO_SOUND_LIMIT, OutputState, PlaybackHealth};
 use std::time::{Duration, Instant};
 
 fn connected_call() -> (
@@ -37,7 +37,7 @@ fn a_call_with_sound_stays_on_quills_output() {
         PlaybackHealth {
             frames: 40,
             peak: 9_000,
-            output_failed: false,
+            output: OutputState::Open,
         },
     );
     let start = Instant::now();
@@ -73,7 +73,7 @@ fn a_stopped_output_is_reopened_at_once() {
         PlaybackHealth {
             frames: 500,
             peak: 9_000,
-            output_failed: true,
+            output: OutputState::Failed,
         },
     );
     driver.request_tick(Instant::now());

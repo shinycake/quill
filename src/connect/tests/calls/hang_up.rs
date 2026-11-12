@@ -87,7 +87,10 @@ fn a_hang_up_tdlib_refuses_drops_the_link_waiting_for_it() {
             target_is_channel: false,
             leave: LeaveKind::PrivateCall,
         },
-        leaving: LeavingCall::Private(77),
+        leaving: LeavingCall::Private {
+            call_id: 77,
+            request,
+        },
     });
     ingest_call_json(
         &mut driver,

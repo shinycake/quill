@@ -519,6 +519,20 @@ impl DownloadIntents {
         !running && self.get(file_id).is_some_and(|i| i.phase == Phase::Ended)
     }
 
+    /// The file has no transfer under way and none will start: its last
+    /// request ended without completing or was cancelled, or nothing asked
+    /// for it (the intent was cleared). A waiter that started a download
+    /// stops waiting on this.
+    pub fn gave_up(&self, file_id: i32, files: &FileMap) -> bool {
+        let local = files.get(&file_id).map(|f| &f.local);
+        let running =
+            local.is_some_and(|l| l.is_downloading_active() || l.is_downloading_completed());
+        !running
+            && self
+                .get(file_id)
+                .is_none_or(|i| matches!(i.phase, Phase::Ended | Phase::Cancelled))
+    }
+
     /// A transfer is under way (paused ones count: the row keeps its
     /// progress).
     pub fn is_downloading(&self, file_id: i32, files: &FileMap) -> bool {

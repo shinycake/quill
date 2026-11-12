@@ -46,6 +46,8 @@ impl Subscription {
     /// Unsubscribe, or the connection ended: every watcher stops.
     pub(super) fn stop(&self) {
         *crate::locks::lock_or_recover(&self.0) = Stage::None;
+        // A watcher parked while Quill is locked or signed out ends now.
+        crate::agent::events::wake_waiters();
     }
 
     /// The watcher under `token` ended by itself.
@@ -80,5 +82,30 @@ mod tests {
             subscription.finished(token);
             assert!(!subscription.is_current(token));
         }
+    }
+
+    #[test]
+    fn a_stop_ends_a_watcher_parked_with_nothing_to_look_at() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let subscription = Arc::new(Subscription::new());
+        let token = subscription.start().expect("first watcher");
+        let ended = Arc::new(AtomicBool::new(false));
+        let watcher = {
+            let (subscription, ended) = (subscription.clone(), ended.clone());
+            std::thread::spawn(move || {
+                while subscription.is_current(token) {
+                    crate::agent::events::park(std::time::Duration::from_secs(600), || {
+                        subscription.is_current(token)
+                    });
+                }
+                ended.store(true, Ordering::SeqCst);
+            })
+        };
+        // One stop, wherever the watcher is: before it parks, `park` sees
+        // it under the lock; after, the notify wakes it.
+        subscription.stop();
+        assert!(watcher.join().is_ok());
+        assert!(ended.load(Ordering::SeqCst));
     }
 }

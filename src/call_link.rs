@@ -14,6 +14,7 @@
 //! (`connect::group_calls::link`) fetches the call.
 #![deny(clippy::indexing_slicing)]
 
+use crate::ids::RequestId;
 use crate::telegram::envelope::ChatKind;
 
 /// tdesktop `lng_group_invite_bad_link`.
@@ -30,7 +31,7 @@ pub enum CallLinkStep {
     /// The call is already joined here.
     AlreadyJoined,
     /// Another call (a private one, or a call in another chat) is on.
-    Busy,
+    OtherCallOn,
     /// Fetch the call and show its join screen with the hash.
     Offer { group_call_id: i32 },
 }
@@ -58,11 +59,11 @@ pub fn plan(
         return CallLinkStep::NoCall;
     };
     if private_call {
-        return CallLinkStep::Busy;
+        return CallLinkStep::OtherCallOn;
     }
     match current {
         Some(call) if call.group_call_id == id && call.joined => CallLinkStep::AlreadyJoined,
-        Some(call) if call.joined => CallLinkStep::Busy,
+        Some(call) if call.joined => CallLinkStep::OtherCallOn,
         _ => CallLinkStep::Offer { group_call_id: id },
     }
 }
@@ -78,8 +79,9 @@ pub fn step_note(step: CallLinkStep, live_stream: bool) -> Option<String> {
         CallLinkStep::JustOpen | CallLinkStep::Offer { .. } => None,
         CallLinkStep::NoCall => Some(BAD_LINK_NOTE.into()),
         CallLinkStep::AlreadyJoined => Some(format!("You are already in this {what}.")),
-        // Busy asks first (`CallLinkConfirm`).
-        CallLinkStep::Busy => None,
+        // Busy: no note; the leave confirmation box answers it
+        // (`CallLinkConfirm`).
+        CallLinkStep::OtherCallOn => None,
     }
 }
 
@@ -163,7 +165,12 @@ pub struct CallLinkLeaving {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LeavingCall {
-    Private(i32),
+    /// A private call, left by the hang-up sent as `request`: its refusal
+    /// (matched by the request) drops the link waiting for the call.
+    Private {
+        call_id: i32,
+        request: RequestId,
+    },
     Group(i32),
 }
 
@@ -264,9 +271,16 @@ impl CallLinkStage {
         };
     }
 
-    /// The link waiting for `call` to end is dropped (its leave failed).
-    pub fn drop_waiting_for(&mut self, call: LeavingCall) {
-        if matches!(self, Self::Leaving(waiting) if waiting.leaving == call) {
+    /// The link waiting for the call left by hang-up `request` is dropped
+    /// (the hang-up failed).
+    pub fn drop_waiting_for(&mut self, request: RequestId) {
+        if matches!(
+            self,
+            Self::Leaving(CallLinkLeaving {
+                leaving: LeavingCall::Private { request: sent, .. },
+                ..
+            }) if *sent == request
+        ) {
             *self = Self::Idle;
         }
     }
@@ -347,13 +361,13 @@ mod tests {
         );
         assert_eq!(
             plan(&channel(), Some(call(4)), Some(joined(9)), false),
-            CallLinkStep::Busy
+            CallLinkStep::OtherCallOn
         );
         assert_eq!(
             plan(&channel(), Some(call(4)), None, true),
-            CallLinkStep::Busy
+            CallLinkStep::OtherCallOn
         );
-        assert_eq!(step_note(CallLinkStep::Busy, true), None);
+        assert_eq!(step_note(CallLinkStep::OtherCallOn, true), None);
     }
 
     #[test]

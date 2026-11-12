@@ -30,7 +30,6 @@ pub(super) struct GroupCall {
     camera_id: Option<String>,
     camera: Option<Native<qc_video_capture>>,
     speaker: Option<String>,
-    sound: Option<DeviceThread>,
     /// The participant videos last asked for, kept so a connect or a
     /// new stream quality asks again without waiting for the driver.
     video_sources: Vec<GroupVideoSource>,
@@ -225,7 +224,6 @@ pub(super) fn retire_group(api: &'static Loader, reaper: &Reaper, mut call: Grou
     }
     call.gate.close();
     call.context.sound.clear();
-    call.sound = None;
     stop_camera(api, &mut call);
     reaper.hand_off(move || destroy_group(api, &mut call));
 }
@@ -312,7 +310,6 @@ impl TgcallsEngine {
                 camera_id: None,
                 camera: None,
                 speaker: None,
-                sound: None,
                 video_sources: Vec::new(),
                 requested_video: None,
                 outputs: HashSet::new(),
@@ -413,9 +410,8 @@ impl TgcallsEngine {
             1.0
         };
         let label = format!("group {group_call_id}");
-        call.sound = None;
         let muted = call.context.sound.muted();
-        call.sound = Some(call.context.sound.open(label, name, volume, muted, hold));
+        call.context.sound.open(label, name, volume, muted, hold);
         Ok(())
     }
 

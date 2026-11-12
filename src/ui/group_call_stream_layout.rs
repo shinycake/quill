@@ -883,7 +883,7 @@ fn stream_label(facts: &StreamFacts, chat_name: &str) -> Option<String> {
             Some(tr(keys::GROUP_CALL_NO_STREAM_ADMIN).to_string())
         }
         StreamState::NoStream => Some(tr_with(keys::GROUP_CALL_NO_STREAM, &[("group", chat_name)])),
-        StreamState::Connecting | StreamState::Live | StreamState::Ended => None,
+        StreamState::Joined | StreamState::Live | StreamState::Ended => None,
     }
 }
 

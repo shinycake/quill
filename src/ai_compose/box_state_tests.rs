@@ -69,7 +69,7 @@ fn opening_waits_on_the_style_tab() {
     let mut ai = AiComposeBox::new("Hello there".into(), Some("en"), "de");
     assert_eq!(ai.start(), None);
     assert_eq!(ai.mode(), AiComposeMode::Style);
-    assert_eq!(ai.card(), &CardState::Waiting);
+    assert_eq!(ai.card(), &CardState::Idle);
     assert_eq!(ai.footer(), FooterAction::SelectStyle);
     assert!(!ai.original_visible());
 }
@@ -192,7 +192,7 @@ fn other_errors_fail_the_card_and_come_back_for_the_toast() {
 fn style_tab_waits_for_a_style() {
     let (mut ai, _) = opened();
     assert_eq!(ai.set_mode(AiComposeMode::Style), None);
-    assert_eq!(ai.card(), &CardState::Waiting);
+    assert_eq!(ai.card(), &CardState::Idle);
     assert_eq!(ai.footer(), FooterAction::SelectStyle);
     assert!(ai.emojify_visible(), "emojify alone can start a request");
     assert_eq!(ai.result_title(), ResultTitle::Original);
@@ -249,7 +249,7 @@ fn emojify_alone_composes_in_the_style_tab() {
     );
     assert_eq!(ai.footer(), FooterAction::SelectStyle, "still no style");
     assert_eq!(ai.set_add_emojis(false), None);
-    assert_eq!(ai.card(), &CardState::Waiting);
+    assert_eq!(ai.card(), &CardState::Idle);
 }
 
 #[test]
@@ -417,7 +417,7 @@ fn a_style_the_server_dropped_is_unpicked() {
     assert_eq!(ai.refresh_styles(&dropped), None, "back to waiting");
     assert_eq!(ai.style(), &StyleChoice::None);
     assert_eq!(ai.translate_style(), &StyleChoice::None);
-    assert_eq!(ai.card(), &CardState::Waiting);
+    assert_eq!(ai.card(), &CardState::Idle);
 }
 
 /// Sweep 01-055: a Translate card made with a style the server then
