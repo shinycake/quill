@@ -422,7 +422,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
-            self.session.chat_list.archive_mute.note_reload_failed(None);
             return Err(ConnectSendError::InvalidRequest);
         }
         let purpose = RequestPurpose::GetArchiveChatListSettings;
@@ -432,13 +431,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&get_archive_chat_list_settings(extra))
         {
             self.session.requests.take(extra);
-            self.session.chat_list.archive_mute.note_reload_failed(None);
             return Err(err);
         }
         // A cached copy stays on screen while it reloads.
         self.session.chat_list.archive_settings.begin();
         self.session.chat_list.archive_settings.sent(extra);
-        self.session.chat_list.archive_mute.note_sent(extra);
         Ok(Some(extra))
     }
 

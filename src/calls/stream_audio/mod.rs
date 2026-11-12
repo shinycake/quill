@@ -24,8 +24,8 @@ use gain::Gain;
 use ring::SampleRing;
 use std::cell::Cell;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering};
-use watch::{OutputState, PlaybackHealth};
+use std::sync::atomic::{AtomicU16, AtomicU64, Ordering};
+use watch::{OutputCell, PlaybackHealth};
 
 /// The rate of the call library's sound (`QC_AUDIO_RATE`), always mono.
 pub const SOURCE_RATE: u32 = 48_000;
@@ -47,7 +47,7 @@ pub struct StreamAudio {
     convert: Mutex<RateConversion>,
     frames: AtomicU64,
     peak: AtomicU16,
-    output_failed: AtomicBool,
+    output: OutputCell,
 }
 
 /// [`SOURCE_RATE`] to the output's rate, with buffers that keep their
@@ -76,7 +76,7 @@ impl StreamAudio {
             }),
             frames: AtomicU64::new(0),
             peak: AtomicU16::new(0),
-            output_failed: AtomicBool::new(false),
+            output: OutputCell::new(),
         }
     }
 
@@ -145,18 +145,14 @@ impl StreamAudio {
     }
 
     pub fn mark_output_failed(&self) {
-        self.output_failed.store(true, Ordering::Relaxed);
+        self.output.fail();
     }
 
     pub fn health(&self) -> PlaybackHealth {
         PlaybackHealth {
             frames: self.frames.load(Ordering::Relaxed),
             peak: self.peak.load(Ordering::Relaxed),
-            output: if self.output_failed.load(Ordering::Relaxed) {
-                OutputState::Failed
-            } else {
-                OutputState::Open
-            },
+            output: self.output.get(),
         }
     }
 }

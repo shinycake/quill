@@ -216,9 +216,6 @@ impl Session {
                     format!("error {}", err.code),
                     false,
                 );
-                self.chat_list
-                    .archive_mute
-                    .note_reload_failed(pending.map(|p| p.id));
                 self.chats_state.chat_action_error.push(format!(
                     "could not load archive settings (error {})",
                     err.code

@@ -11,7 +11,7 @@
 //! video (`video_edit.rs`; `docs/decisions/codex-send-box-options.md`).
 
 use super::*;
-use crate::ids::{FileId, RequestId};
+use crate::ids::FileId;
 use crate::telegram::envelope::{ChatKind, VideoContent};
 
 /// One entry of the edit-media menu.
@@ -43,10 +43,25 @@ pub enum EditImageFetch {
     /// Nothing asked.
     #[default]
     Idle,
-    /// The photo is being downloaded under `request`; the editor opens when
-    /// it lands. The download tracker owns the transfer and says when it
-    /// ended or was given up (`downloads.gave_up(file_id)`).
-    Downloading { file_id: FileId, request: RequestId },
+    /// The photo's download is in the download tracker's hands (ours, or an
+    /// automatic one that was already running). Quill holds no request for
+    /// it: the tracker owns the transfer, and the wait ends on one of two
+    /// exits, the file landing (the editor opens) or
+    /// `downloads.gave_up(file_id)` (a note says it failed).
+    Tracked { file_id: FileId },
+}
+
+impl EditImageFetch {
+    /// The stage after `download_user_file` for `file_id`. `Ok(None)` means
+    /// the file is already requested or running (an automatic download of
+    /// the history row or viewer), which the edit waits for like a fresh
+    /// request; only a refused send is a failure (`None`).
+    pub fn asked<E>(
+        file_id: FileId,
+        sent: &Result<Option<crate::ids::RequestId>, E>,
+    ) -> Option<Self> {
+        sent.is_ok().then_some(Self::Tracked { file_id })
+    }
 }
 
 /// tdesktop `lng_context_clear_cover`.
@@ -200,6 +215,19 @@ mod tests {
             cover: None,
             video_extras: Default::default(),
         }
+    }
+
+    #[test]
+    fn edit_image_waits_for_a_photo_already_downloading() {
+        let file = FileId(7);
+        let waiting = Some(EditImageFetch::Tracked { file_id: file });
+        // `Ok(None)`: the history row or viewer already asked for it.
+        assert_eq!(EditImageFetch::asked::<()>(file, &Ok(None)), waiting);
+        assert_eq!(
+            EditImageFetch::asked::<()>(file, &Ok(Some(crate::ids::RequestId(3)))),
+            waiting
+        );
+        assert_eq!(EditImageFetch::asked(file, &Err(())), None);
     }
 
     #[test]

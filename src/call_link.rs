@@ -79,7 +79,8 @@ pub fn step_note(step: CallLinkStep, live_stream: bool) -> Option<String> {
         CallLinkStep::JustOpen | CallLinkStep::Offer { .. } => None,
         CallLinkStep::NoCall => Some(BAD_LINK_NOTE.into()),
         CallLinkStep::AlreadyJoined => Some(format!("You are already in this {what}.")),
-        // Busy asks first (`CallLinkConfirm`).
+        // Busy: no note; the leave confirmation box answers it
+        // (`CallLinkConfirm`).
         CallLinkStep::OtherCallOn => None,
     }
 }

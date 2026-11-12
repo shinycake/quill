@@ -10,19 +10,33 @@ use crate::locks::LockExt;
 use arc_swap::{ArcSwapOption, Guard};
 use std::sync::{Arc, Mutex};
 
+/// Where the output is. The slot owns the device's thread, so the open
+/// that may still land and the thread it runs on are one value: dropping or
+/// replacing the stage closes the device and an open still running finds
+/// no token of its own to land under.
+enum Stage {
+    /// No output wanted: before the first open, or after `clear`.
+    Closed,
+    /// The open runs on `thread`; only the open holding `token` may land.
+    Opening {
+        thread: DeviceThread,
+        token: Arc<()>,
+    },
+    /// The open answered and `audio` plays on `thread`'s device.
+    Open { _thread: DeviceThread },
+}
+
 /// What the output should be right now. Kept here so that a choice made
-/// while the device opens reaches it, and an open that is no longer wanted
-/// is told apart by its token.
+/// while the device opens reaches it.
 struct Wanted {
-    /// The open that may still land: each open makes its own, and a new
-    /// open or `clear` replaces it, so an older open finds a token that is
-    /// not the slot's.
-    open: Option<Arc<()>>,
+    stage: Stage,
     volume: f32,
     muted: bool,
 }
 
 pub(super) struct SoundSlot {
+    /// The frames' way in, read without the lock: the view of the `Open`
+    /// stage, stored and cleared only together with it under `wanted`.
     audio: ArcSwapOption<StreamAudio>,
     wanted: Mutex<Wanted>,
 }
@@ -32,7 +46,7 @@ impl Default for SoundSlot {
         Self {
             audio: ArcSwapOption::empty(),
             wanted: Mutex::new(Wanted {
-                open: None,
+                stage: Stage::Closed,
                 volume: 1.0,
                 muted: false,
             }),
@@ -46,10 +60,11 @@ impl SoundSlot {
         self.audio.load()
     }
 
-    /// Stops the sound at once; an open still running will not land.
+    /// Stops the sound at once and closes the device on its thread; an open
+    /// still running will not land.
     pub(super) fn clear(&self) {
         let mut wanted = self.wanted.lock_or_recover();
-        wanted.open = None;
+        wanted.stage = Stage::Closed;
         self.audio.store(None);
     }
 
@@ -74,9 +89,8 @@ impl SoundSlot {
         }
     }
 
-    /// Opens the output named `device` in place of the current one. Dropping
-    /// the answer closes the device on its thread, which `hold` keeps quit
-    /// waiting for. A failed open leaves the call silent and logs why, under
+    /// Opens the output named `device` in place of the current one, which
+    /// closes on its thread; `hold` keeps quit waiting for it. A failed open leaves the call silent and logs why, under
     /// `label`.
     pub(super) fn open(
         self: &Arc<Self>,
@@ -85,7 +99,7 @@ impl SoundSlot {
         volume: f32,
         muted: bool,
         hold: ReaperHold,
-    ) -> DeviceThread {
+    ) {
         self.open_with(label, volume, muted, hold, move |volume, muted| {
             let player = StreamPlayer::open(device.as_deref(), volume, muted)?;
             let audio = player.audio().clone();
@@ -100,22 +114,19 @@ impl SoundSlot {
         muted: bool,
         hold: ReaperHold,
         open: impl FnOnce(f32, bool) -> Result<(D, Arc<StreamAudio>), String> + Send + 'static,
-    ) -> DeviceThread {
+    ) {
         let token = Arc::new(());
-        {
-            let mut wanted = self.wanted.lock_or_recover();
-            wanted.open = Some(token.clone());
-            wanted.volume = volume;
-            wanted.muted = muted;
-            self.audio.store(None);
-        }
+        let landing = token.clone();
         let slot = Arc::clone(self);
-        DeviceThread::open(
+        // Held until the stage owns the thread, so the open cannot land
+        // before there is a stage for it to land in.
+        let mut wanted = self.wanted.lock_or_recover();
+        let thread = DeviceThread::open(
             "quill-call-sound",
             &crate::wake::UPDATES,
             move || match open(volume, muted) {
                 Ok((device, audio)) => {
-                    slot.publish(&token, audio);
+                    slot.publish(&landing, audio);
                     Ok(device)
                 }
                 Err(err) => {
@@ -129,19 +140,33 @@ impl SoundSlot {
                 drop(device);
                 drop(hold);
             },
-        )
+        );
+        wanted.volume = volume;
+        wanted.muted = muted;
+        self.audio.store(None);
+        wanted.stage = Stage::Opening { thread, token };
     }
 
     fn publish(&self, token: &Arc<()>, audio: Arc<StreamAudio>) {
-        let wanted = self.wanted.lock_or_recover();
-        if wanted
-            .open
-            .as_ref()
-            .is_some_and(|open| Arc::ptr_eq(open, token))
-        {
-            audio.gain().set_volume(wanted.volume);
-            audio.gain().set_muted(wanted.muted);
-            self.audio.store(Some(audio));
+        let mut wanted = self.wanted.lock_or_recover();
+        match std::mem::replace(&mut wanted.stage, Stage::Closed) {
+            Stage::Opening { thread, token: own } if Arc::ptr_eq(&own, token) => {
+                audio.gain().set_volume(wanted.volume);
+                audio.gain().set_muted(wanted.muted);
+                self.audio.store(Some(audio));
+                wanted.stage = Stage::Open { _thread: thread };
+            }
+            other => wanted.stage = other,
+        }
+    }
+
+    /// How the current open went; `None` while it runs or when no output is
+    /// wanted.
+    #[cfg(test)]
+    fn opened(&self) -> Option<Result<(), CaptureError>> {
+        match &self.wanted.lock_or_recover().stage {
+            Stage::Closed => None,
+            Stage::Opening { thread, .. } | Stage::Open { _thread: thread } => thread.opened(),
         }
     }
 }
@@ -163,7 +188,6 @@ mod tests {
 
     struct Held {
         release: Sender<()>,
-        answer: DeviceThread,
         closed: Receiver<()>,
         audio: Arc<StreamAudio>,
         reaper: Reaper,
@@ -177,22 +201,21 @@ mod tests {
         let opened = audio.clone();
         let reaper = Reaper::start();
         let hold = reaper.hold();
-        let answer = slot.open_with("test".into(), volume, muted, hold, move |_, _| {
+        slot.open_with("test".into(), volume, muted, hold, move |_, _| {
             let _ = released.recv();
             Ok((Device(closes), opened))
         });
         Held {
             release,
-            answer,
             closed,
             audio,
             reaper,
         }
     }
 
-    fn wait_opened(answer: &DeviceThread) -> Result<(), CaptureError> {
+    fn wait_opened(slot: &SoundSlot) -> Result<(), CaptureError> {
         loop {
-            if let Some(answer) = answer.opened() {
+            if let Some(answer) = slot.opened() {
                 return answer;
             }
             std::thread::yield_now();
@@ -205,7 +228,7 @@ mod tests {
         let open = blocked_open(&slot, 1.0, false);
         assert!(slot.audio().is_none(), "frames drop until it opens");
         let _ = open.release.send(());
-        assert!(wait_opened(&open.answer).is_ok());
+        assert!(wait_opened(&slot).is_ok());
         let current = slot.audio();
         let current = current.as_ref().expect("the output landed");
         assert!(Arc::ptr_eq(current, &open.audio));
@@ -217,10 +240,8 @@ mod tests {
         let open = blocked_open(&slot, 1.0, false);
         slot.clear();
         let _ = open.release.send(());
-        assert!(wait_opened(&open.answer).is_ok());
-        assert!(slot.audio().is_none());
-        drop(open.answer);
         assert_eq!(open.closed.recv(), Ok(()), "closed on its thread");
+        assert!(slot.audio().is_none());
     }
 
     #[test]
@@ -229,9 +250,9 @@ mod tests {
         let first = blocked_open(&slot, 1.0, false);
         let second = blocked_open(&slot, 1.0, false);
         let _ = second.release.send(());
-        assert!(wait_opened(&second.answer).is_ok());
+        assert!(wait_opened(&slot).is_ok());
         let _ = first.release.send(());
-        assert!(wait_opened(&first.answer).is_ok());
+        assert_eq!(first.closed.recv(), Ok(()), "the replaced open closes");
         let current = slot.audio();
         let current = current.as_ref().expect("the output landed");
         assert!(Arc::ptr_eq(current, &second.audio));
@@ -244,7 +265,7 @@ mod tests {
         slot.set_muted(true);
         slot.set_volume(0.25);
         let _ = open.release.send(());
-        assert!(wait_opened(&open.answer).is_ok());
+        assert!(wait_opened(&slot).is_ok());
         let current = slot.audio();
         let current = current.as_ref().expect("the output landed");
         assert!(current.gain().muted());
@@ -256,12 +277,12 @@ mod tests {
         let slot = Arc::new(SoundSlot::default());
         let reaper = Reaper::start();
         let hold = reaper.hold();
-        let answer = slot.open_with::<Device>("test".into(), 1.0, false, hold, |_, _| {
+        slot.open_with::<Device>("test".into(), 1.0, false, hold, |_, _| {
             Err("no device".into())
         });
-        assert!(wait_opened(&answer).is_err());
+        assert!(wait_opened(&slot).is_err());
         assert!(slot.audio().is_none());
-        drop(answer);
+        slot.clear();
         reaper.wait_drained();
     }
 
@@ -274,9 +295,9 @@ mod tests {
             "an open still running holds quit"
         );
         let _ = open.release.send(());
-        assert!(wait_opened(&open.answer).is_ok());
+        assert!(wait_opened(&slot).is_ok());
         assert!(!open.reaper.is_drained(), "an open device holds quit");
-        drop(open.answer);
+        slot.clear();
         open.reaper.wait_drained();
         assert_eq!(open.closed.try_recv(), Ok(()), "closed before quit goes on");
     }

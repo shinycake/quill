@@ -246,7 +246,7 @@ impl CallCapture {
             controls,
             sink,
             sender,
-            run: DeviceRun::Opening(mic),
+            run: DeviceRun::opening(mic),
         });
     }
 

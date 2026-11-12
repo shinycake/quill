@@ -25,6 +25,8 @@ use std::sync::OnceLock;
 pub enum StreamState {
     Error,
     Unconnected,
+    /// PipeWire `PW_STREAM_STATE_CONNECTING`: the engine links the stream;
+    /// Quill holds no request.
     Linking,
     Paused,
     Streaming,

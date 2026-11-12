@@ -5,6 +5,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use crate::calls::engine::StreamState;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::{Duration, Instant};
 
 pub const NO_SOUND_LIMIT: Duration = Duration::from_secs(5);
@@ -28,6 +29,30 @@ pub enum OutputState {
     Open,
     /// The stream ended (the device went away); it needs a reopen.
     Failed,
+}
+
+/// An [`OutputState`] the audio thread and the poll loop share. It only
+/// ever moves from `Open` to `Failed`.
+pub struct OutputCell(AtomicU8);
+
+impl OutputCell {
+    const OPEN: u8 = 0;
+    const FAILED: u8 = 1;
+
+    pub fn new() -> Self {
+        Self(AtomicU8::new(Self::OPEN))
+    }
+
+    pub fn get(&self) -> OutputState {
+        match self.0.load(Ordering::Relaxed) {
+            Self::OPEN => OutputState::Open,
+            _ => OutputState::Failed,
+        }
+    }
+
+    pub fn fail(&self) {
+        self.0.store(Self::FAILED, Ordering::Relaxed);
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

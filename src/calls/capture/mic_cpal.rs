@@ -22,12 +22,13 @@ use cpal::{
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-/// Where the microphone stands. The stream's error callback runs on the
-/// audio thread and moves it to `Failed`; the owner starts and stops it.
+/// Whether the microphone's stream has failed. The stream's error callback
+/// runs on the audio thread and moves it to `Failed`; whether the stream
+/// runs is `CpalMic::stream` alone, so a start and a stop do not touch this
+/// beyond the start forgetting the last failure.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Health {
-    Stopped,
-    Live,
+    Fine,
     /// The stream ended (device unplugged, …); dropouts and reroutes only
     /// go to the debug log. Kept until the next start.
     Failed(String),
@@ -40,38 +41,27 @@ pub struct MicHealth(Arc<Mutex<Health>>);
 
 impl MicHealth {
     fn new() -> Self {
-        Self(Arc::new(Mutex::new(Health::Stopped)))
+        Self(Arc::new(Mutex::new(Health::Fine)))
     }
 
     /// The error that stopped the stream, if any.
     pub fn error(&self) -> Option<String> {
         match &*self.0.lock_or_recover() {
             Health::Failed(text) => Some(text.clone()),
-            Health::Stopped | Health::Live => None,
+            Health::Fine => None,
         }
     }
 
     /// A new start forgets the last failure.
     fn reset(&self) {
-        *self.0.lock_or_recover() = Health::Stopped;
-    }
-
-    fn running(&self) {
-        *self.0.lock_or_recover() = Health::Live;
+        *self.0.lock_or_recover() = Health::Fine;
     }
 
     /// The first failure stays.
     fn failed(&self, text: &str) {
         let mut health = self.0.lock_or_recover();
-        if !matches!(*health, Health::Failed(_)) {
+        if *health == Health::Fine {
             *health = Health::Failed(text.to_string());
-        }
-    }
-
-    fn stopped(&self) {
-        let mut health = self.0.lock_or_recover();
-        if *health == Health::Live {
-            *health = Health::Stopped;
         }
     }
 }
@@ -158,14 +148,12 @@ impl MicCapture for CpalMic {
         }?;
         stream.play().map_err(|err| classify(&err))?;
         self.stream = Some(stream);
-        self.health.running();
         Ok(())
     }
 
     fn stop(&mut self) {
         // Dropping the stream closes the device.
         self.stream = None;
-        self.health.stopped();
     }
 }
 

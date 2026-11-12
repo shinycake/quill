@@ -135,9 +135,13 @@ impl SuggestionFacts {
         matched
     }
 
-    /// A fresh list from TDLib shows the card again.
+    /// A fresh list from TDLib shows the card again once the server took
+    /// the hide. A hide still on its way (`Hiding`) stays: the list cannot
+    /// undo it, and the answer must still find its request.
     pub fn show_birthdays(&mut self) {
-        self.birthday_card = BirthdayCard::Shown;
+        if !matches!(self.birthday_card, BirthdayCard::Hiding { .. }) {
+            self.birthday_card = BirthdayCard::Shown;
+        }
     }
 
     /// The card is dismissed (or being dismissed).
@@ -368,6 +372,34 @@ mod tests {
         assert_eq!(pick(&f, 3, 14, true), Some(Suggestion::CheckPhone));
         let f = facts(&[ACTION_PHOTO, ACTION_PASSWORD], &[(5, 3, 14)], false);
         assert_eq!(pick(&f, 3, 14, true), Some(Suggestion::CheckPassword));
+    }
+
+    #[test]
+    fn a_fresh_list_does_not_undo_a_hide_on_its_way() {
+        let mut f = facts(&[], &[(1, 5, 5)], false);
+        f.hide_birthdays(RequestId(4));
+        f.show_birthdays();
+        assert_eq!(
+            f.birthday_card,
+            BirthdayCard::Hiding {
+                request: RequestId(4)
+            }
+        );
+        assert!(f.birthdays_hidden());
+        f.birthdays_hidden_by(RequestId(4));
+        assert_eq!(f.birthday_card, BirthdayCard::Hidden);
+        f.show_birthdays();
+        assert_eq!(
+            f.birthday_card,
+            BirthdayCard::Shown,
+            "a fresh list re-enables it"
+        );
+        f.hide_birthdays(RequestId(5));
+        f.show_birthdays();
+        assert!(
+            f.birthdays_hide_failed(RequestId(5)),
+            "the error still matches"
+        );
     }
 
     #[test]

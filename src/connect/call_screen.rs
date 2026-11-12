@@ -149,7 +149,7 @@ impl SharedAudio {
         );
         Self {
             mix,
-            run: DeviceRun::Opening(capture),
+            run: DeviceRun::opening(capture),
         }
     }
 }
@@ -376,7 +376,7 @@ impl CallScreen {
                 last_preview: 0,
                 paused: false,
                 audio: None,
-                run: DeviceRun::Opening(capture),
+                run: DeviceRun::opening(capture),
             }),
             pick,
             audio_note: None,

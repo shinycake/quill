@@ -4,18 +4,27 @@
 use super::CaptureError;
 use crate::thread_guard::spawn_guarded;
 use crate::wake::Signal;
-use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
+use std::sync::{Arc, Mutex};
 
 /// Where a device is: its open runs on `thread`, or it answered and `T` is
-/// what runs on it. Either way the stage holds the thread, so dropping the
-/// stage closes the device.
+/// what runs on it. Either way the stage holds the thread (shared, so the
+/// open's stage turns into the running one in place, with no stand-in thread
+/// between them), and dropping the stage closes the device.
 pub enum DeviceRun<T> {
-    Opening(DeviceThread),
-    Running { thread: DeviceThread, running: T },
+    Opening(Arc<DeviceThread>),
+    Running {
+        thread: Arc<DeviceThread>,
+        running: T,
+    },
 }
 
 impl<T> DeviceRun<T> {
+    /// The open of `thread` is the stage.
+    pub fn opening(thread: DeviceThread) -> Self {
+        Self::Opening(Arc::new(thread))
+    }
+
     pub fn is_opening(&self) -> bool {
         matches!(self, Self::Opening(_))
     }
@@ -40,7 +49,7 @@ impl<T> DeviceRun<T> {
     /// stays as it is.
     pub fn start(&mut self, running: T) {
         if let Self::Opening(thread) = self {
-            let thread = std::mem::replace(thread, DeviceThread::detached());
+            let thread = Arc::clone(thread);
             *self = Self::Running { thread, running };
         }
     }
@@ -100,16 +109,6 @@ impl DeviceThread {
         }
     }
 
-    /// A stand-in with no device and no thread, already answered; it only
-    /// holds the place of a thread being moved between stages.
-    fn detached() -> Self {
-        let (closing, _closed) = channel::<()>();
-        Self {
-            opened: Mutex::new(Opened::Answered(Ok(()))),
-            _closing: closing,
-        }
-    }
-
     /// How the open went; `None` while it runs. Once it has answered, every
     /// call returns that answer.
     pub fn opened(&self) -> Option<Result<(), CaptureError>> {
@@ -154,7 +153,6 @@ impl Drop for Answering {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
 
     fn answer(device: &DeviceThread) -> Result<(), CaptureError> {

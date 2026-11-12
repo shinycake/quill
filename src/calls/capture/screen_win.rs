@@ -355,23 +355,23 @@ enum CaptureStage {
 struct StageCell(AtomicU8);
 
 impl StageCell {
-    const RUNNING: u8 = 0;
+    const LIVE: u8 = 0;
     const STOPPED: u8 = 1;
 
     fn new() -> Self {
-        Self(AtomicU8::new(Self::RUNNING))
+        Self(AtomicU8::new(Self::LIVE))
     }
 
     fn get(&self) -> CaptureStage {
         match self.0.load(Ordering::Acquire) {
-            Self::RUNNING => CaptureStage::Live,
+            Self::LIVE => CaptureStage::Live,
             _ => CaptureStage::Stopped,
         }
     }
 
     /// Move to `Stopped`; `true` when this call is the one that did.
     fn stop(&self) -> bool {
-        self.0.swap(Self::STOPPED, Ordering::AcqRel) == Self::RUNNING
+        self.0.swap(Self::STOPPED, Ordering::AcqRel) == Self::LIVE
     }
 }
 
