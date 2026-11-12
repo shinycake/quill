@@ -172,25 +172,27 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// The info panel's media counts for `chat_id`: one
-    /// `getChatMessageCount` per `MEDIA_COUNT_FILTERS` entry, once per
-    /// chat per session (counts change little while the panel is open).
+    /// `getChatMessageCount` per `MEDIA_COUNT_FILTERS` entry, on every
+    /// open. Counts already known stay shown while the new ones are out and
+    /// each answer replaces its own; a count still out is not asked twice.
     pub fn fetch_chat_media_counts(
         &mut self,
         chat_id: crate::ids::ChatId,
     ) -> Result<(), ConnectSendError> {
-        if !self.chats_path_active()
-            || self
-                .session
-                .media
-                .chat_media_counts
-                .contains_key(&chat_id.0)
-        {
+        if !self.chats_path_active() {
             return Ok(());
         }
-        self.session
+        let first = !self
+            .session
             .media
             .chat_media_counts
-            .insert(chat_id.0, Default::default());
+            .contains_key(&chat_id.0);
+        if first {
+            self.session
+                .media
+                .chat_media_counts
+                .insert(chat_id.0, Default::default());
+        }
         for (index, (filter, _, _)) in crate::telegram::requests::MEDIA_COUNT_FILTERS
             .iter()
             .enumerate()
@@ -198,6 +200,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             let purpose = RequestPurpose::Users(UsersPurpose::GetChatMessageCount {
                 filter: index as u8,
             });
+            if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+                continue;
+            }
             let extra = self.session.request(purpose, Some(chat_id));
             if let Err(err) =
                 self.sender
@@ -206,7 +211,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                     ))
             {
                 self.session.requests.take(extra);
-                self.session.media.chat_media_counts.remove(&chat_id.0);
+                if first {
+                    self.session.media.chat_media_counts.remove(&chat_id.0);
+                }
                 return Err(err);
             }
         }

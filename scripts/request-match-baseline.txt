@@ -16,7 +16,6 @@ purpose:ConnectDriver::earn_in_flight 1
 purpose:ConnectDriver::emoji_set_request 1
 purpose:ConnectDriver::enable_private_sharing 1
 purpose:ConnectDriver::fetch_archived_stickers 1
-purpose:ConnectDriver::fetch_country_code 1
 purpose:ConnectDriver::fetch_marketplace_gift 2
 purpose:ConnectDriver::fetch_message_statistics 1
 purpose:ConnectDriver::fetch_new_chat_privacy 1

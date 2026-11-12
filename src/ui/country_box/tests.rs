@@ -103,7 +103,11 @@ fn the_poll_takes_several_countries_up_to_the_limit(cx: &mut TestAppContext) {
             session.payments.poll_countries_max = Some(2);
         }
         app.open_poll_dialog(window, cx);
-        app.chat_ui.poll_dialog.as_mut().unwrap().limit_by_country = true;
+        app.chat_ui
+            .poll_dialog
+            .as_mut()
+            .unwrap()
+            .set_limit_by_country(true);
         app.open_country_box(CountryHost::Poll, window, cx);
 
         app.country_box_click(CountryHost::Poll, "US", window, cx);
@@ -113,7 +117,7 @@ fn the_poll_takes_several_countries_up_to_the_limit(cx: &mut TestAppContext) {
         assert!(app.connection.status_note().contains("up to 2 countries"));
         // Nothing is kept until Save.
         let dialog = app.chat_ui.poll_dialog.as_ref().unwrap();
-        assert!(dialog.country_codes.is_empty());
+        assert!(dialog.country_codes().is_empty());
 
         app.country_box_remove(CountryHost::Poll, "US", cx);
         app.country_box_click(CountryHost::Poll, "FR", window, cx);
@@ -121,7 +125,7 @@ fn the_poll_takes_several_countries_up_to_the_limit(cx: &mut TestAppContext) {
 
         let dialog = app.chat_ui.poll_dialog.as_ref().unwrap();
         assert!(dialog.country_box().is_none());
-        assert_eq!(dialog.country_codes, ["GB", "FR"]);
+        assert_eq!(dialog.country_codes(), ["GB", "FR"]);
         assert!(dialog.is_dirty(cx));
         assert_eq!(dialog.draft(cx).country_codes, ["GB", "FR"]);
         assert_eq!(app.country_summary(&dialog_codes(app)), "2 countries");
@@ -131,7 +135,7 @@ fn the_poll_takes_several_countries_up_to_the_limit(cx: &mut TestAppContext) {
         app.country_box_click(CountryHost::Poll, "GB", window, cx);
         app.close_country_box(CountryHost::Poll, cx);
         let dialog = app.chat_ui.poll_dialog.as_ref().unwrap();
-        assert_eq!(dialog.country_codes, ["GB", "FR"]);
+        assert_eq!(dialog.country_codes(), ["GB", "FR"]);
     });
 }
 
@@ -139,7 +143,7 @@ fn dialog_codes(app: &QuillApp) -> Vec<String> {
     app.chat_ui
         .poll_dialog
         .as_ref()
-        .map(|dialog| dialog.country_codes.clone())
+        .map(|dialog| dialog.country_codes().to_vec())
         .unwrap_or_default()
 }
 
@@ -212,11 +216,11 @@ fn the_limit_switch_is_for_channels_and_off_forgets_the_countries(cx: &mut TestA
     assert!(shown(&mut vcx));
     app.update_in(&mut vcx, |app, window, cx| {
         let dialog = app.chat_ui.poll_dialog.as_mut().unwrap();
-        dialog.limit_by_country = true;
-        dialog.country_codes = vec!["US".into()];
+        dialog.set_limit_by_country(true);
+        dialog.set_country_codes(vec!["US".into()]);
         assert_eq!(dialog.draft(cx).country_codes, ["US"]);
         // On with no country is refused with tdesktop's text.
-        dialog.country_codes.clear();
+        dialog.set_country_codes(Vec::new());
         app.submit_poll_dialog(window, cx);
         assert!(
             app.connection
@@ -225,8 +229,8 @@ fn the_limit_switch_is_for_channels_and_off_forgets_the_countries(cx: &mut TestA
         );
         // Off: no codes reach the draft.
         let dialog = app.chat_ui.poll_dialog.as_mut().unwrap();
-        dialog.country_codes = vec!["US".into()];
-        dialog.limit_by_country = false;
+        dialog.set_country_codes(vec!["US".into()]);
+        dialog.set_limit_by_country(false);
         assert!(dialog.draft(cx).country_codes.is_empty());
     });
 }

@@ -344,14 +344,16 @@ fn closing_the_box_drops_a_pending_boost_intent() {
 }
 
 #[test]
-fn a_press_after_closing_mid_request_takes_over_the_slots_read() {
+fn a_press_after_closing_mid_request_joins_the_slots_read_still_out() {
     let mut rig = Rig::new(true);
     rig.driver.open_boost_box(ChatId(13)).unwrap();
     rig.driver.request_chat_boost(ChatId(13)).unwrap();
     rig.driver.close_boost_box();
     rig.driver.open_boost_box(ChatId(13)).unwrap();
-    // The first read is still out: this press waits for it.
-    assert_eq!(rig.driver.request_chat_boost(ChatId(13)).unwrap(), None);
+    // The first read is still out: this press waits for that request and
+    // sends no second one.
+    let own = rig.driver.request_chat_boost(ChatId(13)).unwrap();
+    assert!(own.is_none());
     assert!(matches!(rig.phase(), BoostPhase::Working(_)));
     assert_eq!(rig.sent_all("getAvailableChatBoostSlots").len(), 1);
     rig.answer_slots(&format!("[{}]", slot(5, 0, 0)));
@@ -367,9 +369,11 @@ fn a_press_while_the_box_works_sends_nothing_more() {
     assert!(rig.driver.request_chat_boost(ChatId(13)).unwrap().is_some());
     assert_eq!(rig.driver.request_chat_boost(ChatId(13)).unwrap(), None);
     assert_eq!(rig.sent_all("getAvailableChatBoostSlots").len(), 1);
-    // A press with no box makes the box that holds its wait.
+    // A press with no box makes the box that holds its wait: it joins the
+    // read of the closed box instead of sending another.
     rig.driver.close_boost_box();
-    assert!(rig.driver.request_chat_boost(ChatId(13)).unwrap().is_none());
+    assert_eq!(rig.driver.request_chat_boost(ChatId(13)).unwrap(), None);
+    assert_eq!(rig.sent_all("getAvailableChatBoostSlots").len(), 1);
     assert!(
         rig.driver
             .session

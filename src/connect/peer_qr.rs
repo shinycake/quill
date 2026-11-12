@@ -188,17 +188,21 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if free.is_none() {
-            let contact = &mut self.session.users_state.peer_qr.contact_link;
-            if *contact == UserLinkFetch::Loading {
-                return Ok(());
-            }
-            *contact = UserLinkFetch::Loading;
+        if free.is_none()
+            && matches!(
+                self.session.users_state.peer_qr.contact_link,
+                UserLinkFetch::Loading(_)
+            )
+        {
+            return Ok(());
         }
         let extra = self.session.request(
             RequestPurpose::Users(UsersPurpose::GetUserLink { free }),
             None,
         );
+        if free.is_none() {
+            self.session.users_state.peer_qr.contact_link = UserLinkFetch::Loading(extra);
+        }
         let what = free.map(|ticket| ticket.request);
         let request = json!({
             "@type": "getUserLink",
@@ -212,7 +216,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session
                 .users_state
                 .peer_qr
-                .fail_link(free, String::new());
+                .fail_link(free, extra, String::new());
             return Err(err);
         }
         Ok(())

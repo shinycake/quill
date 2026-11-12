@@ -130,6 +130,22 @@ fn b1_login_url_info_error_degrades_to_url() {
             ))
         );
     }
+    // A press refused under another request than the one asked changes
+    // nothing: two presses never swap their answers.
+    let asked = session.request(RequestPurpose::GetLoginUrlInfo, Some(ChatId(21)));
+    session.bots.login_url = LoginUrlStage::asking(asked, login_request.clone());
+    let other = session.request(RequestPurpose::GetLoginUrlInfo, Some(ChatId(21)));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"BUTTON_ID_INVALID"}}"#,
+            other.0
+        ),
+    );
+    assert!(session.bots.login_url.take_answer().is_none());
+    assert!(!session.bots.login_url.is_idle());
 }
 
 #[test]

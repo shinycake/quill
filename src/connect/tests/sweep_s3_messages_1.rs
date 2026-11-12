@@ -292,7 +292,7 @@ fn an_answer_for_a_set_that_is_no_longer_selected_does_not_end_the_new_selection
     // Another set is chosen before the first answers: it is asked at once.
     let second = rig.driver.select_sticker_set(88).unwrap().unwrap();
     assert_eq!(
-        rig.driver.session.stickers.stickers.set,
+        rig.driver.session.stickers.stickers.selection.stage,
         StickerSetStage::Loading {
             set_id: 88,
             request: second
@@ -301,7 +301,7 @@ fn an_answer_for_a_set_that_is_no_longer_selected_does_not_end_the_new_selection
     // The first set's failure changes nothing for the second.
     rig.error(first, 500);
     assert_eq!(
-        rig.driver.session.stickers.stickers.set,
+        rig.driver.session.stickers.stickers.selection.stage,
         StickerSetStage::Loading {
             set_id: 88,
             request: second
@@ -310,7 +310,7 @@ fn an_answer_for_a_set_that_is_no_longer_selected_does_not_end_the_new_selection
     // Its own failure fails it.
     rig.error(second, 500);
     assert_eq!(
-        rig.driver.session.stickers.stickers.set,
+        rig.driver.session.stickers.stickers.selection.stage,
         StickerSetStage::Failed { set_id: 88 }
     );
 }
@@ -438,4 +438,28 @@ fn a_failed_game_button_press_is_noted() {
         answer.map(|a| a.answer.text.as_str()),
         Some("bot did not answer")
     );
+}
+
+/// r2-14, 02-031: a refused `discardCall` keeps its entry and the ones after
+/// it, for the next ingest, instead of dropping the drained queues.
+#[test]
+fn a_refused_busy_decline_keeps_the_rest_of_the_queue() {
+    let mut rig = Rig::new();
+    let calls = &mut rig.driver.session.calls;
+    calls.created_call_discards = vec![(1, false), (2, true)];
+    calls.busy_decline_queue = vec![(3, 30, false), (4, 40, true)];
+    rig.refuse(true);
+    assert!(rig.driver.maybe_decline_busy_calls().is_err());
+    let calls = &rig.driver.session.calls;
+    assert_eq!(calls.created_call_discards, vec![(1, false), (2, true)]);
+    assert_eq!(
+        calls.busy_decline_queue,
+        vec![(3, 30, false), (4, 40, true)]
+    );
+    rig.refuse(false);
+    rig.driver.maybe_decline_busy_calls().unwrap();
+    assert_eq!(rig.sent("discardCall").len(), 4);
+    let calls = &rig.driver.session.calls;
+    assert!(calls.created_call_discards.is_empty() && calls.busy_decline_queue.is_empty());
+    assert_eq!(calls.busy_declined, vec![(30, false), (40, true)]);
 }

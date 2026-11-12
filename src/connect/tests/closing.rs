@@ -630,6 +630,26 @@ fn a_call_whose_answer_failed_is_left_to_ring() {
     assert_eq!(client.sent(), ["acceptCall", "setOption", "close"]);
 }
 
+/// r2-14, 02-032: a second click on Accept while the first `acceptCall` is
+/// out sends nothing and returns the first request.
+#[test]
+fn a_second_accept_click_sends_one_accept() {
+    let mut client = calling_driver().with_call(
+        false,
+        CallState::Pending {
+            is_created: true,
+            is_received: true,
+        },
+    );
+    client
+        .driver
+        .set_call_engine(Box::new(crate::calls::engine::MockEngine::new()));
+    let first = client.driver.accept_call().expect("accept");
+    let second = client.driver.accept_call().expect("accept again");
+    assert_eq!(first, second);
+    assert_eq!(client.sent(), ["acceptCall"]);
+}
+
 #[test]
 fn a_late_answer_failure_for_an_earlier_call_still_hangs_up_the_answered_one() {
     let ringing = CallState::Pending {

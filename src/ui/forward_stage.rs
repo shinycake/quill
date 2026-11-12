@@ -16,6 +16,7 @@
 
 use quill::composer::ForwardDraft;
 use quill::ids::{ChatId, MessageId};
+use quill::share_box::ShareSelection;
 
 use super::mount::Mount;
 
@@ -44,12 +45,14 @@ pub(crate) enum ForwardStage {
     /// `mount` is the box's own opening stage: its search field takes focus
     /// on the first draw after the dialog has mounted. `share_at` is the
     /// viewer position ("Share at 1:23") the box was opened at, which
-    /// lasts as long as the box.
+    /// lasts as long as the box. `ticks` are the destinations ticked in
+    /// the box: they go with the box, on every exit.
     Picking {
         draft: ForwardDraft,
         bar: Option<ChatId>,
         mount: Mount,
         share_at: Option<ShareAt>,
+        ticks: ShareSelection,
     },
     /// One destination chosen: the forward bar waits above `dest`'s
     /// composer, and Send forwards (the typed comment first). No selection
@@ -129,6 +132,21 @@ impl ForwardStage {
         matches!(self, Self::Picking { .. })
     }
 
+    /// The destinations ticked in the open share box.
+    pub(crate) fn ticks(&self) -> Option<&ShareSelection> {
+        match self {
+            Self::Picking { ticks, .. } => Some(ticks),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn ticks_mut(&mut self) -> Option<&mut ShareSelection> {
+        match self {
+            Self::Picking { ticks, .. } => Some(ticks),
+            _ => None,
+        }
+    }
+
     /// The chat the forward bar is for, shown or under the box.
     pub(crate) fn bar_dest(&self) -> Option<ChatId> {
         match self {
@@ -180,16 +198,25 @@ impl ForwardStage {
                 bar: None,
                 mount: Mount::Mounting,
                 share_at: None,
+                ticks: ShareSelection::default(),
             },
             Self::Bar { draft, dest } => Self::Picking {
                 draft,
                 bar: Some(dest),
                 mount: Mount::Mounting,
                 share_at: None,
+                ticks: ShareSelection::default(),
             },
             picking @ Self::Picking { .. } => picking,
         };
         true
+    }
+
+    /// A selection made elsewhere (the shared-media gallery) becomes the
+    /// forward. A box open for an earlier forward goes with that forward,
+    /// its ticks included; the caller opens the box for the new one.
+    pub(crate) fn begin_selection(&mut self, draft: ForwardDraft) {
+        *self = Self::Selecting(draft);
     }
 
     /// Leave the box: back to the selection or the bar it was opened over.
@@ -216,12 +243,14 @@ impl ForwardStage {
                 draft,
                 mount,
                 share_at,
+                ticks,
                 ..
             } => Self::Picking {
                 draft,
                 bar: None,
                 mount,
                 share_at,
+                ticks,
             },
             other => other,
         };
@@ -282,6 +311,39 @@ mod tests {
         assert_eq!(stage.bar_dest(), None);
     }
 
+    /// The ticked destinations belong to the box: every way out of it
+    /// takes them along, and the next box starts with none.
+    #[test]
+    fn ticks_live_and_die_with_the_box() {
+        let mut stage = ForwardStage::Selecting(draft());
+        assert!(stage.ticks().is_none());
+        assert!(stage.open_picker());
+        if let Some(ticks) = stage.ticks_mut() {
+            ticks.toggle(ChatId(7));
+        }
+        assert_eq!(stage.ticks().map(ShareSelection::len), Some(1));
+        stage.drop_bar();
+        assert_eq!(
+            stage.ticks().map(ShareSelection::len),
+            Some(1),
+            "leaving the bar's chat keeps the box"
+        );
+        stage.close_picker();
+        assert!(stage.ticks().is_none());
+        assert!(stage.open_picker());
+        assert_eq!(stage.ticks().map(ShareSelection::len), Some(0));
+        if let Some(ticks) = stage.ticks_mut() {
+            ticks.toggle(ChatId(7));
+        }
+        // A gallery selection replaces the forward the box was open for.
+        stage.begin_selection(draft());
+        assert!(stage.ticks().is_none());
+        assert!(stage.open_picker());
+        assert_eq!(stage.ticks().map(ShareSelection::len), Some(0));
+        let _ = stage.take_draft();
+        assert!(stage.ticks().is_none());
+    }
+
     #[test]
     fn share_at_lasts_as_long_as_the_box_and_is_taken_once() {
         let at = ShareAt {
@@ -318,6 +380,7 @@ mod tests {
             bar: Some(ChatId(2)),
             mount: Mount::Shown,
             share_at: None,
+            ticks: ShareSelection::default(),
         };
         stage.drop_bar();
         assert!(stage.picker_open());

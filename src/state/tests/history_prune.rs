@@ -307,9 +307,9 @@ fn a_dropped_chat_forgets_its_translations() {
     assert!(!session.histories.contains_key(&1), "the oldest went");
     assert!(!translated(&session, 1, 5));
     assert!(!translated(&session, 1, 80));
-    assert!(translated(&session, 2, 5), "a kept tail keeps them");
-    assert!(translated(&session, 2, 80));
-    session.finish_translation(late, Translation::Failed("late".into()));
+    assert!(!translated(&session, 2, 5), "row 5 left with the tail trim");
+    assert!(translated(&session, 2, 80), "a kept tail keeps its rows");
+    session.finish_translation(late, Translation::failed("late"));
     assert!(!translated(&session, 1, 7), "a late answer finds no job");
     assert_eq!(
         session.chat_translated_to(ChatId(1)),
@@ -978,7 +978,7 @@ fn a_translation_job_whose_request_is_gone_fails_and_frees_its_place() {
     );
     assert!(matches!(
         session.message_translation(ChatId(1), MessageId(5), "en"),
-        Some(Translation::Failed(_))
+        Some(Translation::Failed { .. })
     ));
     assert!(
         session
@@ -988,6 +988,31 @@ fn a_translation_job_whose_request_is_gone_fails_and_frees_its_place() {
             .any(|job| job == live),
         "a job still asking keeps its place"
     );
+}
+
+#[test]
+fn a_failed_translation_is_asked_again_by_the_pump_a_bounded_number_of_times() {
+    use crate::state::{TRANSLATE_PUMP_ATTEMPTS, TranslateTarget, Translation};
+    let (mut session, _sink) = session();
+    let (chat, message) = (ChatId(5), MessageId(9));
+    assert!(session.needs_translation(chat, message, "en"));
+    for round in 1..=TRANSLATE_PUMP_ATTEMPTS {
+        let (job, _) = session.begin_translation(
+            TranslateTarget::Message {
+                chat_id: chat.0,
+                message_id: message.0,
+            },
+            "en",
+            Some(chat),
+        );
+        assert!(!session.needs_translation(chat, message, "en"), "pending");
+        session.finish_translation(job, Translation::failed("send"));
+        assert_eq!(
+            session.needs_translation(chat, message, "en"),
+            round < TRANSLATE_PUMP_ATTEMPTS,
+            "after failure {round}"
+        );
+    }
 }
 
 /// r2-18 06-004: choosing "Hide ads" while a report is out leaves the

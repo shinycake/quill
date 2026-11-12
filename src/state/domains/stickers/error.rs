@@ -68,7 +68,8 @@ impl Session {
                     self.fail_custom_emoji_preview(pending.id);
                 }
             }
-            // "Attached Stickers": the box it opened (set 0) says it failed.
+            // "Attached Stickers": the box waiting for this request says it
+            // failed.
             Some(RequestPurpose::Stickers(StickersPurpose::GetAttachedStickerSets { .. })) => {
                 if self
                     .stickers
@@ -99,10 +100,10 @@ impl Session {
         if let Some(pending) = pending.filter(|p| p.purpose == RequestPurpose::GetStickerSet) {
             // Only the request the panel waits for fails the set view.
             let panel = &mut self.stickers.stickers;
-            if let StickerSetStage::Loading { set_id, request } = panel.set
+            if let StickerSetStage::Loading { set_id, request } = panel.selection.stage
                 && request == pending.id
             {
-                panel.set = StickerSetStage::Failed { set_id };
+                panel.selection.stage = StickerSetStage::Failed { set_id };
             }
         }
         if let Some(RequestPurpose::Stickers(StickersPurpose::LoadLibrarySet { set_id })) =

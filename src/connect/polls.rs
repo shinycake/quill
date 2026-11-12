@@ -194,7 +194,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<Option<RequestId>, ConnectSendError> {
         let key = (chat_id.0, message_id.0, option_index as i32);
         let offset = match self.session.messages.poll_voters.get(&key) {
-            Some(PollVotersFetch::Loaded { voters, .. }) => voters.len() as i32,
+            Some(PollVotersFetch::Loaded { voters, .. }) => {
+                i32::try_from(voters.len()).unwrap_or(i32::MAX)
+            }
             _ => return Ok(None),
         };
         self.fetch_poll_voters_page(chat_id, message_id, option_index, offset)

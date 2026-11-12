@@ -54,8 +54,7 @@ impl QuillApp {
         }
         self.account.passcode.enabled = false;
         quill::wake::PASSCODE.poke();
-        self.account.passcode.system_unlock = false;
-        self.account.passcode.system_unlock_key = None;
+        self.account.passcode.system_unlock = super::SystemUnlock::Off;
         self.account.passcode.screen = super::lock_screen::LockScreen::Entry;
         self.account.passcode.connect_at_unlock = None;
         // What waited for the unlock was the wiped accounts'.

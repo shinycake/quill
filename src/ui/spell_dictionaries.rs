@@ -41,7 +41,8 @@ pub(super) struct ActiveDownload {
 }
 
 /// The one download: none, running (with the task that follows it, so
-/// dropping it ends the loop), or the last one's failure.
+/// dropping it ends the loop), cancelled but still being let go of, or the
+/// last one's failure.
 #[derive(Default)]
 enum DictDownload {
     #[default]
@@ -51,6 +52,12 @@ enum DictDownload {
         /// Dropped with the stage: dropping it ends the progress loop.
         _task: Task<()>,
     },
+    /// The user switched the download off: the row is a plain off switch
+    /// again at once, but the worker may be past its last cancel check, so
+    /// the task goes on to see it end and read the dictionary folder once
+    /// more. A new download replaces this stage and drops that task (its own
+    /// end reads the folder).
+    Cancelling { _task: Task<()> },
     /// The last download of `code` failed with `message`; starting another
     /// (or any download) clears it.
     Failed { code: String, message: String },
@@ -96,7 +103,7 @@ impl QuillApp {
         }
         let managed = &self.spell.dict_manager.installed;
         let download = match &self.spell.dict_manager.download {
-            DictDownload::Idle => RowDownload::None,
+            DictDownload::Idle | DictDownload::Cancelling { .. } => RowDownload::None,
             DictDownload::Running { download, .. } => RowDownload::Running(Transfer {
                 code: &download.code,
                 percent: download.percent,
@@ -151,10 +158,11 @@ impl QuillApp {
     /// flag ends it at the next chunk and nothing it produces is used, so a
     /// stalled server holds nothing but its own thread.
     fn cancel_dictionary_download(&mut self, cx: &mut Context<Self>) {
-        if let DictDownload::Running { download, .. } =
+        if let DictDownload::Running { download, _task } =
             std::mem::take(&mut self.spell.dict_manager.download)
         {
             download.progress.cancel();
+            self.spell.dict_manager.download = DictDownload::Cancelling { _task };
         }
         cx.notify();
     }
@@ -211,9 +219,13 @@ impl QuillApp {
             let _ = this.update(cx, |this, cx| {
                 // This task is the running stage's: it is let go of after
                 // the answer is applied, not under it.
-                let _finished = std::mem::take(&mut this.spell.dict_manager.download);
+                let finished = std::mem::take(&mut this.spell.dict_manager.download);
+                // A cancel that came too late to stop the install still
+                // leaves the dictionary on disk: the list shows it.
                 this.refresh_installed_dictionaries();
+                let cancelled = matches!(finished, DictDownload::Cancelling { .. });
                 match result {
+                    _ if cancelled => {}
                     Ok(()) => {
                         let next = next_chosen(
                             &this.spell.info.chosen,
@@ -387,5 +399,61 @@ impl QuillApp {
                 );
         }
         section.into_any_element()
+    }
+}
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod tests {
+    use super::{ActiveDownload, DictDownload};
+    use crate::ui::app::QuillApp;
+    use crate::ui::screenshot_demo::ScreenshotDemo;
+    use crate::ui::shell::QuillShell;
+    use gpui_kit::component::Root;
+    use gpui_kit::{AppContext, TestAppContext, VisualTestContext, px, size};
+    use quill::spell_download::Progress;
+    use std::sync::Arc;
+
+    /// Switching a running download off ends the row's download at once,
+    /// but the stage keeps the task that sees the worker out, so a cancel
+    /// that came too late to stop the install still refreshes the list.
+    #[gpui_kit::test]
+    fn cancelling_keeps_the_task_that_sees_the_worker_out(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let slot_in = slot.clone();
+        let handle = cx.open_window(size(px(900.), px(700.)), move |window, cx| {
+            let view = cx.new(|cx| {
+                QuillApp::new_with_demo(
+                    window,
+                    cx,
+                    None,
+                    Some(ScreenshotDemo::named("ready-privacy")),
+                )
+            });
+            let shell = cx.new(|_| QuillShell::new(view.clone()));
+            *slot_in.borrow_mut() = Some(view);
+            Root::new(shell, window, cx)
+        });
+        let app = slot.borrow().clone().expect("the app view");
+        let mut vcx = VisualTestContext::from_window(handle.into(), cx);
+        let progress = Arc::new(Progress::default());
+        app.update(&mut vcx, |app, cx| {
+            app.spell.dict_manager.download = DictDownload::Running {
+                download: ActiveDownload {
+                    code: "fr".into(),
+                    progress: progress.clone(),
+                    total: 10,
+                    percent: 0,
+                },
+                _task: cx.spawn(async move |_, _| {}),
+            };
+            app.cancel_dictionary_download(cx);
+            assert!(matches!(
+                app.spell.dict_manager.download,
+                DictDownload::Cancelling { .. }
+            ));
+            assert!(progress.is_cancelled(), "the worker is told to stop");
+        });
     }
 }

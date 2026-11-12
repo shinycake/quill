@@ -180,7 +180,8 @@ impl QuillApp {
         let gift_entry = open.gift_entry;
         let progress = motion.progress(now, animate);
         let layout = box_layout(true, if view.can_style { 3 } else { 0 });
-        let panel_height = motion.shown().map_or(0., |panel| {
+        let shown = motion.visible(now);
+        let panel_height = shown.map_or(0., |panel| {
             self.qr_panel_height(panel, layout.width - 2. * PANEL_MARGIN)
         });
         let place = placement_with(&layout, progress, panel_height);
@@ -292,7 +293,7 @@ impl QuillApp {
                         .child(self.qr_island(view, cx))
                 }));
         }
-        if let Some(panel) = motion.shown().filter(|_| progress > 0.) {
+        if let Some(panel) = shown.filter(|_| progress > 0.) {
             let shown = self.qr_panel(
                 view,
                 panel,

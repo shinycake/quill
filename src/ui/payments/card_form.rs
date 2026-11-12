@@ -652,7 +652,7 @@ impl QuillApp {
         let has_password = session
             .auth_state
             .password_state
-            .as_ref()
+            .get()
             .is_some_and(|state| state.has_password);
         regular.can_save_credentials || (regular.need_password && has_password)
     }

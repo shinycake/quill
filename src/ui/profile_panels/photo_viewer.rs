@@ -23,6 +23,8 @@ fn gallery_items(gallery: &PhotoGallery) -> Vec<MediaViewerItem> {
 /// A gallery click waiting for its photos, with what it was asked over:
 /// the window (`None`: the main window), the chat and the info panel that
 /// window showed, that window's viewer opens so far, and the lock count.
+/// A user's wait also ends when the first page's request leaves flight
+/// without an answer (`user_photos_request_ended`).
 /// The answer opens it only while all of them still hold: a click on
 /// another photo, a chat change, the panel closing or moving to another
 /// peer, a window close, or a lock in between (even one unlocked again
@@ -142,6 +144,10 @@ impl QuillApp {
         let failure = self.session().and_then(|s| match owner {
             PhotoOwner::User(user_id) => match s.users_state.user_profile_photos.get(&user_id) {
                 Some(ProfilePhotosFetch::Failed(reason)) => Some(reason.clone()),
+                // The first page's request ended without an answer.
+                _ if s.user_photos_request_ended(user_id) => {
+                    Some(tr(keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN).to_string())
+                }
                 _ => None,
             },
             PhotoOwner::Chat(chat_id) => match s.users_state.chat_photo_history.get(&chat_id.0) {

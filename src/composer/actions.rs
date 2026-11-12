@@ -75,6 +75,10 @@ pub struct ForwardDraft {
     /// The forum topic of the destination chosen when the drop picked it
     /// (`forwardMessages.topic_id`); `None` sends to the chat itself.
     pub topic_id: Option<i32>,
+    /// The row a Shift+click or Shift+arrow range runs from: the last one
+    /// clicked or stepped to while selecting. It is the selection's, so it
+    /// ends with it.
+    pub range_anchor: Option<MessageId>,
 }
 
 impl ForwardDraft {
@@ -95,6 +99,7 @@ impl ForwardDraft {
             send_copy: false,
             remove_caption: false,
             topic_id: None,
+            range_anchor: None,
         })
     }
 

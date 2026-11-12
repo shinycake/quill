@@ -125,10 +125,7 @@ fn countries_and_default_code_are_fetched_once_and_stored() {
         driver.session.auth_state.countries.data().map(Vec::len),
         Some(2)
     );
-    assert_eq!(
-        driver.session.auth_state.guessed_country_iso.as_deref(),
-        Some("GB")
-    );
+    assert_eq!(driver.session.auth_state.guessed_country_iso(), Some("GB"));
     assert_eq!(driver.fetch_countries().unwrap(), None, "cached");
     assert_eq!(driver.fetch_country_code().unwrap(), None, "cached");
     assert!(
@@ -292,4 +289,43 @@ fn a_failed_country_list_waits_for_a_user_action_to_ask_again() {
         driver.session.auth_state.countries.data().map(Vec::len),
         Some(1)
     );
+}
+
+/// Refuses every request, as a closed client does.
+struct RefusingSender;
+
+impl super::super::JsonSender for Arc<RefusingSender> {
+    fn send_json(&self, _: &str) -> Result<(), super::super::ConnectSendError> {
+        Err(super::super::ConnectSendError::Native)
+    }
+}
+
+/// The phone screen's two lookups are asked once: a refused send leaves
+/// each failed, not idle, so the frame that asks again sends nothing.
+#[test]
+fn refused_phone_lookups_are_not_asked_again_by_a_frame() {
+    use crate::state::fetch::Fetch;
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let session = crate::state::Session::new(crate::ids::AccountKey::primary(), sink);
+    let mut driver = ConnectDriver::new(
+        session,
+        Arc::new(RefusingSender),
+        test_credentials(),
+        prepared,
+    );
+    assert!(driver.fetch_countries().is_err());
+    assert!(driver.fetch_country_code().is_err());
+    assert!(matches!(
+        driver.session.auth_state.countries,
+        Fetch::Failed { .. }
+    ));
+    assert!(matches!(
+        driver.session.auth_state.guessed_country,
+        Fetch::Failed { .. }
+    ));
+    assert_eq!(driver.fetch_countries().unwrap(), None, "not asked again");
+    assert_eq!(driver.fetch_country_code().unwrap(), None);
+    assert!(driver.session.requests.is_empty(), "nothing waits");
+    let _ = std::fs::remove_dir_all(&dir);
 }

@@ -524,7 +524,7 @@ pub(super) fn session_chat_row(
         .on_mouse_down(
             MouseButton::Right,
             cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                this.chat_list.menu.open_row(ChatMenuState::at(id, event.position));
+                this.chat_list.overlay.open_row(ChatMenuState::at(id, event.position));
                 cx.notify();
             }),
         )
@@ -554,7 +554,7 @@ pub(super) fn session_chat_row(
         .on_mouse_up(
             MouseButton::Left,
             cx.listener(move |this, _, _, _| {
-                this.chat_list.peek.cancel_press();
+                this.chat_list.overlay.cancel_press();
             }),
         )
         // Release outside the row (e.g. press, drag off, let go) also
@@ -562,7 +562,7 @@ pub(super) fn session_chat_row(
         .on_mouse_up_out(
             MouseButton::Left,
             cx.listener(move |this, _, _, _| {
-                this.chat_list.peek.cancel_press();
+                this.chat_list.overlay.cancel_press();
             }),
         )
         .child(

@@ -132,17 +132,12 @@ pub enum SettingsPurpose {
     GetNewChatPrivacy,
     /// B13: `setNewChatPrivacySettings`. Response is `ok`; applied
     /// optimistically at send time.
-    SetNewChatPrivacy {
-        previous_allow: bool,
-        previous_stars: i64,
-    },
+    SetNewChatPrivacy,
     /// B13: `setGiftSettings`. Response is `ok`; applied optimistically.
     SetGiftSettings,
     /// B13: `setInactiveSessionTtl`. Response is `ok`; applied
-    /// optimistically, with the value it replaced to roll back to.
-    SetInactiveSessionTtl {
-        previous: Option<i32>,
-    },
+    /// optimistically; the row's `Saves` hold what to fall back to.
+    SetInactiveSessionTtl,
     /// B13: `setOption(ignore_sensitive_content_restrictions)`. The truth
     /// arrives as `updateOption`.
     SetSensitiveContent,

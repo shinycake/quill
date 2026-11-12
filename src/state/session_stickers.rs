@@ -6,10 +6,10 @@ impl Session {
     /// suggested stickers, the Premium examples) by file.
     pub fn panel_sticker(&self, file_id: FileId) -> Option<&StickerItem> {
         [
-            &self.stickers.stickers.stickers,
+            &self.stickers.stickers.selection.stickers,
             &self.stickers.stickers.recent,
             &self.stickers.stickers.favorites,
-            &self.stickers.stickers.found_stickers,
+            &self.stickers.stickers.search.stickers,
             &self.stickers.stickers.suggestions,
         ]
         .into_iter()
@@ -101,13 +101,14 @@ impl Session {
         let still_selected = self
             .stickers
             .stickers
-            .selected_set_id
+            .selection
+            .set_id
             .is_some_and(|id| self.stickers.stickers.sets.iter().any(|set| set.id == id));
         if !still_selected {
-            self.stickers.stickers.selected_set_id =
-                self.stickers.stickers.sets.first().map(|set| set.id);
-            self.stickers.stickers.set = StickerSetStage::Idle;
-            self.stickers.stickers.stickers.clear();
+            self.stickers.stickers.selection = StickerSelection {
+                set_id: self.stickers.stickers.sets.first().map(|set| set.id),
+                ..StickerSelection::default()
+            };
         }
     }
 
@@ -148,24 +149,25 @@ impl Session {
 
     /// Slice S8: store a `searchStickerSets` answer.
     pub fn accept_found_sticker_sets(&mut self, sets: Vec<StickerSetInfo>) {
-        self.stickers.stickers.found_sets = sets;
+        self.stickers.stickers.search.sets = sets;
     }
 
     /// Slice S8: store a `searchStickers` answer.
     pub fn accept_found_stickers(&mut self, stickers: Vec<StickerItem>) {
-        self.stickers.stickers.search_has_more = stickers.len() == 100;
-        if self.stickers.stickers.search_offset == 0 {
-            self.stickers.stickers.found_stickers.clear();
+        self.stickers.stickers.search.has_more = stickers.len() == 100;
+        if self.stickers.stickers.search.offset == 0 {
+            self.stickers.stickers.search.stickers.clear();
         }
-        self.stickers.stickers.search_offset += stickers.len();
+        self.stickers.stickers.search.offset += stickers.len();
         let mut files: HashSet<_> = self
             .stickers
             .stickers
-            .found_stickers
+            .search
+            .stickers
             .iter()
             .map(|sticker| sticker.file_id)
             .collect();
-        self.stickers.stickers.found_stickers.extend(
+        self.stickers.stickers.search.stickers.extend(
             stickers
                 .into_iter()
                 .filter(|sticker| files.insert(sticker.file_id)),
@@ -213,9 +215,7 @@ impl Session {
     pub fn invalidate_installed_sticker_sets(&mut self) {
         self.stickers.stickers.lists.installed = crate::state::fetch::Fetch::Idle;
         self.stickers.stickers.sets.clear();
-        self.stickers.stickers.selected_set_id = None;
-        self.stickers.stickers.set = StickerSetStage::Idle;
-        self.stickers.stickers.stickers.clear();
+        self.stickers.stickers.selection = StickerSelection::default();
     }
 
     /// Slice S15: apply TDLib's `updateInstalledStickerSets` order to the
@@ -240,17 +240,15 @@ impl Session {
     }
 
     pub fn select_sticker_set(&mut self, set_id: i64) {
-        if self.stickers.stickers.selected_set_id == Some(set_id) {
+        if self.stickers.stickers.selection.set_id == Some(set_id) {
             return;
         }
-        self.stickers.stickers.selected_set_id = Some(set_id);
-        self.stickers.stickers.set = StickerSetStage::Idle;
-        self.stickers.stickers.stickers.clear();
+        self.stickers.stickers.selection = StickerSelection::of(set_id);
     }
 
     /// The selected set's `getStickerSet` went out as `request`.
     pub fn mark_sticker_set_loading(&mut self, set_id: i64, request: RequestId) {
-        self.stickers.stickers.set = StickerSetStage::Loading { set_id, request };
+        self.stickers.stickers.selection.stage = StickerSetStage::Loading { set_id, request };
     }
 
     pub fn accept_saved_animations(&mut self, animations: Vec<AnimationItem>) {
@@ -295,12 +293,12 @@ impl Session {
         if let StickerSetStage::Loading {
             set_id,
             request: asked,
-        } = panel.set
+        } = panel.selection.stage
             && Some(asked) == request
             && set_id == id
         {
-            panel.set = StickerSetStage::Ready { set_id };
-            panel.stickers = stickers;
+            panel.selection.stage = StickerSetStage::Ready { set_id };
+            panel.selection.stickers = stickers;
         }
     }
 }

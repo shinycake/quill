@@ -278,7 +278,6 @@ impl QuillApp {
             draft,
             dest: chat_id,
         };
-        self.share.selection.clear();
         self.set_note(StatusNote::silent(tr(
             keys::Q_OPS_FORWARD_BAR_READY_PRESS_SEND,
         )));

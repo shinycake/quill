@@ -371,9 +371,9 @@ impl QuillApp {
         let Some(focus) = focus else {
             return false;
         };
-        self.chat_ui.selection_anchor = Some(focus);
         self.chat_ui.focus = A11yFocus::Row(focus);
         self.toggle_forward_select(chat_id, focus, false, cx);
+        self.set_selection_anchor(focus);
         if self.selecting_in(chat_id) {
             // The keyboard stays on the rows: Space keeps toggling, Up and
             // Down move the focus (tdesktop focuses `HistoryInner`).
@@ -490,8 +490,7 @@ impl QuillApp {
         };
         if extend {
             let anchor = self
-                .chat_ui
-                .selection_anchor
+                .selection_anchor()
                 .filter(|id| ids.contains(id))
                 .or(old)
                 .unwrap_or(new);
@@ -510,9 +509,9 @@ impl QuillApp {
                     draft.toggle(chat_id, topic, id, false);
                 }
             }
-            self.chat_ui.selection_anchor = Some(anchor);
+            self.set_selection_anchor(anchor);
         } else {
-            self.chat_ui.selection_anchor = Some(new);
+            self.set_selection_anchor(new);
         }
         self.chat_ui.focus = A11yFocus::Row(new);
         self.scroll_selection_focus_into_view(new, cx);
@@ -663,8 +662,8 @@ impl QuillApp {
             return false;
         };
         let size = window.viewport_size();
-        self.chat_list.peek = crate::ui::chat_list_state::PeekPreview::Idle;
-        self.chat_list.menu.open_row(ChatMenuState::at(
+        // The menu replaces a peek that was open: one thing floats.
+        self.chat_list.overlay.open_row(ChatMenuState::at(
             chat_id,
             point(size.width - px(220.), px(64.)),
         ));

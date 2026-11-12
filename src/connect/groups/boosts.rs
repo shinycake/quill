@@ -9,6 +9,11 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// open boost box, profile row or look dialog shows the new level.
     pub(crate) fn refresh_moved_boost_statuses(&mut self) {
         for chat_id in self.session.outdated_boost_chats() {
+            // A status asked before the move would hold the old level: its
+            // request is dropped, and the one sent now answers.
+            self.session
+                .requests
+                .take_purpose_for_chat(RequestPurpose::GetChatBoostStatus, chat_id);
             let _ = self.fetch_chat_boost_status(chat_id);
         }
     }

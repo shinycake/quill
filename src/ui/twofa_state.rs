@@ -185,8 +185,7 @@ impl QuillApp {
     /// switch, logout, a connection replacing the client).
     pub(in crate::ui) fn twofa_forget_flow(&mut self) {
         if let Some(flow) = self.twofa_flow_mut() {
-            flow.notice = None;
-            flow.code_wait = quill::state::CodeWait::None;
+            flow.clear();
         }
     }
 
@@ -209,7 +208,7 @@ impl QuillApp {
         if view == TwofaView::Status {
             self.twofa_forget_flow();
         } else if let Some(flow) = self.twofa_flow_mut() {
-            flow.notice = None;
+            flow.clear_notice();
         }
     }
 

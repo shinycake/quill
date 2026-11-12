@@ -6,7 +6,7 @@ use quill::lang::{keys, tr};
 
 impl QuillApp {
     pub(super) fn close_proxy_list_box(&mut self, cx: &mut Context<Self>) {
-        self.settings.proxy.list_box = false;
+        self.auth_ui.proxy_list_open = false;
         cx.notify();
     }
 

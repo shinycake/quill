@@ -182,7 +182,7 @@ impl QuillApp {
                 MouseButton::Right,
                 cx.listener(move |this, event: &MouseDownEvent, _, cx| {
                     this.chat_list
-                        .menu
+                        .overlay
                         .open_row(ChatMenuState::top_person(id, event.position));
                     cx.notify();
                 }),
@@ -199,11 +199,11 @@ impl QuillApp {
             )
             .on_mouse_up(
                 MouseButton::Left,
-                cx.listener(|this, _, _, _| this.chat_list.peek.cancel_press()),
+                cx.listener(|this, _, _, _| this.chat_list.overlay.cancel_press()),
             )
             .on_mouse_up_out(
                 MouseButton::Left,
-                cx.listener(|this, _, _, _| this.chat_list.peek.cancel_press()),
+                cx.listener(|this, _, _, _| this.chat_list.overlay.cancel_press()),
             )
             .child(avatar)
             .child(
@@ -236,7 +236,7 @@ impl QuillApp {
         let single = model::TILE_WIDTH + (width / columns as f32 - model::TILE_WIDTH) * progress;
         let menu_target = self
             .chat_list
-            .menu
+            .overlay
             .row_copy()
             .filter(|menu| menu.kind == crate::ui::menu_states::ChatMenuKind::TopPerson)
             .map(|menu| menu.chat_id);
@@ -307,7 +307,7 @@ impl QuillApp {
                         drag.moved = true;
                     }
                     if drag.moved {
-                        this.chat_list.peek.cancel_press();
+                        this.chat_list.overlay.cancel_press();
                         let scroll = &this.search_ui.top_scroll;
                         let floor = -scroll.max_offset().x;
                         let x = (drag.start_scroll + delta).clamp(floor, px(0.));

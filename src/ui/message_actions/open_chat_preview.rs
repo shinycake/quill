@@ -13,8 +13,8 @@ impl QuillApp {
         anchor: Point<Pixels>,
         cx: &mut Context<Self>,
     ) {
-        // The press owns its timer: a release or a newer press drops it, so
-        // it only ever fires for the press that is still held.
+        // The press owns its timer: a release, a newer press or a menu
+        // drops it, so it only ever fires for the press that is still held.
         let timer = self.spawn_screen(cx, async move |this, cx| {
             cx.background_executor()
                 .timer(Self::CHAT_PREVIEW_LONG_PRESS)
@@ -23,7 +23,7 @@ impl QuillApp {
                 this.open_chat_preview(chat_id, anchor, cx);
             });
         });
-        self.chat_list.peek.press(chat_id, timer);
+        self.chat_list.overlay.press(chat_id, timer);
     }
 
     /// Slice CL: open the read-only peek preview for a chat — recent
@@ -35,9 +35,10 @@ impl QuillApp {
         anchor: Point<Pixels>,
         cx: &mut Context<Self>,
     ) {
-        self.chat_list.menu.close();
-        self.chat_list.peek =
-            crate::ui::chat_list_state::PeekPreview::Open(ChatPreviewState { chat_id, anchor });
+        // The panel replaces a menu that was open: one thing floats.
+        self.chat_list
+            .overlay
+            .open_peek(ChatPreviewState { chat_id, anchor });
         // Live fetch for unopened chats; already-loaded history renders
         // immediately. Demo/no-driver sessions skip the network.
         if let Some(live) = self.live.as_mut() {

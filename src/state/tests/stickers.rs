@@ -60,8 +60,8 @@ fn s8_sticker_backend_purpose_gated_dispatch() {
             extra.0
         ),
     );
-    assert_eq!(with_purpose.stickers.stickers.found_sets.len(), 1);
-    assert_eq!(with_purpose.stickers.stickers.found_sets[0].id, 78);
+    assert_eq!(with_purpose.stickers.stickers.search.sets.len(), 1);
+    assert_eq!(with_purpose.stickers.stickers.search.sets[0].id, 78);
     assert!(with_purpose.stickers.stickers.sets.is_empty());
 
     // A removeFavoriteSticker `ok` clears the favorites cache.
@@ -340,6 +340,13 @@ fn attached_sticker_sets_fail_the_box_and_drop_an_earlier_answer() {
         session.stickers.stickers.attached = crate::state::AttachedSets::Asked(extra);
         extra
     };
+    let stage = |session: &Session| {
+        session
+            .stickers
+            .sticker_set_view
+            .as_ref()
+            .map(|v| v.stage.clone())
+    };
     let failed = ask(&mut session);
     apply_json(
         &mut session,
@@ -350,14 +357,7 @@ fn attached_sticker_sets_fail_the_box_and_drop_an_earlier_answer() {
             failed.0
         ),
     );
-    assert_eq!(
-        session
-            .stickers
-            .sticker_set_view
-            .as_ref()
-            .map(|v| v.stage.clone()),
-        Some(StickerSetViewStage::Failed)
-    );
+    assert_eq!(stage(&session), Some(StickerSetViewStage::Failed));
 
     let earlier = ask(&mut session);
     let later = ask(&mut session);

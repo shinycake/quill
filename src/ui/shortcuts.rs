@@ -18,8 +18,10 @@ impl QuillApp {
         // (`cmd-q` / `ctrl-q`) render as one entry with both chips.
         // `shortcut_rows()` is written in section order, so first-seen
         // order is the display order.
+        // A keymap being changed right now draws its keys next frame instead
+        // of panicking here.
         let bindings = cx.key_bindings();
-        let bindings = bindings.borrow();
+        let bindings = bindings.try_borrow().ok();
         let mut groups: Vec<(&'static str, &'static str, Vec<Keystroke>)> = Vec::new();
         for row in shortcut_rows() {
             if groups
@@ -33,7 +35,8 @@ impl QuillApp {
             // scoped twins of a chord list it once.
             let mut keys: Vec<Keystroke> = Vec::new();
             for binding in bindings
-                .bindings()
+                .iter()
+                .flat_map(|bindings| bindings.bindings())
                 .filter(|binding| binding.action().partial_eq(row.binding.action()))
             {
                 for key in binding.keystrokes() {

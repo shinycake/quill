@@ -40,7 +40,7 @@ impl QuillApp {
             let session = this.session();
             let state = session
                 .as_ref()
-                .and_then(|s| s.auth_state.password_state.clone());
+                .and_then(|s| s.auth_state.password_state.get().cloned());
             let loading = session.is_some_and(|s| s.auth_state.password_state_loading());
             let error = session
                 .as_ref()
@@ -538,10 +538,10 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.maybe_fetch_active_sessions();
         } else if let Some(demo) = self.demo_session.as_mut() {
-            demo.settings
-                .privacy_data
-                .inactive_session_ttl_days
-                .get_or_insert(180);
+            let ttl = &mut demo.settings.privacy_data.inactive_session_ttl;
+            if ttl.value().is_none() {
+                *ttl = quill::state::saves::Optimistic::Ready(180);
+            }
         }
     }
 

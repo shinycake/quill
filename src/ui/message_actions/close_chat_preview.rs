@@ -10,7 +10,8 @@ impl QuillApp {
     /// that ends the long press, or Escape). Also cancels a pending
     /// long press.
     pub(in crate::ui) fn close_chat_preview(&mut self, cx: &mut Context<Self>) {
-        if self.chat_list.peek.close() {
+        if !self.chat_list.overlay.peek_idle() {
+            self.chat_list.overlay.close_peek();
             cx.notify();
         }
     }
@@ -338,7 +339,7 @@ impl QuillApp {
                 window,
                 cx,
                 {
-                    this.chat_list.menu.close();
+                    this.chat_list.overlay.close_menu();
                     this.open_chat_in_new_window(chat_id, window, cx);
                     cx.notify();
                 }
@@ -354,7 +355,7 @@ impl QuillApp {
                 this,
                 cx,
                 {
-                    this.chat_list.menu.close();
+                    this.chat_list.overlay.close_menu();
                     if let Some(live) = this.live.as_mut() {
                         let _ = live.driver.hide_promotion(chat_id);
                     }
@@ -380,7 +381,7 @@ impl QuillApp {
                 cx,
                 {
                     this.toggle_archive(chat_id, cx);
-                    this.chat_list.menu.close();
+                    this.chat_list.overlay.close_menu();
                     cx.notify();
                 }
             );
@@ -397,7 +398,7 @@ impl QuillApp {
                 cx,
                 {
                     this.toggle_chat_pin(chat_id, cx);
-                    this.chat_list.menu.close();
+                    this.chat_list.overlay.close_menu();
                     cx.notify();
                 }
             );
@@ -422,7 +423,7 @@ impl QuillApp {
             cx,
             {
                 this.toggle_chat_marked_as_unread(chat_id, cx);
-                this.chat_list.menu.close();
+                this.chat_list.overlay.close_menu();
                 cx.notify();
             }
         );
@@ -449,7 +450,7 @@ impl QuillApp {
                 window,
                 cx,
                 {
-                    this.chat_list.menu.close();
+                    this.chat_list.overlay.close_menu();
                     if let Some(target) = this.session().and_then(|s| s.chat_info_target(chat_id)) {
                         this.open_info_panel_target(target, window, cx);
                     }
@@ -471,7 +472,7 @@ impl QuillApp {
                         quill::state::UnreadJumpKind::Mention,
                         cx,
                     );
-                    this.chat_list.menu.close();
+                    this.chat_list.overlay.close_menu();
                     cx.notify();
                 }
             );
@@ -490,7 +491,7 @@ impl QuillApp {
                         quill::state::UnreadJumpKind::Reaction,
                         cx,
                     );
-                    this.chat_list.menu.close();
+                    this.chat_list.overlay.close_menu();
                     cx.notify();
                 }
             );
@@ -509,7 +510,7 @@ impl QuillApp {
                         quill::state::UnreadJumpKind::PollVote,
                         cx,
                     );
-                    this.chat_list.menu.close();
+                    this.chat_list.overlay.close_menu();
                     cx.notify();
                 }
             );
@@ -524,7 +525,7 @@ impl QuillApp {
             cx,
             {
                 this.enter_select_mode(chat_id, cx);
-                this.chat_list.menu.close();
+                this.chat_list.overlay.close_menu();
                 cx.notify();
             }
         );
@@ -539,7 +540,7 @@ impl QuillApp {
                 window,
                 cx,
                 {
-                    this.chat_list.menu.close();
+                    this.chat_list.overlay.close_menu();
                     this.open_clear_history_box(chat_id, window, cx);
                     cx.notify();
                 }
@@ -558,7 +559,7 @@ impl QuillApp {
                 this,
                 cx,
                 {
-                    this.chat_list.menu.close();
+                    this.chat_list.overlay.close_menu();
                     this.open_message_report(chat_id, Vec::new(), cx);
                     cx.notify();
                 }
@@ -599,7 +600,7 @@ impl QuillApp {
                         },
                         cx,
                     );
-                    this.chat_list.menu.close();
+                    this.chat_list.overlay.close_menu();
                     cx.notify();
                 }
             );
@@ -614,7 +615,7 @@ impl QuillApp {
                 cx,
                 {
                     this.start_chat_export(chat_id, cx);
-                    this.chat_list.menu.close();
+                    this.chat_list.overlay.close_menu();
                     cx.notify();
                 }
             );

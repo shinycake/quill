@@ -22,14 +22,20 @@ pub(crate) struct PinDrag {
     pub(super) next_press: Option<(i64, f32)>,
 }
 
-/// The peek preview of a chat-list row: a long press in progress (the
-/// row's chat and the timer that opens it, which the stage owns: a release,
-/// a newer press or a close drops it) or the open panel. One value:
-/// opening replaces the press, a release or a close ends either.
+/// What floats over the chat list: a context menu (a chat row's, or the
+/// "Archived chats" row's), or the peek preview of a row (a long press in
+/// progress, with the row's chat and the timer that opens the panel, or the
+/// open panel). One value: opening one replaces the other, and a close ends
+/// only its own. The press owns its timer, so a release, a newer press, a
+/// menu or a close drops it.
 #[derive(Default)]
-pub(crate) enum PeekPreview {
+pub(crate) enum ChatOverlay {
     #[default]
-    Idle,
+    None,
+    /// The right-click menu of a chat row (or a top person).
+    RowMenu(ChatMenuState),
+    /// The archive row's menu, at the pointer.
+    ArchiveMenu(Point<Pixels>),
     /// A press on a row; `over` is the panel still showing under it (a new
     /// press leaves an open panel until its own opens).
     Pressing {
@@ -39,13 +45,64 @@ pub(crate) enum PeekPreview {
         over: Option<ChatPreviewState>,
         _timer: Task<()>,
     },
-    Open(ChatPreviewState),
+    Peek(ChatPreviewState),
 }
 
-impl PeekPreview {
-    pub(super) fn open(&self) -> Option<ChatPreviewState> {
+impl ChatOverlay {
+    /// A chat row's menu, if that is what floats.
+    pub(super) fn row(&self) -> Option<&ChatMenuState> {
+        match self {
+            Self::RowMenu(menu) => Some(menu),
+            _ => None,
+        }
+    }
+
+    pub(super) fn row_mut(&mut self) -> Option<&mut ChatMenuState> {
+        match self {
+            Self::RowMenu(menu) => Some(menu),
+            _ => None,
+        }
+    }
+
+    /// A chat row's menu by value, for drawing it.
+    pub(super) fn row_copy(&self) -> Option<ChatMenuState> {
+        self.row().copied()
+    }
+
+    /// Where the archive row's menu is, if that is what floats.
+    pub(super) fn archive(&self) -> Option<Point<Pixels>> {
+        match self {
+            Self::ArchiveMenu(at) => Some(*at),
+            _ => None,
+        }
+    }
+
+    /// A menu (a row's or the archive row's) is open.
+    pub(super) fn menu_open(&self) -> bool {
+        matches!(self, Self::RowMenu(_) | Self::ArchiveMenu(_))
+    }
+
+    /// The menu goes; a peek is not the menu's to close.
+    pub(super) fn close_menu(&mut self) {
+        if self.menu_open() {
+            *self = Self::None;
+        }
+    }
+
+    /// A row's menu opens over whatever floated before it.
+    pub(super) fn open_row(&mut self, menu: ChatMenuState) {
+        *self = Self::RowMenu(menu);
+    }
+
+    /// The archive row's menu opens over whatever floated before it.
+    pub(super) fn open_archive(&mut self, at: Point<Pixels>) {
+        *self = Self::ArchiveMenu(at);
+    }
+
+    /// The open peek panel, also while a new press waits over it.
+    pub(super) fn peek(&self) -> Option<ChatPreviewState> {
         match *self {
-            Self::Open(state)
+            Self::Peek(state)
             | Self::Pressing {
                 over: Some(state), ..
             } => Some(state),
@@ -53,11 +110,16 @@ impl PeekPreview {
         }
     }
 
-    /// A new press on `chat`; an open panel stays under it.
+    /// The panel opens over whatever floated before it.
+    pub(super) fn open_peek(&mut self, state: ChatPreviewState) {
+        *self = Self::Peek(state);
+    }
+
+    /// A new press on `chat`; an open panel stays under it, a menu goes.
     pub(super) fn press(&mut self, chat: ChatId, timer: Task<()>) {
         *self = Self::Pressing {
             chat,
-            over: self.open(),
+            over: self.peek(),
             _timer: timer,
         };
     }
@@ -74,19 +136,20 @@ impl PeekPreview {
     /// A release or a click elsewhere: a press ends, an open panel stays.
     pub(super) fn cancel_press(&mut self) {
         if let Self::Pressing { over, .. } = *self {
-            *self = over.map_or(Self::Idle, Self::Open);
+            *self = over.map_or(Self::None, Self::Peek);
         }
     }
 
-    /// The panel closes and any press ends (its timer is dropped with it).
-    /// `true` when something was showing or pressed.
-    pub(super) fn close(&mut self) -> bool {
-        !std::mem::take(self).is_idle()
+    /// The peek goes, a press waiting included; a menu is not its to close.
+    pub(super) fn close_peek(&mut self) {
+        if !self.peek_idle() {
+            *self = Self::None;
+        }
     }
 
-    /// Nothing is showing and no press is waiting.
-    pub(super) fn is_idle(&self) -> bool {
-        matches!(self, Self::Idle)
+    /// No peek panel is showing and no press is waiting.
+    pub(super) fn peek_idle(&self) -> bool {
+        !matches!(self, Self::Pressing { .. } | Self::Peek(_))
     }
 }
 
@@ -260,63 +323,6 @@ impl PinStage {
     }
 }
 
-/// The chat list's one context menu: a chat row's, or the "Archived chats"
-/// row's. One value, so opening one replaces the other.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub(crate) enum ChatListMenu {
-    #[default]
-    Closed,
-    Row(ChatMenuState),
-    /// The archive row's menu, at the pointer.
-    Archive(Point<Pixels>),
-}
-
-impl ChatListMenu {
-    /// A chat row's menu, if that is the one open.
-    pub(super) fn row(&self) -> Option<&ChatMenuState> {
-        match self {
-            Self::Row(menu) => Some(menu),
-            _ => None,
-        }
-    }
-
-    pub(super) fn row_mut(&mut self) -> Option<&mut ChatMenuState> {
-        match self {
-            Self::Row(menu) => Some(menu),
-            _ => None,
-        }
-    }
-
-    /// A chat row's menu by value, for drawing it.
-    pub(super) fn row_copy(&self) -> Option<ChatMenuState> {
-        self.row().copied()
-    }
-
-    /// Where the archive row's menu is, if that is the one open.
-    pub(super) fn archive(&self) -> Option<Point<Pixels>> {
-        match self {
-            Self::Archive(at) => Some(*at),
-            _ => None,
-        }
-    }
-
-    pub(super) fn is_open(&self) -> bool {
-        *self != Self::Closed
-    }
-
-    pub(super) fn close(&mut self) {
-        *self = Self::Closed;
-    }
-
-    pub(super) fn open_row(&mut self, menu: ChatMenuState) {
-        *self = Self::Row(menu);
-    }
-
-    pub(super) fn open_archive(&mut self, at: Point<Pixels>) {
-        *self = Self::Archive(at);
-    }
-}
-
 /// Which of the main menu's chat lists is open.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum MyChats {
@@ -342,16 +348,15 @@ pub(crate) struct ChatListUi {
     /// snaps on first sight instead of animating from another account's
     /// state (a chat id alone does not name the same chat across accounts).
     pub(super) row_fx: std::cell::RefCell<quill::row_fx::RowFxMap>,
-    /// Slice CL1: the right-click context menu of a chat row (target +
-    /// window position) or of the "Archived chats" row.
-    pub(super) menu: ChatListMenu,
+    /// What floats over the list: the right-click menu of a chat row
+    /// (target and window position) or of the "Archived chats" row, the
+    /// peek preview of a row (a long press in progress, or the open panel;
+    /// never an open chat), or nothing.
+    pub(super) overlay: ChatOverlay,
     /// Contacts tab, stories menu, suggestions and search tabs.
     pub(super) global: super::chatlist_global::ChatlistGlobal,
     /// The pinned-row gesture: press, drag (or its release slide).
     pub(super) pin: PinStage,
-    /// Slice CL: the peek preview — idle, a long press on a row in
-    /// progress, or the open panel. Transient; never an open chat.
-    pub(super) peek: PeekPreview,
     /// Slice CL3: multi-select mode — checked chat ids. Non-empty while
     /// selecting; rows toggle the check instead of opening the chat and
     /// the select bar offers the bulk actions.
@@ -404,10 +409,9 @@ impl ChatListUi {
             swipe: Default::default(),
             downloads_panel_open: false,
             row_fx: Default::default(),
-            menu: ChatListMenu::Closed,
+            overlay: ChatOverlay::None,
             global,
             pin: PinStage::Idle,
-            peek: PeekPreview::Idle,
             selected: HashSet::new(),
             view: Default::default(),
             archive_hint_open: false,
@@ -427,27 +431,53 @@ impl super::on_screen::Farewell for ChatListUi {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Instant;
 
     #[core::prelude::v1::test]
     fn a_release_ends_a_press_but_leaves_an_open_peek() {
-        let mut peek = PeekPreview::Idle;
+        let mut peek = ChatOverlay::None;
         peek.press(ChatId(5), Task::ready(()));
         assert_eq!(peek.pressing(), Some(ChatId(5)));
         peek.cancel_press();
-        assert!(peek.is_idle());
-        peek = PeekPreview::Open(ChatPreviewState {
+        assert!(peek.peek_idle());
+        peek.open_peek(ChatPreviewState {
             chat_id: ChatId(5),
             anchor: Point::default(),
         });
         peek.cancel_press();
-        assert!(peek.open().is_some(), "an open panel stays");
-        assert!(!peek.is_idle());
+        assert!(peek.peek().is_some(), "an open panel stays");
+        assert!(!peek.peek_idle());
         // A new press leaves the open panel under it; its release restores it.
         peek.press(ChatId(6), Task::ready(()));
-        assert!(peek.open().is_some() && peek.pressing() == Some(ChatId(6)));
+        assert!(peek.peek().is_some() && peek.pressing() == Some(ChatId(6)));
         peek.cancel_press();
-        assert!(matches!(peek, PeekPreview::Open(_)));
+        assert!(matches!(peek, ChatOverlay::Peek(_)));
+    }
+
+    #[core::prelude::v1::test]
+    fn the_menu_and_the_peek_replace_each_other_and_close_alone() {
+        let menu = ChatMenuState::at(ChatId(1), Point::default());
+        let preview = ChatPreviewState {
+            chat_id: ChatId(2),
+            anchor: Point::default(),
+        };
+        let mut overlay = ChatOverlay::None;
+        overlay.open_peek(preview);
+        overlay.open_row(menu);
+        assert!(overlay.peek().is_none() && overlay.row().is_some());
+        overlay.close_peek();
+        assert!(overlay.row().is_some(), "a peek close leaves the menu");
+        overlay.open_peek(preview);
+        assert!(!overlay.menu_open() && overlay.peek().is_some());
+        overlay.close_menu();
+        assert!(overlay.peek().is_some(), "a menu close leaves the peek");
+        overlay.open_archive(Point::default());
+        assert!(overlay.peek().is_none() && overlay.archive().is_some());
+        assert!(overlay.row().is_none(), "one menu at a time");
+        overlay.press(ChatId(3), Task::ready(()));
+        assert!(!overlay.menu_open(), "a press ends a menu");
+        overlay.open_row(menu);
+        overlay.cancel_press();
+        assert!(overlay.row().is_some(), "a release does not close a menu");
     }
 
     #[core::prelude::v1::test]

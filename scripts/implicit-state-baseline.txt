@@ -14,7 +14,6 @@ BackendStatus::failed
 CheckoutView::sending
 
 DestRow::saved
-DragSelect::pending
 
 
 GiveawaySummary::finished
@@ -24,7 +23,6 @@ GiveawaySummary::finished
 
 
 
-MediaMenuFacts::downloading
 
 
 

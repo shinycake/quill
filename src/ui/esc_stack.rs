@@ -87,7 +87,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     // Slice CL: the peek preview is the most transient layer.
     layer!(
         "chat-preview",
-        |app| app.chat_list.peek.open().is_some(),
+        |app| app.chat_list.overlay.peek().is_some(),
         |app, _, cx| app.close_chat_preview(cx)
     ),
     // Drawn in the call windows, not the main window: Esc there closes
@@ -324,9 +324,9 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     ),
     layer!(
         "forward-result",
-        |app| app.share.forward_result.is_some(),
+        |app| app.chat_ui.forward_result.is_some(),
         |app, _, cx| {
-            app.share.forward_result = None;
+            app.chat_ui.forward_result = None;
             app.set_note(StatusNote::silent(tr(
                 keys::Q_MISC_FORWARD_RESULT_DISMISSED,
             )));
@@ -628,7 +628,7 @@ mod dispatch_tests {
                 });
             }),
             ("context-menus", |app, _, _| {
-                app.chat_list.menu.open_archive(point(px(10.), px(10.)));
+                app.chat_list.overlay.open_archive(point(px(10.), px(10.)));
             }),
             ("downloads-panel", |app, _, _| {
                 app.chat_list.downloads_panel_open = true;
@@ -774,8 +774,8 @@ mod dispatch_tests {
             (
                 "passcode settings",
                 // box-host: a test sets the flag directly
-                |a| a.account.passcode.open = true,
-                |a| a.account.passcode.open,
+                |a| a.account.passcode.panel = Some(Default::default()),
+                |a| a.account.passcode.is_open(),
             ),
             (
                 "file open warning",

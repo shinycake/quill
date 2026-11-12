@@ -627,7 +627,7 @@ impl QuillApp {
         session.chat_list.chat_folders.retain(|f| f.id != folder_id);
         session.chat_list.folder_specs.remove(&folder_id);
         session.chat_list.folder_chats_to_leave.remove(&folder_id);
-        session.chat_list.folder_chats_exhausted.remove(&folder_id);
+        session.chat_list.folder_paging.remove(&folder_id);
     }
 
     /// Screenshot demo: there is no server to ask which chats could leave

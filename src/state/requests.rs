@@ -341,22 +341,6 @@ pub struct ForceReplyTarget {
     pub message_id: MessageId,
 }
 
-/// B1: context of an in-flight login-URL button press. Kept while
-/// `getLoginUrlInfo` (and then `getLoginUrl`, after consent) is in flight,
-/// so an error degrades the button to a plain URL-button press (schema
-/// 1.8.67 doc on `getLoginUrl`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LoginUrlRequest {
-    pub chat_id: ChatId,
-    pub message_id: MessageId,
-    pub button_id: i64,
-    /// The button's raw URL — the plain-URL fallback.
-    pub raw_url: String,
-    /// Pressed by a step the agent UI driver injected: what the answer
-    /// opens runs as part of that step (`guard::with_injecting`).
-    pub from_agent: bool,
-}
-
 /// Slice P1: context of an in-flight payment request (`getPaymentForm`,
 /// `validateOrderInfo`, `sendPaymentForm`, `getPaymentReceipt`), kept so
 /// the answers / errors correlate to the right invoice message. Set when a
@@ -932,6 +916,21 @@ impl RequestRegistry {
         self.pending.values().any(|p| {
             p.purpose == purpose && p.chat_id == Some(chat_id) && p.story_id == Some(story_id)
         })
+    }
+
+    /// The in-flight request for a purpose/chat/story triple.
+    pub fn request_for_story_in_flight(
+        &self,
+        purpose: RequestPurpose,
+        chat_id: ChatId,
+        story_id: i32,
+    ) -> Option<RequestId> {
+        self.pending
+            .values()
+            .find(|p| {
+                p.purpose == purpose && p.chat_id == Some(chat_id) && p.story_id == Some(story_id)
+            })
+            .map(|p| p.id)
     }
 
     /// Phase 9.7: an in-flight request for a purpose/chat/album triple

@@ -34,41 +34,15 @@ impl Session {
                 // a later read clears them too.
                 self.settings.notified.mark_active(chat_ids);
             }
-            // Phase C2i: `getUserPrivacySettingRules` answer — map the
-            // rule list to the simple Everybody / Contacts / Nobody
-            // choice (`None` when the account has custom rules the UI
-            // cannot represent; the radios then show nothing selected).
-            // Slice S3: the Privacy-screen keys keep the full parsed
-            // detail (exception lists) instead.
+            // `getUserPrivacySettingRules` answer for a Privacy-screen key:
+            // the full parsed detail (exception lists).
             SettingsPayload::UserPrivacySettingRules { rules } => {
-                if let Some(purpose) = pending.map(|p| p.purpose) {
-                    match purpose {
-                        RequestPurpose::Calls(CallsPurpose::GetCallPrivacyRules { setting })
-                            if pending.is_some_and(|p| {
-                                self.calls.privacy_asks.answered(setting, p.id)
-                            }) =>
-                        {
-                            let names: Vec<String> = rules.iter().map(|r| r.name.clone()).collect();
-                            let who = PrivacyWho::from_rule_names(&names);
-                            match setting {
-                                CallPrivacySetting::AllowCalls => {
-                                    self.calls.privacy_allow_calls = who
-                                }
-                                CallPrivacySetting::PeerToPeer => self.calls.privacy_p2p = who,
-                            }
-                        }
-                        RequestPurpose::Settings(SettingsPurpose::GetPrivacyRules { key }) => {
-                            let detail = PrivacyRuleDetail::from_rules(&rules);
-                            if self.settings.finish_privacy_load(
-                                key,
-                                pending.map(|p| p.id),
-                                detail.clone(),
-                            ) {
-                                self.mirror_call_privacy(key, &detail);
-                            }
-                        }
-                        _ => {}
-                    }
+                if let Some(RequestPurpose::Settings(SettingsPurpose::GetPrivacyRules { key })) =
+                    pending.map(|p| p.purpose)
+                {
+                    let detail = PrivacyRuleDetail::from_rules(&rules);
+                    self.settings
+                        .finish_privacy_load(key, pending.map(|p| p.id), detail);
                 }
             }
             // Slice S3: `updateUserPrivacySettingRules` (:10871) — rules
@@ -87,7 +61,6 @@ impl Session {
                         Some(PrivacyKeyState::Saving { .. })
                     );
                     if !saving {
-                        self.mirror_call_privacy(key, &detail);
                         self.settings
                             .privacy
                             .insert(key, PrivacyKeyState::Ready(detail));
@@ -238,7 +211,9 @@ impl Session {
                     Some(RequestPurpose::Auth(AuthPurpose::PasswordStateOp { .. }))
                 ) {
                     let has_password = state.has_password;
-                    self.auth_state.password_state = Some(state);
+                    self.auth_state
+                        .password_state
+                        .answered(pending.map(|p| p.id), state);
                     self.auth_state.settle_password_op(pending.map(|p| p.id));
                     self.route_gift_export_on_password(has_password);
                     self.route_gram_withdrawal_on_password(has_password);
@@ -308,9 +283,11 @@ impl Session {
                 {
                     self.resolve_unconfirmed_entries(&sessions);
                     self.settings.sessions.answered(Some(asked.id), sessions);
-                    if inactive_session_ttl_days.is_some() {
-                        self.settings.privacy_data.inactive_session_ttl_days =
-                            inactive_session_ttl_days;
+                    if let Some(days) = inactive_session_ttl_days {
+                        self.settings
+                            .privacy_data
+                            .inactive_session_ttl
+                            .read(asked.id, days);
                     }
                 }
             }

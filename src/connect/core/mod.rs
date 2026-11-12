@@ -596,11 +596,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         if cleared_download_cache {
             let _ = self.maybe_fetch_storage_statistics();
         }
-        // Batch 6: a finished reset / cancel / login-email step left the
-        // cached password state out of date.
-        if std::mem::take(&mut self.session.auth_state.twofa_flow.refetch) {
-            let _ = self.refresh_password_state();
+        // Batch 6: a reset / cancel / login-email step left the cached
+        // password state out of date; a refused send keeps it so.
+        if self.session.auth_state.password_state.is_outdated()
+            && let Ok(request) = self.refresh_password_state()
+        {
+            self.session.auth_state.password_state.refetching(request);
         }
+        // Phase 9.2: `updateStoryPostSucceeded` queued poster chats whose
+        // active stories should be refreshed (an own story posted from
+        // another client appears in the tray this way). Asked as the update
+        // lands; a refused send stays queued for the next ingest, never
+        // for every frame.
+        self.refresh_story_trays();
         if let Some(chat_id) = unpinned_all {
             self.session.messages.pins_cleared(chat_id.0);
         }
@@ -852,7 +860,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                 && self.session.stickers.stickers.tab == crate::state::StickerTab::Archived
             {
                 self.drop_in_flight(RequestPurpose::GetStickerSet);
-                self.session.stickers.stickers.set = crate::state::StickerSetStage::Idle;
+                self.session.stickers.stickers.selection.stage =
+                    crate::state::StickerSetStage::Idle;
                 self.fetch_archived_stickers(false)?;
             }
         }

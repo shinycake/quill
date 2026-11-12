@@ -811,6 +811,32 @@ fn g2_boost_slots_stashed_for_chain() {
     assert_eq!(ids, vec![3, 7]);
 }
 
+/// r2-14, 02-071: a boost answer or error counts for the request its box
+/// waits for: an older one (the box closed and reopened) leaves the new
+/// box's stage alone.
+#[test]
+fn an_older_boost_answer_does_not_end_the_new_boxes_wait() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let old = session.request(RequestPurpose::BoostChat, Some(ChatId(13)));
+    let asked = session.request(RequestPurpose::GetBoostSlotsForBoost, Some(ChatId(13)));
+    let mut open = crate::boost_box::BoostBoxState::new(13, false);
+    open.reading_slots(asked);
+    session.groups.boost_box = Some(open);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"BOOST_NOT_MODIFIED"}}"#,
+            old.0
+        ),
+    );
+    let state = session.groups.boost_box.as_ref().expect("the box");
+    assert!(state.waits_for(asked), "the new press still waits");
+    assert!(state.note().is_none());
+}
+
 #[test]
 fn g2_sign_toggle_error_rolls_back() {
     // Slice G2: the optimistic sign-messages toggle restores the

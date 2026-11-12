@@ -71,9 +71,8 @@ pub(in crate::ui) struct NotifyView {
     pub(super) id: u64,
     pub(super) content: Content,
     pub(super) opacity: f32,
-    /// The Reply button is showing (tdesktop `_actionsVisible`).
-    actions: bool,
     hovered: bool,
+    /// The open reply field; `Some` is also what hides the Reply button.
     reply: Option<Entity<TextareaState>>,
     reply_height: Rc<Cell<f32>>,
     owner: WeakEntity<QuillApp>,
@@ -85,7 +84,6 @@ impl NotifyView {
             id,
             content,
             opacity: 0.0,
-            actions: false,
             hovered: false,
             reply: None,
             reply_height: Rc::new(Cell::new(0.0)),
@@ -109,6 +107,12 @@ impl NotifyView {
         });
     }
 
+    /// The Reply button is showing (tdesktop `_actionsVisible`): derived,
+    /// never stored.
+    fn actions_visible(&self) -> bool {
+        self.hovered && self.reply.is_none() && self.can_reply()
+    }
+
     fn can_reply(&self) -> bool {
         matches!(
             self.content,
@@ -124,7 +128,6 @@ impl NotifyView {
             return;
         }
         self.hovered = hovered;
-        self.actions = hovered && self.reply.is_none() && self.can_reply();
         match self.content {
             Content::Message { .. } => self.send(ViewEvent::Hover(hovered), cx),
             Content::HideAll | Content::Sample => {}
@@ -163,7 +166,6 @@ impl NotifyView {
         .detach();
         state.update(cx, |input, cx| input.focus(window, cx));
         self.reply = Some(state);
-        self.actions = false;
         window.activate_window();
         self.send(ViewEvent::ReplyOpened, cx);
         cx.notify();
@@ -268,7 +270,7 @@ impl NotifyView {
                         })),
                 ),
             )
-            .when(self.actions, |this| {
+            .when(self.actions_visible(), |this| {
                 this.child(
                     div()
                         .absolute()

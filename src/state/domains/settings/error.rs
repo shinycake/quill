@@ -11,7 +11,7 @@ impl Session {
         extra: Option<RequestId>,
         _seq: u64,
     ) {
-        if self.apply_quick_replies_error(err, pending.map(|p| p.purpose))
+        if self.apply_quick_replies_error(err, pending.map(|p| p.purpose), pending.map(|p| p.id))
             || self.apply_business_error(err, pending.map(|p| p.purpose), pending.map(|p| p.id))
             || self.apply_business_extra_error(err, pending.map(|p| p.purpose), extra)
             || self.apply_passkeys_error(err, pending.map(|p| (p.id, p.purpose)))
@@ -56,11 +56,10 @@ impl Session {
             // presence check sends it again.
             Some(RequestPurpose::SetOnline) => {}
             Some(RequestPurpose::Settings(SettingsPurpose::ReviewUnconfirmedSession {
-                session_id,
                 ..
             })) => {
                 self.finish_login_review(
-                    session_id,
+                    pending.map(|p| p.id),
                     Some(sessions_error_line("review the new login", err)),
                 );
             }
@@ -96,16 +95,12 @@ impl Session {
                 // since then already settled the key.
                 self.settings.fail_privacy_load(key, pending.map(|p| p.id));
             }
-            // A refused save puts back what the server kept (and the call
-            // rules mirrored from it) and says why in the editor.
+            // A refused save puts back what the server kept and says why in
+            // the editor.
             Some(RequestPurpose::Settings(SettingsPurpose::SetPrivacyRules { key })) => {
                 let error = sessions_error_line("save the privacy setting", err);
-                if let Some(kept) =
-                    self.settings
-                        .fail_privacy_save(key, pending.map(|p| p.id), error)
-                {
-                    self.mirror_call_privacy(key, &kept);
-                }
+                self.settings
+                    .fail_privacy_save(key, pending.map(|p| p.id), error);
             }
             Some(RequestPurpose::GetReadDatePrivacy) => {
                 if let Some(pending) = pending {
@@ -177,16 +172,15 @@ impl Session {
             ) => self.apply_proxy_error(purpose, pending, err),
             Some(
                 purpose @ (RequestPurpose::GetNewChatPrivacy
-                | RequestPurpose::Settings(SettingsPurpose::SetNewChatPrivacy { .. })
+                | RequestPurpose::Settings(SettingsPurpose::SetNewChatPrivacy)
                 | RequestPurpose::CanSendMessageToUser
                 | RequestPurpose::GetPaidMessageRevenue
                 | RequestPurpose::AllowUnpaidMessages
                 | RequestPurpose::SetDirectMessagesGroup
                 | RequestPurpose::LoadDirectMessagesChat
                 | RequestPurpose::SetGiftSettings
-                | RequestPurpose::Settings(SettingsPurpose::SetInactiveSessionTtl {
-                    ..
-                })
+                | RequestPurpose::Settings(SettingsPurpose::SetInactiveSessionTtl)
+                | RequestPurpose::HideCheckPasswordSuggestion
                 | RequestPurpose::SetSensitiveContent
                 | RequestPurpose::SetContactJoinedNotifications
                 | RequestPurpose::GetNetworkStatistics

@@ -7,7 +7,7 @@
 //! `is_rtmp_stream = true`.
 use super::*;
 use crate::calls::group_call_create::CreateJoinAs;
-use crate::calls::rtmp_start::RtmpStart;
+use crate::calls::rtmp_start::{RtmpStage, RtmpStart};
 use crate::ids::ChatId;
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -18,12 +18,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || !self.rtmp_start_allowed(chat_id) {
             return Err(ConnectSendError::InvalidRequest);
         }
+        // A process whose first request failed is dead (the box never
+        // opened): asking again starts a new one instead of waiting for
+        // the UI to drop it.
         if self
             .session
             .calls
             .rtmp_start
             .as_ref()
-            .is_some_and(|start| start.chat_id == chat_id)
+            .is_some_and(|start| start.chat_id == chat_id && start.stage != RtmpStage::FetchFailed)
         {
             return Ok(());
         }

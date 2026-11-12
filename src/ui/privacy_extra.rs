@@ -922,7 +922,9 @@ impl QuillApp {
                 )));
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
-            demo.settings.privacy_data.check_password_suggested = false;
+            demo.chat_list
+                .suggestions
+                .remove_action(quill::chatlist_suggestions::ACTION_PASSWORD);
             demo.settings.privacy_data.password_check = PasswordCheck::Idle;
         }
         cx.notify();

@@ -47,6 +47,7 @@ impl Session {
         self.apply_group_type_ok(pending);
         self.apply_ai_compose_ok(pending);
         self.apply_hang_up_ok(pending);
+        self.settle_group_paging(pending, false);
         self.apply_communities_ok(pending);
         self.settle_permissions_save(pending);
         self.apply_backgrounds_ok(pending);
@@ -225,11 +226,10 @@ impl Session {
         // Batch 4: a `confirmSession` / `terminateSession` for the
         // new-login alert succeeded.
         if let Some(RequestPurpose::Settings(SettingsPurpose::ReviewUnconfirmedSession {
-            session_id,
             ..
         })) = pending.map(|p| p.purpose)
         {
-            self.finish_login_review(session_id, None);
+            self.finish_login_review(pending.map(|p| p.id), None);
         }
         // Batch 4: terms accepted.
         if matches!(
@@ -323,7 +323,7 @@ impl Session {
             self.finish_set_change(set_id, SetChange::of(installed, archived), true);
             for sets in [
                 &mut self.stickers.stickers.trending,
-                &mut self.stickers.stickers.found_sets,
+                &mut self.stickers.stickers.search.sets,
             ] {
                 for set in sets.iter_mut().filter(|set| set.id == set_id) {
                     set.is_installed = installed;
@@ -335,9 +335,7 @@ impl Session {
             self.stickers.stickers.archived_has_more = false;
             self.stickers.stickers.archived_next_offset = 0;
             if self.stickers.stickers.tab == StickerTab::Archived {
-                self.stickers.stickers.selected_set_id = None;
-                self.stickers.stickers.set = StickerSetStage::Idle;
-                self.stickers.stickers.stickers.clear();
+                self.stickers.stickers.selection = StickerSelection::default();
             }
         }
         self.finish_mask_mutation(pending.map(|p| p.purpose));
@@ -537,14 +535,6 @@ impl Session {
         {
             summary.rating = CallRating::Sent;
         }
-        // Phase C2i: `setUserPrivacySettingRules` confirmed (the
-        // new value was applied optimistically at send time).
-        if let Some(pending) = pending
-            && let RequestPurpose::Calls(CallsPurpose::SetCallPrivacyRules { setting }) =
-                pending.purpose
-        {
-            self.calls.privacy_asks.answered(setting, pending.id);
-        }
         // Slice S3: `setReadDatePrivacySettings` confirmed — clear
         // the optimistic spinner (the value itself was set at
         // send time). `setUserPrivacySettingRules` /
@@ -566,6 +556,11 @@ impl Session {
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::LoadChats) => self.chat_list.main_paging.page_ok(),
             Some(RequestPurpose::LoadArchiveChats) => self.chat_list.archive_paging.page_ok(),
+            Some(RequestPurpose::LoadFolderChats) => {
+                if let Some(folder_id) = pending.and_then(|p| p.folder_id) {
+                    self.chat_list.folder_page_ok(folder_id);
+                }
+            }
             _ => {}
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::DeleteChatFolder)
@@ -576,7 +571,7 @@ impl Session {
             // source of truth and will confirm.
             self.chat_list.chat_folders.retain(|f| f.id != folder_id);
             self.chat_list.folder_specs.remove(&folder_id);
-            self.chat_list.folder_chats_exhausted.remove(&folder_id);
+            self.chat_list.folder_paging.remove(&folder_id);
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::ProcessChatFolderNewChats)
             && let Some(folder_id) = pending.and_then(|p| p.folder_id)

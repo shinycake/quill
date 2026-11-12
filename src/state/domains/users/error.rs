@@ -38,13 +38,10 @@ impl Session {
                         .fail(user, error_reason(err));
                 }
             }
-            // One filter's count failed: drop the chat's entry so the next
-            // open asks for all of them again, not a zero for good.
-            Some(RequestPurpose::Users(UsersPurpose::GetChatMessageCount { .. })) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.media.chat_media_counts.remove(&chat_id.0);
-                }
-            }
+            // One filter's count failed: its count stays unknown (or the
+            // older one stays shown) and the next open asks for all of
+            // them again, never a zero for good.
+            Some(RequestPurpose::Users(UsersPurpose::GetChatMessageCount { .. })) => {}
             Some(RequestPurpose::GetProfilePhotoEmojiIcons) => {
                 self.users_state.profile_photo_emoji_icons.failed(
                     pending.map(|p| p.id),
@@ -78,7 +75,11 @@ impl Session {
                     .fail_save(ticket, error_reason(err));
             }
             Some(RequestPurpose::Users(UsersPurpose::GetUserLink { free })) => {
-                self.users_state.peer_qr.fail_link(free, error_reason(err));
+                if let Some(id) = pending.map(|p| p.id) {
+                    self.users_state
+                        .peer_qr
+                        .fail_link(free, id, error_reason(err));
+                }
             }
             Some(RequestPurpose::GetBackgroundEmojiIcons) => {
                 self.users_state.background_emoji_icons.failed(

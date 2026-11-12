@@ -26,6 +26,14 @@ pub enum LoginReview {
     Prevented { places: Vec<String> },
 }
 
+/// One session of a review: it is answered by its own request, which is
+/// unknown until the send goes out.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReviewItem {
+    pub entry: UnconfirmedEntry,
+    pub request: Option<RequestId>,
+}
+
 /// The new-login review ("Yes, it's me" / "No, it's not me!"): one
 /// `confirmSession` / `terminateSession` per unconfirmed session. A session
 /// leaves the alert when its own request succeeds, so a retry after a
@@ -34,11 +42,12 @@ pub enum LoginReview {
 pub enum ReviewStage {
     #[default]
     Idle,
-    /// Requests are out; `done` are the sessions already reviewed, `error`
-    /// the first failure so far.
+    /// Requests are out; `items` are the sessions still waiting for their
+    /// own answer, `done` the sessions already reviewed, `error` the first
+    /// failure so far.
     Reviewing {
         confirmed: bool,
-        waiting: usize,
+        items: Vec<ReviewItem>,
         done: Vec<UnconfirmedEntry>,
         error: Option<String>,
     },
@@ -200,14 +209,22 @@ impl ServiceNotice {
     }
 }
 
+/// What `updateUnconfirmedSession` announced, with the sessions behind it
+/// once `getActiveSessions` resolved them: one value, replaced whole.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnconfirmedAlert {
+    /// The first unconfirmed login of the last update.
+    pub first: Option<UnconfirmedLogin>,
+    /// The total count of unconfirmed logins (always above zero).
+    pub count: i32,
+    /// Sessions behind the alert, resolved from `getActiveSessions`.
+    pub entries: Vec<UnconfirmedEntry>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct AccountNotices {
-    /// The first unconfirmed login from the last update (`None` when
-    /// every login is confirmed) and the total count.
-    pub unconfirmed: Option<UnconfirmedLogin>,
-    pub unconfirmed_count: i32,
-    /// Sessions behind the alert, resolved from `getActiveSessions`.
-    pub unconfirmed_entries: Vec<UnconfirmedEntry>,
+    /// The new-login alert: `None` when every login is confirmed.
+    pub unconfirmed: Option<UnconfirmedAlert>,
     /// `confirmSession` / `terminateSession` requests of the review.
     pub review: ReviewStage,
     /// Popups in arrival order; the UI shows the front one.
@@ -216,35 +233,41 @@ pub struct AccountNotices {
     pub terms: TermsState,
 }
 
-/// Where the two-step recovery/reset flow is, as the dialog needs it.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct TwofaFlow {
-    /// The emailed code the open step awaits.
-    pub code_wait: CodeWait,
-    /// A finished step the dialog reports once.
-    pub notice: Option<TwofaNotice>,
-    /// The cached password state is out of date (cancel reset, login
-    /// email changed): the driver refetches it.
-    pub refetch: bool,
+impl AccountNotices {
+    /// The unconfirmed logins announced (0 when none).
+    pub fn unconfirmed_count(&self) -> i32 {
+        self.unconfirmed.as_ref().map_or(0, |alert| alert.count)
+    }
+
+    /// The sessions behind the alert, once resolved.
+    pub fn unconfirmed_entries(&self) -> &[UnconfirmedEntry] {
+        self.unconfirmed
+            .as_ref()
+            .map_or(&[], |alert| alert.entries.as_slice())
+    }
 }
 
-/// The emailed code a two-step step waits for, with the pattern of the
-/// address it went to. One step waits at a time: a new one replaces it.
+/// Where the two-step recovery/reset flow is, as the dialog needs it. One
+/// step at a time: a step that starts or finishes replaces what the last one
+/// left, and the dialog going back to its status view clears it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub enum CodeWait {
+pub enum TwofaFlow {
     #[default]
-    None,
-    /// `requestPasswordRecovery` answered.
-    Recovery(String),
-    /// `setLoginEmailAddress` answered.
-    LoginEmail(String),
+    Idle,
+    /// `requestPasswordRecovery` answered: the emailed code the step awaits
+    /// went to this address pattern.
+    RecoveryCode(String),
+    /// `setLoginEmailAddress` answered: the code went to this pattern.
+    LoginEmailCode(String),
+    /// A finished step the dialog reports until it moves on.
+    Done(TwofaNotice),
 }
 
-impl CodeWait {
+impl TwofaFlow {
     /// Where the recovery code went, while it is awaited.
     pub fn recovery(&self) -> Option<&str> {
         match self {
-            Self::Recovery(to) => Some(to),
+            Self::RecoveryCode(to) => Some(to),
             _ => None,
         }
     }
@@ -252,22 +275,48 @@ impl CodeWait {
     /// Where the login-email code went, while it is awaited.
     pub fn login_email(&self) -> Option<&str> {
         match self {
-            Self::LoginEmail(to) => Some(to),
+            Self::LoginEmailCode(to) => Some(to),
+            _ => None,
+        }
+    }
+
+    /// The finished step's report.
+    pub fn notice(&self) -> Option<TwofaNotice> {
+        match self {
+            Self::Done(notice) => Some(*notice),
             _ => None,
         }
     }
 
     /// The recovery step is over; another step's wait stays.
     pub fn end_recovery(&mut self) {
-        if matches!(self, Self::Recovery(_)) {
-            *self = Self::None;
+        if matches!(self, Self::RecoveryCode(_)) {
+            *self = Self::Idle;
         }
     }
 
     /// The login-email step is over; another step's wait stays.
     pub fn end_login_email(&mut self) {
-        if matches!(self, Self::LoginEmail(_)) {
-            *self = Self::None;
+        if matches!(self, Self::LoginEmailCode(_)) {
+            *self = Self::Idle;
+        }
+    }
+
+    /// A step finished: its report replaces the step before it.
+    pub fn finish(&mut self, notice: TwofaNotice) {
+        *self = Self::Done(notice);
+    }
+
+    /// The dialog is back at its status view or closed.
+    pub fn clear(&mut self) {
+        *self = Self::Idle;
+    }
+
+    /// A step awaits its code, and the dialog drops the report line when a
+    /// new form opens.
+    pub fn clear_notice(&mut self) {
+        if matches!(self, Self::Done(_)) {
+            *self = Self::Idle;
         }
     }
 }
@@ -296,21 +345,36 @@ impl Session {
         session: Option<UnconfirmedLogin>,
         count: i32,
     ) {
-        self.settings.notices.unconfirmed = session;
-        self.settings.notices.unconfirmed_count = count;
-        if count == 0 {
-            self.settings.notices.unconfirmed_entries.clear();
-        } else {
-            // The update carries no session id: refetch the list; its
-            // answer fills `unconfirmed_entries`.
-            self.settings.sessions_op.mark_stale();
+        if count <= 0 {
+            self.settings.notices.unconfirmed = None;
+            return;
         }
+        // The sessions already resolved stay until the answer replaces them.
+        let entries = self
+            .settings
+            .notices
+            .unconfirmed
+            .take()
+            .map(|alert| alert.entries)
+            .unwrap_or_default();
+        self.settings.notices.unconfirmed = Some(UnconfirmedAlert {
+            first: session,
+            count,
+            entries,
+        });
+        // The update carries no session id: refetch the list; its answer
+        // fills the entries.
+        self.settings.sessions_op.mark_stale();
     }
 
     /// `getActiveSessions` answered: resolve the sessions behind the
-    /// alert from `is_unconfirmed`.
+    /// alert from `is_unconfirmed`. Without an alert there is nothing to
+    /// resolve: the update that announces one asks again.
     pub(crate) fn resolve_unconfirmed_entries(&mut self, sessions: &[ParsedSession]) {
-        self.settings.notices.unconfirmed_entries = sessions
+        let Some(alert) = self.settings.notices.unconfirmed.as_mut() else {
+            return;
+        };
+        alert.entries = sessions
             .iter()
             .filter(|session| session.is_unconfirmed)
             .map(|session| UnconfirmedEntry {
@@ -338,41 +402,100 @@ impl Session {
         self.settings.notices.service.pop_front();
     }
 
-    /// The review starts: one request per session still unreviewed.
-    pub(crate) fn begin_login_review(&mut self, confirmed: bool, waiting: usize) {
+    /// The review starts: one request per session still unreviewed, sent
+    /// next; each is told its request by [`Session::login_review_sent`].
+    pub(crate) fn begin_login_review(&mut self, confirmed: bool) {
         let done = self.settings.notices.review.done();
+        let items = self
+            .settings
+            .notices
+            .unconfirmed_entries()
+            .iter()
+            .map(|entry| ReviewItem {
+                entry: entry.clone(),
+                request: None,
+            })
+            .collect();
         self.settings.notices.review = ReviewStage::Reviewing {
             confirmed,
-            waiting,
+            items,
             done,
             error: None,
         };
     }
 
-    /// The `confirmSession` / `terminateSession` for session `id` finished.
-    pub(crate) fn finish_login_review(&mut self, id: i64, error: Option<String>) {
+    /// The request for session `id` went out.
+    pub(crate) fn login_review_sent(&mut self, id: i64, request: RequestId) {
+        if let ReviewStage::Reviewing { items, .. } = &mut self.settings.notices.review
+            && let Some(item) = items
+                .iter_mut()
+                .find(|item| item.request.is_none() && item.entry.id == id)
+        {
+            item.request = Some(request);
+        }
+    }
+
+    /// The request for session `id` could not be sent.
+    pub(crate) fn login_review_unsent(&mut self, id: i64, error: String) {
+        let at = match &self.settings.notices.review {
+            ReviewStage::Reviewing { items, .. } => items
+                .iter()
+                .position(|item| item.request.is_none() && item.entry.id == id),
+            _ => None,
+        };
+        if let Some(at) = at {
+            self.settle_login_review(at, Some(error));
+        }
+    }
+
+    /// The `confirmSession` / `terminateSession` under `request` finished.
+    /// Only a request of this review counts.
+    pub(crate) fn finish_login_review(
+        &mut self,
+        request: Option<RequestId>,
+        error: Option<String>,
+    ) {
+        let at = match (&self.settings.notices.review, request) {
+            (ReviewStage::Reviewing { items, .. }, Some(id)) => {
+                items.iter().position(|item| item.request == Some(id))
+            }
+            _ => None,
+        };
+        if let Some(at) = at {
+            self.settle_login_review(at, error);
+        }
+    }
+
+    fn settle_login_review(&mut self, at: usize, error: Option<String>) {
         let notices = &mut self.settings.notices;
         let ReviewStage::Reviewing {
             confirmed,
-            waiting,
+            items,
             done,
             error: failed,
         } = &mut notices.review
         else {
             return;
         };
-        *waiting = waiting.saturating_sub(1);
+        if at >= items.len() {
+            return;
+        }
+        let item = items.remove(at);
         match error {
             Some(error) => {
                 failed.get_or_insert(error);
             }
             None => {
-                if let Some(at) = notices.unconfirmed_entries.iter().position(|e| e.id == id) {
-                    done.push(notices.unconfirmed_entries.remove(at));
+                if let Some(alert) = notices.unconfirmed.as_mut()
+                    && let Some(at) = alert.entries.iter().position(|e| e.id == item.entry.id)
+                {
+                    done.push(alert.entries.remove(at));
+                } else {
+                    done.push(item.entry);
                 }
             }
         }
-        if *waiting > 0 {
+        if !items.is_empty() {
             return;
         }
         let confirmed = *confirmed;
@@ -393,8 +516,6 @@ impl Session {
                     LoginReview::Prevented { places }
                 });
                 notices.unconfirmed = None;
-                notices.unconfirmed_count = 0;
-                notices.unconfirmed_entries.clear();
             }
         }
         self.settings.sessions_op.mark_stale();
@@ -403,18 +524,17 @@ impl Session {
     pub(crate) fn apply_email_code_info(&mut self, op: PasswordOp, pattern: String) {
         match op {
             PasswordOp::RequestRecoveryCode => {
-                self.auth_state.twofa_flow.code_wait = CodeWait::Recovery(pattern);
+                self.auth_state.twofa_flow = TwofaFlow::RecoveryCode(pattern);
             }
             PasswordOp::SetLoginEmail => {
-                self.auth_state.twofa_flow.code_wait = CodeWait::LoginEmail(pattern);
+                self.auth_state.twofa_flow = TwofaFlow::LoginEmailCode(pattern);
             }
             _ => {}
         }
     }
 
     pub(crate) fn apply_reset_password_result(&mut self, outcome: ResetPasswordOutcome) {
-        self.auth_state.twofa_flow.code_wait.end_recovery();
-        self.auth_state.twofa_flow.notice = Some(match outcome {
+        self.auth_state.twofa_flow.finish(match outcome {
             ResetPasswordOutcome::Ok => TwofaNotice::PasswordRemoved,
             ResetPasswordOutcome::Pending { reset_date } => {
                 TwofaNotice::ResetPending { reset_date }
@@ -424,27 +544,28 @@ impl Session {
             }
         });
         // The pending date (or the removed password) lives in the state.
-        self.auth_state.twofa_flow.refetch = true;
+        self.auth_state.password_state.mark_outdated();
     }
 
     /// A `PasswordStateOp` answered `passwordState`.
     pub(crate) fn apply_password_state_op(&mut self, op: PasswordOp) {
         match op {
             PasswordOp::RecoverPassword => {
-                self.auth_state.twofa_flow.code_wait.end_recovery();
                 let still_on = self
                     .auth_state
                     .password_state
-                    .as_ref()
+                    .get()
                     .is_some_and(|s| s.has_password);
-                self.auth_state.twofa_flow.notice = Some(if still_on {
+                self.auth_state.twofa_flow.finish(if still_on {
                     TwofaNotice::PasswordRecovered
                 } else {
                     TwofaNotice::PasswordRemoved
                 });
             }
             PasswordOp::CheckEmailCode => {
-                self.auth_state.twofa_flow.notice = Some(TwofaNotice::RecoveryEmailConfirmed);
+                self.auth_state
+                    .twofa_flow
+                    .finish(TwofaNotice::RecoveryEmailConfirmed);
             }
             _ => {}
         }
@@ -455,13 +576,16 @@ impl Session {
         self.auth_state.settle_password_op(request);
         match op {
             PasswordOp::CancelPasswordReset => {
-                self.auth_state.twofa_flow.notice = Some(TwofaNotice::ResetCancelled);
-                self.auth_state.twofa_flow.refetch = true;
+                self.auth_state
+                    .twofa_flow
+                    .finish(TwofaNotice::ResetCancelled);
+                self.auth_state.password_state.mark_outdated();
             }
             PasswordOp::CheckLoginEmailCode => {
-                self.auth_state.twofa_flow.code_wait.end_login_email();
-                self.auth_state.twofa_flow.notice = Some(TwofaNotice::LoginEmailChanged);
-                self.auth_state.twofa_flow.refetch = true;
+                self.auth_state
+                    .twofa_flow
+                    .finish(TwofaNotice::LoginEmailChanged);
+                self.auth_state.password_state.mark_outdated();
             }
             _ => {}
         }
@@ -570,26 +694,67 @@ mod tests {
         assert_eq!(state, TermsState::Offered(terms("tos-2")));
     }
 
-    #[test]
-    fn a_failed_send_does_not_leave_the_review_pending() {
+    fn session_with_alert(ids: &[i64]) -> Session {
         let sink: std::sync::Arc<dyn crate::diagnostics::DiagnosticSink> =
             std::sync::Arc::new(crate::diagnostics::MemorySink::new());
         let mut session = Session::new(crate::ids::AccountKey::primary(), sink);
+        session.settings.notices.unconfirmed = Some(UnconfirmedAlert {
+            first: None,
+            count: i32::try_from(ids.len()).unwrap_or(1),
+            entries: ids.iter().map(|id| entry(*id, "d", "l")).collect(),
+        });
+        session
+    }
+
+    #[test]
+    fn a_failed_send_does_not_leave_the_review_pending() {
+        let mut session = session_with_alert(&[1, 2, 3]);
         // Three sends planned: the first went out, the second failed, so it
         // and the third are finished with the error; the answer still out
         // settles the review as failed.
-        session.begin_login_review(true, 3);
-        session.finish_login_review(2, Some("failed".into()));
-        session.finish_login_review(3, Some("failed".into()));
-        assert!(matches!(
-            session.settings.notices.review,
-            ReviewStage::Reviewing { waiting: 1, .. }
-        ));
-        session.finish_login_review(1, None);
+        session.begin_login_review(true);
+        session.login_review_sent(1, RequestId(11));
+        session.login_review_unsent(2, "failed".into());
+        session.login_review_unsent(3, "failed".into());
+        assert!(session.settings.notices.review.busy());
+        session.finish_login_review(Some(RequestId(11)), None);
         assert!(matches!(
             session.settings.notices.review,
             ReviewStage::Failed { .. }
         ));
+    }
+
+    #[test]
+    fn an_answer_counts_only_for_the_request_that_asked() {
+        let mut session = session_with_alert(&[1, 2]);
+        session.begin_login_review(false);
+        session.login_review_sent(1, RequestId(11));
+        session.login_review_sent(2, RequestId(12));
+        // An answer of some other request, or one that names none, changes
+        // nothing; a request answered twice counts once.
+        session.finish_login_review(Some(RequestId(99)), None);
+        session.finish_login_review(None, None);
+        session.finish_login_review(Some(RequestId(11)), None);
+        session.finish_login_review(Some(RequestId(11)), None);
+        assert!(session.settings.notices.review.busy());
+        // The lost request settles as an error, so the review ends.
+        session.finish_login_review(Some(RequestId(12)), Some("lost".into()));
+        assert!(matches!(
+            session.settings.notices.review,
+            ReviewStage::Failed { .. }
+        ));
+        assert_eq!(session.settings.notices.unconfirmed_entries().len(), 1);
+    }
+
+    #[test]
+    fn a_count_of_zero_drops_the_alert_whole() {
+        let mut session = session_with_alert(&[1]);
+        session.apply_unconfirmed_session(None, 0);
+        assert_eq!(session.settings.notices.unconfirmed_count(), 0);
+        assert!(session.settings.notices.unconfirmed_entries().is_empty());
+        // Sessions that answer with no alert announced are not kept.
+        session.resolve_unconfirmed_entries(&[]);
+        assert!(session.settings.notices.unconfirmed.is_none());
     }
 
     #[test]

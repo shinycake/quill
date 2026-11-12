@@ -289,6 +289,58 @@ impl StickerBatch {
     }
 }
 
+/// The sticker set the panel has selected: nothing, or a set with its
+/// `getStickerSet` stage (asked, answered or failed) and stickers. Changing
+/// mode or set replaces it whole.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StickerSelection {
+    pub set_id: Option<i64>,
+    pub stage: StickerSetStage,
+    pub stickers: Vec<StickerItem>,
+}
+
+impl StickerSelection {
+    /// `set_id` is selected and not yet loaded.
+    pub fn of(set_id: i64) -> Self {
+        Self {
+            set_id: Some(set_id),
+            ..Self::default()
+        }
+    }
+}
+
+/// What a search found and how far its paging got. A new search or category
+/// replaces the whole value, so no cursor of the old one survives.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StickerSearchResults {
+    /// What `stickers` are (being) found for: a typed query or a category.
+    pub query: StickerSearch,
+    pub offset: usize,
+    pub has_more: bool,
+    /// `searchStickerSets` results.
+    pub sets: Vec<StickerSetInfo>,
+    /// `searchStickers` results.
+    pub stickers: Vec<StickerItem>,
+}
+
+impl StickerSearchResults {
+    /// A typed search starts, with nothing found yet.
+    pub fn typed(query: &str) -> Self {
+        Self {
+            query: StickerSearch::Typed(query.trim().to_string()),
+            ..Self::default()
+        }
+    }
+
+    /// A category of the sticker strip is chosen.
+    pub fn category(source: crate::telegram::EmojiCategorySource) -> Self {
+        Self {
+            query: StickerSearch::Category(source),
+            ..Self::default()
+        }
+    }
+}
+
 /// Composer sticker panel (Unigram `StickerDrawerViewModel` installed regular sets).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StickerPanel {
@@ -299,10 +351,9 @@ pub struct StickerPanel {
     pub archived_offset: i64,
     pub archived_next_offset: i64,
     pub archived_has_more: bool,
-    pub selected_set_id: Option<i64>,
-    pub stickers: Vec<StickerItem>,
-    /// The selected set's `getStickerSet`: asked, answered or failed.
-    pub set: StickerSetStage,
+    /// The selected set: its id, `getStickerSet` stage and stickers, one
+    /// value replaced whole when the mode or the set changes.
+    pub selection: StickerSelection,
     /// Each list tab's own fetch: a failure of one list shows on that tab
     /// only, and a failed mutation is a note, not a list failure.
     pub lists: StickerLists,
@@ -324,15 +375,10 @@ pub struct StickerPanel {
     pub favorites: Vec<StickerItem>,
     /// Slice S8: recent stickers (`getRecentStickers`).
     pub recent: Vec<StickerItem>,
-    /// Slice S8: `searchStickerSets` / `searchStickers` results.
-    pub found_sets: Vec<StickerSetInfo>,
-    /// What `found_stickers` are (being) found for: a typed query or a
-    /// category. One list per session; a window shows it only while it is
-    /// for what that window asks.
-    pub searched: StickerSearch,
-    pub search_offset: usize,
-    pub search_has_more: bool,
-    pub found_stickers: Vec<StickerItem>,
+    /// Slice S8: `searchStickerSets` / `searchStickers` results: one
+    /// value replaced whole by each new search. One per session; a window
+    /// shows it only while it is for what that window asks.
+    pub search: StickerSearchResults,
     /// Slice S12: sticker suggestions for the composer's trailing emoji
     /// (`searchStickers` answers under `SuggestStickers`). `suggest_for`
     /// is the emoji they were requested for.
@@ -804,13 +850,13 @@ impl StickerPanel {
 
     pub fn visible_stickers(&self) -> &[StickerItem] {
         match self.tab {
-            StickerTab::Installed | StickerTab::Trending => &self.stickers,
-            StickerTab::Archived if self.selected_set_id.is_some() => &self.stickers,
+            StickerTab::Installed | StickerTab::Trending => &self.selection.stickers,
+            StickerTab::Archived if self.selection.set_id.is_some() => &self.selection.stickers,
             StickerTab::Archived => &[],
             StickerTab::Recent => &self.recent,
             StickerTab::Favorites => &self.favorites,
-            StickerTab::Search if self.selected_set_id.is_some() => &self.stickers,
-            StickerTab::Search => &self.found_stickers,
+            StickerTab::Search if self.selection.set_id.is_some() => &self.selection.stickers,
+            StickerTab::Search => &self.search.stickers,
         }
     }
 
@@ -819,8 +865,8 @@ impl StickerPanel {
     }
 
     pub fn selected_needs_load(&self) -> Option<i64> {
-        let id = self.selected_set_id?;
-        if self.set.set_id() == Some(id) {
+        let id = self.selection.set_id?;
+        if self.selection.stage.set_id() == Some(id) {
             None
         } else {
             Some(id)

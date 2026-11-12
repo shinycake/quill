@@ -1,6 +1,6 @@
 //! Connect driver: call debug logs, call history, call privacy and busy-call handling.
 use super::*;
-use crate::state::{CallUpload, PrivacyAsk};
+use crate::state::CallUpload;
 
 impl<S: JsonSender> ConnectDriver<S> {
     pub(crate) fn call_debug_information(&self) -> Result<String, ConnectSendError> {
@@ -225,78 +225,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(extra)
     }
 
-    /// Phase C2i: fetch both call privacy settings
-    /// (`userPrivacySettingAllowCalls` /
-    /// `userPrivacySettingAllowPeerToPeerCalls`, schema 1.8.67
-    /// :15620).
-    pub fn fetch_call_privacy(&mut self) -> Result<(), ConnectSendError> {
-        if !self.chats_path_active() {
-            return Err(ConnectSendError::InvalidRequest);
-        }
-        for setting in [
-            CallPrivacySetting::AllowCalls,
-            CallPrivacySetting::PeerToPeer,
-        ] {
-            let extra = self.session.request(
-                RequestPurpose::Calls(CallsPurpose::GetCallPrivacyRules { setting }),
-                None,
-            );
-            if let Err(err) = self
-                .sender
-                .send_json(&get_user_privacy_setting_rules(extra, setting))
-            {
-                self.session.requests.take(extra);
-                self.session
-                    .calls
-                    .privacy_asks
-                    .set(setting, PrivacyAsk::Failed);
-                return Err(err);
-            }
-            self.session
-                .calls
-                .privacy_asks
-                .set(setting, PrivacyAsk::Asking(extra));
-        }
-        Ok(())
-    }
-
-    /// Phase C2i: change a call privacy setting (schema 1.8.67
-    /// :15617). Applied optimistically; the `ok` / error response
-    /// confirms or clears it.
-    pub fn set_call_privacy(
-        &mut self,
-        setting: CallPrivacySetting,
-        who: PrivacyWho,
-    ) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() {
-            return Err(ConnectSendError::InvalidRequest);
-        }
-        let extra = self.session.request(
-            RequestPurpose::Calls(CallsPurpose::SetCallPrivacyRules { setting }),
-            None,
-        );
-        if let Err(err) = self
-            .sender
-            .send_json(&set_user_privacy_setting_rules(extra, setting, who))
-        {
-            self.session.requests.take(extra);
-            self.session
-                .calls
-                .privacy_asks
-                .set(setting, PrivacyAsk::Failed);
-            return Err(err);
-        }
-        match setting {
-            CallPrivacySetting::AllowCalls => self.session.calls.privacy_allow_calls = Some(who),
-            CallPrivacySetting::PeerToPeer => self.session.calls.privacy_p2p = Some(who),
-        }
-        self.session
-            .calls
-            .privacy_asks
-            .set(setting, PrivacyAsk::Asking(extra));
-        Ok(extra)
-    }
-
     /// Phase C1: drain `Session::call_busy_decline_queue` — incoming
     /// calls that arrived while another call was active are declined
     /// (busy) with `discardCall`. Called from `ingest`.
@@ -308,26 +236,36 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Ok(());
         }
+        // An entry leaves its queue only once its send went out: a refused
+        // send keeps it and the ones after it for the next ingest.
         let created = std::mem::take(&mut self.session.calls.created_call_discards);
-        for (call_id, is_video) in created {
+        let mut created = created.into_iter();
+        while let Some((call_id, is_video)) = created.next() {
             let extra = self.session.request(RequestPurpose::DiscardCall, None);
             if let Err(err) = self
                 .sender
                 .send_json(&discard_call_request(extra, call_id, false, 0, is_video))
             {
                 self.session.requests.take(extra);
+                let calls = &mut self.session.calls;
+                calls.created_call_discards.push((call_id, is_video));
+                calls.created_call_discards.extend(created);
                 return Err(err);
             }
         }
         let queued: Vec<(i32, i64, bool)> =
             std::mem::take(&mut self.session.calls.busy_decline_queue);
-        for (call_id, user_id, is_video) in queued {
+        let mut queued = queued.into_iter();
+        while let Some((call_id, user_id, is_video)) = queued.next() {
             let extra = self.session.request(RequestPurpose::DiscardCall, None);
             if let Err(err) = self
                 .sender
                 .send_json(&discard_call_request(extra, call_id, false, 0, is_video))
             {
                 self.session.requests.take(extra);
+                let calls = &mut self.session.calls;
+                calls.busy_decline_queue.push((call_id, user_id, is_video));
+                calls.busy_decline_queue.extend(queued);
                 return Err(err);
             }
             // ponytail: cap the banner list — it is drained by the UI.

@@ -22,8 +22,8 @@ impl QuillApp {
         }
         self.open_forward_picker(window, cx);
         if std::env::var("QUILL_DEMO_FORWARD_BOX").as_deref() != Ok("empty") {
-            self.share.selection.toggle(ChatId(61));
-            self.share.selection.toggle(ChatId(63));
+            self.share.toggle_tick(ChatId(61));
+            self.share.toggle_tick(ChatId(63));
         }
     }
 

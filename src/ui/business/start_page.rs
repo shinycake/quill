@@ -121,10 +121,10 @@ impl QuillApp {
         let found = self.session().and_then(|s| {
             let panel = &s.stickers.stickers;
             [
-                &panel.stickers,
+                &panel.selection.stickers,
                 &panel.recent,
                 &panel.favorites,
-                &panel.found_stickers,
+                &panel.search.stickers,
                 &panel.suggestions,
             ]
             .into_iter()

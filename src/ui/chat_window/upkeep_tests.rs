@@ -280,11 +280,11 @@ fn a_forward_from_a_chat_window_answers_there(cx: &mut TestAppContext) {
     let main = read(&h, None, cx, |app, _| {
         (
             app.share.forward.draft().is_some(),
-            app.share.forward_result.is_some(),
+            app.chat_ui.forward_result.is_some(),
         )
     });
     let window = read(&h, Some(OTHER), cx, |app, _| {
-        app.share.forward_result.is_some()
+        app.chat_ui.forward_result.is_some()
     });
     assert_eq!(main, (true, false), "the main window's selection stays");
     assert!(window, "the result shows in the window it came from");

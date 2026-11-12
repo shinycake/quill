@@ -33,6 +33,16 @@ const GRID_MS: u64 = 200;
 const PLAYER_EDGE: u32 = 2048;
 
 impl QuillApp {
+    /// An encode failed (the tray, the edit box or a profile avatar): the
+    /// editor is ready again with the line, and its looping preview comes
+    /// back. The one failure transition every encode caller uses.
+    pub(in crate::ui) fn video_encode_failed(&mut self, note: String, cx: &mut Context<Self>) {
+        if let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() {
+            editor.encode_failed(note);
+        }
+        self.start_video_editor_player(cx);
+    }
+
     /// Start the muted loop of the kept range (tdesktop `setupStreaming`):
     /// it plays from the start of the range as soon as the video is read.
     pub(super) fn start_video_editor_player(&mut self, cx: &mut Context<Self>) {
@@ -60,7 +70,12 @@ impl QuillApp {
                 video.watch(cx.entity_id());
                 editor.set_player(Some((video, edits.from_ms)));
             }
-            Err(_) => editor.set_note(tr(keys::Q_AV_QUILL_CANT_PLAY_THIS_VIDEO).into()),
+            // A line that is already there (why an encode failed) says more
+            // than this one, so it stays.
+            Err(_) if editor.note().is_none() => {
+                editor.set_note(tr(keys::Q_AV_QUILL_CANT_PLAY_THIS_VIDEO).into());
+            }
+            Err(_) => {}
         }
         cx.notify();
     }

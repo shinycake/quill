@@ -475,6 +475,13 @@ impl QuillApp {
         })
     }
 
+    /// The media panel closed or left the compose mode: no option waits
+    /// for its next sticker or emoji (the prompt and its Cancel go), so a
+    /// panel opened later sends to the chat again.
+    pub(in crate::ui) fn end_poll_option_waits(&mut self) {
+        self.pickers.poll_pick = PollPick::None;
+    }
+
     /// Drop the panel's recipient when it is `target`'s.
     fn forget_poll_pick(&mut self, target: AttachTarget) {
         if self.picking_for(target) {

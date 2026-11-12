@@ -69,15 +69,6 @@ impl QuillApp {
     /// post and save answers, the viewer's editors and a deleted story.
     /// Only the main window draws the story tray, viewer and composer.
     fn story_frame_upkeep(&mut self, cx: &mut Context<Self>) {
-        // Phase 9.2: the `updateStoryPostSucceeded` reducer queued poster
-        // chats whose active stories should be refreshed (an own story
-        // posted from another client appears in the tray this way).
-        if let Some(live) = self.live.as_mut() {
-            let chats: Vec<i64> = live.driver.session.stories.tray_refresh.drain().collect();
-            for chat_id in chats {
-                let _ = live.driver.get_chat_active_stories(ChatId(chat_id));
-            }
-        }
         // The composer's Post and Save presses, each answered by its own
         // request (`story_composer_stage.rs`).
         self.story_composer_upkeep(cx);

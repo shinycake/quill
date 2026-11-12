@@ -54,6 +54,52 @@ fn inline_query_first_page_loads_slot() {
 }
 
 #[test]
+fn inline_query_answer_of_an_older_request_is_dropped() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let ask = |session: &mut Session| {
+        session.request(
+            RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
+                chat_id: ChatId(1),
+                bot_user_id: 77,
+                first_page: true,
+            }),
+            Some(ChatId(1)),
+        )
+    };
+    let old = ask(&mut session);
+    let new = ask(&mut session);
+    session.bots.inline_query = Some(InlineQuerySlot {
+        chat_id: ChatId(1),
+        bot_user_id: 77,
+        query: "second".to_string(),
+        fetch: InlineQueryFetch::Loading { request: new },
+    });
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"inlineQueryResults","@extra":"{}","inline_query_id":1,"button":null,"results":[],"next_offset":""}}"#,
+            old.0,
+        ),
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"X"}}"#,
+            old.0,
+        ),
+    );
+    assert!(matches!(
+        session.bots.inline_query.as_ref().map(|s| &s.fetch),
+        Some(InlineQueryFetch::Loading { request }) if *request == new
+    ));
+}
+
+#[test]
 fn inline_query_pagination_appends() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);

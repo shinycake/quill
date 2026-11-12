@@ -44,6 +44,14 @@ impl Session {
             Some(RequestPurpose::GetCountries) => {
                 self.auth_state.countries.fail(error_reason(err));
             }
+            // The default guess stays unknown; the picker needs none.
+            Some(RequestPurpose::GetCountryCode) => {
+                self.auth_state.guessed_country.failed(
+                    pending.map(|p| p.id),
+                    error_reason(err),
+                    false,
+                );
+            }
             // Slice A8: a refused change-number op (code send /
             // resend, code check) clears the in-flight flags and
             // parks the honest, classified error line — never a

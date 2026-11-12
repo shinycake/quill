@@ -701,7 +701,7 @@ fn the_first_join_asks_for_the_star_bursts_once() {
 }
 
 #[test]
-fn a_failed_burst_request_is_asked_again_on_the_next_join() {
+fn a_failed_burst_request_is_not_asked_again_by_the_call_updates_of_the_same_story() {
     let mut h = watching();
     joined_answer(&mut h);
     h.answer(
@@ -715,6 +715,8 @@ fn a_failed_burst_request_is_asked_again_on_the_next_join() {
     // Not asked again by the next ingest, only by the next Join.
     h.ingest(&LIVE_CALL.replace("JOINED", "true"));
     assert_eq!(h.sent("getCustomEmojiReactionAnimations"), 1);
+    // A new Join asks once more; the one after it finds the ask out.
+    rejoin(&mut h);
     rejoin(&mut h);
     assert_eq!(h.sent("getCustomEmojiReactionAnimations"), 2);
 }

@@ -190,6 +190,16 @@ impl Session {
         {
             self.settings.quick_replies.shortcuts_load.succeed(());
         }
+        // TDLib reports the messages as an update before this answer: a load
+        // still waiting here had nothing to report.
+        if let Some(pending) = pending
+            && let RequestPurpose::Settings(SettingsPurpose::LoadQuickReplyMessages { shortcut_id }) =
+                pending.purpose
+            && let Some(fetch) = self.settings.quick_replies.messages.get_mut(&shortcut_id)
+        {
+            let held = fetch.data().cloned().unwrap_or_default();
+            fetch.answered(Some(pending.id), held);
+        }
     }
 
     /// A failed quick reply request; `true` when it was one.
@@ -197,6 +207,7 @@ impl Session {
         &mut self,
         err: &TdError,
         purpose: Option<RequestPurpose>,
+        request: Option<RequestId>,
     ) -> bool {
         let state = &mut self.settings.quick_replies;
         match purpose {
@@ -208,11 +219,10 @@ impl Session {
             })) => {
                 // Marked failed, not un-requested: a poll waiting for the
                 // messages stops instead of asking again on every tick.
-                state
-                    .messages
-                    .entry(shortcut_id)
-                    .or_default()
-                    .fail(error_reason(err));
+                // Only the load that is waited for fails.
+                if let Some(fetch) = state.messages.get_mut(&shortcut_id) {
+                    fetch.failed(request, error_reason(err), false);
+                }
             }
             Some(RequestPurpose::Settings(SettingsPurpose::MutateQuickReplies)) => {}
             _ => return false,

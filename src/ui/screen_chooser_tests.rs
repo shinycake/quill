@@ -157,7 +157,7 @@ fn share_screen_opens_the_chooser_and_shares_the_pick(cx: &mut TestAppContext) {
             "Share Screen closes it"
         );
         assert_eq!(
-            app.screen_share.demo_active,
+            app.screen_share.demo_source(),
             Some(SourceId("window:42".into()))
         );
     });
@@ -173,7 +173,10 @@ fn the_chooser_stops_the_shared_source_and_cancel_keeps_it(cx: &mut TestAppConte
     let (app, mut vcx) = new_app(cx, ScreenAccess::Granted);
     let vcx = &mut vcx;
     app.update_in(vcx, |app, _, cx| {
-        app.screen_share.demo_active = Some(SourceId("window:42".into()));
+        app.screen_share.demo_active = Some(crate::ui::screen_share_state::DemoShare {
+            source: SourceId("window:42".into()),
+            with_audio: false,
+        });
         app.demo_session
             .as_mut()
             .unwrap()
@@ -287,7 +290,7 @@ fn the_system_audio_box_starts_as_the_share_and_changes_it(cx: &mut TestAppConte
         assert!(!app.screen_share.with_audio(), "starts off");
         app.set_screen_audio(true, cx);
         app.accept_screen_source(cx);
-        assert!(!app.screen_share.demo_active_audio);
+        assert!(!app.screen_share.demo_audio());
         app.stop_screen_source(cx);
     });
     vcx.run_until_parked();
@@ -303,10 +306,10 @@ fn the_system_audio_box_starts_as_the_share_and_changes_it(cx: &mut TestAppConte
         app.set_screen_audio(true, cx);
         app.accept_screen_source(cx);
         assert_eq!(
-            app.screen_share.demo_active,
+            app.screen_share.demo_source(),
             Some(SourceId("display:1".into()))
         );
-        assert!(app.screen_share.demo_active_audio);
+        assert!(app.screen_share.demo_audio());
     });
     vcx.run_until_parked();
     assert!(group_sharing(&app, vcx));
@@ -320,7 +323,7 @@ fn the_system_audio_box_starts_as_the_share_and_changes_it(cx: &mut TestAppConte
         // instead of stopping.
         app.set_screen_audio(false, cx);
         app.accept_screen_source(cx);
-        assert!(!app.screen_share.demo_active_audio);
+        assert!(!app.screen_share.demo_audio());
     });
     vcx.run_until_parked();
     assert!(group_sharing(&app, vcx));
@@ -342,7 +345,7 @@ fn a_system_picker_shares_and_stops_without_the_chooser(cx: &mut TestAppContext)
     app.read_with(vcx, |app, _| {
         assert!(app.screen_share.window().is_none(), "no chooser");
         assert_eq!(
-            app.screen_share.demo_active,
+            app.screen_share.demo_source(),
             Some(SourceId(SYSTEM_PICKER_SOURCE.into()))
         );
     });

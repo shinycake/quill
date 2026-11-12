@@ -153,7 +153,10 @@ fn hidden_number_asks_for_a_contact_link() {
         })
     };
     assert_eq!(hidden(&UserLinkFetch::Idle), OwnLinkState::NeedsContactLink);
-    assert_eq!(hidden(&UserLinkFetch::Loading), OwnLinkState::Waiting);
+    assert_eq!(
+        hidden(&UserLinkFetch::Loading(crate::ids::RequestId(1))),
+        OwnLinkState::Waiting
+    );
     assert_eq!(
         hidden(&UserLinkFetch::Failed(None)),
         OwnLinkState::Unavailable

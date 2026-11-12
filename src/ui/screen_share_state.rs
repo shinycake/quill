@@ -32,15 +32,13 @@ pub(crate) struct ChooserTarget {
     pub(super) group_call: Option<i32>,
 }
 
-/// The open chooser: its window, its sources and what is picked.
+/// The chooser's content: its sources and what is picked. The window it
+/// shows in is the stage ([`Chooser::Opening`], [`Chooser::Open`]).
 pub(crate) struct OpenChooser {
     pub(super) target: ChooserTarget,
     /// Tells a thumbnail that arrives later whether this chooser is still
     /// the one it was loaded for.
     pub(super) generation: u64,
-    /// The chooser's own window (tdesktop opens it as a separate window);
-    /// `None` while the window is being made.
-    pub(super) window: Option<AnyWindowHandle>,
     pub(super) sources: Vec<ChooserSource>,
     pub(super) selected: Option<SourceId>,
     /// The chooser's "Share System Audio" box (Windows only).
@@ -61,7 +59,15 @@ pub(crate) enum Chooser {
         epoch: super::on_screen::ScreenEpoch,
         generation: u64,
     },
-    Open(OpenChooser),
+    /// The sources are in and the chooser's window is being made (tdesktop
+    /// opens it as a window of its own). The task opens it and moves the
+    /// stage to `Open`; leaving the stage drops the task, so no window is
+    /// made for a chooser that is gone.
+    Opening { sheet: OpenChooser, _open: Task<()> },
+    Open {
+        sheet: OpenChooser,
+        window: AnyWindowHandle,
+    },
     /// The screen access box shown over this call's window.
     PrivacyBox(ChooserTarget),
 }
@@ -71,7 +77,7 @@ impl Chooser {
     pub(super) fn sharing_into(&self) -> Option<ChooserTarget> {
         match self {
             Self::Listing { target, .. } => Some(*target),
-            Self::Open(open) => Some(open.target),
+            Self::Opening { sheet, .. } | Self::Open { sheet, .. } => Some(sheet.target),
             Self::Closed | Self::PrivacyBox(_) => None,
         }
     }
@@ -84,23 +90,27 @@ impl Chooser {
         }
     }
 
+    /// The chooser's content, whether or not its window exists yet.
     pub(super) fn open(&self) -> Option<&OpenChooser> {
         match self {
-            Self::Open(open) => Some(open),
+            Self::Opening { sheet, .. } | Self::Open { sheet, .. } => Some(sheet),
             _ => None,
         }
     }
 
     pub(super) fn open_mut(&mut self) -> Option<&mut OpenChooser> {
         match self {
-            Self::Open(open) => Some(open),
+            Self::Opening { sheet, .. } | Self::Open { sheet, .. } => Some(sheet),
             _ => None,
         }
     }
 
     /// The chooser's window, once it exists.
     pub(super) fn window(&self) -> Option<AnyWindowHandle> {
-        self.open().and_then(|open| open.window)
+        match self {
+            Self::Open { window, .. } => Some(*window),
+            _ => None,
+        }
     }
 }
 
@@ -109,6 +119,16 @@ impl Chooser {
 impl ScreenShareUi {
     pub(super) fn window(&self) -> Option<AnyWindowHandle> {
         self.chooser.window()
+    }
+
+    pub(super) fn demo_source(&self) -> Option<SourceId> {
+        self.demo_active.as_ref().map(|share| share.source.clone())
+    }
+
+    pub(super) fn demo_audio(&self) -> bool {
+        self.demo_active
+            .as_ref()
+            .is_some_and(|share| share.with_audio)
     }
 
     pub(super) fn selected(&self) -> Option<SourceId> {
@@ -128,7 +148,7 @@ impl ScreenShareUi {
 
     /// Pretend the chooser was made for another video chat.
     pub(super) fn retarget_group_call(&mut self, call: i32) {
-        if let Chooser::Open(open) = &mut self.chooser {
+        if let Some(open) = self.chooser.open_mut() {
             open.target.group_call = Some(call);
         }
     }
@@ -143,6 +163,13 @@ impl ScreenShareUi {
     }
 }
 
+/// The demo's running share: its source, and whether it carries system
+/// audio (only meaningful while a share runs).
+pub(crate) struct DemoShare {
+    pub(super) source: SourceId,
+    pub(super) with_audio: bool,
+}
+
 #[derive(Default)]
 pub(crate) struct ScreenShareUi {
     pub(super) chooser: Chooser,
@@ -151,10 +178,8 @@ pub(crate) struct ScreenShareUi {
     pub(super) generation: u64,
     /// A backend used instead of the OS one (demos, tests).
     pub(super) backend: Option<Arc<dyn ScreenBackend>>,
-    /// The demo's "currently shared" source (live calls ask the driver).
-    pub(super) demo_active: Option<SourceId>,
-    /// Whether the demo's share includes system audio.
-    pub(super) demo_active_audio: bool,
+    /// The demo's running share (live calls ask the driver).
+    pub(super) demo_active: Option<DemoShare>,
     /// Show the system audio box in demos and tests, as on Windows.
     pub(super) demo_system_audio: bool,
 }

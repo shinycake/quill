@@ -272,7 +272,7 @@ mod tests {
         };
         apply_json(&mut with_purpose, &seq, &sink, &answer(extra.0));
         assert_eq!(with_purpose.stickers.stickers.suggestions.len(), 2);
-        assert!(with_purpose.stickers.stickers.found_stickers.is_empty());
+        assert!(with_purpose.stickers.stickers.search.stickers.is_empty());
 
         // InstalledOnly: the set-99 sticker is filtered out.
         with_purpose.settings.media_prefs.sticker_suggest_mode = StickerSuggestMode::InstalledOnly;

@@ -278,6 +278,10 @@ pub(super) struct MiniApps {
     /// profile, so it stays to turn on again (`bot_permissions`); cleared
     /// when the profile panel changes or closes.
     pub(super) emoji_access_shown: std::collections::HashSet<quill::ids::OfAccount<i64>>,
+    /// The `sendWebAppData` requests this account's apps sent and whose
+    /// outcome is still to be reported: an outcome of any other request is
+    /// not reported here.
+    data_sends: Vec<quill::ids::RequestId>,
     /// The poll task, alive while a window is.
     poll: Option<Task<()>>,
     /// The window the last mini-app flow was started in (`None`: the main

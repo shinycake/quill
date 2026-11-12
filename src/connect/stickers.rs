@@ -3,7 +3,7 @@ use super::*;
 use crate::ids::FileId;
 use crate::ids::RequestId;
 use crate::state::StickersPurpose;
-use crate::state::{RequestPurpose, StickerSearch, StickerTab};
+use crate::state::{RequestPurpose, StickerTab};
 use crate::sticker_suggest::{SUGGEST_LIMIT, StickerSuggestMode, suggest_emoji_for};
 use crate::telegram::requests::{
     add_favorite_sticker, change_sticker_set, clear_recent_stickers, get_archived_sticker_sets,
@@ -145,8 +145,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Opening the panel again tries a failed list and set again.
         let panel = &mut self.session.stickers.stickers;
         panel.lists.installed.clear_error();
-        if panel.set.is_failed() {
-            panel.set = crate::state::StickerSetStage::Idle;
+        if panel.selection.stage.is_failed() {
+            panel.selection.stage = crate::state::StickerSetStage::Idle;
         }
         if self
             .session
@@ -235,9 +235,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .requests
                     .take_purpose(RequestPurpose::GetStickerSet),
             );
-            self.session.stickers.stickers.set = crate::state::StickerSetStage::Idle;
-            self.session.stickers.stickers.selected_set_id = None;
-            self.session.stickers.stickers.stickers.clear();
+            self.session.stickers.stickers.selection = crate::state::StickerSelection::default();
         }
         if tab == StickerTab::Installed {
             let id = self
@@ -254,7 +252,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .stickers
                     .sets
                     .iter()
-                    .any(|set| Some(set.id) == self.session.stickers.stickers.selected_set_id)
+                    .any(|set| Some(set.id) == self.session.stickers.stickers.selection.set_id)
             {
                 self.session.select_sticker_set(id);
             }
@@ -293,15 +291,17 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .requests
                 .take_purpose(RequestPurpose::GetStickerSet),
         );
-        self.session.stickers.stickers.selected_set_id = None;
-        self.session.stickers.stickers.set = crate::state::StickerSetStage::Idle;
+        self.session.stickers.stickers.selection = crate::state::StickerSelection::default();
         self.session.stickers.stickers.lists.reset_search();
-        self.session.stickers.stickers.search_offset = 0;
-        self.session.stickers.stickers.search_has_more = false;
-        self.session.stickers.stickers.searched = StickerSearch::Typed(query.trim().to_string());
-        self.session.stickers.stickers.found_sets.clear();
-        self.session.stickers.stickers.found_stickers.clear();
-        let query = self.session.stickers.stickers.searched.typed().to_string();
+        self.session.stickers.stickers.search = crate::state::StickerSearchResults::typed(query);
+        let query = self
+            .session
+            .stickers
+            .stickers
+            .search
+            .query
+            .typed()
+            .to_string();
         if query.is_empty() {
             return Ok(());
         }
@@ -315,9 +315,16 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     pub fn more_sticker_search_results(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        let query = self.session.stickers.stickers.searched.typed().to_string();
-        let offset = self.session.stickers.stickers.search_offset;
-        if query.is_empty() || !self.session.stickers.stickers.search_has_more {
+        let query = self
+            .session
+            .stickers
+            .stickers
+            .search
+            .query
+            .typed()
+            .to_string();
+        let offset = self.session.stickers.stickers.search.offset;
+        if query.is_empty() || !self.session.stickers.stickers.search.has_more {
             return Ok(None);
         }
         self.sticker_request(RequestPurpose::SearchStickers, |id| {
@@ -724,7 +731,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.stickers.stickers.set =
+                self.session.stickers.stickers.selection.stage =
                     crate::state::StickerSetStage::Failed { set_id };
                 Err(err)
             }
@@ -862,6 +869,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !needs {
             return Ok(None);
         }
+        let owed = self.session.stickers.gifs.saved_is_outdated();
         self.session.stickers.gifs.saved_asked();
         let extra = self
             .session
@@ -873,7 +881,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.stickers.gifs.saved_failed();
+                // A refetch owed after an update stays owed.
+                if owed {
+                    self.session.stickers.gifs.saved_outdated();
+                } else {
+                    self.session.stickers.gifs.saved_failed();
+                }
                 Err(err)
             }
         }

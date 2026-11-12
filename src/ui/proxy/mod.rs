@@ -21,8 +21,8 @@ use gpui_kit::*;
 use quill::calls::proxy::ProxyKind;
 use quill::lang::{keys, tr, tr_with};
 use quill::proxy::{
-    AUTO_SWITCH_TIMEOUTS, LinkCheck, PingStatus, ProxyDraft, ProxyEntry, ProxyIssue, ProxyMode,
-    kind_label, parse_proxy_link, proxy_link_from_text,
+    AUTO_SWITCH_TIMEOUTS, PingStatus, ProxyDraft, ProxyEntry, ProxyIssue, ProxyMode, kind_label,
+    parse_proxy_link, proxy_link_from_text,
 };
 use quill::telegram::envelope::ConnectionState;
 use std::cell::RefCell;
@@ -32,17 +32,14 @@ use std::rc::Rc;
 #[derive(Default)]
 pub(crate) struct ProxyUi {
     pub(crate) editor: Option<ProxyEditor>,
-    pub(crate) link: Option<ProxyLinkBox>,
-    /// One-line result of the last list action ("Proxy List copied…").
-    pub(crate) notice: Option<String>,
+    /// One-line result of the last list action ("Proxy List copied…"); it
+    /// hides itself, its timer being the stage's own task.
+    pub(crate) notice: ProxyNotice,
     /// The "this exposes your IP" warning was confirmed for this run on
     /// this account: the field lives in the account's `SettingsUi`, so
     /// another account asks again (the warning is about the proxy this
     /// account's connection would use).
     pub(crate) ip_warning_acked: bool,
-    /// The proxy list as a box of its own (tdesktop's `ProxiesBox`), for
-    /// the sign-in screen, which has no Settings window to hold it.
-    pub(crate) list_box: bool,
 }
 
 /// The add / edit box.
@@ -71,11 +68,6 @@ pub(crate) struct ProxyEditor {
 enum ProxySave {
     Editing,
     Saving(quill::ids::RequestId),
-}
-
-/// The "Proxy Server — Connect Proxy" confirmation for a proxy link.
-pub(crate) struct ProxyLinkBox {
-    draft: ProxyDraft,
 }
 
 /// Editor validation message (tdesktop highlights the bad field; Quill
@@ -112,7 +104,7 @@ impl QuillApp {
     /// as a box over it.
     pub(crate) fn open_proxy_list(&mut self, cx: &mut Context<Self>) {
         if self.pane_mode() == super::app::PaneMode::Connecting {
-            self.settings.proxy.list_box = true;
+            self.auth_ui.proxy_list_open = true;
             self.open_box(DialogKind::ProxyList);
         } else {
             self.open_settings(Some(quill::settings_catalog::Page::Connection), cx);
@@ -125,19 +117,11 @@ impl QuillApp {
     /// screen is, so a box left open when the account reaches Ready never
     /// lands over the chat list.
     pub(super) fn proxy_list_box_shown(&self) -> bool {
-        self.settings.proxy.list_box && self.pane_mode() == super::app::PaneMode::Connecting
-    }
-
-    /// Forget the box once its owner (the sign-in screen) is gone, so it
-    /// does not come back if the pane connects again.
-    pub(super) fn sync_proxy_list_box(&mut self) {
-        if self.settings.proxy.list_box && !self.proxy_list_box_shown() {
-            self.settings.proxy.list_box = false;
-        }
+        self.auth_ui.proxy_list_open && self.pane_mode() == super::app::PaneMode::Connecting
     }
 
     pub(crate) fn fetch_proxy_list(&mut self) {
-        self.settings.proxy.notice = None;
+        self.settings.proxy.notice = ProxyNotice::Hidden;
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.fetch_proxies();
         }
@@ -398,8 +382,7 @@ impl QuillApp {
                 .is_some_and(|p| !s.settings.proxy.can_enable(p.proxy.kind))
         });
         if unhostable {
-            self.settings.proxy.notice =
-                Some(tr(keys::Q_PREFS_WEB_PROXIES_ARENT_SUPPORTED_YET).into());
+            self.proxy_notice(tr(keys::Q_PREFS_WEB_PROXIES_ARENT_SUPPORTED_YET), cx);
             cx.notify();
             return;
         }
@@ -416,14 +399,22 @@ impl QuillApp {
 
     /// Deleting the proxy in use falls back to the system proxy settings,
     /// as tdesktop's `ProxiesBoxController::setDeleted` does.
+    /// The removal goes out first; the system-proxy fallback is set only
+    /// when it was sent, so a removal that could not go out (no connection)
+    /// leaves the saved preference matching the proxy that is still enabled.
     fn delete_proxy_entry(&mut self, id: i32, cx: &mut Context<Self>) {
-        let _ = self.proxy_driver(|driver| {
-            if driver.session.settings.proxy.enabled().map(|p| p.id) == Some(id) {
+        let sent = self.proxy_driver(|driver| {
+            let was_enabled = driver.session.settings.proxy.enabled().map(|p| p.id) == Some(id);
+            let sent = driver.remove_proxy(id);
+            if sent.is_ok() && was_enabled {
                 driver.session.settings.proxy.prefs.use_system = true;
                 let _ = driver.save_proxy_prefs();
             }
-            driver.remove_proxy(id)
+            sent
         });
+        if let Some(Err(_)) = sent {
+            self.proxy_notice(tr(keys::Q_PREFS_COULDNT_SAVE_THE_PROXY_TRY), cx);
+        }
         cx.notify();
     }
 
@@ -440,11 +431,10 @@ impl QuillApp {
         match link {
             Some(link) => {
                 cx.write_to_clipboard(ClipboardItem::new_string(link));
-                self.settings.proxy.notice = Some(tr(keys::USERNAME_COPIED).into());
+                self.proxy_notice(tr(keys::USERNAME_COPIED), cx);
             }
             None => {
-                self.settings.proxy.notice =
-                    Some(tr(keys::Q_PREFS_HTTP_PROXIES_CANT_BE_SHARED).into());
+                self.proxy_notice(tr(keys::Q_PREFS_HTTP_PROXIES_CANT_BE_SHARED), cx);
             }
         }
         cx.notify();
@@ -467,7 +457,7 @@ impl QuillApp {
             return;
         }
         cx.write_to_clipboard(ClipboardItem::new_string(links.join("\n")));
-        self.settings.proxy.notice = Some(tr(keys::PROXY_EDIT_SHARE_LIST_TOAST).into());
+        self.proxy_notice(tr(keys::PROXY_EDIT_SHARE_LIST_TOAST), cx);
         cx.notify();
     }
 
@@ -498,7 +488,7 @@ impl QuillApp {
                 }
             }
         };
-        self.settings.proxy.notice = Some(notice);
+        self.proxy_notice(notice, cx);
         cx.notify();
     }
 
@@ -527,15 +517,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let _ = self.proxy_driver(|driver| {
-            let prefs = &mut driver.session.settings.proxy.prefs;
-            if let Some(on) = on {
-                prefs.auto_switch = on;
-            }
-            if let Some(secs) = secs {
-                prefs.auto_switch_secs = secs;
-            }
-            // The clock restarts with the new settings.
-            driver.session.settings.proxy.rotation = quill::proxy::Rotation::Watching;
+            // The clock restarts with the new settings (the state does it).
+            driver.session.settings.proxy.set_auto_switch(on, secs);
             driver.save_proxy_prefs()
         });
         cx.notify();
@@ -550,10 +533,11 @@ impl QuillApp {
         };
         match parsed {
             Ok(draft) => {
-                self.settings.proxy.link = Some(ProxyLinkBox { draft });
+                if let Some(proxy) = self.link_box_state_mut() {
+                    proxy.open_link(draft);
+                }
                 self.open_box(crate::ui::shell::DialogKind::ProxyLink);
                 if let Some(live) = self.live.as_mut() {
-                    live.driver.session.settings.proxy.link_check = LinkCheck::Review;
                     let _ = live.driver.maybe_fetch_proxies();
                 }
             }
@@ -566,63 +550,55 @@ impl QuillApp {
         true
     }
 
-    fn close_proxy_link(&mut self, cx: &mut Context<Self>) {
-        self.settings.proxy.link = None;
-        self.reset_link_check();
-        cx.notify();
+    /// The proxy state that holds the link box: the live session's, or the
+    /// demo's.
+    fn link_box_state_mut(&mut self) -> Option<&mut quill::proxy::ProxyState> {
+        self.session_mut().map(|s| &mut s.settings.proxy)
     }
 
-    /// The link box's stage goes back to `Review`: a check still in flight
-    /// no longer matches and is ignored.
-    fn reset_link_check(&mut self) {
-        if let Some(live) = self.live.as_mut() {
-            live.driver.session.settings.proxy.link_check = LinkCheck::Review;
+    pub(in crate::ui) fn close_proxy_link(&mut self, cx: &mut Context<Self>) {
+        if let Some(proxy) = self.link_box_state_mut() {
+            proxy.close_link();
         }
+        cx.notify();
     }
 
     /// "Connect Proxy": enable the listed proxy, or add and enable it.
     fn connect_link_proxy(&mut self, cx: &mut Context<Self>) {
-        let Some(link) = self.settings.proxy.link.take() else {
+        let Some(draft) = self.link_box_state_mut().and_then(|p| p.take_link()) else {
             return;
         };
-        self.reset_link_check();
         let existing = self.session().and_then(|s| {
             s.settings
                 .proxy
                 .entries()
                 .iter()
-                .find(|p| p.proxy.same_endpoint(&link.draft))
+                .find(|p| p.proxy.same_endpoint(&draft))
                 .map(|p| p.id)
         });
         let switchable = self
             .session()
-            .is_none_or(|s| s.settings.proxy.can_enable(link.draft.kind));
+            .is_none_or(|s| s.settings.proxy.can_enable(draft.kind));
         if existing.is_some() && !switchable {
             // Nothing to add and nothing to switch to: say so.
-            self.settings.proxy.notice =
-                Some(tr(keys::PROXY_ADD_FROM_CLIPBOARD_EXISTING_TOAST).into());
+            self.proxy_notice(tr(keys::PROXY_ADD_FROM_CLIPBOARD_EXISTING_TOAST), cx);
             cx.notify();
             return;
         }
         let _ = self.proxy_driver(|driver| match existing {
             Some(id) => driver.enable_proxy(id),
-            None => driver.add_proxy(&link.draft, true, ""),
+            None => driver.add_proxy(&draft, true, ""),
         });
         cx.notify();
     }
 
     fn check_link_proxy(&mut self, cx: &mut Context<Self>) {
         let acked = self.settings.proxy.ip_warning_acked;
-        let Some(link) = self.settings.proxy.link.as_ref() else {
-            return;
-        };
-        let draft = link.draft.clone();
         let _ = self.proxy_driver(|driver| {
             if acked {
-                driver.session.settings.proxy.link_check = LinkCheck::Review;
-                let _ = driver.ping_link_proxy(&draft);
+                let _ = driver.ping_link_proxy();
             } else {
-                driver.session.settings.proxy.link_check = LinkCheck::Warn;
+                driver.session.settings.proxy.warn_link();
             }
         });
         cx.notify();
@@ -939,7 +915,7 @@ impl QuillApp {
                 cx,
             ),
         );
-        if let Some(notice) = this.settings.proxy.notice.clone() {
+        if let Some(notice) = this.settings.proxy.notice.text().map(str::to_string) {
             body = body.child(div().text_xs().text_color(text_muted()).child(notice));
         }
         body
@@ -980,13 +956,15 @@ crate::ui::shell::register_dialogs! {
 
     ProxyLink => DialogSpec::new(
         3100,
-        |app| app.settings.proxy.link.is_some(),
+        |app| app.session().is_some_and(|s| s.settings.proxy.link.is_open()),
         QuillApp::build_proxy_link_dialog,
     )
     .close(|app, _, cx| app.close_proxy_link(cx)),
 }
 
 mod build_proxy_edit_dialog;
+mod notice;
+pub(crate) use notice::ProxyNotice;
 mod build_proxy_list_dialog;
 #[cfg(test)]
 mod login_box_tests;

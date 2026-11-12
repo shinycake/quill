@@ -116,7 +116,7 @@ fn a_refused_selection_translation_shows_failed_not_loading(cx: &mut TestAppCont
         }
         assert!(matches!(
             app.dialog_translation(),
-            Some(Translation::Failed(_))
+            Some(Translation::Failed { .. })
         ));
     });
 }
@@ -135,7 +135,7 @@ fn a_failed_translation_is_asked_again_when_the_chat_is_reopened(cx: &mut TestAp
         matches!(
             app.session()
                 .and_then(|s| s.message_translation(CHANNEL, NEWEST_POST, "en")),
-            Some(Translation::Failed(_))
+            Some(Translation::Failed { .. })
         )
     };
     app.update(&mut vcx, |app, _| {
@@ -143,7 +143,7 @@ fn a_failed_translation_is_asked_again_when_the_chat_is_reopened(cx: &mut TestAp
         if let Some(session) = app.session_mut() {
             session.messages.translate.messages.insert(
                 (CHANNEL.0, NEWEST_POST.0, "en".to_string()),
-                Translation::Failed("send".into()),
+                Translation::failed("send"),
             );
         }
         app.translate.asked.clear();
@@ -192,7 +192,7 @@ fn turning_translation_on_again_asks_for_failed_messages(cx: &mut TestAppContext
         if let Some(session) = app.session_mut() {
             session.messages.translate.messages.insert(
                 (CHANNEL.0, NEWEST_POST.0, "en".to_string()),
-                Translation::Failed("send".into()),
+                Translation::failed("send"),
             );
         }
         app.pump_translation();

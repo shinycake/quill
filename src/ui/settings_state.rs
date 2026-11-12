@@ -50,22 +50,30 @@ pub(crate) struct SettingsUi {
 }
 
 /// What the operating system's accent color is known to be.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(Default)]
 pub(crate) enum SystemAccent {
     /// Not read yet.
     #[default]
     Unread,
+    /// Linux reads it on a background thread: the color known so far, and
+    /// the task waiting for the read to land (dropping it ends the wait; a
+    /// second refresh while it runs does not start another).
+    Reading { color: Option<u32>, _wait: Task<()> },
     /// Read: the color (0xRRGGBB) when the system reports one.
     Read(Option<u32>),
 }
 
 impl SystemAccent {
     /// The color, when read and reported.
-    pub(super) fn color(self) -> Option<u32> {
+    pub(super) fn color(&self) -> Option<u32> {
         match self {
-            Self::Read(color) => color,
+            Self::Read(color) | Self::Reading { color, .. } => *color,
             Self::Unread => None,
         }
+    }
+
+    pub(super) fn is_unread(&self) -> bool {
+        matches!(self, Self::Unread)
     }
 }
 
@@ -154,6 +162,8 @@ impl super::on_screen::Farewell for SettingsUi {
         if app.settings.box_open(SettingsBox::Stickers) {
             app.close_stickers_manager(cx);
         }
+        // The proxy-link box (its draft and check) is the session's.
+        app.close_proxy_link(cx);
         // These boxes keep their open flags in the session, which goes to
         // the background with the account.
         let (masks, emoji, archive) = app.session().map_or((false, false, false), |session| {
@@ -199,9 +209,6 @@ pub(crate) struct PreferencesUi {
     /// The operating system's accent color, once read
     /// (`refresh_system_accent`).
     pub(super) system_accent: SystemAccent,
-    /// The one task waiting for a Linux accent read to land; a second
-    /// refresh while it runs does not start another.
-    pub(super) system_accent_poll: Option<Task<()>>,
     /// The wait for the link handler's background read to land; dropping
     /// it ends the wait.
     pub(super) link_handler_watch: Option<Task<()>>,
@@ -242,7 +249,6 @@ impl PreferencesUi {
             appearance_applied: None,
             app_theme: Default::default(),
             system_accent: SystemAccent::Unread,
-            system_accent_poll: None,
             link_handler_watch: None,
             link_handler_recheck: Default::default(),
             font_picker,

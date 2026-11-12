@@ -24,8 +24,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self
             .session
             .chat_list
-            .folder_chats_exhausted
-            .contains(&folder_id)
+            .folder_paging_of(folder_id)
+            .is_exhausted()
         {
             return Ok(None);
         }

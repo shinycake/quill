@@ -33,7 +33,8 @@ pub struct AuthState {
     /// offers Retry).
     pub countries: crate::state::fetch::Fetch<Vec<crate::phone::Country>>,
     /// Uppercase ISO code from `getCountryCode`: the default country guess.
-    pub guessed_country_iso: Option<String>,
+    /// Asked once; a failure is not asked again (the guess is a nicety).
+    pub guessed_country: crate::state::fetch::Fetch<String>,
     /// Slice A8: the while-authorized change-number flow: the target
     /// number the code was sent to, the resend timeout, the round trip in
     /// flight and the honest one-line failure of the last operation.
@@ -44,7 +45,7 @@ pub struct AuthState {
     /// `setRecoveryEmailAddress` answer; drives the two-step
     /// verification overlay. Replaced only by our own
     /// `PasswordStateOp` answers — never mutated optimistically.
-    pub password_state: Option<PasswordState>,
+    pub password_state: PasswordCache,
     /// Slice A2: the 2FA management round trip (fetch or mutation) in
     /// flight under its request, or the honest one-line failure of the last
     /// one; the overlay shows progress and disables submits. Only that
@@ -53,17 +54,98 @@ pub struct AuthState {
 }
 
 impl AuthState {
+    /// The default country guess (uppercase ISO), once it answered.
+    pub fn guessed_country_iso(&self) -> Option<&str> {
+        self.guessed_country.data().map(String::as_str)
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             password_recovery: PasswordRecovery::Idle,
             last_auth_error: None,
             countries: crate::state::fetch::Fetch::Idle,
-            guessed_country_iso: None,
+            guessed_country: crate::state::fetch::Fetch::Idle,
             change_number: ChangeNumber::Idle,
             twofa_flow: TwofaFlow::default(),
-            password_state: None,
+            password_state: PasswordCache::Unknown,
             password_op: PasswordFlight::Idle,
         }
+    }
+}
+
+/// The cached `passwordState` and whether it can be trusted: a reset, a
+/// cancelled reset or a changed login email leave it out of date, and it is
+/// asked again under its own request. Only that request's answer ends the
+/// refetch; a refusal keeps what is shown and does not ask again by itself.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum PasswordCache {
+    /// Never answered.
+    #[default]
+    Unknown,
+    Fresh(PasswordState),
+    /// Something changed after the answer: it is shown until the refetch
+    /// goes out.
+    Outdated(PasswordState),
+    /// The refetch is out under `request`.
+    Refetching {
+        state: PasswordState,
+        request: RequestId,
+    },
+}
+
+impl PasswordCache {
+    pub fn get(&self) -> Option<&PasswordState> {
+        match self {
+            Self::Unknown => None,
+            Self::Fresh(state) | Self::Outdated(state) | Self::Refetching { state, .. } => {
+                Some(state)
+            }
+        }
+    }
+
+    /// A refetch is due and not yet out.
+    pub fn is_outdated(&self) -> bool {
+        matches!(self, Self::Outdated(_))
+    }
+
+    /// The answer of `request` replaces the state. A change marked after
+    /// that request went out keeps its refetch.
+    pub fn answered(&mut self, request: Option<RequestId>, state: PasswordState) {
+        *self = match self {
+            Self::Outdated(_) => Self::Outdated(state),
+            Self::Refetching { request: out, .. } if Some(*out) != request => Self::Refetching {
+                state,
+                request: *out,
+            },
+            _ => Self::Fresh(state),
+        };
+    }
+
+    /// The answer is out of date: it is fetched again.
+    pub fn mark_outdated(&mut self) {
+        *self = match std::mem::take(self) {
+            Self::Fresh(state) | Self::Refetching { state, .. } => Self::Outdated(state),
+            other => other,
+        };
+    }
+
+    /// The refetch went out under `request`.
+    pub fn refetching(&mut self, request: RequestId) {
+        *self = match std::mem::take(self) {
+            Self::Outdated(state) => Self::Refetching { state, request },
+            other => other,
+        };
+    }
+
+    /// `request` was refused: the state shown stays and is not asked again.
+    pub fn refetch_failed(&mut self, request: Option<RequestId>) {
+        *self = match std::mem::take(self) {
+            Self::Refetching {
+                state,
+                request: out,
+            } if Some(out) == request => Self::Fresh(state),
+            other => other,
+        };
     }
 }
 
@@ -103,6 +185,7 @@ impl AuthState {
     /// `request` failed with `line`: ends the round trip when it is the one
     /// in flight. Returns whether it was.
     pub fn fail_password_op(&mut self, request: Option<RequestId>, line: String) -> bool {
+        self.password_state.refetch_failed(request);
         if self.settle_password_op(request) {
             self.password_op = PasswordFlight::Failed(line);
             return true;

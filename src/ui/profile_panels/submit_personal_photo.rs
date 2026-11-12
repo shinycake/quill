@@ -47,9 +47,7 @@ impl QuillApp {
     }
 
     pub(in crate::ui) fn close_profile_dialog(&mut self, cx: &mut Context<Self>) {
-        self.forget_profile_saving();
-        self.forget_box_send();
-        self.dialogs.profile_dialog = None;
+        self.drop_profile_dialog();
         cx.notify();
     }
 
@@ -183,7 +181,7 @@ impl QuillApp {
     /// Privacy editor for the date-of-birth rule (tdesktop links the same
     /// `Privacy::Key::Birthday` box from the birthday row).
     pub(in crate::ui) fn open_birthday_privacy(&mut self, cx: &mut Context<Self>) {
-        self.dialogs.profile_dialog = None;
+        self.drop_profile_dialog();
         self.open_privacy(cx);
         self.privacy
             .layer
@@ -470,9 +468,14 @@ impl QuillApp {
                             })),
                     )
                     .child(cancel("edit-contact-cancel", tr(keys::CANCEL), cx));
+                let body = if saving {
+                    super::profile_saving::block_while_saving(body.into_any_element())
+                } else {
+                    body.into_any_element()
+                };
                 Some((
                     tr(keys::INFO_EDIT_CONTACT).into(),
-                    body.into_any_element(),
+                    body,
                     footer.into_any_element(),
                 ))
             }

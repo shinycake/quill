@@ -77,7 +77,7 @@ fn a_failed_sticker_set_is_not_asked_again_until_another_is_picked() {
     );
     assert_eq!(rig.sent("getStickerSet").len(), 1);
     assert_eq!(
-        rig.driver.session.stickers.stickers.set,
+        rig.driver.session.stickers.stickers.selection.stage,
         crate::state::StickerSetStage::Failed { set_id: 77 }
     );
     // Another set, then back: asked again (the user chose it).

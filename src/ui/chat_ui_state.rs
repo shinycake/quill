@@ -217,6 +217,13 @@ pub(crate) struct ChatUi {
     /// "Save as HTML" with "Ask where to save" on: the folder picker of
     /// this chat's selection, while it is open.
     pub(super) html_save: super::selection_html::HtmlSave,
+    /// The banner for the last `forwardMessages` answer of this chat's
+    /// forward (Dismiss or Esc ends it). The chat's own: another chat starts
+    /// without it, and a window that does not show the chat draws none.
+    pub(super) forward_result: Option<quill::state::ForwardResult>,
+    /// "Save Selected": waiting for the folder the user picks. The picker's
+    /// task lives in the stage, so a chat change drops it with the selection.
+    pub(super) save_selection: super::selection_mode::SaveSelection,
     /// What the selected topic tab was last scrolled into view for. Per
     /// chat and topic: another chat's strip with the same index, count and
     /// width starts at the old scroll offset until it is revealed.
@@ -252,8 +259,6 @@ pub(crate) struct ChatUi {
     /// `StopPollWarn` / `StopQuizWarn`: nobody can vote afterwards and
     /// the action can't be undone.
     pub(super) pending_stop_poll: Option<(ChatId, MessageId, bool)>,
-    /// Last row clicked in selection mode: the Shift+click range anchor.
-    pub(super) selection_anchor: Option<MessageId>,
     /// What keyboard selection and the screen reader's focus rest on in
     /// this chat: a row (Ctrl+Space, Up / Down) or the unread bar. One
     /// value of the chat, so another chat starts with none.

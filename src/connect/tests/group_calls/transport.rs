@@ -498,7 +498,7 @@ fn a_presentation_that_cannot_connect_is_ended_on_telegram() {
         .as_ref()
         .expect("call");
     assert!(!call.screen_share.is_sharing());
-    assert!(call.screen_share_error.is_some());
+    assert!(call.screen_share.error().is_some());
     let _ = std::fs::remove_dir_all(&dir);
 }
 

@@ -25,7 +25,8 @@ fn password_state_response_replaces_cache_and_clears_error() {
     let state = session
         .auth_state
         .password_state
-        .clone()
+        .get()
+        .cloned()
         .expect("password state cached");
     assert!(state.has_password);
     assert_eq!(state.password_hint, "street");
@@ -48,7 +49,7 @@ fn stray_password_state_response_is_ignored() {
         &sink,
         r#"{"@type":"passwordState","has_password":true,"password_hint":"","has_recovery_email_address":false,"has_passport_data":false,"recovery_email_address_code_info":null,"login_email_address_pattern":"","pending_reset_date":0}"#,
     );
-    assert!(session.auth_state.password_state.is_none());
+    assert!(session.auth_state.password_state.get().is_none());
     assert_eq!(
         session.auth_state.password_op,
         crate::state::PasswordFlight::Idle
@@ -87,7 +88,7 @@ fn password_state_error_surfaces_honest_classified_line() {
             .to_string();
         assert!(line.contains(expect), "op {op:?} code {code}: {line}");
         assert!(!session.auth_state.password_state_loading());
-        assert!(session.auth_state.password_state.is_none());
+        assert!(session.auth_state.password_state.get().is_none());
     }
 }
 

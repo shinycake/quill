@@ -280,6 +280,14 @@ impl QuillApp {
                             this.child(
                                 div()
                                     .id("group-call-more")
+                                    // A page is on its way: a click asks for nothing more.
+                                    .when(
+                                        matches!(
+                                            call.paging,
+                                            quill::state::ParticipantPaging::Loading(_)
+                                        ),
+                                        |this| this.opacity(0.5),
+                                    )
                                     .h(px(40.))
                                     .flex()
                                     .items_center()

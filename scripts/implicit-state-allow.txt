@@ -6,7 +6,6 @@ State::frame_requested mirrors the C qw_state struct field by field (repr(C)); i
 ActiveGroupCall::loaded_all_participants TDLib's groupCall.loaded_all_participants: the server's own report that the participant list is complete, mirrored as is
 ParsedGroupCall::loaded_all_participants TDLib's groupCall.loaded_all_participants as parsed: the server's own report that the participant list is complete, copied into the tracked call as is
 ChecklistSend::others_can_mark_tasks_as_done a send option of inputChecklist (may others tick tasks off), sent as the user chose; not a stage of anything
-ActiveGroupCall::loaded_all_participants+screen_share_error TDLib's groupCall.loaded_all_participants beside the screen share's last failure: independent
 
 MiniAppWindow::closing_confirmation the mini app's own setting (`web_app_setup_closing_behavior`: ask before closing), set and cleared by the app; not a stage of anything Quill runs
 MediaFacts::in_saved_messages the message's chat is Saved Messages: a fact about where the message lives, read once when the menu opens, not a stage of anything
@@ -15,6 +14,5 @@ ChatSwipeFacts::is_saved the chat with yourself: a fact about the chat read when
 RowMenuFacts::is_saved_messages the chat is Saved Messages: a fact about the chat read once when the row menu is built, not a stage
 Checklist::others_can_mark_tasks_as_done TDLib's checklist.others_can_mark_tasks_as_done permission ("Allow Others to Mark As Done"), mirrored as is; not a stage
 ChecklistDraft::others_can_mark_tasks_as_done the frozen "Allow Others to Mark As Done" setting of the new checklist; not a stage
-ChecklistSend::others_can_mark_tasks_as_done the "Allow Others to Mark As Done" setting sent with the new checklist; not a stage
 ReceivedGift::is_saved TDLib's receivedGift.is_saved: whether the gift is shown on the profile page, the server's own setting, flipped only after the server confirmed toggleGiftIsSaved; not a stage of anything Quill runs
 Step::started the one-shot answer of a wheel call (a pull began this call): returned to the caller, merged per call, never stored, so it is no stage

@@ -38,9 +38,10 @@ pub struct ChatListState {
     /// lists a chat may be added to. Drives the per-chat folder picker as
     /// the schema intends (`:13347` doc comment).
     pub chat_lists_for_add: HashMap<i64, crate::state::fetch::Fetch<Vec<ChatList>>>,
-    /// Parity slice: folder ids whose `loadChats(chatListFolder)` paging hit
-    /// 404 — no "load more" for these folders.
-    pub folder_chats_exhausted: HashSet<i32>,
+    /// Parity slice: where each folder's `loadChats(chatListFolder)` paging
+    /// is. A folder without an entry has more pages; a failed page waits
+    /// and asks again like the main list (`ListPaging::Retrying`).
+    pub folder_paging: HashMap<i32, ListPaging>,
     /// Parity slice: queued remove-from-folder intents `(chat_id,
     /// folder_id)`. The driver sends `getChatFolder`, then `editChatFolder`
     /// with the chat dropped from the spec — there is no
@@ -136,6 +137,42 @@ pub enum HistoryPreload {
 }
 
 impl ChatListState {
+    /// The folder's paging stage; `More` until a page answers.
+    pub fn folder_paging_of(&self, folder_id: i32) -> ListPaging {
+        self.folder_paging
+            .get(&folder_id)
+            .copied()
+            .unwrap_or_default()
+    }
+
+    /// The folder tab was left: a retry waiting out a failed page stops.
+    /// Opening the folder again asks for its page at once.
+    pub fn folder_left(&mut self, folder_id: i32) {
+        if let Some(paging) = self.folder_paging.get_mut(&folder_id) {
+            paging.page_ok();
+        }
+    }
+
+    /// A folder's `loadChats` page went through.
+    pub(crate) fn folder_page_ok(&mut self, folder_id: i32) {
+        if let Some(paging) = self.folder_paging.get_mut(&folder_id) {
+            paging.page_ok();
+        }
+    }
+
+    /// A folder's `loadChats` page failed with `code`.
+    pub(crate) fn folder_page_failed(
+        &mut self,
+        folder_id: i32,
+        code: i32,
+        now: std::time::Instant,
+    ) {
+        self.folder_paging
+            .entry(folder_id)
+            .or_default()
+            .page_failed(code, now);
+    }
+
     /// The next channel's history page arrived.
     pub fn history_preloaded(&self, chat: i64) -> bool {
         self.history_preloads.get(&chat) == Some(&HistoryPreload::Ready)
@@ -224,7 +261,7 @@ impl ChatListState {
             are_folder_tags_enabled: false,
             folder_specs: FolderSpecs::default(),
             chat_lists_for_add: HashMap::new(),
-            folder_chats_exhausted: HashSet::new(),
+            folder_paging: HashMap::new(),
             folder_remove_queue: Vec::new(),
             delete_after_leave: Vec::new(),
             folder_chats_to_leave: HashMap::new(),

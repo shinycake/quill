@@ -388,7 +388,7 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
         ),
     );
     assert_eq!(with_purpose.stickers.emoji.found_sets.len(), 1);
-    assert!(with_purpose.stickers.stickers.found_sets.is_empty());
+    assert!(with_purpose.stickers.stickers.search.sets.is_empty());
 
     let extra = with_purpose.request(
         RequestPurpose::Stickers(StickersPurpose::GetArchivedEmojiSets { first_page: true }),

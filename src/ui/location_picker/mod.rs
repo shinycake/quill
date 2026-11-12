@@ -105,8 +105,9 @@ impl QuillApp {
         };
         let country = geolocation::system_country()
             .or_else(|| {
-                self.session()
-                    .and_then(|session| session.auth_state.guessed_country_iso.clone())
+                self.session().and_then(|session| {
+                    session.auth_state.guessed_country_iso().map(str::to_string)
+                })
             })
             .and_then(|iso| country::country_center(&iso));
         // One picker per account: opened from another window, it moves

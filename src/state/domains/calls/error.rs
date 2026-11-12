@@ -47,7 +47,9 @@ impl Session {
             Some(RequestPurpose::Calls(CallsPurpose::AcceptCall { call_id })) => {
                 // The call was never answered and keeps ringing, so a
                 // close must leave it to ring.
-                self.calls.answer_call_failed(call_id);
+                if let Some(pending) = pending {
+                    self.calls.answer_call_failed(call_id, pending.id);
+                }
                 // An answer that fails after its call went must not land on
                 // the next one (tdesktop drops the request with its call).
                 if self.calls.active_call.as_ref().map(|call| call.id) == Some(call_id) {
@@ -109,26 +111,6 @@ impl Session {
                 self.chats_state
                     .chat_action_error
                     .push(crate::chatlist_calls::clear_failed(err.code));
-            }
-            Some(RequestPurpose::Calls(CallsPurpose::GetCallPrivacyRules { setting })) => {
-                if let Some(pending) = pending {
-                    self.calls.privacy_asks.failed_by(setting, pending.id);
-                }
-            }
-            // Phase C2i: a failed `setUserPrivacySettingRules`
-            // clears the optimistic value (the next fetch
-            // restores the truth) and flags the error.
-            Some(RequestPurpose::Calls(CallsPurpose::SetCallPrivacyRules { setting })) => {
-                // Only the set the rule waits for: an earlier one that
-                // fails after a later one was sent clears nothing.
-                if let Some(pending) = pending
-                    && self.calls.privacy_asks.failed_by(setting, pending.id)
-                {
-                    match setting {
-                        CallPrivacySetting::AllowCalls => self.calls.privacy_allow_calls = None,
-                        CallPrivacySetting::PeerToPeer => self.calls.privacy_p2p = None,
-                    }
-                }
             }
             Some(RequestPurpose::SendCallLog) => {
                 if let Some(summary) = self.calls.summary.as_mut()
@@ -264,7 +246,6 @@ impl Session {
             Some(
                 RequestPurpose::Calls(CallsPurpose::LeaveGroupCall { .. })
                 | RequestPurpose::Calls(CallsPurpose::EndGroupCall { .. })
-                | RequestPurpose::Calls(CallsPurpose::LoadGroupCallParticipants { .. })
                 | RequestPurpose::Calls(CallsPurpose::SetVideoChatDefaultParticipant { .. })
                 | RequestPurpose::Calls(CallsPurpose::SetVideoChatTitle { .. })
                 | RequestPurpose::Calls(CallsPurpose::RevokeVideoChatInviteLink { .. })
@@ -289,6 +270,14 @@ impl Session {
             ) => {
                 self.calls.group_call_error =
                     Some(call_request_error_line(err, "Voice chat request failed"));
+            }
+            // The next participants were refused: the button asks again.
+            Some(RequestPurpose::Calls(CallsPurpose::LoadGroupCallParticipants { .. })) => {
+                self.settle_group_paging(pending, true);
+                self.calls.group_call_error = Some(call_request_error_line(
+                    err,
+                    "Could not load more participants",
+                ));
             }
             // A failed speaker link is left out of the share box (tdesktop's
             // `fail` handler); a failed listener link is reported and can be

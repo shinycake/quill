@@ -24,10 +24,11 @@ pub(crate) use device_loss::{recover_after_gpu_loss, reopen_main_window};
 use gpui_kit::ForegroundExecutor;
 use gpui_kit::Platform;
 use quill::lang::{keys, tr};
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 #[cfg(target_os = "linux")]
 use std::rc::Weak;
+use std::time::{Duration, Instant};
 
 /// Report `error` from opening the main window and end the process.
 #[expect(
@@ -64,7 +65,7 @@ pub(crate) fn watch_gpu_loss(platform: &Rc<dyn Platform>) {
     #[cfg(target_os = "linux")]
     {
         let quit = (platform.foreground_executor(), Rc::downgrade(platform));
-        QUIT.with(|slot| *slot.borrow_mut() = Some(quit));
+        QUIT.set(Some(quit));
         gpui_wgpu::on_device_gone(gpu_gone);
     }
     #[cfg(not(target_os = "linux"))]
@@ -73,39 +74,60 @@ pub(crate) fn watch_gpu_loss(platform: &Rc<dyn Platform>) {
 
 #[cfg(target_os = "linux")]
 thread_local! {
-    static QUIT: RefCell<Option<(ForegroundExecutor, Weak<dyn Platform>)>> =
-        const { RefCell::new(None) };
+    static QUIT: Cell<Option<(ForegroundExecutor, Weak<dyn Platform>)>> =
+        const { Cell::new(None) };
 }
 
 thread_local! {
-    static GPU_GONE: RefCell<Option<String>> = const { RefCell::new(None) };
-    /// Quill or the system asked to quit or restart: a window closing from
-    /// now on is part of that, not a window the renderer gave up on.
-    static QUIT_ASKED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static GPU_GONE: Cell<Option<String>> = const { Cell::new(None) };
+    static QUIT_STAGE: Cell<QuitStage> = const { Cell::new(QuitStage::Normal) };
+}
+
+/// A quit that was asked for and neither refused nor finished by now was
+/// dropped without a word: the windows closing after it are not part of it.
+/// Read where a lost window is told from a quit (Windows, Linux).
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+const QUIT_GRACE: Duration = Duration::from_secs(10);
+
+/// Whether Quill or the system asked to quit or restart: a window closing
+/// from now on is part of that, not a window the renderer gave up on. The
+/// stage ends when the app refuses the quit ([`note_quit_refused`]) or the
+/// quit does not finish within [`QUIT_GRACE`]; one that is allowed ends the
+/// process.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+#[derive(Clone, Copy)]
+enum QuitStage {
+    Normal,
+    Asked { at: Instant },
 }
 
 /// Every quit and restart goes through `interface_zoom::ZoomPlatform`, which
 /// notes it here.
 pub(crate) fn note_quit_asked() {
-    QUIT_ASKED.with(|asked| asked.set(true));
+    QUIT_STAGE.set(QuitStage::Asked { at: Instant::now() });
 }
 
 /// The quit that was asked for was refused (the app declined it): a window
 /// closing from now on is a window lost again.
 pub(crate) fn note_quit_refused() {
-    QUIT_ASKED.with(|asked| asked.set(false));
+    QUIT_STAGE.set(QuitStage::Normal);
 }
 
 #[cfg(any(test, target_os = "windows", target_os = "linux"))]
 pub(super) fn quit_asked() -> bool {
-    QUIT_ASKED.with(std::cell::Cell::get)
+    match QUIT_STAGE.get() {
+        QuitStage::Normal => false,
+        QuitStage::Asked { at } => at.elapsed() < QUIT_GRACE,
+    }
 }
 
 /// Keep why the GPU stopped working for [`report_gpu_gone`]. Whether this
 /// is the first report.
 #[cfg(any(test, target_os = "linux", target_os = "windows"))]
 fn remember_gpu_gone(detail: &str) -> bool {
-    GPU_GONE.with(|gone| gone.borrow_mut().replace(detail.to_owned()).is_none())
+    let earlier = GPU_GONE.take();
+    GPU_GONE.set(Some(detail.to_owned()));
+    earlier.is_none()
 }
 
 /// Called by the renderer inside a window's draw, so the quit is queued
@@ -113,7 +135,9 @@ fn remember_gpu_gone(detail: &str) -> bool {
 #[cfg(target_os = "linux")]
 fn gpu_gone(detail: &str) {
     let first = remember_gpu_gone(detail);
-    let quit = QUIT.with(|slot| slot.borrow().clone());
+    let held = QUIT.take();
+    let quit = held.clone();
+    QUIT.set(held);
     let (true, Some((executor, platform))) = (first, quit) else {
         return;
     };
@@ -129,7 +153,7 @@ fn gpu_gone(detail: &str) {
 /// Called after the app's `run` returns: the alert for a GPU that stopped
 /// working mid-session, if one did.
 pub(crate) fn report_gpu_gone() {
-    if let Some(detail) = GPU_GONE.with(|gone| gone.borrow_mut().take()) {
+    if let Some(detail) = GPU_GONE.take() {
         eprintln!("quill: the GPU stopped working: {detail}");
         show_alert(
             tr(keys::Q_MISC_GPU_STOPPED_WORKING),

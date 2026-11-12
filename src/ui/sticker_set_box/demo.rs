@@ -29,7 +29,14 @@ impl QuillApp {
             let sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> =
                 self.demo_ui.sink.clone();
             let thumb = crate::ui::demo::demo_thumb_png_path();
-            let Some(template) = session.stickers.stickers.stickers.first().cloned() else {
+            let Some(template) = session
+                .stickers
+                .stickers
+                .selection
+                .stickers
+                .first()
+                .cloned()
+            else {
                 return;
             };
             let mut stickers = Vec::new();

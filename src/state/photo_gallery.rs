@@ -424,6 +424,18 @@ impl Session {
             .insert(chat_id.0, photo);
     }
 
+    /// The user's photos are not loaded and the request that would load them
+    /// is gone (dropped without an answer, or never sent): a gallery waiting
+    /// for them must give up. A first page still out is `Loading(request)`
+    /// with that request in flight.
+    pub fn user_photos_request_ended(&self, user_id: i64) -> bool {
+        match self.users_state.user_profile_photos.get(&user_id) {
+            Some(ProfilePhotosFetch::Loading(request)) => self.requests.get(*request).is_none(),
+            Some(_) => false,
+            None => true,
+        }
+    }
+
     /// The chat's current photo is unknown and the full-info request that
     /// would tell it is not in flight any more (it failed, or never went
     /// out): the viewer waiting for it must give up.

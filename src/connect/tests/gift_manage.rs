@@ -300,12 +300,20 @@ fn resale_price_must_be_in_range_and_removal_needs_a_listing() {
             .is_err()
     );
     assert!(p.0.set_received_gift_resale_price("sale", None).is_err());
+    {
+        let view = &mut p.0.session.payments.hub.received.view;
+        view.select(Some("sale".into()));
+        view.set_form(Some(crate::premium_hub::gift_view::GiftForm::resale()));
+    }
     let extra =
         p.0.set_received_gift_resale_price("sale", Some(500))
             .unwrap();
     let sent = sent_request(&p.1, "setGiftResalePrice");
     assert_eq!(sent["price"]["star_count"], 500);
+    // The form that sent it is the one its answer closes; the panel stays.
     feed(&mut p, json!({"@type": "ok", "@extra": extra.as_extra()}));
+    let view = &p.0.session.payments.hub.received.view;
+    assert_eq!((view.form(), view.selected()), (None, Some("sale")));
     p.0.set_received_gift_resale_price("listed", None).unwrap();
     assert!(sent_request(&p.1, "setGiftResalePrice")["price"].is_null());
 }
@@ -717,4 +725,64 @@ fn a_failed_premium_list_shows_a_line_and_retry_asks_only_it() {
     assert!(send.premium_fetch.is_loading());
     assert_eq!(send.gifts_fetch, GiftListFetch::Answered);
     assert!(!send.lists_failed());
+}
+
+/// A form that names a gift lives in that gift's panel, so every way the
+/// panel ends (another gift, another collection, a delete answer, the box
+/// closing) leaves no form for a gift that is not shown.
+#[test]
+fn a_gifts_form_ends_with_its_panel_on_every_path() {
+    use crate::premium_hub::gift_view::GiftForm;
+    let open_form = |p: &mut Parts, id: &str| {
+        let view = &mut p.0.session.payments.hub.received.view;
+        view.select(Some(id.into()));
+        view.set_form(Some(GiftForm::resale()));
+        assert_eq!(view.form_of(id), Some(&GiftForm::resale()));
+    };
+    let mut p = parts();
+    open_my_gifts(
+        &mut p,
+        vec![
+            regular("a", json!({"can_be_deleted": true})),
+            regular("b", json!({})),
+        ],
+    );
+    let sent = sent_request(&p.1, "getGiftCollections");
+    feed(
+        &mut p,
+        json!({"@type": "giftCollections", "@extra": sent["@extra"], "collections": [
+            {"@type": "giftCollection", "id": 4, "name": "Cats", "gift_count": 1}]}),
+    );
+    // Another gift.
+    open_form(&mut p, "a");
+    p.0.session
+        .payments
+        .hub
+        .received
+        .view
+        .select(Some("b".into()));
+    assert_eq!(p.0.session.payments.hub.received.view.form(), None);
+    // Another collection.
+    open_form(&mut p, "a");
+    p.0.select_gift_collection(4).unwrap();
+    let view = &p.0.session.payments.hub.received.view;
+    assert_eq!((view.form(), view.selected()), (None, None));
+    // The delete answer of the shown gift.
+    p.0.select_gift_collection(0).unwrap();
+    let extra = sent_request(&p.1, "getReceivedGifts")["@extra"].clone();
+    feed(
+        &mut p,
+        json!({"@type": "receivedGifts", "@extra": extra, "total_count": 1,
+            "next_offset": "", "gifts": [regular("a", json!({"can_be_deleted": true}))]}),
+    );
+    open_form(&mut p, "a");
+    let extra = p.0.delete_received_gift("a").unwrap();
+    feed(&mut p, json!({"@type": "ok", "@extra": extra.as_extra()}));
+    let view = &p.0.session.payments.hub.received.view;
+    assert_eq!((view.form(), view.selected()), (None, None));
+    // The box closing.
+    p.0.session.payments.hub.received.open();
+    open_form(&mut p, "b");
+    p.0.session.payments.hub.received.close();
+    assert_eq!(p.0.session.payments.hub.received.view.form(), None);
 }

@@ -53,7 +53,8 @@ pub struct UserLinkData {
 pub enum UserLinkFetch {
     #[default]
     Idle,
-    Loading,
+    /// Asked under this request: only its answer or error ends the wait.
+    Loading(crate::ids::RequestId),
     Ready(UserLinkData),
     /// The ask failed. The reason is for the box to show once (`None`
     /// after it did, or when there was none to tell).
@@ -138,7 +139,7 @@ pub fn own_link(inputs: OwnLinkInputs<'_>) -> OwnLinkState {
             })
         }
         UserLinkFetch::Failed(_) => OwnLinkState::Unavailable,
-        UserLinkFetch::Loading => OwnLinkState::Waiting,
+        UserLinkFetch::Loading(_) => OwnLinkState::Waiting,
         UserLinkFetch::Idle | UserLinkFetch::Ready(_) => OwnLinkState::NeedsContactLink,
     }
 }

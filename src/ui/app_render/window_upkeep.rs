@@ -25,6 +25,8 @@ impl QuillApp {
         self.menu_focus_upkeep(window, cx);
         // A resolved comment thread moves the view into its discussion group.
         self.advance_thread(window, cx);
+        // The share box's typed text goes with the box.
+        self.sync_share_inputs(window, cx);
         // A deleted message's reply or edit bar goes.
         self.cancel_gone_composer_targets(window, cx);
         // The reply bar's message, when it is not in memory: each window's
@@ -91,11 +93,9 @@ impl QuillApp {
         // A Premium preview a reducer asked for, in the window showing
         // the chat it is about.
         self.pump_promo_request(cx);
-        // A Premium limit's toast (a full GIF list, too many pins), in the
-        // window of the last press: the one whose action hit the limit.
-        if self.windows.pressed_here() {
-            self.premium_limit_toast_upkeep(window, cx);
-        }
+        // A Premium limit's toast (a full GIF list, too many pins): claimed
+        // by the window of the last press, shown in that window.
+        self.premium_limit_toast_upkeep(window, cx);
         self.gift_boxes_upkeep(window, cx);
         // A video chosen for an owned set finished downloading: its editor,
         // in the window the pick was made in.
