@@ -9,7 +9,7 @@ use super::super::demo::{
 use super::*;
 use quill::peer_qr::gift_tiles::gifts_panel_height;
 use quill::peer_qr::layout::panel_height;
-use quill::peer_qr::theme::{GiftsLayout, ShareTheme, ThemeChoice, ThemeEmoji, ThemeOwner};
+use quill::peer_qr::theme::{GiftsLayoutView, ShareTheme, ThemeChoice, ThemeEmoji, ThemeOwner};
 
 fn served(
     app: &Entity<QuillApp>,
@@ -199,7 +199,7 @@ fn a_short_gift_list_opens_the_panel_only_as_tall_as_its_tiles(cx: &mut TestAppC
     set_gift_count(&app, vcx, 1);
     click(vcx, "peer-qr-gifts");
     let width = BOX_WIDTH - 2. * PANEL_MARGIN;
-    let expected = gifts_panel_height(GiftsLayout::Wide(1), width, 1, true);
+    let expected = gifts_panel_height(GiftsLayoutView::Wide(1), width, 1, true);
     assert!(expected < panel_height(width));
     assert!((panel_bounds_height(vcx) - expected).abs() < 1.);
     assert!(shown(vcx, "peer-qr-gift-0"));

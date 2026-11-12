@@ -138,7 +138,10 @@ fn an_effect_left_to_play_follows_the_message_to_its_final_id() {
             .stickers
             .effects
             .watch
-            .is_unwatched((7, id))
+            .is_unwatched(crate::ids::ChatMessage::new(
+                ChatId(7),
+                crate::ids::MessageId(id),
+            ))
     };
     // Sent from here: the pending message has an effect to play, and keeps
     // it under its final id.
@@ -196,14 +199,9 @@ fn a_live_message_gets_its_effect_ready_in_the_main_window_and_a_chat_window() {
     let in_window: i64 = 5_107_584_321_108_051_014;
     for (chat, id, effect, icon) in [(7, 90, EFFECT, 800), (8, 91, in_window, 810)] {
         f.ingest(&live_message(chat, id, effect));
-        assert!(
-            f.driver
-                .session
-                .stickers
-                .effects
-                .watch
-                .is_unwatched((chat, id))
-        );
+        assert!(f.driver.session.stickers.effects.watch.is_unwatched(
+            crate::ids::ChatMessage::new(ChatId(chat), crate::ids::MessageId(id),)
+        ));
         let request = asked_for(&f, effect).expect("the effect is described");
         f.answer_effect(&request, icon);
         f.ingest(&format!(

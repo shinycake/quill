@@ -25,7 +25,7 @@ use quill::peer_qr::gift_tiles::{
 use quill::peer_qr::layout::{PANEL_PADDING, panel_height};
 use quill::peer_qr::pattern::Rect;
 use quill::peer_qr::state::{QrAction, QrPanel, QrPeer};
-use quill::peer_qr::theme::{GIFT_COLUMNS, GiftsLayout, ThemeGift, gifts_layout};
+use quill::peer_qr::theme::{GIFT_COLUMNS, GiftsLayoutView, ThemeGift, gifts_layout};
 use std::rc::Rc;
 
 fn at(value: f64) -> Pixels {
@@ -100,7 +100,7 @@ impl QuillApp {
             .and_then(|open| open.state.gift().map(|gift| gift.id));
         let foreground = hsla(view.colors.foreground);
         match layout {
-            GiftsLayout::Loading => div()
+            GiftsLayoutView::Loading => div()
                 .debug_selector(|| "peer-qr-gifts-loading".into())
                 .size_full()
                 .flex()
@@ -108,7 +108,7 @@ impl QuillApp {
                 .justify_center()
                 .child(Spinner::new().color(foreground))
                 .into_any_element(),
-            GiftsLayout::Failed => div()
+            GiftsLayoutView::Failed => div()
                 .debug_selector(|| "peer-qr-gifts-failed".into())
                 .size_full()
                 .flex()
@@ -134,8 +134,8 @@ impl QuillApp {
                     ),
                 )
                 .into_any_element(),
-            GiftsLayout::Empty => self.qr_gifts_empty(view, width, cx).into_any_element(),
-            GiftsLayout::Wide(_) => div()
+            GiftsLayoutView::Empty => self.qr_gifts_empty(view, width, cx).into_any_element(),
+            GiftsLayoutView::Wide(_) => div()
                 .relative()
                 .size_full()
                 .children(list.iter().enumerate().map(|(index, gift)| {
@@ -147,7 +147,7 @@ impl QuillApp {
                         .child(self.qr_gift_tile(gift, index, rect, chosen == Some(gift.id), cx))
                 }))
                 .into_any_element(),
-            GiftsLayout::Grid => self
+            GiftsLayoutView::Grid => self
                 .qr_gifts_grid(list, width, chosen, more, cx)
                 .into_any_element(),
         }

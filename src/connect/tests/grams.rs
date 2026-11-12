@@ -86,7 +86,7 @@ fn the_probe_fills_the_balance_once_and_the_screen_pages() {
         ),
     );
     let grams = &driver.session.payments.hub.grams;
-    assert!(grams.open && grams.load == crate::gift_market::PageLoad::Ready);
+    assert!(grams.is_open() && grams.load == crate::gift_market::PageLoad::Ready);
     assert_eq!(grams.rows.len(), 11);
     assert_eq!(grams.balance_nano, Some(12_750_000_000));
     assert_eq!(

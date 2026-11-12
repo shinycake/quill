@@ -568,7 +568,7 @@ impl ThemeGifts {
 
 /// How the gifts panel lays its tiles out (tdesktop `ChooseLayout`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GiftsLayout {
+pub enum GiftsLayoutView {
     Loading,
     /// The first page could not be asked for: a message and Retry.
     Failed,
@@ -581,19 +581,19 @@ pub enum GiftsLayout {
 /// Tiles per grid row.
 pub const GIFT_COLUMNS: usize = 3;
 
-pub fn gifts_layout(gifts: &ThemeGifts) -> GiftsLayout {
+pub fn gifts_layout(gifts: &ThemeGifts) -> GiftsLayoutView {
     let count = gifts.list.len();
     let complete = match &gifts.stage {
-        GiftsStage::First | GiftsStage::FirstAsking(_) => return GiftsLayout::Loading,
-        GiftsStage::FirstFailed => return GiftsLayout::Failed,
+        GiftsStage::First | GiftsStage::FirstAsking(_) => return GiftsLayoutView::Loading,
+        GiftsStage::FirstFailed => return GiftsLayoutView::Failed,
         GiftsStage::Listed(rest) => *rest == GiftsRest::Complete,
     };
     if count == 0 {
-        GiftsLayout::Empty
+        GiftsLayoutView::Empty
     } else if !complete || count > GIFT_COLUMNS {
-        GiftsLayout::Grid
+        GiftsLayoutView::Grid
     } else {
-        GiftsLayout::Wide(count)
+        GiftsLayoutView::Wide(count)
     }
 }
 

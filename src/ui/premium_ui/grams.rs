@@ -44,7 +44,7 @@ crate::ui::shell::register_dialogs! {
     /// Settings → My Grams.
     Grams => DialogSpec::new(
         3805,
-        |app| app.session().is_some_and(|s| s.payments.hub.grams.open),
+        |app| app.session().is_some_and(|s| s.payments.hub.grams.is_open()),
         QuillApp::build_grams_dialog,
     )
     .close(|app, _, cx| app.close_grams(cx)),
@@ -143,13 +143,13 @@ impl QuillApp {
             // A failed first page shows its error inside the open dialog;
             // the status line covers the case where it could not open.
             if live.driver.open_grams(is_dark).is_err()
-                && !live.driver.session.payments.hub.grams.open
+                && !live.driver.session.payments.hub.grams.is_open()
             {
                 self.set_note(StatusNote::error(tr(keys::Q_GRAMS_COULD_NOT_LOAD)));
             }
         } else if let Some(grams) = self.grams_mut() {
             // box-host: GramsWithdraw shows only once a withdrawal is set, which start_grams_withdraw names
-            grams.open = true;
+            grams.open_list();
         }
         // A reopened list asks its first look again, whatever length it had.
         self.payments.grams_asked.reset();
@@ -176,7 +176,7 @@ impl QuillApp {
     /// Show the receipt of the row with `key` (`TonTx::key`), or the list.
     pub(in crate::ui) fn select_grams_tx(&mut self, key: Option<String>, cx: &mut Context<Self>) {
         if let Some(grams) = self.grams_mut() {
-            grams.selected = key;
+            grams.select(key);
         }
         cx.notify();
     }

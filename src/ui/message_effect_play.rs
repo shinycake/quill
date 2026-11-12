@@ -124,7 +124,16 @@ impl QuillApp {
         let marked: Vec<(Key, badge::Seen)> = match self.effects_session_mut() {
             Some(session) => shown_now
                 .into_iter()
-                .filter(|(key, _)| session.stickers.effects.watch.mark_watched(*key))
+                .filter(|(key, _)| {
+                    session
+                        .stickers
+                        .effects
+                        .watch
+                        .mark_watched(quill::ids::ChatMessage::new(
+                            quill::ids::ChatId(key.0),
+                            quill::ids::MessageId(key.1),
+                        ))
+                })
                 .collect(),
             None => Vec::new(),
         };

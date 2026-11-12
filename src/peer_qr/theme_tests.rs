@@ -9,7 +9,7 @@ use crate::peer_qr::state::{
     PeerQrBox, QrAction, QrEffect, QrEnv, QrPanel, QrPeer, QrSubject, QrToast,
 };
 use crate::peer_qr::theme::{
-    BACKDROPS_LOAD_SECS, BACKDROPS_REFRESH_SECS, Backdrops, BackdropsStage, GiftsLayout,
+    BACKDROPS_LOAD_SECS, BACKDROPS_REFRESH_SECS, Backdrops, BackdropsStage, GiftsLayoutView,
     SaveRights, ShareTheme, ThemeChoice, ThemeEmoji, ThemeGift, ThemeGifts, can_save, gifts_layout,
     parse_share_theme,
 };
@@ -279,14 +279,14 @@ fn can_save_per_peer_kind() {
 #[test]
 fn the_gifts_list_dedupes_and_picks_a_layout() {
     let mut gifts = ThemeGifts::default();
-    assert_eq!(gifts_layout(&gifts), GiftsLayout::Loading);
+    assert_eq!(gifts_layout(&gifts), GiftsLayoutView::Loading);
     gifts.accept(Vec::new(), String::new(), true);
-    assert_eq!(gifts_layout(&gifts), GiftsLayout::Empty);
+    assert_eq!(gifts_layout(&gifts), GiftsLayoutView::Empty);
     gifts.accept(vec![gift(1, "a"), gift(2, "b")], String::new(), true);
-    assert_eq!(gifts_layout(&gifts), GiftsLayout::Wide(2));
+    assert_eq!(gifts_layout(&gifts), GiftsLayoutView::Wide(2));
     gifts.accept(vec![gift(1, "a"), gift(3, "c")], "more".into(), false);
     assert_eq!(gifts.list.len(), 3);
-    assert_eq!(gifts_layout(&gifts), GiftsLayout::Grid, "more to come");
+    assert_eq!(gifts_layout(&gifts), GiftsLayoutView::Grid, "more to come");
     gifts.accept(vec![gift(4, "d")], String::new(), true);
     assert_eq!(gifts.list.len(), 1, "a first page replaces the list");
 }
@@ -696,7 +696,7 @@ fn a_gifts_request_the_session_dropped_fails_instead_of_loading_for_good() {
     // Gone from the table with no answer: the panel stops waiting.
     gifts.forget_dropped(&HashSet::new());
     assert!(!gifts.asking());
-    assert_eq!(gifts_layout(&gifts), GiftsLayout::Empty);
+    assert_eq!(gifts_layout(&gifts), GiftsLayoutView::Empty);
 }
 
 #[test]
@@ -715,7 +715,7 @@ fn a_refused_gifts_request_settles_the_panel_instead_of_asking_every_frame() {
     let mut fresh = ThemeGifts::default();
     fresh.plan(owner, false, 20).unwrap();
     fresh.refuse(20);
-    assert_eq!(gifts_layout(&fresh), GiftsLayout::Failed);
+    assert_eq!(gifts_layout(&fresh), GiftsLayoutView::Failed);
     assert!(
         !fresh.wants_more(1_000),
         "a retry is the user's, not a frame's"
@@ -723,10 +723,10 @@ fn a_refused_gifts_request_settles_the_panel_instead_of_asking_every_frame() {
     // Retry asks for the first page again; it lands like any first page.
     let offset = fresh.plan(owner, false, 30).unwrap();
     fresh.asked(RequestId(5), 30);
-    assert_eq!(gifts_layout(&fresh), GiftsLayout::Loading);
+    assert_eq!(gifts_layout(&fresh), GiftsLayoutView::Loading);
     assert_eq!(offset, "");
     fresh.accept(vec![gift(1, "r1")], String::new(), true);
-    assert_eq!(gifts_layout(&fresh), GiftsLayout::Wide(1));
+    assert_eq!(gifts_layout(&fresh), GiftsLayoutView::Wide(1));
 }
 
 #[test]

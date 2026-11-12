@@ -130,7 +130,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let grams = &mut self.session.payments.hub.grams;
-        grams.open = true;
+        grams.open_list();
         grams.restart(TxFilter::All);
         let page = match self.fetch_grams_page(false) {
             Ok(page) => page,
@@ -206,10 +206,10 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Only while the screen is open with an available amount.
     pub fn start_gram_withdrawal(&mut self) -> Result<(), ConnectSendError> {
         let grams = &self.session.payments.hub.grams;
-        if !self.chats_path_active() || !grams.open || grams.withdrawable().is_none() {
+        if !self.chats_path_active() || !grams.is_open() || grams.withdrawable().is_none() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if grams.withdraw.is_some() {
+        if grams.withdraw().is_some() {
             return Ok(());
         }
         // tdesktop `cloudPassword().reload()`, then the state it has.
@@ -238,11 +238,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<RequestId, ConnectSendError> {
         let grams = &self.session.payments.hub.grams;
         if password.is_empty()
-            || !grams.open
-            || !grams
-                .withdraw
-                .as_ref()
-                .is_some_and(GramWithdraw::can_submit)
+            || !grams.is_open()
+            || !grams.withdraw().is_some_and(GramWithdraw::can_submit)
         {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -264,6 +261,6 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Cancel, Escape or a step's OK: close the box. A URL that still
     /// arrives for it is dropped.
     pub fn cancel_gram_withdrawal(&mut self) {
-        self.session.payments.hub.grams.withdraw = None;
+        self.session.payments.hub.grams.cancel_withdraw();
     }
 }

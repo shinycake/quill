@@ -34,7 +34,7 @@ use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
 use quill::peer_qr::free::FreeMode;
-use quill::peer_qr::link::OwnLinkState;
+use quill::peer_qr::link::OwnLinkView;
 use quill::peer_qr::session::PeerQrData;
 use quill::peer_qr::state::{PeerQrBox, QrAction, QrEffect, QrPanel, QrPeer, QrSubject, QrToast};
 use quill::peer_qr::theme::ThemeChoice;
@@ -588,7 +588,7 @@ impl QuillApp {
         matches!(open.state.free.mode, FreeMode::Temporary { .. })
             || matches!(
                 self.qr_own_link(&open.state.subject),
-                Some(OwnLinkState::Ready(link)) if link.expires_at != 0
+                Some(OwnLinkView::Ready(link)) if link.expires_at != 0
             )
     }
 

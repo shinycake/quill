@@ -595,7 +595,7 @@ fn a_full_export_follows_tdesktops_layout() {
             if matches!(chat.stage, crate::export::Stage::Collecting { read: 0 }) {
                 assert_ne!(last_writing, Some(*index), "stale writing counts");
             }
-            if matches!(chat.stage, crate::export::Stage::Writing { .. }) {
+            if matches!(chat.stage, crate::export::Stage::Written { .. }) {
                 last_writing = Some(*index);
             }
         }
@@ -748,12 +748,12 @@ fn an_error_after_some_messages_were_saved_is_a_partial_chat() {
         ChatOutcome::Failed { reason: "x".into() },
         "nothing was written yet"
     );
-    progress.stage = Stage::Writing { done: 0, total: 9 };
+    progress.stage = Stage::Written { done: 0, total: 9 };
     assert!(matches!(
         ChatOutcome::after_error(&progress, "x".into()),
         ChatOutcome::Failed { .. }
     ));
-    progress.stage = Stage::Writing { done: 7, total: 9 };
+    progress.stage = Stage::Written { done: 7, total: 9 };
     let partial = ChatOutcome::after_error(&progress, "x".into());
     assert_eq!(
         partial,
@@ -799,7 +799,7 @@ fn progress_labels_and_fraction() {
     p.stage = on_chat(&chat);
     assert_eq!(p.label(), "Chats: 2 of 4 · Team");
     assert_eq!(p.fraction(), Some(0.25));
-    chat.stage = crate::export::Stage::Writing { done: 5, total: 10 };
+    chat.stage = crate::export::Stage::Written { done: 5, total: 10 };
     p.stage = on_chat(&chat);
     assert_eq!(p.fraction(), Some(0.375));
     assert_eq!(p.detail().unwrap(), "Saving messages… 5 of 10 · 0 files");

@@ -62,9 +62,7 @@ forget_display::displays.borrow_mut 1
 forget_reveals::reveals.borrow_mut 1
 hide_until_mouse_moves::slot.borrow 1
 image_tile::tile.borrow_mut 1
-last_target::last.borrow 1
 mark_revealed::reveals.borrow_mut 1
-note_target::last.borrow_mut 1
 once::body.borrow_mut 1
 paint_text_specks::painted.borrow_mut 1
 parsed_chart::charts.borrow_mut 1

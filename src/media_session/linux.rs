@@ -9,8 +9,7 @@
 
 use super::{Command, NowPlaying, push_command};
 use std::collections::HashMap;
-use std::sync::mpsc::{Sender, channel};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use zbus::blocking::connection::Builder;
 use zbus::interface;
@@ -226,18 +225,10 @@ impl Player {
     }
 }
 
-static WORKER: OnceLock<Sender<Option<NowPlaying>>> = OnceLock::new();
+static WORKER: super::worker::Worker = super::worker::Worker::new();
 
 pub(super) fn set(info: Option<&NowPlaying>) {
-    let sender = WORKER.get_or_init(|| {
-        let (tx, rx) = channel::<Option<NowPlaying>>();
-        let spawned = crate::thread_guard::spawn_guarded("mpris", move || run(rx));
-        if spawned.is_err() {
-            // No thread: the receiver is gone, sends below just fail.
-        }
-        tx
-    });
-    let _ = sender.send(info.cloned());
+    WORKER.send("mpris", run, info);
 }
 
 fn run(rx: std::sync::mpsc::Receiver<Option<NowPlaying>>) {

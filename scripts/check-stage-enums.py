@@ -14,7 +14,8 @@ hold what ends it:
 
 - `bare`: the variant has no data at all;
 - `unkeyed`: the variant has data, but no `RequestId`, `Task`,
-  `JoinHandle`, `Subscription`, channel end or deadline in it, or in the
+  `JoinHandle`, `Subscription`, channel end or deadline (an `Instant`, or a
+  field named `at`, `deadline` or `..._at_ms`) in it, or in the
   types it names. A field typed by one of the enum's own generic
   parameters (`enum Lifecycle<R> { Running(R) }`) counts: the caller picks
   the owned handle it stands for, and dropping the stage drops it;
@@ -79,6 +80,8 @@ IN_FLIGHT = set(
 )
 CARRIER = re.compile(
     r"\b(?:RequestId|Task|TaskHold|RenderJob|JoinHandle|Subscription|Receiver|Sender|Instant|SystemTime)\b"
+    # A deadline held as a number: `at`, `commit_at_ms`, `retry_at_ms`, `deadline`.
+    r"|\b(?:at|deadline|\w+_at(?:_ms|_secs)?)\s*:"
 )
 OPTIONAL_REQUEST = re.compile(r"Option\s*<\s*(?:[\w:]*::)?RequestId\s*>")
 # Enums that name a message, a reason or a derived view, not a stored stage.

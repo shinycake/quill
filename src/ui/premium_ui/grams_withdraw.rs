@@ -31,12 +31,11 @@ crate::ui::shell::register_dialogs! {
         3804,
         |app| {
             app.session().is_some_and(|s| {
-                s.payments.hub.grams.open
+                s.payments.hub.grams.is_open()
                     && s.payments
                         .hub
                         .grams
-                        .withdraw
-                        .as_ref()
+                        .withdraw()
                         .is_some_and(GramWithdraw::shows_box)
             })
         },
@@ -59,13 +58,7 @@ pub(super) fn collect_button(cx: &mut Context<QuillApp>) -> Button {
 
 impl QuillApp {
     fn grams_withdraw(&self) -> Option<GramWithdraw> {
-        self.session()?
-            .payments
-            .hub
-            .grams
-            .withdraw
-            .as_ref()
-            .cloned()
+        self.session()?.payments.hub.grams.withdraw().cloned()
     }
 
     fn clear_grams_withdraw_password(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -113,10 +106,7 @@ impl QuillApp {
             // Refused before sending: say so under the field.
             Some(Err(_)) => {
                 if let Some(grams) = self.grams_mut()
-                    && grams
-                        .withdraw
-                        .as_ref()
-                        .is_some_and(GramWithdraw::can_submit)
+                    && grams.withdraw().is_some_and(GramWithdraw::can_submit)
                 {
                     grams.enter_withdraw(GramWithdraw::idle(Some(ExportError::Other(
                         String::new(),
@@ -137,7 +127,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.cancel_gram_withdrawal();
         } else if let Some(grams) = self.grams_mut() {
-            grams.withdraw = None;
+            grams.cancel_withdraw();
         }
         self.clear_grams_withdraw_password(window, cx);
         cx.notify();
@@ -163,11 +153,8 @@ impl QuillApp {
     ) {
         let (outcome, showing, ready) = match self.grams_mut() {
             Some(grams) => {
-                let showing = grams.open
-                    && grams
-                        .withdraw
-                        .as_ref()
-                        .is_some_and(GramWithdraw::shows_password);
+                let showing =
+                    grams.is_open() && grams.withdraw().is_some_and(GramWithdraw::shows_password);
                 let ready = grams.take_events().contains(&GramsEvent::PasswordReady);
                 (grams.take_withdraw_outcome(), showing, ready)
             }

@@ -4,7 +4,7 @@
 use super::*;
 use crate::ids::{FileId, RequestId};
 use crate::peer_qr::free::FreeRequest;
-use crate::peer_qr::link::{OwnLinkState, UserLinkFetch};
+use crate::peer_qr::link::{OwnLinkView, UserLinkFetch};
 use crate::peer_qr::requests::{GiftsOwner, get_share_theme_gifts, set_profile_share_theme};
 use crate::peer_qr::state::QrPeer;
 use crate::peer_qr::theme::{ThemeChoice, ThemeOwner, can_save};
@@ -159,7 +159,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// step while the box is open.
     pub fn ensure_own_contact_link(&mut self, now: i64) -> Result<(), ConnectSendError> {
         match self.session.own_qr_link("", now) {
-            Some(OwnLinkState::NeedsContactLink) => self.fetch_own_contact_link(),
+            Some(OwnLinkView::NeedsContactLink) => self.fetch_own_contact_link(),
             _ => Ok(()),
         }
     }

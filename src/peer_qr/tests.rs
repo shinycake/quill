@@ -6,8 +6,8 @@ use crate::peer_qr::appearance::{
 use crate::peer_qr::color::{Rgb, contrast, mix_lab, to_lab};
 use crate::peer_qr::free::{FreeCode, FreeMenuItem, FreeMode, FreeRequest, FreeResult};
 use crate::peer_qr::link::{
-    OwnLinkInputs, OwnLinkKind, OwnLinkState, UserLinkData, UserLinkFetch, countdown_text,
-    eligible, own_link, username_label,
+    OwnLinkInputs, OwnLinkKind, OwnLinkView, UserLinkData, UserLinkFetch, countdown_text, eligible,
+    own_link, username_label,
 };
 use crate::peer_qr::pattern::{
     Falloff, LAYER_BAND, Metrics, POP_MS, Rect, drift_offset, overlaps, pick_index, pop_scale,
@@ -120,7 +120,7 @@ fn own_username_link_wins() {
         find_by_phone: None,
         ..inputs(&contact)
     });
-    let OwnLinkState::Ready(link) = state else {
+    let OwnLinkView::Ready(link) = state else {
         panic!("expected a link, got {state:?}");
     };
     assert_eq!(link.kind, OwnLinkKind::Username);
@@ -136,13 +136,13 @@ fn own_link_waits_for_phone_privacy() {
         find_by_phone: None,
         ..inputs(&contact)
     });
-    assert_eq!(state, OwnLinkState::Waiting);
+    assert_eq!(state, OwnLinkView::Waiting);
 }
 
 #[test]
 fn visible_number_encodes_the_phone_link() {
     let contact = UserLinkFetch::Idle;
-    let OwnLinkState::Ready(link) = own_link(inputs(&contact)) else {
+    let OwnLinkView::Ready(link) = own_link(inputs(&contact)) else {
         panic!("expected a phone link");
     };
     assert_eq!(link.kind, OwnLinkKind::Phone);
@@ -157,7 +157,7 @@ fn hidden_number_findable_by_everyone_still_uses_the_phone() {
         show_phone: Some(PrivacyWho::Nobody),
         ..inputs(&contact)
     });
-    assert!(matches!(state, OwnLinkState::Ready(link) if link.kind == OwnLinkKind::Phone));
+    assert!(matches!(state, OwnLinkView::Ready(link) if link.kind == OwnLinkKind::Phone));
 }
 
 #[test]
@@ -169,20 +169,20 @@ fn hidden_number_asks_for_a_contact_link() {
             ..inputs(contact)
         })
     };
-    assert_eq!(hidden(&UserLinkFetch::Idle), OwnLinkState::NeedsContactLink);
+    assert_eq!(hidden(&UserLinkFetch::Idle), OwnLinkView::NeedsContactLink);
     assert_eq!(
         hidden(&UserLinkFetch::Loading(crate::ids::RequestId(1))),
-        OwnLinkState::Waiting
+        OwnLinkView::Waiting
     );
     assert_eq!(
         hidden(&UserLinkFetch::Failed(None)),
-        OwnLinkState::Unavailable
+        OwnLinkView::Unavailable
     );
     let live = UserLinkFetch::Ready(UserLinkData {
         url: "https://t.me/contact/abc".into(),
         expires_at: 1_075,
     });
-    let OwnLinkState::Ready(link) = hidden(&live) else {
+    let OwnLinkView::Ready(link) = hidden(&live) else {
         panic!("expected a contact link");
     };
     assert_eq!(link.kind, OwnLinkKind::Contact);
@@ -192,7 +192,7 @@ fn hidden_number_asks_for_a_contact_link() {
         url: "https://t.me/contact/abc".into(),
         expires_at: 900,
     });
-    assert_eq!(hidden(&expired), OwnLinkState::NeedsContactLink);
+    assert_eq!(hidden(&expired), OwnLinkView::NeedsContactLink);
 }
 
 #[test]

@@ -17,6 +17,9 @@ use crate::locks::LockExt;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+#[cfg(all(feature = "ui", any(target_os = "linux", windows)))]
+mod worker;
+
 #[cfg(all(feature = "ui", target_os = "linux"))]
 mod linux;
 #[cfg(all(feature = "ui", target_os = "macos"))]

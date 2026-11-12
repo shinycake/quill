@@ -81,7 +81,7 @@ impl QuillApp {
             "withdraw-check" => {
                 self.open_grams(cx);
                 if let Some(grams) = self.grams_mut() {
-                    grams.withdraw = Some(GramWithdraw::SecurityCheck { later: false });
+                    grams.put_withdraw(GramWithdraw::SecurityCheck { later: false });
                 }
             }
             "loading-more" => {

@@ -455,7 +455,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         match self.session.settings.proxy.rotation_step(now_ms, connected) {
             RotationAction::None => {}
             RotationAction::Ping(id) => {
-                if self.ping_listed_proxy(id).is_ok() {
+                if let Ok(request) = self.ping_listed_proxy(id) {
+                    self.session.settings.proxy.probe_sent(id, request, now_ms);
                     changed = true;
                 } else {
                     // The probe never left: it counts as failed, so the

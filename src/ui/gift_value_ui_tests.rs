@@ -10,6 +10,7 @@ use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, Modifiers, TestAppContext, VisualTestContext, px, size};
+use quill::ids::RequestId;
 use quill::premium_hub::gift_value::{GiftValueInfo, GiftValueLookup, GiftValueStage};
 
 fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
@@ -149,7 +150,7 @@ fn learn_more_spins_while_loading_and_reopens_a_known_value(cx: &mut TestAppCont
     // A lookup in flight spins.
     set_lookup(&app, vcx, |lookup| {
         Some(GiftValueLookup {
-            stage: GiftValueStage::Loading(7),
+            stage: GiftValueStage::Loading(RequestId(7)),
             ..lookup
         })
     });
@@ -234,7 +235,7 @@ fn a_lookup_asked_from_a_box_that_is_gone_does_not_open_later(cx: &mut TestAppCo
     // A lookup in flight, as a live account's "learn more" leaves it.
     set_lookup(&app, vcx, |lookup| {
         Some(GiftValueLookup {
-            stage: GiftValueStage::Loading(7),
+            stage: GiftValueStage::Loading(RequestId(7)),
             ..lookup
         })
     });
@@ -263,7 +264,7 @@ fn a_lookup_for_one_gift_is_dropped_when_the_box_shows_another(cx: &mut TestAppC
     // A lookup in flight, as a live account's "learn more" leaves it.
     set_lookup(&app, vcx, |lookup| {
         Some(GiftValueLookup {
-            stage: GiftValueStage::Loading(7),
+            stage: GiftValueStage::Loading(RequestId(7)),
             ..lookup
         })
     });

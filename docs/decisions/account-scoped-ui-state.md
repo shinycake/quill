@@ -10220,3 +10220,44 @@ add and closed link save), `composer_sends_tests` (an ack never takes a
 neighbour's clear), `chat_window::asker_tests` (gif ask settles; two
 windows keep their own link text), `forum_extras::tests` (both answer
 orders), `deep_link_routes_tests` (seek stays with its account).
+
+### Sweep fixes (r4-04)
+
+| Ids | What changed |
+| --- | --- |
+| g-456, g-475, 05-006 | `export::Stage::Starting` is gone: the start of a chat is `Collecting { read: 0 }` (label "Starting the export…"), which the account export also uses between chats. The progress count is `Stage::Written { done, total }` (a count of messages written, not an in-flight name). `stale_archives_are_removed` no longer sleeps: `remove_stale_at(dir, age, now)` takes the clock. |
+| 05-008 | The dismissed keyboard/force-reply set is `HashSet<ChatMessage>`, not `(i64, i64)`. |
+| g-449, g-450, 05-005 | `GlyphSave::Saving { _writer }` holds the writer's `JoinHandle` (taken under the lock the stage lives in, so a writer that ends at once waits for its handle); `Pending` is `Unwritten`. The allow lines went. |
+| g-451 | `link_handler::state()` returns `Option<LinkHandlerState>`: `None` is the first read still running. `LinkHandlerState::Checking` and `DemoPin` (the screenshot demo's pin) replace it. |
+| g-452 | `LinkStatus` is `LinkLine`: what the line under the group link says, worked out from the text and the verdict each time. |
+| g-463, 05-003 | `AddressStage` is `First(Lookup)`, `Later(Lookup)` or `Shown`: whether an address was ever shown is the variant, not `Address::ever_shown`. `Lookup::Resolving { point, _job: TaskHold }` holds the geocode task (the UI's separate `Geocode` stage is gone), so a new place drops the old lookup. `address_job` reads, `address_started` records. |
+| g-459, 05-002 | `VenueList` is `VenueView`, worked out from the ask's stage and the search field (`Loading` is no second copy of `AskStage`). Typing with no search location settles at once instead of sitting on Loading with nothing to send. |
+| g-476, g-477 | The screenshot demo's driver task is held by the `DemoDriver` global; its autoscroll task by the driver. No detach. |
+| g-466 | `GiftPurchaseStage::Sent` is `Completed`. |
+| g-474 | `SendStage::Sent` is `Done`. |
+| 05-001 | `media_session::worker::Worker` holds the thread of the MPRIS and SMTC backends; a send into a worker that died starts a new one. |
+| 05-004 | `Presses` is `Idle` / `Held(over)` / `Handled(over)`. |
+| 05-007 | `EffectWatch` keys are `ChatMessage`. |
+| g-453 | `MediaFile` is `MediaFileView`: read from the downloads table and the disk when the menu is built. |
+| 06-005, g-469..g-471 | `Lifecycle::Waiting { streak, since }` (the widget waiting longest starts first). The guard counts a field typed by one of the enum's own generic parameters as the owned handle (`Loading { runtime: R }`, `Running(R)`). |
+| 06-010, g-472 | `Neighbour::Asking { gateway, since }`: a gateway that never answers is asked again after `RESOLVE_AGAIN_AFTER`. |
+| 06-011, g-447 | `BackgroundStatus::Connecting { since }`: a start that stays there past `CONNECT_GIVE_UP` is `Failed` and started again. |
+| g-460, 06-008 | `new_chat::ViewState::Waiting(requests)` carries the requests of the stage. `GiftsLayout` is `GiftsLayoutView`, `OwnLinkState` is `OwnLinkView` (both are worked out on each draw). |
+| 06-006, g-465 | `Dnd::Refreshing { last, _worker }` holds the worker. |
+| 06-013 | `TrustFile::SaveFailed { reason, retry_at_ms }`: a failed write of the trusted Star prices is tried again by `paid_trust_tick` after `TRUST_RETRY_MS`. |
+| 06-009, g-455, 06-001 | `PaidStage::Waiting { commit_at_ms }` (the deadline left `PendingPaid`). `PaidStage::Stuck { settle, retry_at_ms, tries }` is sent again (the commit that failed, or the undo that was refused) on a doubling wait, `MAX_TRIES` times, then let go; `Undoing { request, tries }` keeps the count across a refused resend. The user is told once. |
+| 06-012 | The Linux idle sampler is one `Sampler` stage: `Running { last_read_ms, _thread }`. The thread ends itself under the same lock reads take, so no read lands between its check and its exit. |
+| g-454 | See g-460. |
+| 06-007, g-468 | `GiftsRest::Waiting { at, offset }` holds its deadline; the guard counts a field named `at`, `deadline` or `..._at_ms` as a deadline. |
+| g-479, g-478 | The test-only last target is a `Cell`, not a `RefCell`. |
+| 06-002, g-467 | `GiftValueStage::Loading(RequestId)`. |
+| g-462 | `LimitNotice::Box { over }` (how far over the limit; it was `extra`, which the guard reads as an `@extra`). |
+| g-461 | The mirrored `WithdrawalState::Pending` of Fragment is `Unsettled`. |
+| 06-003 | `GramsHub::view` is `GramsView::{Closed, List, Receipt(key), Withdraw(stage)}`; `open`, `selected` and `withdraw` are readers of it. Closing is one assignment. |
+| g-457, g-458 | `profile_photo_camera` has no `StreamStage`: the stream holds its reader's `JoinHandle` (`finished()` is `is_finished()`) and a cancel flag the reader checks. |
+| 06-004, g-473 | `Rotation::Probing { id, request, .. }`: the rotation leaves `Disconnected` when the ping's send went out (`probe_sent`), and the probe is out only while the slot is `Checking` under that request. |
+| g-464 | `BadgeStage::Pending { count, since }`: a push the platform never answers is pushed again after `PENDING_GIVES_UP_AFTER`. |
+
+Guards: `check-stage-enums.py` counts a field typed by one of the enum's own generic parameters as a carrier, and a field named `at`, `deadline` or `..._at_ms`/`..._at_secs` as a deadline. Allow lines removed with their shapes: `GlyphSave`, `StreamStage`, `BadgeStage::Pending`, `Stage::Writing`; the `WithdrawalState::Pending` line now names only `src/earn/revenue.rs`.
+
+Tests: `location_picker::picker_tests` (typing before a place, a new place stops the lookup), `paid_reaction::tests` (resend, let go, refused undo), `connect::tests::sweep_s3_payments_1`, `notify_accounts::tests` (give up), `net_watch::tests` (asked again), `proxy::tests` (probe by request), `icon_badge` (hung push), `paid_messages` (trust retry), `media_session::worker`.

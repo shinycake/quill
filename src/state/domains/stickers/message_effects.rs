@@ -1,5 +1,6 @@
 //! Message effects: `updateAvailableMessageEffects` and `getMessageEffect`
 //! answers land in `Session::stickers.effects`.
+use crate::ids::ChatMessage;
 use crate::message_effect_watch::EffectArrival;
 use crate::state::*;
 use crate::telegram::envelope::{MessageSendState, ParsedMessage, StickersPayload};
@@ -48,7 +49,7 @@ impl Session {
         self.stickers
             .effects
             .watch
-            .note((message.chat_id.0, message.id.0), arrival);
+            .note(ChatMessage::new(message.chat_id, message.id), arrival);
     }
 
     /// The effect ids on the messages of every chat a window shows (the

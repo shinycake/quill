@@ -9,7 +9,7 @@ use crate::locks::LockExt;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// Side of the frames, in pixels (`kProfilePhotoSize` on desktop).
@@ -57,65 +57,25 @@ struct Latest {
     rgb: Vec<u8>,
 }
 
-/// Where a stream is, shared with its reader thread as one atomic value.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u8)]
-enum StreamStage {
-    /// The reader is taking frames.
-    Running = 0,
-    /// ffmpeg ended by itself (camera busy, unplugged, no permission).
-    Ended = 1,
-    /// The owner dropped the stream and ffmpeg is being stopped.
-    Stopping = 2,
-}
-
-struct SharedStage(AtomicU8);
-
-impl SharedStage {
-    fn new() -> Self {
-        Self(AtomicU8::new(StreamStage::Running as u8))
-    }
-
-    fn get(&self) -> StreamStage {
-        match self.0.load(Ordering::Acquire) {
-            0 => StreamStage::Running,
-            1 => StreamStage::Ended,
-            _ => StreamStage::Stopping,
-        }
-    }
-
-    /// `Running` moves to `to`; a stage that already left `Running` stays
-    /// (an owner's stop is not turned into an end by the thread exiting).
-    fn leave_running(&self, to: StreamStage) -> StreamStage {
-        match self.0.compare_exchange(
-            StreamStage::Running as u8,
-            to as u8,
-            Ordering::AcqRel,
-            Ordering::Acquire,
-        ) {
-            Ok(_) => to,
-            Err(_) => self.get(),
-        }
-    }
-}
-
 /// Take frames from `reader` into `latest` until the stream ends or the
-/// owner stops it. Leaves `Running` for `Ended` when the stream ran out on
-/// its own.
-fn pump(reader: &mut impl Read, latest: &Mutex<Latest>, stage: &SharedStage) -> StreamStage {
+/// owner asks it to stop (`cancelled`).
+fn pump(reader: &mut impl Read, latest: &Mutex<Latest>, cancelled: &AtomicBool) {
     let mut buf = Vec::new();
-    while stage.get() == StreamStage::Running && read_frame(reader, &mut buf, LIVE_SIDE) {
+    while !cancelled.load(Ordering::Acquire) && read_frame(reader, &mut buf, LIVE_SIDE) {
         let mut slot = latest.lock_or_recover();
         slot.serial = slot.serial.wrapping_add(1);
         std::mem::swap(&mut slot.rgb, &mut buf);
     }
-    stage.leave_running(StreamStage::Ended)
 }
 
 /// A running camera stream. Dropping it stops ffmpeg.
 pub struct CameraStream {
     latest: Arc<Mutex<Latest>>,
-    stage: Arc<SharedStage>,
+    /// The owner is dropping the stream: the reader stops taking frames.
+    cancelled: Arc<AtomicBool>,
+    /// The reader thread. It returns when ffmpeg ends by itself (camera
+    /// busy, unplugged, no permission) or is stopped.
+    reader: std::thread::JoinHandle<Option<()>>,
     child: Arc<Mutex<Option<Child>>>,
     log: PathBuf,
 }
@@ -144,34 +104,39 @@ impl CameraStream {
             .map_err(|e| e.to_string())?;
         let mut stdout = child.stdout.take().ok_or("Couldn't start the camera.")?;
         let latest = Arc::new(Mutex::new(Latest::default()));
-        let stage = Arc::new(SharedStage::new());
+        let cancelled = Arc::new(AtomicBool::new(false));
         let child = Arc::new(Mutex::new(Some(child)));
         let spawned = {
-            let (latest, stage, child) = (latest.clone(), stage.clone(), child.clone());
+            let (latest, cancelled, child) = (latest.clone(), cancelled.clone(), child.clone());
             crate::thread_guard::spawn_guarded("quill-camera", move || {
-                if pump(&mut stdout, &latest, &stage) == StreamStage::Ended {
-                    // ffmpeg is done: reap it now, not when the panel drops.
-                    let process = child.lock_or_recover().take();
-                    if let Some(process) = process {
-                        crate::child_reap::kill_and_reap(process);
-                    }
+                pump(&mut stdout, &latest, &cancelled);
+                // ffmpeg is done (or being stopped): reap it now, not when
+                // the panel drops. Whichever of this thread and the drop
+                // takes the child first reaps it.
+                let process = child.lock_or_recover().take();
+                if let Some(process) = process {
+                    crate::child_reap::kill_and_reap(process);
                 }
             })
         };
-        if let Err(error) = spawned {
-            // Nothing would read the camera: stop ffmpeg now.
-            // Take the child out first so the lock is not held while
-            // ffmpeg is killed and reaped.
-            let process = child.lock_or_recover().take();
-            if let Some(mut process) = process {
-                let _ = process.kill();
-                let _ = process.wait();
+        let reader = match spawned {
+            Ok(reader) => reader,
+            Err(error) => {
+                // Nothing would read the camera: stop ffmpeg now.
+                // Take the child out first so the lock is not held while
+                // ffmpeg is killed and reaped.
+                let process = child.lock_or_recover().take();
+                if let Some(mut process) = process {
+                    let _ = process.kill();
+                    let _ = process.wait();
+                }
+                return Err(error.to_string());
             }
-            return Err(error.to_string());
-        }
+        };
         Ok(Self {
             latest,
-            stage,
+            cancelled,
+            reader,
             child,
             log: log.to_path_buf(),
         })
@@ -186,7 +151,7 @@ impl CameraStream {
 
     /// ffmpeg ended (camera busy, unplugged, no permission).
     pub fn finished(&self) -> bool {
-        self.stage.get() == StreamStage::Ended
+        self.reader.is_finished()
     }
 
     /// Why the stream ended, for the panel.
@@ -197,7 +162,7 @@ impl CameraStream {
 
 impl Drop for CameraStream {
     fn drop(&mut self) {
-        self.stage.leave_running(StreamStage::Stopping);
+        self.cancelled.store(true, Ordering::Release);
         let child = self.child.lock_or_recover().take();
         if let Some(child) = child {
             crate::child_reap::kill_and_reap(child);
@@ -207,31 +172,25 @@ impl Drop for CameraStream {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        LIVE_SIDE, Latest, SharedStage, StreamStage, frame_len, pump, read_frame, stream_args,
-    };
+    use super::{LIVE_SIDE, Latest, frame_len, pump, read_frame, stream_args};
     use std::io::Cursor;
     use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     #[test]
-    fn a_stream_that_runs_out_ends_and_a_stopped_one_stays_stopping() {
+    fn a_stream_takes_frames_until_it_runs_out_or_is_cancelled() {
         let frames = vec![7u8; frame_len(LIVE_SIDE) * 2];
         let latest = Mutex::new(Latest::default());
-        let stage = SharedStage::new();
-        assert_eq!(
-            pump(&mut Cursor::new(frames.clone()), &latest, &stage),
-            StreamStage::Ended
-        );
-        assert_eq!(stage.get(), StreamStage::Ended);
+        let cancelled = AtomicBool::new(false);
+        pump(&mut Cursor::new(frames.clone()), &latest, &cancelled);
         assert_eq!(latest.lock().map(|slot| slot.serial).unwrap_or(0), 2);
-        let stopped = SharedStage::new();
-        stopped.leave_running(StreamStage::Stopping);
+        cancelled.store(true, Ordering::Release);
+        pump(&mut Cursor::new(frames), &latest, &cancelled);
         assert_eq!(
-            pump(&mut Cursor::new(frames), &latest, &stopped),
-            StreamStage::Stopping,
-            "the owner's stop is not an end"
+            latest.lock().map(|slot| slot.serial).unwrap_or(0),
+            2,
+            "a cancelled stream takes nothing more"
         );
-        assert_eq!(latest.lock().map(|slot| slot.serial).unwrap_or(0), 2);
     }
 
     #[test]

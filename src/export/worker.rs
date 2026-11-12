@@ -93,8 +93,9 @@ pub enum Stage {
     Collecting {
         read: usize,
     },
-    /// Saving them: `total` is known once collecting ends.
-    Writing {
+    /// Saving them: `done` of `total` messages are written (`total` is
+    /// known once collecting ends).
+    Written {
         done: usize,
         total: usize,
     },
@@ -131,7 +132,7 @@ impl Progress {
         match &self.stage {
             Stage::Collecting { read: 0 } => "Starting the export…".into(),
             Stage::Collecting { read } => format!("Reading messages… {read}"),
-            Stage::Writing { done, total } => {
+            Stage::Written { done, total } => {
                 format!("Saving messages… {done} of {total} · {} files", self.files)
             }
             Stage::Finished(summary) => format!(
@@ -146,7 +147,7 @@ impl Progress {
     /// 0.0..=1.0 while writing, `None` while the total is unknown.
     pub fn fraction(&self) -> Option<f32> {
         match self.stage {
-            Stage::Writing { done, total } if total > 0 => Some(done as f32 / total as f32),
+            Stage::Written { done, total } if total > 0 => Some(done as f32 / total as f32),
             Stage::Finished(_) => Some(1.0),
             _ => None,
         }
@@ -154,7 +155,7 @@ impl Progress {
 
     /// One more message was saved.
     pub(crate) fn wrote_one(&mut self) {
-        if let Stage::Writing { done, .. } = &mut self.stage {
+        if let Stage::Written { done, .. } = &mut self.stage {
             *done += 1;
         }
     }
@@ -581,7 +582,7 @@ fn write_chat<T: Tdlib>(
     ids.reverse();
     let total = ids.len();
     let pages = total.div_ceil(MESSAGES_PER_FILE).max(1);
-    progress.stage = Stage::Writing { done: 0, total };
+    progress.stage = Stage::Written { done: 0, total };
     (job.report)(progress.clone());
     let mut namer = Namer::default();
     let mut buffer: Vec<(ExportMessage, Option<Outcome>)> = Vec::new();

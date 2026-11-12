@@ -502,9 +502,13 @@ pub enum TrustFile {
     /// The prices changed and are not written yet.
     Dirty,
     /// The last write failed (the reason, for the person to see); the next
-    /// change writes again.
-    SaveFailed(String),
+    /// change writes again, and so does the first tick after `retry_at_ms`
+    /// (unix milliseconds).
+    SaveFailed { reason: String, retry_at_ms: u64 },
 }
+
+/// How long a failed write of the trusted prices waits before the next try.
+pub const TRUST_RETRY_MS: u64 = 30_000;
 
 impl PaidMessages {
     /// The user agreed to `stars` per message in `chat_id`: remembered, and
@@ -525,9 +529,15 @@ impl PaidMessages {
         self.trust.entries()
     }
 
-    /// The file's text when the prices changed since it was written.
-    pub fn trust_to_write(&self) -> Option<String> {
-        (self.trust_file == TrustFile::Dirty).then(|| self.trust.to_json())
+    /// The file's text when the prices changed since it was written, or the
+    /// last write failed and its wait is over at `now_ms`.
+    pub fn trust_to_write(&self, now_ms: u64) -> Option<String> {
+        let due = match &self.trust_file {
+            TrustFile::Dirty => true,
+            TrustFile::SaveFailed { retry_at_ms, .. } => now_ms >= *retry_at_ms,
+            TrustFile::NotLoaded | TrustFile::Clean => false,
+        };
+        due.then(|| self.trust.to_json())
     }
 
     /// Whether the file has not been read yet.
@@ -549,17 +559,20 @@ impl PaidMessages {
 
     /// The write of [`Self::trust_to_write`] ended: the file is clean, or
     /// the reason it failed.
-    pub fn trust_written(&mut self, result: Result<(), String>) {
+    pub fn trust_written(&mut self, result: Result<(), String>, now_ms: u64) {
         self.trust_file = match result {
             Ok(()) => TrustFile::Clean,
-            Err(reason) => TrustFile::SaveFailed(reason),
+            Err(reason) => TrustFile::SaveFailed {
+                reason,
+                retry_at_ms: now_ms.saturating_add(TRUST_RETRY_MS),
+            },
         };
     }
 
     /// The reason the last write of the trusted prices failed.
     pub fn trust_save_error(&self) -> Option<&str> {
         match &self.trust_file {
-            TrustFile::SaveFailed(error) => Some(error),
+            TrustFile::SaveFailed { reason, .. } => Some(reason),
             _ => None,
         }
     }
@@ -1279,17 +1292,22 @@ mod tests {
         let mut state = PaidMessages::default();
         state.trust_loaded(Some(r#"{"4": 10}"#));
         assert!(!state.needs_confirmation(4, 10));
-        assert!(state.trust_to_write().is_none());
+        assert!(state.trust_to_write(0).is_none());
         state.trust_loaded(Some(r#"{"4": 99}"#));
         assert!(state.needs_confirmation(4, 50), "read once");
         state.remember_trust(5, 7);
-        assert!(state.trust_to_write().is_some());
-        state.trust_written(Err("disk".into()));
+        assert!(state.trust_to_write(0).is_some());
+        state.trust_written(Err("disk".into()), 1_000);
         assert_eq!(state.trust_save_error(), Some("disk"));
-        assert!(state.trust_to_write().is_none());
+        assert!(state.trust_to_write(1_000).is_none(), "not at once");
+        // The write is tried again once its wait is over.
+        assert!(state.trust_to_write(1_000 + TRUST_RETRY_MS).is_some());
+        state.trust_written(Ok(()), 1_000 + TRUST_RETRY_MS);
+        assert_eq!(state.trust_save_error(), None);
+        assert!(state.trust_to_write(u64::MAX).is_none());
         // A user who stops charging loses the price, and the file is behind.
         state.record_answer(5, CanSend::Ok, 0, false);
-        assert!(state.trust_to_write().is_some());
+        assert!(state.trust_to_write(0).is_some());
     }
 
     #[test]

@@ -39,14 +39,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self.session.request(RequestPurpose::GetGiftValueInfo, None);
         let json = get_upgraded_gift_value_info(extra, &lookup.name);
         self.session.payments.hub.gift_value = Some(GiftValueLookup {
-            stage: GiftValueStage::Loading(extra.0),
+            stage: GiftValueStage::Loading(extra),
             ..lookup
         });
         if let Err(err) = self.send_json_request(extra, &json) {
             if let Some(current) = self.session.payments.hub.gift_value.as_mut() {
                 // The request never left (not connected): say so plainly.
                 current.fail(
-                    extra.0,
+                    extra,
                     crate::lang::tr(crate::lang::keys::Q_GIFT_VALUE_NOT_SENT).to_string(),
                 );
             }

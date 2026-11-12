@@ -86,20 +86,20 @@ impl Session {
     /// it is dropped.
     pub(crate) fn apply_gram_withdrawal_url(&mut self, url: String, id: Option<RequestId>) {
         let grams = &mut self.payments.hub.grams;
-        if !grams.withdraw.as_ref().is_some_and(|w| w.waits_for(id)) {
+        if !grams.withdraw().is_some_and(|w| w.waits_for(id)) {
             return;
         }
-        grams.withdraw = if url.is_empty() {
-            None
+        if url.is_empty() {
+            grams.cancel_withdraw();
         } else {
-            Some(GramWithdraw::Finished(WithdrawOutcome::Url(url)))
-        };
+            grams.put_withdraw(GramWithdraw::Finished(WithdrawOutcome::Url(url)));
+        }
     }
 
     /// A fresh `passwordState` arrived: with no password, the idle
     /// password box becomes the security check.
     pub(crate) fn route_gram_withdrawal_on_password(&mut self, has_password: bool) {
-        if let Some(withdraw) = self.payments.hub.grams.withdraw.as_mut() {
+        if let Some(withdraw) = self.payments.hub.grams.withdraw_mut() {
             withdraw.password_state_known(has_password);
         }
     }
@@ -112,11 +112,11 @@ impl Session {
         err: &TdError,
         id: Option<RequestId>,
     ) {
-        if !grams.withdraw.as_ref().is_some_and(|w| w.waits_for(id)) {
+        if !grams.withdraw().is_some_and(|w| w.waits_for(id)) {
             return;
         }
         if err.earn_hint == Some(EarnErrorHint::AmountTooSmall) {
-            grams.withdraw = Some(GramWithdraw::Finished(WithdrawOutcome::TooSmall));
+            grams.put_withdraw(GramWithdraw::Finished(WithdrawOutcome::TooSmall));
             return;
         }
         grams.enter_withdraw(match password_check_failure(err, &error_reason(err)) {

@@ -7,7 +7,7 @@ use super::super::app::QuillApp;
 use quill::lang::Key;
 use quill::local_time::now_unix;
 use quill::peer_qr::appearance::{Appearance, PeerQrColors, Swatch, swatches};
-use quill::peer_qr::link::{OwnLinkKind, OwnLinkState, username_label};
+use quill::peer_qr::link::{OwnLinkKind, OwnLinkView, username_label};
 use quill::peer_qr::state::{QrEnv, QrPeer, QrSubject, ShownLink};
 use quill::peer_qr::theme::can_save;
 use quill::privacy::NewChatPrivacyState;
@@ -55,7 +55,7 @@ impl QuillApp {
     }
 
     /// Where your own link stands; `None` for any other box.
-    pub(super) fn qr_own_link(&self, subject: &QrSubject) -> Option<OwnLinkState> {
+    pub(super) fn qr_own_link(&self, subject: &QrSubject) -> Option<OwnLinkView> {
         let QrSubject::Peer(peer @ QrPeer::User(user_id)) = subject else {
             return None;
         };
@@ -110,7 +110,7 @@ impl QuillApp {
         QrEnv {
             now: now_unix(),
             price: self.qr_message_price(),
-            temporary_only: matches!(own, OwnLinkState::Ready(link) if link.kind == OwnLinkKind::Contact),
+            temporary_only: matches!(own, OwnLinkView::Ready(link) if link.kind == OwnLinkKind::Contact),
             can_save,
         }
     }
@@ -166,7 +166,7 @@ impl QuillApp {
             QrSubject::Peer(peer) => match self.qr_own_link(&open.state.subject) {
                 Some(own) => {
                     let (link, label) = match own {
-                        OwnLinkState::Ready(link) => (
+                        OwnLinkView::Ready(link) => (
                             Some(plain(link.link, link.expires_at)),
                             Some(link.label).filter(|label| !label.is_empty()),
                         ),

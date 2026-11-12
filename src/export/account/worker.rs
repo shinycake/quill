@@ -414,7 +414,7 @@ impl ChatOutcome {
     /// it had got (only the writing step has saved messages).
     pub(super) fn after_error(progress: &Progress, reason: String) -> Self {
         match progress.stage {
-            Stage::Writing { done, .. } if done > 0 => Self::Partial {
+            Stage::Written { done, .. } if done > 0 => Self::Partial {
                 messages: done,
                 reason,
             },

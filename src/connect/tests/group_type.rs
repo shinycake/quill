@@ -177,7 +177,7 @@ fn revoking_a_link_frees_the_limit() {
     rig.driver.session.payments.hub.limit_notice =
         Some(crate::premium_hub::limit_notice::LimitNotice::Box {
             kind: PremiumLimitKind::PublicLinks,
-            extra: 0,
+            over: 0,
             toast: None,
         });
     rig.driver.revoke_public_link(ChatId(13)).unwrap().unwrap();
