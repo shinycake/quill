@@ -2,7 +2,6 @@
 //! row (slice CL); closing it lives in `close_chat_preview.rs`.
 
 use super::*;
-use std::time::Instant;
 
 impl QuillApp {
     /// Slice CL: start a long press on a chat-list row — after
@@ -14,20 +13,17 @@ impl QuillApp {
         anchor: Point<Pixels>,
         cx: &mut Context<Self>,
     ) {
-        let started = Instant::now();
-        self.chat_list.overlay.press(chat_id, started);
-        self.spawn_screen(cx, async move |this, cx| {
+        // The press owns its timer: a release, a newer press or a menu
+        // drops it, so it only ever fires for the press that is still held.
+        let timer = self.spawn_screen(cx, async move |this, cx| {
             cx.background_executor()
                 .timer(Self::CHAT_PREVIEW_LONG_PRESS)
                 .await;
             let _ = this.update(cx, |this, cx| {
-                // Still the same press (no release, no newer press)?
-                if this.chat_list.overlay.is_press(chat_id, started) {
-                    this.open_chat_preview(chat_id, anchor, cx);
-                }
+                this.open_chat_preview(chat_id, anchor, cx);
             });
-        })
-        .detach();
+        });
+        self.chat_list.overlay.press(chat_id, timer);
     }
 
     /// Slice CL: open the read-only peek preview for a chat — recent

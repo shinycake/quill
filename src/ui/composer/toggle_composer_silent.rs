@@ -746,7 +746,11 @@ impl QuillApp {
 }
 
 /// A send-option chip of the composer's option row.
-fn option_chip(id: &'static str, label: String, cx: &mut Context<QuillApp>) -> Stateful<Div> {
+pub(in crate::ui) fn option_chip(
+    id: &'static str,
+    label: String,
+    cx: &mut Context<QuillApp>,
+) -> Stateful<Div> {
     div()
         .id(id)
         .flex()

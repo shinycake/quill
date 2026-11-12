@@ -8117,7 +8117,7 @@ the integration's shape stays and this branch's second version is gone.
 | 14-081 | Integration's `LiveInput`. |
 | 14-083 | `LiveOverlayClock::armed` holds the due time and its timer together. |
 | 14-053 | Integration's `SliderDrag`. |
-| 14-054, 14-055 | `SpaceHold` and `WaitingGate` keep their timer inside the stage that needs it. |
+| 14-054, 14-055 | `WaitingGate` keeps its timer inside the stage that needs it. The Space hold is r2-38's `BoostState<Task<()>>` (11-007), whose `Armed` stage holds the timer; the `SpaceHold` wrapper this bundle made for the same finding went at the merge. |
 | 14-028 | The PiP's last-drag answer is read once by the click that ends the press. |
 | 14-074 | Each PiP line is one value (`SeekLine`, `VolumeLine`). |
 | 14-041 | `request_lead` computes "on the grid" from what it is asked about. |
@@ -9640,6 +9640,41 @@ one-shot UI notes in `MessagesState` (`Notes`, `message_link`,
 and their register entries were all closed in round 1;
 `StickersManager::open` and `sponsored_hidden` are a box's visibility and a
 fact the server confirmed.
+
+### Sweep fixes (r2-38)
+
+Files: image budget, interface zoom, invite-link custom boxes, keybindings, location picker, media panel status box, media viewer, message actions (peek, chat menu), message menu UI, message text, new chat, notifications inline reply.
+
+| id | result |
+| --- | --- |
+| 10-091 | `retired.rs`: every thread-local cell goes through `with_cell` (`try_borrow_mut`); a sweep that finds the frame books busy drops nothing (`close_frame`/`LatestFrames::now`/`see` return `Option`). The sweeper task is held by its `Sweeper` global. |
+| 10-108 | `interface_zoom`: `try_borrow_mut` everywhere; the run state moved to `window_zoom.rs` (file size). |
+| 10-113 | `LimitFocus` deleted: the field takes focus from `window.defer` at open (a test checks it holds focus). |
+| 10-114, 11-017 | dialog bodies are taken from a `Cell`, no `RefCell` (custom box, status time box, block-from-replies box). |
+| 10-119 | `apply_custom_bindings` reads the keymap with `try_borrow` and leaves it alone when it is held. |
+| 11-011 | `location_search_changed(SearchEdit)` is the one transition that opens, edits and closes the search field and the picker's query together (`SearchEdit { Open(input), Text, Close }`); an edit with no field open reaches neither. |
+| 11-012 | `locate_started` puts the picker back to `Locating` when "My location" starts a new lookup. |
+| 11-013 | macOS locate: the replaced `Running` leaves the cell before the native stop calls; other cells use `try_borrow`. |
+| 11-007 | `BoostState<T>`: the hold timer lives in `Armed`, so tick, release, cancel and a stale press drop it. |
+| 11-005 | the window's pause of a looping clip lives in `ViewerClip::Playing { pause }` (`hold_for_window`, `release_window_hold`), so a stopped or replaced clip loses it; `ViewerExtra::loop_pause` is gone. |
+| 11-008 | merged onto the integration shape: `SwipeTimer` on the viewer owns the end-of-swipe task and `closed` drops it. |
+| 11-014 | on the integration shape: `ViewerUi::new_item` and `closed` replace the two hand lists, and both name every field of `ViewerUi`, so a field added later does not compile until it is decided. |
+| 11-016 | the viewer render copies only the item's files and download intents (`FileMap::only`, `DownloadIntents::only`). |
+| 11-006 | merged onto the integration shape: one `SliderDrag` on `VideoControlsState`. |
+| 11-015 | merged onto the integration shape: `ForwardStage::Picking.share_at`. |
+| 11-003, 11-020 | `ChatOverlay::Pressing` (r2-31's one overlay value) owns its timer task; `is_press` and the `Instant` token are gone; a release, a newer press, a menu or `close_peek` drops it. |
+| 11-023 | on the integration shape: `ChatOverlay::RowMenu` is the only chat-row menu owner; `ChatMenuState::kind` (`ChatMenuKind {Row, TopPerson}`) replaces the `top_person` bool. |
+| 11-024 | one `RightPress` stage holds link and item and the task that ends it. |
+| 11-026 | one message menu is open across windows (`close_message_menus_of_other_windows`), so the session's audience and reaction slots belong to it. `wanted_reactor_tab` is taken synchronously by the fetch that follows, so no other window can touch it. |
+| 11-021 | `SetBoxHost {Closed, In(window)}` on the box's own state replaces the per-window `StickerBox` flag. |
+| 11-029 | Save As says "Couldn't start the download" when the send is refused. |
+| 11-025 | a new Block target is not written over a `Submitting` one. |
+| 11-022 | `Delivery {Incoming, Sending, Sent, Read}` replaces `FooterMeta::pending` (baseline line dropped). It is a draw-time mark derived from the message, so its `Sending` and `Sent` are in `stage-enums-allow.txt` with the reason. |
+| 11-036 | closing the dialog or leaving the Saving step forgets the type-save requests. |
+| 11-032 | an account's reply targets, parked replies and photo waits go with it. Parked text is kept across a lock on purpose (existing test). |
+| new-01 | the viewer's saved toast owns its hide timer (`SavedToastStage`, in `saved_toast.rs`), no generation counter. |
+
+Not changed: `NewChatDialog.photo`/`photo_note` (the kept photo and the note about the latest failed pick are independent). The locate poll loop is bounded by its timeout and owned by the `Locate` stage.
 
 ### Sweep fixes (r2-14)
 

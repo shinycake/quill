@@ -47,7 +47,6 @@ bare:GraphFetch::Loading 1
 bare:Health::Running 1
 bare:Kind::Applying 1
 bare:Leg::Pending 1
-bare:LimitFocus::Requested 1
 bare:LinkHandlerState::Checking 1
 bare:LinkStatus::Pending 1
 bare:ListStatus::Loading 1

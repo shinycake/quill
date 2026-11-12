@@ -238,7 +238,7 @@ impl QuillApp {
             .chat_list
             .overlay
             .row_copy()
-            .filter(|menu| menu.top_person)
+            .filter(|menu| menu.kind == crate::ui::menu_states::ChatMenuKind::TopPerson)
             .map(|menu| menu.chat_id);
         let tiles: Vec<Stateful<Div>> = people
             .iter()

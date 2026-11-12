@@ -5,16 +5,31 @@ use super::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
 
+/// What a right-press was over, for the message menu that opens in the same
+/// event. The press owns its end: the task that drops it is held here, so a
+/// press where no menu opened cannot hand its link or item to a later menu
+/// at the same point.
+#[derive(Default)]
+pub(crate) enum RightPress {
+    #[default]
+    None,
+    Pressed {
+        position: Point<Pixels>,
+        link: Option<quill::text::LinkTarget>,
+        item: Option<quill::composer::ReplyItem>,
+        _end: Task<()>,
+    },
+}
+
 pub(crate) struct MessageUi {
     /// M1: right-click context menu target + window position, and what
     /// it was opened over (`message_menu_state`).
     pub(super) menu: super::message_menu_state::MessageMenu,
     /// Page, report and sticker-set dialogs of the message menu's extras.
     pub(super) menu_ui: super::message_menu_ui::MessageMenuUi,
-    /// The link under the latest right-press, and where it was pressed.
-    pub(super) right_clicked_link: Option<(Point<Pixels>, quill::text::LinkTarget)>,
-    /// The task or option under the latest right-press, and where.
-    pub(super) right_clicked_item: Option<(Point<Pixels>, quill::composer::ReplyItem)>,
+    /// What the latest right-press was over (a link, a task or a poll
+    /// option), until the press ends.
+    pub(super) right_press: RightPress,
     /// The "Open this link?" box (`DialogKind::OpenLink`).
     pub(super) open_link_confirm: Option<super::entity_links::OpenLinkConfirm>,
     /// A clicked message entity (mention, hashtag, link…) waiting for
@@ -67,8 +82,7 @@ impl MessageUi {
         Self {
             menu: Default::default(),
             menu_ui: super::message_menu_ui::MessageMenuUi::new(window, cx),
-            right_clicked_link: None,
-            right_clicked_item: None,
+            right_press: RightPress::None,
             open_link_confirm: None,
             pending_link: None,
             selection_drag: Default::default(),

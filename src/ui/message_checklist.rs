@@ -171,10 +171,11 @@ fn checklist_task_row(
         .child(text)
         .on_mouse_down(
             MouseButton::Right,
-            cx.listener(move |this, event: &MouseDownEvent, _, _| {
+            cx.listener(move |this, event: &MouseDownEvent, _, cx| {
                 this.note_right_clicked_item(
                     event.position,
                     quill::composer::ReplyItem::Task(task_id),
+                    cx,
                 );
             }),
         );

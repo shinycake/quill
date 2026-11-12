@@ -256,12 +256,9 @@ impl QuillApp {
             self.toggle_viewer_video(cx);
             return;
         }
+        let now = cx.background_executor().now();
         let was_boosted = self.viewer.controls.boost.is_active();
-        let press = self
-            .viewer
-            .controls
-            .boost
-            .press(cx.background_executor().now());
+        let press = self.viewer.controls.boost.press(now);
         if was_boosted && !self.viewer.controls.boost.is_active() {
             // The last hold's release never came.
             self.restore_viewer_rate(cx);
@@ -280,7 +277,7 @@ impl QuillApp {
                 .await;
             let _ = this.update(cx, |this, cx| this.viewer_boost_tick(cx));
         });
-        self.viewer.controls.boost.arm(timer);
+        self.viewer.controls.boost.arm(now, timer);
     }
 
     /// The hold check: still held after 200 ms plays at 2×.

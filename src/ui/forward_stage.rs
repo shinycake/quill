@@ -345,6 +345,35 @@ mod tests {
     }
 
     #[test]
+    fn share_at_lasts_as_long_as_the_box_and_is_taken_once() {
+        let at = ShareAt {
+            chat_id: ChatId(1),
+            message_id: MessageId(7),
+            secs: 83,
+        };
+        let mut stage = ForwardStage::Selecting(draft());
+        stage.set_share_at(at);
+        assert_eq!(
+            stage.take_share_at(ChatId(1), MessageId(7)),
+            None,
+            "no box is open"
+        );
+        assert!(stage.open_picker());
+        stage.set_share_at(at);
+        assert_eq!(stage.take_share_at(ChatId(1), MessageId(8)), None);
+        assert_eq!(stage.take_share_at(ChatId(1), MessageId(7)), Some(83));
+        assert_eq!(stage.take_share_at(ChatId(1), MessageId(7)), None, "once");
+        stage.set_share_at(at);
+        stage.close_picker();
+        assert!(stage.open_picker());
+        assert_eq!(
+            stage.take_share_at(ChatId(1), MessageId(7)),
+            None,
+            "closing the box dropped it"
+        );
+    }
+
+    #[test]
     fn leaving_the_bars_chat_keeps_the_selection_only() {
         let mut stage = ForwardStage::Picking {
             draft: draft(),

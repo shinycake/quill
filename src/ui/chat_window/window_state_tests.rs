@@ -249,12 +249,11 @@ fn the_sticker_set_box_closes_in_the_window_that_showed_it(cx: &mut TestAppConte
     app.update(cx, |app, cx| {
         app.set_window_scope(None);
         app.in_window_scope(Some(OTHER), cx, |app, _| {
-            app.message_ui.menu_ui.show_sticker_set();
+            app.sticker_box.host =
+                crate::ui::sticker_set_box::state::SetBoxHost::In(app.windows.scope);
         });
         app.close_sticker_set_dialog(cx);
-        let open = app.in_window_scope(Some(OTHER), cx, |app, _| {
-            app.message_ui.menu_ui.sticker_set_open()
-        });
+        let open = app.in_window_scope(Some(OTHER), cx, |app, _| app.sticker_set_open());
         assert_eq!(open, Some(false));
     });
 }
@@ -268,7 +267,8 @@ fn the_report_box_follows_the_session_flow_and_leaves_the_sticker_box(cx: &mut T
     app.update(cx, |app, cx| {
         app.set_window_scope(None);
         app.in_window_scope(Some(OTHER), cx, |app, cx| {
-            app.message_ui.menu_ui.show_sticker_set();
+            app.sticker_box.host =
+                crate::ui::sticker_set_box::state::SetBoxHost::In(app.windows.scope);
             app.open_message_report(OTHER, Vec::new(), cx);
         });
         let shown_in = |app: &mut QuillApp, cx: &mut gpui_kit::Context<QuillApp>, w| {
@@ -288,9 +288,7 @@ fn the_report_box_follows_the_session_flow_and_leaves_the_sticker_box(cx: &mut T
             Some(false),
             "not in the main window"
         );
-        let sticker = app.in_window_scope(Some(OTHER), cx, |app, _| {
-            app.message_ui.menu_ui.sticker_set_open()
-        });
+        let sticker = app.in_window_scope(Some(OTHER), cx, |app, _| app.sticker_set_open());
         assert_eq!(
             sticker,
             Some(true),
@@ -304,9 +302,7 @@ fn the_report_box_follows_the_session_flow_and_leaves_the_sticker_box(cx: &mut T
             session.clear_message_report();
         }
         assert_eq!(shown_in(app, cx, None), Some(false), "the flow ended");
-        let sticker = app.in_window_scope(Some(OTHER), cx, |app, _| {
-            app.message_ui.menu_ui.sticker_set_open()
-        });
+        let sticker = app.in_window_scope(Some(OTHER), cx, |app, _| app.sticker_set_open());
         assert_eq!(sticker, Some(true), "the sticker box is back after Report");
     });
 }

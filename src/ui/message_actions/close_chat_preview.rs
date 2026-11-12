@@ -229,7 +229,7 @@ impl QuillApp {
         menu: ChatMenuState,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        if menu.top_person {
+        if menu.kind == crate::ui::menu_states::ChatMenuKind::TopPerson {
             return self.top_person_menu_overlay(menu, cx);
         }
         let chat_id = menu.chat_id;

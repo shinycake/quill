@@ -438,10 +438,11 @@ pub(super) fn poll_option_row(
     let option_id = option.id.clone();
     row = row.on_mouse_down(
         MouseButton::Right,
-        cx.listener(move |this, event: &MouseDownEvent, _, _| {
+        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
             this.note_right_clicked_item(
                 event.position,
                 quill::composer::ReplyItem::PollOption(option_id.clone()),
+                cx,
             );
         }),
     );

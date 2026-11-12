@@ -34,7 +34,7 @@ mod tests;
 #[cfg(feature = "demo-capture")]
 pub(crate) use fade::cursor_hides;
 pub(crate) use fade::{ControlsFade, hide_cursor};
-pub(crate) use gesture::{SpaceHold, WaitingCheck, WaitingGate};
+pub(crate) use gesture::{WaitingCheck, WaitingGate};
 pub(crate) use live::{
     BADGE_GAP, BAR_HEIGHT, CONTROLS_BG, LiveActions, LiveFacts, LiveKeyAction, VolumeHoverHandler,
     VolumePart, bar_disc, live_badge, live_key_action, live_label, live_pill, live_pill_text_size,
@@ -60,6 +60,7 @@ use metrics::{
     VOLUME_SKIP, VOLUME_WIDTH,
 };
 use quill::lang::{keys, tr};
+use quill::media_viewer::BoostState;
 use std::rc::Rc;
 
 /// The controller's per-viewer state on `ViewerUi`: the slider entities,
@@ -80,9 +81,8 @@ pub(crate) struct VideoControlsState {
     pub(crate) demo_speed_open: bool,
     /// The pointer's fraction over the scrubber while it hovers.
     pub(crate) hover: Option<f32>,
-    /// Space held to play at 2×, with the hold check 200 ms after the key
-    /// went down.
-    pub(crate) boost: SpaceHold,
+    /// Space held to play at 2×; an armed press holds its 200 ms hold check.
+    pub(crate) boost: BoostState<Task<()>>,
     /// The view the controller was last drawn in (the cached viewer slice,
     /// or a chat window), so a hover redraws only that view.
     pub(crate) panel_view: Option<EntityId>,

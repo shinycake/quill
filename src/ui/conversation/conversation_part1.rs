@@ -203,7 +203,7 @@ impl QuillApp {
                         })
                         .when(
                             show_attach && !self.pending_attachments().is_empty(),
-                            |this| this.child(self.composer_attachment_tray(cx)),
+                            |this| this.child(self.send_card(cx)),
                         )
                         .when_some(self.chat_ui.forward_result.clone(), |this, result| {
                             this.child(self.forward_success_banner(&result, cx))
@@ -281,8 +281,8 @@ impl QuillApp {
                         .when_some(self.paid_messages_notice(cx), |this, row| this.child(row))
                         .when_some(self.composer_options_row(cx), |this, row| this.child(row))
                         // MED4: detected-URL chip (send-time preview
-                        // control) and caption bar ("Add a caption…",
-                        // above/below toggle, n / max counter).
+                        // control) and caption bar (above/below toggle
+                        // while editing a caption, n / max counter).
                         .when_some(self.preview_chip(cx), |this, chip| this.child(chip))
                         .when_some(self.edit_replacement_chip(cx), |this, chip| {
                             this.child(chip)

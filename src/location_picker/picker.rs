@@ -374,6 +374,12 @@ impl LocationPicker {
         self.address.ever_shown = true;
     }
 
+    /// A new "where am I" lookup began: the picker is locating again until
+    /// [`Self::geolocated`] answers it.
+    pub(super) fn locate_started(&mut self) {
+        self.here = HereState::Locating;
+    }
+
     /// tdesktop `resolveCurrentLocation`'s callback. A new exact fix flies
     /// the map there and looks around it; anything else leaves the list
     /// waiting for the user to choose a place.

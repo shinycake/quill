@@ -275,6 +275,7 @@
 "qll_chat_downloading_1_file" = "Downloading 1 file…";
 "qll_chat_downloading_choose_save_again_when" = "Downloading… choose Save again when it finishes";
 "qll_chat_downloading_choose_save_as_again" = "Downloading… choose Save As again when it finishes";
+"qll_chat_could_not_start_the_download" = "Couldn't start the download";
 "qll_chat_downloading_files#one" = "downloading {count} file…";
 "qll_chat_downloading_files#other" = "downloading {count} files…";
 "qll_chat_drop_a_single_file_to" = "Drop a single file to replace the attachment.";
@@ -424,7 +425,9 @@
 "qll_chat_read_all_reactions" = "Read all reactions";
 "qll_chat_received_gifts" = "Received gifts";
 "qll_chat_recent" = "Recent";
+"qll_chat_more" = "More";
 "qll_chat_remember_choice" = "Remember choice";
+"qll_chat_remove_attachment" = "Remove {name}";
 "qll_chat_reminder" = "Reminder";
 "qll_chat_remove_all" = "Remove all";
 "qll_chat_remove_all_disable" = "Remove all & Disable";
@@ -503,8 +506,11 @@
 "qll_chat_self_destruct_view_once" = "Self-destruct: view once";
 "qll_chat_send_a_gift" = "Send a gift";
 "qll_chat_send_as_album" = "Send as album";
+"qll_chat_send_options" = "Send options";
+"qll_chat_send_separately" = "Separate messages";
 "qll_chat_send_with_sound" = "Send with sound";
 "qll_chat_send_without_compression" = "Send without compression";
+"qll_chat_turn_off_option" = "Turn off: {option}";
 "qll_chat_sending" = "sending…";
 "qll_chat_sending_gif" = "Sending GIF";
 "qll_chat_shared_media" = "Shared media";

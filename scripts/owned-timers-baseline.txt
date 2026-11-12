@@ -2,7 +2,6 @@
 # <rule>:<Type::function> <count>. Only remove lines or lower counts.
 detached:AgentBridge::new 1
 detached:QuillApp::agent_driver_start 1
-detached:QuillApp::begin_chat_preview_press 1
 detached:QuillApp::bot_username_changed 1
 detached:QuillApp::ensure_self_destruct_tick 1
 detached:QuillApp::new_chatbot_draft 1
@@ -14,7 +13,6 @@ detached:QuillApp::start_update_checks 1
 detached:hide_main_window 1
 detached:run_screenshot_demo 2
 detached:spawn_menu_sync 1
-detached:start_sweeper 1
 detached:watch_closed_windows 2
 detached:watch_saver 1
 poll:QuillApp::arm_stream_hide_timer 1

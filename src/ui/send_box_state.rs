@@ -114,6 +114,13 @@ pub(crate) struct TrayReads {
     /// (`send_box_media_check.rs`), with the job that reads each.
     pub(super) media: Reads<super::send_box_media_check::MediaCheck>,
     pub(super) media_check_jobs: u64,
+    /// The first frame and length of tray videos (`send_card/video_preview.rs`).
+    pub(super) previews: Reads<super::send_card::VideoPreview>,
+    pub(super) preview_jobs: u64,
+    /// Bytes of tray files for the file rows (`send_card/file_size.rs`);
+    /// `None` when the file could not be read.
+    pub(super) file_sizes: Reads<Option<u64>>,
+    pub(super) file_size_jobs: u64,
 }
 
 /// What reading the header of the picture a tray photo goes out as found:
@@ -135,6 +142,11 @@ impl TrayReads {
             self.sound.forget(path);
             self.thumbnails.forget(path);
             self.media.forget(path);
+            if let Some(preview) = self.previews.done(path) {
+                super::send_card::discard_preview(preview);
+            }
+            self.previews.forget(path);
+            self.file_sizes.forget(path);
         }
     }
 }

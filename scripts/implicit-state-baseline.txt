@@ -12,7 +12,6 @@ AppearancePrefs::ignore_battery_saving
 
 DestRow::saved
 
-FooterMeta::pending
 
 GiveawaySummary::finished
 

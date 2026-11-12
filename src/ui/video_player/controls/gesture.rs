@@ -1,70 +1,11 @@
-//! The controller's key gestures, each one value: the Space hold with its timer, and the stall delay with its
-//! timer. A timer lives inside the stage that needs it, so a stage that
-//! ends takes its timer with it and nothing clears the timer by hand.
+//! The controller's stall delay, one value with its timer. The timer lives
+//! inside the stage that needs it, so a stage that ends takes its timer
+//! with it and nothing clears the timer by hand. (The Space hold is
+//! `quill::media_viewer::BoostState`, which holds its timer the same way.)
 
 use gpui_kit::Task;
-use quill::media_viewer::{BoostPress, BoostRelease, BoostState, waiting_wait};
+use quill::media_viewer::waiting_wait;
 use std::time::{Duration, Instant};
-
-/// Space held to play at 2×: the press state and the check that fires
-/// [`SPEED_BOOST_HOLD_MS`](quill::media_viewer::SPEED_BOOST_HOLD_MS) after
-/// the key went down. The timer is kept only while the press waits for it
-/// (`Armed`); every move out of that stage drops it.
-#[derive(Default)]
-pub(crate) struct SpaceHold {
-    state: BoostState,
-    timer: Option<Task<()>>,
-}
-
-impl SpaceHold {
-    /// Whatever left the armed stage no longer needs its timer.
-    fn settle(&mut self) {
-        if !matches!(self.state, BoostState::Armed { .. }) {
-            self.timer = None;
-        }
-    }
-
-    pub(crate) fn press(&mut self, now: Instant) -> BoostPress {
-        let press = self.state.press(now);
-        self.settle();
-        press
-    }
-
-    /// Keep the check that fires when the hold delay is up; dropped at once
-    /// if no press waits for it.
-    pub(crate) fn arm(&mut self, timer: Task<()>) {
-        self.timer = Some(timer);
-        self.settle();
-    }
-
-    pub(crate) fn tick(&mut self, now: Instant) -> bool {
-        let started = self.state.tick(now);
-        self.settle();
-        started
-    }
-
-    pub(crate) fn release(&mut self) -> BoostRelease {
-        let release = self.state.release();
-        self.settle();
-        release
-    }
-
-    /// Forget the press; `true` when a boost was on.
-    pub(crate) fn cancel(&mut self) -> bool {
-        let was_on = self.state.cancel();
-        self.settle();
-        was_on
-    }
-
-    pub(crate) fn is_active(&self) -> bool {
-        self.state.is_active()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn holds_timer(&self) -> bool {
-        self.timer.is_some()
-    }
-}
 
 /// The delay before a stall shows its spinner (tdesktop
 /// `kWaitingShowDelay`): the stage remembers when waiting began and holds
@@ -137,34 +78,12 @@ impl WaitingGate {
 
 #[cfg(test)]
 mod tests {
-    use super::{SpaceHold, WaitingCheck, WaitingGate};
+    use super::{WaitingCheck, WaitingGate};
     use gpui_kit::Task;
     use std::time::{Duration, Instant};
 
     fn ms(base: Instant, n: u64) -> Instant {
         base + Duration::from_millis(n)
-    }
-
-    #[test]
-    fn the_hold_timer_lives_only_while_the_press_waits_for_it() {
-        let t0 = Instant::now();
-        let mut hold = SpaceHold::default();
-        hold.arm(Task::ready(()));
-        assert!(!hold.holds_timer(), "no press waits for it");
-        hold.press(t0);
-        hold.arm(Task::ready(()));
-        assert!(hold.holds_timer());
-        assert!(hold.tick(ms(t0, 250)), "the hold starts the boost");
-        assert!(!hold.holds_timer(), "the stage ended with the timer");
-        hold.press(ms(t0, 300));
-        assert!(!hold.holds_timer());
-        hold.arm(Task::ready(()));
-        assert!(hold.cancel(), "a running boost ends");
-        assert!(!hold.holds_timer());
-        hold.press(ms(t0, 400));
-        hold.arm(Task::ready(()));
-        hold.release();
-        assert!(!hold.holds_timer(), "a tap drops the check");
     }
 
     #[test]

@@ -24,10 +24,11 @@ pub(crate) struct PinDrag {
 
 /// What floats over the chat list: a context menu (a chat row's, or the
 /// "Archived chats" row's), or the peek preview of a row (a long press in
-/// progress, with the row's chat and when it went down so the timer that
-/// opens it can tell it is still the same press, or the open panel). One
-/// value: opening one replaces the other, and a close ends only its own.
-#[derive(Clone, Copy, Default, PartialEq)]
+/// progress, with the row's chat and the timer that opens the panel, or the
+/// open panel). One value: opening one replaces the other, and a close ends
+/// only its own. The press owns its timer, so a release, a newer press, a
+/// menu or a close drops it.
+#[derive(Default)]
 pub(crate) enum ChatOverlay {
     #[default]
     None,
@@ -38,9 +39,11 @@ pub(crate) enum ChatOverlay {
     /// A press on a row; `over` is the panel still showing under it (a new
     /// press leaves an open panel until its own opens).
     Pressing {
+        /// The row the press went down on (tests read it).
+        #[allow(dead_code, reason = "read by tests through `pressing`")]
         chat: ChatId,
-        started: Instant,
         over: Option<ChatPreviewState>,
+        _timer: Task<()>,
     },
     Peek(ChatPreviewState),
 }
@@ -113,18 +116,12 @@ impl ChatOverlay {
     }
 
     /// A new press on `chat`; an open panel stays under it, a menu goes.
-    pub(super) fn press(&mut self, chat: ChatId, started: Instant) {
+    pub(super) fn press(&mut self, chat: ChatId, timer: Task<()>) {
         *self = Self::Pressing {
             chat,
-            started,
             over: self.peek(),
+            _timer: timer,
         };
-    }
-
-    /// Whether this is still the press `press` started (no release, no
-    /// newer press).
-    pub(super) fn is_press(&self, chat: ChatId, started: Instant) -> bool {
-        matches!(*self, Self::Pressing { chat: c, started: s, .. } if c == chat && s == started)
     }
 
     /// The chat being long-pressed, if a press is in progress.
@@ -437,9 +434,8 @@ mod tests {
 
     #[core::prelude::v1::test]
     fn a_release_ends_a_press_but_leaves_an_open_peek() {
-        let started = Instant::now();
         let mut peek = ChatOverlay::None;
-        peek.press(ChatId(5), started);
+        peek.press(ChatId(5), Task::ready(()));
         assert_eq!(peek.pressing(), Some(ChatId(5)));
         peek.cancel_press();
         assert!(peek.peek_idle());
@@ -451,7 +447,7 @@ mod tests {
         assert!(peek.peek().is_some(), "an open panel stays");
         assert!(!peek.peek_idle());
         // A new press leaves the open panel under it; its release restores it.
-        peek.press(ChatId(6), started);
+        peek.press(ChatId(6), Task::ready(()));
         assert!(peek.peek().is_some() && peek.pressing() == Some(ChatId(6)));
         peek.cancel_press();
         assert!(matches!(peek, ChatOverlay::Peek(_)));
@@ -477,7 +473,7 @@ mod tests {
         overlay.open_archive(Point::default());
         assert!(overlay.peek().is_none() && overlay.archive().is_some());
         assert!(overlay.row().is_none(), "one menu at a time");
-        overlay.press(ChatId(3), Instant::now());
+        overlay.press(ChatId(3), Task::ready(()));
         assert!(!overlay.menu_open(), "a press ends a menu");
         overlay.open_row(menu);
         overlay.cancel_press();

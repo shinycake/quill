@@ -17,19 +17,9 @@ impl QuillApp {
         &mut self,
         position: Point<Pixels>,
         item: ReplyItem,
+        cx: &mut Context<Self>,
     ) {
-        self.message_ui.right_clicked_item = Some((position, item));
-    }
-
-    /// The task or option under the right-click that opened a menu at
-    /// `position`; the whole message when there is none.
-    pub(in crate::ui) fn take_right_clicked_item(&mut self, position: Point<Pixels>) -> ReplyItem {
-        self.message_ui
-            .right_clicked_item
-            .take()
-            .filter(|(at, _)| *at == position)
-            .map(|(_, item)| item)
-            .unwrap_or_default()
+        self.note_right_press(position, None, Some(item), cx);
     }
 
     /// The menu is over a task of this checklist: Reply is "Reply to Task"

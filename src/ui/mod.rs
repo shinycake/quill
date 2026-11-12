@@ -554,6 +554,7 @@ mod send_box_state;
 mod send_box_tests;
 mod send_box_thumbnails;
 mod send_button_ui;
+mod send_card;
 mod send_effects;
 mod send_fly;
 mod send_limits;
