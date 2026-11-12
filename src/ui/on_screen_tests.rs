@@ -280,7 +280,11 @@ fn the_search_farewell_closes_a_chat_search_still_typing(cx: &mut TestAppContext
         let search = &mut session.search.chat_search;
         search.open_for(quill::ids::ChatId(11));
         search.begin_query("hello");
-        assert_eq!(search.status(), SearchStatus::Searching, "in the quiet window");
+        assert_eq!(
+            search.status(),
+            SearchStatus::Searching,
+            "in the quiet window"
+        );
     });
     // The screen's own farewell, not the chat's leave that a switch also
     // runs, ends it.
