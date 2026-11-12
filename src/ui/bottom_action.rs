@@ -287,7 +287,7 @@ fn bar_restart_wait<E>(
 #[cfg(test)]
 mod restart_wait_tests {
     use super::{BotRestart, bar_restart_wait, send_unblock};
-    use crate::ui::driver_fixture::driver_with;
+    use crate::ui::auth_state::driver_fixture::driver_with;
     use quill::ids::{ChatId, RequestId};
     use quill::state::{Answer, RequestAcks};
 

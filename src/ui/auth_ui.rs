@@ -22,15 +22,16 @@ impl QuillApp {
         ) -> Result<quill::ids::RequestId, E>,
     ) -> Option<Result<quill::ids::RequestId, E>> {
         let live = self.live.as_mut()?;
+        let screen = self.screen.epoch;
         let busy = self
             .screen
             .auth_ui
             .submit
-            .is_out(&live.driver.session.requests);
+            .is_out(&live.driver.session.requests, screen);
         self.screen
             .auth_ui
             .submit
-            .send(busy, || send(&mut live.driver))
+            .send(busy, screen, || send(&mut live.driver))
     }
 
     /// A sign-in submit is out: Enter in a field must not send a second one
@@ -38,7 +39,11 @@ impl QuillApp {
     pub(super) fn auth_submit_busy(&self) -> bool {
         self.live
             .as_ref()
-            .is_some_and(|live| self.auth_ui.submit.is_out(&live.driver.session.requests))
+            .is_some_and(|live| {
+                self.auth_ui
+                    .submit
+                    .is_out(&live.driver.session.requests, self.screen.epoch)
+            })
     }
 
     pub(super) fn cycle_auth(&mut self, cx: &mut Context<Self>) {
@@ -74,7 +79,7 @@ impl QuillApp {
         };
         let mut email = self.screen.auth_ui.email_input.read(cx).value().to_string();
         let result = live.driver.submit_email(&email);
-        self.screen.auth_ui.submit.sent(&result);
+        self.screen.auth_ui.submit.sent(&result, self.screen.epoch);
         email.zeroize();
         // The field keeps the address until the step is done: a rejected
         // one is corrected, not retyped (`sync_auth_forms` clears it).
@@ -94,7 +99,10 @@ impl QuillApp {
         self.screen
             .auth_ui
             .submit
-            .settle(self.live.as_ref().map(|live| &live.driver.session.requests));
+            .settle(
+                self.live.as_ref().map(|live| &live.driver.session.requests),
+                self.screen.epoch,
+            );
         let ui = &self.screen.auth_ui;
         if !matches!(auth, AuthorizationState::WaitEmailAddress) {
             let email = ui.email_input.clone();
@@ -156,7 +164,7 @@ impl QuillApp {
             return;
         };
         let result = live.driver.submit_phone(&number);
-        self.screen.auth_ui.submit.sent(&result);
+        self.screen.auth_ui.submit.sent(&result, self.screen.epoch);
         match result {
             Ok(request) => {
                 live.driver.session.acks.expect(request);
@@ -197,7 +205,7 @@ impl QuillApp {
         }
         let mut code = self.screen.auth_ui.code_input.read(cx).value().to_string();
         let result = live.driver.submit_code(&code);
-        self.screen.auth_ui.submit.sent(&result);
+        self.screen.auth_ui.submit.sent(&result, self.screen.epoch);
         code.zeroize();
         match result {
             // The field keeps the code until the step is done: a rejected
@@ -234,7 +242,7 @@ impl QuillApp {
             .value()
             .to_string();
         let result = live.driver.submit_password(&password);
-        self.screen.auth_ui.submit.sent(&result);
+        self.screen.auth_ui.submit.sent(&result, self.screen.epoch);
         password.zeroize();
         match result {
             Ok(_) => {
@@ -269,7 +277,7 @@ impl QuillApp {
             return;
         }
         let result = live.driver.resend_code();
-        self.screen.auth_ui.submit.sent(&result);
+        self.screen.auth_ui.submit.sent(&result, self.screen.epoch);
         match result {
             Ok(_) => {
                 self.auth_ui.signin.step_clock.restart_code();
@@ -292,7 +300,7 @@ impl QuillApp {
             return;
         };
         let result = live.driver.request_qr_login();
-        self.screen.auth_ui.submit.sent(&result);
+        self.screen.auth_ui.submit.sent(&result, self.screen.epoch);
         match result {
             Ok(_) => {
                 self.set_note(StatusNote::silent(tr(keys::Q_NOTES_QR_LOGIN_REQUESTED)));

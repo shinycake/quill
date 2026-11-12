@@ -278,7 +278,7 @@ fn refusal_key(kind: BarKind) -> quill::lang::Key {
 mod tests {
     // No `use super::*`: the kit's glob brings its own `test` attribute.
     use super::{BarEnd, BarKind, BarWork, BlockPlan, Started};
-    use crate::ui::driver_fixture::{driver_with, sent_types};
+    use crate::ui::auth_state::driver_fixture::{driver_with, sent_types};
     use quill::connect::{ConnectDriver, RecordingSender};
     use quill::ids::{ChatId, RequestId};
     use quill::state::{Answer, RequestAcks};

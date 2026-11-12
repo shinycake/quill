@@ -539,10 +539,6 @@ impl QuillApp {
             "a client is put on screen before the last one's goodbyes ran"
         );
         self.screen.client = ScreenClient::Filled;
-        // A form left on screen across the restart (no main window to
-        // build a fresh one) holds no request of the old client: the new
-        // client numbers its requests from the start again.
-        self.screen.auth_ui.submit.new_client();
         // The private media scratch is this account's from here on.
         quill::local_path::set_media_cache_scope(&live.driver.session.account);
         quill::telegram::name_accent::set_active_account(&live.driver.session.account);

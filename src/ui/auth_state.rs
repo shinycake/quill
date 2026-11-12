@@ -70,31 +70,47 @@ macro_rules! submit_on_enter {
 /// one is out sends nothing ([`Self::send`]). The session is the one that
 /// knows when it is answered: the submit is out while its own request is
 /// still in the session's table, so another account's request, or an older
-/// one, never reads as this one.
+/// one, never reads as this one. The request numbers restart with a new
+/// client, so the stage also holds the screen it was sent from: an `Out` of
+/// another screen is no submit of this one.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AuthSubmit {
     #[default]
     Idle,
     Out {
         request: quill::ids::RequestId,
+        screen: super::on_screen::ScreenEpoch,
     },
 }
 
 impl AuthSubmit {
-    /// The submit's request is still unanswered in `requests`.
-    pub(super) fn is_out(self, requests: &quill::state::RequestRegistry) -> bool {
+    /// The submit's request is still unanswered in `requests`, and was
+    /// sent from the screen `screen` that is on now.
+    pub(super) fn is_out(
+        self,
+        requests: &quill::state::RequestRegistry,
+        screen: super::on_screen::ScreenEpoch,
+    ) -> bool {
         match self {
             Self::Idle => false,
-            Self::Out { request } => requests.get(request).is_some(),
+            Self::Out {
+                request,
+                screen: sent_from,
+            } => sent_from == screen && requests.get(request).is_some(),
         }
     }
 
     /// The stage after a look at the session's table: an answered request,
-    /// or no session at all, ends it, so an id never outlives its session
-    /// and never reads as an unrelated request of the next one.
-    pub(super) fn settle(&mut self, requests: Option<&quill::state::RequestRegistry>) {
-        if let Self::Out { request } = *self
-            && requests.is_none_or(|requests| requests.get(request).is_none())
+    /// a request of another screen, or no session at all, ends it, so an id
+    /// never outlives its session and never reads as an unrelated request of
+    /// the next one.
+    pub(super) fn settle(
+        &mut self,
+        requests: Option<&quill::state::RequestRegistry>,
+        screen: super::on_screen::ScreenEpoch,
+    ) {
+        if let Self::Out { .. } = *self
+            && !requests.is_some_and(|requests| self.is_out(requests, screen))
         {
             *self = Self::Idle;
         }
@@ -106,26 +122,29 @@ impl AuthSubmit {
     pub(super) fn send<E>(
         &mut self,
         busy: bool,
+        screen: super::on_screen::ScreenEpoch,
         send: impl FnOnce() -> Result<quill::ids::RequestId, E>,
     ) -> Option<Result<quill::ids::RequestId, E>> {
         if busy {
             return None;
         }
         let result = send();
-        self.sent(&result);
+        self.sent(&result, screen);
         Some(result)
     }
 
-    /// A new client is on screen: no request of an older one is out.
-    pub(super) fn new_client(&mut self) {
-        *self = Self::Idle;
-    }
-
-    /// A send that went out holds its request; a refused one leaves the
-    /// stage as it was.
-    pub(super) fn sent<E>(&mut self, result: &Result<quill::ids::RequestId, E>) {
+    /// A send that went out holds its request and its screen; a refused one
+    /// leaves the stage as it was.
+    pub(super) fn sent<E>(
+        &mut self,
+        result: &Result<quill::ids::RequestId, E>,
+        screen: super::on_screen::ScreenEpoch,
+    ) {
         if let Ok(request) = result {
-            *self = Self::Out { request: *request };
+            *self = Self::Out {
+                request: *request,
+                screen,
+            };
         }
     }
 }
@@ -293,10 +312,21 @@ impl AuthDemo {
     }
 }
 
+/// The recording driver the sign-in, bottom-action and report tests send
+/// through; test-only, declared here so the shared module list stays as is.
+#[cfg(test)]
+#[path = "driver_fixture.rs"]
+pub(in crate::ui) mod driver_fixture;
+
 #[cfg(test)]
 mod submit_tests {
     use super::AuthSubmit;
+    use crate::ui::on_screen::ScreenEpoch;
     use quill::state::{RequestPurpose, RequestRegistry};
+
+    fn screen() -> ScreenEpoch {
+        ScreenEpoch::default()
+    }
 
     fn registry_with_reset() -> (RequestRegistry, quill::ids::RequestId) {
         let mut registry = RequestRegistry::default();
@@ -314,11 +344,11 @@ mod submit_tests {
     fn a_sent_reset_holds_the_submit_busy_until_answered() {
         let (mut registry, id) = registry_with_reset();
         let mut submit = AuthSubmit::Idle;
-        submit.sent::<()>(&Ok(id));
-        assert!(submit.is_out(&registry));
+        submit.sent::<()>(&Ok(id), screen());
+        assert!(submit.is_out(&registry, screen()));
         registry.take(id);
-        submit.settle(Some(&registry));
-        assert!(!submit.is_out(&registry));
+        submit.settle(Some(&registry), screen());
+        assert!(!submit.is_out(&registry, screen()));
         assert_eq!(submit, AuthSubmit::Idle, "the answer ends the stage");
     }
 
@@ -328,7 +358,7 @@ mod submit_tests {
         quill::connect::ConnectDriver<std::sync::Arc<quill::connect::RecordingSender>>,
         std::sync::Arc<quill::connect::RecordingSender>,
     ) {
-        crate::ui::driver_fixture::driver_with(&[format!(
+        crate::ui::auth_state::driver_fixture::driver_with(&[format!(
             r#"{{"@type":"updateAuthorizationState","authorization_state":{auth}}}"#
         )])
     }
@@ -343,16 +373,16 @@ mod submit_tests {
         let before = recorder.snapshot().len();
         let mut submit = AuthSubmit::Idle;
         let busy = |submit: AuthSubmit, driver: &quill::connect::ConnectDriver<_>| {
-            submit.is_out(&driver.session.requests)
+            submit.is_out(&driver.session.requests, screen())
         };
         assert!(!busy(submit, &driver));
-        let first = submit.send(false, || driver.reset_login_email());
+        let first = submit.send(false, screen(), || driver.reset_login_email());
         assert!(matches!(first, Some(Ok(_))), "it went out");
         assert!(busy(submit, &driver), "the submit is out");
-        let second = submit.send(busy(submit, &driver), || driver.reset_login_email());
+        let second = submit.send(busy(submit, &driver), screen(), || driver.reset_login_email());
         assert!(second.is_none(), "a second press sends nothing");
         assert_eq!(
-            crate::ui::driver_fixture::sent_types(&recorder, before).len(),
+            crate::ui::auth_state::driver_fixture::sent_types(&recorder, before).len(),
             1
         );
     }
@@ -366,33 +396,51 @@ mod submit_tests {
         );
         let before = recorder.snapshot().len();
         let mut submit = AuthSubmit::Idle;
-        let first = submit.send(false, || driver.request_password_recovery());
+        let first = submit.send(false, screen(), || driver.request_password_recovery());
         let Some(Ok(request)) = first else {
             panic!("the request went out: {first:?}");
         };
-        assert_eq!(submit, AuthSubmit::Out { request });
-        let busy = submit.is_out(&driver.session.requests);
+        assert_eq!(
+            submit,
+            AuthSubmit::Out {
+                request,
+                screen: screen()
+            }
+        );
+        let busy = submit.is_out(&driver.session.requests, screen());
         assert!(
             submit
-                .send(busy, || driver.request_password_recovery())
+                .send(busy, screen(), || driver.request_password_recovery())
                 .is_none()
         );
-        assert_eq!(submit, AuthSubmit::Out { request }, "still the first");
         assert_eq!(
-            crate::ui::driver_fixture::sent_types(&recorder, before).len(),
+            submit,
+            AuthSubmit::Out {
+                request,
+                screen: screen()
+            },
+            "still the first"
+        );
+        assert_eq!(
+            crate::ui::auth_state::driver_fixture::sent_types(&recorder, before).len(),
             1
         );
     }
 
-    /// A new client on screen starts with no submit out: the old client's
-    /// request number would match the new one's.
+    /// The request numbers restart with a new client: an `Out` sent from
+    /// another screen is no submit of this one, though its number is still
+    /// in the table (it names the new client's request).
     #[test]
-    fn a_new_client_holds_no_old_request() {
+    fn a_submit_of_another_screen_is_not_out() {
+        let (registry, id) = registry_with_reset();
         let mut submit = AuthSubmit::Out {
-            request: quill::ids::RequestId(4),
+            request: id,
+            screen: screen(),
         };
-        submit.new_client();
-        assert_eq!(submit, AuthSubmit::Idle);
+        assert!(submit.is_out(&registry, screen()));
+        assert!(!submit.is_out(&registry, screen().next()));
+        submit.settle(Some(&registry), screen().next());
+        assert_eq!(submit, AuthSubmit::Idle, "the next screen's look ends it");
     }
 
     /// A refused send leaves the stage as it was.
@@ -400,8 +448,8 @@ mod submit_tests {
     fn a_refused_send_holds_nothing() {
         let (registry, _) = registry_with_reset();
         let mut submit = AuthSubmit::Idle;
-        submit.sent(&Err::<quill::ids::RequestId, ()>(()));
-        assert!(!submit.is_out(&registry));
+        submit.sent(&Err::<quill::ids::RequestId, ()>(()), screen());
+        assert!(!submit.is_out(&registry, screen()));
     }
 
     /// A replaced session ends the stage, so an old id never matches an
@@ -409,9 +457,12 @@ mod submit_tests {
     #[test]
     fn a_replaced_session_ends_the_stage() {
         let (registry, id) = registry_with_reset();
-        let mut submit = AuthSubmit::Out { request: id };
-        submit.settle(None);
+        let mut submit = AuthSubmit::Out {
+            request: id,
+            screen: screen(),
+        };
+        submit.settle(None, screen());
         assert_eq!(submit, AuthSubmit::Idle);
-        assert!(!submit.is_out(&registry));
+        assert!(!submit.is_out(&registry, screen()));
     }
 }

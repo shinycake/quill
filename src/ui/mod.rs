@@ -76,8 +76,6 @@ mod demo_state;
 mod dialog_image_cache;
 mod dialogs_state;
 mod display_events;
-#[cfg(test)]
-mod driver_fixture;
 mod earn;
 mod earn_state;
 mod editor_art;
