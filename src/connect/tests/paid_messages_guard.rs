@@ -115,6 +115,41 @@ fn a_remembered_price_is_stored_and_lets_sends_through() {
 }
 
 #[test]
+fn a_trusted_price_whose_write_failed_is_written_again_after_the_wait() {
+    use crate::paid_messages::TRUST_RETRY_MS;
+    let mut f = fixture();
+    paid_chat(&mut f, 10);
+    // A directory where the file goes: the write fails.
+    let file = f.1.paths.root.join("paid_trust.json");
+    std::fs::create_dir_all(&file).unwrap();
+    f.1.remember_paid_trust(ChatId(600), 10);
+    let paid = &f.1.session.payments.paid_messages;
+    assert!(paid.trust_save_error().is_some(), "the write failed");
+    // Not before the wait is over.
+    f.1.paid_trust_tick(crate::state::unix_ms_now());
+    assert!(
+        f.1.session
+            .payments
+            .paid_messages
+            .trust_save_error()
+            .is_some()
+    );
+    // The disk is fine again: the next tick after the wait writes it.
+    std::fs::remove_dir_all(&file).unwrap();
+    f.1.paid_trust_tick(crate::state::unix_ms_now() + TRUST_RETRY_MS + 1_000);
+    assert!(
+        f.1.session
+            .payments
+            .paid_messages
+            .trust_save_error()
+            .is_none()
+    );
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(PaidTrust::from_json(&text).is_trusted(600, 10));
+    cleanup(f);
+}
+
+#[test]
 fn a_paid_supergroup_gates_and_holds_like_a_user() {
     let mut f = fixture();
     ingest(
