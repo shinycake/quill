@@ -168,17 +168,20 @@ impl<S: JsonSender> ConnectDriver<S> {
             .data()
             .map(|list| list.len())
             .unwrap_or(0);
-        if offset == 0 {
-            self.session.settings.restart_blocked_list();
-        }
-        self.session.settings.blocked_senders.begin();
         let extra = self.session.request(
             RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders {
                 offset: offset as i32,
-                generation: self.session.settings.blocked_generation,
             }),
             None,
         );
+        let list = &mut self.session.settings.blocked_senders;
+        if offset == 0 {
+            // A list that starts over: the page of the one before no longer
+            // matches the fetch.
+            *list = crate::state::fetch::Fetch::Idle;
+        }
+        list.begin();
+        list.sent(extra);
         if let Err(err) =
             self.sender
                 .send_json(&get_blocked_message_senders(extra, offset as i32, 100))

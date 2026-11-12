@@ -5,7 +5,6 @@ use crate::business_bots::{self as bots, ConnectedBot};
 use crate::business_chat_links as links;
 use crate::business_settings::BusinessSettingKind;
 use crate::ids::RequestId;
-use crate::state::fetch::Fetch;
 use crate::state::{
     BotLookup, BotLookupPart, ChatLinkOp, RequestPurpose, RequestRollback, SettingsPurpose,
 };
@@ -237,63 +236,48 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// exact username, own chats and global results. An invalid query
     /// clears the lookup.
     pub fn lookup_business_bot(&mut self, text: &str) -> Result<(), ConnectSendError> {
-        let generation = self
-            .session
-            .settings
-            .business_extra
-            .lookup
-            .generation
-            .wrapping_add(1);
         let Some(query) = bots::parse_username_query(text) else {
-            self.session.settings.business_extra.lookup = BotLookup {
-                generation,
-                ..BotLookup::default()
-            };
+            self.session.settings.business_extra.lookup = BotLookup::default();
             return Ok(());
         };
         let lookup = &self.session.settings.business_extra.lookup;
         if lookup.query == query && lookup.error().is_none() {
             return Ok(());
         }
+        // A new lookup replaces the three fetches: the old lookup's answers
+        // find other requests there and drop.
         self.session.settings.business_extra.lookup = BotLookup {
-            generation,
             query: query.clone(),
-            exact: Fetch::Loading {
-                stale: None,
-                request: None,
-            },
-            mine: Fetch::Loading {
-                stale: None,
-                request: None,
-            },
-            global: Fetch::Loading {
-                stale: None,
-                request: None,
-            },
+            ..BotLookup::default()
         };
-        let part = |part| SettingsPurpose::LookupBusinessBot { generation, part };
+        let part = |part| SettingsPurpose::LookupBusinessBot { part };
         let sent = self
             .send_business_extra(part(BotLookupPart::Exact), |extra| {
                 bots::search_public_chat_request(extra, &query)
             })
             .and_then(|id| {
-                self.session.settings.business_extra.lookup.exact.sent(id);
+                let exact = &mut self.session.settings.business_extra.lookup.exact;
+                exact.begin();
+                exact.sent(id);
                 self.send_business_extra(part(BotLookupPart::Mine), |extra| {
                     bots::search_bots_on_server_request(extra, &query)
                 })
             })
             .and_then(|id| {
-                self.session.settings.business_extra.lookup.mine.sent(id);
+                let mine = &mut self.session.settings.business_extra.lookup.mine;
+                mine.begin();
+                mine.sent(id);
                 self.send_business_extra(part(BotLookupPart::Global), |extra| {
                     bots::search_public_bots_request(extra, &query)
                 })
             })
-            .map(|id| self.session.settings.business_extra.lookup.global.sent(id));
+            .map(|id| {
+                let global = &mut self.session.settings.business_extra.lookup.global;
+                global.begin();
+                global.sent(id);
+            });
         if sent.is_err() {
-            self.session.settings.business_extra.lookup = BotLookup {
-                generation: generation.wrapping_add(1),
-                ..BotLookup::default()
-            };
+            self.session.settings.business_extra.lookup = BotLookup::default();
         }
         sent
     }

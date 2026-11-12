@@ -42,7 +42,6 @@ pub enum ChatLinkAnswer {
 /// The bot lookup of the chatbots screen for one typed username.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BotLookup {
-    pub generation: u32,
     pub query: String,
     /// `Ready(None)` when nothing matched; a refused search is `Failed`,
     /// not an empty result.
@@ -200,20 +199,19 @@ impl Session {
         pending: Option<&PendingRequest>,
     ) -> bool {
         let Some(RequestPurpose::Settings(SettingsPurpose::LookupBusinessBot {
-            generation,
             part: BotLookupPart::Exact,
         })) = pending.map(|p| p.purpose)
         else {
             return false;
         };
         let lookup = &mut self.settings.business_extra.lookup;
-        if lookup.generation == generation {
-            let found = match kind {
-                ChatKind::Private { user_id } => Some(user_id.0),
-                _ => None,
-            };
-            lookup.exact.answered(pending.map(|p| p.id), found);
-        }
+        let found = match kind {
+            ChatKind::Private { user_id } => Some(user_id.0),
+            _ => None,
+        };
+        // Only the request the lookup waits for lands; an older lookup's
+        // answer finds another request in the fetch.
+        lookup.exact.answered(pending.map(|p| p.id), found);
         true
     }
 
@@ -224,7 +222,7 @@ impl Session {
         chat_ids: &[ChatId],
         pending: Option<&PendingRequest>,
     ) -> bool {
-        let Some(RequestPurpose::Settings(SettingsPurpose::LookupBusinessBot { generation, part })) =
+        let Some(RequestPurpose::Settings(SettingsPurpose::LookupBusinessBot { part })) =
             pending.map(|p| p.purpose)
         else {
             return false;
@@ -237,17 +235,15 @@ impl Session {
             })
             .collect();
         let lookup = &mut self.settings.business_extra.lookup;
-        if lookup.generation == generation {
-            let id = pending.map(|p| p.id);
-            match part {
-                BotLookupPart::Mine => {
-                    lookup.mine.answered(id, users);
-                }
-                BotLookupPart::Global => {
-                    lookup.global.answered(id, users);
-                }
-                BotLookupPart::Exact => {}
+        let id = pending.map(|p| p.id);
+        match part {
+            BotLookupPart::Mine => {
+                lookup.mine.answered(id, users);
             }
+            BotLookupPart::Global => {
+                lookup.global.answered(id, users);
+            }
+            BotLookupPart::Exact => {}
         }
         true
     }
@@ -303,16 +299,14 @@ impl Session {
                     format!("Couldn't save the chatbot: {reason}"),
                 )
             }
-            SettingsPurpose::LookupBusinessBot { generation, part } => {
+            SettingsPurpose::LookupBusinessBot { part } => {
                 let lookup = &mut extra.lookup;
-                if lookup.generation == generation {
-                    let message = format!("Couldn't search for bots: {reason}");
-                    match part {
-                        BotLookupPart::Exact => lookup.exact.failed(extra_id, message, true),
-                        BotLookupPart::Mine => lookup.mine.failed(extra_id, message, true),
-                        BotLookupPart::Global => lookup.global.failed(extra_id, message, true),
-                    };
-                }
+                let message = format!("Couldn't search for bots: {reason}");
+                match part {
+                    BotLookupPart::Exact => lookup.exact.failed(extra_id, message, true),
+                    BotLookupPart::Mine => lookup.mine.failed(extra_id, message, true),
+                    BotLookupPart::Global => lookup.global.failed(extra_id, message, true),
+                };
                 return true;
             }
             SettingsPurpose::SetSponsoredEnabled => (

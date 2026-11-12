@@ -446,10 +446,6 @@ pub struct SettingsState {
     /// `total_count` from the last `messageSenders` answer; more pages
     /// exist while `blocked_senders.len() < blocked_total`.
     pub blocked_total: i32,
-    /// Changes whenever the blocked list restarts or is dropped. A page
-    /// answers under the generation it was asked in and only extends that
-    /// list.
-    pub blocked_generation: u32,
     /// MED1: local media preferences (remember-media-grouping),
     /// persisted via `settings::MediaPrefs`. Loaded at startup like
     /// `call_prefs`; the UI saves on toggle.
@@ -510,34 +506,33 @@ impl SettingsState {
         self.account_ttl.is_loading() || self.account_delete.is_loading()
     }
 
-    /// The blocked list starts over (a fresh fetch, or its data was
-    /// dropped): pages asked for the old one no longer apply.
-    pub fn restart_blocked_list(&mut self) {
-        self.blocked_generation = self.blocked_generation.wrapping_add(1);
-    }
-
-    /// One blocked-senders page. Page 0 replaces the list; a later page
-    /// extends the list it was asked for, without ids already there. A page
-    /// of an older list, or one with no list left to extend, is dropped and
-    /// changes nothing (not even the total).
+    /// One blocked-senders page, taken only by the fetch that waits for
+    /// `request`: a page asked before the list restarted (the fetch was
+    /// replaced or failed since) is dropped and changes nothing, not even
+    /// the total. Page 0 replaces the list; a later page extends it, without
+    /// ids already there. A later page with no list left to extend ends the
+    /// fetch, so it does not stay loading.
     pub fn apply_blocked_page(
         &mut self,
         offset: i32,
-        generation: u32,
+        request: Option<RequestId>,
         total_count: i32,
         sender_ids: Vec<i64>,
     ) {
-        if generation != self.blocked_generation {
+        if !request.is_some_and(|id| self.blocked_senders.waits_for(id)) {
             return;
         }
-        if offset == 0 {
-            self.blocked_total = total_count;
-            self.blocked_senders
-                .succeed(dedup_ids(Vec::new(), sender_ids));
-        } else if let Some(list) = self.blocked_senders.take_data() {
-            self.blocked_total = total_count;
-            self.blocked_senders.succeed(dedup_ids(list, sender_ids));
-        }
+        let held = if offset == 0 {
+            Vec::new()
+        } else if let Some(list) = self.blocked_senders.data_mut() {
+            std::mem::take(list)
+        } else {
+            self.blocked_senders.cancel();
+            return;
+        };
+        self.blocked_total = total_count;
+        self.blocked_senders
+            .answered(request, dedup_ids(held, sender_ids));
     }
 
     pub fn export_links(&self) -> impl Iterator<Item = &crate::export::handle::WorkerLink> {
@@ -614,7 +609,6 @@ impl SettingsState {
             read_date: ReadDate::Unknown,
             blocked_senders: Fetch::Idle,
             blocked_total: 0,
-            blocked_generation: 0,
             media_prefs: MediaPrefs::default(),
             contact_prefs: ContactPrefs::default(),
             badge_prefs: BadgePrefs::default(),

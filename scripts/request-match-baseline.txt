@@ -1,8 +1,5 @@
 # Answers not matched by RequestId (scripts/check-request-match.py).
 # <rule>:<Type::function> <count>. Only remove lines or lower counts.
-counter:SearchPurpose::GetChatMessageCalendar 1
-counter:SettingsPurpose::GetBlockedSenders 1
-counter:SettingsPurpose::LookupBusinessBot 1
 generation:Session::apply_found_chat_messages 2
 generation:Session::apply_search_error 2
 purpose:ConnectDriver::ask_gift_text_limit 1
@@ -108,11 +105,9 @@ unmatched:Session::apply_privacy_data_payload 1
 unmatched:Session::apply_quick_replies_ok 1
 unmatched:Session::apply_saved_tags 1
 unmatched:Session::apply_ton_wallet 1
-unmatched:SettingsState::apply_blocked_page 2
 unsent:ConnectDriver::ask_countries 1
 unsent:ConnectDriver::delete_account 1
 unsent:ConnectDriver::ensure_quick_reply_shortcuts 1
-unsent:ConnectDriver::fetch_blocked_senders 1
 unsent:ConnectDriver::fetch_chat_lists_to_add_chat 1
 unsent:ConnectDriver::fetch_contacts 1
 unsent:ConnectDriver::fetch_network_statistics 1

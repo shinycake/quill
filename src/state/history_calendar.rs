@@ -54,8 +54,9 @@ impl ViewJump {
 pub enum CalendarPaging {
     /// Nothing in flight; the next older page may be asked for.
     Idle,
-    /// A page is on its way.
-    Loading,
+    /// A page is on its way as `request`; only its answer or error ends
+    /// the stage.
+    Loading { request: RequestId },
     /// The last page failed (a timeout, a flood wait, offline): moving to
     /// another month asks for it again.
     Failed,
@@ -77,14 +78,13 @@ pub struct HistoryCalendar {
     /// `from_message_id` for the next older page.
     pub oldest_loaded: MessageId,
     pub paging: CalendarPaging,
-    pub generation: u64,
     /// Set when the box was opened from the shared-media gallery: a picked
     /// day reloads that tab instead of jumping in the history.
     pub shared_tab: Option<SharedMediaTab>,
 }
 
 impl HistoryCalendar {
-    pub fn new(chat_id: ChatId, media: SearchMediaKind, now: i64, generation: u64) -> Self {
+    pub fn new(chat_id: ChatId, media: SearchMediaKind, now: i64) -> Self {
         Self {
             chat_id,
             media,
@@ -96,7 +96,6 @@ impl HistoryCalendar {
             } else {
                 CalendarPaging::Idle
             },
-            generation,
             shared_tab: None,
         }
     }
@@ -110,7 +109,7 @@ impl HistoryCalendar {
     pub fn needs_older_page(&self) -> bool {
         if matches!(
             self.paging,
-            CalendarPaging::Exhausted | CalendarPaging::Loading
+            CalendarPaging::Exhausted | CalendarPaging::Loading { .. }
         ) {
             return false;
         }
@@ -121,17 +120,21 @@ impl HistoryCalendar {
     }
 
     pub fn is_loading(&self) -> bool {
-        self.paging == CalendarPaging::Loading
+        matches!(self.paging, CalendarPaging::Loading { .. })
     }
 
-    /// A page request went out.
-    pub fn begin_page(&mut self) {
-        self.paging = CalendarPaging::Loading;
+    /// A page request went out as `request`.
+    pub fn begin_page(&mut self, request: RequestId) {
+        self.paging = CalendarPaging::Loading { request };
     }
 
-    /// Merge one page. `days` come newest first; an empty page (or the
-    /// same cursor again) ends the list.
-    pub fn accept(&mut self, days: Vec<CalendarDay>) {
+    /// Merge the page `request` answered. `days` come newest first; an
+    /// empty page (or the same cursor again) ends the list. Another
+    /// request's page (an earlier calendar's) changes nothing: `false`.
+    pub fn accept(&mut self, request: RequestId, days: Vec<CalendarDay>) -> bool {
+        if self.paging != (CalendarPaging::Loading { request }) {
+            return false;
+        }
         self.paging = CalendarPaging::Idle;
         let before = self.oldest_loaded;
         let mut oldest = self.oldest_loaded;
@@ -153,11 +156,17 @@ impl HistoryCalendar {
         if oldest == before {
             self.paging = CalendarPaging::Exhausted;
         }
+        true
     }
 
-    /// The page failed: the list stays as it is and a later ask retries.
-    pub fn fail(&mut self) {
+    /// The page `request` failed: the list stays as it is and a later ask
+    /// retries. Another request's error changes nothing: `false`.
+    pub fn fail(&mut self, request: RequestId) -> bool {
+        if self.paging != (CalendarPaging::Loading { request }) {
+            return false;
+        }
         self.paging = CalendarPaging::Failed;
+        true
     }
 
     pub fn show_month(&mut self, month: YearMonth) {
@@ -179,12 +188,12 @@ mod tests {
 
     fn calendar() -> HistoryCalendar {
         // 2026-10-08 12:00 UTC-ish; the exact zone does not matter below.
-        HistoryCalendar::new(ChatId(1), SearchMediaKind::Media, 1_791_460_800, 1)
+        HistoryCalendar::new(ChatId(1), SearchMediaKind::Media, 1_791_460_800)
     }
 
     #[test]
     fn all_filter_never_fetches() {
-        let all = HistoryCalendar::new(ChatId(1), SearchMediaKind::All, 1_791_460_800, 1);
+        let all = HistoryCalendar::new(ChatId(1), SearchMediaKind::All, 1_791_460_800);
         assert!(!all.needs_older_page());
     }
 
@@ -192,13 +201,13 @@ mod tests {
     fn pages_until_the_month_is_covered() {
         let mut c = calendar();
         assert!(c.needs_older_page());
-        c.begin_page();
+        c.begin_page(RequestId(31));
         // Early October: the loaded days do not reach back before the 1st.
-        c.accept(vec![day(500 << 20, 1_791_000_000, 3)]);
+        c.accept(RequestId(31), vec![day(500 << 20, 1_791_000_000, 3)]);
         assert!(c.needs_older_page());
-        c.begin_page();
+        c.begin_page(RequestId(32));
         // A day in August covers the displayed month.
-        c.accept(vec![day(100 << 20, 1_788_000_000, 1)]);
+        c.accept(RequestId(32), vec![day(100 << 20, 1_788_000_000, 1)]);
         assert_eq!(c.oldest_loaded, MessageId(100 << 20));
         assert_eq!(c.paging, CalendarPaging::Idle);
         assert!(!c.needs_older_page());
@@ -207,10 +216,10 @@ mod tests {
     #[test]
     fn an_empty_page_ends_the_list() {
         let mut c = calendar();
-        c.begin_page();
-        c.accept(vec![day(5 << 20, 1_791_000_000, 1)]);
-        c.begin_page();
-        c.accept(Vec::new());
+        c.begin_page(RequestId(1));
+        c.accept(RequestId(1), vec![day(5 << 20, 1_791_000_000, 1)]);
+        c.begin_page(RequestId(2));
+        c.accept(RequestId(2), Vec::new());
         assert_eq!(c.paging, CalendarPaging::Exhausted);
         assert!(!c.needs_older_page());
     }
@@ -218,21 +227,24 @@ mod tests {
     #[test]
     fn a_failed_page_is_asked_for_again() {
         let mut c = calendar();
-        c.begin_page();
+        c.begin_page(RequestId(90));
         assert!(!c.needs_older_page(), "one page at a time");
-        c.fail();
+        assert!(!c.fail(RequestId(89)), "another request's error");
+        assert!(c.fail(RequestId(90)));
         assert_eq!(c.paging, CalendarPaging::Failed);
         assert!(c.needs_older_page(), "a failure does not end the paging");
-        c.begin_page();
-        c.accept(vec![day(5 << 20, 1_788_000_000, 1)]);
+        c.begin_page(RequestId(3));
+        c.accept(RequestId(3), vec![day(5 << 20, 1_788_000_000, 1)]);
         assert_eq!(c.paging, CalendarPaging::Idle);
     }
 
     #[test]
     fn partial_days_keep_the_earliest_message() {
         let mut c = calendar();
-        c.accept(vec![day(50 << 20, 1_791_000_100, 1)]);
-        c.accept(vec![day(40 << 20, 1_791_000_000, 2)]);
+        c.begin_page(RequestId(1));
+        c.accept(RequestId(1), vec![day(50 << 20, 1_791_000_100, 1)]);
+        c.begin_page(RequestId(2));
+        c.accept(RequestId(2), vec![day(40 << 20, 1_791_000_000, 2)]);
         let key = local_day_number(1_791_000_000);
         assert_eq!(c.day(key).map(|d| d.message_id), Some(MessageId(40 << 20)));
     }

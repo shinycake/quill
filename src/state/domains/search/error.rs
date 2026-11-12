@@ -77,7 +77,7 @@ impl Session {
             Some(RequestPurpose::GetChatMessageByDate) => {
                 self.fail_date_jump(err.code == 404, pending)
             }
-            Some(RequestPurpose::Search(SearchPurpose::GetChatMessageCalendar { .. })) => {
+            Some(RequestPurpose::Search(SearchPurpose::GetChatMessageCalendar)) => {
                 self.fail_message_calendar(pending)
             }
             Some(RequestPurpose::SearchFromMembers) => {

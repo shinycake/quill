@@ -12,17 +12,9 @@ impl Session {
         } else {
             SearchMediaKind::All
         };
-        let generation = self.next_calendar_generation();
         self.search.clear_date_jump_note();
-        self.search.history_calendar = Some(HistoryCalendar::new(chat_id, media, now, generation));
+        self.search.history_calendar = Some(HistoryCalendar::new(chat_id, media, now));
         self.search.history_calendar.as_ref()
-    }
-
-    /// The generation for a calendar being opened: one more than the last
-    /// one opened, closed or not.
-    pub(crate) fn next_calendar_generation(&mut self) -> u64 {
-        self.search.calendar_generation = self.search.calendar_generation.saturating_add(1);
-        self.search.calendar_generation
     }
 
     pub fn close_history_calendar(&mut self) {
@@ -72,35 +64,29 @@ impl Session {
         days: Vec<CalendarDay>,
         pending: Option<&PendingRequest>,
     ) {
-        let Some(RequestPurpose::Search(SearchPurpose::GetChatMessageCalendar { generation })) =
-            pending.map(|p| p.purpose)
+        let Some(pending) = pending
+            .filter(|p| p.purpose == RequestPurpose::Search(SearchPurpose::GetChatMessageCalendar))
         else {
             return;
         };
-        let chat_id = pending.and_then(|p| p.chat_id);
         if let Some(calendar) = self
             .search
             .history_calendar
             .as_mut()
-            .filter(|c| c.generation == generation && Some(c.chat_id) == chat_id)
+            .filter(|c| Some(c.chat_id) == pending.chat_id)
         {
-            calendar.accept(days);
+            calendar.accept(pending.id, days);
         }
     }
 
     pub(crate) fn fail_message_calendar(&mut self, pending: Option<&PendingRequest>) {
-        let Some(RequestPurpose::Search(SearchPurpose::GetChatMessageCalendar { generation })) =
-            pending.map(|p| p.purpose)
+        let Some(pending) = pending
+            .filter(|p| p.purpose == RequestPurpose::Search(SearchPurpose::GetChatMessageCalendar))
         else {
             return;
         };
-        if let Some(calendar) = self
-            .search
-            .history_calendar
-            .as_mut()
-            .filter(|c| c.generation == generation)
-        {
-            calendar.fail();
+        if let Some(calendar) = self.search.history_calendar.as_mut() {
+            calendar.fail(pending.id);
         }
     }
 

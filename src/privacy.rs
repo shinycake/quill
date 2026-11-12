@@ -1001,14 +1001,13 @@ mod tests {
         let (mut session, sink) = session();
         let seq = AtomicU64::new(0);
         let old = session.request(
-            RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders {
-                offset: 2,
-                generation: 0,
-            }),
+            RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders { offset: 2 }),
             None,
         );
-        // The list restarted: page 0 of generation 1 is in.
-        session.settings.restart_blocked_list();
+        session.settings.blocked_senders.begin();
+        session.settings.blocked_senders.sent(old);
+        // The list restarted: its first page is in, and the fetch moved on.
+        session.settings.blocked_senders = crate::state::fetch::Fetch::Idle;
         session.settings.blocked_senders.succeed(vec![61, 62]);
         session.settings.blocked_total = 2;
         apply_json(
@@ -1024,12 +1023,11 @@ mod tests {
         assert_eq!(session.settings.blocked_total, 2);
         // A page of the live list appends without repeating an id.
         let live = session.request(
-            RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders {
-                offset: 2,
-                generation: session.settings.blocked_generation,
-            }),
+            RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders { offset: 2 }),
             None,
         );
+        session.settings.blocked_senders.begin();
+        session.settings.blocked_senders.sent(live);
         apply_json(
             &mut session,
             &seq,
@@ -1052,12 +1050,11 @@ mod tests {
         let (mut session, sink) = session();
         let seq = AtomicU64::new(0);
         let extra = session.request(
-            RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders {
-                offset: 0,
-                generation: 0,
-            }),
+            RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders { offset: 0 }),
             None,
         );
+        session.settings.blocked_senders.begin();
+        session.settings.blocked_senders.sent(extra);
         apply_json(
             &mut session,
             &seq,
@@ -1072,12 +1069,11 @@ mod tests {
         assert!(!session.settings.blocked_senders.is_loading());
 
         let extra = session.request(
-            RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders {
-                offset: 2,
-                generation: 0,
-            }),
+            RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders { offset: 2 }),
             None,
         );
+        session.settings.blocked_senders.begin();
+        session.settings.blocked_senders.sent(extra);
         apply_json(
             &mut session,
             &seq,

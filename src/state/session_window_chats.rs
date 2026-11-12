@@ -221,7 +221,7 @@ fn lands_in_view(purpose: RequestPurpose) -> bool {
             | RequestPurpose::SearchChatMessagesMore
             | RequestPurpose::SearchFromMembers
             | RequestPurpose::GetChatMessageByDate
-            | RequestPurpose::Search(SearchPurpose::GetChatMessageCalendar { .. })
+            | RequestPurpose::Search(SearchPurpose::GetChatMessageCalendar)
             | RequestPurpose::GetHistoryAround
             | RequestPurpose::GetSharedMedia { .. }
             | RequestPurpose::Media(MediaPurpose::GetSharedMediaMore { .. })

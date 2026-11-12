@@ -47,11 +47,9 @@ pub enum SearchPurpose {
     SearchFromMembers,
     /// `getChatMessageByDate` of a jump to date.
     GetChatMessageByDate,
-    /// `getChatMessageCalendar` page of the calendar box (the box's
-    /// generation drops late answers).
-    GetChatMessageCalendar {
-        generation: u64,
-    },
+    /// `getChatMessageCalendar` page of the calendar box (the box's paging
+    /// stage holds the request, so late answers drop).
+    GetChatMessageCalendar,
     /// `viewSponsoredChat`. Response is `ok`.
     ViewSponsoredChat,
 }

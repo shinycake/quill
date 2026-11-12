@@ -115,23 +115,33 @@ fn a_deep_link_answer_after_the_flow_ended_is_dropped() {
     assert_eq!(driver.session.chats_state.deep_link, None);
 }
 
-/// Sweep 05-231: a calendar's generation never repeats after the box
-/// closes, so an earlier calendar's late page cannot match the next one.
+/// Sweep 05-231 / 08-015: an earlier calendar's late page cannot land on
+/// the next calendar, because the paging stage holds the request it waits
+/// for.
 #[test]
-fn a_reopened_calendar_has_a_new_generation() {
+fn a_reopened_calendar_ignores_the_earlier_calendars_page() {
+    use crate::search_filters::SearchMediaKind;
+    use crate::state::CalendarPaging;
     let (_dir, mut driver, _sender, _sink, _seq) = toggle_driver();
     driver.session.open = crate::state::OpenView::of(Some(crate::ids::ChatId(5)));
-    let first = driver
-        .session
-        .open_history_calendar(0)
-        .map(|calendar| calendar.generation);
+    driver.session.open_history_calendar(0);
+    let old = crate::ids::RequestId(41);
+    if let Some(calendar) = driver.session.search.history_calendar.as_mut() {
+        calendar.media = SearchMediaKind::Media;
+        calendar.begin_page(old);
+    }
     driver.session.close_history_calendar();
-    let second = driver
+    driver.session.open_history_calendar(0);
+    let new = crate::ids::RequestId(42);
+    let calendar = driver
         .session
-        .open_history_calendar(0)
-        .map(|calendar| calendar.generation);
-    assert!(first.is_some() && second.is_some());
-    assert_ne!(first, second);
+        .search
+        .history_calendar
+        .as_mut()
+        .expect("open");
+    calendar.begin_page(new);
+    assert!(!calendar.accept(old, Vec::new()), "the earlier page");
+    assert_eq!(calendar.paging, CalendarPaging::Loading { request: new });
 }
 
 /// Sweep 06-005: a deletion in another chat does not make the search

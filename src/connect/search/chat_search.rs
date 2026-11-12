@@ -439,17 +439,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(constructor) = calendar.media.constructor() else {
             return Ok(());
         };
-        let (chat_id, generation, from) = (
-            calendar.chat_id,
-            calendar.generation,
-            calendar.oldest_loaded,
-        );
+        let (chat_id, from) = (calendar.chat_id, calendar.oldest_loaded);
         let extra = self.session.request(
-            RequestPurpose::Search(SearchPurpose::GetChatMessageCalendar { generation }),
+            RequestPurpose::Search(SearchPurpose::GetChatMessageCalendar),
             Some(chat_id),
         );
         if let Some(calendar) = self.session.search.history_calendar.as_mut() {
-            calendar.begin_page();
+            calendar.begin_page(extra);
         }
         match self.sender.send_json(&get_chat_message_calendar(
             extra,
@@ -461,7 +457,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Err(err) => {
                 self.session.requests.take(extra);
                 if let Some(calendar) = self.session.search.history_calendar.as_mut() {
-                    calendar.fail();
+                    calendar.fail(extra);
                 }
                 Err(err)
             }

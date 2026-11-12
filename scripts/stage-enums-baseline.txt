@@ -6,7 +6,6 @@ bare:Answer::Waiting 1
 bare:ApplyStage::Sent 1
 bare:BackgroundStatus::Connecting 1
 bare:BoxStage::Opening 1
-bare:CalendarPaging::Loading 1
 bare:CallEnd::Running 1
 bare:CallLinkStep::Busy 1
 bare:CallPhase::Busy 1
