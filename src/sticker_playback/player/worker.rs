@@ -108,10 +108,10 @@ fn open(
 ) {
     let opened = Source::lottie(path, key);
     let mut state = lock_or_recover(&shared.state);
-    let Some(clip) = state
-        .clip_mut(&key, id)
-        .filter(|clip| clip.stage.taken_by(Taking::Worker(WorkerTicket::new(worker))))
-    else {
+    let Some(clip) = state.clip_mut(&key, id).filter(|clip| {
+        clip.stage
+            .taken_by(Taking::Worker(WorkerTicket::new(worker)))
+    }) else {
         // Closed meanwhile, or no longer opened by this worker.
         return;
     };

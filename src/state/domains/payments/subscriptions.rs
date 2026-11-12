@@ -261,7 +261,10 @@ mod tests {
         list.begin_edit(RequestId(2));
         list.edit_done(RequestId(1));
         list.edit_failed(RequestId(1), "old".into());
-        assert!(list.is_editing(), "another request's answer changes nothing");
+        assert!(
+            list.is_editing(),
+            "another request's answer changes nothing"
+        );
         assert!(list.error().is_none());
         list.edit_failed(RequestId(2), "no".into());
         assert_eq!(list.error(), Some("no"));

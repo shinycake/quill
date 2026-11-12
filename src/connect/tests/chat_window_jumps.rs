@@ -196,7 +196,12 @@ fn a_date_lookup_that_fails_says_so_after_the_box_closed() {
         asked.0
     ));
     assert!(
-        h.driver.session.chats_state.chat_action_error.last().is_some(),
+        h.driver
+            .session
+            .chats_state
+            .chat_action_error
+            .last()
+            .is_some(),
         "the failed lookup is a line in the status note"
     );
 }

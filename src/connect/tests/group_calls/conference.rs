@@ -657,7 +657,10 @@ fn join_conference_600(harness: &mut Harness) {
         .expect("join sends");
     let extra: Value = serde_json::to_value(request.as_extra()).unwrap();
     feed(harness, &answer(&extra, 600));
-    feed(harness, &conference_update(600, "https://t.me/call/xyz", false));
+    feed(
+        harness,
+        &conference_update(600, "https://t.me/call/xyz", false),
+    );
 }
 
 #[test]

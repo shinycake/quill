@@ -825,9 +825,12 @@ impl State {
         let key = opening?;
         let clip = self.clips.get_mut(&key)?;
         let id = clip.id;
-        let Stage::Waiting(origin) =
-            std::mem::replace(&mut clip.stage, Stage::Opening { worker: WorkerTicket::new(me) })
-        else {
+        let Stage::Waiting(origin) = std::mem::replace(
+            &mut clip.stage,
+            Stage::Opening {
+                worker: WorkerTicket::new(me),
+            },
+        ) else {
             return None;
         };
         match origin {
@@ -891,9 +894,12 @@ impl State {
             .clips
             .iter_mut()
             .find(|(_, clip)| matches!(clip.stage, Stage::Waiting(Origin::Decoded(_))))?;
-        let Stage::Waiting(Origin::Decoded(decode)) =
-            std::mem::replace(&mut clip.stage, Stage::Decoding { opener: WorkerTicket::new(opener) })
-        else {
+        let Stage::Waiting(Origin::Decoded(decode)) = std::mem::replace(
+            &mut clip.stage,
+            Stage::Decoding {
+                opener: WorkerTicket::new(opener),
+            },
+        ) else {
             return None;
         };
         Some((*key, clip.id, decode, clip.cancel.clone()))

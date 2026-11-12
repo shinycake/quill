@@ -88,9 +88,9 @@ impl SearchDomainState {
     /// The line `window`'s calendar box draws for a shared-media day with
     /// no media.
     pub fn date_jump_note(&self, window: Option<ChatId>) -> Option<String> {
-        self.jump_lookups.no_media(window).then(|| {
-            crate::lang::tr(crate::lang::keys::Q_MISC_NO_MEDIA_TO_JUMP_TO).to_string()
-        })
+        self.jump_lookups
+            .no_media(window)
+            .then(|| crate::lang::tr(crate::lang::keys::Q_MISC_NO_MEDIA_TO_JUMP_TO).to_string())
     }
 
     /// `window`'s "no media" note goes; its resolved jump stays.
@@ -251,11 +251,7 @@ impl Session {
     /// the jump goes to the start of the chat. Any other error is a line in
     /// the status note (the box closed when the day was picked, so nothing
     /// there could draw it).
-    pub(crate) fn fail_date_jump(
-        &mut self,
-        not_found: bool,
-        pending: Option<&PendingRequest>,
-    ) {
+    pub(crate) fn fail_date_jump(&mut self, not_found: bool, pending: Option<&PendingRequest>) {
         if !self.search.jump_lookups.settle(pending) {
             return;
         }

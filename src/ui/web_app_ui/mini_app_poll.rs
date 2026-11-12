@@ -83,7 +83,7 @@ impl QuillApp {
         self.mini_apps.window.is_some()
             || self.mini_apps.flow.is_waiting()
             || self.session().is_some_and(|session| {
-                session.bots.web_apps.opening.is_some() || session.web_app_answer_due()
+                session.bots.web_apps.opening().is_some() || session.web_app_answer_due()
             })
     }
 

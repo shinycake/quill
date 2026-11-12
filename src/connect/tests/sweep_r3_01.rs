@@ -256,12 +256,7 @@ fn a_refused_mini_app_custom_request_leaves_no_entry() {
         .send_web_app_custom_request(900, 1, "r2", "method", "{}")
         .unwrap();
     assert_eq!(
-        t.driver
-            .session
-            .bots
-            .web_apps
-            .custom_requests
-            .get(&request.0),
+        t.driver.session.bots.web_apps.custom_requests.get(&request),
         Some(&(1, "r2".to_string()))
     );
 }

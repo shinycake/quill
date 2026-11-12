@@ -1,8 +1,8 @@
+use super::engine::{Taking, WorkerTicket};
 use super::head::{PAUSE_GAP, REPAINT_GAP, pick};
 use super::source::{Packer, Source};
 use super::store::{self, Scratch, Store};
 use super::*;
-use super::engine::{Taking, WorkerTicket};
 use std::io::Write;
 use std::path::Path;
 use std::time::{Duration, Instant};

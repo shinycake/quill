@@ -202,7 +202,7 @@ impl QuillApp {
             return;
         };
         let apps = &mut live.driver.session.bots.web_apps;
-        let open_result = apps.open_result.take();
+        let open_result = apps.take_open_result();
         let write_access = std::mem::take(&mut apps.write_access);
         let custom_replies = std::mem::take(&mut apps.custom_replies);
         let attach_bots = std::mem::take(&mut apps.attachment_menu_bot);

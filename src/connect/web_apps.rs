@@ -40,13 +40,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         // The latest launch asked is the current one: an older one still
         // out is dropped, so its answer opens nothing (the app TDLib
         // started for it is closed) and its error is nobody's.
-        self.session.bots.web_apps.opening = Some(WebAppPending {
+        self.session.bots.web_apps.begin_launch(WebAppPending {
             request,
             bot_user_id,
             chat_id: chat_id.map(|id| id.0),
             source,
         });
-        self.session.bots.web_apps.replace_open_result(None);
     }
 
     /// Send an open call marked pending: a send that fails leaves no
@@ -59,9 +58,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let sent = self.send_json_request(extra, json);
         if sent.is_err() {
             let apps = &mut self.session.bots.web_apps;
-            if apps.opening.as_ref().is_some_and(|o| o.request == extra) {
-                apps.opening = None;
-            }
+            apps.settle_launch(extra);
         }
         sent
     }
@@ -389,7 +386,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .bots
             .web_apps
             .custom_requests
-            .insert(extra.0, (launch_id, req_id.to_string()));
+            .insert(extra, (launch_id, req_id.to_string()));
         Ok(sent)
     }
 }

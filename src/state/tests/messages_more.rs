@@ -1004,7 +1004,10 @@ fn a_tab_still_loading_keeps_its_request_when_a_next_page_is_marked() {
     let next = ask(&mut session, true);
     session.audience_tab_loading_more(chat, message, 0, next);
     let audience = session.messages.message_audience.as_ref().unwrap();
-    assert!(audience.reactions.is_loading(), "the first page is still waited for");
+    assert!(
+        audience.reactions.is_loading(),
+        "the first page is still waited for"
+    );
     let page = crate::telegram::envelope::AddedReactionsPage {
         total_count: 1,
         reactions: Vec::new(),
@@ -1012,7 +1015,10 @@ fn a_tab_still_loading_keeps_its_request_when_a_next_page_is_marked() {
     };
     session.accept_added_reactions(first, chat, message, 0, page);
     let audience = session.messages.message_audience.as_ref().unwrap();
-    assert!(audience.reactions.ready().is_some(), "its own answer still lands");
+    assert!(
+        audience.reactions.ready().is_some(),
+        "its own answer still lands"
+    );
 }
 
 #[test]
@@ -1029,5 +1035,8 @@ fn an_older_delete_accounts_answer_does_not_settle_the_newer_one() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, older.0),
     );
-    assert!(session.settings.account_busy(), "the newer delete still waits");
+    assert!(
+        session.settings.account_busy(),
+        "the newer delete still waits"
+    );
 }
