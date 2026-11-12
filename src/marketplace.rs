@@ -130,6 +130,9 @@ pub struct GiftPurchase {
     pub recipient: MessageSender,
     pub recipient_name: String,
     pub requested_name: String,
+    /// The request that asked for this quote: the box that sent it shows
+    /// this purchase and no other.
+    pub asked: crate::ids::RequestId,
     pub stage: GiftPurchaseStage,
 }
 
@@ -147,6 +150,7 @@ impl GiftPurchase {
             recipient,
             recipient_name,
             requested_name,
+            asked: request,
             stage: GiftPurchaseStage::Loading(request),
         }
     }

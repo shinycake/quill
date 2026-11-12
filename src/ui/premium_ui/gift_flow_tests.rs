@@ -80,6 +80,7 @@ fn a_purchase_on_its_way_is_not_taken_over_by_another_chats_box(cx: &mut TestApp
                     recipient: MessageSender::User { user_id: 501 },
                     recipient_name: "Ada".into(),
                     requested_name: "plush".into(),
+                    asked: quill::ids::RequestId(1),
                     stage: quill::marketplace::GiftPurchaseStage::Loading(quill::ids::RequestId(1)),
                 });
             }
@@ -107,17 +108,15 @@ fn a_fresh_box_hides_the_purchase_of_an_earlier_one(cx: &mut TestAppContext) {
                     recipient: MessageSender::User { user_id: 501 },
                     recipient_name: "Ada".into(),
                     requested_name: "plush".into(),
+                    asked: quill::ids::RequestId(1),
                     stage: quill::marketplace::GiftPurchaseStage::Failed("old".into()),
                 });
             }
             app.open_marketplace_for(Some(ChatId(501)), window, cx);
             let draft = app.payments.marketplace.draft().cloned();
-            assert!(draft.is_some_and(|d| !d.shows(ChatId(501), "plush")));
-            assert!(
-                app.session()
-                    .is_some_and(|s| s.payments.marketplace_gift.is_some()),
-                "the session's copy is not reset by the box"
-            );
+            let gift = app.session().and_then(|s| s.payments.marketplace_gift.clone());
+            assert!(gift.is_some(), "the session's copy is not reset by the box");
+            assert!(draft.is_some_and(|d| gift.is_some_and(|g| !d.shows(&g))));
         })
         .unwrap();
 }

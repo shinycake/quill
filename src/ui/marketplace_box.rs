@@ -3,7 +3,7 @@
 //! live in the session (`quill::marketplace::GiftPurchase`).
 #![deny(clippy::indexing_slicing)]
 
-use quill::ids::ChatId;
+use quill::ids::{ChatId, RequestId};
 
 /// What the box holds for one chat. The chat is fixed when the box opens:
 /// the Send Gift box's recipient, or the open chat from the menu. Never the
@@ -14,11 +14,11 @@ pub(super) struct MarketplaceDraft {
     /// "Comment and sender visible to the receiver only".
     pub(super) private: bool,
     pub(super) error: Option<String>,
-    /// The collectible name this draft asked the server for. The session's
-    /// purchase is this box's only when it is for this name and chat, so a
-    /// fresh draft shows no purchase of an earlier box (`shows`) and needs
-    /// no reset of the session's copy.
-    pub(super) asked_name: Option<String>,
+    /// The request this draft asked the server's quote with. The session's
+    /// purchase is this box's only when that request asked it, so a fresh
+    /// draft shows no purchase of an earlier box (`shows`) and needs no
+    /// reset of the session's copy.
+    pub(super) asked: Option<RequestId>,
 }
 
 impl MarketplaceDraft {
@@ -27,14 +27,13 @@ impl MarketplaceDraft {
             chat,
             private: true,
             error: None,
-            asked_name: None,
+            asked: None,
         }
     }
 
-    /// Whether the session's purchase for `requested_name` in `chat_id` is
-    /// the one this draft asked for.
-    pub(super) fn shows(&self, chat_id: ChatId, requested_name: &str) -> bool {
-        self.chat == chat_id && self.asked_name.as_deref() == Some(requested_name)
+    /// Whether the session's purchase is the one this draft asked for.
+    pub(super) fn shows(&self, gift: &quill::marketplace::GiftPurchase) -> bool {
+        self.asked == Some(gift.asked)
     }
 }
 
@@ -75,13 +74,16 @@ impl MarketplaceBox {
     }
 
     /// Open for `chat`: with the kept draft when it is for that chat and
-    /// `resume`, otherwise a fresh one.
-    pub(super) fn open_for(&mut self, chat: ChatId, resume: bool) {
+    /// `resume`, otherwise a fresh one. `true` when the draft is fresh: its
+    /// inputs start empty (`reset_marketplace_inputs`).
+    pub(super) fn open_for(&mut self, chat: ChatId, resume: bool) -> bool {
         let kept = match std::mem::take(self) {
             Self::Kept(draft) | Self::Open(draft) if resume && draft.chat == chat => Some(draft),
             _ => None,
         };
+        let fresh = kept.is_none();
         *self = Self::Open(kept.unwrap_or_else(|| MarketplaceDraft::new(chat)));
+        fresh
     }
 
     /// Close the box, keeping its draft.
@@ -97,10 +99,10 @@ impl MarketplaceBox {
         *self = Self::Closed;
     }
 
-    /// A load for `name` was sent from the open box.
-    pub(super) fn asked(&mut self, name: String) {
+    /// A quote was asked from the open box as `request`.
+    pub(super) fn asked(&mut self, request: RequestId) {
         if let Some(draft) = self.open_draft_mut() {
-            draft.asked_name = Some(name);
+            draft.asked = Some(request);
             draft.error = None;
         }
     }
@@ -145,24 +147,29 @@ mod tests {
 
     #[test]
     fn a_fresh_draft_shows_no_purchase_of_an_earlier_box() {
-        let mut state = MarketplaceBox::default();
-        state.open_for(ChatId(5), false);
-        state.asked("PlushPepe-1".into());
-        let shown = |state: &MarketplaceBox, chat, name| {
-            state.draft().is_some_and(|d| d.shows(ChatId(chat), name))
+        use quill::marketplace::{GiftPurchase, GiftPurchaseStage};
+        let gift = |request| GiftPurchase {
+            chat_id: ChatId(5),
+            recipient: quill::telegram::envelope::MessageSender::User { user_id: 5 },
+            recipient_name: "Ada".into(),
+            requested_name: "PlushPepe-1".into(),
+            asked: RequestId(request),
+            stage: GiftPurchaseStage::Failed("no".into()),
         };
-        assert!(shown(&state, 5, "PlushPepe-1"));
-        assert!(!shown(&state, 6, "PlushPepe-1"), "another chat's purchase");
-        assert!(!shown(&state, 5, "PlushPepe-2"), "another name");
+        let mut state = MarketplaceBox::default();
+        assert!(state.open_for(ChatId(5), false), "fresh");
+        state.asked(RequestId(7));
+        let shown = |state: &MarketplaceBox, request| {
+            state.draft().is_some_and(|d| d.shows(&gift(request)))
+        };
+        assert!(shown(&state, 7));
+        assert!(!shown(&state, 8), "another request's purchase");
         state.close();
-        state.open_for(ChatId(5), true);
-        assert!(shown(&state, 5, "PlushPepe-1"), "resumed with its purchase");
+        assert!(!state.open_for(ChatId(5), true), "resumed");
+        assert!(shown(&state, 7), "resumed with its purchase");
         state.close();
-        state.open_for(ChatId(5), false);
-        assert!(
-            !shown(&state, 5, "PlushPepe-1"),
-            "fresh: the old quote hides"
-        );
+        assert!(state.open_for(ChatId(5), false));
+        assert!(!shown(&state, 7), "fresh: the old quote hides");
     }
 
     #[test]

@@ -767,7 +767,7 @@ mod dispatch_tests {
                 |a| {
                     a.payments
                         .marketplace
-                        .open_for(quill::ids::ChatId(1), false)
+                        .open_for(quill::ids::ChatId(1), false);
                 },
                 |a| a.payments.marketplace.is_open(),
             ),
