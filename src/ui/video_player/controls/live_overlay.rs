@@ -143,8 +143,9 @@ fn overlay_at(phase: Phase, elapsed: Duration) -> (LiveOverlay, Option<Duration>
 #[derive(Default)]
 pub(crate) struct LiveOverlayClock {
     phase: Option<(Phase, Instant)>,
-    armed: Option<Instant>,
-    timer: Option<gpui_kit::Task<()>>,
+    /// The next change's due time with the timer that redraws for it: one
+    /// value, so a due time never outlives its timer.
+    armed: Option<(Instant, gpui_kit::Task<()>)>,
 }
 
 impl LiveOverlayClock {
@@ -167,10 +168,9 @@ impl LiveOverlayClock {
         let due = left.and_then(|left| now.checked_add(left));
         if due.is_none() {
             self.armed = None;
-            self.timer = None;
             return (overlay, None);
         }
-        if due == self.armed {
+        if self.armed.as_ref().map(|(at, _)| *at) == due {
             return (overlay, None);
         }
         (overlay, due)
@@ -178,8 +178,7 @@ impl LiveOverlayClock {
 
     /// Keep the redraw due at `due`.
     pub(crate) fn arm(&mut self, due: Instant, timer: gpui_kit::Task<()>) {
-        self.armed = Some(due);
-        self.timer = Some(timer);
+        self.armed = Some((due, timer));
     }
 }
 

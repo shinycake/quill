@@ -244,14 +244,25 @@ pub(crate) fn bgra_only() -> bool {
 #[derive(Default)]
 pub(super) struct Surfaces {
     #[cfg(target_os = "macos")]
-    pool: Option<(
-        (u32, u32),
-        objc2_core_foundation::CFRetained<objc2_core_video::CVPixelBufferPool>,
-    )>,
+    pool: PoolState,
+}
+
+/// Where the pool stands: not made yet, made for a size, or not makeable.
+#[cfg(target_os = "macos")]
+#[derive(Default)]
+enum PoolState {
+    #[default]
+    Unmade,
+    Ready {
+        size: (u32, u32),
+        pool: objc2_core_foundation::CFRetained<objc2_core_video::CVPixelBufferPool>,
+    },
     /// A pool that could not be made, for that size and since then: tried
     /// again after [`POOL_RETRY`], not on every frame.
-    #[cfg(target_os = "macos")]
-    failed: Option<((u32, u32), std::time::Instant)>,
+    Failed {
+        size: (u32, u32),
+        at: std::time::Instant,
+    },
 }
 
 /// How long a size whose pool failed converts to BGRA before trying again.
@@ -267,23 +278,30 @@ impl Surfaces {
             return Target::Bgra;
         }
         let size = (width, height);
-        let backing_off = self
-            .failed
-            .is_some_and(|(failed, at)| failed == size && at.elapsed() < POOL_RETRY);
-        if !backing_off && self.pool.as_ref().is_none_or(|(made, _)| *made != size) {
-            self.pool = new_pool(width, height).map(|pool| (size, pool));
-            self.failed = match self.pool {
-                Some(_) => None,
-                None => Some((size, std::time::Instant::now())),
+        let made_for_size = match &self.pool {
+            PoolState::Failed { size: failed, at }
+                if *failed == size && at.elapsed() < POOL_RETRY =>
+            {
+                return Target::Bgra;
+            }
+            PoolState::Ready { size: made, .. } => *made == size,
+            PoolState::Unmade | PoolState::Failed { .. } => false,
+        };
+        if !made_for_size {
+            self.pool = match new_pool(width, height) {
+                Some(pool) => PoolState::Ready { size, pool },
+                None => PoolState::Failed {
+                    size,
+                    at: std::time::Instant::now(),
+                },
             };
         }
-        if backing_off {
-            return Target::Bgra;
+        match &self.pool {
+            PoolState::Ready { pool, .. } => {
+                pool_buffer(pool).map_or(Target::Bgra, |buffer| Target::Surface(SendBuffer(buffer)))
+            }
+            PoolState::Unmade | PoolState::Failed { .. } => Target::Bgra,
         }
-        self.pool
-            .as_ref()
-            .and_then(|(_, pool)| pool_buffer(pool))
-            .map_or(Target::Bgra, |buffer| Target::Surface(SendBuffer(buffer)))
     }
 
     #[cfg(not(target_os = "macos"))]

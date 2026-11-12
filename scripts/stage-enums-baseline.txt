@@ -5,8 +5,6 @@ bare:AccountStage::Starting 1
 bare:Answer::Waiting 1
 bare:ApplyStage::Sent 1
 bare:AskStage::InFlight 1
-bare:Attempt::Pending 1
-bare:Attempt::Sending 1
 bare:Audience::Loading 1
 bare:BackgroundStatus::Connecting 1
 bare:BoxStage::Opening 1

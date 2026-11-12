@@ -29,27 +29,61 @@ pub(crate) enum PlayState {
     Failed,
 }
 
-/// Where the machine is: a [`PlayState`], or, for a looping player playing
-/// or buffering, that state with the loop's seek back to the start still
-/// landing. `Landing`: the seek was sent ahead of the end and the backend
-/// still reports a position near it; it ends when the position leaves the
-/// end, and any other move of the state (sleep, pause, a failure) replaces
-/// the value, so nothing resets it by hand.
+/// What the user wants of the clock: it survives Opening and Buffering, so
+/// a Play pressed before the file opens still starts it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Intent {
+    Pause,
+    Play,
+}
+
+/// Where the machine is: a [`PlayState`] with what the user wants, or, for
+/// a looping player playing or buffering, that state with the loop's seek
+/// back to the start still landing. `Landing`: the seek was sent ahead of
+/// the end and the backend still reports a position near it; it ends when
+/// the position leaves the end, and any other move of the state (sleep,
+/// pause, a failure) replaces the value, so nothing resets it by hand. The
+/// intent lives in the value, so a move sets state and intent together.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Stage {
-    At(PlayState),
-    Landing(PlayState),
+    At(PlayState, Intent),
+    Landing(PlayState, Intent),
 }
 
 impl Stage {
     fn play_state(self) -> PlayState {
         match self {
-            Self::At(state) | Self::Landing(state) => state,
+            Self::At(state, _) | Self::Landing(state, _) => state,
+        }
+    }
+
+    fn intent(self) -> Intent {
+        match self {
+            Self::At(_, intent) | Self::Landing(_, intent) => intent,
         }
     }
 
     fn landing(self) -> bool {
-        matches!(self, Self::Landing(_))
+        matches!(self, Self::Landing(..))
+    }
+
+    /// The same stage in `state`; a loop seek still landing carries over
+    /// only while the player stays playing or buffering.
+    fn in_state(self, state: PlayState) -> Self {
+        let playing = matches!(state, PlayState::Playing | PlayState::Buffering);
+        if playing && self.landing() {
+            Self::Landing(state, self.intent())
+        } else {
+            Self::At(state, self.intent())
+        }
+    }
+
+    /// The same stage wanting `intent`.
+    fn wanting(self, intent: Intent) -> Self {
+        match self {
+            Self::At(state, _) => Self::At(state, intent),
+            Self::Landing(state, _) => Self::Landing(state, intent),
+        }
     }
 }
 
@@ -109,20 +143,55 @@ impl Transport {
     }
 }
 
+/// What a backend's engine reported: one stage, never two at once.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum EngineHealth {
+    /// The file is still opening.
+    #[default]
+    NotOpen,
+    /// The file can't play.
+    Failed,
+    /// Open; how the clock and the picture are doing.
+    Open(Flow),
+}
+
+/// How an open engine runs.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Flow {
+    #[default]
+    Steady,
+    /// The picture is stalled while the clock should run.
+    Stalled,
+    /// The backend stopped at the end of the clip.
+    AtEnd,
+}
+
+impl EngineHealth {
+    /// The one stage an engine's readings amount to. A failure wins, then
+    /// not being open yet, then the end of the clip, then a stall.
+    pub(crate) fn read(ready: bool, failed: bool, stalled: bool, at_end: bool) -> Self {
+        if failed {
+            Self::Failed
+        } else if !ready {
+            Self::NotOpen
+        } else if at_end {
+            Self::Open(Flow::AtEnd)
+        } else if stalled {
+            Self::Open(Flow::Stalled)
+        } else {
+            Self::Open(Flow::Steady)
+        }
+    }
+}
+
 /// What a backend reported when it was polled.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct BackendStatus {
-    /// The file is open and can play.
-    pub(crate) ready: bool,
-    /// The file can't play.
-    pub(crate) failed: bool,
+    /// How the engine stands: opening, failed, or open and how it runs.
+    pub(crate) health: EngineHealth,
     /// The playback position (seconds).
     pub(crate) position: f64,
     pub(crate) duration: Option<f64>,
-    /// The picture is stalled while the clock should run.
-    pub(crate) stalled: bool,
-    /// The backend stopped at the end of the clip.
-    pub(crate) at_end: bool,
     pub(crate) buffered: Vec<Range<f64>>,
     pub(crate) has_sound: bool,
 }
@@ -137,8 +206,19 @@ pub(crate) struct LiveStatus {
     pub(crate) stalled: bool,
     /// What the sender's video is doing, once known.
     pub(crate) sender: Option<quill::calls::live_video::LiveState>,
-    /// The feed ended: `Some(true)` when the engine failed.
-    pub(crate) ended: Option<bool>,
+    /// Whether the feed is still running, ended or failed.
+    pub(crate) end: FeedEnd,
+}
+
+/// How a live feed stands at its end.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum FeedEnd {
+    #[default]
+    Live,
+    /// The feed ended.
+    Ended,
+    /// The engine failed.
+    Failed,
 }
 
 /// What the player must do to the backend after a status update, besides
@@ -215,8 +295,6 @@ const LOOP_LEAD: f64 = 0.05;
 #[derive(Clone, Debug)]
 pub(crate) struct TransportMachine {
     stage: Stage,
-    /// The user wants it playing (survives Opening and Buffering).
-    wants_play: bool,
     looping: bool,
     position: f64,
     pulled_at: Instant,
@@ -234,8 +312,7 @@ pub(crate) struct TransportMachine {
 impl TransportMachine {
     pub(crate) fn new(fallback_duration: Option<f64>, now: Instant) -> Self {
         Self {
-            stage: Stage::At(PlayState::Opening),
-            wants_play: false,
+            stage: Stage::At(PlayState::Opening, Intent::Pause),
             looping: false,
             position: 0.0,
             pulled_at: now,
@@ -252,22 +329,20 @@ impl TransportMachine {
     /// A machine for a live feed: Opening until its first frame; play,
     /// pause, seek and rate do nothing.
     pub(crate) fn live(now: Instant) -> Self {
-        Self {
-            live: true,
-            wants_play: true,
-            ..Self::new(None, now)
-        }
+        let mut machine = Self::new(None, now);
+        machine.live = true;
+        machine.stage = machine.stage.wanting(Intent::Play);
+        machine
     }
 
-    /// Move to `state`; a loop seek still landing carries over only while
-    /// the player stays playing or buffering.
+    /// Move to `state`, keeping what the user wants.
     fn set_state(&mut self, state: PlayState) {
-        let playing = matches!(state, PlayState::Playing | PlayState::Buffering);
-        self.stage = if playing && self.stage.landing() {
-            Stage::Landing(state)
-        } else {
-            Stage::At(state)
-        };
+        self.stage = self.stage.in_state(state);
+    }
+
+    /// Move to `state` wanting `intent`: one assignment, so the two agree.
+    fn move_to(&mut self, state: PlayState, intent: Intent) {
+        self.stage = self.stage.in_state(state).wanting(intent);
     }
 
     pub(crate) fn state(&self) -> PlayState {
@@ -283,13 +358,13 @@ impl TransportMachine {
     }
 
     pub(crate) fn wants_play(&self) -> bool {
-        self.wants_play
+        self.stage.intent() == Intent::Play
     }
 
     /// What the backend's engine must do now.
     pub(crate) fn want(&self) -> Want {
         Want {
-            playing: self.wants_play && self.state() != PlayState::Failed,
+            playing: self.wants_play() && self.state() != PlayState::Failed,
             rate: self.rate,
         }
     }
@@ -334,7 +409,7 @@ impl TransportMachine {
         if self.live {
             return PlayStart::Already;
         }
-        self.wants_play = true;
+        self.stage = self.stage.wanting(Intent::Play);
         match self.state() {
             PlayState::Opening | PlayState::Failed => PlayStart::Later,
             PlayState::Ended => {
@@ -356,11 +431,12 @@ impl TransportMachine {
         if self.live {
             return;
         }
-        self.wants_play = false;
         if self.state().animates() {
             self.position = self.position_at(now);
             self.pulled_at = now;
-            self.set_state(PlayState::Paused);
+            self.move_to(PlayState::Paused, Intent::Pause);
+        } else {
+            self.stage = self.stage.wanting(Intent::Pause);
         }
     }
 
@@ -368,11 +444,12 @@ impl TransportMachine {
     /// paused where it was, no play wanted, until a new backend opens
     /// through a new machine. A failed clip stays failed.
     pub(crate) fn sleep(&mut self, now: Instant) {
-        self.wants_play = false;
         if self.state() != PlayState::Failed {
             self.position = self.position_at(now);
             self.pulled_at = now;
-            self.set_state(PlayState::Paused);
+            self.move_to(PlayState::Paused, Intent::Pause);
+        } else {
+            self.stage = self.stage.wanting(Intent::Pause);
         }
     }
 
@@ -390,8 +467,7 @@ impl TransportMachine {
         self.position = target;
         self.pulled_at = now;
         if self.state() == PlayState::Ended {
-            self.set_state(PlayState::Paused);
-            self.wants_play = false;
+            self.move_to(PlayState::Paused, Intent::Pause);
         }
         target
     }
@@ -434,22 +510,25 @@ impl TransportMachine {
         if self.state() == PlayState::Failed {
             return None;
         }
-        if status.failed {
-            self.fail(now);
-            return None;
-        }
+        let flow = match status.health {
+            EngineHealth::Failed => {
+                self.fail(now);
+                return None;
+            }
+            EngineHealth::NotOpen => None,
+            EngineHealth::Open(flow) => Some(flow),
+        };
         if let Some(duration) = status.duration.filter(|d| d.is_finite() && *d > 0.0) {
             self.duration = Some(duration);
         }
         self.buffered = merge_ranges(status.buffered.clone());
         self.has_sound = status.has_sound;
         if self.state() == PlayState::Opening {
-            if !status.ready {
-                return None;
-            }
+            // Still not open: nothing more to take in.
+            flow?;
             self.position = status.position.max(0.0);
             self.pulled_at = now;
-            self.set_state(if self.wants_play {
+            self.set_state(if self.wants_play() {
                 PlayState::Playing
             } else {
                 PlayState::Ready
@@ -464,7 +543,7 @@ impl TransportMachine {
                 .duration
                 .is_some_and(|total| status.position >= total - LOOP_LEAD);
         if !near_end && self.stage.landing() {
-            self.stage = Stage::At(self.state());
+            self.stage = Stage::At(self.state(), self.stage.intent());
         }
         // While a loop's seek has not landed the backend still reports the
         // end: keep the position at the start (no flash of the end in the
@@ -474,22 +553,22 @@ impl TransportMachine {
             self.pulled_at = now;
         }
         let loops_early = near_end && !self.stage.landing();
-        let ended = status.at_end && !self.stage.landing();
+        let flow = flow.unwrap_or_default();
+        let ended = flow == Flow::AtEnd && !self.stage.landing();
         match self.state() {
             PlayState::Playing | PlayState::Buffering if ended || loops_early => {
                 if self.looping {
                     self.position = 0.0;
-                    self.stage = Stage::Landing(PlayState::Playing);
+                    self.stage = Stage::Landing(PlayState::Playing, self.stage.intent());
                     return Some(Command::Loop);
                 }
-                self.set_state(PlayState::Ended);
-                self.wants_play = false;
+                self.move_to(PlayState::Ended, Intent::Pause);
                 if let Some(total) = self.duration() {
                     self.position = total;
                 }
             }
-            PlayState::Playing if status.stalled => self.set_state(PlayState::Buffering),
-            PlayState::Buffering if !status.stalled => self.set_state(PlayState::Playing),
+            PlayState::Playing if flow == Flow::Stalled => self.set_state(PlayState::Buffering),
+            PlayState::Buffering if flow != Flow::Stalled => self.set_state(PlayState::Playing),
             _ => {}
         }
         None
@@ -507,16 +586,23 @@ impl TransportMachine {
             return;
         }
         self.pulled_at = now;
-        self.set_state(match (status.ended, status.sender) {
-            (Some(true), _) => PlayState::Failed,
-            (Some(false), _) => PlayState::Ended,
-            (None, Some(LiveState::Paused)) => PlayState::Paused,
-            (None, Some(LiveState::Inactive)) => PlayState::Ready,
-            (None, _) if !status.has_frame => PlayState::Opening,
-            (None, _) if status.stalled => PlayState::Buffering,
-            (None, _) => PlayState::Playing,
-        });
-        self.wants_play = !matches!(self.state(), PlayState::Ended | PlayState::Failed);
+        let state = match (status.end, status.sender) {
+            (FeedEnd::Failed, _) => PlayState::Failed,
+            (FeedEnd::Ended, _) => PlayState::Ended,
+            (FeedEnd::Live, Some(LiveState::Paused)) => PlayState::Paused,
+            (FeedEnd::Live, Some(LiveState::Inactive)) => PlayState::Ready,
+            (FeedEnd::Live, _) if !status.has_frame => PlayState::Opening,
+            (FeedEnd::Live, _) if status.stalled => PlayState::Buffering,
+            (FeedEnd::Live, _) => PlayState::Playing,
+        };
+        self.move_to(
+            state,
+            if matches!(state, PlayState::Ended | PlayState::Failed) {
+                Intent::Pause
+            } else {
+                Intent::Play
+            },
+        );
     }
 }
 
@@ -553,14 +639,14 @@ pub(crate) fn merge_ranges(mut ranges: Vec<Range<f64>>) -> Vec<Range<f64>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        BackendStatus, Command, Correction, Engine, PlayStart, PlayState, TransportMachine, Want,
-        merge_ranges, reconcile,
+        BackendStatus, Command, Correction, Engine, EngineHealth, Flow, PlayStart, PlayState,
+        TransportMachine, Want, merge_ranges, reconcile,
     };
     use std::time::{Duration, Instant};
 
     fn ready(position: f64) -> BackendStatus {
         BackendStatus {
-            ready: true,
+            health: EngineHealth::Open(Flow::Steady),
             position,
             duration: Some(10.0),
             ..BackendStatus::default()
@@ -606,7 +692,7 @@ mod tests {
         assert_eq!(machine.state(), PlayState::Playing);
         assert_eq!(machine.duration(), Some(10.0));
         let stalled = BackendStatus {
-            stalled: true,
+            health: EngineHealth::Open(Flow::Stalled),
             ..ready(1.0)
         };
         machine.observe(&stalled, t0);
@@ -614,7 +700,7 @@ mod tests {
         machine.observe(&ready(1.2), t0);
         assert_eq!(machine.state(), PlayState::Playing);
         let end = BackendStatus {
-            at_end: true,
+            health: EngineHealth::Open(Flow::AtEnd),
             ..ready(9.98)
         };
         machine.observe(&end, t0);
@@ -643,7 +729,7 @@ mod tests {
         machine.play(t0);
         machine.observe(&ready(0.0), t0);
         let end = BackendStatus {
-            at_end: true,
+            health: EngineHealth::Open(Flow::AtEnd),
             ..ready(10.0)
         };
         assert_eq!(machine.observe(&end, t0), Some(Command::Loop));
@@ -683,7 +769,7 @@ mod tests {
         // The backend reaches the end before the seek lands: no second loop,
         // and the position stays at the start.
         let end = BackendStatus {
-            at_end: true,
+            health: EngineHealth::Open(Flow::AtEnd),
             ..ready(10.0)
         };
         assert_eq!(machine.observe(&end, t0), None);
@@ -702,7 +788,7 @@ mod tests {
         machine.set_looping(true);
         machine.play(t0);
         let unknown = BackendStatus {
-            ready: true,
+            health: EngineHealth::Open(Flow::Steady),
             ..BackendStatus::default()
         };
         machine.observe(&unknown, t0);
@@ -735,7 +821,7 @@ mod tests {
         // Ended: a seek pauses there.
         machine.observe(
             &BackendStatus {
-                at_end: true,
+                health: EngineHealth::Open(Flow::AtEnd),
                 ..ready(10.0)
             },
             t0,
@@ -784,7 +870,7 @@ mod tests {
         let t2 = t1 + Duration::from_secs(1);
         machine.observe(
             &BackendStatus {
-                failed: true,
+                health: EngineHealth::Failed,
                 ..BackendStatus::default()
             },
             t2,
@@ -866,7 +952,7 @@ mod tests {
         machine.set_rate(1.5, t0);
         assert_eq!(machine.want(), play(1.5));
         let end = BackendStatus {
-            at_end: true,
+            health: EngineHealth::Open(Flow::AtEnd),
             ..ready(10.0)
         };
         machine.observe(&end, t0);
@@ -894,5 +980,43 @@ mod tests {
         ]);
         assert_eq!(merged, vec![0.0..4.0, 5.0..6.0]);
         assert!(merge_ranges(Vec::new()).is_empty());
+    }
+
+    #[test]
+    fn an_engine_reading_is_one_stage_with_failure_first() {
+        use super::EngineHealth as H;
+        assert_eq!(H::read(true, true, true, true), H::Failed);
+        assert_eq!(H::read(false, false, true, true), H::NotOpen);
+        assert_eq!(H::read(true, false, true, true), H::Open(Flow::AtEnd));
+        assert_eq!(H::read(true, false, true, false), H::Open(Flow::Stalled));
+        assert_eq!(H::read(true, false, false, false), H::Open(Flow::Steady));
+    }
+
+    #[test]
+    fn what_the_user_wants_moves_with_the_state() {
+        use super::{FeedEnd, LiveStatus};
+        let t0 = Instant::now();
+        let mut machine = TransportMachine::new(Some(10.0), t0);
+        machine.play(t0);
+        machine.observe(&ready(0.0), t0);
+        assert!(machine.wants_play());
+        machine.pause(t0);
+        assert!(!machine.wants_play());
+        machine.play(t0);
+        machine.fail(t0);
+        assert!(
+            !machine.want().playing,
+            "a failed clip is never asked to play"
+        );
+        let mut live = TransportMachine::live(t0);
+        assert!(live.wants_play());
+        live.observe_live(
+            &LiveStatus {
+                end: FeedEnd::Ended,
+                ..LiveStatus::default()
+            },
+            t0,
+        );
+        assert!(!live.wants_play(), "an ended feed wants nothing");
     }
 }

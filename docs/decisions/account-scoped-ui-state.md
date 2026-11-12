@@ -8095,6 +8095,40 @@ from the top after its entries; what that found is in the `new-` rows.
   crate `composer/actions.rs`, `auth/state.rs`, `profile_panels.rs`, `stats_pages.rs` and
   `groups/mod.rs`.
 
+### Sweep fixes (r2-41)
+
+Files: `translate_ui/mod.rs`, the video player's transport, backends, pacing,
+controls and Picture-in-Picture, and the mini-app launch, invoice and emoji
+status flows. Rebased onto the r2 follow-up: where both sides fixed an entry
+the integration's shape stays and this branch's second version is gone.
+
+| id | fix |
+| --- | --- |
+| 14-008, 14-017, 14-026, 14-027 | Integration's shape: `Awaited` holds the send's `RequestId`; `LaunchFlow::take_*_for` take only their own answer; a newer launch replaces the older wait. |
+| 14-018 | `WebApps::emoji_access` is a list of `EmojiAccessAnswer` (the request and its `EmojiAccessResult`, the integration branch's type), so two answers in one poll are both kept; the grant takes only the answer whose request is its `AccessStage::Granting` request, not the permissions panel's. |
+| 14-015, 14-016 | Integration's `CheckoutForm` owns the checkout. The verdict of an invoice's last `sendPaymentForm` is recorded where its answer is applied (`PaymentsState::outcomes`: `Paid`, `Refused`, `NeedsVerification`; a new checkout or payment of the invoice starts it over), and the mini app's watcher reads it (`PayStage { Untouched, Sending(request), Settled(verdict) }`) instead of diffing 30 ms looks, so a payment refused between two looks is seen. `InvoiceWatch::Attempt` and the `CheckoutView` bools are gone. |
+| 14-033, 13-065, 14-011, 14-012 | The PiP slot is a `Cell` hand-over and the offer cache uses `try_borrow`; the web-app confirm body uses the integration's one-shot content. Baseline borrows pruned. |
+| 13-060 | Integration's `ToastStage` owns the toast timer. |
+| 13-061 | `TranslateDialog` holds one `TranslateStage` (`Box`, `Choosing { under }`, `SkipList { note }`). |
+| 13-062 | `new_translate_dialog` drops the open box's selection job before replacing the dialog. |
+| 14-080, 14-044 | `BackendStatus::health` is one `EngineHealth` (`NotOpen`, `Failed`, `Open(Flow)`). |
+| 14-045 | The user's intent lives in `Stage` (`At/Landing(state, Intent)`); `wants_play` is read from it. |
+| 14-046 | `LiveStatus::end` is `FeedEnd { Live, Ended, Failed }`. |
+| 14-081 | Integration's `LiveInput`. |
+| 14-083 | `LiveOverlayClock::armed` holds the due time and its timer together. |
+| 14-053 | Integration's `SliderDrag`. |
+| 14-054, 14-055 | `SpaceHold` and `WaitingGate` keep their timer inside the stage that needs it. |
+| 14-028 | The PiP's last-drag answer is read once by the click that ends the press. |
+| 14-074 | Each PiP line is one value (`SeekLine`, `VolumeLine`). |
+| 14-041 | `request_lead` computes "on the grid" from what it is asked about. |
+| 14-050 | The decoder load is one global stage (`DecoderLoad`). |
+| 14-071 | `Surfaces::pool` is one `PoolState` (macOS only; not built on Linux). |
+
+`MiniAppWindow::closing_confirmation` is allowed in
+`implicit-state-allow.txt` (the app's own setting), so its duplicate baseline
+line is gone. `settings_button`, `in_attachment_menu`, `looping`,
+`Engine::{ready,running,at_end,keeps_up}` and `AvPlayer` buffer flags are
+independent readings or settings, not stages.
 ### Sweep fixes (r2-32)
 
 Round 2, bundle 32: the statistics rows, the story state files, the suggested

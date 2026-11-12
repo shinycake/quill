@@ -311,11 +311,12 @@ fn emoji_status_access_follows_the_switch_and_comes_back_on_failure() {
     assert_eq!(emoji_access(&h), Some(true), "put back");
     assert_eq!(
         h.driver.session.bots.web_apps.emoji_access,
-        Some(crate::state::EmojiAccessAnswer {
+        [crate::state::EmojiAccessAnswer {
             request: extra,
             result: crate::state::EmojiAccessResult::Refused
-        })
+        }]
     );
+    h.driver.session.bots.web_apps.emoji_access.clear();
 
     let extra = h
         .driver
@@ -328,10 +329,10 @@ fn emoji_status_access_follows_the_switch_and_comes_back_on_failure() {
     assert_eq!(emoji_access(&h), Some(false));
     assert_eq!(
         h.driver.session.bots.web_apps.emoji_access,
-        Some(crate::state::EmojiAccessAnswer {
+        [crate::state::EmojiAccessAnswer {
             request: extra,
             result: crate::state::EmojiAccessResult::Granted
-        })
+        }]
     );
 }
 

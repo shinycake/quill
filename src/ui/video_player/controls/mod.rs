@@ -18,6 +18,7 @@
 #![deny(clippy::indexing_slicing)]
 
 mod fade;
+mod gesture;
 mod live;
 mod live_overlay;
 mod metrics;
@@ -33,6 +34,7 @@ mod tests;
 #[cfg(feature = "demo-capture")]
 pub(crate) use fade::cursor_hides;
 pub(crate) use fade::{ControlsFade, hide_cursor};
+pub(crate) use gesture::{SpaceHold, WaitingCheck, WaitingGate};
 pub(crate) use live::{
     BADGE_GAP, BAR_HEIGHT, CONTROLS_BG, LiveActions, LiveFacts, LiveKeyAction, VolumeHoverHandler,
     VolumePart, bar_disc, live_badge, live_key_action, live_label, live_pill, live_pill_text_size,
@@ -58,9 +60,7 @@ use metrics::{
     VOLUME_SKIP, VOLUME_WIDTH,
 };
 use quill::lang::{keys, tr};
-use quill::media_viewer::{BoostState, waiting_wait};
 use std::rc::Rc;
-use std::time::{Duration, Instant};
 
 /// The controller's per-viewer state on `ViewerUi`: the slider entities,
 /// what a drag previews, the pointer over the scrubber and the Space-hold
@@ -80,10 +80,9 @@ pub(crate) struct VideoControlsState {
     pub(crate) demo_speed_open: bool,
     /// The pointer's fraction over the scrubber while it hovers.
     pub(crate) hover: Option<f32>,
-    /// Space held to play at 2×.
-    pub(crate) boost: BoostState,
-    /// The hold check 200 ms after Space went down.
-    pub(crate) boost_timer: Option<Task<()>>,
+    /// Space held to play at 2×, with the hold check 200 ms after the key
+    /// went down.
+    pub(crate) boost: SpaceHold,
     /// The view the controller was last drawn in (the cached viewer slice,
     /// or a chat window), so a hover redraws only that view.
     pub(crate) panel_view: Option<EntityId>,
@@ -151,53 +150,8 @@ impl VideoControlsState {
         // A drag cut off by the clip's end never gets its Release.
         self.drag = SliderDrag::None;
         self.hover = None;
-        self.boost_timer = None;
         self.waiting = WaitingGate::default();
         self.boost.cancel()
-    }
-}
-
-/// The delay before a stall shows its spinner (tdesktop
-/// `kWaitingShowDelay`): the gate remembers when waiting began and the
-/// timer that redraws when the delay is up.
-#[derive(Default)]
-pub(crate) struct WaitingGate {
-    since: Option<Instant>,
-    timer: Option<Task<()>>,
-}
-
-/// What [`WaitingGate::observe`] decided.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum WaitingCheck {
-    /// Not waiting, or the delay is up and the spinner shows.
-    Settled { shown: bool },
-    /// Waiting, not long enough yet: redraw after this long.
-    Pending(Duration),
-}
-
-impl WaitingGate {
-    /// Feed whether the clip waits now. A pending delay that already has
-    /// its timer reports `Settled { shown: false }`.
-    pub(crate) fn observe(&mut self, waiting: bool, now: Instant) -> WaitingCheck {
-        if !waiting {
-            self.since = None;
-            self.timer = None;
-            return WaitingCheck::Settled { shown: false };
-        }
-        let since = *self.since.get_or_insert(now);
-        match waiting_wait(since, now) {
-            None => {
-                self.timer = None;
-                WaitingCheck::Settled { shown: true }
-            }
-            Some(_) if self.timer.is_some() => WaitingCheck::Settled { shown: false },
-            Some(wait) => WaitingCheck::Pending(wait),
-        }
-    }
-
-    /// Keep the timer that redraws once the delay is up.
-    pub(crate) fn arm(&mut self, timer: Task<()>) {
-        self.timer = Some(timer);
     }
 }
 

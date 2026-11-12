@@ -27,7 +27,7 @@ impl Session {
         apps.attachment_menu_bot.clear();
         apps.attachment_menu_toggled.clear();
         apps.write_access = None;
-        apps.emoji_access = None;
+        apps.emoji_access.clear();
         apps.data_sent.clear();
         apps.phone_share = None;
         apps.custom_replies.clear();
