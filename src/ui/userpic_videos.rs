@@ -674,7 +674,10 @@ impl UserpicVideos {
         let now = cx.background_executor().now();
         let wanted = self
             .with(|state| {
-                state.timer.as_ref().is_none_or(|(due, _)| *due <= now)
+                state
+                    .timer
+                    .as_ref()
+                    .is_none_or(|(due, _)| *due + RELEASE_AFTER <= now)
                     && state
                         .slots
                         .iter()
