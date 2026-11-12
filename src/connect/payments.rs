@@ -48,7 +48,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         // The checkout waits on the form only once the request is out. The
         // new value replaces the one before it whole (its request, form,
         // order info, shipping choice and note), here and nowhere in the
-        // UI; a refused send leaves the checkout on screen as it was.
+        // UI; a refused send leaves the checkout on screen as it was. A new
+        // checkout of the invoice starts its payment's verdict over.
+        self.session.payments.forget_outcome(&invoice);
         self.session.payments.checkout = crate::state::CheckoutForm::Loading {
             request: extra,
             invoice: PaymentRequest { invoice },

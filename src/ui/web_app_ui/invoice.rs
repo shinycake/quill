@@ -15,81 +15,58 @@
 //! brings that window in front of the mini app's.
 
 use super::*;
+use quill::ids::RequestId;
 use quill::payment_invoice::invoice_link_invoice;
+use quill::state::PaymentVerdict;
 
-/// How one watched checkout has gone so far.
+/// The checkout a mini app opened, by the invoice slug it was opened for.
 #[derive(Default, Debug, PartialEq, Eq)]
 pub(super) struct InvoiceWatch {
     slug: String,
-    attempt: Attempt,
 }
 
-/// How the last payment attempt of a watched checkout stands. `Sending`
-/// leaves on the next look that does not see the payment out: `Failed` (an
-/// error on the form), `Pending` (a verification step) or `Idle`; a new
-/// attempt starts it over.
-#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
-enum Attempt {
-    /// No attempt yet, or one that ended without paying.
-    #[default]
-    Idle,
-    /// A payment was being sent on the last look.
-    Sending,
-    Failed,
-    Pending,
+/// Where the watched invoice's payment stands, read from the payments
+/// state: the verdict is recorded when the answer is applied, so a payment
+/// refused between two looks is still seen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum PayStage {
+    /// No payment sent since the checkout opened.
+    Untouched,
+    /// `sendPaymentForm` is out as this request.
+    Sending(RequestId),
+    Settled(PaymentVerdict),
 }
 
 /// What the payment state shows right now.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 pub(super) struct CheckoutView {
     pub(super) dialog_open: bool,
-    pub(super) paid: bool,
-    pub(super) sending: bool,
-    /// An error line is on the checkout.
-    pub(super) note: bool,
-    /// The last payment attempt was sent off to verify.
-    pub(super) verification: bool,
+    pub(super) stage: PayStage,
 }
 
 impl InvoiceWatch {
     pub(super) fn new(slug: &str) -> Self {
         Self {
             slug: slug.to_string(),
-            ..Self::default()
         }
     }
 
-    /// Folds in one look at the checkout; `Some` once it has ended.
-    pub(super) fn observe(&mut self, view: CheckoutView) -> Option<&'static str> {
-        if view.paid {
-            return Some("paid");
-        }
-        if !view.dialog_open {
+    /// What the app hears for this look at the checkout; `Some` once it has
+    /// ended.
+    pub(super) fn verdict(view: CheckoutView) -> Option<&'static str> {
+        match (view.dialog_open, view.stage) {
+            (_, PayStage::Settled(PaymentVerdict::Paid)) => Some("paid"),
+            (true, _) => None,
+            (false, PayStage::Settled(PaymentVerdict::Refused)) => Some("failed"),
             // A payment still being sent when the checkout closed (Esc, or
-            // the 3-D Secure page taking over before the next look) may
-            // still go through: that is pending, never cancelled.
-            return Some(match self.attempt {
-                Attempt::Failed => "failed",
-                Attempt::Pending | Attempt::Sending => "pending",
-                Attempt::Idle if view.sending => "pending",
-                Attempt::Idle => "cancelled",
-            });
+            // the 3-D Secure page taking over) may still go through: that
+            // is pending, never cancelled.
+            (
+                false,
+                PayStage::Settled(PaymentVerdict::NeedsVerification) | PayStage::Sending(_),
+            ) => Some("pending"),
+            (false, PayStage::Untouched) => Some("cancelled"),
         }
-        if view.sending {
-            self.attempt = Attempt::Sending;
-        } else if self.attempt == Attempt::Sending {
-            // The attempt ended without paying: an error on the form means it
-            // failed, a verification step means it is pending, and anything
-            // else leaves it cancelled.
-            self.attempt = if view.note {
-                Attempt::Failed
-            } else if view.verification {
-                Attempt::Pending
-            } else {
-                Attempt::Idle
-            };
-        }
-        None
     }
 }
 
@@ -143,13 +120,18 @@ impl QuillApp {
             return;
         };
         let payments = self.session().map(|s| &s.payments);
-        let shown = payments.is_some_and(|p| p.shows(&invoice));
+        let stage = match payments {
+            Some(p) => match p.paying_request(&invoice) {
+                Some(request) => PayStage::Sending(request),
+                None => p
+                    .outcome_of(&invoice)
+                    .map_or(PayStage::Untouched, PayStage::Settled),
+            },
+            None => PayStage::Untouched,
+        };
         let view = CheckoutView {
             dialog_open: self.payments.dialog.is_some(),
-            paid: shown && payments.is_some_and(|p| p.checkout.is_paid()),
-            sending: payments.is_some_and(|p| p.is_paying(&invoice)),
-            note: shown && payments.is_some_and(|p| p.checkout.note().is_some()),
-            verification: shown && payments.is_some_and(|p| p.checkout.is_verifying()),
+            stage,
         };
         let Some(window) = self.mini_apps.window.as_mut() else {
             return;
@@ -157,7 +139,7 @@ impl QuillApp {
         let Some(watch) = window.invoice.as_mut() else {
             return;
         };
-        let Some(status) = watch.observe(view) else {
+        let Some(status) = InvoiceWatch::verdict(view) else {
             return;
         };
         let slug = std::mem::take(&mut watch.slug);
@@ -173,121 +155,48 @@ impl QuillApp {
 #[cfg(test)]
 mod tests {
     // No `super::*`: the kit's glob brings its own `test` attribute.
-    use super::{CheckoutView, InvoiceWatch};
+    use super::{CheckoutView, InvoiceWatch, PayStage};
+    use quill::ids::RequestId;
+    use quill::state::PaymentVerdict;
 
-    fn open() -> CheckoutView {
-        CheckoutView {
-            dialog_open: true,
-            ..CheckoutView::default()
-        }
+    fn look(dialog_open: bool, stage: PayStage) -> Option<&'static str> {
+        InvoiceWatch::verdict(CheckoutView { dialog_open, stage })
     }
 
     #[test]
     fn closing_an_untouched_checkout_is_cancelled() {
-        let mut watch = InvoiceWatch::new("s");
-        assert_eq!(watch.observe(open()), None);
-        assert_eq!(watch.observe(CheckoutView::default()), Some("cancelled"));
+        assert_eq!(look(true, PayStage::Untouched), None);
+        assert_eq!(look(false, PayStage::Untouched), Some("cancelled"));
     }
 
     #[test]
-    fn a_paid_form_is_paid() {
-        let mut watch = InvoiceWatch::new("s");
-        let paid = CheckoutView {
-            paid: true,
-            ..open()
-        };
-        assert_eq!(watch.observe(paid), Some("paid"));
+    fn a_paid_form_is_paid_open_or_closed() {
+        let paid = PayStage::Settled(PaymentVerdict::Paid);
+        assert_eq!(look(true, paid), Some("paid"));
+        assert_eq!(look(false, paid), Some("paid"));
     }
 
     #[test]
-    fn a_refused_payment_closed_afterwards_is_failed() {
-        let mut watch = InvoiceWatch::new("s");
-        let sending = CheckoutView {
-            sending: true,
-            ..open()
-        };
-        let refused = CheckoutView {
-            note: true,
-            ..open()
-        };
-        assert_eq!(watch.observe(sending), None);
-        assert_eq!(watch.observe(refused), None);
-        assert_eq!(watch.observe(CheckoutView::default()), Some("failed"));
+    fn a_refused_payment_is_failed_once_the_checkout_closes() {
+        let refused = PayStage::Settled(PaymentVerdict::Refused);
+        assert_eq!(look(true, refused), None, "the form stays for a retry");
+        assert_eq!(look(false, refused), Some("failed"));
     }
 
     #[test]
     fn a_payment_sent_off_to_verify_is_pending() {
-        let mut watch = InvoiceWatch::new("s");
-        let sending = CheckoutView {
-            sending: true,
-            ..open()
-        };
-        let verifying = CheckoutView {
-            verification: true,
-            ..open()
-        };
-        assert_eq!(watch.observe(sending), None);
-        assert_eq!(watch.observe(verifying), None);
-        assert_eq!(watch.observe(CheckoutView::default()), Some("pending"));
+        let verifying = PayStage::Settled(PaymentVerdict::NeedsVerification);
+        assert_eq!(look(true, verifying), None);
+        assert_eq!(look(false, verifying), Some("pending"));
     }
 
     #[test]
     fn a_checkout_closed_while_the_payment_is_sent_is_pending() {
-        let mut watch = InvoiceWatch::new("s");
-        let sending = CheckoutView {
-            sending: true,
-            ..open()
-        };
-        assert_eq!(watch.observe(sending), None);
-        // Closed (Esc, or the 3-D Secure page) before the next look.
-        assert_eq!(watch.observe(CheckoutView::default()), Some("pending"));
-    }
-
-    #[test]
-    fn a_checkout_closed_before_any_look_saw_the_send_is_pending() {
-        let mut watch = InvoiceWatch::new("s");
-        assert_eq!(watch.observe(open()), None);
-        // Pay, then Esc within one poll: the first look already finds the
-        // dialog closed with the payment still being sent.
-        let closed_sending = CheckoutView {
-            sending: true,
-            ..CheckoutView::default()
-        };
-        assert_eq!(watch.observe(closed_sending), Some("pending"));
-    }
-
-    #[test]
-    fn a_send_that_ends_quietly_is_cancelled() {
-        let mut watch = InvoiceWatch::new("s");
-        let sending = CheckoutView {
-            sending: true,
-            ..open()
-        };
-        assert_eq!(watch.observe(sending), None);
-        assert_eq!(watch.observe(open()), None);
-        assert_eq!(watch.observe(CheckoutView::default()), Some("cancelled"));
-    }
-
-    #[test]
-    fn a_new_attempt_clears_the_old_verdict() {
-        let mut watch = InvoiceWatch::new("s");
-        let sending = CheckoutView {
-            sending: true,
-            ..open()
-        };
-        let refused = CheckoutView {
-            note: true,
-            ..open()
-        };
-        watch.observe(sending);
-        watch.observe(refused);
-        let verifying = CheckoutView {
-            verification: true,
-            ..open()
-        };
-        watch.observe(sending);
-        watch.observe(verifying);
-        assert_eq!(watch.observe(CheckoutView::default()), Some("pending"));
+        assert_eq!(look(true, PayStage::Sending(RequestId(1))), None);
+        assert_eq!(
+            look(false, PayStage::Sending(RequestId(1))),
+            Some("pending")
+        );
     }
 }
 

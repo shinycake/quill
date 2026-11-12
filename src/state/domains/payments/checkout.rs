@@ -18,6 +18,8 @@ impl Session {
     /// is the one on screen, only while the checkout shows that invoice.
     pub(crate) fn payment_sent(&mut self, request_id: RequestId, invoice: &InputInvoice) {
         let payments = &mut self.payments;
+        // A new payment of the invoice starts its verdict over.
+        payments.forget_outcome(invoice);
         let form = payments
             .shows(invoice)
             .then(|| payments.checkout.form().cloned())

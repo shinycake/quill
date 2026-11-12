@@ -130,6 +130,11 @@ fn payment_result_notes_and_verification_url() {
         session.payments.checkout.note(),
         Some("✅ Payment successful")
     );
+    let shop = crate::payment_invoice::InputInvoice::Name("shop".into());
+    assert_eq!(
+        session.payments.outcome_of(&shop),
+        Some(PaymentVerdict::Paid)
+    );
     let extra = session.request(RequestPurpose::SendPaymentForm, Some(ChatId(51)));
     payment_sent_for_shown(&mut session, extra);
     apply_json(
@@ -146,8 +151,17 @@ fn payment_result_notes_and_verification_url() {
             .map(|step| step.url.as_str()),
         Some("https://pay.example.com/3ds")
     );
+    assert_eq!(
+        session.payments.outcome_of(&shop),
+        Some(PaymentVerdict::NeedsVerification)
+    );
     let extra = session.request(RequestPurpose::SendPaymentForm, Some(ChatId(51)));
     payment_sent_for_shown(&mut session, extra);
+    assert_eq!(
+        session.payments.outcome_of(&shop),
+        None,
+        "a new payment starts over"
+    );
     apply_json(
         &mut session,
         &seq,
@@ -155,6 +169,10 @@ fn payment_result_notes_and_verification_url() {
         &result_json(&extra.0.to_string(), false, ""),
     );
     assert_eq!(session.payments.checkout.note(), Some("Payment failed"));
+    assert_eq!(
+        session.payments.outcome_of(&shop),
+        Some(PaymentVerdict::Refused)
+    );
 }
 
 #[test]

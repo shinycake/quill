@@ -45,6 +45,8 @@ impl Session {
             // is the checkout's only while it shows that invoice.
             Some(RequestPurpose::SendPaymentForm) => {
                 if let Some(failed) = self.payments.take_paying(extra) {
+                    self.payments
+                        .record_outcome(&failed.invoice, PaymentVerdict::Refused);
                     let text = crate::lang::tr_with(
                         crate::lang::keys::Q_MONEY_PAYMENT_FAILED_REASON,
                         &[("reason", &error_reason(err))],

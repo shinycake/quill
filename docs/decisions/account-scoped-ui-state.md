@@ -8055,7 +8055,7 @@ the integration's shape stays and this branch's second version is gone.
 | --- | --- |
 | 14-008, 14-017, 14-026, 14-027 | Integration's shape: `Awaited` holds the send's `RequestId`; `LaunchFlow::take_*_for` take only their own answer; a newer launch replaces the older wait. |
 | 14-018 | `WebApps::emoji_access` is a list of `(RequestId, bool)`; the grant takes only the answer whose request is its `AccessStage::Granting` request, not the permissions panel's. |
-| 14-015, 14-016 | Integration's `CheckoutForm` owns the checkout; `InvoiceWatch::Attempt` stays on the stage-enum baseline as it was on the integration branch. |
+| 14-015, 14-016 | Integration's `CheckoutForm` owns the checkout. The verdict of an invoice's last `sendPaymentForm` is recorded where its answer is applied (`PaymentsState::outcomes`: `Paid`, `Refused`, `NeedsVerification`; a new checkout or payment of the invoice starts it over), and the mini app's watcher reads it (`PayStage { Untouched, Sending(request), Settled(verdict) }`) instead of diffing 30 ms looks, so a payment refused between two looks is seen. `InvoiceWatch::Attempt` and the `CheckoutView` bools are gone. |
 | 14-033, 13-065, 14-011, 14-012 | The PiP slot is a `Cell` hand-over and the offer cache uses `try_borrow`; the web-app confirm body uses the integration's one-shot content. Baseline borrows pruned. |
 | 13-060 | Integration's `ToastStage` owns the toast timer. |
 | 13-061 | `TranslateDialog` holds one `TranslateStage` (`Box`, `Choosing { under }`, `SkipList { note }`). |
