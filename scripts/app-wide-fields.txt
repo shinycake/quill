@@ -182,7 +182,7 @@ main_window.handle | the main window's handle
 main_window.place * | the main window's place
 main_window.cascade | the chat window cascade count
 main_window.quit_gate | the Quit held behind the Stop and quit alert, which is the window's
-main_window.quit_gate.Asking.exit | the exit a Quit left behind the Stop and quit alert, which is the window's
+main_window.quit_gate.Held.exit | the exit a Quit left behind the Stop and quit alert, which is the window's
 main_window._key_scope | the key-scope interceptor
 first_run.Writing * | the first-run intro's clip write and timing, before any account
 first_run.Playing * | the first-run intro's player and timing, before any account
