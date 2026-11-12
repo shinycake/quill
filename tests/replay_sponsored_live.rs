@@ -22,18 +22,24 @@ fn sponsored_tail_views_count_once() {
     // Fetch -> store: the first text ad is the first to join the history.
     assert_eq!(shown(&mut session), Some(9001));
     // Visible -> view: counted once, however often it is reported.
-    assert_eq!(session.take_sponsored_views(chat_id, &[9001]), vec![9001]);
-    assert!(session.take_sponsored_views(chat_id, &[9001]).is_empty());
+    let (first, ids) = session
+        .begin_sponsored_views(chat_id, &[9001])
+        .expect("due");
+    assert_eq!(ids, vec![9001]);
+    assert!(session.begin_sponsored_views(chat_id, &[9001]).is_none());
     // Unknown ids and other chats are ignored.
-    assert!(session.take_sponsored_views(chat_id, &[1234]).is_empty());
+    assert!(session.begin_sponsored_views(chat_id, &[1234]).is_none());
     assert!(
         session
-            .take_sponsored_views(quill::ids::ChatId(99), &[9001])
-            .is_empty()
+            .begin_sponsored_views(quill::ids::ChatId(99), &[9001])
+            .is_none()
     );
     // A failed send releases the id for a retry.
-    session.untake_sponsored_views(chat_id, &[9001]);
-    assert_eq!(session.take_sponsored_views(chat_id, &[9001]), vec![9001]);
+    session.settle_sponsored_views(chat_id, first, false);
+    let (_, ids) = session
+        .begin_sponsored_views(chat_id, &[9001])
+        .expect("asked again");
+    assert_eq!(ids, vec![9001]);
 
     // Within five minutes no refetch is due; after, one is.
     let now = std::time::Instant::now();

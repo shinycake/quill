@@ -328,7 +328,7 @@ impl Session {
     /// The answer of a `viewMessages` for sponsored ads: its ads are counted
     /// (`counted`) or fail one more time. An ad another request took over
     /// since keeps that request.
-    pub(crate) fn settle_sponsored_views(
+    pub fn settle_sponsored_views(
         &mut self,
         chat_id: ChatId,
         request: RequestId,
