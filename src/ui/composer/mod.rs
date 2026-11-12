@@ -587,7 +587,7 @@ impl QuillApp {
                 self.chat_ui.set_reply(None);
                 self.chat_ui.rich.set_editor(false);
                 self.clear_suggest_bar_after_send(chat_id);
-                self.expect_draft_clear(DraftClear::whole_composer(chat_id));
+                self.expect_draft_clear(DraftClear::whole_composer(chat_id), request);
                 self.composer
                     .update(cx, |input, cx| input.set_value("", window, cx));
                 self.forget_local_draft(chat_id);

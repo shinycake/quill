@@ -6,6 +6,7 @@ use crate::diagnostics::DiagnosticSink;
 use crate::diagnostics::MemorySink;
 use crate::ids::{AccountKey, ChatId, MessageId};
 use crate::platform::MemorySecretStore;
+use crate::state::SendAck;
 use crate::state::Session;
 use crate::telegram::client::copy_and_parse;
 use crate::telegram::envelope::MessageContent;
@@ -279,7 +280,11 @@ fn private_draft_debounces_then_flushes_and_skips_channels() {
             .unwrap();
     assert_eq!(
         driver.session.messages.draft_clears,
-        vec![(ChatId(7), DraftTopic::Chat)]
+        vec![SendAck {
+            chat_id: ChatId(7),
+            slot: DraftTopic::Chat,
+            old_message_id: MessageId(-1)
+        }]
     );
     driver
         .clear_draft_after_send(ChatId(7), DraftTopic::Chat, true)

@@ -507,9 +507,21 @@ fn a_sent_message_clears_the_slot_it_went_to() {
     assert_eq!(
         session.messages.draft_clears,
         vec![
-            (ChatId(9), DraftTopic::Chat),
-            (ChatId(9), DraftTopic::Forum(3)),
-            (ChatId(9), DraftTopic::Thread(501)),
+            SendAck {
+                chat_id: ChatId(9),
+                slot: DraftTopic::Chat,
+                old_message_id: MessageId(-1)
+            },
+            SendAck {
+                chat_id: ChatId(9),
+                slot: DraftTopic::Forum(3),
+                old_message_id: MessageId(-1)
+            },
+            SendAck {
+                chat_id: ChatId(9),
+                slot: DraftTopic::Thread(501),
+                old_message_id: MessageId(-1)
+            },
         ]
     );
 }
@@ -533,7 +545,11 @@ fn a_failed_send_names_the_slot_whose_draft_clear_is_dropped() {
     );
     assert_eq!(
         session.messages.failed_sends,
-        vec![(ChatId(9), DraftTopic::Forum(3))]
+        vec![SendAck {
+            chat_id: ChatId(9),
+            slot: DraftTopic::Forum(3),
+            old_message_id: MessageId(-1)
+        }]
     );
     assert!(session.messages.draft_clears.is_empty());
 }
@@ -637,4 +653,38 @@ fn a_remote_draft_change_moves_the_revision_and_an_echo_does_not() {
     );
     assert_ne!(session.remote_draft_revision(), after_remote);
     assert_eq!(session.draft_for(ChatId(8), DraftTopic::Chat), None);
+}
+
+/// Sweep r3-08 review (14-004): the answer to a send names the temporary
+/// message its request made, so the composer can match the ack
+/// (`old_message_id`) to the send; another request's answer is not kept.
+#[test]
+fn a_send_answer_names_the_temporary_message_of_its_request() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    new_chat(
+        &mut session,
+        &seq,
+        &sink,
+        9,
+        r#"{"@type":"chatTypeSupergroup","supergroup_id":9,"is_channel":false}"#,
+    );
+    let send = session.request(RequestPurpose::SendMessage, Some(ChatId(9)));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"message","@extra":"{}","id":-5,"chat_id":9,"is_outgoing":true,"sending_state":{{"@type":"messageSendingStatePending"}},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"x","entities":[]}}}}}}"#,
+            send.0
+        ),
+    );
+    assert_eq!(
+        session.messages.sent_answers,
+        vec![SendAnswered {
+            request: send,
+            chat_id: ChatId(9),
+            message_id: MessageId(-5),
+        }]
+    );
 }

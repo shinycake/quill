@@ -18,7 +18,7 @@ use gpui_kit::{
     VisualTestContext, Window, px, size,
 };
 use quill::composer::{AttachmentKind, ComposerAttachment, ComposerScheduling};
-use quill::ids::{AccountKey, ChatId, MessageId};
+use quill::ids::{AccountKey, ChatId, MessageId, RequestId};
 use quill::paid_messages::CanSend;
 use quill::telegram::requests::SelfDestructSend;
 use std::path::PathBuf;
@@ -913,18 +913,67 @@ fn an_ack_takes_its_own_topics_clear_and_never_a_neighbours() {
     sends.set_draft_clear(&first, Some(DraftClear::of_text(chat, "one")));
     sends.set_draft_clear(&second, Some(DraftClear::of_text(chat, "two")));
     let account = first.account.clone();
+    let unknown = MessageId(-90);
     // A third topic's send set no clear: its ack finds none, and the other
     // two stay for their own acks.
-    assert_eq!(sends.take_draft_clear(&account, forum_slot(3).draft), None);
+    assert_eq!(
+        sends.take_draft_clear(&account, unknown, forum_slot(3).draft),
+        None
+    );
     assert!(sends.has_draft_clear(&first));
     assert!(sends.has_draft_clear(&second));
     assert_eq!(
-        sends.take_draft_clear(&account, second.draft),
-        Some(DraftClear::of_text(chat, "two"))
+        sends.take_draft_clear(&account, unknown, second.draft),
+        Some((second.draft, DraftClear::of_text(chat, "two")))
     );
     assert_eq!(
-        sends.take_draft_clear(&account, first.draft),
-        Some(DraftClear::of_text(chat, "one"))
+        sends.take_draft_clear(&account, unknown, first.draft),
+        Some((first.draft, DraftClear::of_text(chat, "one")))
     );
     assert!(!sends.has_draft_clear(&first));
+}
+
+/// Sweep r3-08 review (14-004): a reply sent from a supergroup's main
+/// composer is acked under the replied-to message's topic, not the slot
+/// the composer sent from. The ack finds the send by the temporary id its
+/// request's answer gave the message, takes that clear, and names the
+/// slot the draft is cleared in; a neighbour topic's clear stays.
+#[test]
+fn a_reply_from_the_main_composer_is_acked_under_another_topic() {
+    use crate::ui::composer_state::DraftClear;
+    let chat = ChatId(7);
+    let account = AccountKey("a".into());
+    let main = SendSlot {
+        account: account.clone(),
+        draft: quill::composer::DraftKey {
+            chat_id: 7,
+            topic: quill::composer::DraftTopic::Chat,
+        },
+    };
+    let other_topic = forum_slot(2);
+    let mut sends = crate::ui::composer_sends::ComposerSends::default();
+    sends.set_draft_clear(
+        &main,
+        Some(DraftClear::of_text(chat, "reply").asked([RequestId(11)])),
+    );
+    sends.set_draft_clear(
+        &other_topic,
+        Some(DraftClear::of_text(chat, "neighbour").asked([RequestId(12)])),
+    );
+    // TDLib answers the reply's request with the temporary message.
+    sends.note_send_answer(&account, RequestId(11), MessageId(-5));
+    // The ack names the message's topic (Forum 3), which has no clear of
+    // its own: the send's own clear is taken, from the main slot.
+    let taken = sends.take_draft_clear(&account, MessageId(-5), forum_slot(3).draft);
+    assert_eq!(
+        taken.map(|(slot, clear)| (slot, clear.sent)),
+        Some((main.draft, Some("reply".to_string())))
+    );
+    assert!(sends.has_draft_clear(&other_topic), "the neighbour stays");
+    // An ack of a message no send made takes nothing of a topic it does
+    // not name.
+    assert_eq!(
+        sends.take_draft_clear(&account, MessageId(-6), forum_slot(3).draft),
+        None
+    );
 }

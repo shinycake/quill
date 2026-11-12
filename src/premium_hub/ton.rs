@@ -564,9 +564,31 @@ pub struct GramsHub {
     /// Collect's password box, security check or finished outcome, while
     /// open.
     pub withdraw: Option<GramWithdraw>,
+    /// What the withdrawal box's window acts on once (`take_ready`): the
+    /// password field takes the keyboard.
+    ready: Vec<WithdrawReady>,
 }
 
+/// The idle password box of Collect is ready for a password.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WithdrawReady;
+
 impl GramsHub {
+    /// Put the withdrawal in `stage`. Entering the idle password box (it
+    /// opened, or a try was refused or failed) queues the focus for its
+    /// field; every other stage queues nothing.
+    pub fn enter_withdraw(&mut self, stage: GramWithdraw) {
+        if stage.can_submit() {
+            self.ready.push(WithdrawReady);
+        }
+        self.withdraw = Some(stage);
+    }
+
+    /// The password box became ready since the last call.
+    pub fn take_ready(&mut self) -> bool {
+        !std::mem::take(&mut self.ready).is_empty()
+    }
+
     /// tdesktop shows "My Grams" in Settings while the balance is not zero.
     pub fn shows_settings_row(&self) -> bool {
         self.balance_nano.is_some_and(|nanos| nanos != 0)

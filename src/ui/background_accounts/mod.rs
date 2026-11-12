@@ -208,6 +208,18 @@ impl BackgroundAccounts {
             .collect()
     }
 
+    /// An account's start was refused for space and waits for a reading
+    /// with room.
+    pub(in crate::ui) fn has_refused_start(&self) -> bool {
+        self.prepare.any_refused()
+    }
+
+    /// A reading with room: the refused starts leave their stage, and the
+    /// pass that follows asks again.
+    pub(in crate::ui) fn release_refused_starts(&mut self) {
+        self.prepare.take_refused();
+    }
+
     fn has_work(&self) -> bool {
         self.prepare.any_wanted()
             || !self.closing.is_empty()
@@ -437,7 +449,7 @@ impl QuillApp {
                 (Some(live), BackgroundStatus::Connecting)
             }
             Err(ConnectBlocker::DiskFull) => {
-                self.disk.refused_start();
+                self.background.prepare.refuse(&key);
                 return;
             }
             Err(_) => {

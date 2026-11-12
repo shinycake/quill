@@ -124,11 +124,15 @@ fn the_open_private_chat_is_listed_first(cx: &mut TestAppContext) {
 
 fn open_password_box(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
     app.update_in(vcx, |app, _, cx| {
-        if let Some(picker) = app.gift_manage_mut().and_then(|m| m.transfer_mut()) {
-            picker.stage = TransferStage::Password {
-                send: ExportSend::Idle,
-                error: None,
-            };
+        if let Some(manage) = app.gift_manage_mut() {
+            if let Some(picker) = manage.transfer_mut() {
+                picker.stage = TransferStage::Password {
+                    send: ExportSend::Idle,
+                    error: None,
+                };
+            }
+            // What moves the box to idle in the app queues the focus.
+            manage.password_ready();
         }
         cx.notify();
     });

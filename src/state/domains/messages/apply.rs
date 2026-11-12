@@ -233,7 +233,11 @@ impl Session {
                 // The draft of the slot the message went to (topic, thread
                 // or chat) is cleared once the composer is seen idle.
                 let slot = self.draft_slot_of_message(chat_id, topic_id, thread_id, direct_topic);
-                self.messages.draft_clears.push((chat_id, slot));
+                self.messages.draft_clears.push(SendAck {
+                    chat_id,
+                    slot,
+                    old_message_id,
+                });
             }
             MessagesPayload::UpdateMessageSendFailed {
                 message,
@@ -258,7 +262,11 @@ impl Session {
                     message.thread_id(),
                     message.extras.direct_messages_topic_id(),
                 );
-                self.messages.failed_sends.push((chat_id, slot));
+                self.messages.failed_sends.push(SendAck {
+                    chat_id,
+                    slot,
+                    old_message_id,
+                });
                 let failed = crate::telegram::envelope::MessageSendState::Failed {
                     can_retry: matches!(
                         message.send_state,
@@ -537,7 +545,18 @@ impl Session {
                     } else {
                         self.messages.scheduled_messages.push(message);
                     }
-                } else if pending.map(|p| p.purpose) == Some(RequestPurpose::SendMessage) {
+                } else if let Some(request) =
+                    pending.filter(|p| p.purpose == RequestPurpose::SendMessage)
+                {
+                    // Nobody may be looking (an agent session): keep the newest.
+                    if self.messages.sent_answers.len() >= 64 {
+                        self.messages.sent_answers.remove(0);
+                    }
+                    self.messages.sent_answers.push(SendAnswered {
+                        request: request.id,
+                        chat_id: message.chat_id,
+                        message_id: message.id,
+                    });
                     self.upsert_message(message, true);
                 } else if matches!(
                     pending.map(|p| p.purpose),

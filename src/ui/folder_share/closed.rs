@@ -28,10 +28,16 @@ impl QuillApp {
         let waiting: Vec<RequestId> = self.folders.closed_asks.keys().copied().collect();
         let mut changed = false;
         for request in waiting {
-            let Some(answer) = self
-                .session_mut_any()
-                .and_then(|session| session.chat_list.dialog_answers.take(request))
-            else {
+            let Some(session) = self.session_mut_any() else {
+                continue;
+            };
+            let Some(answer) = session.chat_list.dialog_answers.take(request) else {
+                // Out of the session's requests with no answer kept (the
+                // ring of answers dropped it): nothing will come, the
+                // entry ends without a toast.
+                if session.requests.get(request).is_none() {
+                    self.folders.closed_asks.remove(&request);
+                }
                 continue;
             };
             let Some(ask) = self.folders.closed_asks.remove(&request) else {

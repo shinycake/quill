@@ -636,6 +636,34 @@ fn closing_the_share_box_keeps_a_link_saves_answer(cx: &mut TestAppContext) {
     });
 }
 
+/// Sweep r3-08 review: a closed box's entry ends when its request is gone
+/// and its answer is not kept (the ring of answers dropped it), with no
+/// toast.
+#[gpui_kit::test]
+fn a_closed_ask_ends_when_its_answer_was_evicted(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        let request = sent(app, RequestPurpose::CreateChatFolderInviteLink, Some(5));
+        let mut dialog = FolderShareDialog::new(5);
+        dialog.view = FolderShareView::edit(
+            None,
+            LinkForm::new(window, cx, String::new(), Default::default()),
+        );
+        dialog.view.set_op(LinkOp::Saving(request));
+        app.folders.share = Some(dialog);
+        app.close_folder_share(cx);
+        // Still out: the entry waits.
+        assert!(!app.settle_folder_share(cx));
+        assert!(app.folders.closed_asks.contains_key(&request));
+        // Answered, then the answer is evicted before anyone takes it.
+        answer(app, request, REFUSED);
+        let demo = app.demo_session.as_mut().expect("demo session");
+        assert!(demo.chat_list.dialog_answers.take(request).is_some());
+        assert!(!app.settle_folder_share(cx), "no toast for a lost answer");
+        assert!(app.folders.closed_asks.is_empty());
+    });
+}
+
 /// The shared folder's join box stays up, drawing "Joining", until the
 /// answer to its own request: the offer gone closes it, the offer standing
 /// (the request failed) sends it back to choosing with the ticks kept.

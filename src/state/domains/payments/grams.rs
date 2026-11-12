@@ -119,7 +119,7 @@ impl Session {
             grams.withdraw = Some(GramWithdraw::Finished(WithdrawOutcome::TooSmall));
             return;
         }
-        grams.withdraw = Some(match password_check_failure(err, &error_reason(err)) {
+        grams.enter_withdraw(match password_check_failure(err, &error_reason(err)) {
             PasswordCheckFailure::Field(error) => GramWithdraw::idle(Some(error)),
             PasswordCheckFailure::SecurityCheck { later } => GramWithdraw::SecurityCheck { later },
         });

@@ -30,7 +30,7 @@ use super::status_note::StatusNote;
 use super::user_error::user_error;
 use gpui_kit::*;
 use quill::composer::{ComposerSnapshot, PrepareError, PreparedMedia};
-use quill::ids::{AccountKey, ChatId};
+use quill::ids::{AccountKey, ChatId, RequestId};
 use quill::lang::{keys, tr, tr_with};
 use quill::text_split::SplitText;
 use std::path::PathBuf;
@@ -343,10 +343,14 @@ impl QuillApp {
         };
         let scheduling = first.send_options.scheduling;
         let mut sent = 0usize;
+        let mut requests = Vec::new();
         let mut failure = None;
         for snap in &snaps {
             match live.driver.send_snapshot(snap) {
-                Ok(_) => sent += 1,
+                Ok(request) => {
+                    sent += 1;
+                    requests.push(request);
+                }
                 Err(err) => {
                     failure = Some(err);
                     break;
@@ -367,7 +371,7 @@ impl QuillApp {
                 sent_snaps,
             );
             let left = unsent_text(origin.split.as_deref(), &snaps, sent);
-            self.clear_after_send(&done, window, &left, cx);
+            self.clear_after_send(&done, &requests, window, &left, cx);
         }
         // The notes are the screen's: an account in the background sends
         // without one.
@@ -412,6 +416,7 @@ impl QuillApp {
     fn clear_after_send(
         &mut self,
         origin: &SendOrigin,
+        requests: &[RequestId],
         window: Option<&mut Window>,
         left: &str,
         cx: &mut Context<Self>,
@@ -468,8 +473,9 @@ impl QuillApp {
         self.clear_suggest_bar_after_send(chat_id);
         self.composer_sends.set_draft_clear(
             &origin.slot,
-            plan.clears_draft_on_ack(left)
-                .then(|| DraftClear::of_text(chat_id, &origin.markup)),
+            plan.clears_draft_on_ack(left).then(|| {
+                DraftClear::of_text(chat_id, &origin.markup).asked(requests.iter().copied())
+            }),
         );
         if plan.clear_text {
             // `left`: the unsent parts of a split text, else nothing.

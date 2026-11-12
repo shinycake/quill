@@ -148,7 +148,8 @@ fn a_connection_prepared_before_the_disk_filled_opens_nothing(cx: &mut TestAppCo
     });
     vcx.run_until_parked();
     app.read_with(&vcx, |app, _| {
-        assert!(matches!(app.auth_demo.stage, ConnectStage::Idle));
+        // The prepared client was refused: the connection stage says so.
+        assert!(matches!(app.auth_demo.stage, ConnectStage::DiskRefused));
         assert!(app.live.is_none());
         assert!(app.disk.is_full());
     });

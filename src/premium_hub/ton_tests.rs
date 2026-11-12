@@ -419,3 +419,18 @@ fn closing_the_screen_drops_an_unacted_outcome() {
     assert!(!hub.open && hub.selected.is_none());
     assert_eq!(hub.take_withdraw_outcome(), None);
 }
+
+/// Sweep r3-08 review (16-006): entering the idle password box queues the
+/// focus for its field once; every other stage queues nothing.
+#[test]
+fn entering_the_idle_password_box_queues_its_focus_once() {
+    use super::GramWithdraw;
+    let mut hub = GramsHub::default();
+    hub.enter_withdraw(GramWithdraw::Sending(RequestId(3)));
+    assert!(!hub.take_ready());
+    hub.enter_withdraw(GramWithdraw::idle(None));
+    assert!(hub.take_ready());
+    assert!(!hub.take_ready(), "taken once");
+    hub.enter_withdraw(GramWithdraw::SecurityCheck { later: false });
+    assert!(!hub.take_ready());
+}

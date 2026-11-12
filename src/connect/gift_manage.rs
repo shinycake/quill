@@ -432,6 +432,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some(picker) = self.session.payments.gifts_manage.transfer_mut() {
             picker.stage = TransferStage::Password { send, error: None };
         }
+        if send == ExportSend::Idle {
+            self.session.payments.gifts_manage.password_ready();
+        }
     }
 
     /// `setGiftResalePrice`: `Some(stars)` lists the collectible, `None`

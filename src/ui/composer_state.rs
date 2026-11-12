@@ -3,7 +3,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use quill::composer::DraftTopic;
-use quill::ids::ChatId;
+use quill::ids::{ChatId, MessageId, RequestId};
 use quill::telegram::envelope::ChatDraft;
 
 /// A draft to clear once a send is acknowledged. `sent` is the composer
@@ -13,6 +13,19 @@ use quill::telegram::envelope::ChatDraft;
 pub(super) struct DraftClear {
     pub(super) chat_id: ChatId,
     pub(super) sent: Option<String>,
+    /// The messages of the send, each from the request that made it to
+    /// the temporary id TDLib gave it. An ack names its message by that id
+    /// (the topic it names can differ from the composer's slot, as for a
+    /// reply from a supergroup's main composer), so this is how it finds
+    /// the clear of the send it ends.
+    messages: Vec<SentMessage>,
+}
+
+/// One message of a send, from the request to its temporary id.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SentMessage {
+    Asked(RequestId),
+    Made(MessageId),
 }
 
 impl DraftClear {
@@ -20,6 +33,7 @@ impl DraftClear {
         Self {
             chat_id,
             sent: None,
+            messages: Vec::new(),
         }
     }
 
@@ -27,7 +41,29 @@ impl DraftClear {
         Self {
             chat_id,
             sent: Some(sent.to_string()),
+            messages: Vec::new(),
         }
+    }
+
+    /// The send went out as `requests`.
+    pub(super) fn asked(mut self, requests: impl IntoIterator<Item = RequestId>) -> Self {
+        self.messages
+            .extend(requests.into_iter().map(SentMessage::Asked));
+        self
+    }
+
+    /// `request` was answered with the temporary message `made`.
+    pub(super) fn answered(&mut self, request: RequestId, made: MessageId) {
+        for message in &mut self.messages {
+            if *message == SentMessage::Asked(request) {
+                *message = SentMessage::Made(made);
+            }
+        }
+    }
+
+    /// `message` is one the send made.
+    pub(super) fn made(&self, message: MessageId) -> bool {
+        self.messages.contains(&SentMessage::Made(message))
     }
 
     /// Whether the ack for `chat_id` may clear its draft, given the

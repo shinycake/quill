@@ -20,7 +20,7 @@ use super::composer_state::DraftClear;
 use quill::composer::{
     ComposerAttachment, ComposerScheduling, DraftKey, LinkPreviewChoice, PreviewMediaSize,
 };
-use quill::ids::{AccountKey, ChatId, RequestId};
+use quill::ids::{AccountKey, ChatId, MessageId, RequestId};
 use quill::telegram::envelope::AuthorizationState;
 use quill::telegram::requests::SelfDestructSend;
 use std::collections::HashMap;
@@ -479,23 +479,47 @@ impl ComposerSends {
         }
     }
 
-    /// The pending clear for an ack of `draft` in `account`: the slot's
-    /// own and no other. The ack names the slot its message went to
-    /// (`Session::draft_slot_of_message`), the same one the composer sent
-    /// from; another topic's pending clear is not this ack's to take, so a
-    /// send that set none (a menu command) cannot clear a neighbour's
-    /// draft.
+    /// A send was answered: `request` made the temporary message `made`.
+    /// The pending clear that holds the request learns the message.
+    pub(super) fn note_send_answer(
+        &mut self,
+        account: &AccountKey,
+        request: RequestId,
+        made: MessageId,
+    ) {
+        if let Some(sends) = self.accounts.get_mut(account) {
+            for clear in sends.draft_clears.values_mut() {
+                clear.answered(request, made);
+            }
+        }
+    }
+
+    /// The pending clear for the ack of `message` in `account`, with the
+    /// slot it waits in: the send that made the message (the ack names the
+    /// message's own topic, which can differ from the composer's slot, as
+    /// for a reply from a supergroup's main composer), else the clear of
+    /// the slot the ack names (`ack_slot`). Never another send's: a send
+    /// that set none (a menu command) cannot clear a neighbour's draft.
     pub(super) fn take_draft_clear(
         &mut self,
         account: &AccountKey,
-        draft: DraftKey,
-    ) -> Option<DraftClear> {
-        let clear = self
-            .accounts
-            .get_mut(account)
-            .and_then(|sends| sends.draft_clears.remove(&draft));
+        message: MessageId,
+        ack_slot: DraftKey,
+    ) -> Option<(DraftKey, DraftClear)> {
+        let sends = self.accounts.get_mut(account)?;
+        let slot = sends
+            .draft_clears
+            .iter()
+            .find_map(|(slot, clear)| clear.made(message).then_some(*slot))
+            .or_else(|| {
+                sends
+                    .draft_clears
+                    .contains_key(&ack_slot)
+                    .then_some(ack_slot)
+            });
+        let taken = slot.and_then(|slot| sends.draft_clears.remove(&slot).map(|c| (slot, c)));
         self.drop_if_empty(account);
-        clear
+        taken
     }
 
     /// Whether `slot` has a send waiting for its ack to clear the draft.
@@ -559,9 +583,10 @@ fn session_ended(prev: &AuthorizationState, now: &AuthorizationState) -> bool {
 impl QuillApp {
     /// The send just made from the composer in place clears its slot's draft
     /// when it is acknowledged (`finish_successful_sends`).
-    pub(super) fn expect_draft_clear(&mut self, clear: DraftClear) {
+    pub(super) fn expect_draft_clear(&mut self, clear: DraftClear, request: RequestId) {
         if let Some(slot) = self.send_slot() {
-            self.composer_sends.set_draft_clear(&slot, Some(clear));
+            self.composer_sends
+                .set_draft_clear(&slot, Some(clear.asked([request])));
         }
     }
 

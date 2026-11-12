@@ -14,6 +14,9 @@ enum Prepare {
     /// The account was removed, stopped or switched to meanwhile: nothing
     /// starts, but `workers` still run.
     Cancelled { workers: u32 },
+    /// The disk is below the open floor: the start was refused and no
+    /// worker runs. A reading with room asks again (`take_refused`).
+    DiskRefused,
 }
 
 /// What the preparations of all accounts are doing.
@@ -27,7 +30,7 @@ impl PrepareSet {
     pub(super) fn begin(&mut self, key: &AccountKey) {
         let workers = match self.accounts.get(key) {
             Some(Prepare::Wanted { workers } | Prepare::Cancelled { workers }) => *workers,
-            None => 0,
+            Some(Prepare::DiskRefused) | None => 0,
         };
         self.accounts.insert(
             key.clone(),
@@ -50,24 +53,58 @@ impl PrepareSet {
 
     /// A worker for `key` is running, wanted or not.
     pub(super) fn running(&self, key: &AccountKey) -> bool {
-        self.accounts.contains_key(key)
+        matches!(
+            self.accounts.get(key),
+            Some(Prepare::Wanted { .. } | Prepare::Cancelled { .. })
+        )
     }
 
     /// Every account with a worker running or a start wanted.
     pub(super) fn keys(&self) -> impl Iterator<Item = &AccountKey> {
-        self.accounts.keys()
+        self.accounts
+            .iter()
+            .filter(|(_, prepare)| !matches!(prepare, Prepare::DiskRefused))
+            .map(|(key, _)| key)
+    }
+
+    /// The open floor refused `key`'s start, which waits for a reading with
+    /// room. An account with a worker still running keeps its stage.
+    pub(super) fn refuse(&mut self, key: &AccountKey) {
+        self.accounts
+            .entry(key.clone())
+            .or_insert(Prepare::DiskRefused);
+    }
+
+    pub(super) fn any_refused(&self) -> bool {
+        self.accounts
+            .values()
+            .any(|prepare| matches!(prepare, Prepare::DiskRefused))
+    }
+
+    /// A reading with room: every refused start leaves its stage, and the
+    /// pass that follows asks again (and refuses again what is still short).
+    pub(super) fn take_refused(&mut self) {
+        self.accounts
+            .retain(|_, prepare| !matches!(prepare, Prepare::DiskRefused));
     }
 
     /// No client starts for `key` any more; its workers run on.
     pub(super) fn cancel(&mut self, key: &AccountKey) {
-        if let Some(Prepare::Wanted { workers }) = self.accounts.get(key).copied() {
-            self.accounts
-                .insert(key.clone(), Prepare::Cancelled { workers });
+        match self.accounts.get(key).copied() {
+            Some(Prepare::Wanted { workers }) => {
+                self.accounts
+                    .insert(key.clone(), Prepare::Cancelled { workers });
+            }
+            Some(Prepare::DiskRefused) => {
+                self.accounts.remove(key);
+            }
+            Some(Prepare::Cancelled { .. }) | None => {}
         }
     }
 
     /// Every start is cancelled.
     pub(super) fn cancel_all(&mut self) {
+        self.take_refused();
         for prepare in self.accounts.values_mut() {
             if let Prepare::Wanted { workers } = *prepare {
                 *prepare = Prepare::Cancelled { workers };
@@ -81,7 +118,7 @@ impl PrepareSet {
         let (wanted, workers) = match self.accounts.get(key).copied() {
             Some(Prepare::Wanted { workers }) => (true, workers),
             Some(Prepare::Cancelled { workers }) => (false, workers),
-            None => return false,
+            Some(Prepare::DiskRefused) | None => return false,
         };
         match workers.saturating_sub(1) {
             0 => {
@@ -129,5 +166,25 @@ mod tests {
         assert!(set.running(&key("b")));
         assert!(!set.finished(&key("a")) && !set.finished(&key("b")));
         assert_eq!(set.keys().count(), 0);
+    }
+
+    #[test]
+    fn a_refused_start_waits_without_blocking_deletion_and_leaves_on_a_retry() {
+        let mut set = PrepareSet::default();
+        set.refuse(&key("a"));
+        assert!(set.any_refused());
+        assert!(!set.wanted(&key("a")), "not a start in flight");
+        assert!(!set.running(&key("a")), "no worker: nothing to wait for");
+        assert_eq!(set.keys().count(), 0);
+        set.take_refused();
+        assert!(!set.any_refused());
+        // A stopped account forgets its refusal.
+        set.refuse(&key("b"));
+        set.cancel(&key("b"));
+        assert!(!set.any_refused());
+        // A worker still running keeps its stage.
+        set.begin(&key("c"));
+        set.refuse(&key("c"));
+        assert!(set.wanted(&key("c")) && !set.any_refused());
     }
 }

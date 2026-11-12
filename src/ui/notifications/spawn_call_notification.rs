@@ -400,7 +400,7 @@ impl QuillApp {
     }
 
     pub(in crate::ui) fn finish_successful_sends(&mut self, cx: &mut Context<Self>) {
-        let (clears, failed) = self
+        let (clears, failed, answered) = self
             .live
             .as_mut()
             .map(|live| {
@@ -408,10 +408,11 @@ impl QuillApp {
                 (
                     std::mem::take(&mut messages.draft_clears),
                     std::mem::take(&mut messages.failed_sends),
+                    std::mem::take(&mut messages.sent_answers),
                 )
             })
             .unwrap_or_default();
-        if clears.is_empty() && failed.is_empty() {
+        if clears.is_empty() && failed.is_empty() && answered.is_empty() {
             return;
         }
         let open_chat = self.open_chat_id();
@@ -421,20 +422,32 @@ impl QuillApp {
         let Some(account) = self.session().map(|session| session.account.clone()) else {
             return;
         };
+        // The answers come first: an ack finds its send's clear by the
+        // temporary id its request's answer gave the message.
+        for sent in answered {
+            self.composer_sends
+                .note_send_answer(&account, sent.request, sent.message_id);
+        }
         // A send that failed clears nothing: its entry goes, the draft stays,
         // and the ack of a later send of the slot finds none to take.
-        for (chat_id, topic) in failed {
-            let _ = self
-                .composer_sends
-                .take_draft_clear(&account, topic.key(chat_id.0));
+        for ack in failed {
+            let _ = self.composer_sends.take_draft_clear(
+                &account,
+                ack.old_message_id,
+                ack.slot.key(ack.chat_id.0),
+            );
         }
-        for (chat_id, topic) in clears {
-            let Some(flag) = self
-                .composer_sends
-                .take_draft_clear(&account, topic.key(chat_id.0))
-            else {
+        for ack in clears {
+            let chat_id = ack.chat_id;
+            let Some((sent_from, flag)) = self.composer_sends.take_draft_clear(
+                &account,
+                ack.old_message_id,
+                ack.slot.key(chat_id.0),
+            ) else {
                 continue;
             };
+            // The draft that goes is the slot the send was made from.
+            let topic = sent_from.topic;
             let stored = self
                 .session()
                 .and_then(|session| session.draft_for(chat_id, topic))

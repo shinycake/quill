@@ -300,6 +300,10 @@ pub enum GiftEvent {
     Transferred(GiftTransferred),
     /// Fragment's export page from `getUpgradedGiftWithdrawalUrl`, to open.
     ExportUrl(String),
+    /// The password box of "Send via Blockchain" is ready for a password
+    /// (it opened, or a try was refused or failed): the field takes the
+    /// keyboard.
+    PasswordReady,
 }
 
 /// tdesktop `ShowGiftTransferredToast` and `showPeerHistory` after
@@ -361,6 +365,24 @@ impl GiftManageState {
     /// Take what finished since the last call.
     pub fn take_events(&mut self) -> Vec<GiftEvent> {
         std::mem::take(&mut self.events)
+    }
+
+    /// The picker's password box is idle (ready for a password): queue the
+    /// event that gives its field the keyboard. Called by the code that
+    /// puts the box in that stage, after every answer that returns to it.
+    pub fn password_ready(&mut self) {
+        let idle = self.transfer().is_some_and(|picker| {
+            matches!(
+                picker.stage,
+                super::TransferStage::Password {
+                    send: super::ExportSend::Idle,
+                    ..
+                }
+            )
+        });
+        if idle {
+            self.events.push(GiftEvent::PasswordReady);
+        }
     }
 
     /// The finished transfer waiting to be shown.
