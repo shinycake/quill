@@ -498,16 +498,18 @@ impl ThemeGifts {
 
     /// The request on its way is no longer pending and nothing answered it
     /// (a reconnect dropped it): it failed.
-    pub fn forget_dropped(&mut self, pending: &std::collections::HashSet<RequestId>) {
+    pub fn forget_dropped(&mut self, pending: &std::collections::HashSet<RequestId>) -> bool {
         let out = match &self.stage {
             GiftsStage::FirstAsking(ask) | GiftsStage::Listed(GiftsRest::Loading { ask, .. }) => {
                 Some(ask.request)
             }
             _ => None,
         };
-        if out.is_some_and(|request| !pending.contains(&request)) {
+        let dropped = out.is_some_and(|request| !pending.contains(&request));
+        if dropped {
             self.fail();
         }
+        dropped
     }
 
     /// The request failed. The list stays as it was; the empty state shows

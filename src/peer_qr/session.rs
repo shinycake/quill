@@ -157,13 +157,17 @@ impl PeerQrData {
     /// forgotten, the gifts list and the contact link stop waiting. The
     /// open box's own save and free-code requests end through the
     /// answers the UI gives them when it finds them gone.
-    pub fn forget_dropped(&mut self, pending: &HashSet<RequestId>) {
+    pub fn forget_dropped(&mut self, pending: &HashSet<RequestId>) -> bool {
+        let saves = self.saves.len();
         self.saves.retain(|request, _| pending.contains(request));
-        self.gifts.forget_dropped(pending);
+        let mut changed = self.saves.len() != saves;
+        changed |= self.gifts.forget_dropped(pending);
         if let UserLinkFetch::Loading(request) = self.contact_link
             && !pending.contains(&request)
         {
             self.contact_link = UserLinkFetch::Failed(None);
+            changed = true;
         }
+        changed
     }
 }

@@ -328,18 +328,25 @@ fn note_read(path: &Path, readable: bool) {
 
 /// Load the registry; missing or corrupt ⇒ `[primary]` (never a hard error).
 fn load_registry(app_root: &Path) -> AccountRegistry {
-    load_registry_via(app_root, &|from, to| std::fs::rename(from, to))
+    load_registry_via(
+        app_root,
+        &|from, to| std::fs::rename(from, to),
+        &LOADED,
+        registry_writes(),
+    )
 }
 
-/// [`load_registry`] with the rename that moves a corrupt file aside.
+/// [`load_registry`] with the rename that moves a corrupt file aside, the
+/// cache slot it reads and keeps, and the write count to compare with.
 fn load_registry_via(
     app_root: &Path,
     rename: &dyn Fn(&Path, &Path) -> std::io::Result<()>,
+    cache: &std::sync::Mutex<Option<Loaded>>,
+    writes: u64,
 ) -> AccountRegistry {
     let path = registry_path(app_root);
-    let writes = registry_writes();
     let stamp = file_stamp(&path);
-    let mut loaded = crate::locks::lock_or_recover(&LOADED);
+    let mut loaded = crate::locks::lock_or_recover(cache);
     if let Some(last) = loaded.as_ref()
         && last.path == path
         && last.writes == writes
@@ -848,9 +855,16 @@ mod account_registry_tests {
             renames.set(renames.get() + 1);
             locked(from, to)
         };
-        assert_eq!(load_registry_via(&root, &counting).listed().len(), 1);
+        // The test's own cache slot and write count: no other test moves them.
+        let cache = std::sync::Mutex::new(None);
+        assert_eq!(
+            load_registry_via(&root, &counting, &cache, 0)
+                .listed()
+                .len(),
+            1
+        );
         // Read again (every frame asks): kept, not parsed and renamed again.
-        let _ = load_registry_via(&root, &counting);
+        let _ = load_registry_via(&root, &counting, &cache, 0);
         assert_eq!(renames.get(), 1);
         // A save refuses, so the recoverable list is not replaced.
         assert!(save_registry(&root, &AccountRegistry::default()).is_err());

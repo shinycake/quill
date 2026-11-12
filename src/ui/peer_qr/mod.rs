@@ -711,10 +711,11 @@ impl QuillApp {
         }) else {
             return false;
         };
-        if let Some(data) = self.qr_data_mut() {
-            data.forget_dropped(&pending);
-        }
+        let mut changed = self
+            .qr_data_mut()
+            .is_some_and(|data| data.forget_dropped(&pending));
         if let Some(request) = free.filter(|request| !pending.contains(request)) {
+            changed = true;
             self.qr_act(
                 QrAction::FreeAnswer {
                     request,
@@ -724,6 +725,7 @@ impl QuillApp {
             );
         }
         if let Some(request) = save.filter(|request| !pending.contains(request)) {
+            changed = true;
             self.qr_act(
                 QrAction::SaveAnswer {
                     request,
@@ -732,7 +734,7 @@ impl QuillApp {
                 cx,
             );
         }
-        session_waits || free.is_some() || save.is_some()
+        changed
     }
 
     /// Your own box: the driver asks for a temporary contact link when

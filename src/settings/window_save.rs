@@ -25,9 +25,7 @@ struct Saver {
 /// itself. A save while it runs only stages.
 enum Writer {
     Idle,
-    Running {
-        _thread: std::thread::JoinHandle<()>,
-    },
+    Running { thread: std::thread::JoinHandle<()> },
 }
 
 static SAVER: Saver = Saver {
@@ -69,14 +67,15 @@ impl Saver {
     /// write; a thread that could not start leaves the writer `Idle`, and
     /// the next save (or the quit flush) writes the slot.
     fn start_writer(&self, spawn: impl FnOnce() -> std::io::Result<std::thread::JoinHandle<()>>) {
-        let Ok(mut writer) = self.writer.lock() else {
-            return;
-        };
-        if matches!(*writer, Writer::Running { .. }) {
+        let mut writer = self.writer.lock().unwrap_or_else(|e| e.into_inner());
+        // A writer thread that is gone (it panicked) is not running: start a
+        // new one rather than only staging until the quit flush.
+        if matches!(&*writer, Writer::Running { thread } if !thread.is_finished()) {
             return;
         }
+        *writer = Writer::Idle;
         if let Ok(handle) = spawn() {
-            *writer = Writer::Running { _thread: handle };
+            *writer = Writer::Running { thread: handle };
         }
     }
 
@@ -86,9 +85,7 @@ impl Saver {
     fn run_writer(&self, path: &Path) {
         loop {
             let wrote = self.write_staged(path);
-            let Ok(mut writer) = self.writer.lock() else {
-                return;
-            };
+            let mut writer = self.writer.lock().unwrap_or_else(|e| e.into_inner());
             let more = wrote && self.staged.lock().is_ok_and(|staged| staged.is_some());
             if !more {
                 *writer = Writer::Idle;
@@ -210,9 +207,15 @@ mod tests {
             writer: Mutex::new(Writer::Idle),
         };
         let started = std::cell::Cell::new(0);
+        let release = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let spawn = || {
             started.set(started.get() + 1);
-            Ok(std::thread::spawn(|| {}))
+            let release = release.clone();
+            Ok(std::thread::spawn(move || {
+                while !release.load(std::sync::atomic::Ordering::SeqCst) {
+                    std::thread::park();
+                }
+            }))
         };
         saver.stage(state(1.));
         saver.start_writer(spawn);
@@ -230,7 +233,31 @@ mod tests {
         saver.stage(state(60.));
         saver.start_writer(spawn);
         assert_eq!(started.get(), 2, "a later report starts a new writer");
+        release.store(true, std::sync::atomic::Ordering::SeqCst);
         std::fs::remove_file(&path).ok();
+    }
+
+    /// Sweep r3-02 (07-002): a writer thread that died leaves `Running`
+    /// behind; the next save starts a new one.
+    #[test]
+    fn a_writer_thread_that_died_is_replaced_by_the_next_save() {
+        let saver = Saver {
+            staged: Mutex::new(None),
+            write: Mutex::new(()),
+            writer: Mutex::new(Writer::Idle),
+        };
+        let dead = std::thread::spawn(|| {});
+        while !dead.is_finished() {
+            std::thread::yield_now();
+        }
+        *saver.writer.lock().unwrap_or_else(|e| e.into_inner()) = Writer::Running { thread: dead };
+        let started = std::cell::Cell::new(0);
+        saver.stage(state(1.));
+        saver.start_writer(|| {
+            started.set(started.get() + 1);
+            Ok(std::thread::spawn(|| {}))
+        });
+        assert_eq!(started.get(), 1, "the dead writer is replaced");
     }
 
     #[test]

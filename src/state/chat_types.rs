@@ -284,7 +284,11 @@ pub enum OwnMember {
     Unknown,
     /// The probe found no member record (not a member, no access): there is
     /// no status and no personal restriction to find.
-    NoRecord,
+    /// The status `updateSupergroup` gave, when it had one, is kept.
+    NoRecord(Option<ChannelMemberStatus>),
+    /// `chatMemberStatusAdministrator` known only from `updateSupergroup`:
+    /// its rights were not read, so the own-member probe is still due.
+    AdminRightsUnread,
     /// Any status but administrator or restricted.
     Other(ChannelMemberStatus),
     /// `chatMemberStatusRestricted`: its rights and end date, `None` while
@@ -307,8 +311,9 @@ impl OwnMember {
 
     pub fn status(&self) -> Option<ChannelMemberStatus> {
         match self {
-            Self::Unknown | Self::NoRecord => None,
-            Self::Other(status) => Some(*status),
+            Self::Unknown | Self::NoRecord(None) => None,
+            Self::NoRecord(Some(status)) | Self::Other(status) => Some(*status),
+            Self::AdminRightsUnread => Some(ChannelMemberStatus::Administrator),
             Self::Restricted(_) => Some(ChannelMemberStatus::Restricted),
             Self::Administrator(_) => Some(ChannelMemberStatus::Administrator),
         }
@@ -417,6 +422,9 @@ impl ChatSummary {
         match &self.my_member {
             OwnMember::Other(ChannelMemberStatus::Creator) => true,
             OwnMember::Administrator(rights) => rights.post_messages.unwrap_or(true),
+            // Rights not read yet: a bare administrator posts.
+            OwnMember::AdminRightsUnread
+            | OwnMember::NoRecord(Some(ChannelMemberStatus::Administrator)) => true,
             _ => false,
         }
     }
@@ -447,16 +455,32 @@ impl ChatSummary {
     pub fn rights_fetched(&self) -> bool {
         !matches!(
             self.my_member,
-            OwnMember::Unknown | OwnMember::Restricted(None)
+            OwnMember::Unknown | OwnMember::AdminRightsUnread | OwnMember::Restricted(None)
         )
     }
 
     /// The probe found no member record (not a member, no access): there is
-    /// no personal restriction to find.
+    /// no personal restriction to find. A status already known from
+    /// `updateSupergroup` is kept.
     pub fn note_no_member_record(&mut self) {
-        if self.my_member == OwnMember::Unknown {
-            self.my_member = OwnMember::NoRecord;
+        if !self.rights_fetched() {
+            self.my_member = OwnMember::NoRecord(self.member_status());
         }
+    }
+
+    /// Adopt the status `updateSupergroup` gave. An administrator's rights
+    /// and a restricted member's details were not read, so the own-member
+    /// probe stays due for them; any other status has nothing more to read.
+    /// The same status again keeps what a probe already read.
+    pub fn adopt_status_only(&mut self, status: ChannelMemberStatus) {
+        if self.member_status() == Some(status) {
+            return;
+        }
+        self.my_member = match status {
+            ChannelMemberStatus::Restricted => OwnMember::Restricted(None),
+            ChannelMemberStatus::Administrator => OwnMember::AdminRightsUnread,
+            other => OwnMember::Other(other),
+        };
     }
 
     /// Record own channel membership (`getChatMember` / `updateChatMember` /

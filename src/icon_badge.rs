@@ -624,12 +624,14 @@ mod tests {
         let badge = Mutex::new(BadgeStage::Idle);
         sync_with(&badge, 5, t0(), |_| Push::Handed);
         drop(WorkerEnd(&badge));
+        // `WorkerEnd` stamps the real clock: retry relative to it.
+        let now = std::time::Instant::now();
         assert!(matches!(
             *badge.lock().unwrap(),
             BadgeStage::Failed { count: 5, .. }
         ));
         let pushes = std::cell::Cell::new(0);
-        sync_with(&badge, 5, t0() + FAILED_RETRY_AFTER * 2, |_| {
+        sync_with(&badge, 5, now + FAILED_RETRY_AFTER * 2, |_| {
             pushes.set(pushes.get() + 1);
             Push::Handed
         });

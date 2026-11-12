@@ -142,7 +142,7 @@ impl Session {
         let chat_id = chat.id;
         match chat.member_status() {
             None => {
-                chat.set_member_status(status, None);
+                chat.adopt_status_only(status);
             }
             Some(
                 ChannelMemberStatus::Left
@@ -150,7 +150,7 @@ impl Session {
                 | ChannelMemberStatus::Banned
                 | ChannelMemberStatus::Restricted,
             ) if !status.is_admin() => {
-                chat.set_member_status(status, None);
+                chat.adopt_status_only(status);
             }
             _ => {}
         }

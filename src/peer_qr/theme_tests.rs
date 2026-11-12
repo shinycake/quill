@@ -520,13 +520,16 @@ fn requests_the_session_dropped_are_forgotten_by_the_data() {
     data.start_save(RequestId(2), ThemeOwner::User(1), ThemeChoice::default());
     data.contact_link = UserLinkFetch::Loading(RequestId(3));
     assert!(data.waits());
-    data.forget_dropped(&HashSet::from([RequestId(2), RequestId(3)]));
+    assert!(data.forget_dropped(&HashSet::from([RequestId(2), RequestId(3)])));
     assert_eq!(
         data.saves.keys().copied().collect::<Vec<_>>(),
         vec![RequestId(2)]
     );
     assert_eq!(data.contact_link, UserLinkFetch::Loading(RequestId(3)));
-    data.forget_dropped(&HashSet::new());
+    // Nothing dropped, nothing reported: the poll is not asked to redraw.
+    assert!(!data.forget_dropped(&HashSet::from([RequestId(2), RequestId(3)])));
+    assert!(data.forget_dropped(&HashSet::new()));
+    assert!(!data.forget_dropped(&HashSet::new()));
     assert!(data.saves.is_empty());
     assert_eq!(data.contact_link, UserLinkFetch::Failed(None));
     assert!(!data.waits());
