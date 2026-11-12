@@ -35,6 +35,9 @@ pub(crate) struct CardInput {
     pub(crate) check: FieldCheck,
     /// A Backspace or Delete whose edit has not landed yet (`field_edit`).
     delete: DeleteEdit,
+    /// Number of the last Backspace or Delete press, so only the press that
+    /// took a snapshot can clear it.
+    presses: u64,
 }
 
 /// What the last check of a field found, tied to the text it judged: the
@@ -58,6 +61,19 @@ impl FieldCheck {
 }
 
 impl CardInput {
+    fn next_press(&mut self) -> u64 {
+        self.presses = self.presses.wrapping_add(1);
+        self.presses
+    }
+
+    /// The effect cycle of `press` is over: drop its snapshot, unless the
+    /// edit already took it or a newer press replaced it.
+    pub(crate) fn expire_delete(&mut self, press: u64) {
+        if matches!(self.delete, DeleteEdit::Pending { press: held, .. } if held == press) {
+            self.delete = DeleteEdit::None;
+        }
+    }
+
     /// The field is marked as an error: its text is the rejected text.
     pub(crate) fn shows_error(&self, cx: &App) -> bool {
         self.check.rejects(self.state.read(cx).value().as_ref())
@@ -65,15 +81,11 @@ impl CardInput {
 }
 
 /// The text just before a Backspace or Delete, until the edit it belongs
-/// to has been read or the effect cycle it was taken in is over. The
-/// expiry task belongs to the snapshot: the edit taking it, a newer press
-/// or the form going away drops the task with it.
+/// to has been read or the effect cycle it was taken in is over. The press
+/// number lets the end-of-cycle clear leave a newer press's snapshot alone.
 pub(crate) enum DeleteEdit {
     None,
-    Pending {
-        before: EditSnapshot,
-        _expires: Task<()>,
-    },
+    Pending { before: EditSnapshot, press: u64 },
 }
 
 impl DeleteEdit {
@@ -143,7 +155,7 @@ impl CardForm {
         self.inputs.iter().find(|input| input.field == field)
     }
 
-    fn input_mut(&mut self, field: CardField) -> Option<&mut CardInput> {
+    pub(super) fn input_mut(&mut self, field: CardField) -> Option<&mut CardInput> {
         self.inputs.iter_mut().find(|input| input.field == field)
     }
 
@@ -267,6 +279,7 @@ impl QuillApp {
                 state,
                 check: FieldCheck::Fine,
                 delete: DeleteEdit::None,
+                presses: 0,
             });
         }
         let card_form = CardForm {
@@ -324,7 +337,7 @@ impl QuillApp {
         self.payments.dialog.as_ref()?.card_form()
     }
 
-    fn card_form_mut(&mut self) -> Option<&mut CardForm> {
+    pub(super) fn card_form_mut(&mut self) -> Option<&mut CardForm> {
         self.payments.dialog.as_mut()?.card_form_mut()
     }
 
@@ -413,31 +426,24 @@ impl QuillApp {
         // its Change in this same effect cycle. A defer queued from a defer
         // runs after that Change, so a press that changed nothing (at the
         // start or end of the text) leaves no snapshot for later typing,
-        // even for a key already queued. The task waiting for that second
-        // defer is part of the snapshot: a Change that takes the snapshot,
-        // or a newer press that replaces it, cancels the wait.
-        let (settled, after_change) = futures_channel::oneshot::channel::<()>();
+        // even for a key already queued. The clear runs inside that second
+        // defer and only if the field still holds this press: a Change that
+        // took the snapshot, or a newer press, has replaced the number.
+        let Some(input) = self.card_form_mut().and_then(|form| form.input_mut(field)) else {
+            return;
+        };
+        let press = input.next_press();
+        input.delete = DeleteEdit::Pending {
+            before: snapshot,
+            press,
+        };
         self.defer_screen_in(window, cx, move |this, window, cx| {
-            this.defer_screen_in(window, cx, move |_, _, _| {
-                let _ = settled.send(());
-            });
-        });
-        let expires = self.spawn_screen_in(window, cx, async move |this, cx| {
-            if after_change.await.is_err() {
-                return;
-            }
-            let _ = this.update_in(cx, |this, _, _| {
+            this.defer_screen_in(window, cx, move |this, _, _| {
                 if let Some(input) = this.card_form_mut().and_then(|form| form.input_mut(field)) {
-                    input.delete = DeleteEdit::None;
+                    input.expire_delete(press);
                 }
             });
         });
-        if let Some(input) = self.card_form_mut().and_then(|form| form.input_mut(field)) {
-            input.delete = DeleteEdit::Pending {
-                before: snapshot,
-                _expires: expires,
-            };
-        }
         if at_front && let Some(previous) = self.neighbour_field(field, -1) {
             self.focus_card_field(previous, window, cx);
         }

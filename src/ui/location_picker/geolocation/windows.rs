@@ -13,8 +13,7 @@ use std::task::{Context, Poll, Wake, Waker};
 use windows::Devices::Geolocation::{
     GeolocationAccessStatus, Geolocator, Geoposition, PositionAccuracy, PositionStatus,
 };
-use windows::Foundation::{IAsyncInfo, IAsyncOperation};
-use windows::core::Interface;
+use windows_future::IAsyncOperation;
 
 /// Wakes the lookup thread parked in [`position_unless_dropped`].
 struct Unpark(std::thread::Thread);
@@ -41,9 +40,7 @@ fn position_unless_dropped(
         }
         if Pin::new(&mut *cancelled).poll(&mut context).is_ready() {
             // The operation may already be done: Cancel then does nothing.
-            if let Ok(info) = operation.cast::<IAsyncInfo>() {
-                let _ = info.Cancel();
-            }
+            let _ = operation.Cancel();
             return None;
         }
         std::thread::park();
