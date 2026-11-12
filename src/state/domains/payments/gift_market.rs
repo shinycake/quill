@@ -1,6 +1,7 @@
 //! Reducer for the gift market (`crate::gift_market`): resale pages and
 //! purchases, auction states and bids, crafting candidates and results.
 use crate::gift_market::{
+    MarketEvent,
     AuctionFetch, AuctionFollow, CraftGift, CraftResult, CraftRun, GiftMarketPayload,
     GiftMarketPurpose, PageLoad, bid_done_toast, error_note,
 };
@@ -205,15 +206,15 @@ impl Session {
                         craft_date: 0,
                     });
                 } else if recipient.is_self {
-                    market.toasts.push((
-                        String::new(),
-                        format!("{} is now yours.", listing.gift.full_name()),
-                    ));
+                    market.events.push(MarketEvent::Toast {
+                        title: String::new(),
+                        text: format!("{} is now yours.", listing.gift.full_name()),
+                    });
                 } else {
-                    market.toasts.push((
-                        "Gift Sent!".into(),
-                        format!("{} has been notified about your gift.", recipient.name),
-                    ));
+                    market.events.push(MarketEvent::Toast {
+                        title: "Gift Sent!".into(),
+                        text: format!("{} has been notified about your gift.", recipient.name),
+                    });
                 }
                 market.buy = None;
             }
@@ -249,7 +250,10 @@ impl Session {
                     Some(GiftMarketPurpose::IncreaseBid { .. })
                 );
                 let (title, text) = bid_done_toast(increased, per_round);
-                market.toasts.push((title.into(), text));
+                market.events.push(MarketEvent::Toast {
+                    title: title.into(),
+                    text,
+                });
             }
             Some(GiftMarketPurpose::Craft) => {
                 let request = pending.map_or(0, |p| p.id.0);
@@ -301,9 +305,9 @@ impl Session {
                 };
                 buy.send_failed();
                 if low {
-                    market.balance_low = true;
+                    market.events.push(MarketEvent::BalanceLow);
                 } else {
-                    market.notes.push(note);
+                    market.events.push(MarketEvent::Note(note));
                 }
             }
             GiftMarketPurpose::AuctionState { .. } => {
@@ -314,7 +318,7 @@ impl Session {
                     return;
                 }
                 market.auction = AuctionFetch::Idle;
-                market.notes.push(note);
+                market.events.push(MarketEvent::Note(note));
             }
             GiftMarketPurpose::PlaceBid { .. } | GiftMarketPurpose::IncreaseBid { .. } => {
                 if market
@@ -324,9 +328,9 @@ impl Session {
                     market.bidding = None;
                 }
                 if low {
-                    market.balance_low = true;
+                    market.events.push(MarketEvent::BalanceLow);
                 } else {
-                    market.notes.push(note);
+                    market.events.push(MarketEvent::Note(note));
                 }
             }
             GiftMarketPurpose::GiftsForCrafting { .. } => {
@@ -338,7 +342,7 @@ impl Session {
                     return;
                 };
                 craft.candidates_load = PageLoad::Failed(note.clone());
-                market.notes.push(note);
+                market.events.push(MarketEvent::Note(note));
             }
             GiftMarketPurpose::Craft => {
                 let Some(craft) = market.craft.as_mut().filter(|craft| {
@@ -347,7 +351,7 @@ impl Session {
                     return;
                 };
                 craft.run = CraftRun::Idle;
-                market.notes.push(note);
+                market.events.push(MarketEvent::Note(note));
             }
             GiftMarketPurpose::AcquiredGifts { gift_id } => {
                 if let Some(fetch) = market.acquired.get_mut(&gift_id) {
@@ -388,18 +392,9 @@ impl Session {
             .or_else(|| self.payments.gift_market.title(gift_id).map(str::to_string))
     }
 
-    /// Takes the one-shot error toasts.
-    pub fn take_gift_market_notes(&mut self) -> Vec<String> {
-        std::mem::take(&mut self.payments.gift_market.notes)
-    }
-
-    /// Takes the one-shot success toasts (title, text).
-    pub fn take_gift_market_toasts(&mut self) -> Vec<(String, String)> {
-        std::mem::take(&mut self.payments.gift_market.toasts)
-    }
-
-    /// Takes the "not enough Stars" flag.
-    pub fn take_gift_market_balance_low(&mut self) -> bool {
-        std::mem::take(&mut self.payments.gift_market.balance_low)
+    /// Takes the one-shot events (toasts, the low-balance prompt), oldest
+    /// first.
+    pub fn take_gift_market_events(&mut self) -> Vec<MarketEvent> {
+        std::mem::take(&mut self.payments.gift_market.events)
     }
 }

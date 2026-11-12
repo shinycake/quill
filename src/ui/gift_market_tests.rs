@@ -316,7 +316,10 @@ fn two_failed_answers_in_one_frame_both_toast(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     app.update_in(vcx, |app, window, cx| {
         if let Some(market) = app.gift_market_mut() {
-            market.notes = vec!["Purchase failed".into(), "Craft failed".into()];
+            market.events = vec![
+                quill::gift_market::MarketEvent::Note("Purchase failed".into()),
+                quill::gift_market::MarketEvent::Note("Craft failed".into()),
+            ];
         }
         app.gift_market_frame_upkeep(window, cx);
         let toasts = &app.connection.toasts;

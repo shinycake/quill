@@ -19,7 +19,9 @@ use gpui_kit::component::notification::Notification;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::gift_market::{AuctionBoxChoice, AuctionFetch, GiftMarketState, auction_about_shown};
+use quill::gift_market::{
+    AuctionBoxChoice, AuctionFetch, GiftMarketState, MarketEvent, auction_about_shown,
+};
 use quill::ids::FileId;
 use quill::lang::{keys, tr};
 use quill::local_time::now_unix;
@@ -344,27 +346,27 @@ impl QuillApp {
         let Some(market) = self.gift_market_mut() else {
             return;
         };
-        let notes = std::mem::take(&mut market.notes);
-        let toasts = std::mem::take(&mut market.toasts);
-        let low = std::mem::take(&mut market.balance_low);
+        let events = std::mem::take(&mut market.events);
         // Every note toasts, one after another through the toast queue.
-        for note in notes {
-            self.set_note(StatusNote::info(note));
-        }
-        if low {
-            self.set_note(StatusNote::silent(tr(
-                keys::Q_MONEY_YOUR_STARS_BALANCE_IS_TOO,
-            )));
-            self.open_stars(cx);
-        }
-        for (title, text) in toasts {
-            cx.defer_in(window, move |_, window, cx| {
-                let mut toast = Notification::new().message(text);
-                if !title.is_empty() {
-                    toast = toast.title(title);
+        for event in events {
+            match event {
+                MarketEvent::Note(note) => self.set_note(StatusNote::info(note)),
+                MarketEvent::BalanceLow => {
+                    self.set_note(StatusNote::silent(tr(
+                        keys::Q_MONEY_YOUR_STARS_BALANCE_IS_TOO,
+                    )));
+                    self.open_stars(cx);
                 }
-                window.push_notification(toast, cx);
-            });
+                MarketEvent::Toast { title, text } => {
+                    cx.defer_in(window, move |_, window, cx| {
+                        let mut toast = Notification::new().message(text);
+                        if !title.is_empty() {
+                            toast = toast.title(title);
+                        }
+                        window.push_notification(toast, cx);
+                    });
+                }
+            }
         }
     }
 

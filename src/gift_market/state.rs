@@ -443,12 +443,20 @@ pub struct GiftMarketState {
     /// The bid in flight: its gift and the request that answers it.
     pub bidding: Option<(i64, crate::ids::RequestId)>,
     pub craft: Option<CraftSession>,
-    /// One-shot error toasts.
-    pub notes: Vec<String>,
-    /// One-shot success toasts: title and text.
-    pub toasts: Vec<(String, String)>,
-    /// A paid request was refused for too few Stars.
-    pub balance_low: bool,
+    /// The one-shot events for the UI, in the order they happened; the UI
+    /// drains them once ([`Session::take_gift_market_events`]).
+    pub events: Vec<MarketEvent>,
+}
+
+/// One-shot event of the gift market for the UI.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MarketEvent {
+    /// An error toast.
+    Note(String),
+    /// A success toast: title (empty for none) and text.
+    Toast { title: String, text: String },
+    /// A paid request (buy, bid) was refused for too few Stars.
+    BalanceLow,
 }
 
 /// The `getGiftAuctionState` the UI waits for. Its answer and its error

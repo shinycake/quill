@@ -154,7 +154,7 @@ fn market_failures_hit_only_the_request_that_failed() {
         matches!(
             market.auction,
             crate::gift_market::AuctionFetch::Loading { .. }
-        ) && market.notes.is_empty()
+        ) && market.events.is_empty()
     );
     fail(&mut session, b, &sink);
     assert_eq!(

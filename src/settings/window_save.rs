@@ -25,7 +25,7 @@ struct Saver {
 /// itself. A save while it runs only stages.
 enum Writer {
     Idle,
-    Running(std::thread::JoinHandle<()>),
+    Running { _thread: std::thread::JoinHandle<()> },
 }
 
 static SAVER: Saver = Saver {
@@ -70,11 +70,11 @@ impl Saver {
         let Ok(mut writer) = self.writer.lock() else {
             return;
         };
-        if matches!(*writer, Writer::Running(_)) {
+        if matches!(*writer, Writer::Running { .. }) {
             return;
         }
         if let Ok(handle) = spawn() {
-            *writer = Writer::Running(handle);
+            *writer = Writer::Running { _thread: handle };
         }
     }
 
@@ -195,7 +195,7 @@ mod tests {
         saver
             .writer
             .lock()
-            .is_ok_and(|writer| matches!(*writer, Writer::Running(_)))
+            .is_ok_and(|writer| matches!(*writer, Writer::Running { .. }))
     }
 
     #[test]
