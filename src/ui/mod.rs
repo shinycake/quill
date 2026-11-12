@@ -410,6 +410,7 @@ mod group_call_share;
 mod group_call_speaker;
 mod group_call_stage_volume;
 mod group_call_stream_boxes;
+mod group_call_stream_join;
 mod group_call_stream_layout;
 mod group_call_stream_photo;
 mod group_call_tiles;
