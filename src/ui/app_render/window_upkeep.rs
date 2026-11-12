@@ -46,6 +46,8 @@ impl QuillApp {
         self.settle_scheduled_deletes(cx);
         // A bot's Restart sends its /start once the unblock is answered.
         self.pump_bot_restart(cx);
+        // The spam bar's report says "done" once both requests are answered.
+        self.pump_bar_report(cx);
         // A forced reply for the chat this window shows arms its composer.
         self.arm_force_reply_here(window, cx);
         // The histories every window still reads stay whole.

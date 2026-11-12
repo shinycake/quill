@@ -98,6 +98,15 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Retry of a failed contacts fetch: the failure is forgotten by the
+    /// fetch's own ask.
+    fn retry_call_add_people_contacts(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.fetch_contacts();
+        }
+        cx.notify();
+    }
+
     /// The box ends, whichever way: closed, finished, its call over, the
     /// lock, the account going away. The one place that takes it and
     /// clears the session's search with it.
@@ -343,20 +352,36 @@ impl QuillApp {
             rows = rows.child(self.call_add_people_row(row, true, cx));
         }
         if let Some(empty) = view.empty {
+            let message = tr(match empty {
+                AddPeopleEmpty::ContactsLoading | AddPeopleEmpty::SearchLoading => {
+                    keys::CONTACTS_LOADING
+                }
+                AddPeopleEmpty::ContactsFailed => keys::Q_PEOPLE_COULDN_T_LOAD_CONTACTS,
+                AddPeopleEmpty::NoContacts => keys::CONTACTS_NOT_FOUND,
+                AddPeopleEmpty::NoResults => keys::BLOCKED_LIST_NOT_FOUND,
+            });
+            let retry = (empty == AddPeopleEmpty::ContactsFailed).then(|| {
+                Button::new("call-add-people-retry")
+                    .debug_selector(|| "call-add-people-retry".into())
+                    .label(tr(keys::Q_MONEY_RETRY))
+                    .ghost()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.retry_call_add_people_contacts(cx);
+                    }))
+            });
             rows = rows.child(
                 div()
                     .id("call-add-people-empty")
                     .debug_selector(|| "call-add-people-empty".into())
                     .py_2()
+                    .flex()
+                    .flex_col()
+                    .items_start()
+                    .gap_1()
                     .text_sm()
                     .text_color(muted)
-                    .child(tr(match empty {
-                        AddPeopleEmpty::ContactsLoading | AddPeopleEmpty::SearchLoading => {
-                            keys::CONTACTS_LOADING
-                        }
-                        AddPeopleEmpty::NoContacts => keys::CONTACTS_NOT_FOUND,
-                        AddPeopleEmpty::NoResults => keys::BLOCKED_LIST_NOT_FOUND,
-                    })),
+                    .child(message)
+                    .children(retry),
             );
         }
         let field = Input::new(&search)

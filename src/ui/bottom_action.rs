@@ -171,14 +171,7 @@ impl QuillApp {
         let mut restart_now = false;
         if let Some(live) = self.live.as_mut() {
             let sent = live.driver.set_chat_user_blocked(chat_id, false);
-            // An unblock already out (from another entry) is the one the
-            // /start waits for.
-            let waited = match &sent {
-                Ok(Some(request)) => Some(*request),
-                Ok(None) => live.driver.pending_unblock(chat_id),
-                Err(_) => None,
-            };
-            if let Some(request) = waited
+            if let Some(request) = bar_restart_wait(&sent)
                 && restart
             {
                 live.driver.session.acks.expect(request);
@@ -254,5 +247,45 @@ impl QuillApp {
         } else {
             self.set_note(StatusNote::silent(tr(keys::Q_MEDIA_BOT_STARTED_DEMO)));
         }
+    }
+}
+
+/// The unblock the bar's /start waits for: only one this call sent. An
+/// unblock already out belongs to the surface that sent it (the web app's
+/// phone flow waits on its own), and an answer has one taker.
+fn bar_restart_wait<E>(
+    sent: &Result<Option<quill::ids::RequestId>, E>,
+) -> Option<quill::ids::RequestId> {
+    match sent {
+        Ok(Some(request)) => Some(*request),
+        Ok(None) | Err(_) => None,
+    }
+}
+
+#[cfg(test)]
+mod restart_wait_tests {
+    use super::bar_restart_wait;
+    use quill::ids::RequestId;
+    use quill::state::{Answer, RequestAcks};
+
+    /// The phone flow's unblock is out and waited on: the bar's click
+    /// (`Ok(None)`) takes nothing, so the phone flow still gets its answer.
+    #[test]
+    fn the_bar_leaves_an_unblock_another_surface_awaits() {
+        let mut acks = RequestAcks::default();
+        let phone = RequestId(5);
+        acks.expect(phone);
+        assert_eq!(bar_restart_wait::<()>(&Ok(None)), None);
+        acks.settle(phone, Answer::Done);
+        assert_eq!(acks.take(phone), Some(Answer::Done));
+    }
+
+    #[test]
+    fn the_bar_waits_on_the_unblock_it_sent() {
+        assert_eq!(
+            bar_restart_wait::<()>(&Ok(Some(RequestId(9)))),
+            Some(RequestId(9))
+        );
+        assert_eq!(bar_restart_wait(&Err(())), None);
     }
 }

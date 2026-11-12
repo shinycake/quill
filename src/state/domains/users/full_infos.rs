@@ -66,6 +66,27 @@ impl UserFullInfos {
         matches!(self.by_user.get(user_id), Some(Fetch::Failed { .. }))
     }
 
+    /// An ask went out as `request`: the entry waits for it, keeping any
+    /// answer held, and a failure of it lands as `Failed` (never a
+    /// spinner nothing ends).
+    pub fn begin(&mut self, user_id: i64, request: crate::ids::RequestId) {
+        let entry = self.by_user.entry(user_id).or_default();
+        entry.begin();
+        entry.sent(request);
+    }
+
+    /// The box has nothing to show yet and an ask is out (or due).
+    pub fn shows_loading(&self, user_id: &i64) -> bool {
+        self.by_user
+            .get(user_id)
+            .is_none_or(|entry| !entry.error().is_some() && entry.data().is_none())
+    }
+
+    /// Why the last ask failed, until an answer or a retry.
+    pub fn error(&self, user_id: &i64) -> Option<&str> {
+        self.by_user.get(user_id)?.error()
+    }
+
     /// An explicit retry: the failure is forgotten, the data kept.
     pub fn forget_failure(&mut self, user_id: &i64) {
         let Some(entry) = self.by_user.get_mut(user_id) else {

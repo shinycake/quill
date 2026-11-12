@@ -849,9 +849,11 @@ impl QuillApp {
         let Some(live) = self.live.as_mut() else {
             return;
         };
+        let result = live.driver.reset_login_email();
+        self.screen.auth_ui.submit.sent(&result);
         self.screen.connection.set_note_for(
             &self.screen.windows,
-            match live.driver.reset_login_email() {
+            match result {
                 Ok(_) => StatusNote::silent(tr(keys::Q_OPS_EMAIL_RESET_REQUESTED_WAITING_FOR)),
                 Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_RESET_THE_EMAIL)),
             },

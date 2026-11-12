@@ -121,6 +121,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        self.session
+            .users_state
+            .user_full_infos
+            .begin(user_id, extra);
         Ok(Some(extra))
     }
 

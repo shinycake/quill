@@ -10266,3 +10266,17 @@ orders), `deep_link_routes_tests` (seek stays with its account).
 
 Guards: no guard changed; the baselines and allow lines of the shapes above are
 gone.
+
+#### r4-07 fix round 2 (review items)
+
+| Item | What changed |
+| --- | --- |
+| 1, 8 | `reset_login_email` passes its request to `AuthSubmit::sent`, so a reset holds Submit and Reset busy. `AuthSubmit::settle` (run each frame in `sync_auth_forms`) drops `Out` to `Idle` once the request has left the registry, and when `live` is gone, so an old id never matches a request of the next session. |
+| 4 | `refresh_system_accent` keeps the old wait only for a read it did not start; a read it started replaces the stage's wait with a task on the new receiver. Doc says "receiver wait". |
+| 5 | `bar_restart_wait`: the bar's Restart adopts only the unblock it sent (`Ok(Some)`). An unblock out from the web app's phone flow stays that flow's single ack taker. `Driver::pending_unblock` is gone. |
+| 6 | `AddPeopleEmpty::ContactsFailed` for a failed contacts fetch; the box says "Couldn't load contacts" with a Retry that calls `fetch_contacts`. |
+| 7 | The stale `SearchField::Opening` allow line is deleted. |
+| 9 | `UserFullInfos` records `Loading { request }` when the ask goes out (`begin`); the Add Bot box reads `shows_loading` / `error` of the entry, not a request-purpose query. |
+| 10 | `BarReport::Out { waiting }` holds the report and leave requests in the chat's `ChatUi`; `pump_bar_report` shows "done" on the last answer and the error note on a refusal (either order). A chat change forgets the acks. |
+| 11 | The attach-bot icon cache keeps the verdict per path, usable or not. |
+| 12, 13 | `Watch` doc; `bot_create_dialog` uses `one_shot_dialog_content`. |

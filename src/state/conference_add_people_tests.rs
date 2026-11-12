@@ -167,6 +167,11 @@ fn the_empty_texts_follow_the_contacts_and_the_search() {
     let empty =
         |session: &Session, query: &str| session.add_people_view(PEER, &[], &[], query).empty;
     assert_eq!(empty(&session, ""), Some(AddPeopleEmpty::ContactsLoading));
+    session
+        .users_state
+        .contacts
+        .fail_dropping_data("could not send the request");
+    assert_eq!(empty(&session, ""), Some(AddPeopleEmpty::ContactsFailed));
     session.users_state.contacts = crate::state::fetch::Fetch::Ready(Vec::new());
     assert_eq!(empty(&session, ""), Some(AddPeopleEmpty::NoContacts));
     assert_eq!(empty(&session, "zed"), Some(AddPeopleEmpty::NoResults));

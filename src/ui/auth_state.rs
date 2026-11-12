@@ -70,7 +70,7 @@ macro_rules! submit_on_enter {
 /// and is the one that knows when it is answered: the submit is out while
 /// its own request is still in the session's table, so another account's
 /// request, or an older one, never reads as this one.
-#[derive(Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AuthSubmit {
     #[default]
     Idle,
@@ -85,6 +85,17 @@ impl AuthSubmit {
         match self {
             Self::Idle => false,
             Self::Out { request } => requests.get(request).is_some(),
+        }
+    }
+
+    /// The stage after a look at the session's table: an answered request,
+    /// or no session at all, ends it, so an id never outlives its session
+    /// and never reads as an unrelated request of the next one.
+    pub(super) fn settle(&mut self, requests: Option<&quill::state::RequestRegistry>) {
+        if let Self::Out { request } = *self
+            && requests.is_none_or(|requests| requests.get(request).is_none())
+        {
+            *self = Self::Idle;
         }
     }
 
@@ -257,5 +268,55 @@ impl AuthDemo {
             stage,
             demo_inputs: demo.is_some_and(|d| d.auth_inputs()),
         }
+    }
+}
+
+#[cfg(test)]
+mod submit_tests {
+    use super::AuthSubmit;
+    use quill::state::{RequestPurpose, RequestRegistry};
+
+    fn registry_with_reset() -> (RequestRegistry, quill::ids::RequestId) {
+        let mut registry = RequestRegistry::default();
+        let id = registry.register(
+            quill::ids::AccountGeneration::default(),
+            RequestPurpose::ResetAuthenticationEmail,
+            None,
+            None,
+        );
+        (registry, id)
+    }
+
+    /// A reset that went out holds the submit busy until its answer.
+    #[test]
+    fn a_sent_reset_holds_the_submit_busy_until_answered() {
+        let (mut registry, id) = registry_with_reset();
+        let mut submit = AuthSubmit::Idle;
+        submit.sent::<()>(&Ok(id));
+        assert!(submit.is_out(&registry));
+        registry.take(id);
+        submit.settle(Some(&registry));
+        assert!(!submit.is_out(&registry));
+        assert_eq!(submit, AuthSubmit::Idle, "the answer ends the stage");
+    }
+
+    /// A refused send leaves the stage as it was.
+    #[test]
+    fn a_refused_send_holds_nothing() {
+        let (registry, _) = registry_with_reset();
+        let mut submit = AuthSubmit::Idle;
+        submit.sent(&Err::<quill::ids::RequestId, ()>(()));
+        assert!(!submit.is_out(&registry));
+    }
+
+    /// A replaced session ends the stage, so an old id never matches an
+    /// unrelated request of the new session.
+    #[test]
+    fn a_replaced_session_ends_the_stage() {
+        let (registry, id) = registry_with_reset();
+        let mut submit = AuthSubmit::Out { request: id };
+        submit.settle(None);
+        assert_eq!(submit, AuthSubmit::Idle);
+        assert!(!submit.is_out(&registry));
     }
 }

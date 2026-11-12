@@ -154,6 +154,35 @@ fn get_contacts_error_surfaces_retry() {
     assert!(session.contacts_settled());
 }
 
+/// A bot's full info that is asked reads as loading; a failed ask reads
+/// as failed (with its error), and a retry loads again (sweep r4 14-007).
+#[test]
+fn a_full_info_ask_loads_then_fails_then_retries() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let infos = |session: &Session| session.users_state.user_full_infos.shows_loading(&31);
+    assert!(infos(&session), "nothing asked yet shows no failure");
+    let extra = session.request_for_user(RequestPurpose::GetUserFullInfo, 31);
+    session.users_state.user_full_infos.begin(31, extra);
+    assert!(infos(&session));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":500,"message":"boom"}}"#,
+            extra.0
+        ),
+    );
+    assert!(!infos(&session));
+    assert!(session.users_state.user_full_infos.error(&31).is_some());
+    session.users_state.user_full_infos.forget_failure(&31);
+    let again = session.request_for_user(RequestPurpose::GetUserFullInfo, 31);
+    session.users_state.user_full_infos.begin(31, again);
+    assert!(infos(&session));
+    assert!(session.users_state.user_full_infos.error(&31).is_none());
+}
+
 #[test]
 fn user_full_info_bio_resolves_user() {
     let (mut session, sink) = session();

@@ -431,21 +431,6 @@ impl QuillApp {
         });
     }
 
-    fn submit_bar_report(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
-        if let Some(live) = self.live.as_mut() {
-            let reported = live.driver.report_chat(chat_id);
-            let left = live.driver.leave_channel(chat_id);
-            self.set_note(if reported.is_ok() && left.is_ok() {
-                StatusNote::info(tr(keys::REPORT_SPAM_DONE))
-            } else {
-                StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_REPORT_THE_CHAT))
-            });
-        } else if let Some(session) = self.demo_session.as_mut() {
-            session.set_chat_action_bar(chat_id.0, None);
-        }
-        cx.notify();
-    }
-
     fn open_block_bar_dialog(&mut self, chat_id: ChatId, user_id: i64, cx: &mut Context<Self>) {
         // tdesktop pre-checks both boxes for a stranger's bar.
         self.dialogs.block_bar_dialog = Some(BlockBarDialog {

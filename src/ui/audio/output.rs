@@ -148,8 +148,8 @@ impl DeviceLink {
 }
 
 /// The watch thread of an open device. It is owned by the device's stage:
-/// dropping the device drops the handle, and the thread ends at its next
-/// look.
+/// dropping the device drops the handle, which wakes the thread at once to
+/// end.
 enum Watch {
     /// None runs (it failed to start, or it panicked): the next use of the
     /// device starts one.

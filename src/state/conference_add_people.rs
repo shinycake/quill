@@ -36,6 +36,8 @@ pub struct AddPeopleRow {
 pub enum AddPeopleEmpty {
     /// `lng_contacts_loading`: the contacts list hasn't come yet.
     ContactsLoading,
+    /// The contacts fetch failed: the box says so, with a Retry.
+    ContactsFailed,
     /// `lng_contacts_not_found`: you have no contacts.
     NoContacts,
     /// `lng_contacts_loading`: nothing matched yet and the server search
@@ -156,6 +158,9 @@ impl Session {
             (false, _) => None,
             (true, true) if self.users_state.contacts.data().is_some() => {
                 Some(AddPeopleEmpty::NoContacts)
+            }
+            (true, true) if self.users_state.contacts.error().is_some() => {
+                Some(AddPeopleEmpty::ContactsFailed)
             }
             (true, true) => Some(AddPeopleEmpty::ContactsLoading),
             (true, false) if search.query() == query && search.is_searching() => {

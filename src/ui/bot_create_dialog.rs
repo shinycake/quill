@@ -17,8 +17,6 @@ use quill::lang::{keys, tr, tr_with};
 use quill::owned_bots::{self, NAME_MAX, UsernameProblem};
 use quill::state::{DeepLinkAction, ManagedBotShare};
 use quill::telegram::envelope::{RequestManagedBotSpec, UsernameCheckResult};
-use std::cell::Cell;
-use std::rc::Rc;
 use std::time::Duration;
 
 /// Wait after the last keystroke before asking the server.
@@ -496,16 +494,10 @@ impl QuillApp {
                 .child(body)
                 .child(footer)
                 .into_any_element();
-            let content = Rc::new(Cell::new(Some(content)));
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(tr(keys::CREATE_BOT_TITLE)))
-                .content(crate::ui::shell::scrollable_dialog_content(
-                    move |slot, _, _| {
-                        let body = content.take().unwrap_or_else(|| div().into_any_element());
-                        slot.child(body)
-                    },
-                ))
+                .content(crate::ui::shell::one_shot_dialog_content(content))
                 .on_close(on_close)
         })
     }

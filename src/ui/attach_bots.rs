@@ -48,10 +48,11 @@ pub(super) fn looks_like_svg(bytes: &[u8]) -> bool {
     String::from_utf8_lossy(head).contains("<svg")
 }
 
-/// What was read from an icon file and the modification time it was read
-/// at: an unusable file (still downloading, not an SVG) that is replaced at
-/// the same path reads again.
-type IconCache = Mutex<HashMap<String, (Option<std::time::SystemTime>, Option<Arc<[u8]>>)>>;
+/// The verdict on an icon file, by its path (one path per downloaded file):
+/// the SVG read, or `None` when the file is not a usable icon. A downloaded
+/// file does not change under its path, so either verdict costs no file
+/// call afterwards.
+type IconCache = Mutex<HashMap<String, Option<Arc<[u8]>>>>;
 
 /// Icons kept; past it the cache starts over (a menu shows a handful).
 const ICONS_KEPT: usize = 64;
@@ -61,27 +62,16 @@ fn cache() -> &'static IconCache {
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// The SVG at `path`, read once (the menu rebuilds with every render). A
-/// usable icon is kept as read and costs no file call afterwards: a
-/// downloaded file does not change under its path. A file that is missing
-/// or fails to read is asked again at the next render; one that is not a
-/// usable SVG (too big, not an SVG, still downloading) stays unused until
-/// its modification time changes.
+/// The SVG at `path`, read once (the menu rebuilds with every render). The
+/// verdict is kept, usable or not (too big, not an SVG): no file call at
+/// the next render. A file that is missing or fails to read is not a
+/// verdict and is asked again at the next render.
 pub(super) fn icon_svg(path: &str) -> Option<Arc<[u8]>> {
     let mut cache = cache().lock_or_recover();
-    if let Some((_, Some(icon))) = cache.get(path) {
-        return Some(icon.clone());
+    if let Some(verdict) = cache.get(path) {
+        return verdict.clone();
     }
-    let Ok(meta) = std::fs::metadata(path) else {
-        cache.remove(path);
-        return None;
-    };
-    let stamp = meta.modified().ok();
-    if let Some((seen, icon)) = cache.get(path)
-        && *seen == stamp
-    {
-        return icon.clone();
-    }
+    let meta = std::fs::metadata(path).ok()?;
     let icon = if meta.len() <= MAX_ICON_BYTES {
         // A read that fails is not remembered: it is tried again.
         let bytes = std::fs::read(path).ok()?;
@@ -92,7 +82,7 @@ pub(super) fn icon_svg(path: &str) -> Option<Arc<[u8]>> {
     if cache.len() >= ICONS_KEPT {
         cache.clear();
     }
-    cache.insert(path.to_string(), (stamp, icon.clone()));
+    cache.insert(path.to_string(), icon.clone());
     icon
 }
 
@@ -187,33 +177,31 @@ mod tests {
     }
 
     #[test]
-    fn an_unusable_file_replaced_at_the_same_path_is_read_again() {
+    fn an_unusable_verdict_is_kept_without_a_file_call() {
         let dir = std::env::temp_dir().join(format!("quill-attach-icons-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("bot.svg");
-        let write = |bytes: &[u8], secs: u64| {
-            std::fs::write(&path, bytes).unwrap();
-            let when = std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs);
-            std::fs::File::options()
-                .write(true)
-                .open(&path)
-                .unwrap()
-                .set_modified(when)
-                .unwrap();
-        };
         let key = path.to_str().unwrap();
-        // Not an SVG yet (still downloading): no icon.
-        write(b"partial", 1_000);
+        std::fs::write(&path, b"not an icon").unwrap();
         assert!(icon_svg(key).is_none());
-        // The finished file replaces it.
-        write(b"<svg/>", 2_000);
-        assert_eq!(icon_svg(key).as_deref(), Some(&b"<svg/>"[..]));
-        // A usable icon costs no file call: it stays after the file goes.
-        std::fs::remove_file(&path).unwrap();
-        assert_eq!(icon_svg(key).as_deref(), Some(&b"<svg/>"[..]));
-        // A file that never was usable and is gone is not remembered.
-        let missing = dir.join("never.svg");
-        assert!(icon_svg(missing.to_str().unwrap()).is_none());
+        // The verdict stands: even a changed file is not read again.
+        std::fs::write(&path, b"<svg/>").unwrap();
+        assert!(icon_svg(key).is_none(), "no file call at the next render");
+        // A usable icon is kept too, after the file goes.
+        let good = dir.join("good.svg");
+        std::fs::write(&good, b"<svg/>").unwrap();
+        let good_key = good.to_str().unwrap();
+        assert_eq!(icon_svg(good_key).as_deref(), Some(&b"<svg/>"[..]));
+        std::fs::remove_file(&good).unwrap();
+        assert_eq!(icon_svg(good_key).as_deref(), Some(&b"<svg/>"[..]));
+        // A file that is missing is not a verdict: it reads once it exists.
+        let late = dir.join("late.svg");
+        assert!(icon_svg(late.to_str().unwrap()).is_none());
+        std::fs::write(&late, b"<svg/>").unwrap();
+        assert_eq!(
+            icon_svg(late.to_str().unwrap()).as_deref(),
+            Some(&b"<svg/>"[..])
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

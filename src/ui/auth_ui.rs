@@ -70,6 +70,10 @@ impl QuillApp {
     /// they typed.
     pub(super) fn sync_auth_forms(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let auth = self.current_auth();
+        self.screen
+            .auth_ui
+            .submit
+            .settle(self.live.as_ref().map(|live| &live.driver.session.requests));
         let ui = &self.screen.auth_ui;
         if !matches!(auth, AuthorizationState::WaitEmailAddress) {
             let email = ui.email_input.clone();

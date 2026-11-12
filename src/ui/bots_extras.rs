@@ -22,7 +22,6 @@ use gpui_kit::*;
 use quill::bot_invite::{BotFacts, ChatFacts, Invite, Plan, choices, invite_about, invite_label};
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
-use quill::state::RequestPurpose;
 use quill::telegram::envelope::{ChatAdminRights, ChatKind, ReplyMarkup};
 
 /// What pressing the box's button did: the outcome of that one call, kept
@@ -375,14 +374,11 @@ impl QuillApp {
             .map(|user| user.display_name())
             .unwrap_or_else(|| tr(keys::Q_MEDIA_THE_BOT).into());
         let Some(facts) = self.bot_invite_facts(bot_id) else {
-            // The bot's full info (its requested rights) loads while its
-            // request is in flight; with none in flight and no info, it
-            // failed: say so, with Retry, instead of waiting for good.
-            let loading = self.session().is_some_and(|session| {
-                session
-                    .requests
-                    .has_purpose_for_user(RequestPurpose::GetUserFullInfo, bot_id)
-            });
+            // The bot's full info (its requested rights) loads until its
+            // fetch answers or fails; a failure says so, with Retry.
+            let loading = self
+                .session()
+                .is_some_and(|session| session.users_state.user_full_infos.shows_loading(&bot_id));
             let footer = div()
                 .flex()
                 .gap_2()

@@ -110,7 +110,8 @@ impl QuillApp {
     /// Refresh the operating system's accent color. macOS and Windows read
     /// it right away. On Linux the read runs on a background thread (it
     /// spawns `gdbus`), so this only requests it and returns the cached
-    /// value; a short poll applies the result once it lands.
+    /// value; a task waiting on the read's receiver applies the result once it
+    /// lands (a read that starts while one is awaited takes the wait over).
     pub(in crate::ui) fn refresh_system_accent(&mut self, cx: &mut Context<Self>) {
         // Screenshot demos keep their fixture accent.
         if self.demo_session.is_some() {
@@ -130,7 +131,11 @@ impl QuillApp {
             }
             return;
         }
-        if let SystemAccent::Reading { color: known, .. } = &mut self.preferences.system_accent {
+        // Another refresh's wait still covers a read that is running; a
+        // read this call started has its own receiver, so it takes over.
+        if !started
+            && let SystemAccent::Reading { color: known, .. } = &mut self.preferences.system_accent
+        {
             *known = color;
             return;
         }
