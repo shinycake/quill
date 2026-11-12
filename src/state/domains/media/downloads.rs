@@ -95,6 +95,24 @@ pub struct DownloadIntents {
 }
 
 impl DownloadIntents {
+    /// The intents of the files `ids` name only: what a view reads of one
+    /// item, without copying every thumbnail and avatar request.
+    pub fn only(&self, ids: &[i32]) -> DownloadIntents {
+        let mut kept = DownloadIntents::default();
+        for id in ids {
+            if let Some(intent) = self.entries.get(id) {
+                kept.put(*id, Some(*intent));
+            }
+            if let Some(chat) = self.chats.get(id) {
+                kept.chats.insert(*id, *chat);
+            }
+            if self.finished.contains(id) && !kept.finished.contains(id) {
+                kept.finished.push_back(*id);
+            }
+        }
+        kept
+    }
+
     /// The request is out (retry clears an earlier end).
     pub fn begin(&mut self, file_id: i32, origin: DownloadOrigin) {
         if file_id == 0 {

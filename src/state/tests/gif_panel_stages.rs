@@ -107,3 +107,42 @@ fn clearing_a_failure_leaves_a_list_that_did_not_fail_alone() {
     idle.saved_failure_cleared();
     assert!(idle.loading());
 }
+
+#[test]
+fn a_new_search_replaces_what_the_last_one_found() {
+    // Sweep r2-19 (06-032): results and offsets are the search's own.
+    let mut panel = GifPanel::default();
+    panel.search_begun("cats".into());
+    panel.search_sent(RequestId(1));
+    panel.search_page_asked(String::new());
+    panel.search_sent(RequestId(2));
+    panel.search_page_answered(Vec::new(), "50".into(), true);
+    assert_eq!(panel.search_next_offset(), "50");
+    panel.search_begun("dogs".into());
+    assert!(panel.search_results().is_empty());
+    assert_eq!(panel.search_next_offset(), "");
+    panel.search_left();
+    assert_eq!(panel.search_next_offset(), "");
+}
+
+#[test]
+fn a_saved_list_marked_out_of_date_drops_the_older_answer_and_is_asked_again() {
+    // Sweep r2-19 (06-028): the mark is the fetch's own `Outdated`.
+    let mut panel = GifPanel::default();
+    panel.saved_answered(Vec::new());
+    assert!(panel.loaded() && !panel.saved_is_outdated());
+    panel.saved_asked();
+    panel.saved_outdated();
+    panel.saved_answered(Vec::new());
+    assert!(
+        !panel.loaded() || panel.saved_is_outdated(),
+        "the answer predates the change"
+    );
+    panel.saved_failed();
+    assert!(
+        !panel.loaded() || panel.saved_is_outdated(),
+        "a failure keeps the mark"
+    );
+    panel.saved_asked();
+    assert!(panel.loaded() && !panel.saved_is_outdated());
+}

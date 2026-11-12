@@ -24,14 +24,78 @@ pub(super) struct ClearCallsBox {
     pub revoke: bool,
 }
 
+/// The pointer on the contacts index bar: away, over it (the magnifier
+/// follows `cursor`, relative to the bar's top-left) or held down on it,
+/// scrubbing to `slot`. One value, so every way off the bar is one reset.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(super) enum IndexBar {
+    #[default]
+    Away,
+    Over {
+        cursor: (f32, f32),
+    },
+    Scrubbing {
+        cursor: (f32, f32),
+        /// The letter slot jumped to last; `None` until the pointer is on one.
+        slot: Option<usize>,
+    },
+}
+
+impl IndexBar {
+    pub(super) fn cursor(self) -> Option<(f32, f32)> {
+        match self {
+            Self::Away => None,
+            Self::Over { cursor } | Self::Scrubbing { cursor, .. } => Some(cursor),
+        }
+    }
+
+    /// The slot being scrubbed.
+    pub(super) fn slot(self) -> Option<usize> {
+        match self {
+            Self::Scrubbing { slot, .. } => slot,
+            _ => None,
+        }
+    }
+
+    /// The pointer moved to `cursor`; `held` is the left button.
+    pub(super) fn moved(self, cursor: (f32, f32), held: bool) -> Self {
+        if held {
+            Self::Scrubbing {
+                cursor,
+                slot: self.slot(),
+            }
+        } else {
+            Self::Over { cursor }
+        }
+    }
+
+    /// The scrub reached `slot`.
+    pub(super) fn scrubbed_to(self, slot: usize) -> Self {
+        match self.cursor() {
+            Some(cursor) => Self::Scrubbing {
+                cursor,
+                slot: Some(slot),
+            },
+            None => self,
+        }
+    }
+
+    /// The button went up (or the search text changed): the pointer stays
+    /// over the bar, the scrub ends.
+    pub(super) fn released(self) -> Self {
+        match self {
+            Self::Scrubbing { cursor, .. } => Self::Over { cursor },
+            other => other,
+        }
+    }
+}
+
 pub(super) struct ChatlistGlobal {
     pub contacts_sort: SortMode,
     pub contacts_search: Entity<TextareaState>,
     pub contacts_scroll: ScrollHandle,
-    /// Pointer over the index bar, relative to the bar's top-left.
-    pub index_cursor: Option<(f32, f32)>,
-    /// Slot being scrubbed (pointer held down on the bar).
-    pub index_current: Option<usize>,
+    /// The pointer on the index bar.
+    pub index_bar: IndexBar,
     /// The "Clear calls" confirm box and its "Delete for everyone" box.
     /// `Some` while the box is open; closing drops its checkbox with it.
     pub clear_calls: Option<ClearCallsBox>,
@@ -52,7 +116,8 @@ impl ChatlistGlobal {
             window,
             |this, _, event: &InputEvent, _, cx| {
                 if matches!(event, InputEvent::Change) {
-                    this.chat_list.global.index_current = None;
+                    let bar = this.chat_list.global.index_bar;
+                    this.chat_list.global.index_bar = bar.released();
                     this.notify_sidebar(cx);
                 }
             },
@@ -62,8 +127,7 @@ impl ChatlistGlobal {
             contacts_sort: SortMode::default(),
             contacts_search,
             contacts_scroll: ScrollHandle::new(),
-            index_cursor: None,
-            index_current: None,
+            index_bar: IndexBar::Away,
             clear_calls: None,
             story_menu: None,
         }
@@ -117,7 +181,7 @@ impl QuillApp {
                                     .global
                                     .contacts_scroll
                                     .set_offset(point(px(0.), px(0.)));
-                                this.chat_list.global.index_cursor = None;
+                                this.chat_list.global.index_bar = IndexBar::Away;
                                 cx.notify();
                             })),
                     ),
@@ -195,7 +259,7 @@ impl QuillApp {
         let scroll = -f32::from(handle.offset().y);
         let visible = index::visible_letters(stops, total, scroll, height);
         let width = BAR_WIDTH + BAR_APPROACH;
-        let cursor = self.chat_list.global.index_cursor;
+        let cursor = self.chat_list.global.index_bar.cursor();
         let scales: Vec<f32> = layout
             .slots
             .iter()
@@ -219,7 +283,7 @@ impl QuillApp {
                 continue;
             };
             let on =
-                self.chat_list.global.index_current == Some(i) || visible.contains(&slot.letter);
+                self.chat_list.global.index_bar.slot() == Some(i) || visible.contains(&slot.letter);
             bar = bar.child(
                 div()
                     .absolute()
@@ -251,14 +315,14 @@ impl QuillApp {
         .on_mouse_up(
             MouseButton::Left,
             cx.listener(|this, _, _, cx| {
-                this.chat_list.global.index_current = None;
+                let bar = this.chat_list.global.index_bar;
+                this.chat_list.global.index_bar = bar.released();
                 this.notify_sidebar(cx);
             }),
         )
         .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
             if !*hovered {
-                this.chat_list.global.index_cursor = None;
-                this.chat_list.global.index_current = None;
+                this.chat_list.global.index_bar = IndexBar::Away;
                 this.notify_sidebar(cx);
             }
         }))
@@ -280,14 +344,15 @@ impl QuillApp {
         let left = f32::from(bounds.right()) - (BAR_WIDTH + BAR_APPROACH);
         let x = f32::from(position.x) - left;
         let y = f32::from(position.y - bounds.origin.y);
-        self.chat_list.global.index_cursor = Some((x, y));
+        let bar = self.chat_list.global.index_bar.moved((x, y), held);
+        self.chat_list.global.index_bar = bar;
         if held {
             let layout = index::bar_layout(stops, height);
             if let Some(slot) = index::slot_at(&layout, y)
-                && self.chat_list.global.index_current != Some(slot)
+                && bar.slot() != Some(slot)
                 && let Some(stop) = layout.slots.get(slot).and_then(|s| stops.get(s.source))
             {
-                self.chat_list.global.index_current = Some(slot);
+                self.chat_list.global.index_bar = bar.scrubbed_to(slot);
                 let offset = index::jump_offset(stop, total, height);
                 self.chat_list
                     .global
@@ -332,4 +397,35 @@ fn contacts_action(
                 .child(div().font_medium().child(label)),
         )
         .on_click(on_click)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::IndexBar;
+
+    #[test]
+    fn a_press_scrubs_and_a_release_leaves_the_pointer_over_the_bar() {
+        let bar = IndexBar::Away.moved((1., 2.), true).scrubbed_to(4);
+        assert_eq!(bar.slot(), Some(4));
+        assert_eq!(bar.cursor(), Some((1., 2.)));
+        let held = bar.moved((1., 9.), true);
+        assert_eq!(held.slot(), Some(4), "the last slot stays while held");
+        let up = held.released();
+        assert_eq!(up.slot(), None);
+        assert_eq!(up.cursor(), Some((1., 9.)));
+    }
+
+    #[test]
+    fn moving_without_the_button_ends_a_scrub() {
+        let bar = IndexBar::Away.moved((0., 0.), true).scrubbed_to(1);
+        assert_eq!(
+            bar.moved((0., 3.), false),
+            IndexBar::Over { cursor: (0., 3.) }
+        );
+    }
+
+    #[test]
+    fn scrubbing_needs_a_cursor() {
+        assert_eq!(IndexBar::Away.scrubbed_to(2), IndexBar::Away);
+    }
 }

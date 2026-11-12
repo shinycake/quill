@@ -1,8 +1,8 @@
 //! Where a widget is drawn, with two windows showing it at once.
 
 use super::{
-    Live, Presence, PresenceChange, Showing, WidgetEntry, next_query_token, prune_hidden, ticks,
-    write_pending,
+    Contact, Lander, Live, Presence, PresenceChange, Showing, WidgetEntry, next_query_token,
+    prune_hidden, ticks, write_pending,
 };
 use quill::ids::ChatId;
 use quill::message_widget::WidgetKey;
@@ -186,17 +186,12 @@ fn entry() -> WidgetEntry {
 #[test]
 fn a_released_pointer_has_no_press_or_hover_left() {
     let mut live = Live::new((), (String::new(), [0; 3]));
-    live.pointer.pressed = Some(0);
-    live.pointer.hovered = true;
+    live.pointer.contact = Contact::Pressed(0);
     live.pointer.hold = true;
     live.pointer.release();
     assert_eq!(
-        (
-            live.pointer.pressed,
-            live.pointer.hovered,
-            live.pointer.hold
-        ),
-        (None, false, false)
+        (live.pointer.contact, live.pointer.hold),
+        (Contact::Away, false)
     );
 }
 
@@ -236,7 +231,7 @@ fn new_content_replaces_what_was_bound_to_the_old() {
         streak: 2,
     };
     entry.polled = Some("{}".into());
-    entry.poll = super::Poll::Asking;
+    entry.poll = super::Poll::Asking(quill::ids::RequestId(1));
     entry.replace_content(identity("new"), 150.0);
     assert_eq!(
         entry.identity.as_ref().map(|i| i.html.as_str()),
@@ -251,4 +246,12 @@ fn new_content_replaces_what_was_bound_to_the_old() {
     ));
     assert_eq!(entry.lifecycle.streak(), 0);
     assert_eq!(entry.poll, super::Poll::Off);
+}
+
+/// A lander loop that ended (its screen's updates stopped) is not a running
+/// one: the next runtime start runs it again.
+#[test]
+fn a_finished_lander_is_not_running() {
+    assert!(!Lander::NotStarted.running());
+    assert!(!Lander::Running(gpui_kit::Task::ready(())).running());
 }

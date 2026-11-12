@@ -7,7 +7,7 @@ impl LanguagePurpose {
     pub(crate) fn kind(&self) -> RequestKind {
         match self {
             Self::TargetInfo | Self::Strings { .. } | Self::PsaLabels { .. } => RequestKind::Lookup,
-            Self::SetOption | Self::Synchronize => RequestKind::UserAction,
+            Self::SetOption { .. } | Self::Synchronize { .. } => RequestKind::UserAction,
         }
     }
 }

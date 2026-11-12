@@ -190,7 +190,92 @@ fn closing_a_reused_call_window_keeps_it_shut_for_the_new_call(cx: &mut TestAppC
     call.run_until_parked();
     app.update(call, |app, cx| app.sync_call_window(cx));
     app.read_with(call, |app, _| {
-        assert_eq!(app.call_screen.window_closed_by_user, Some(second));
+        assert_eq!(
+            app.call_screen.wanted,
+            crate::ui::calls_state::WindowWanted::ClosedByUser(second)
+        );
         assert!(app.calls.window.handle().is_none(), "it stays shut");
+    });
+}
+
+fn ended_summary(call_id: i32, busy: bool) -> quill::state::CallSummary {
+    quill::state::CallSummary {
+        call_id,
+        user_id: PEER,
+        is_outgoing: true,
+        is_video: false,
+        duration_secs: 30,
+        had_audio: true,
+        end_line: String::new(),
+        end: if busy {
+            quill::state::CallEnd::Declined
+        } else {
+            quill::state::CallEnd::Ended
+        },
+        rating: quill::state::CallRating::NotNeeded,
+        debug_information: quill::state::CallUpload::NotNeeded,
+        log: quill::state::CallUpload::NotNeeded,
+        final_transport: None,
+        reconnect_attempts: 0,
+        muted: false,
+    }
+}
+
+/// An ended call's window lingers on "call ended" under the stage's own
+/// timer (the manual clock drives it), then closes; a busy line stays.
+#[gpui_kit::test]
+fn an_ended_calls_window_lingers_then_closes_on_its_timer(cx: &mut TestAppContext) {
+    use crate::ui::calls_state::CallEnd;
+    let (app, mut call) = open_box(cx);
+    let call = &mut call;
+    app.update(call, |app, cx| {
+        if let Some(session) = app.session_mut() {
+            session.calls.active_call = None;
+            session.calls.summary = Some(ended_summary(5, false));
+        }
+        app.sync_call_window(cx);
+    });
+    app.read_with(call, |app, _| {
+        assert!(matches!(
+            app.call_screen.end,
+            CallEnd::Lingering { call_id: 5, .. }
+        ));
+        assert!(app.calls.window.handle().is_some(), "it lingers");
+    });
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(1600));
+    call.run_until_parked();
+    app.read_with(call, |app, _| {
+        assert!(matches!(app.call_screen.end, CallEnd::Over { call_id: 5 }));
+        assert!(app.calls.window.handle().is_none(), "the linger is over");
+    });
+}
+
+#[gpui_kit::test]
+fn a_busy_lines_window_stays_until_it_is_dismissed(cx: &mut TestAppContext) {
+    use crate::ui::calls_state::CallEnd;
+    let (app, mut call) = open_box(cx);
+    let call = &mut call;
+    app.update(call, |app, cx| {
+        if let Some(session) = app.session_mut() {
+            session.calls.active_call = None;
+            session.calls.summary = Some(ended_summary(6, true));
+        }
+        app.sync_call_window(cx);
+    });
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(1600) * 3);
+    call.run_until_parked();
+    app.read_with(call, |app, _| {
+        assert!(matches!(app.call_screen.end, CallEnd::Busy { call_id: 6 }));
+        assert!(app.calls.window.handle().is_some(), "no timer closes it");
+    });
+    app.update(call, |app, cx| {
+        app.dismiss_call_summary(cx);
+        app.sync_call_window(cx);
+    });
+    app.read_with(call, |app, _| {
+        assert!(matches!(app.call_screen.end, CallEnd::Running));
+        assert!(app.calls.window.handle().is_none());
     });
 }

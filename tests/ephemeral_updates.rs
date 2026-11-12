@@ -87,7 +87,7 @@ fn update_message_ephemeral_content_refreshes_stored_content_and_preview() {
         &sink,
         r#"{"@type":"updateChatLastMessage","chat_id":7,"last_message":{"id":44,"chat_id":7,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"public","entities":[]}}},"positions":[{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"8","is_pinned":false}]}"#,
     );
-    assert_eq!(session.chats.get(&7).unwrap().last_preview, "public");
+    assert_eq!(session.chats.get(&7).unwrap().last_preview(), "public");
     apply(
         &mut session,
         &seq,
@@ -110,7 +110,7 @@ fn update_message_ephemeral_content_refreshes_stored_content_and_preview() {
             .as_ref(),
         &MessageContent::Text("secret v2".into())
     );
-    assert_eq!(session.chats.get(&7).unwrap().last_preview, "secret v2");
+    assert_eq!(session.chats.get(&7).unwrap().last_preview(), "secret v2");
 }
 
 #[test]
@@ -170,7 +170,7 @@ fn update_message_ephemeral_content_null_clears_stored_content() {
             .ephemeral
             .is_some()
     );
-    assert_eq!(session.chats.get(&7).unwrap().last_preview, "secret v2");
+    assert_eq!(session.chats.get(&7).unwrap().last_preview(), "secret v2");
     apply(
         &mut session,
         &seq,
@@ -185,5 +185,5 @@ fn update_message_ephemeral_content_null_clears_stored_content() {
         .get(&44)
         .unwrap();
     assert!(message.ephemeral.is_none());
-    assert_eq!(session.chats.get(&7).unwrap().last_preview, "public");
+    assert_eq!(session.chats.get(&7).unwrap().last_preview(), "public");
 }

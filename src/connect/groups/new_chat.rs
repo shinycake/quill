@@ -5,7 +5,7 @@
 use super::*;
 use crate::new_chat::{CreateFailure, CreationOutcome, NewChatKind, NewChatRequest};
 use crate::profile_photo_sources::ChatPhotoInput;
-use crate::state::{CreationAsker, NewChatCreation, TypeSave};
+use crate::state::{CreationStage, NewChatCreation, TypeSave};
 use crate::telegram::envelope::{ChatsPayload, EnvelopePayload, GroupsPayload};
 use crate::telegram::requests::{
     create_new_basic_group_chat, create_new_supergroup_chat, set_chat_photo,
@@ -38,7 +38,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .creations
             .iter()
             .any(|(id, creation)| {
-                creation.asker == CreationAsker::Dialog
+                matches!(creation.stage, CreationStage::Out { .. })
                     && self
                         .session
                         .requests
@@ -67,13 +67,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.send_json_request(extra, &json)?;
         self.session.groups.new_chats.creations.insert(
             extra,
-            NewChatCreation {
+            NewChatCreation::asked(
                 photo,
-                open_when_created: request.kind == NewChatKind::Group,
-                make_invite_link: request.kind.is_supergroup(),
-                outcome: None,
-                asker: CreationAsker::Dialog,
-            },
+                request.kind == NewChatKind::Group,
+                request.kind.is_supergroup(),
+            ),
         );
         Ok(Some(extra))
     }
@@ -90,17 +88,33 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// was taken into the next step). An answered create is forgotten; one
     /// still out comes anyway (TDLib cannot cancel it) but nothing opens it
     /// on top of whatever the person is doing now, and its entry goes when
-    /// its answer is applied.
+    /// its answer is applied. One whose request is gone (lost) has no
+    /// answer to wait for: its entry goes now.
     pub fn abandon_new_chat(&mut self, request: RequestId) {
+        let still_out = self.session.requests.get(request).is_some();
         let creations = &mut self.session.groups.new_chats.creations;
-        match creations.get_mut(&request) {
-            Some(creation) if creation.outcome.is_none() => {
-                creation.asker = CreationAsker::Closed;
+        let Some(creation) = creations.get_mut(&request) else {
+            return;
+        };
+        match &mut creation.stage {
+            CreationStage::Out { photo } if still_out => {
+                creation.stage = CreationStage::OutClosed {
+                    photo: photo.take(),
+                };
             }
-            Some(_) => {
+            CreationStage::Out { .. } => {
                 creations.remove(&request);
             }
-            None => {}
+            CreationStage::Made { chat, photo } => {
+                creation.stage = CreationStage::MadeClosed {
+                    chat: *chat,
+                    photo: photo.take(),
+                };
+            }
+            CreationStage::OutClosed { .. } | CreationStage::MadeClosed { .. } => {}
+            CreationStage::Settled(_) => {
+                creations.remove(&request);
+            }
         }
     }
 
@@ -112,10 +126,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         owned: &crate::telegram::client::OwnedEnvelope,
     ) -> Option<RequestId> {
         let extra = owned.envelope.extra?;
-        let creation = self.session.groups.new_chats.creations.get_mut(&extra)?;
-        if creation.outcome.is_some() {
-            return None;
-        }
+        let creations = &mut self.session.groups.new_chats.creations;
+        let creation = creations.get_mut(&extra)?;
+        let (photo, closed) = match &mut creation.stage {
+            CreationStage::Out { photo } => (photo.take(), false),
+            CreationStage::OutClosed { photo } => (photo.take(), true),
+            _ => return None,
+        };
         let outcome = match &owned.envelope.payload {
             EnvelopePayload::Groups(GroupsPayload::CreatedBasicGroupChat { chat_id }) => {
                 CreationOutcome::Created(ChatId(*chat_id))
@@ -127,17 +144,36 @@ impl<S: JsonSender> ConnectDriver<S> {
                 failure: CreateFailure::from_server_type(err.server_type.as_deref()),
                 reason: crate::state::error_reason(err),
             },
-            _ => return None,
+            _ => {
+                // Not an answer to the create: it stays out, as it was.
+                creation.stage = if closed {
+                    CreationStage::OutClosed { photo }
+                } else {
+                    CreationStage::Out { photo }
+                };
+                return None;
+            }
         };
-        let created = matches!(outcome, CreationOutcome::Created(_));
-        // Nobody reads the answer of a create whose dialog is gone: a
-        // refusal is forgotten now, a made chat after its photo and link.
-        if !created && creation.asker == CreationAsker::Closed {
-            self.session.groups.new_chats.creations.remove(&extra);
-            return None;
+        match outcome {
+            CreationOutcome::Created(chat) => {
+                creation.stage = if closed {
+                    CreationStage::MadeClosed { chat, photo }
+                } else {
+                    CreationStage::Made { chat, photo }
+                };
+                Some(extra)
+            }
+            // Nobody reads the refusal of a create whose dialog is gone.
+            failed if closed => {
+                drop(failed);
+                creations.remove(&extra);
+                None
+            }
+            failed => {
+                creation.stage = CreationStage::Settled(failed);
+                None
+            }
         }
-        creation.outcome = Some(outcome);
-        created.then_some(extra)
     }
 
     /// After `apply`: the new chat's photo, then open a group.
@@ -145,13 +181,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(creation) = self.session.groups.new_chats.creations.get_mut(&extra) else {
             return;
         };
-        let Some(CreationOutcome::Created(chat_id)) = creation.outcome else {
-            return;
+        let (chat_id, photo, dialog_reads) = match &mut creation.stage {
+            CreationStage::Made { chat, photo } => (*chat, photo.take(), true),
+            CreationStage::MadeClosed { chat, photo } => (*chat, photo.take(), false),
+            _ => return,
         };
-        let photo = creation.photo.take();
-        let dialog_reads = creation.asker == CreationAsker::Dialog;
         let open = creation.open_when_created && dialog_reads;
         let make_invite_link = creation.make_invite_link;
+        if dialog_reads {
+            creation.stage = CreationStage::Settled(CreationOutcome::Created(chat_id));
+        } else {
+            self.session.groups.new_chats.creations.remove(&extra);
+        }
         if let Some(photo) = photo {
             let photo_request = self
                 .session
@@ -169,9 +210,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if open {
             let _ = self.select_chat(chat_id);
-        }
-        if !dialog_reads {
-            self.session.groups.new_chats.creations.remove(&extra);
         }
     }
 }

@@ -206,6 +206,8 @@ on_screen_fields! {
     profile_cover: super::profile_cover::ProfileCoverUi,
     /// The info cover's video profile photo (`ui/video_avatar`).
     video_avatar: super::video_avatar::VideoAvatarUi,
+    /// The secret-chat inline-bot warning's confirmation, for every window (`ui/inline_bot_state.rs`).
+    inline_bot: super::inline_bot_state::InlineBotUi,
     /// The `#` popup's recent hashtags, one list for every window (`ui/recent_hashtags_state.rs`).
     recent_hashtags: super::recent_hashtags_state::RecentHashtagsUi,
     /// Empties the message effect badge registries when this screen goes (`ui/message_effect_badge.rs`).
@@ -318,6 +320,7 @@ impl OnScreen {
         )
         .detach();
         let chat_search_input = QuillApp::new_chat_search_field(window, cx);
+        let member_search_input = QuillApp::new_member_search_field(window, cx);
         let forward_search_input = QuillApp::new_forward_search_field(window, cx);
         let history = super::history_state::HistoryUi::new(cx);
         // The scroller notifies on every scroll: drives the floating date.
@@ -344,7 +347,11 @@ impl OnScreen {
                 emoji_search_input,
                 reaction_search_input,
             ),
-            search_ui: super::search_state::SearchUi::new(search_input, chat_search_input),
+            search_ui: super::search_state::SearchUi::new(
+                search_input,
+                chat_search_input,
+                member_search_input,
+            ),
             sticker_box: super::sticker_set_box::state::StickerSetBoxUi::new(window, cx),
             share: super::share_state::ShareUi::new(window, cx, forward_search_input),
             main_menu: super::main_menu_grid::MainMenuUi::new(window, cx),
@@ -369,6 +376,7 @@ impl OnScreen {
             peer_qr: super::peer_qr::PeerQrUi::new(cx),
             profile_cover: Default::default(),
             video_avatar: Default::default(),
+            inline_bot: Default::default(),
             recent_hashtags: Default::default(),
             inline_members: super::inline_members_state::InlineMembersUi::new(),
             common_groups: Default::default(),
@@ -437,6 +445,9 @@ impl QuillApp {
         // the deferred replacement runs (`screen_leaves_later`).
         let note = self.connection.note().text().to_string();
         self.screen = OnScreen::new(epoch, &self.chat_prefs, note, window, cx);
+        // The new screen's 2FA box is closed: the session's recovery flow
+        // (code wait, notice) must not outlive the box that showed it.
+        self.twofa_forget_flow();
         // The side column slides out drawing the panels it last had, which
         // name the old account's users and chats.
         self.frame.panels = super::panel_reveal::PanelReveal::new(std::time::Instant::now());
@@ -506,7 +517,11 @@ impl QuillApp {
             self.screen.client != ScreenClient::Filled,
             "the client leaves the screen before its UI is replaced"
         );
-        self.live.take()
+        let mut live = self.live.take()?;
+        // The debounced draft belongs to this client and the one timer only
+        // commits the client on screen: it goes out now, not never.
+        let _ = live.driver.flush_pending_draft();
+        Some(live)
     }
 
     /// A client fills the empty screen: the chat list, folders and counters
@@ -577,10 +592,7 @@ impl QuillApp {
         } else {
             let _ = main.update(cx, |_, window, cx| window.close_all_dialogs(cx));
         }
-        self.main_window
-            .dialogs_closed
-            .borrow_mut()
-            .insert(main.window_id());
+        self.main_window.dialogs_closed.mark(main.window_id());
     }
 }
 

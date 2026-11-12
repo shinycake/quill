@@ -598,8 +598,10 @@ fn measured(
     window: &mut Window,
 ) -> Option<Size<Pixels>> {
     let pass = Pass::of(window);
+    // A re-entrant call lays out without the cache instead of ending the
+    // process.
     let hit = CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
+        let mut cache = cache.try_borrow_mut().ok()?;
         let now = cache.tick(pass);
         let entry = cache.pool(one_line).entries.get_mut(&key)?;
         entry.width(wrap, now).map(|width| width.size)
@@ -614,7 +616,9 @@ fn measured(
     let paragraph = wrap.is_some().then(|| Rc::new(paragraph));
     let bytes = paragraph.as_ref().map_or(0, |p| p.heap_size());
     CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
+        let Ok(mut cache) = cache.try_borrow_mut() else {
+            return;
+        };
         let now = cache.tick(pass);
         #[cfg(test)]
         cache.count_layout(&key, one_line, wrap);
@@ -638,7 +642,7 @@ fn drawn(
 ) -> Option<Rc<BidiParagraph>> {
     let pass = Pass::of(window);
     let hit = CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
+        let mut cache = cache.try_borrow_mut().ok()?;
         let now = cache.tick(pass);
         let width = cache
             .pool(one_line)
@@ -655,7 +659,9 @@ fn drawn(
     let paragraph = Rc::new(lay_out(window)?);
     let bytes = paragraph.heap_size();
     CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
+        let Ok(mut cache) = cache.try_borrow_mut() else {
+            return;
+        };
         let now = cache.tick(pass);
         #[cfg(test)]
         cache.count_layout(&key, one_line, wrap);

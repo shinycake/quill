@@ -228,7 +228,7 @@ impl QuillApp {
                 .calls
                 .active_group_call
                 .as_ref()
-                .is_some_and(|call| !call.is_my_video_enabled)
+                .is_some_and(|call| !call.my_video.is_enabled())
         });
         if turning_on {
             self.with_camera_access(Self::flip_group_call_video, cx);
@@ -245,7 +245,7 @@ impl QuillApp {
                 .calls
                 .active_group_call
                 .as_ref()
-                .is_some_and(|call| !call.is_my_video_enabled);
+                .is_some_and(|call| !call.my_video.is_enabled());
             // Others would see your camera as on with nothing sent.
             if turning_on && let Err(err) = live.driver.camera_to_turn_on() {
                 self.set_note(super::calls::camera_toggle_note(Err(err), false));
@@ -368,15 +368,24 @@ impl QuillApp {
     /// Phase C2f: open the invite picker; fetch contacts first when
     /// the cache is empty.
     pub(super) fn open_group_call_invite(&mut self, cx: &mut Context<Self>) {
-        self.group_call_needs_unlock(cx);
-        let call = self
-            .session()
-            .and_then(|s| s.calls.active_group_call.as_ref())
-            .map(|call| call.id);
-        self.group_call_boxes.call_box = CallBox::Invite { call };
+        if self.group_call_needs_unlock(cx) {
+            return;
+        }
+        // Without a tracked call there is nothing to invite to.
+        if !self.open_call_box(CallBox::Invite) {
+            return;
+        }
         if let Some(live) = self.live.as_mut()
             && live.driver.session.users_state.contacts.data().is_none()
         {
+            let _ = live.driver.fetch_contacts();
+        }
+        cx.notify();
+    }
+
+    /// Retry on the invite picker's failed contacts line.
+    pub(super) fn retry_group_call_contacts(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
             let _ = live.driver.fetch_contacts();
         }
         cx.notify();
@@ -458,16 +467,20 @@ impl QuillApp {
         sender: MessageSender,
         level: i32,
         cx: &mut Context<Self>,
-    ) {
+    ) -> Option<quill::ids::RequestId> {
         let level = level.clamp(1, 20000);
+        let mut sent = None;
         if let Some(live) = self.live.as_mut() {
             self.screen.connection.set_note_for(
                 &self.screen.windows,
                 match live.driver.set_group_call_participant_volume(sender, level) {
-                    Ok(_) => StatusNote::silent(tr_with(
-                        keys::Q_AV_VOLUME,
-                        &[("level_100", &(level / 100).to_string())],
-                    )),
+                    Ok(request) => {
+                        sent = Some(request);
+                        StatusNote::silent(tr_with(
+                            keys::Q_AV_VOLUME,
+                            &[("level_100", &(level / 100).to_string())],
+                        ))
+                    }
                     Err(_) => {
                         StatusNote::error(tr(keys::Q_AV_COULDNT_CHANGE_THE_PARTICIPANT_VOLUME))
                     }
@@ -484,6 +497,7 @@ impl QuillApp {
             )));
         }
         cx.notify();
+        sent
     }
 
     /// Phase C2f: accept a `messageGroupCall` invitation via
@@ -494,6 +508,13 @@ impl QuillApp {
         message_id: MessageId,
         cx: &mut Context<Self>,
     ) {
+        // A join already on its way: the press is a repeat, not a new ask.
+        if self
+            .session()
+            .is_some_and(|s| s.calls.pending_conference.is_some())
+        {
+            return;
+        }
         if let Some(live) = self.live.as_mut() {
             self.screen.connection.set_note_for(
                 &self.screen.windows,
@@ -628,17 +649,19 @@ impl QuillApp {
             .map(|c| c.title.clone())
             .unwrap_or_default();
         let dialog = GroupCallTitleDialog::new(window, cx, &current);
-        self.group_call_screen.title_dialog = Some(dialog);
+        self.open_call_box(CallBox::Rename(dialog));
         cx.notify();
     }
 
     pub(super) fn close_group_call_title_dialog(&mut self, cx: &mut Context<Self>) {
-        self.group_call_screen.title_dialog = None;
+        if self.title_dialog().is_some() {
+            self.close_call_box();
+        }
         cx.notify();
     }
 
     pub(super) fn save_group_call_title(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = self.group_call_screen.title_dialog.take() else {
+        let Some(dialog) = self.take_title_dialog() else {
             return;
         };
         let title = dialog.title_input.read(cx).value().to_string();
@@ -647,7 +670,7 @@ impl QuillApp {
                 Ok(_) => StatusNote::silent(tr(keys::Q_AV_RENAMING_VOICE_CHAT)),
                 Err(_) => {
                     // Not sent: the box stays with the typed title.
-                    self.group_call_screen.title_dialog = Some(dialog);
+                    self.open_call_box(CallBox::Rename(dialog));
                     StatusNote::error(tr(keys::Q_AV_COULDNT_RENAME_THE_VOICE_CHAT))
                 }
             };
@@ -655,7 +678,7 @@ impl QuillApp {
                 .connection
                 .set_note_for(&self.screen.windows, note);
         } else {
-            self.group_call_screen.title_dialog = Some(dialog);
+            self.open_call_box(CallBox::Rename(dialog));
             self.set_note(StatusNote::info(tr(
                 keys::Q_AV_RENAMING_NEEDS_A_LIVE_CONNECTION,
             )));

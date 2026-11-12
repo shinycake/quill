@@ -105,12 +105,18 @@ impl MuteState {
     }
 }
 
-fn mute_state(call: &ActiveGroupCall) -> MuteState {
+/// `joining`: the join request is out (the Join press was taken), so the
+/// button reads Connecting instead of inviting another press.
+fn mute_state(call: &ActiveGroupCall, joining: bool) -> MuteState {
     if call.scheduled_start_date > 0 && !call.is_joined {
         return MuteState::Scheduled;
     }
     if !call.is_joined {
-        return MuteState::Join;
+        return if joining {
+            MuteState::Connecting
+        } else {
+            MuteState::Join
+        };
     }
     let me = call.participants.iter().find(|p| p.is_current_user);
     let Some(me) = me.filter(|_| !call.reconnecting()) else {
@@ -154,7 +160,7 @@ impl QuillApp {
                 .bg(call_chrome::group_surface())
                 .into_any_element();
         };
-        let state = mute_state(&call);
+        let state = mute_state(&call, call.transport.joining());
         let now = self.group_call_now_ms();
         let still = quill::power_saving::on(quill::power_saving::Flag::Calls);
         if !still {
@@ -292,14 +298,17 @@ impl QuillApp {
                         },
                     ),
             )
-            .when(self.group_call.chat_shown, |this| {
-                this.child(
-                    self.group_call_messages_section(div().id("group-call-chat"), &call, cx)
-                        .rounded(px(12.))
-                        .bg(call_chrome::group_raised())
-                        .p(px(10.)),
-                )
-            });
+            .when(
+                self.call_view().is_some_and(|view| view.chat_shown),
+                |this| {
+                    this.child(
+                        self.group_call_messages_section(div().id("group-call-chat"), &call, cx)
+                            .rounded(px(12.))
+                            .bg(call_chrome::group_raised())
+                            .p(px(10.)),
+                    )
+                },
+            );
 
         let header = div()
             .relative()
@@ -372,37 +381,35 @@ impl QuillApp {
 
         // A conference made with "Create Call Link" opens on its link.
         let link_open = call.conference.as_ref().is_some_and(|c| c.link_open());
-        let invite = ((self.group_call_boxes.invite_open() || link_open)
-            && !self.account.passcode.is_locked())
-        .then(|| {
-            div()
-                .absolute()
-                .inset_0()
-                .bg(call_chrome::scrim())
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(
-                    div()
-                        .w(px(340.))
-                        .max_h(relative(0.85))
-                        .rounded(px(12.))
-                        .bg(cx.theme().background)
-                        .p(px(12.))
-                        .child(self.group_call_invite_panel(&call, cx)),
-                )
-        });
+        let invite = ((self.invite_open() || link_open) && !self.account.passcode.is_locked())
+            .then(|| {
+                div()
+                    .absolute()
+                    .inset_0()
+                    .bg(call_chrome::scrim())
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        div()
+                            .w(px(340.))
+                            .max_h(relative(0.85))
+                            .rounded(px(12.))
+                            .bg(cx.theme().background)
+                            .p(px(12.))
+                            .child(self.group_call_invite_panel(&call, cx)),
+                    )
+            });
 
         // Rename (`setVideoChatTitle`).
         let rename = self.group_call_rename_overlay(tr(keys::Q_AV_EDIT_TITLE).into(), cx);
         // Streaming with an external app: the server URL and key.
         // The stream key is a secret: not drawn under the lock.
         let stream = call
-            .rtmp_url
+            .rtmp
             .clone()
             .filter(|_| !self.refused_while_locked())
-            .map(|url| {
-                let key = call.rtmp_stream_key.clone().unwrap_or_default();
+            .map(|quill::calls::rtmp_start::RtmpInfo { url, key }| {
                 let copy = |id: &'static str, label: &'static str, value: String| {
                     Button::new(id)
                         .label(label)
@@ -491,7 +498,7 @@ impl QuillApp {
         heading: SharedString,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let dialog = self.group_call_screen.title_dialog.as_ref()?;
+        let dialog = self.title_dialog()?;
         Some(
             div()
                 .absolute()
@@ -580,7 +587,7 @@ impl QuillApp {
                 )
                 .child(div().text_size(px(11.)).child(label))
         };
-        let video_on = call.is_my_video_enabled;
+        let video_on = call.my_video.is_enabled();
         let left = (joined && call.can_enable_video).then(|| {
             side(
                 "group-call-video",
@@ -759,7 +766,7 @@ impl QuillApp {
         if !call.is_joined || call.is_live_story {
             return None;
         }
-        let state = mute_state(call);
+        let state = mute_state(call, false);
         let (from, to) = state.colors();
         let title = if call.title.is_empty() {
             tr(keys::MENU_START_GROUP_CALL_OPTIONS).to_string()
@@ -899,8 +906,6 @@ mod tests {
             can_unmute_self: can_unmute,
             volume_level: 10000,
             order: String::new(),
-            video_enabled: false,
-            screen_sharing_enabled: false,
             video_info: None,
             screen_sharing_video_info: None,
         }
@@ -909,20 +914,24 @@ mod tests {
     #[test]
     fn the_big_button_follows_tdesktop_states() {
         let mut call = ActiveGroupCall::fresh(1);
-        assert!(mute_state(&call) == MuteState::Join);
+        assert!(mute_state(&call, false) == MuteState::Join);
+        assert!(
+            mute_state(&call, true) == MuteState::Connecting,
+            "the join is out: no second invitation to press"
+        );
         call.is_joined = true;
-        assert!(mute_state(&call) == MuteState::Connecting);
+        assert!(mute_state(&call, false) == MuteState::Connecting);
         call.participants = vec![me(false, true, false)].into();
-        assert!(mute_state(&call) == MuteState::Live);
+        assert!(mute_state(&call, false) == MuteState::Live);
         call.is_muted_self = true;
-        assert!(mute_state(&call) == MuteState::Muted);
+        assert!(mute_state(&call, false) == MuteState::Muted);
         call.participants = vec![me(true, false, false)].into();
-        assert!(mute_state(&call) == MuteState::ForceMuted);
+        assert!(mute_state(&call, false) == MuteState::ForceMuted);
         call.participants = vec![me(true, false, true)].into();
-        assert!(mute_state(&call) == MuteState::HandRaised);
+        assert!(mute_state(&call, false) == MuteState::HandRaised);
         call.is_joined = false;
         call.scheduled_start_date = 2_000_000_000;
-        assert!(mute_state(&call) == MuteState::Scheduled);
+        assert!(mute_state(&call, false) == MuteState::Scheduled);
     }
 
     #[test]

@@ -10,6 +10,34 @@ use quill::composer::{SendKeyMode, should_send_on_enter};
 use quill::lang::{keys, tr};
 
 impl QuillApp {
+    /// The "From:" picker's own filter field: its text filters the members.
+    /// The message query lives in the other field and never holds it.
+    pub(super) fn new_member_search_field(
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<TextareaState> {
+        let input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder(tr(keys::Q_CHAT_SEARCH_MEMBERS))
+                .auto_grow(1, 1)
+                .submit_on_enter(true)
+        });
+        cx.subscribe_in(
+            &input,
+            window,
+            |this, state, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::Change) {
+                    let text = state.read(cx).value().to_string();
+                    this.in_window_of(window, cx, |this, _, cx| {
+                        this.sync_chat_search_members(&text, cx)
+                    });
+                }
+            },
+        )
+        .detach();
+        input
+    }
+
     /// The "Search in chat" field: its text drives the chat search, Enter
     /// jumps to the selected hit.
     pub(super) fn new_chat_search_field(
@@ -50,8 +78,7 @@ impl QuillApp {
         }
         if let InputEvent::PressEnter { secondary, shift } = event {
             let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
-            if *secondary && !*shift && marked.is_none() && !self.share.forward.reply_chooser_open()
-            {
+            if *secondary && !*shift && marked.is_none() && !self.reply_chooser_open() {
                 self.submit_share_from_search(window, cx);
             } else if should_send_on_enter(
                 quill::composer::enter_event_from_kit(*shift, *secondary, marked),
@@ -104,15 +131,14 @@ impl QuillApp {
         }
         if let InputEvent::PressEnter { secondary, shift } = event {
             let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
-            if *secondary && !*shift && marked.is_none() && !self.share.forward.reply_chooser_open()
-            {
+            if *secondary && !*shift && marked.is_none() && !self.reply_chooser_open() {
                 self.submit_share_from_search(window, cx);
             } else if should_send_on_enter(
                 quill::composer::enter_event_from_kit(*shift, *secondary, marked),
                 // Not a chat composer: the send-key setting does not apply.
                 SendKeyMode::Enter,
             ) {
-                if self.share.forward.reply_chooser_open() {
+                if self.reply_chooser_open() {
                     self.choose_first_reply_chat(window, cx);
                 } else {
                     self.activate_first_forward_destination(cx);

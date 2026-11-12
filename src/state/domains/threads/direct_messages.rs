@@ -19,9 +19,10 @@ pub struct DirectMessagesTopics {
     /// How loading each chat's conversations stands. No entry: the first
     /// `loadDirectMessagesChatTopics` was not sent yet.
     pub loads: HashMap<i64, TopicsLoad>,
-    /// `true` = banned from the channel, by `(channel chat id, user id)`
-    /// (tdesktop `kickedValue`). Missing = not asked yet.
-    pub kicked: HashMap<(i64, i64), bool>,
+    /// Whether the user is banned from the channel (`true`), by
+    /// `(channel chat id, user id)` (tdesktop `kickedValue`): asked, known,
+    /// or failed. Missing = not asked yet.
+    pub kicked: HashMap<(i64, i64), crate::state::fetch::Fetch<bool>>,
     /// Stars a conversation has paid, by `(chat id, topic id)`
     /// (`getDirectMessagesChatTopicRevenue`).
     pub revenue: HashMap<(i64, i64), i64>,

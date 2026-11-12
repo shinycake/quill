@@ -68,15 +68,13 @@ pub(in crate::ui) enum CeremonyMode {
 }
 
 /// The open ceremony dialog: running, with what belongs to the run, or
-/// ended with its reason. The worker, the phone sheet's QR and the PIN
-/// focus ask exist only while it runs, so none outlives it.
+/// ended with its reason. The worker and the phone sheet's QR exist only
+/// while it runs, so neither outlives it.
 enum CeremonyRun {
     Live {
         sheet: CeremonySheet,
         /// The running ceremony; `None` in demos and tests.
         worker: Option<Ceremony>,
-        /// Focus the PIN field on the next render.
-        focus_pin: bool,
         /// The phone sheet's QR code, rendered once.
         qr: Option<hybrid::CableQr>,
     },
@@ -166,7 +164,6 @@ impl CeremonyUi {
             run: CeremonyRun::Live {
                 sheet,
                 worker: ceremony,
-                focus_pin: false,
                 qr: None,
             },
         }
@@ -192,14 +189,10 @@ impl CeremonyUi {
         }
     }
 
-    /// The PIN sheet opens and its field takes focus.
+    /// The PIN sheet opens on a running ceremony.
     fn ask_pin(&mut self, invalid: bool) {
-        if let CeremonyRun::Live {
-            sheet, focus_pin, ..
-        } = &mut self.run
-        {
+        if let CeremonyRun::Live { sheet, .. } = &mut self.run {
             *sheet = CeremonySheet::Pin { invalid };
-            *focus_pin = true;
         }
     }
 
@@ -236,14 +229,6 @@ impl CeremonyUi {
         match &self.run {
             CeremonyRun::Live { worker, .. } => worker.as_ref(),
             CeremonyRun::Ended(_) => None,
-        }
-    }
-
-    /// The focus ask is read once.
-    fn take_focus_pin(&mut self) -> bool {
-        match &mut self.run {
-            CeremonyRun::Live { focus_pin, .. } => std::mem::take(focus_pin),
-            CeremonyRun::Ended(_) => false,
         }
     }
 
@@ -392,9 +377,12 @@ impl QuillApp {
             .unwrap_or_default();
         for event in events {
             changed = true;
+            let asks_pin = matches!(event, CeremonyEvent::NeedPin { .. });
             self.apply_ceremony_event(event);
+            if asks_pin {
+                self.focus_passkey_pin(window, cx);
+            }
         }
-        self.focus_passkey_pin_if_asked(window, cx);
         if added {
             // tdesktop closes the box once `registerPasskey` is done.
             self.privacy.passkeys.close_about();
@@ -407,13 +395,16 @@ impl QuillApp {
     }
 
     /// The PIN sheet just opened: the field takes focus.
-    fn focus_passkey_pin_if_asked(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let asked = self
+    fn focus_passkey_pin(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self
             .privacy
             .passkeys
-            .ceremony_mut()
-            .is_some_and(CeremonyUi::take_focus_pin);
-        if asked && let Some(input) = self.privacy.passkeys.pin_input.clone() {
+            .ceremony()
+            .is_some_and(|ui| matches!(ui.sheet(), CeremonySheet::Pin { .. }))
+        {
+            return;
+        }
+        if let Some(input) = self.privacy.passkeys.pin_input.clone() {
             input.update(cx, |input, cx| input.focus(window, cx));
         }
     }

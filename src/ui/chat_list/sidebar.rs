@@ -116,15 +116,6 @@ impl QuillApp {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
-        // A pinned drag lives in the chat rows, which end it on release.
-        // Contacts, Calls or search in their place: the release can never
-        // reach them, so the drag ends now, unsaved (round 18 B #2).
-        if self.chat_list.tab != SidebarTab::Chats || self.search_is_open() {
-            self.chat_list.pin.end_drag();
-            // The rows laid out by the last chats render are not on screen
-            // now: key stepping and file drags must not use that list.
-            self.chat_list.items.clear();
-        }
         if self.chat_list.tab == SidebarTab::Contacts {
             return list.child(self.contacts_panel(cx));
         }
@@ -177,8 +168,8 @@ impl QuillApp {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
-        let folder = self.folders.tab;
-        let filter = self.chat_list.filter;
+        let folder = self.chat_list.view.folder();
+        let filter = self.chat_list.view.filter();
         // Parity slice: folder names + tags flag for chat-row chips.
         let folder_tags = self.folder_tag_context();
         let mut chats: Vec<&ChatSummary> = self.listed_main_chats();
@@ -261,10 +252,9 @@ impl QuillApp {
             // A live pinned drag shows its swapped order (tdesktop moves
             // rows while dragging); stable, so unpinned rows keep their
             // place.
-            if let Some(drag) = self.chat_list.pin.drag()
+            if let Some(drag) = self.chat_list.pin.held()
                 && !drag.archived
                 && let reorder = &drag.reorder
-                && reorder.dragging().is_some()
             {
                 chats.sort_by_key(|chat| reorder.position(chat.id.0).unwrap_or(usize::MAX));
             }
@@ -280,7 +270,7 @@ impl QuillApp {
                 .map(|chat| ListedChat {
                     chat_id: chat.id.0,
                     pinned: chat.is_pinned,
-                    date: chat.last_message.as_ref().map_or(0, |m| m.date),
+                    date: chat.last_message().as_ref().map_or(0, |m| m.date),
                 })
                 .collect();
             for entry in group_main_list(&listed, &communities) {
@@ -311,10 +301,9 @@ impl QuillApp {
         // more" button: paging is automatic, not user-triggered.
         if folder.is_none() && matches!(filter, ChatListFilter::Archived | ChatListFilter::Unread) {
             if filter != ChatListFilter::Unread
-                && let Some(drag) = self.chat_list.pin.drag()
+                && let Some(drag) = self.chat_list.pin.held()
                 && drag.archived
                 && let reorder = &drag.reorder
-                && reorder.dragging().is_some()
             {
                 archived.sort_by_key(|chat| reorder.position(chat.id.0).unwrap_or(usize::MAX));
             }
@@ -334,19 +323,16 @@ impl QuillApp {
                 });
             }
         }
-        // Pinned-drag animation: keep frames coming while rows slide, drop
-        // the state once everything settled.
-        if let Some(reorder) = self.chat_list.pin.drag().map(|drag| &drag.reorder) {
-            let now = std::time::Instant::now();
-            // A deactivated window never gets the release: the drag ends
-            // there, unsaved, instead of redrawing at 60 Hz for good.
-            if !self.frame.window_active.get() {
-                self.chat_list.pin.end_drag();
-            } else if reorder.settled(now) {
-                self.chat_list.pin.settle();
-            } else {
-                self.request_animation_tick(60, cx);
-            }
+        // Pinned-drag animation: keep frames coming while rows slide. The
+        // drag ends itself when its window lost focus, and settles when the
+        // slide is done.
+        let active = self.frame.window_active.get();
+        if self
+            .chat_list
+            .pin
+            .advance(std::time::Instant::now(), active)
+        {
+            self.request_animation_tick(60, cx);
         }
         // kit Phase 3: hand the flat item list to the kit `VirtualList`.
         // Item heights are fixed by construction (see `chat_row_height`),
@@ -368,7 +354,7 @@ impl QuillApp {
                 })
                 .collect(),
         );
-        self.chat_list.row_fx.borrow_mut().begin_pass();
+        self.chat_list.begin_row_pass();
         self.chat_list.items = items;
         self.chat_list.folder_tags = folder_tags;
         list.child(self.chat_list_rows(sizes, focus_visible, window, cx))
@@ -389,10 +375,18 @@ impl QuillApp {
             // fires `getCommunityFullInfo` when live), so it spins like the
             // community info panel. An empty pack / no matching loaded
             // chats is the genuine empty state, never a crash.
-            if self
-                .session()
-                .is_some_and(|s| !s.groups.community_full_infos.contains_key(&community_id))
-            {
+            let pack = self.session().map(|s| {
+                let infos = &s.groups.community_full_infos;
+                (
+                    infos.contains_key(&community_id),
+                    infos
+                        .fetch(community_id)
+                        .is_some_and(|fetch| fetch.error().is_some()),
+                )
+            });
+            if let Some((false, true)) = pack {
+                EmptyState::new(id, IconName::Users).title(tr(keys::Q_NOTES_FAILED_COMMUNITY_INFO))
+            } else if let Some((false, false)) = pack {
                 EmptyState::loading(id)
                     .title(tr(keys::Q_CHATLIST_LOADING_COMMUNITY))
                     .hint(tr(keys::Q_CHATLIST_FETCHING_THE_COMMUNITYS_CHATS))
@@ -455,6 +449,7 @@ impl QuillApp {
             "chat-list",
             sizes,
             |this: &mut QuillApp, range, _window, cx| {
+                this.chat_list.keys.note_rendered_items(&range);
                 range
                     .map(|ix| this.chat_list_item_element(ix, cx))
                     .collect::<Vec<_>>()
@@ -479,11 +474,7 @@ impl QuillApp {
                 .child(rows)
                 .children(pull_gap),
         );
-        let reordering = self
-            .chat_list
-            .pin
-            .drag()
-            .is_some_and(|drag| drag.reorder.dragging().is_some());
+        let reordering = self.chat_list.pin.held().is_some();
         div()
             .id("chat-rows")
             .role(gpui_kit::Role::Group)

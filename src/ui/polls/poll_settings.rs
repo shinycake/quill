@@ -35,7 +35,9 @@ impl PollDialog {
             self.allow_adding_options = false;
             self.allows_revoting = false;
         } else {
-            self.quiz_correct_rows.clear();
+            for option in &mut self.options {
+                option.correct = false;
+            }
         }
     }
 
@@ -43,7 +45,14 @@ impl PollDialog {
     pub(crate) fn set_multiple(&mut self, on: bool) {
         self.allows_multiple_answers = on;
         if !on {
-            self.quiz_correct_rows.truncate(1);
+            // One right answer stays: the first marked row.
+            let mut kept = false;
+            for option in &mut self.options {
+                if option.correct && kept {
+                    option.correct = false;
+                }
+                kept |= option.correct;
+            }
         }
     }
 
@@ -63,31 +72,14 @@ impl PollDialog {
 
     /// Mark or unmark option `row` as a right answer.
     pub(crate) fn set_correct_row(&mut self, row: usize, on: bool) {
-        if !on {
-            self.quiz_correct_rows.retain(|marked| *marked != row);
-        } else if self.allows_multiple_answers {
-            if !self.quiz_correct_rows.contains(&row) {
-                self.quiz_correct_rows.push(row);
+        if on && !self.allows_multiple_answers {
+            for other in &mut self.options {
+                other.correct = false;
             }
-        } else {
-            self.quiz_correct_rows = vec![row];
         }
-    }
-
-    /// A row left the list: the marks after it move up with their options.
-    pub(crate) fn forget_correct_row(&mut self, removed: usize) {
-        self.quiz_correct_rows = self
-            .quiz_correct_rows
-            .iter()
-            .filter(|marked| **marked != removed)
-            .map(|marked| {
-                if *marked > removed {
-                    marked - 1
-                } else {
-                    *marked
-                }
-            })
-            .collect();
+        if let Some(option) = self.options.get_mut(row) {
+            option.correct = on;
+        }
     }
 }
 

@@ -116,8 +116,29 @@ enum CeremonyState {
     Finished,
 }
 
+/// What the worker asks of time: now, and a pause before the next look
+/// for a key.
+pub(super) trait Pace {
+    fn now(&self) -> Instant;
+    fn pause(&self, span: Duration);
+}
+
+struct SystemPace;
+
+impl Pace for SystemPace {
+    fn now(&self) -> Instant {
+        Instant::now()
+    }
+
+    fn pause(&self, span: Duration) {
+        std::thread::sleep(span);
+    }
+}
+
 /// The worker's side of the channels.
 pub(super) struct Link {
+    /// The clock the worker reads and waits on (a manual one in tests).
+    pace: Box<dyn Pace + Send>,
     pub(super) events: Sender<CeremonyEvent>,
     pins: Receiver<Zeroizing<String>>,
     pub(super) commands: Receiver<CeremonyCommand>,
@@ -149,6 +170,7 @@ impl Ceremony {
         let (commands, command_rx) = channel();
         let cancel = Arc::new(AtomicBool::new(false));
         let link = Link {
+            pace: Box::new(SystemPace),
             events: event_tx.clone(),
             pins: pin_rx,
             commands: command_rx,
@@ -234,6 +256,33 @@ impl Ceremony {
         out
     }
 
+    /// Wait for the worker's next word, then everything that came with it.
+    /// For tests: no polling and no clock, the worker's channel wakes it.
+    #[cfg(test)]
+    pub(crate) fn wait(&mut self) -> Vec<CeremonyEvent> {
+        let CeremonyState::Running(events) = &self.state else {
+            return Vec::new();
+        };
+        match events.recv() {
+            Ok(event) => {
+                let finished = matches!(
+                    event,
+                    CeremonyEvent::Registered(_)
+                        | CeremonyEvent::SignedIn(_)
+                        | CeremonyEvent::Failed(_)
+                );
+                let mut out = vec![event];
+                if finished {
+                    self.state = CeremonyState::Finished;
+                } else {
+                    out.extend(self.poll());
+                }
+                out
+            }
+            Err(_) => self.poll(),
+        }
+    }
+
     /// The PIN the user typed, for the next attempt.
     pub fn submit_pin(&self, pin: Zeroizing<String>) {
         let _ = self.pins.send(pin);
@@ -309,17 +358,20 @@ impl Link {
                     return Err(CeremonyError::AccessDenied);
                 }
             }
-            let left = deadline.saturating_duration_since(Instant::now());
+            let left = deadline.saturating_duration_since(self.pace.now());
             if left.is_zero() {
                 return Err(CeremonyError::NoDevice);
             }
-            std::thread::sleep(left.min(DEVICE_POLL));
+            self.pace.pause(left.min(DEVICE_POLL));
         }
     }
 
     /// Ask for the PIN and wait for it (no deadline: the dialog waits for
     /// the user, as tdesktop's PIN box does).
     fn ask_pin(&self, invalid: bool) -> Result<Zeroizing<String>, CeremonyError> {
+        // A PIN sent while none was asked answers nothing: only one typed
+        // after this ask's event counts.
+        while self.pins.try_recv().is_ok() {}
         let _ = self.events.send(CeremonyEvent::NeedPin { invalid });
         loop {
             if self.cancelled() {
@@ -380,7 +432,7 @@ pub(super) fn run_register(
     let hash = sha256(client_data_json.as_bytes());
     let timeout = Duration::from_millis(u64::from(options.timeout_ms));
     link.run(|pin| {
-        let deadline = Instant::now() + timeout;
+        let deadline = link.pace.now() + timeout;
         let devices = match link.devices(source, deadline) {
             Ok(devices) => devices,
             Err(error) => return Attempt::Failed(error),
@@ -449,7 +501,7 @@ pub(super) fn run_login(
     // The key (by its place in the list) that asked for the PIN.
     let asked = std::cell::Cell::new(None);
     link.run(|pin| {
-        let deadline = Instant::now() + timeout;
+        let deadline = link.pace.now() + timeout;
         let devices = match link.devices(source, deadline) {
             Ok(devices) => devices,
             Err(error) => return Attempt::Failed(error),

@@ -8,7 +8,7 @@
 use super::app::QuillApp;
 use super::shell::DialogKind;
 use super::video_editor::{EditorTarget, VideoEditorDialog, palette};
-use super::video_editor_timeline::{Fade, QualityPointer};
+use super::video_editor_timeline::{Drag, Fade};
 use gpui_kit::TestSupportExt;
 use gpui_kit::component::{Icon, Sizable};
 use gpui_kit::prelude::FluentBuilder;
@@ -113,18 +113,19 @@ impl QuillApp {
         let Some(info) = editor.info() else {
             return;
         };
-        let (width, height) = editor.edits.edited_size(&info);
+        let edits = editor.edits();
+        let (width, height) = edits.edited_size(&info);
         let levels = quality_levels(width, height);
         let Some(level) = levels.get(index).copied() else {
             return;
         };
-        if editor.edits.quality == level {
+        if edits.quality == level || editor.busy() {
             return;
         }
         // Slide from where the dot is now (`setIndex`).
         let was = levels
             .iter()
-            .position(|known| *known == editor.edits.quality)
+            .position(|known| *known == edits.quality)
             .unwrap_or(levels.len().saturating_sub(1));
         editor.motion.quality_shift = Fade::default();
         editor.motion.quality_shift.start(was as f32, 0, true);
@@ -132,7 +133,9 @@ impl QuillApp {
             .motion
             .quality_shift
             .start(index as f32, SHIFT_MS, reduce);
-        editor.edits.quality = level;
+        if let Some(edits) = editor.edits_mut() {
+            edits.quality = level;
+        }
         cx.notify();
     }
 
@@ -140,19 +143,15 @@ impl QuillApp {
         let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() else {
             return;
         };
-        if let Some(pressed) = pressed {
-            editor.motion.quality_pointer = if pressed {
-                QualityPointer::Down
-            } else {
-                QualityPointer::Up
-            };
-        } else if editor.motion.quality_pointer == QualityPointer::Up {
+        if pressed == Some(true) {
+            editor.motion.drag = Drag::Quality;
+        } else if !matches!(editor.motion.drag, Drag::Quality) {
             return;
         }
         let (Some(bounds), Some(info)) = (editor.motion.quality_bounds.get(), editor.info()) else {
             return;
         };
-        let (width, height) = editor.edits.edited_size(&info);
+        let (width, height) = editor.edits().edited_size(&info);
         let count = quality_levels(width, height).len();
         let index = quality_index_at(
             f32::from(x - bounds.origin.x),
@@ -173,14 +172,14 @@ impl QuillApp {
         if editor.target.square() {
             return None;
         }
-        let (width, height) = editor.edits.edited_size(&editor.info()?);
+        let (width, height) = editor.edits().edited_size(&editor.info()?);
         let levels = quality_levels(width, height);
         if levels.len() < 2 {
             return None;
         }
         let index = levels
             .iter()
-            .position(|level| *level == editor.edits.quality)
+            .position(|level| *level == editor.edits().quality)
             .unwrap_or(levels.len() - 1);
         let motion = &editor.motion.quality_shift;
         let active = if motion.animating(Instant::now()) {
@@ -228,7 +227,7 @@ impl QuillApp {
                                 if let Some(editor) =
                                     this.composer_ui.send_box.video_editor.as_mut()
                                 {
-                                    editor.motion.quality_pointer = QualityPointer::Up;
+                                    editor.motion.release_quality();
                                 }
                             });
                         }
@@ -248,8 +247,8 @@ impl QuillApp {
         // The sound is dropped anyway for a sticker or a replacement, so
         // there is nothing to choose (`removeAudio`).
         let gif_allowed = matches!(editor.target, EditorTarget::Tray(_));
-        let gif = editor.edits.gif;
-        let flipped = editor.edits.flipped;
+        let gif = editor.edits().gif;
+        let flipped = editor.edits().flipped;
         let text_button = |id: &'static str, label: &'static str, color: Hsla| {
             div()
                 .id(id)
@@ -358,8 +357,14 @@ impl QuillApp {
     }
 
     fn toggle_video_editor_gif(&mut self, cx: &mut Context<Self>) {
-        if let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() {
-            editor.edits.gif = !editor.edits.gif;
+        if let Some(edits) = self
+            .composer_ui
+            .send_box
+            .video_editor
+            .as_mut()
+            .and_then(|editor| editor.edits_mut())
+        {
+            edits.gif = !edits.gif;
             cx.notify();
         }
     }

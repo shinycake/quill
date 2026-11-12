@@ -67,7 +67,7 @@ impl QuillApp {
         if drawn.shown >= 1. {
             return Some(panel.into_any_element());
         }
-        if drawn.leaving {
+        if drawn.leaving() {
             return Some(div().opacity(drawn.shown).child(panel).into_any_element());
         }
         let full = |measured: Pixels, guess: f32| {

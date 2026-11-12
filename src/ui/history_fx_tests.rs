@@ -142,6 +142,29 @@ fn the_date_shows_as_soon_as_a_separator_leaves_the_top(cx: &mut TestAppContext)
     vcx.run_until_parked();
     assert!(date_up(&app, vcx, &day));
     // One pill: the row's own one gives way to the floating one.
-    let covered = app.read_with(vcx, |app, _| app.history.scroll_date.covered_row);
+    let covered = app.read_with(vcx, |app, _| app.history.scroll_date.covered_row());
     assert_eq!(covered, Some(start), "the separator under the pill hides");
+}
+
+/// A reaction's fly leaves the history with its run: the first row drawn
+/// after it ended takes it out, whichever message that row is.
+#[gpui_kit::test]
+fn a_finished_reaction_fly_leaves_the_slot(cx: &mut TestAppContext) {
+    let (app, mut vcx) = opened(cx);
+    let vcx = &mut vcx;
+    let long_ago = std::time::Instant::now()
+        .checked_sub(Duration::from_secs(5))
+        .expect("the clock has run for five seconds");
+    app.update(vcx, |app, cx| {
+        app.history
+            .reaction_fly
+            .set(Some(crate::ui::history_fx::ReactionFly {
+                chat_id: 1,
+                message_id: 2,
+                glyph: "x".into(),
+                started: long_ago,
+            }));
+        assert!(app.reaction_fly_for(9, 9, cx).is_none());
+        assert!(app.history.reaction_fly.take().is_none(), "the run ended");
+    });
 }

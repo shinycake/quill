@@ -76,8 +76,8 @@ impl QuillApp {
 
     /// Shortcuts take keystrokes for rebinding only while their page is up.
     pub(super) fn keybinding_capture_active(&mut self) -> bool {
-        let shown = self.settings.open
-            && self.settings.page == Some(quill::settings_catalog::Page::Shortcuts);
+        let shown = self.settings.open()
+            && self.settings.page() == Some(quill::settings_catalog::Page::Shortcuts);
         self.preferences.keybinding.capture_active(shown)
     }
 
@@ -147,7 +147,7 @@ impl QuillApp {
         if self.demo_session.is_none() {
             super::battery_watch::watch(cx);
         }
-        self.start_omarchy_watch(cx);
+        self.sync_omarchy_watch(cx);
         cx.set_reduce_motion(quill::power_saving::reduce_motion_now());
         // Quill's themes and high contrast take the single accent of old.
         let accent = quill::system_accent::effective(
@@ -227,7 +227,7 @@ impl QuillApp {
         f: impl FnOnce(&mut AppearancePrefs),
     ) {
         f(&mut self.appearance);
-        quill::tray::set_tray_enabled(self.appearance.show_tray_icon);
+        quill::tray::set_tray_enabled(self.appearance.work_mode.has_tray());
         quill::tray::monochrome::set_monochrome(self.appearance.tray_icon_monochrome);
         self.appearance.font_size_px = clamp_font_size(self.appearance.font_size_px);
         save_appearance_prefs(&Self::appearance_paths(), &self.appearance);
@@ -502,8 +502,10 @@ impl QuillApp {
         // Tray-dependent switches only exist while a tray icon does:
         // a hidden window with no tray to reopen it from would
         // strand the user (Linux without a StatusNotifier host).
-        let tray =
-            quill::tray::tray_setting_switches(tray_available, this.appearance.show_tray_icon);
+        let tray = quill::tray::tray_setting_switches(
+            tray_available,
+            this.appearance.work_mode.has_tray(),
+        );
         body.extend(this.tray_icon_sections(tray_available, cx));
         if tray.start_in_tray {
             body.push(
@@ -647,6 +649,7 @@ impl QuillApp {
 
 mod appearance_keybindings_section;
 mod new_accent_picker;
+pub(in crate::ui) use new_accent_picker::{AccentSelect, LinkHandlerRecheck};
 mod send_to_menu_section;
 pub(in crate::ui) use send_to_menu_section::SendToMenu;
 mod telegram_wallpapers;

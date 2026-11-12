@@ -234,18 +234,18 @@ fn stale_sticker_lists_stay_stale_until_their_refetch_goes_out() {
     let mut rig = Rig::new();
     let panel = &mut rig.driver.session.stickers.stickers;
     panel.open = true;
-    panel.recent_stale = true;
-    panel.favorites_stale = true;
+    panel.lists.recent.outdate();
+    panel.lists.favorites.outdate();
     // The first refetch cannot be sent: neither flag is lost.
     rig.refuse(true);
     assert!(rig.driver.refresh_stale_panels().is_err());
     let panel = &rig.driver.session.stickers.stickers;
-    assert!(panel.recent_stale && panel.favorites_stale);
+    assert!(panel.lists.recent.is_outdated() && panel.lists.favorites.is_outdated());
     // Sent: its flag goes, and so does the next one's.
     rig.refuse(false);
     rig.driver.refresh_stale_panels().unwrap();
     let panel = &rig.driver.session.stickers.stickers;
-    assert!(!panel.recent_stale && !panel.favorites_stale);
+    assert!(!panel.lists.recent.is_outdated() && !panel.lists.favorites.is_outdated());
     assert_eq!(rig.sent("getRecentStickers").len(), 1);
     assert_eq!(rig.sent("getFavoriteStickers").len(), 1);
 }

@@ -12,7 +12,6 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::*;
 use gpui_kit::*;
-use quill::agent::access;
 use quill::agent::activity::Connected;
 use quill::lang::{keys, tr, tr_with};
 
@@ -95,8 +94,8 @@ impl QuillApp {
                         .ghost()
                         .xsmall()
                         .tooltip(tr(keys::Q_AGENT_REVOKE_HINT))
-                        .on_click(cx.listener(|_, _, _, cx| {
-                            access::set_enabled(false);
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.turn_agent_access_off(cx);
                             cx.notify();
                         })),
                 )

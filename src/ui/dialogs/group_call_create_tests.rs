@@ -598,11 +598,10 @@ fn a_join_as_list_nobody_waits_for_is_dropped(cx: &mut TestAppContext) {
     // The box was closed before the list answered: nothing waits for it.
     app.update_in(&mut main, |app, _, _| {
         if let Some(session) = app.demo_session.as_deref_mut() {
-            session.calls.create_join_as = Some(quill::calls::group_call_create::CreateJoinAs {
-                chat_id: CHANNEL,
-                request: RequestId(9),
-                answer: Some(Ok(vec![ME])),
-            });
+            let mut asked =
+                quill::calls::group_call_create::CreateJoinAs::asking(CHANNEL, RequestId(9));
+            asked.accept(Some(RequestId(9)), vec![ME]);
+            session.calls.create_join_as = Some(asked);
         }
     });
     frames(&mut main);
@@ -612,4 +611,43 @@ fn a_join_as_list_nobody_waits_for_is_dropped(cx: &mut TestAppContext) {
             .is_some_and(|session| session.calls.create_join_as.is_some())
     });
     assert!(!held, "the answer went with the box that asked");
+}
+
+#[gpui_kit::test]
+fn a_second_create_waits_for_the_first_one_in_flight(cx: &mut TestAppContext) {
+    let (app, mut main) = open_main(cx);
+    manager(&app, &mut main);
+    app.update_in(&mut main, |app, _, _| {
+        let request = app
+            .demo_session
+            .as_mut()
+            .map(|session| {
+                session.request(
+                    quill::state::RequestPurpose::Calls(
+                        quill::state::CallsPurpose::CreateVideoChat { chat_id: CHANNEL },
+                    ),
+                    None,
+                )
+            })
+            .expect("a session");
+        app.group_call_boxes.create = VideoChatCreate::Sent(request);
+        assert!(app.video_chat_create_in_flight());
+    });
+    begin(&app, &mut main, CreateKind::Now);
+    click(&mut main, "group-call-create-confirm");
+    app.read_with(&main, |app, _| {
+        assert!(
+            matches!(app.group_call_boxes.create, VideoChatCreate::Sent(_)),
+            "the first create is still the one waited for"
+        );
+    });
+    // Answered: the registry forgets it and a new create may go.
+    app.update_in(&mut main, |app, _, _| {
+        if let VideoChatCreate::Sent(request) = app.group_call_boxes.create
+            && let Some(session) = app.demo_session.as_mut()
+        {
+            session.requests.take(request);
+        }
+        assert!(!app.video_chat_create_in_flight());
+    });
 }

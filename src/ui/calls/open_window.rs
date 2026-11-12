@@ -1,6 +1,6 @@
 //! Opening the 1:1 call's window (`QuillApp::sync_call_window` asks for it).
 use crate::ui::app::QuillApp;
-use crate::ui::calls_state::CallWindow;
+use crate::ui::calls_state::{CallWindow, WindowWanted};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::Root;
 use gpui_kit::*;
@@ -12,7 +12,7 @@ impl QuillApp {
             return;
         }
         self.calls.window = CallWindow::Opening;
-        self.calls.raised_for = None;
+        self.call_screen.raised_for = None;
         let owner = cx.entity();
         // screen-scope: the call window is the app's; its failure note goes to whichever account is on screen.
         cx.defer(move |cx| {
@@ -41,8 +41,9 @@ impl QuillApp {
                             app.calls.forget_window();
                             // The window is reused for later calls: it
                             // closes on the one it shows now.
-                            let (shown, ..) = app.call_window_target();
-                            app.call_screen.window_closed_by_user = shown.or(Some(call_id));
+                            let shown = app.call_window_target().id();
+                            app.call_screen.wanted =
+                                WindowWanted::ClosedByUser(shown.unwrap_or(call_id));
                             cx.notify();
                         });
                         true
@@ -70,7 +71,7 @@ impl QuillApp {
                         // Kept shut for this call: the next sync does not
                         // try (and note) it again, a second call ringing
                         // included; the call bar reopens it.
-                        app.call_screen.window_open_failed = Some(call_id);
+                        app.call_screen.wanted = WindowWanted::OpenFailed(call_id);
                         app.set_note(StatusNote::error(tr(
                             keys::Q_OPS_COULDNT_OPEN_THE_CALL_WINDOW,
                         )));

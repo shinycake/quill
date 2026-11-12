@@ -31,6 +31,10 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Sent already: the answer decides, so there is nothing to cancel.
+        if self.chat_ui.edit_sending().is_some() {
+            return;
+        }
         if self.edit_text_is_changed(cx) {
             self.chat_ui.set_cancel_edit_confirm(true);
             cx.notify();

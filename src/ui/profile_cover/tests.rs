@@ -65,8 +65,9 @@ fn the_ringed_avatar_opens_the_first_unread_story(cx: &mut TestAppContext) {
     assert!(find(&mut vcx, "profile-rating"));
     click(&mut vcx, "profile-cover-avatar");
     let opened = app.read_with(&vcx, |app, _| {
-        app.chat_list
-            .pending_story_open
+        app.stories
+            .viewer
+            .waiting()
             .map(|open| (open.chat_id, open.story_id))
             .or_else(|| app.stories.viewer.is_open().then_some((COVER_STORIES, 0)))
     });
@@ -184,4 +185,31 @@ fn others_have_no_pending_rating(cx: &mut TestAppContext) {
     let (_app, _shell, mut vcx) = new_app(cx, "ready-info-cover-stories");
     click(&mut vcx, "profile-rating");
     assert!(!find(&mut vcx, "rating-box-preview"));
+}
+
+/// The box settles on its own request: another save of the Last seen rule
+/// (a refusal in the key's state) says nothing about it.
+#[gpui_kit::test]
+fn the_show_box_settles_on_its_own_request(cx: &mut TestAppContext) {
+    use crate::ui::profile_cover::ShowStage;
+    use quill::state::RequestPurpose;
+    let (app, _shell, mut vcx) = new_app(cx, "ready-info-cover-last-seen");
+    click(&mut vcx, "profile-cover-when");
+    app.update_in(&mut vcx, |app, _, cx| {
+        let request = app
+            .demo_session
+            .as_mut()
+            .map(|session| session.request(RequestPurpose::SetReadDatePrivacy, None))
+            .expect("the demo session");
+        if let Some(open) = app.profile_cover.show_or_premium.as_mut() {
+            open.stage = ShowStage::Saving(request);
+        }
+        assert!(!app.drain_show_or_premium(cx), "its request is still out");
+        assert!(app.profile_cover.show_or_premium.is_some());
+        if let Some(session) = app.demo_session.as_mut() {
+            session.requests.take(request);
+        }
+        assert!(app.drain_show_or_premium(cx), "answered");
+        assert!(app.profile_cover.show_or_premium.is_none());
+    });
 }

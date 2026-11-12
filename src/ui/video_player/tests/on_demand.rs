@@ -209,6 +209,36 @@ fn a_clicked_round_video_plays_with_sound_once_downloaded(cx: &mut TestAppContex
     });
 }
 
+/// Sweep 12-C016: a drag along a round video's seek ring ends at the mouse
+/// button going up anywhere (the window's own handler), not only through a
+/// handler the ring registers while it paints.
+#[gpui_kit::test]
+fn a_seek_drag_ends_at_any_mouse_up_even_with_no_ring_painted(cx: &mut TestAppContext) {
+    let _scripts = queue_scripts(16);
+    let (app, mut vcx) = autoplay_off(cx);
+    let vcx = &mut vcx;
+    set_local(&app, vcx, ROUND_FILE, false);
+    let MessageContent::VideoNote(note) = round_note(&app, vcx) else {
+        panic!("message 611 is a round video");
+    };
+    app.update_in(vcx, |app, _, cx| {
+        app.play_video_note(ChatId(ROUND.0), MessageId(ROUND.1), &note, cx);
+    });
+    settle(&app, vcx);
+    set_local(&app, vcx, ROUND_FILE, true);
+    land(&app, vcx);
+    app.read_with(vcx, |app, _| {
+        let videos = &app.players.inline_videos;
+        assert!(videos.is_sounding(ROUND), "plays with sound");
+        assert!(videos.seek_to(ROUND.0, ROUND.1, 0.5), "the drag holds it");
+        assert!(videos.is_seeking(ROUND.0, ROUND.1));
+        assert!(videos.end_all_seeks(), "a release ends it");
+        assert!(!videos.is_seeking(ROUND.0, ROUND.1));
+        assert!(videos.is_sounding(ROUND), "it plays on as it was");
+        assert!(!videos.end_all_seeks(), "nothing left to end");
+    });
+}
+
 #[gpui_kit::test]
 fn a_clicked_mp4_gif_loops_on_the_inline_player(cx: &mut TestAppContext) {
     let scripts = queue_scripts(16);
@@ -245,7 +275,6 @@ fn a_clicked_mp4_gif_loops_on_the_inline_player(cx: &mut TestAppContext) {
         assert!(!videos.is_sounding(MP4_GIF));
         // The MP4 never reaches the GIF decoder.
         assert!(app.playback.animation.playing().is_none());
-        assert!(app.playback.gif_decodes.is_empty());
         videos.player(MP4_GIF)
     });
     let player = player.expect("an inline player for the MP4 GIF");
@@ -287,7 +316,6 @@ fn a_video_labelled_image_gif_plays_on_the_inline_player(cx: &mut TestAppContext
         let videos = &app.players.inline_videos;
         assert!(app.playback.animation.playing().is_none());
         assert!(app.playback.animation.clip().is_none());
-        assert!(app.playback.gif_decodes.is_empty());
         assert_eq!(videos.demand(LABELLED_GIF), Some(Demand::Loop));
         assert!(videos.player(LABELLED_GIF).is_some());
     });
@@ -379,54 +407,67 @@ fn one_press_on_a_voice_note_plays_it_once_downloaded(cx: &mut TestAppContext) {
     });
 }
 
-/// Stopped and played again while its decode still runs: the GIF plays
-/// from the first picture the decode already sent, instead of waiting for
-/// the whole file.
+/// Stopping the GIF leaves its stage, which owns the decode: the decoder is
+/// told to end before its next frame and the landing is dropped with the
+/// task, so a decode nobody waits for never lands.
 #[gpui_kit::test]
-fn a_gif_played_again_while_it_decodes_starts_at_once(cx: &mut TestAppContext) {
-    use crate::ui::gif_clip::GifClip;
-    use crate::ui::playback_state::{ChatMessage, GifDecode};
-    use std::sync::Arc;
-    use std::sync::atomic::AtomicBool;
+fn stopping_a_gif_stops_its_decode(cx: &mut TestAppContext) {
+    use crate::ui::playback_state::{ChatMessage, GifPlayback, PlayingGif};
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     let message = MessageId(LABELLED_GIF.1);
     let chat = ChatId(LABELLED_GIF.0);
     app.update_in(vcx, |app, _, cx| {
-        let clip = GifClip::decoding_with_one_picture();
-        app.playback.gif_decodes.insert(
-            ChatMessage::new(chat, message),
-            GifDecode {
-                cancel: Arc::new(AtomicBool::new(false)),
-                first: Some(clip.clone()),
-            },
-        );
-        let playing = crate::ui::playback_state::PlayingGif {
-            window: None,
-            message: ChatMessage::new(chat, message),
-        };
-        app.playback.animation = crate::ui::playback_state::GifPlayback::Waiting(playing);
-        app.playback
-            .animation
-            .begin_clip(clip.clone(), std::time::Instant::now());
-        app.stop_animation_playback();
-        assert!(app.playback.animation.clip().is_none());
-        app.playback.animation = crate::ui::playback_state::GifPlayback::Waiting(playing);
-        app.spawn_gif_decode(
+        let run = app.spawn_gif_decode(
             chat,
             message,
             FileId(LABELLED_GIF_FILE),
-            "/nonexistent/played-again.gif".into(),
+            "/nonexistent/stopped.gif".into(),
             cx,
         );
-        let playing = app.playback.animation.clip();
-        assert!(playing.is_some_and(|playing| Arc::ptr_eq(playing, &clip)));
-        let decode = app
-            .playback
-            .gif_decodes
-            .get(&ChatMessage::new(chat, message));
+        app.playback.animation = GifPlayback::Waiting {
+            playing: PlayingGif {
+                window: None,
+                message: ChatMessage::new(chat, message),
+            },
+            run,
+        };
         assert!(
-            decode.is_some_and(|decode| !decode.cancel.load(std::sync::atomic::Ordering::Relaxed))
+            app.playback
+                .animation
+                .run()
+                .is_some_and(|run| !run.cancelled())
+        );
+        app.stop_animation_playback();
+        assert!(app.playback.animation.playing().is_none());
+        assert!(app.playback.animation.run().is_none());
+    });
+}
+
+/// The decode is the stage's own: replacing the stage cancels the decoder.
+#[gpui_kit::test]
+fn a_gif_stage_cancels_its_decode_when_it_goes(cx: &mut TestAppContext) {
+    use crate::ui::playback_state::{ChatMessage, GifPlayback, GifRun, PlayingGif};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let cancel = Arc::new(AtomicBool::new(false));
+    let observed = cancel.clone();
+    app.update_in(vcx, |app, _, cx| {
+        let task = cx.spawn(async |_, _| {});
+        app.playback.animation = GifPlayback::Waiting {
+            playing: PlayingGif {
+                window: None,
+                message: ChatMessage::new(ChatId(LABELLED_GIF.0), MessageId(LABELLED_GIF.1)),
+            },
+            run: GifRun::new(cancel, task),
+        };
+        assert!(!observed.load(Ordering::Relaxed));
+        app.playback.animation = GifPlayback::Idle;
+        assert!(
+            observed.load(Ordering::Relaxed),
+            "dropping the stage cancels"
         );
     });
 }

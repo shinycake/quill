@@ -178,10 +178,10 @@ fn replay_chat_search_generation_jump_and_empty() {
         )],
     );
     assert_eq!(
-        session.search.chat_search.status,
+        session.search.chat_search.status(),
         quill::state::SearchStatus::Ready
     );
-    assert_eq!(session.search.chat_search.hits.len(), 2);
+    assert_eq!(session.search.chat_search.hits().len(), 2);
     assert_eq!(
         session.begin_chat_search_jump(quill::ids::MessageId(50)),
         quill::state::ChatSearchJumpNeed::AlreadyReady
@@ -236,10 +236,10 @@ fn replay_chat_search_generation_jump_and_empty() {
         )],
     );
     assert_eq!(
-        session.search.chat_search.status,
+        session.search.chat_search.status(),
         quill::state::SearchStatus::Searching
     );
-    assert!(session.search.chat_search.hits.is_empty());
+    assert!(session.search.chat_search.hits().is_empty());
 
     let empty_gen = session.search.chat_search.begin_query("zzz");
     let empty_extra = session.request_chat_search(
@@ -257,14 +257,14 @@ fn replay_chat_search_generation_jump_and_empty() {
         )],
     );
     assert_eq!(
-        session.search.chat_search.status,
+        session.search.chat_search.status(),
         quill::state::SearchStatus::Empty
     );
 
     let open_chat = session.open_chat_id();
     session.close_chat_search();
     assert_eq!(
-        session.search.chat_search.status,
+        session.search.chat_search.status(),
         quill::state::SearchStatus::Closed
     );
     assert_eq!(session.open_chat_id(), open_chat);

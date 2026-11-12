@@ -10,7 +10,7 @@ use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
 use quill::boost_box::BoostBoxState;
 use quill::calls::rtmp_start::RtmpStart;
-use quill::collectible_info::CollectibleLookup;
+use quill::collectible_info::{LookupSpec, LookupStage};
 use quill::ids::{AccountKey, ChatId};
 use quill::state::LanguageLinkLookup;
 
@@ -56,12 +56,10 @@ fn a_switch_closes_the_boxes_whose_flag_is_the_sessions(cx: &mut TestAppContext)
                 "de".into(),
                 quill::ids::RequestId(1),
             ));
-            session.payments.hub.collectible = Some(CollectibleLookup::new(
-                "durov",
-                "Pavel",
-                None,
-                String::new(),
-            ));
+            session.payments.hub.collectible = Some(
+                LookupSpec::new("durov", "Pavel", None, String::new())
+                    .into_lookup(LookupStage::Loading(quill::ids::RequestId(1))),
+            );
         }
         app.open_location_picker(cx);
     });

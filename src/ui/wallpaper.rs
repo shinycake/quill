@@ -101,7 +101,11 @@ impl Wallpaper {
         if !self.rotates() {
             return self;
         }
-        let rotation = ROTATIONS.with(|r| r.borrow().get(&self.identity()).copied());
+        let rotation = ROTATIONS.with(|r| {
+            r.try_borrow()
+                .ok()
+                .and_then(|map| map.get(&self.identity()).copied())
+        });
         self.with_rotation(rotation.unwrap_or(0))
     }
 
@@ -133,11 +137,13 @@ pub(super) fn rotate(wallpaper: &Wallpaper) -> bool {
         return false;
     }
     ROTATIONS.with(|r| {
-        let mut map = r.borrow_mut();
+        let Ok(mut map) = r.try_borrow_mut() else {
+            return false;
+        };
         let entry = map.entry(wallpaper.identity()).or_insert(0);
         *entry = quill::wallpaper_raster::next_rotation(*entry);
-    });
-    true
+        true
+    })
 }
 
 fn fill_wallpaper(fill: &BackgroundFill) -> Wallpaper {
@@ -186,17 +192,18 @@ pub(super) fn background_wallpaper(
     }
 }
 
-/// Pick the wallpaper: the Telegram one when chosen and available, else the
-/// preset color.
+/// Pick the wallpaper: the preset colour, or the Telegram one once it is
+/// available (until then, and with nothing chosen, the theme shows).
 pub(super) fn resolve_wallpaper(
-    preset_rgb: Option<u32>,
-    use_telegram: bool,
+    source: quill::settings::WallpaperSource,
     telegram: Option<Wallpaper>,
 ) -> Option<Wallpaper> {
-    if use_telegram && let Some(wallpaper) = telegram {
-        return Some(wallpaper);
+    use quill::settings::WallpaperSource;
+    match source {
+        WallpaperSource::Theme => None,
+        WallpaperSource::Color(rgb) => Some(Wallpaper::Solid(rgb)),
+        WallpaperSource::Telegram => telegram,
     }
-    preset_rgb.map(Wallpaper::Solid)
 }
 
 /// What one chat shows: its wallpaper (with the dark-mode dimming) and the
@@ -372,8 +379,7 @@ impl QuillApp {
         use gpui_kit::component::theme::ActiveTheme;
         let dark = cx.theme().is_dark();
         resolve_wallpaper(
-            self.appearance.wallpaper_rgb,
-            self.appearance.telegram_wallpaper,
+            self.appearance.wallpaper,
             self.account_telegram_wallpaper(dark),
         )
         // Nothing chosen: the app theme's background (tdesktop's theme
@@ -529,20 +535,18 @@ mod tests {
 
     #[test]
     fn telegram_wallpaper_wins_only_when_chosen_and_ready() {
+        use quill::settings::WallpaperSource as Source;
         let tg = Some(Wallpaper::Solid(7));
         assert_eq!(
-            resolve_wallpaper(Some(1), true, tg.clone()),
+            resolve_wallpaper(Source::Telegram, tg.clone()),
             Some(Wallpaper::Solid(7))
         );
         assert_eq!(
-            resolve_wallpaper(Some(1), false, tg.clone()),
+            resolve_wallpaper(Source::Color(1), tg.clone()),
             Some(Wallpaper::Solid(1))
         );
-        // Chosen but not downloaded yet: the preset (or the theme) shows.
-        assert_eq!(
-            resolve_wallpaper(Some(1), true, None),
-            Some(Wallpaper::Solid(1))
-        );
-        assert_eq!(resolve_wallpaper(None, true, None), None);
+        // Chosen but not downloaded yet: the theme shows.
+        assert_eq!(resolve_wallpaper(Source::Telegram, None), None);
+        assert_eq!(resolve_wallpaper(Source::Theme, tg), None);
     }
 }

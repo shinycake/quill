@@ -48,7 +48,7 @@ const WINDOW_MARGIN: f32 = 8.;
 fn progress(preview: &Preview, now: Instant) -> f32 {
     let span = Duration::from_millis(PREVIEW_TOGGLE_MS).as_secs_f32();
     let since = |at: Instant| now.saturating_duration_since(at).as_secs_f32() / span;
-    match preview.hiding {
+    match preview.hiding() {
         Some(at) => 1. - ease_out_circ(since(at)),
         None => ease_out_circ(since(preview.shown)),
     }
@@ -69,7 +69,7 @@ impl QuillApp {
         // The executor's clock: simulated in tests, the real one otherwise.
         let now = cx.background_executor().now();
         let gone = preview
-            .hiding
+            .hiding()
             .is_some_and(|since| now.saturating_duration_since(since) >= toggle);
         if gone {
             if current {
@@ -112,7 +112,7 @@ impl QuillApp {
             .min(viewport.1 - card.1 - WINDOW_MARGIN)
             .max(WINDOW_MARGIN);
         let progress = progress(preview, now);
-        let hiding = preview.hiding.is_some();
+        let hiding = preview.hiding().is_some();
 
         let icon = badge::effect_icon(effect, &session.media.files, &self.media_display_roots());
         // The effect loops over the card; the sample is incoming, on the
@@ -134,9 +134,8 @@ impl QuillApp {
         let animated = effect.animation().is_some();
         let ready = !matches!(icon, BadgeIcon::Waiting) && (view.is_some() || !animated);
         let lottie = view.filter(|_| ready).map(|(view, file)| {
-            if preview.playing.get().is_none() {
+            if preview.begin_playing() {
                 // Shown again: from its first frame.
-                preview.playing.set(Some(Instant::now()));
                 self.players.stickers.restart(head, file.0);
             }
             view

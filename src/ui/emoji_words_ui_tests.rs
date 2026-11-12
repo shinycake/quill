@@ -244,11 +244,11 @@ fn escape_closes_the_colon_strip_before_a_hovered_word(cx: &mut TestAppContext) 
     app.update(vcx, |app, _| app.hover_highlight(0));
     vcx.simulate_input(":heart");
     frame(vcx);
-    let open = app.read_with(vcx, |app, _| app.composer_ui.suggest.active.is_some());
+    let open = app.read_with(vcx, |app, _| app.composer_ui.suggest.is_showing());
     assert!(open, "the `:` strip is showing");
     vcx.simulate_keystrokes("escape");
     frame(vcx);
-    let open = app.read_with(vcx, |app, _| app.composer_ui.suggest.active.is_some());
+    let open = app.read_with(vcx, |app, _| app.composer_ui.suggest.is_showing());
     assert!(!open);
     assert!(lit(&app, vcx).contains(&"pizza".to_string()));
 }

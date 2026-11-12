@@ -348,6 +348,17 @@ impl QuillApp {
             .into_any_element()
     }
 
+    /// The panel of a group whose chat is not known: its name alone.
+    fn unknown_group_panel(title: String) -> AnyElement {
+        div()
+            .flex()
+            .flex_col()
+            .items_center()
+            .p_4()
+            .child(div().text_lg().font_semibold().child(title))
+            .into_any_element()
+    }
+
     /// Supergroup/channel panel: title, member count, description.
     pub(in crate::ui) fn supergroup_info_panel(
         &self,
@@ -355,7 +366,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let session = self.session();
-        let (title, chat_id, is_channel) = session
+        let Some((title, chat_id, is_channel)) = session
             .and_then(|s| s.supergroup_chat(supergroup_id))
             .and_then(|chat| match chat.kind {
                 ChatKind::Supergroup { is_channel, .. } => {
@@ -363,16 +374,14 @@ impl QuillApp {
                 }
                 _ => None,
             })
-            .unwrap_or_else(|| {
-                (
-                    tr_with(
-                        keys::Q_PEOPLE_GROUP,
-                        &[("supergroup_id", &supergroup_id.to_string())],
-                    ),
-                    ChatId(supergroup_id),
-                    false,
-                )
-            });
+        else {
+            // No chat for this supergroup (removed, left, not loaded): its
+            // id is not a chat id, so no row acts on it.
+            return Self::unknown_group_panel(tr_with(
+                keys::Q_PEOPLE_GROUP,
+                &[("supergroup_id", &supergroup_id.to_string())],
+            ));
+        };
         let info = session
             .and_then(|s| s.groups.supergroup_full_infos.get(&supergroup_id))
             .cloned();
@@ -551,25 +560,19 @@ impl QuillApp {
         basic_group_id: i64,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let (title, chat_id) = self
-            .session()
-            .and_then(|s| {
-                s.chats.values().find_map(|chat| match chat.kind {
-                    ChatKind::BasicGroup { basic_group_id: id } if id == basic_group_id => {
-                        Some((chat.title.clone(), chat.id))
-                    }
-                    _ => None,
-                })
+        let Some((title, chat_id)) = self.session().and_then(|s| {
+            s.chats.values().find_map(|chat| match chat.kind {
+                ChatKind::BasicGroup { basic_group_id: id } if id == basic_group_id => {
+                    Some((chat.title.clone(), chat.id))
+                }
+                _ => None,
             })
-            .unwrap_or_else(|| {
-                (
-                    tr_with(
-                        keys::Q_PEOPLE_GROUP_2,
-                        &[("basic_group_id", &basic_group_id.to_string())],
-                    ),
-                    ChatId(basic_group_id),
-                )
-            });
+        }) else {
+            return Self::unknown_group_panel(tr_with(
+                keys::Q_PEOPLE_GROUP_2,
+                &[("basic_group_id", &basic_group_id.to_string())],
+            ));
+        };
         let member_count = self
             .session()
             .and_then(|s| s.groups.basic_group_members.get(&chat_id.0))

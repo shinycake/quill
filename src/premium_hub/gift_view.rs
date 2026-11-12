@@ -7,8 +7,10 @@
 /// outlive the panel it belongs to.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum GiftView {
-    /// The list alone.
+    /// The gifts box is not open.
     #[default]
+    Closed,
+    /// The list alone.
     List,
     /// The panel of the gift with this id.
     Detail(String),
@@ -17,10 +19,15 @@ pub enum GiftView {
 }
 
 impl GiftView {
+    /// The gifts box is open (the list, or a panel over it).
+    pub fn is_open(&self) -> bool {
+        *self != Self::Closed
+    }
+
     /// The gift whose panel is open.
     pub fn selected(&self) -> Option<&str> {
         match self {
-            Self::List => None,
+            Self::Closed | Self::List => None,
             Self::Detail(id) | Self::ConfirmConvert(id) => Some(id),
         }
     }
@@ -34,8 +41,11 @@ impl GiftView {
     }
 
     /// Open (`Some`) or close (`None`) a gift's panel. A confirmation goes
-    /// with the panel it was for.
+    /// with the panel it was for. A closed box shows no panel.
     pub fn select(&mut self, id: Option<String>) {
+        if *self == Self::Closed {
+            return;
+        }
         *self = match id {
             Some(id) => Self::Detail(id),
             None => Self::List,
@@ -46,6 +56,7 @@ impl GiftView {
     /// panel.
     pub fn confirm_convert(&mut self, id: Option<String>) {
         match (&*self, id) {
+            (Self::Closed, _) => {}
             (_, Some(id)) => *self = Self::ConfirmConvert(id),
             (Self::ConfirmConvert(open), None) => *self = Self::Detail(open.clone()),
             (_, None) => {}

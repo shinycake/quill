@@ -147,7 +147,7 @@ fn closing_settings_closes_the_privacy_editor(cx: &mut TestAppContext) {
     });
     frames(vcx);
     app.read_with(vcx, |app, _| {
-        assert!(!app.settings.open);
+        assert!(!app.settings.open());
         assert!(app.privacy.layer.editor().is_none(), "the editor closed");
         assert!(
             app.privacy.layer.exceptions().is_none(),
@@ -179,8 +179,8 @@ fn a_chat_window_menu_action_leaves_the_main_windows_settings_open(cx: &mut Test
     .expect("the chat window");
     cx.run_until_parked();
     app.read_with(cx, |app, _| {
-        assert!(app.settings.open, "Settings stays open");
-        assert_eq!(app.settings.page, Some(Page::Language));
+        assert!(app.settings.open(), "Settings stays open");
+        assert_eq!(app.settings.page(), Some(Page::Language));
     });
 }
 
@@ -196,14 +196,14 @@ fn agent_access_from_a_chat_window_opens_in_the_main_window(cx: &mut TestAppCont
     let ran_in = app.update(cx, |app, cx| {
         app.in_window_scope(Some(OTHER), cx, |app, cx| {
             app.open_agent_access_for_chat(OTHER.0, cx);
-            app.settings.open
+            app.settings.open()
         })
     });
     assert_eq!(ran_in, Some(false), "nothing opens in the chat window");
     cx.run_until_parked();
     app.read_with(cx, |app, _| {
-        assert!(app.settings.open);
-        assert_eq!(app.settings.page, Some(Page::AgentAccess));
+        assert!(app.settings.open());
+        assert_eq!(app.settings.page(), Some(Page::AgentAccess));
         assert_eq!(app.agent_ui.page.focus_chat, Some(OTHER.0));
     });
     let main_active = cx
@@ -225,14 +225,14 @@ fn a_settings_link_in_a_chat_windows_box_opens_in_the_main_window(cx: &mut TestA
     let ran_in = app.update(cx, |app, cx| {
         app.in_window_scope(Some(OTHER), cx, |app, cx| {
             app.open_notification_settings(cx);
-            app.settings.open
+            app.settings.open()
         })
     });
     assert_eq!(ran_in, Some(false), "nothing opens in the chat window");
     cx.run_until_parked();
     app.read_with(cx, |app, _| {
-        assert!(app.settings.open);
-        assert_eq!(app.settings.page, Some(Page::Notifications));
+        assert!(app.settings.open());
+        assert_eq!(app.settings.page(), Some(Page::Notifications));
     });
     let main_active = cx
         .update_window(main, |_, window, _| window.is_window_active())
@@ -261,8 +261,7 @@ fn the_password_check_on_the_page_and_in_the_2fa_box_has_a_field_each(cx: &mut T
                 password_hint: String::new(),
                 has_recovery_email_address: false,
                 has_passport_data: false,
-                pending_email_pattern: None,
-                pending_email_code_length: 0,
+                pending_email: None,
                 login_email_address_pattern: String::new(),
                 pending_reset_date: 0,
             });
@@ -309,8 +308,10 @@ fn aborting_the_recovery_email_asks_inside_the_2fa_box(cx: &mut TestAppContext) 
                 password_hint: String::new(),
                 has_recovery_email_address: false,
                 has_passport_data: false,
-                pending_email_pattern: Some("a***@example.com".into()),
-                pending_email_code_length: 6,
+                pending_email: Some(quill::telegram::envelope::PendingRecoveryEmail {
+                    pattern: "a***@example.com".into(),
+                    code_length: 6,
+                }),
                 login_email_address_pattern: String::new(),
                 pending_reset_date: 0,
             });
@@ -335,6 +336,32 @@ fn aborting_the_recovery_email_asks_inside_the_2fa_box(cx: &mut TestAppContext) 
         vcx.update(|window, _| window.find_all("twofa-confirm-yes").len()) == 1,
         "the question shows in the 2FA box"
     );
+}
+
+/// A screen replaced under an open 2FA box (account switch, logout) takes the
+/// session's half-finished recovery step with it.
+#[gpui_kit::test]
+fn replacing_the_screen_forgets_a_half_finished_recovery_step(cx: &mut TestAppContext) {
+    let (app, main) = new_app(cx);
+    let mut vcx = VisualTestContext::from_window(main, cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, window, cx| {
+        app.demo_settings(Page::Account, cx);
+        app.open_twofa(cx);
+        if let Some(session) = app.demo_session.as_mut() {
+            session.auth_state.twofa_flow.code_wait =
+                quill::state::CodeWait::Recovery("a***@example.com".into());
+        }
+        app.replace_screen(window, cx);
+    });
+    app.read_with(vcx, |app, _| {
+        assert!(!app.twofa.is_open());
+        let waiting = app
+            .demo_session
+            .as_ref()
+            .and_then(|session| session.auth_state.twofa_flow.code_wait.recovery());
+        assert_eq!(waiting, None);
+    });
 }
 
 /// A password typed into the Privacy page's check card, not sent, does not

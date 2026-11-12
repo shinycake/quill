@@ -167,7 +167,7 @@ impl QuillApp {
         // range selects, and no swipe replies.
         if super::forward_drag_source::forward_lift_live(cx) {
             self.message_ui.selection_drag.clear();
-            self.message_ui.swipe_reply_start = None;
+            self.chat_ui.swipe_reply.clear();
             return None;
         }
         if drag.forward {
@@ -243,7 +243,7 @@ impl QuillApp {
     /// dropped without applying its range.
     pub(super) fn selection_drag_lost(&mut self, cx: &mut Context<Self>) {
         if self.message_ui.selection_drag.take().is_some() {
-            self.message_ui.swipe_reply_start = None;
+            self.chat_ui.swipe_reply.clear();
             cx.notify();
         }
     }
@@ -287,7 +287,7 @@ impl QuillApp {
                 let next = apply_drag(&ids, &selected, &range, LIMIT);
                 self.set_selection(drag.chat, next, cx);
                 // The release ends the drag, not a swipe to reply.
-                self.message_ui.swipe_reply_start = None;
+                self.chat_ui.swipe_reply.clear();
                 self.chat_ui.selection_anchor = Some(range.to);
                 self.chat_ui.focus = A11yFocus::Row(range.to);
             }

@@ -267,7 +267,10 @@ fn masks_open_in_their_own_box_with_masks_and_archived_tabs(cx: &mut TestAppCont
             session.stickers.masks.installed =
                 quill::state::fetch::Fetch::Ready(vec![set(501, "Party hats"), set(502, "Beards")]);
             session.stickers.masks.archived =
-                quill::state::fetch::Fetch::Ready(vec![set(503, "Old masks")]);
+                quill::state::fetch::Fetch::Ready(quill::state::ArchivedMasks {
+                    sets: vec![set(503, "Old masks")],
+                    next_offset: None,
+                });
         }
         app.open_mask_sets(cx);
     });
@@ -335,5 +338,5 @@ fn settings_chats_page_opens_the_box_and_holds_the_suggestion_choice(cx: &mut Te
         shell.read_with(vcx, |shell, _| shell.open_dialog),
         Some(DialogKind::ArchivedStickers)
     );
-    assert!(app.read_with(vcx, |app, _| app.settings.open));
+    assert!(app.read_with(vcx, |app, _| app.settings.open()));
 }

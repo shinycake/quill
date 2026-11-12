@@ -7,7 +7,7 @@ use super::{
     WindowMenuNewGroup, dock_entries, register_actions,
 };
 use crate::ui::app::QuillApp;
-use crate::ui::dialogs::contacts::NewContactStage;
+use crate::ui::dialogs::contacts::AddContactStage;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
@@ -97,10 +97,10 @@ fn window_menu_add_contact_opens_the_new_contact_box(cx: &mut TestAppContext) {
     app.update_in(&mut vcx, |app, window, cx| {
         let dialog = app.dialogs.add_contact_dialog.as_ref().unwrap();
         assert_eq!(dialog.user_id, 0);
-        assert_eq!(dialog.stage, NewContactStage::Form);
+        assert_eq!(dialog.stage, AddContactStage::Form);
         // Create with no name keeps the box open and sends nothing.
         app.submit_new_contact(window, cx);
-        assert!(app.dialogs.add_contact_dialog.as_ref().unwrap().stage == NewContactStage::Form);
+        assert!(app.dialogs.add_contact_dialog.as_ref().unwrap().stage == AddContactStage::Form);
         let dialog = app.dialogs.add_contact_dialog.as_ref().unwrap();
         let first = dialog.first_name_input.clone();
         let phone = dialog.phone_input.clone();
@@ -108,7 +108,7 @@ fn window_menu_add_contact_opens_the_new_contact_box(cx: &mut TestAppContext) {
         // Too short for tdesktop's phone check.
         phone.update(cx, |input, cx| input.set_value("12345", window, cx));
         app.submit_new_contact(window, cx);
-        assert!(app.dialogs.add_contact_dialog.as_ref().unwrap().stage == NewContactStage::Form);
+        assert!(app.dialogs.add_contact_dialog.as_ref().unwrap().stage == AddContactStage::Form);
         phone.update(cx, |input, cx| {
             input.set_value("+1 555 010 0199", window, cx)
         });
@@ -117,7 +117,7 @@ fn window_menu_add_contact_opens_the_new_contact_box(cx: &mut TestAppContext) {
         let dialog = app.dialogs.add_contact_dialog.as_ref().unwrap();
         assert_eq!(
             dialog.stage,
-            NewContactStage::NotJoined { name: "Ada".into() }
+            AddContactStage::NotJoined { name: "Ada".into() }
         );
     });
     vcx.run_until_parked();
@@ -133,7 +133,7 @@ fn a_second_create_keeps_the_import_in_flight(cx: &mut TestAppContext) {
     app.update_in(&mut vcx, |app, window, cx| {
         let dialog = app.dialogs.add_contact_dialog.as_mut().unwrap();
         let (first, phone) = (dialog.first_name_input.clone(), dialog.phone_input.clone());
-        dialog.stage = NewContactStage::Sending {
+        dialog.stage = AddContactStage::Importing {
             request: quill::ids::RequestId(41),
             name: "Ada".into(),
         };
@@ -145,7 +145,7 @@ fn a_second_create_keeps_the_import_in_flight(cx: &mut TestAppContext) {
         let dialog = app.dialogs.add_contact_dialog.as_ref().unwrap();
         assert_eq!(
             dialog.stage,
-            NewContactStage::Sending {
+            AddContactStage::Importing {
                 request: quill::ids::RequestId(41),
                 name: "Ada".into()
             }

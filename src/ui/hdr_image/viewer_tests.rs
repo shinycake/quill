@@ -82,7 +82,7 @@ fn an_hdr_file_shows_in_extended_range_while_upright(cx: &mut TestAppContext) {
     });
     // Closing releases extended range.
     app.update_in(vcx, |app, _, cx| {
-        app.viewer.orientation = Default::default();
+        app.viewer.reorient.reset(Default::default());
         cx.notify();
     });
     vcx.run_until_parked();

@@ -1,7 +1,6 @@
 //! Methods moved out of `appearance.rs` to keep files under 1000 lines.
 
 use super::*;
-use crate::ui::keybindings::Capture;
 use quill::lang::{keys, tr};
 
 impl QuillApp {
@@ -26,12 +25,7 @@ impl QuillApp {
             .map(|live| live.driver.load_custom_keybindings())
             .unwrap_or_default();
         let resolved = resolve_keybindings(&customs);
-        let capturing = self
-            .preferences
-            .keybinding
-            .capture
-            .waiting()
-            .map(str::to_owned);
+        let capturing = self.preferences.keybinding.waiting().map(str::to_owned);
         let rows = REBINDABLE_ACTIONS.iter().map(|ra| {
             let row_state = resolved.iter().find(|row| row.id == ra.id);
             let current = row_state
@@ -107,10 +101,10 @@ impl QuillApp {
                                 .on_click({
                                     let id = id.clone();
                                     cx.listener(move |this, _, window, cx| {
-                                        if this.preferences.keybinding.capture.waiting()
+                                        if this.preferences.keybinding.waiting()
                                             == Some(id.as_str())
                                         {
-                                            this.preferences.keybinding.capture = Capture::Idle;
+                                            this.preferences.keybinding.stop_capture();
                                         } else {
                                             this.preferences.keybinding.start_capture(id.clone());
                                             window.focus(&this.preferences.keybinding_focus, cx);
@@ -136,8 +130,7 @@ impl QuillApp {
                                             let customs = live.driver.load_custom_keybindings();
                                             apply_custom_bindings(cx, &customs);
                                         }
-                                        this.preferences.keybinding.capture = Capture::Idle;
-                                        this.preferences.keybinding.refusals.clear_of(&id);
+                                        this.preferences.keybinding.reset_row(&id);
                                         cx.notify();
                                     })
                                 }),
@@ -205,20 +198,14 @@ impl QuillApp {
         if !self.keybinding_capture_active() {
             return;
         }
-        let Some(id) = self
-            .preferences
-            .keybinding
-            .capture
-            .waiting()
-            .map(str::to_owned)
-        else {
+        let Some(id) = self.preferences.keybinding.waiting().map(str::to_owned) else {
             return;
         };
         if keystroke.is_modifier_key() {
             return;
         }
         if keystroke.key == "escape" && !keystroke.modifiers.modified() {
-            self.preferences.keybinding.capture = Capture::Idle;
+            self.preferences.keybinding.stop_capture();
             cx.notify();
             return;
         }
@@ -231,11 +218,9 @@ impl QuillApp {
             .map(|live| live.driver.load_custom_keybindings())
             .unwrap_or_default();
         if let Some(conflict) = keybinding_conflict(&id, &chord, &customs) {
-            self.preferences.keybinding.capture = Capture::Idle;
             self.preferences
                 .keybinding
-                .refusals
-                .refuse(id, conflict_message(&chord, &conflict));
+                .refuse_chord(id, conflict_message(&chord, &conflict));
             cx.notify();
             return;
         }
@@ -250,7 +235,7 @@ impl QuillApp {
         if let Some(customs) = saved {
             apply_custom_bindings(cx, &customs);
         }
-        self.preferences.keybinding.capture = Capture::Idle;
+        self.preferences.keybinding.stop_capture();
         cx.notify();
     }
 }

@@ -62,15 +62,14 @@ fn show_once_visible(root: PathBuf, crash: PendingCrash, window: &mut Window, cx
         show_crash(&root, &crash, window, cx);
         return;
     }
-    let gate = cx.new(|_| NoticeGate::default());
+    let gate = cx.new(|_| NoticeGate::Unseen { root, crash });
     // The observer holds the gate until the notice is shown; dropping this
     // handle then releases the gate, and the observer with it.
     let mut keep = Some(gate.clone());
     gate.update(cx, |_, cx| {
         cx.observe_window_activation(window, move |gate, window, cx| {
-            if gate.open(window.is_window_active()) {
+            if let Some((root, crash)) = gate.open(window.is_window_active()) {
                 drop(keep.take());
-                let (root, crash) = (root.clone(), crash.clone());
                 // Outside this activation callback and the root's update.
                 window.defer(cx, move |window, cx| show_crash(&root, &crash, window, cx));
             }
@@ -79,21 +78,25 @@ fn show_once_visible(root: PathBuf, crash: PendingCrash, window: &mut Window, cx
     });
 }
 
-/// Lets the notice through once, on the first activation.
-#[derive(Default)]
-struct NoticeGate {
-    shown: bool,
+/// Holds the crash to report (`Unseen`) until the window is first active, then
+/// hands it over once: `Shown` keeps nothing, so a second activation has
+/// nothing to show.
+enum NoticeGate {
+    Unseen { root: PathBuf, crash: PendingCrash },
+    Shown,
 }
 
 impl NoticeGate {
-    /// Whether to show the notice now that the window's active state is
-    /// `active`: true the first time it is active, never again after.
-    fn open(&mut self, active: bool) -> bool {
-        if self.shown || !active {
-            return false;
+    /// The crash to show now that the window's active state is `active`:
+    /// given the first time it is active, never again after.
+    fn open(&mut self, active: bool) -> Option<(PathBuf, PendingCrash)> {
+        if !active {
+            return None;
         }
-        self.shown = true;
-        true
+        match std::mem::replace(self, Self::Shown) {
+            Self::Unseen { root, crash } => Some((root, crash)),
+            Self::Shown => None,
+        }
     }
 }
 
@@ -133,14 +136,27 @@ struct CrashNotice;
 #[cfg(test)]
 mod gate_tests {
     use super::NoticeGate;
+    use quill::crash_log::PendingCrash;
+    use std::path::PathBuf;
+
+    fn waiting() -> NoticeGate {
+        NoticeGate::Unseen {
+            root: PathBuf::from("root"),
+            crash: PendingCrash {
+                unix_secs: 1,
+                path: PathBuf::from("report"),
+                disk_full: false,
+            },
+        }
+    }
 
     #[test]
     fn the_gate_opens_once_on_the_first_activation() {
-        let mut gate = NoticeGate::default();
-        assert!(!gate.open(false), "hidden in the tray");
-        assert!(gate.open(true), "first shown");
-        assert!(!gate.open(false));
-        assert!(!gate.open(true), "only once");
+        let mut gate = waiting();
+        assert!(gate.open(false).is_none(), "hidden in the tray");
+        assert!(gate.open(true).is_some(), "first shown");
+        assert!(gate.open(false).is_none());
+        assert!(gate.open(true).is_none(), "only once");
     }
 }
 

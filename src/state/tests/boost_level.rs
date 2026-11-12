@@ -19,7 +19,14 @@ fn channel_with_status(level: i32) -> (Session, Arc<MemorySink>, AtomicU64) {
         r#"{"@type":"updateNewChat","chat":{"id":13,"title":"G","type":{"@type":"chatTypeSupergroup","supergroup_id":113,"is_channel":true},"unread_count":0}}"#,
     );
     apply_json(&mut session, &seq, &sink, &supergroup_update(level));
-    session.groups.chat_boost_status.insert(13, (level, 5));
+    session.groups.set_boost_status(
+        13,
+        crate::telegram::envelope::ParsedBoostStatus {
+            level,
+            boost_count: 5,
+            ..Default::default()
+        },
+    );
     (session, sink, seq)
 }
 
@@ -27,18 +34,22 @@ fn channel_with_status(level: i32) -> (Session, Arc<MemorySink>, AtomicU64) {
 fn the_same_level_keeps_the_cached_status() {
     let (mut session, sink, seq) = channel_with_status(2);
     apply_json(&mut session, &seq, &sink, &supergroup_update(2));
-    assert!(session.take_moved_boost_chats().is_empty());
-    assert!(session.groups.chat_boost_status.contains_key(&13));
+    assert!(session.outdated_boost_chats().is_empty());
+    assert!(session.groups.boost_status(13).is_some());
 }
 
 #[test]
-fn a_moved_level_drops_the_cached_status_once() {
+fn a_moved_level_outdates_the_cached_status_and_keeps_it_visible() {
     let (mut session, sink, seq) = channel_with_status(2);
     apply_json(&mut session, &seq, &sink, &supergroup_update(3));
     apply_json(&mut session, &seq, &sink, &supergroup_update(3));
-    assert_eq!(session.take_moved_boost_chats(), vec![ChatId(13)]);
-    assert!(!session.groups.chat_boost_status.contains_key(&13));
-    assert!(session.take_moved_boost_chats().is_empty());
+    assert_eq!(session.outdated_boost_chats(), vec![ChatId(13)]);
+    assert_eq!(
+        session.groups.boost_level(13),
+        Some(2),
+        "kept until replaced"
+    );
+    assert!(session.groups.boost_status_wanted(13));
 }
 
 #[test]
@@ -54,8 +65,8 @@ fn another_supergroup_moving_leaves_the_status_alone() {
             ),
         );
     }
-    assert!(session.take_moved_boost_chats().is_empty());
-    assert!(session.groups.chat_boost_status.contains_key(&13));
+    assert!(session.outdated_boost_chats().is_empty());
+    assert!(session.groups.boost_status(13).is_some());
 }
 
 #[test]

@@ -58,18 +58,32 @@ pub const REQUEST_LOG_TAG: &str = "td_requests";
 /// global verbosity reaches its tag's level, and 1024 is TDLib's highest.
 pub const HIDDEN_REQUEST_LOG_LEVEL: i32 = 1024;
 
+/// Whether the request log is hidden, and by how many calls. The level to
+/// put back (TDLib's default when it could not be read) lives in the stage
+/// that needs it.
+#[derive(Clone, Copy)]
+enum Gate {
+    Shown,
+    Hidden { calls: usize, saved: i32 },
+}
+
 /// How many calls keep the request log hidden, and the tag's level to put
 /// back once none does. TDLib's log tags are process-wide, so every
 /// account's calls share one.
-#[derive(Default)]
 pub struct RequestLogGate {
-    state: Mutex<(usize, Option<i32>)>,
+    state: Mutex<Gate>,
+}
+
+impl Default for RequestLogGate {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl RequestLogGate {
     pub const fn new() -> Self {
         Self {
-            state: Mutex::new((0, None)),
+            state: Mutex::new(Gate::Shown),
         }
     }
 
@@ -77,24 +91,33 @@ impl RequestLogGate {
     /// the hidden one.
     pub fn hide(&self, read: impl FnOnce() -> Option<i32>, set: impl FnOnce(i32)) {
         let mut state = crate::locks::lock_or_recover(&self.state);
-        state.0 += 1;
-        if state.0 == 1 {
-            state.1 = read();
-            set(HIDDEN_REQUEST_LOG_LEVEL);
-        }
+        *state = match *state {
+            Gate::Shown => {
+                let saved = read().unwrap_or(DEFAULT_REQUEST_LOG_LEVEL);
+                set(HIDDEN_REQUEST_LOG_LEVEL);
+                Gate::Hidden { calls: 1, saved }
+            }
+            Gate::Hidden { calls, saved } => Gate::Hidden {
+                calls: calls.saturating_add(1),
+                saved,
+            },
+        };
     }
 
-    /// A call is done: the last one puts the level back (TDLib's default
-    /// when it could not be read).
+    /// A call is done: the last one puts the level back.
     pub fn show(&self, set: impl FnOnce(i32)) {
         let mut state = crate::locks::lock_or_recover(&self.state);
-        if state.0 == 0 {
-            return;
-        }
-        state.0 -= 1;
-        if state.0 == 0 {
-            set(state.1.take().unwrap_or(DEFAULT_REQUEST_LOG_LEVEL));
-        }
+        *state = match *state {
+            Gate::Shown => Gate::Shown,
+            Gate::Hidden { calls, saved } if calls <= 1 => {
+                set(saved);
+                Gate::Shown
+            }
+            Gate::Hidden { calls, saved } => Gate::Hidden {
+                calls: calls.saturating_sub(1),
+                saved,
+            },
+        };
     }
 }
 

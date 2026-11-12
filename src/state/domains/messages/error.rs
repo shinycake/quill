@@ -28,15 +28,13 @@ impl Session {
         if let Some(p) = pending
             && p.purpose == RequestPurpose::GetPinnedMessages
             && let Some(chat_id) = p.chat_id
+            && let Some(fetch) = self.messages.pinned_messages.get_mut(&chat_id.0)
         {
-            self.messages
-                .pinned_messages
-                .entry(chat_id.0)
-                .or_default()
-                .fail(format!(
-                    "could not load the pinned messages (error {})",
-                    err.code
-                ));
+            fetch.failed(
+                Some(p.id),
+                format!("could not load the pinned messages (error {})", err.code),
+                false,
+            );
         }
         if let Some(RequestPurpose::GetRepliedMessage {
             chat_id,
@@ -45,12 +43,13 @@ impl Session {
         {
             self.reject_replied_message(chat_id, message_id, err.code, std::time::Instant::now());
         }
-        if let Some(RequestPurpose::Messages(MessagesPurpose::GetComposerReplyTarget {
-            chat_id,
-            message_id,
-        })) = pending.map(|p| p.purpose)
+        if let Some(p) = pending
+            && let RequestPurpose::Messages(MessagesPurpose::GetComposerReplyTarget {
+                chat_id,
+                message_id,
+            }) = p.purpose
         {
-            self.reject_composer_reply_target(chat_id, message_id, err);
+            self.reject_composer_reply_target(chat_id, message_id, p.id, err);
         }
         // The option menu's facts: a refusal leaves `Loading` so the page
         // stops waiting for rows that will not come.
@@ -81,16 +80,25 @@ impl Session {
             message_id,
         })) = pending.map(|p| p.purpose)
         {
-            self.messages.full_rich_loads.insert(
-                crate::ids::ChatMessage::new(chat_id, message_id),
-                crate::state::fetch::Fetch::Failed {
-                    error: format!("could not load the full message (error {})", err.code),
-                    stale: None,
-                },
-            );
-            self.chats_state.chat_action_error.push(
-                crate::lang::tr(crate::lang::keys::Q_MISC_COULD_NOT_LOAD_FULL_MESSAGE).to_string(),
-            );
+            let failed = self
+                .messages
+                .full_rich_loads
+                .get_mut(&crate::ids::ChatMessage::new(chat_id, message_id))
+                .is_some_and(|load| {
+                    load.failed(
+                        pending.map(|p| p.id),
+                        format!("could not load the full message (error {})", err.code),
+                        true,
+                    )
+                });
+            // An older ask's refusal, while a newer one waits, says nothing
+            // about the message now being loaded.
+            if failed {
+                self.chats_state.chat_action_error.push(
+                    crate::lang::tr(crate::lang::keys::Q_MISC_COULD_NOT_LOAD_FULL_MESSAGE)
+                        .to_string(),
+                );
+            }
         }
         if let Some(RequestPurpose::Messages(MessagesPurpose::GetMessageAvailableReactions {
             message_id,
@@ -130,7 +138,7 @@ impl Session {
             ) => self.fail_audience(purpose),
             Some(RequestPurpose::GetChatAvailableMessageSenders) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.fail_message_senders(chat_id, error_reason(err));
+                    self.fail_message_senders(chat_id, pending.map(|p| p.id), error_reason(err));
                 }
             }
             Some(RequestPurpose::Messages(MessagesPurpose::GetMessageMenuActions {
@@ -190,13 +198,16 @@ impl Session {
                 chat_id,
                 message_id,
             })) => {
-                self.messages.poll_stats.insert(
-                    (chat_id.0, message_id.0),
-                    PollStatsFetch::Failed(call_request_error_line(
+                // Only the request the dialog waits for fails it.
+                if let Some(pending) = pending
+                    && let Some(slot) = self.messages.poll_stats.get_mut(&(chat_id.0, message_id.0))
+                    && *slot == PollStatsFetch::Loading(pending.id)
+                {
+                    *slot = PollStatsFetch::Failed(call_request_error_line(
                         err,
                         "Could not load poll stats",
-                    )),
-                );
+                    ));
+                }
             }
             // B15: poll option / checklist mutations surface their
             // failure in the status note (tdesktop shows a toast:
@@ -235,21 +246,29 @@ impl Session {
                 option_id,
                 offset,
             })) => {
-                if offset == 0
-                    || !matches!(
-                        self.messages
-                            .poll_voters
-                            .get(&(chat_id.0, message_id.0, option_id)),
-                        Some(PollVotersFetch::Loaded { .. })
-                    )
-                {
-                    self.messages.poll_voters.insert(
-                        (chat_id.0, message_id.0, option_id),
-                        PollVotersFetch::Failed(call_request_error_line(
-                            err,
-                            "Could not load voters",
-                        )),
-                    );
+                // Only the request the entry waits for fails it: a later
+                // page's error leaves the loaded page retryable, and an
+                // entry an update dropped has nothing to fail.
+                let asked = pending.map(|p| p.id);
+                let key = (chat_id.0, message_id.0, option_id);
+                match self.messages.poll_voters.get_mut(&key) {
+                    Some(PollVotersFetch::Loading(id)) if offset == 0 && Some(*id) == asked => {
+                        self.messages.poll_voters.insert(
+                            key,
+                            PollVotersFetch::Failed(call_request_error_line(
+                                err,
+                                "Could not load voters",
+                            )),
+                        );
+                    }
+                    Some(PollVotersFetch::Loaded { more, .. }) if offset > 0 => {
+                        if let VotersMore::Asking(id) = *more
+                            && Some(id) == asked
+                        {
+                            *more = VotersMore::Ready;
+                        }
+                    }
+                    _ => {}
                 }
             }
             // A failed translation shows "Translate failed." where the text
@@ -313,6 +332,16 @@ impl Session {
                 | RequestPurpose::CreateRichMessageWithAi
                 | RequestPurpose::FixRichMessageWithAi,
             ) => {
+                if let Some(pending) = pending
+                    && let Some(chat) = pending.chat_id
+                {
+                    self.messages.ai_answers.push(AiAnswer {
+                        request: pending.id,
+                        window: pending.asked_in.chat(),
+                        chat,
+                        result: AiResult::Failed,
+                    });
+                }
                 self.messages.ai_error.push(match err.class {
                     ErrorClass::AiComposeFloodPremium => {
                         "AI limit reached — Telegram Premium is required for more requests"
@@ -358,12 +387,8 @@ impl Session {
             // A TDLib error dismisses the option picker; no outcome is shown.
             // Only for the request the flow waits on: a report already
             // dismissed, or an earlier step, has nothing left to dismiss.
-            let waits = pending.is_some_and(|p| {
-                self.messages
-                    .sponsored_report
-                    .target()
-                    .is_some_and(|target| target.request == Some(p.id))
-            });
+            let waits =
+                pending.is_some_and(|p| self.messages.sponsored_report.awaited() == Some(p.id));
             if waits {
                 self.messages.sponsored_report = SponsoredReportFlow::Idle;
             }

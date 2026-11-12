@@ -13,8 +13,10 @@ pub const LOCALIZATION_TARGET: &str = "tdesktop";
 /// In-flight language requests; wrapped as `SettingsPurpose::Language`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LanguagePurpose {
-    /// `setOption` of a language option. Response is `ok`.
-    SetOption,
+    /// `setOption` of a language option. Response is `ok`. `generation` is
+    /// the switch a `language_pack_id` option selects; `None` for the
+    /// startup options, which no switch waits on.
+    SetOption { generation: Option<u32> },
     /// `getLocalizationTargetInfo`. Response is `localizationTargetInfo`.
     TargetInfo,
     /// `getLanguagePackStrings` of the switch `generation`, for the pack
@@ -24,9 +26,9 @@ pub enum LanguagePurpose {
     /// (`cloud_lng_badge_psa_<type>`) of one pack; `epoch` tells whether the
     /// pack is still the one asked about. Response is `languagePackStrings`.
     PsaLabels { epoch: u32 },
-    /// `synchronizeLanguagePack` / `addCustomServerLanguagePack`.
-    /// Response is `ok`.
-    Synchronize,
+    /// `synchronizeLanguagePack` / `addCustomServerLanguagePack` of the
+    /// switch `generation`. Response is `ok`.
+    Synchronize { generation: u32 },
 }
 
 type Strings = Vec<(String, PackValue)>;
@@ -365,7 +367,22 @@ impl Session {
                     self.chat_list.psa_labels.fail_request(request);
                 }
             }
-            LanguagePurpose::SetOption | LanguagePurpose::Synchronize => {}
+            // The switch's own option or synchronize refused: TDLib keeps the
+            // old language, so the switch leaves with the reason instead of
+            // installing a pack TDLib did not select.
+            LanguagePurpose::SetOption {
+                generation: Some(generation),
+            }
+            | LanguagePurpose::Synchronize { generation } => {
+                if state.switching().map(|s| s.generation) == Some(generation) {
+                    state.stage = LanguageStage::Idle;
+                    state.forget_failure();
+                    state
+                        .events
+                        .push(LanguageEvent::SwitchFailed(error_reason(err)));
+                }
+            }
+            LanguagePurpose::SetOption { generation: None } => {}
         }
     }
 }

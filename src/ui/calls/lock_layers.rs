@@ -18,14 +18,8 @@ use quill::lang::{keys, tr};
 impl QuillApp {
     /// Called from `close_for_lock`.
     pub(in crate::ui) fn close_call_layers_for_lock(&mut self, cx: &mut Context<Self>) {
-        if self.call_boxes.add_people.take().is_some()
-            && let Some(live) = self.live.as_mut()
-        {
-            let _ = live.driver.search_add_people("");
-        }
-        self.group_call.stream.overlay = None;
-        self.group_call_screen.title_dialog = None;
-        self.group_call_screen.settings_open = false;
+        self.end_call_add_people();
+        self.close_call_box();
         self.screen_share.close_privacy();
         cx.notify();
     }
@@ -128,3 +122,8 @@ impl QuillApp {
         Some(lock_call_card(ids.card, title, caller, decline, answer, cx))
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "lock_layers_tests.rs"]
+mod tests;

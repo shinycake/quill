@@ -90,3 +90,40 @@ fn a_failed_thread_is_answered_with_why() {
     );
     assert!(matches!(session.take_bot_thread_start(extra), Some(Err(_))));
 }
+
+#[test]
+fn two_windows_each_get_their_own_thread_answer() {
+    // Each Send in the "All" view asks for its own thread: an answer is
+    // taken by the request that asked, whichever window it was.
+    let (mut session, sink, seq) = bot_session(true, true);
+    let first = session.request(RequestPurpose::StartBotThread, Some(ChatId(41)));
+    let second = session.request(RequestPurpose::StartBotThread, Some(ChatId(41)));
+    for (extra, topic) in [(first, 12), (second, 13)] {
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"forumTopicInfo","@extra":"{}","chat_id":41,"forum_topic_id":{topic},"name":"New Chat","icon":{{"@type":"forumTopicIcon","color":7322096,"custom_emoji_id":"0"}},"is_general":false,"is_outgoing":true,"is_closed":false,"is_hidden":false,"is_name_implicit":true}}"#,
+                extra.0
+            ),
+        );
+    }
+    assert_eq!(session.take_bot_thread_start(second), Some(Ok(13)));
+    assert_eq!(session.take_bot_thread_start(first), Some(Ok(12)));
+}
+
+#[test]
+fn an_at_search_ends_only_for_its_own_chat() {
+    let (mut session, _, _) = bot_session(true, true);
+    session.messages.mention_search = Some(MentionSearch {
+        chat_id: ChatId(41),
+        query: "a".into(),
+        members: crate::state::fetch::Fetch::Ready(vec![5]),
+    });
+    // Another window's menu closing leaves this search alone.
+    session.end_mention_search(ChatId(99));
+    assert!(session.messages.mention_search.is_some());
+    session.end_mention_search(ChatId(41));
+    assert!(session.messages.mention_search.is_none());
+}

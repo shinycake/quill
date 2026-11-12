@@ -7,7 +7,7 @@ use quill::ids::{ChatId, RequestId};
 /// poll keeps no one window for them all).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Awaited {
-    /// The send this waits on: only its answer moves the launch on.
+    /// The request whose answer this waits for: only that answer counts.
     pub(super) request: RequestId,
     pub(super) then: PendingOpen,
     pub(super) window: Option<ChatId>,

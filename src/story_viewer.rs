@@ -459,16 +459,13 @@ fn story_viewer_item(chat_id: ChatId, story: &ParsedStory) -> Option<StoryViewer
             file_id,
             ..
         } => {
-            let download = (*thumb_file_id).unwrap_or(*file_id);
-            if download.0 == 0 {
-                return None;
-            }
+            let download = (*thumb_file_id).or(*file_id)?;
             StoryViewerItem {
                 chat_id,
                 story_id: story.id,
                 kind: StoryViewerKind::Video {
                     duration_secs: Some(*duration_secs),
-                    clip: (file_id.0 != 0).then_some(*file_id),
+                    clip: *file_id,
                 },
                 display_file_ids: (*thumb_file_id).into_iter().collect(),
                 download_file_id: download,
@@ -585,7 +582,7 @@ mod tests {
                 thumb_width: 320,
                 thumb_height: 240,
                 duration_secs: duration,
-                file_id: FileId(file),
+                file_id: Some(FileId(file)),
                 preload_prefix_size: 0,
             },
             caption: String::new(),

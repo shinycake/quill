@@ -45,6 +45,14 @@ enum AccessStage {
 }
 
 impl EmojiStatusFlow {
+    /// A suggested emoji is being looked up: nothing pokes when the lookup
+    /// lands, so the poll looks again on a short tick.
+    pub(super) fn is_active(&self) -> bool {
+        self.set
+            .as_ref()
+            .is_some_and(|request| matches!(request.stage, SetStage::Resolving { .. }))
+    }
+
     #[cfg(test)]
     #[cfg(all(feature = "demo-capture", unix))]
     fn set_is_idle(&self) -> bool {
@@ -264,17 +272,17 @@ impl QuillApp {
 
     /// The grant answers drained this tick: the one to the request the
     /// window waits on answers the app, any other is not its own.
-    pub(super) fn answer_emoji_access(&mut self, answers: Vec<quill::state::WebAnswer<bool>>) {
-        for answer in answers {
+    pub(super) fn answer_emoji_access(&mut self, answers: Vec<(quill::ids::RequestId, bool)>) {
+        for (asked, done) in answers {
             // Only the answer to the grant this window sent counts: the bot
             // permissions switch answers through the same mailbox.
             let waiting = self.mini_apps.window.as_ref().is_some_and(|window| {
-                matches!(window.emoji.access, AccessStage::Granting(request) if request == answer.request)
+                matches!(window.emoji.access, AccessStage::Granting(request) if request == asked)
             });
             if waiting {
                 self.with_window(|window| {
                     window.emoji.access = AccessStage::Idle;
-                    window.emit(BridgeReply::emoji_status_access_requested(answer.result));
+                    window.emit(BridgeReply::emoji_status_access_requested(done));
                 });
             }
         }

@@ -70,10 +70,10 @@ pub(crate) struct VideoControlsState {
     /// The seek slider, in seconds (`0..=duration`). Created when a clip
     /// starts, cleared when it stops.
     pub(crate) seek: Option<Entity<SliderState>>,
-    /// The slider being dragged, with what it previews.
-    pub(crate) drag: Drag,
     /// The volume slider, 0–100.
     pub(crate) volume: Option<Entity<SliderState>>,
+    /// The slider held right now, if any: one pointer holds one thumb.
+    pub(crate) drag: SliderDrag,
     /// The speed popover's slider (created on first use, kept).
     pub(crate) speed: Option<Entity<SliderState>>,
     /// Screenshot demo: open the speed popover on the first frame.
@@ -94,57 +94,51 @@ pub(crate) struct VideoControlsState {
     pub(crate) waiting: WaitingGate,
 }
 
+/// The slider whose thumb is held: none, the seek thumb (with the position
+/// it previews), the volume thumb, or the speed thumb (with the speed
+/// shown). A new drag replaces the one before, and the clip stopping ends
+/// it, so no flag is left behind.
+#[derive(Default, Clone, Copy, PartialEq, Debug)]
+pub(crate) enum SliderDrag {
+    #[default]
+    None,
+    Seek(f64),
+    Volume,
+    Speed(f64),
+}
+
 impl VideoControlsState {
     /// A slider is being dragged: the controls must not hide.
     pub(crate) fn dragging(&self) -> bool {
-        self.drag != Drag::None
+        self.drag != SliderDrag::None
     }
 
     /// The dragged position while the seek thumb is held.
     pub(crate) fn seek_preview(&self) -> Option<f64> {
-        self.drag.seek()
+        match self.drag {
+            SliderDrag::Seek(at) => Some(at),
+            _ => None,
+        }
     }
 
     /// The volume thumb is held.
     pub(crate) fn volume_dragging(&self) -> bool {
-        self.drag.volume()
+        self.drag == SliderDrag::Volume
     }
 
     /// The speed shown while its slider is dragged.
     pub(crate) fn speed_preview(&self) -> Option<f64> {
-        self.drag.speed()
-    }
-
-    /// The seek thumb moved to `position`.
-    pub(crate) fn preview_seek(&mut self, position: f64) {
-        self.drag = Drag::Seek(position);
-    }
-
-    /// The seek thumb was let go (another slider's drag stays).
-    pub(crate) fn release_seek(&mut self) {
-        if self.drag.seek().is_some() {
-            self.drag = Drag::None;
+        match self.drag {
+            SliderDrag::Speed(speed) => Some(speed),
+            _ => None,
         }
     }
 
-    pub(crate) fn hold_volume(&mut self) {
-        self.drag = Drag::Volume;
-    }
-
-    pub(crate) fn release_volume(&mut self) {
-        if self.drag.volume() {
-            self.drag = Drag::None;
-        }
-    }
-
-    /// The speed slider moved to `speed`.
-    pub(crate) fn preview_speed(&mut self, speed: f64) {
-        self.drag = Drag::Speed(speed);
-    }
-
-    pub(crate) fn release_speed(&mut self) {
-        if self.drag.speed().is_some() {
-            self.drag = Drag::None;
+    /// The speed slider's drag ended (a speed was chosen); another
+    /// slider's drag goes on.
+    pub(crate) fn end_speed_drag(&mut self) {
+        if self.speed_preview().is_some() {
+            self.drag = SliderDrag::None;
         }
     }
 
@@ -152,9 +146,9 @@ impl VideoControlsState {
     /// `true` when a boost was on.
     pub(crate) fn clear_clip(&mut self) -> bool {
         self.seek = None;
-        // A drag cut off by the clip's end never gets its Release.
-        self.drag = Drag::None;
         self.volume = None;
+        // A drag cut off by the clip's end never gets its Release.
+        self.drag = SliderDrag::None;
         self.hover = None;
         self.waiting = WaitingGate::default();
         self.boost.cancel()

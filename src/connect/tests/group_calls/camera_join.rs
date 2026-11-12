@@ -18,7 +18,7 @@ fn a_busy_camera_at_join_still_connects_with_audio_and_reports_the_camera() {
         .calls
         .group_call_mut(555)
         .expect("tracked")
-        .is_my_video_enabled = true;
+        .my_video = crate::state::MyVideo::On;
     let extra = driver.join_video_chat(555).expect("join tracked call");
     let answer = format!(
         r#"{{"@type":"text","text":"join-answer","@extra":{}}}"#,

@@ -12,9 +12,7 @@ impl Session {
                 self.chats_state.default_backgrounds.remove(&for_dark_theme);
             }
             RequestPurpose::Chats(ChatsPurpose::RemoveInstalledBackground { background_id }) => {
-                if let Some(list) = self.chats_state.installed_backgrounds.data_mut() {
-                    list.retain(|b| b.id != background_id);
-                }
+                self.chats_state.installed_backgrounds.forget(background_id);
             }
             RequestPurpose::DeleteChatBackground => {
                 if let Some(chat_id) = pending.chat_id {
@@ -88,7 +86,7 @@ impl Session {
                 notification_settings,
                 draft,
                 photo,
-                can_send_basic_messages,
+                can_send_basic_messages: _,
                 permissions,
                 can_be_deleted_for_all_users,
                 can_be_deleted_only_for_self,
@@ -158,7 +156,6 @@ impl Session {
                     notification_settings,
                     draft,
                     photo,
-                    can_send_basic_messages,
                     permissions,
                     can_be_deleted_for_all_users,
                     can_be_deleted_only_for_self,
@@ -183,7 +180,7 @@ impl Session {
                     let newer_known = self
                         .chats
                         .get(&chat_id.0)
-                        .and_then(|chat| chat.last_message)
+                        .and_then(|chat| chat.last_message().copied())
                         .is_some_and(|known| known.id.0 > message.id.0);
                     if !newer_known {
                         self.remember_files(&message.files);
@@ -225,14 +222,13 @@ impl Session {
             }
             ChatsPayload::UpdateChatPermissions {
                 chat_id,
-                can_send_basic_messages,
+                can_send_basic_messages: _,
                 permissions,
             } => {
                 let chat = self
                     .chats
                     .entry(chat_id.0)
                     .or_insert_with(|| placeholder_chat(chat_id));
-                chat.can_send_basic_messages = can_send_basic_messages;
                 // Slice G1: keep the full default permissions block for
                 // the editor.
                 chat.permissions = permissions;
@@ -276,7 +272,7 @@ impl Session {
                     .ready()
                     .is_some_and(|options| options.chat_id.0 == chat_id)
                 {
-                    self.stickers.reaction_options_stale = true;
+                    self.stickers.message_reaction_options.mark_stale();
                 }
             }
             // Batch 8: `updateChatActionBar` (schema 1.8.67, line 10526).
@@ -454,7 +450,15 @@ impl Session {
                 for background in &list {
                     self.upsert_background_files(background);
                 }
-                self.chats_state.installed_backgrounds.succeed(list);
+                if let Some(RequestPurpose::Chats(ChatsPurpose::GetInstalledBackgrounds {
+                    for_dark_theme,
+                })) = pending.map(|p| p.purpose)
+                {
+                    self.chats_state
+                        .installed_backgrounds
+                        .theme_mut(for_dark_theme)
+                        .answered(extra, list);
+                }
             }
             ChatsPayload::Background(background) => {
                 self.upsert_background_files(&background);
@@ -474,13 +478,13 @@ impl Session {
                                 .push(id, Ok(BackgroundOutcome::Applied));
                         }
                     }
-                    Some(RequestPurpose::SearchBackground)
-                        if self
-                            .chats_state
-                            .background_search
-                            .waits_for(pending.map(|p| p.id)) =>
-                    {
-                        self.chats_state.background_search = BackgroundSearch::Found(background);
+                    Some(RequestPurpose::SearchBackground) => {
+                        if let Some(id) = pending.map(|p| p.id)
+                            && self.chats_state.background_search.waits_for(Some(id))
+                        {
+                            self.chats_state.background_search =
+                                BackgroundSearch::Found(id, background);
+                        }
                     }
                     _ => {}
                 }

@@ -246,7 +246,8 @@ async fn cast(
 }
 
 /// Where the PipeWire stream is. Pausing before frames flowed is setup, so
-/// `Paused` is only reached from `Streaming`.
+/// `Paused` is only reached from `Streaming`. `Gone` is after the stream
+/// went back to unconnected, from any phase: the share ended once.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StreamPhase {
     /// No frame has flowed yet.
@@ -254,6 +255,8 @@ enum StreamPhase {
     Streaming,
     /// The source stopped sending (the shared window is hidden).
     Paused,
+    /// The stream disconnected (the compositor or the node went away).
+    Gone,
 }
 
 /// Turns PipeWire buffers into call frames, on PipeWire's thread.
@@ -321,10 +324,56 @@ impl StreamHandler for Frames {
                     "Screen sharing failed: {}",
                     error.unwrap_or_default()
                 )))),
-            StreamState::Unconnected if self.phase != StreamPhase::Connecting => {
+            StreamState::Unconnected if self.phase != StreamPhase::Gone => {
+                self.phase = StreamPhase::Gone;
                 self.sink.push_event(CaptureEvent::Ended);
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn frames() -> (Frames, FrameSink<VideoFrame>) {
+        let sink = FrameSink::new(2);
+        let options = ScreenOptions::default();
+        let frames = Frames {
+            sink: sink.clone(),
+            preview: Arc::new(PreviewSlot::default()),
+            options,
+            pacer: FramePacer::new(options.fps),
+            format: None,
+            phase: StreamPhase::Connecting,
+        };
+        (frames, sink)
+    }
+
+    #[test]
+    fn a_stream_that_disconnects_before_it_streams_ends_the_share_once() {
+        let (mut frames, sink) = frames();
+        frames.state_changed(StreamState::Connecting, None);
+        frames.state_changed(StreamState::Paused, None);
+        assert!(sink.take_events().is_empty(), "setup is not an event");
+        frames.state_changed(StreamState::Unconnected, None);
+        frames.state_changed(StreamState::Unconnected, None);
+        assert!(matches!(
+            sink.take_events().as_slice(),
+            [CaptureEvent::Ended]
+        ));
+    }
+
+    #[test]
+    fn pausing_and_resuming_after_streaming_are_events() {
+        let (mut frames, sink) = frames();
+        frames.state_changed(StreamState::Streaming, None);
+        frames.state_changed(StreamState::Paused, None);
+        frames.state_changed(StreamState::Streaming, None);
+        assert!(matches!(
+            sink.take_events().as_slice(),
+            [CaptureEvent::Paused, CaptureEvent::Resumed]
+        ));
     }
 }

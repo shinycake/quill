@@ -55,6 +55,14 @@ impl QuillApp {
 
     /// The userpic button: pick an image for the new community.
     fn choose_new_community_photo(&mut self, cx: &mut Context<Self>) {
+        // The picture belongs to the draft that asked: its name field is the
+        // draft's identity, so another Create box opened meanwhile (its own
+        // name field) takes nothing from this picker.
+        let Some(CommunityBox::Create { draft, .. }) = self.admin.community.flow.open.as_ref()
+        else {
+            return;
+        };
+        let asked_for = draft.name.entity_id();
         let picker = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
@@ -75,6 +83,7 @@ impl QuillApp {
                         this.set_note(StatusNote::silent(tr(keys::Q_PEOPLE_CHOOSE_A_JPEG_PNG_OR)));
                     } else if let Some(CommunityBox::Create { draft, .. }) =
                         this.admin.community.flow.open.as_mut()
+                        && draft.name.entity_id() == asked_for
                     {
                         draft.photo = Some(path);
                     }

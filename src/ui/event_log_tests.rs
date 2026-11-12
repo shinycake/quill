@@ -141,13 +141,13 @@ fn the_box_for_another_chat_replaces_the_invite_pages(cx: &mut TestAppContext) {
     let other = ChatId(CHANNEL.0 + 1);
     app.update_in(&mut vcx, |app, _, cx| {
         app.open_group_settings_view(CHANNEL, GroupSettingsView::InviteLinks, cx);
-        if let Some(dialog) = app.admin.group_settings_dialog.as_mut() {
-            dialog.revoked_open = true;
-            dialog.details_link = Some("https://t.me/+a".into());
-        }
         let Some(session) = app.session_mut() else {
             panic!("the demo session");
         };
+        session.groups.revoked_invite_links.insert(
+            CHANNEL.0,
+            quill::state::InviteLinkFetch::Loading(quill::ids::RequestId(3)),
+        );
         session.groups.invite_pages.set_admin_links(
             CHANNEL.0,
             quill::state::AdminLinksState {
@@ -167,8 +167,10 @@ fn the_box_for_another_chat_replaces_the_invite_pages(cx: &mut TestAppContext) {
         app.open_group_settings_view(CHANNEL, GroupSettingsView::InviteLinks, cx);
         let pages = app.session().map(|s| s.groups.invite_pages.chat());
         assert_eq!(pages, Some(None), "no page of either chat is left");
-        let dialog = app.admin.group_settings_dialog.as_ref().expect("the box");
-        assert!(!dialog.revoked_open && dialog.details_link.is_none());
+        assert!(
+            !app.revoked_links_open(CHANNEL),
+            "the revoked list is closed in a new box"
+        );
     });
 }
 
@@ -181,15 +183,21 @@ fn the_search_box_follows_the_chat_whose_log_is_open(cx: &mut TestAppContext) {
     app.update_in(&mut vcx, |app, window, cx| {
         let shown = |app: &QuillApp, cx: &gpui_kit::App| {
             app.admin
-                .event_log_search
+                .event_log_page
                 .as_ref()
+                .and_then(|page| page.search.as_ref())
                 .map(|search| search.input.read(cx).value().to_string())
         };
-        app.ensure_event_log_search(window, cx);
+        app.ensure_event_log_search(CHANNEL, window, cx);
         app.open_group_settings_view(CHANNEL, GroupSettingsView::RecentActions, cx);
         app.event_log_search_upkeep(window, cx);
         // "foo" is typed in this group's box.
-        if let Some(search) = app.admin.event_log_search.as_ref() {
+        if let Some(search) = app
+            .admin
+            .event_log_page
+            .as_ref()
+            .and_then(|page| page.search.as_ref())
+        {
             search
                 .input
                 .update(cx, |state, cx| state.set_value("foo", window, cx));
@@ -239,5 +247,32 @@ fn a_second_chats_page_replaces_the_first(cx: &mut TestAppContext) {
         let other = ChatId(CHANNEL.0 + 1);
         let page = app.event_log_page_for(other);
         assert_eq!((page.chat, page.autoload.get()), (other, None));
+    });
+}
+
+/// The recent-actions poll stops while the app is in the background: the
+/// timer's tick ends it, and the page has no poll until a window wakes.
+#[gpui_kit::test]
+fn the_poll_stops_while_the_window_is_inactive(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, _, cx| {
+        app.open_group_settings_view(CHANNEL, GroupSettingsView::RecentActions, cx);
+        app.event_log_page_for(CHANNEL).poll = Some(cx.spawn(async |_, _| {}));
+        app.frame.window_active.set(true);
+        assert!(app.event_log_poll_tick(CHANNEL, cx), "active: keeps going");
+        assert!(
+            app.admin
+                .event_log_page
+                .as_ref()
+                .is_some_and(|p| p.poll.is_some())
+        );
+        app.frame.window_active.set(false);
+        assert!(!app.event_log_poll_tick(CHANNEL, cx), "inactive: stops");
+        assert!(
+            app.admin
+                .event_log_page
+                .as_ref()
+                .is_some_and(|p| p.poll.is_none())
+        );
     });
 }

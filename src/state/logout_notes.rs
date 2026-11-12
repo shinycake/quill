@@ -6,7 +6,7 @@ use super::*;
 /// A request lost to logout is settled through those handlers so its busy
 /// marker clears, but nobody asked it to fail: its note would show while the
 /// account signs out, and again after the next login in this Session.
-pub(super) struct UserNotes([Option<String>; 7], [Notes; 6]);
+pub(super) struct UserNotes([Option<String>; 6], [Notes; 7]);
 
 impl Session {
     /// The account is going away (logout, close): no answer can land any
@@ -32,9 +32,8 @@ impl Session {
     pub(super) fn take_user_notes(&self) -> UserNotes {
         UserNotes(
             [
-                self.payments.note.clone(),
+                self.payments.checkout.note().map(str::to_string),
                 self.users_state.contacts_notice.clone(),
-                self.groups.invite_link_error.clone(),
                 self.calls.group_call_error.clone(),
                 self.calls.error.clone(),
                 self.settings.account_ttl.error().map(str::to_string),
@@ -42,6 +41,7 @@ impl Session {
             ],
             [
                 self.chats_state.chat_action_error.clone(),
+                self.groups.invite_link_error.clone(),
                 self.messages.message_action_note.clone(),
                 self.messages.message_link_error.clone(),
                 self.messages.resend_error.clone(),
@@ -56,7 +56,6 @@ impl Session {
             [
                 payments,
                 contacts,
-                invite_link,
                 group_call,
                 calls,
                 account_ttl,
@@ -64,6 +63,7 @@ impl Session {
             ],
             [
                 chat_action,
+                invite_link,
                 message_action,
                 message_link,
                 resend,
@@ -77,7 +77,7 @@ impl Session {
         self.messages.resend_error = resend;
         self.messages.send_permission_error = send_permission;
         self.messages.flood_notice = flood;
-        self.payments.note = payments;
+        self.payments.checkout.set_note(payments);
         self.users_state.contacts_notice = contacts;
         self.groups.invite_link_error = invite_link;
         self.calls.group_call_error = group_call;

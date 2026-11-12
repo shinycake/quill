@@ -15,11 +15,18 @@ pub const BGRA_KEPT: usize = 3;
 #[derive(Clone, Default)]
 pub struct BgraPool(Arc<Mutex<Kept>>);
 
-#[derive(Default)]
-struct Kept {
-    buffers: Vec<Vec<u8>>,
+/// What the pool keeps. `Released` holds no buffers by construction: a clip
+/// showing NV12 pictures has none to keep.
+enum Kept {
+    Recycling(Vec<Vec<u8>>),
     /// The clip shows NV12 pictures: buffers handed back would sit idle.
-    released: bool,
+    Released,
+}
+
+impl Default for Kept {
+    fn default() -> Self {
+        Self::Recycling(Vec::new())
+    }
 }
 
 impl BgraPool {
@@ -27,31 +34,36 @@ impl BgraPool {
     /// Kept buffers of other sizes go.
     pub fn take(&self, len: usize) -> Vec<u8> {
         let mut kept = lock(&self.0);
-        kept.released = false;
-        kept.buffers.retain(|buffer| buffer.len() == len);
+        let Kept::Recycling(buffers) = &mut *kept else {
+            *kept = Kept::Recycling(Vec::new());
+            return vec![0; len];
+        };
+        buffers.retain(|buffer| buffer.len() == len);
         // Zeroed memory this large is fresh pages, not a memset.
-        kept.buffers.pop().unwrap_or_else(|| vec![0; len])
+        buffers.pop().unwrap_or_else(|| vec![0; len])
     }
 
     /// Keep `buffer` for a later picture.
     pub fn give(&self, buffer: Vec<u8>) {
-        let mut kept = lock(&self.0);
-        if !kept.released && kept.buffers.len() < BGRA_KEPT {
-            kept.buffers.push(buffer);
+        if let Kept::Recycling(buffers) = &mut *lock(&self.0)
+            && buffers.len() < BGRA_KEPT
+        {
+            buffers.push(buffer);
         }
     }
 
     /// A picture that needs no buffer of ours was shown: let the kept ones
     /// go, and the ones handed back until a BGRA picture is decoded again.
     pub(super) fn release(&self) {
-        let mut kept = lock(&self.0);
-        kept.released = true;
-        kept.buffers = Vec::new();
+        *lock(&self.0) = Kept::Released;
     }
 
     /// Bytes of the buffers kept.
     pub fn held_bytes(&self) -> usize {
-        lock(&self.0).buffers.iter().map(Vec::len).sum()
+        match &*lock(&self.0) {
+            Kept::Recycling(buffers) => buffers.iter().map(Vec::len).sum(),
+            Kept::Released => 0,
+        }
     }
 }
 

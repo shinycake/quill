@@ -155,10 +155,8 @@ pub enum SettingsPayload {
     /// the reducer marks the cached list stale (schema line 10947).
     UpdateSavedNotificationSounds { sound_ids: Vec<i64> },
     /// `scopeNotificationSettings` — `getScopeNotificationSettings` response.
-    ScopeNotificationSettings {
-        scope: NotificationSettingsScope,
-        settings: ScopeNotificationSettings,
-    },
+    /// The answer carries no scope: the request that asked holds it.
+    ScopeNotificationSettings { settings: ScopeNotificationSettings },
     /// `updateScopeNotificationSettings` — a scope's defaults changed
     /// (schema line 10668).
     UpdateScopeNotificationSettings {

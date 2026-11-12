@@ -188,11 +188,22 @@ impl Snapshot {
 /// The snapshot in use; `None` is the built-in English.
 static CURRENT: ArcSwapOption<Snapshot> = ArcSwapOption::const_empty();
 
+/// Whose strings a thread reads.
+#[derive(Clone, Default)]
+enum Local {
+    /// The process-wide [`CURRENT`].
+    #[default]
+    Shared,
+    /// The thread's own, built-in English.
+    English,
+    /// The thread's own pack.
+    Pack(Arc<Snapshot>),
+}
+
 thread_local! {
     /// The strings of a thread that called [`isolate_thread`]: tests that
     /// switch languages keep the switch to themselves.
-    static LOCAL: std::cell::RefCell<Option<Option<Arc<Snapshot>>>> =
-        const { std::cell::RefCell::new(None) };
+    static LOCAL: std::cell::RefCell<Local> = const { std::cell::RefCell::new(Local::Shared) };
 }
 
 /// From now on, [`install`] and every lookup on this thread use strings of
@@ -201,16 +212,20 @@ thread_local! {
 pub fn isolate_thread() {
     LOCAL.with(|local| {
         if let Ok(mut local) = local.try_borrow_mut() {
-            *local = Some(None);
+            *local = Local::English;
         }
     });
 }
 
-/// Installs into this thread's own strings when it has them.
-fn install_local(snapshot: &mut Option<Option<Arc<Snapshot>>>) -> bool {
+/// Installs into this thread's own strings when it has them; `false` when
+/// it reads the shared ones.
+fn install_local(snapshot: &Option<Arc<Snapshot>>) -> bool {
     LOCAL.with(|local| match local.try_borrow_mut() {
-        Ok(mut local) if local.is_some() => {
-            *local = snapshot.take();
+        Ok(mut local) if !matches!(*local, Local::Shared) => {
+            *local = match snapshot {
+                Some(snapshot) => Local::Pack(Arc::clone(snapshot)),
+                None => Local::English,
+            };
             true
         }
         _ => false,
@@ -220,33 +235,40 @@ fn install_local(snapshot: &mut Option<Option<Arc<Snapshot>>>) -> bool {
 /// Makes `snapshot` the strings every later lookup uses (`None`: English).
 /// The caller refreshes the windows.
 pub fn install(snapshot: Option<Snapshot>) {
-    let mut local = Some(snapshot.map(Arc::new));
-    if install_local(&mut local) {
+    let snapshot = snapshot.map(Arc::new);
+    if install_local(&snapshot) {
         return;
     }
-    if let Some(snapshot) = local {
-        CURRENT.store(snapshot);
-    }
+    CURRENT.store(snapshot);
 }
 
 /// The snapshot in use, if a pack other than the built-in English is.
 pub fn current() -> Option<Arc<Snapshot>> {
-    if let Some(local) = local_snapshot() {
-        return local;
+    match local_strings() {
+        Local::Shared => CURRENT.load_full(),
+        Local::English => None,
+        Local::Pack(snapshot) => Some(snapshot),
     }
-    CURRENT.load_full()
 }
 
-/// This thread's own snapshot after [`isolate_thread`].
-fn local_snapshot() -> Option<Option<Arc<Snapshot>>> {
-    LOCAL.with(|local| local.try_borrow().ok().and_then(|local| local.clone()))
+/// Whose strings this thread reads (after [`isolate_thread`], its own).
+fn local_strings() -> Local {
+    LOCAL.with(|local| {
+        local
+            .try_borrow()
+            .map(|local| local.clone())
+            .unwrap_or_default()
+    })
 }
 
 /// Runs `f` with the current snapshot without cloning the `Arc`.
 pub(crate) fn with_current<R>(f: impl FnOnce(Option<&Snapshot>) -> R) -> R {
-    if let Some(local) = local_snapshot() {
-        return f(local.as_deref());
+    match local_strings() {
+        Local::Shared => {
+            let guard = CURRENT.load();
+            f(guard.as_deref())
+        }
+        Local::English => f(None),
+        Local::Pack(snapshot) => f(Some(&snapshot)),
     }
-    let guard = CURRENT.load();
-    f(guard.as_deref())
 }

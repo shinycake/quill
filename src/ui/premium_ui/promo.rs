@@ -63,7 +63,7 @@ pub(super) fn preview_downloads(hub: &quill::premium_hub::PremiumHub) -> Vec<(i3
     }
     let clip = hub
         .premium_state
-        .as_ref()
+        .data()
         .and_then(|state| animation_for(&state.animations, feature))
         .map(|animation| (animation.file_id, 32));
     let stickers: Vec<(i32, i32)> =
@@ -188,10 +188,10 @@ impl QuillApp {
         };
         let hub = &session.payments.hub;
         let subscribed =
-            hub.premium_state.as_ref().is_some_and(|s| s.is_subscribed) || session.my_is_premium();
+            hub.premium_state.data().is_some_and(|s| s.is_subscribed) || session.my_is_premium();
         let state_text = hub
             .premium_state
-            .as_ref()
+            .data()
             .map(|s| s.text.clone())
             .filter(|t| !t.is_empty());
         let mut body = div().flex().flex_col().gap_3();
@@ -302,7 +302,7 @@ impl QuillApp {
             .payments
             .hub
             .premium_state
-            .as_ref()
+            .data()
             .map(|s| s.options.clone())
             .unwrap_or_default();
         let mut section = div().flex().flex_col().gap_2().pt_2();

@@ -85,7 +85,7 @@ fn arriving_on_the_page_again_makes_a_fresh_box(cx: &mut TestAppContext) {
     });
     // A fresh Settings state for the next account: no page.
     app.update_in(vcx, |app, window, cx| {
-        app.settings.page = None;
+        app.settings.nav = crate::ui::settings_window::SettingsNav::List;
         app.open_language_box(window, cx);
     });
     vcx.run_until_parked();

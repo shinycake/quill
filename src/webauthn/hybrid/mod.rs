@@ -40,7 +40,8 @@ use super::ceremony::{self, Ceremony, CeremonyEvent, DeviceSource, UsbKeys};
 use super::{CreationOptions, RequestOptions};
 use ble::ScannerFactory;
 use rand::Rng;
-use std::time::Duration;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tunnel::Connector;
 
 /// How long Quill waits to learn whether Bluetooth works before it shows
@@ -63,6 +64,8 @@ pub struct Environment {
     /// The QR code's timestamp.
     pub now_unix: i64,
     pub bluetooth_probe: Duration,
+    /// The clock the deadline and the probe are read from.
+    pub now: Arc<dyn Fn() -> Instant + Send + Sync>,
 }
 
 impl Environment {
@@ -80,6 +83,7 @@ impl Environment {
             rng: Box::new(rand::rand_core::UnwrapErr(rand::rngs::SysRng)),
             now_unix,
             bluetooth_probe: BLUETOOTH_PROBE,
+            now: Arc::new(Instant::now),
         }
     }
 }

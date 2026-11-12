@@ -36,7 +36,17 @@ use super::menu_states::ChatMenuSubmenu;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::*;
 use gpui_kit::*;
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
+
+/// Run `f` on the vector in `cell`: taken out, changed, put back. A `Cell`
+/// holds no borrow, so a call that re-enters while `f` runs finds the
+/// vector empty instead of panicking.
+fn with_vec<T, R>(cell: &Cell<Vec<T>>, f: impl FnOnce(&mut Vec<T>) -> R) -> R {
+    let mut items = cell.take();
+    let result = f(&mut items);
+    cell.set(items);
+    result
+}
 
 /// Focus handles of the enabled items of the open menu. Handles are kept by
 /// claim position so they survive re-renders; `begin` runs at the top of
@@ -45,10 +55,10 @@ use std::cell::{Cell, RefCell};
 /// their rows after building them pass the row's order).
 #[derive(Default)]
 pub(super) struct ContextMenuItems {
-    handles: RefCell<Vec<FocusHandle>>,
-    keys: RefCell<Vec<u32>>,
+    handles: Cell<Vec<FocusHandle>>,
+    keys: Cell<Vec<u32>>,
     /// Rows drawn this frame that own a submenu, with the submenu each opens.
-    parents: RefCell<Vec<(u32, ChatMenuSubmenu)>>,
+    parents: Cell<Vec<(u32, ChatMenuSubmenu)>>,
     /// Parent row of a submenu whose first drawn row takes the focus once
     /// the frame that draws it has run.
     focus_pending: Cell<Option<u32>>,
@@ -71,13 +81,39 @@ pub(super) struct MenuFocus {
 }
 
 /// The focus hand-off of one menu: closed, or open with the focus to give
-/// back when it closes.
+/// back when it closes. Whether a menu is open is read from the menus
+/// themselves every frame ([`QuillApp::context_menu_open`]); this keeps
+/// only what no menu holds, the focus it took the keyboard from, and
+/// changes only in [`MenuFocus::settle`].
 enum MenuFocusStage {
     Closed,
     Open { previous: Option<FocusHandle> },
 }
 
 impl MenuFocus {
+    /// The window's frame start: `open` is whether a menu shows now. A menu
+    /// that just opened takes the focus; one that just closed gives it back
+    /// unless its action moved it on purpose.
+    fn settle(&mut self, open: bool, window: &mut Window, cx: &mut App) {
+        match (&self.stage, open) {
+            (MenuFocusStage::Closed, true) => {
+                let previous = window.focused(cx);
+                window.focus(&self.focus, cx);
+                self.stage = MenuFocusStage::Open { previous };
+            }
+            (MenuFocusStage::Open { previous }, false) => {
+                // A menu action may already have focused an editor or a dialog.
+                if self.focus.contains_focused(window, cx)
+                    && let Some(previous) = previous.as_ref()
+                {
+                    window.focus(previous, cx);
+                }
+                self.stage = MenuFocusStage::Closed;
+            }
+            _ => {}
+        }
+    }
+
     pub(super) fn new(cx: &mut App) -> Self {
         Self {
             focus: cx.focus_handle(),
@@ -123,38 +159,55 @@ impl ContextMenuItems {
     /// A new frame starts: no item has been drawn yet. The handles are
     /// retained across frames; only the claims reset.
     pub(super) fn begin(&self) {
-        self.keys.borrow_mut().clear();
-        self.parents.borrow_mut().clear();
+        drop(self.keys.take());
+        drop(self.parents.take());
     }
 
     /// The row at `row_key(order)` drawn this frame opens `submenu`.
     pub(super) fn mark_submenu_parent(&self, order: u8, submenu: ChatMenuSubmenu) {
-        self.parents.borrow_mut().push((row_key(order), submenu));
+        with_vec(&self.parents, |parents| {
+            parents.push((row_key(order), submenu))
+        });
     }
 
     /// The handle for the next enabled item drawn this frame, which sorts
     /// at `key` among the menu's items.
     fn claim(&self, key: u32, cx: &App) -> FocusHandle {
-        let slot = {
-            let mut keys = self.keys.borrow_mut();
-            let slot = keys.len();
+        let slot = with_vec(&self.keys, |keys| {
             keys.push(key);
-            slot
-        };
-        let existing = self.handles.borrow().get(slot).cloned();
+            keys.len() - 1
+        });
+        let existing = with_vec(&self.handles, |handles| handles.get(slot).cloned());
         if let Some(handle) = existing {
             return handle;
         }
         let handle = cx.focus_handle().tab_stop(true);
-        self.handles.borrow_mut().push(handle.clone());
+        with_vec(&self.handles, |handles| handles.push(handle.clone()));
         handle
+    }
+
+    /// How many enabled items were drawn so far this frame.
+    fn claimed(&self) -> usize {
+        with_vec(&self.keys, |keys| keys.len())
+    }
+
+    /// Forget the claims of the submenu rows, as if the open submenu had
+    /// drawn none.
+    #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
+    pub(super) fn drop_submenu_claims(&self) -> usize {
+        with_vec(&self.keys, |keys| {
+            let before = keys.len();
+            keys.retain(|key| !is_submenu_key(*key));
+            before - keys.len()
+        })
     }
 
     /// How many enabled items were drawn this frame.
     #[cfg(test)]
     #[cfg(feature = "demo-capture")]
     pub(super) fn enabled_count(&self) -> usize {
-        self.keys.borrow().len()
+        self.claimed()
     }
 
     /// Asks the end of the next frame to focus the first row drawn for the
@@ -192,14 +245,13 @@ impl ContextMenuItems {
     /// This frame's items as `(key, handle)`, in key order. Guards are
     /// dropped before the caller touches the window.
     fn live(&self) -> Vec<(u32, FocusHandle)> {
-        let mut live: Vec<(u32, FocusHandle)> = {
-            let handles = self.handles.borrow();
-            let keys = self.keys.borrow();
+        let keys = with_vec(&self.keys, |keys| keys.clone());
+        let mut live: Vec<(u32, FocusHandle)> = with_vec(&self.handles, |handles| {
             keys.iter()
                 .zip(handles.iter())
                 .map(|(key, handle)| (*key, handle.clone()))
                 .collect()
-        };
+        });
         live.sort_by_key(|(key, _)| *key);
         live
     }
@@ -222,20 +274,22 @@ impl ContextMenuItems {
 
     /// The submenu the row at `key` opens.
     fn submenu_of(&self, key: u32) -> Option<ChatMenuSubmenu> {
-        self.parents
-            .borrow()
-            .iter()
-            .find(|(parent, _)| *parent == key)
-            .map(|(_, submenu)| *submenu)
+        with_vec(&self.parents, |parents| {
+            parents
+                .iter()
+                .find(|(parent, _)| *parent == key)
+                .map(|(_, submenu)| *submenu)
+        })
     }
 
     /// The sort key of the row that owns `submenu`, if drawn this frame.
     fn parent_of(&self, submenu: ChatMenuSubmenu) -> Option<u32> {
-        self.parents
-            .borrow()
-            .iter()
-            .find(|(_, candidate)| *candidate == submenu)
-            .map(|(parent, _)| *parent)
+        with_vec(&self.parents, |parents| {
+            parents
+                .iter()
+                .find(|(_, candidate)| *candidate == submenu)
+                .map(|(parent, _)| *parent)
+        })
     }
 
     /// The handle after (or before) the focused one, wrapping; with none of
@@ -323,7 +377,7 @@ pub(super) fn context_menu_item(
         .child(Icon::new(icon).size(px(16.)).text_color(color))
         .child(label);
     if enabled {
-        let position = items.keys.borrow().len();
+        let position = items.claimed();
         let key = row_key(u8::try_from(position).unwrap_or(u8::MAX));
         item.cursor_pointer()
             .hover(|style| style.bg(hover))
@@ -342,24 +396,7 @@ impl QuillApp {
     pub(super) fn menu_focus_upkeep(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.frame.menu.items.begin();
         let menu_open = self.context_menu_open();
-        let menu = &mut self.frame.menu;
-        match (&menu.stage, menu_open) {
-            (MenuFocusStage::Closed, true) => {
-                let previous = window.focused(cx);
-                window.focus(&menu.focus, cx);
-                menu.stage = MenuFocusStage::Open { previous };
-            }
-            (MenuFocusStage::Open { previous }, false) => {
-                // A menu action may already have focused an editor or a dialog.
-                if menu.focus.contains_focused(window, cx)
-                    && let Some(previous) = previous.as_ref()
-                {
-                    window.focus(previous, cx);
-                }
-                menu.stage = MenuFocusStage::Closed;
-            }
-            _ => {}
-        }
+        self.frame.menu.settle(menu_open, window, cx);
         self.track_layer_focus(window, cx);
     }
 
@@ -375,8 +412,7 @@ impl QuillApp {
     /// The menus only the main window draws: the chat list's row, archive
     /// and story menus, a playlist's and a folder tab's.
     fn main_menu_open(&self) -> bool {
-        self.chat_list.menu.is_some()
-            || self.chat_list.archive_menu.is_some()
+        self.chat_list.menu.is_open()
             || self.admin.community.flow.row_menu.is_some()
             || self.chat_list.global.story_menu.is_some()
             || self.playback.playlist.menu().is_some()
@@ -404,8 +440,7 @@ impl QuillApp {
         self.close_message_menu();
         if !self.windows.in_window() {
             self.playback.playlist.close_menu();
-            self.chat_list.menu = None;
-            self.chat_list.archive_menu = None;
+            self.chat_list.menu.close();
             self.admin.community.flow.row_menu = None;
             self.chat_list.global.story_menu = None;
             self.folders.tab_menu = None;
@@ -448,7 +483,10 @@ impl QuillApp {
         if self.windows.in_window() {
             return None;
         }
-        match (&self.chat_list.menu, &self.admin.community.flow.row_menu) {
+        match (
+            self.chat_list.menu.row(),
+            &self.admin.community.flow.row_menu,
+        ) {
             (Some(menu), _) => menu.submenu,
             (None, Some(menu)) => menu.submenu,
             (None, None) => None,
@@ -458,8 +496,8 @@ impl QuillApp {
     /// Up, Down, Left, Right, Escape and Enter where a submenu is involved.
     /// With one open every such key is for it, whichever row has the focus
     /// (`PopupMenu::handleKeyPress`). A submenu marked open whose parent row
-    /// was not drawn this frame is stale: it is closed and the key goes on as
-    /// if none were open. A drawn submenu with no live row takes the keys and
+    /// was not drawn this frame is stale (the frame closes it,
+    /// [`Self::close_stale_submenu`]): the key goes on as if none were open. A drawn submenu with no live row takes the keys and
     /// leaves the focus on its parent row. Returns whether the key was taken.
     fn submenu_key_press(
         &mut self,
@@ -481,9 +519,6 @@ impl QuillApp {
                 open_parent,
             )
         };
-        if open_parent.is_none() && self.open_submenu().is_some() {
-            self.close_chat_submenu(cx);
-        }
         if let Some(parent) = open_parent {
             match name {
                 "down" | "up" => {
@@ -518,6 +553,23 @@ impl QuillApp {
                 true
             }
             _ => false,
+        }
+    }
+
+    /// The end of a window's frame: the focus a key asked for lands, and a
+    /// submenu marked open whose parent row this frame did not draw (the
+    /// list changed under it) is closed, so it never keeps taking keys.
+    pub(super) fn menu_frame_end(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.frame.menu.items.apply_pending_focus(window, cx);
+        self.close_stale_submenu(cx);
+    }
+
+    fn close_stale_submenu(&mut self, cx: &mut Context<Self>) {
+        let Some(submenu) = self.open_submenu() else {
+            return;
+        };
+        if self.frame.menu.items.parent_of(submenu).is_none() {
+            self.close_chat_submenu(cx);
         }
     }
 

@@ -48,24 +48,40 @@ pub(super) fn looks_like_svg(bytes: &[u8]) -> bool {
     String::from_utf8_lossy(head).contains("<svg")
 }
 
-type IconCache = Mutex<HashMap<String, Option<Arc<[u8]>>>>;
+/// What was read from an icon file and the modification time it was read
+/// at: a file replaced at the same path reads again.
+type IconCache = Mutex<HashMap<String, (Option<std::time::SystemTime>, Option<Arc<[u8]>>)>>;
 
 fn cache() -> &'static IconCache {
     static CACHE: std::sync::OnceLock<IconCache> = std::sync::OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// The SVG at `path`, read once (the menu rebuilds with every render).
+/// The SVG at `path`, read once per version of the file (the menu rebuilds
+/// with every render). A file that is missing or fails to read is asked
+/// again at the next render; one that is not a usable SVG (too big, not an
+/// SVG) stays unused until its modification time changes.
 pub(super) fn icon_svg(path: &str) -> Option<Arc<[u8]>> {
     let mut cache = cache().lock_or_recover();
-    cache
-        .entry(path.to_string())
-        .or_insert_with(|| {
-            let small = std::fs::metadata(path).is_ok_and(|meta| meta.len() <= MAX_ICON_BYTES);
-            let bytes = small.then(|| std::fs::read(path).ok()).flatten()?;
-            looks_like_svg(&bytes).then(|| Arc::from(bytes))
-        })
-        .clone()
+    let Ok(meta) = std::fs::metadata(path) else {
+        cache.remove(path);
+        return None;
+    };
+    let stamp = meta.modified().ok();
+    if let Some((seen, icon)) = cache.get(path)
+        && *seen == stamp
+    {
+        return icon.clone();
+    }
+    let icon = if meta.len() <= MAX_ICON_BYTES {
+        // A read that fails is not remembered: it is tried again.
+        let bytes = std::fs::read(path).ok()?;
+        looks_like_svg(&bytes).then(|| Arc::from(bytes))
+    } else {
+        None
+    };
+    cache.insert(path.to_string(), (stamp, icon.clone()));
+    icon
 }
 
 #[cfg(test)]
@@ -156,5 +172,33 @@ mod tests {
         assert!(!looks_like_svg(b"\x89PNG\r\n"));
         assert!(!looks_like_svg(b""));
         assert!(icon_svg("/nonexistent/quill-attach-icon.svg").is_none());
+    }
+
+    #[test]
+    fn an_icon_replaced_at_the_same_path_is_read_again() {
+        let dir = std::env::temp_dir().join(format!("quill-attach-icons-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("bot.svg");
+        let write = |bytes: &[u8], secs: u64| {
+            std::fs::write(&path, bytes).unwrap();
+            let when = std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs);
+            std::fs::File::options()
+                .write(true)
+                .open(&path)
+                .unwrap()
+                .set_modified(when)
+                .unwrap();
+        };
+        let key = path.to_str().unwrap();
+        // Not an SVG yet (still downloading): no icon.
+        write(b"partial", 1_000);
+        assert!(icon_svg(key).is_none());
+        // The finished file replaces it.
+        write(b"<svg/>", 2_000);
+        assert_eq!(icon_svg(key).as_deref(), Some(&b"<svg/>"[..]));
+        // Removed: no icon, and not remembered.
+        std::fs::remove_file(&path).unwrap();
+        assert!(icon_svg(key).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

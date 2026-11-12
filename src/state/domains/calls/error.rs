@@ -47,7 +47,7 @@ impl Session {
             Some(RequestPurpose::Calls(CallsPurpose::AcceptCall { call_id })) => {
                 // The call was never answered and keeps ringing, so a
                 // close must leave it to ring.
-                self.calls.progress.answer_failed(call_id);
+                self.calls.answer_call_failed(call_id);
                 // An answer that fails after its call went must not land on
                 // the next one (tdesktop drops the request with its call).
                 if self.calls.active_call.as_ref().map(|call| call.id) == Some(call_id) {
@@ -58,12 +58,7 @@ impl Session {
             Some(RequestPurpose::DiscardCall) => {
                 // The active call's hang-up failed: the call goes on in
                 // the phase it had, and a swap waiting on it asks again.
-                if let Some(hang_up) = self.calls.progress.hang_up_failed(extra) {
-                    if let Some(call) = self.calls.active_call.as_mut()
-                        && call.id == hang_up.call_id
-                    {
-                        call.state = hang_up.resume;
-                    }
+                if let Some(hang_up) = self.calls.hang_up_failed(extra) {
                     self.calls.second_call.back_to_prompt();
                     // The call stays up, so no link waits for it to end.
                     self.calls
@@ -77,12 +72,14 @@ impl Session {
             // that is no longer the one in flight is dropped.
             Some(RequestPurpose::SendCallRating) => {
                 if let Some(summary) = self.calls.summary.as_mut()
-                    && extra.is_some_and(|extra| summary.rating == CallRating::Sending(extra))
+                    && extra.is_some_and(|extra| summary.rating.sends(extra))
+                    && let CallRating::Sending { draft, .. } =
+                        std::mem::replace(&mut summary.rating, CallRating::Sent)
                 {
-                    summary.rating = CallRating::Failed(call_request_error_line(
-                        err,
-                        "Could not send the rating",
-                    ));
+                    summary.rating = CallRating::Failed {
+                        error: call_request_error_line(err, "Could not send the rating"),
+                        draft,
+                    };
                 }
             }
             Some(RequestPurpose::SendCallDebugInformation) => {
@@ -101,18 +98,13 @@ impl Session {
             // surface on the Recent-calls tab (the UI reads the
             // flags), not the call overlay.
             Some(RequestPurpose::SearchCallMessages) => {
-                if pending.is_some_and(|p| self.calls.take_recent_calls_request(p.id)) {
-                    self.calls.recent_calls_stage = RecentCalls::Failed;
+                if let Some(pending) = pending {
+                    self.calls.recent_calls.page_failed(pending.id);
                 }
             }
             Some(RequestPurpose::DeleteAllCallMessages) => {
-                if let Some(pending) = pending
-                    && self.calls.recent_calls_stage
-                        == (RecentCalls::Clearing {
-                            request: pending.id,
-                        })
-                {
-                    self.calls.recent_calls_stage = RecentCalls::Idle;
+                if let Some(pending) = pending {
+                    self.calls.recent_calls.clear_failed(pending.id);
                 }
                 self.chats_state
                     .chat_action_error
@@ -166,10 +158,8 @@ impl Session {
                 }
             }
             Some(RequestPurpose::Calls(CallsPurpose::CreateVideoChatJoinAs { .. })) => {
-                if let Some(join_as) = self.calls.create_join_as.as_mut()
-                    && Some(join_as.request) == extra
-                {
-                    join_as.answer = Some(Err(()));
+                if let Some(join_as) = self.calls.create_join_as.as_mut() {
+                    join_as.fail(extra);
                 }
             }
             // A conference join or create: nothing is tracked yet. A failed
@@ -201,6 +191,9 @@ impl Session {
                 let Some(call) = self.calls.group_call_mut(group_call_id) else {
                     return;
                 };
+                if let Some(request) = extra {
+                    call.transport.join_failed(request);
+                }
                 if extra.is_some_and(|request| call.rejoin.attempt_failed(request)) {
                     // The banner + manual Rejoin stay after exhaustion.
                     let exhausted = call.rejoin == crate::state::GroupCallRejoin::GaveUp;
@@ -234,7 +227,7 @@ impl Session {
                 if let Some(tracked) = self.calls.active_group_call.as_mut()
                     && tracked.id == group_call_id
                 {
-                    tracked.screen_share.stop();
+                    tracked.screen_share.fail_start(pending.map(|p| p.id));
                 }
                 self.calls.group_call_error = Some(call_request_error_line(
                     err,
@@ -263,9 +256,9 @@ impl Session {
             })) => {
                 if let Some(tracked) = self.calls.active_group_call.as_mut()
                     && tracked.id == group_call_id
-                    && tracked.screen_share_paused == paused
+                    && tracked.screen_share.is_paused() == paused
                 {
-                    tracked.screen_share_paused = !paused;
+                    tracked.screen_share.set_paused(!paused);
                 }
             }
             Some(
@@ -302,14 +295,18 @@ impl Session {
             // asked for again.
             Some(RequestPurpose::Calls(CallsPurpose::GetVideoChatInviteLink {
                 group_call_id,
-                can_self_unmute,
+                ..
             })) => {
-                if let Some(tracked) = self.calls.active_group_call.as_mut()
-                    && tracked.id == group_call_id
-                {
-                    tracked.share_links.failed(can_self_unmute);
-                }
-                if !can_self_unmute {
+                // Only the request the call still waits for: the error of
+                // one whose links were reset meanwhile says nothing.
+                let listener_failed = pending.is_some_and(|pending| {
+                    self.calls
+                        .active_group_call
+                        .as_mut()
+                        .filter(|tracked| tracked.id == group_call_id)
+                        .is_some_and(|tracked| tracked.share_links.failed(pending.id))
+                });
+                if listener_failed {
                     self.calls.group_call_error =
                         Some(call_request_error_line(err, "Couldn't get the invite link"));
                 }
@@ -321,14 +318,8 @@ impl Session {
             // The call a link offered could not be fetched: its hash goes
             // with it, or a later join of that call would send it.
             Some(RequestPurpose::Calls(CallsPurpose::GetGroupCall { group_call_id })) => {
-                if self
-                    .calls
-                    .call_link
-                    .as_ref()
-                    .is_some_and(|link| link.group_call_id == group_call_id)
-                {
-                    self.calls.call_link = None;
-                }
+                self.calls.call_link_stage.forget_hash(Some(group_call_id));
+                self.calls.note_group_call_fetch_failed(group_call_id);
                 self.calls.group_call_error =
                     Some(call_request_error_line(err, "Voice chat request failed"));
             }
@@ -338,6 +329,7 @@ impl Session {
                 group_call_id,
             })) => self.fail_group_call_join_as_options(
                 group_call_id,
+                pending.map(|p| p.id),
                 &call_request_error_line(err, "Couldn't load who you can join as"),
             ),
             // A failed "Add People" search ends it with what the other

@@ -156,6 +156,21 @@ fn preview(
     }
 }
 
+/// One recent post's `getMessage`: asked once, answered by its request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PostFetch {
+    Loading {
+        request: RequestId,
+    },
+    Ready(StatsPostPreview),
+    /// The server answered with an error (the post is gone): the row is
+    /// skipped.
+    Missing,
+    /// The send was refused: the row is skipped until the panel is
+    /// opened afresh.
+    Failed,
+}
+
 /// tdesktop shows ten recent posts first and thirty more per "Show more".
 pub const RECENT_POSTS_FIRST: usize = 10;
 pub const RECENT_POSTS_PAGE: usize = 30;
@@ -172,7 +187,7 @@ pub struct StatsState {
     /// The post whose statistics are open (one at a time).
     pub message: Option<MessageStatsState>,
     /// Fetched previews of recent posts, keyed by (chat id, message id).
-    pub posts: HashMap<(i64, i64), Option<StatsPostPreview>>,
+    pub posts: HashMap<(i64, i64), PostFetch>,
     /// How many recent posts are listed, keyed by chat.
     pub recent_shown: HashMap<i64, usize>,
 }
@@ -196,6 +211,7 @@ impl StatsState {
         self.pages.remove(&chat_id);
         self.recent_shown.remove(&chat_id);
         self.zoomed.clear();
+        self.posts.retain(|_, post| *post != PostFetch::Failed);
     }
 
     /// How many recent posts the overview lists.
@@ -228,11 +244,10 @@ impl StatsState {
         self.graph_requests.insert(extra, key);
     }
 
-    /// Forget a request that could not be sent.
-    pub(crate) fn graph_unsent(&mut self, extra: RequestId) {
-        if let Some(key) = self.graph_requests.remove(&extra) {
-            self.graphs.remove(&key);
-        }
+    /// A request that could not be sent: the graph shows the failure with
+    /// Retry instead of being asked for again by the next render.
+    pub(crate) fn graph_unsent(&mut self, extra: RequestId, message: String) {
+        self.fail_graph(extra, message);
     }
 
     pub(crate) fn accept_graph(&mut self, extra: RequestId, graph: StatisticalGraph) {
@@ -339,20 +354,51 @@ impl StatsState {
         }
     }
 
-    pub(crate) fn accept_post(&mut self, chat_id: i64, message_id: i64, message: &ParsedMessage) {
-        self.posts.insert(
-            (chat_id, message_id),
-            Some(preview(
-                &message.content,
-                message.date,
-                message.interaction_info.as_ref(),
-            )),
-        );
+    /// Record a sent `getMessage` for a recent post's row.
+    pub(crate) fn post_requested(&mut self, chat_id: i64, message_id: i64, request: RequestId) {
+        self.posts
+            .insert((chat_id, message_id), PostFetch::Loading { request });
+    }
+
+    /// Whether `request` is the one this post's row waits for.
+    fn post_awaits(&self, chat_id: i64, message_id: i64, request: RequestId) -> bool {
+        matches!(
+            self.posts.get(&(chat_id, message_id)),
+            Some(PostFetch::Loading { request: asked }) if *asked == request
+        )
+    }
+
+    pub(crate) fn accept_post(
+        &mut self,
+        chat_id: i64,
+        message_id: i64,
+        request: RequestId,
+        message: &ParsedMessage,
+    ) {
+        if self.post_awaits(chat_id, message_id, request) {
+            self.posts.insert(
+                (chat_id, message_id),
+                PostFetch::Ready(preview(
+                    &message.content,
+                    message.date,
+                    message.interaction_info.as_ref(),
+                )),
+            );
+        }
     }
 
     /// A post that could not be fetched (deleted): its row is skipped.
-    pub(crate) fn post_missing(&mut self, chat_id: i64, message_id: i64) {
-        self.posts.insert((chat_id, message_id), None);
+    pub(crate) fn post_missing(&mut self, chat_id: i64, message_id: i64, request: RequestId) {
+        if self.post_awaits(chat_id, message_id, request) {
+            self.posts.insert((chat_id, message_id), PostFetch::Missing);
+        }
+    }
+
+    /// A `getMessage` that could not be sent.
+    pub(crate) fn post_unsent(&mut self, chat_id: i64, message_id: i64, request: RequestId) {
+        if self.post_awaits(chat_id, message_id, request) {
+            self.posts.insert((chat_id, message_id), PostFetch::Failed);
+        }
     }
 }
 
@@ -362,7 +408,9 @@ pub enum PostLookup {
     Ready(StatsPostPreview),
     /// Fetched and gone (deleted): the row is skipped.
     Missing,
-    /// Not loaded yet: fetch it.
+    /// Asked, no answer yet: the row waits for this request.
+    Loading(RequestId),
+    /// Never asked: fetch it.
     Unknown,
 }
 
@@ -382,8 +430,9 @@ impl Session {
             ));
         }
         match self.groups.stats.posts.get(&(chat_id, message_id)) {
-            Some(Some(preview)) => PostLookup::Ready(preview.clone()),
-            Some(None) => PostLookup::Missing,
+            Some(PostFetch::Ready(preview)) => PostLookup::Ready(preview.clone()),
+            Some(PostFetch::Missing | PostFetch::Failed) => PostLookup::Missing,
+            Some(PostFetch::Loading { request }) => PostLookup::Loading(*request),
             None => PostLookup::Unknown,
         }
     }

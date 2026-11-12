@@ -32,9 +32,6 @@ pub struct TopicHistory {
     /// Bumped whenever the window is replaced, so the UI re-anchors its
     /// scroll.
     pub window_epoch: u64,
-    /// Page requests issued for a window end that was dropped or replaced
-    /// since: their answers would land across a gap and are dropped.
-    pub stale_pages: HashSet<u64>,
 }
 
 impl Default for TopicHistory {
@@ -49,7 +46,6 @@ impl Default for TopicHistory {
             older: OlderEnd::Open,
             latest_seen: 0,
             window_epoch: 0,
-            stale_pages: HashSet::new(),
         }
     }
 }
@@ -85,9 +81,31 @@ impl TopicHistory {
     /// The last older page failed (nothing to fail once the start is
     /// reached).
     pub fn fail_older(&mut self) {
-        if self.older == OlderEnd::Open {
+        if matches!(self.older, OlderEnd::Open | OlderEnd::Asking(_)) {
             self.older = OlderEnd::Failed;
         }
+    }
+
+    /// An older page went out as request `id`.
+    pub fn ask_older(&mut self, id: RequestId) {
+        if self.older == OlderEnd::Open {
+            self.older = OlderEnd::Asking(id);
+        }
+    }
+
+    /// The older page `id` answered or failed: whether it is the one this
+    /// window waits for (a stale one is dropped). The end is open again.
+    pub fn settle_older(&mut self, id: RequestId) -> bool {
+        if self.older == OlderEnd::Asking(id) {
+            self.older = OlderEnd::Open;
+            return true;
+        }
+        false
+    }
+
+    /// An older page request is out.
+    pub fn asking_older(&self) -> bool {
+        matches!(self.older, OlderEnd::Asking(_))
     }
 
     /// Reopen the older end after a failure (a retry, a landed page or

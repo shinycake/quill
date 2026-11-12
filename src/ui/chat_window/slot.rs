@@ -89,14 +89,10 @@ super::super::on_screen::on_screen_fields! {
     pub(super) images: Entity<BoundedImageCache>,
     /// The frame `QuillApp::chat_frame_starts` last ran for.
     pub(super) frame_started: Cell<u64>,
-    /// The window was the active one at its last render or activation
-    /// change.
-    pub(super) active: bool,
-    /// Where the window stood then (`cover`).
-    pub(super) place: Option<super::cover::WindowPlace>,
-    /// The window's geometry at its last render or move, so the places
-    /// can be saved while the window itself is leased (`saved`).
-    pub(super) bounds: Option<Bounds<Pixels>>,
+    /// Where the window stands as the platform last reported it, so the
+    /// places can be read and saved while the window itself is leased
+    /// (`cover`, `saved`).
+    pub(super) stand: super::cover::Standing,
     ;
     history: HistoryUi,
     composer: Entity<TextareaState>,
@@ -108,6 +104,8 @@ super::super::on_screen::on_screen_fields! {
     viewer: ViewerUi,
     /// The window's own "Search in chat" field (`SearchUi::chat_input`).
     chat_search_input: Entity<TextareaState>,
+    /// The window's own "From:" filter field (`SearchUi::member_input`).
+    member_input: Entity<TextareaState>,
     /// The window's own share box, forward selection and picker field.
     share: ShareUi,
     /// The window's own passcode field on the lock screen
@@ -148,6 +146,7 @@ impl super::ChatWindows {
     pub(in crate::ui) fn take_slot_inline_return(
         &self,
         bot_id: i64,
+        account: &quill::ids::AccountKey,
     ) -> Option<super::super::inline_return::InlineReturn> {
         self.slots().find_map(|slot| {
             let mut slot = slot.try_borrow_mut().ok()?;
@@ -155,7 +154,7 @@ impl super::ChatWindows {
                 .composer_ui
                 .inline_return
                 .as_ref()
-                .is_some_and(|ret| ret.waits_for_start(bot_id));
+                .is_some_and(|ret| ret.waits_for_start(bot_id) && ret.is_of(account));
             waits
                 .then(|| slot.composer_ui.inline_return.take())
                 .flatten()
@@ -251,6 +250,7 @@ impl WindowSlot {
             pickers: PickerUi::new(window, cx, emoji_search_input, reaction_search_input),
             viewer: ViewerUi::new(),
             chat_search_input: QuillApp::new_chat_search_field(window, cx),
+            member_input: QuillApp::new_member_search_field(window, cx),
             share: ShareUi::new(window, cx, forward_search_input),
             lock_field: LockField::new(window, cx, app.account.passcode.is_locked()),
             surfaces: Surfaces::new(std::time::Instant::now()),
@@ -260,9 +260,7 @@ impl WindowSlot {
                 .with_composer_height(app.slices.composer_height()),
             images: cx.new(|_| BoundedImageCache::for_window(chat_id, app.slices.scope())),
             frame_started: Cell::new(0),
-            active: false,
-            place: None,
-            bounds: None,
+            stand: Default::default(),
         }
     }
 }
@@ -278,18 +276,29 @@ impl QuillApp {
         if self.windows.scope == target {
             return true;
         }
-        if let Some(current) = self.windows.scope.take()
-            && let Some(slot) = self.windows.slot_for(current)
-        {
-            self.swap_slot(&slot);
+        if let Some(current) = self.windows.scope {
+            // A slot in use cannot take its state back: the scope stays
+            // where it is, and the caller sees `target` is not in place.
+            if let Some(slot) = self.windows.slot_for(current)
+                && !self.swap_slot(&slot)
+            {
+                return false;
+            }
+            self.windows.scope = None;
         }
         let slot = target.and_then(|chat_id| Some((chat_id, self.windows.slot_for(chat_id)?)));
         let view = slot.as_ref().map(|(chat_id, _)| *chat_id);
         if self.enter_session_view(view)
             && let Some((chat_id, slot)) = slot
         {
-            self.swap_slot(&slot);
-            self.windows.scope = Some(chat_id);
+            if self.swap_slot(&slot) {
+                self.windows.scope = Some(chat_id);
+            } else {
+                // The window's state could not come in place: the session
+                // goes back to the main window's view, like a window with
+                // no view.
+                self.enter_session_view(None);
+            }
         }
         self.windows.scope == target
     }
@@ -306,9 +315,12 @@ impl QuillApp {
         }
     }
 
-    /// Exchange the app's view state with the slot's (symmetric).
-    fn swap_slot(&mut self, slot: &SharedSlot) {
-        let mut slot = slot.borrow_mut();
+    /// Exchange the app's view state with the slot's (symmetric). `false`,
+    /// with nothing exchanged, when the slot is in use.
+    fn swap_slot(&mut self, slot: &SharedSlot) -> bool {
+        let Ok(mut slot) = slot.try_borrow_mut() else {
+            return false;
+        };
         std::mem::swap(&mut self.history, &mut slot.history);
         std::mem::swap(&mut self.composer, &mut slot.composer);
         std::mem::swap(&mut self.composer_ui, &mut slot.composer_ui);
@@ -317,12 +329,14 @@ impl QuillApp {
         std::mem::swap(&mut self.pickers, &mut slot.pickers);
         std::mem::swap(&mut self.viewer, &mut slot.viewer);
         std::mem::swap(&mut self.search_ui.chat_input, &mut slot.chat_search_input);
+        std::mem::swap(&mut self.search_ui.member_input, &mut slot.member_input);
         std::mem::swap(&mut self.share, &mut slot.share);
         std::mem::swap(&mut self.account.passcode.lock, &mut slot.lock_field);
         std::mem::swap(&mut self.slices.window, &mut slot.slices);
         std::mem::swap(&mut self.frame.surfaces, &mut slot.surfaces);
         std::mem::swap(&mut self.frame.motion, &mut slot.motion);
         std::mem::swap(&mut self.frame.menu, &mut slot.menu);
+        true
     }
 
     /// Run `f` as `window_chat`'s window (`None`: the main window), for
@@ -434,10 +448,13 @@ impl QuillApp {
             return;
         };
         let frame = window.frame_number();
-        let (started, images) = {
-            let slot = slot.borrow();
-            (slot.frame_started.replace(frame), slot.images.clone())
+        // A slot borrowed elsewhere starts no frame now: `frame_started` is
+        // untouched, so the next call of this frame (or the next frame) does.
+        let Ok(slot) = slot.try_borrow() else {
+            return;
         };
+        let (started, images) = (slot.frame_started.replace(frame), slot.images.clone());
+        drop(slot);
         if started == frame {
             return;
         }
@@ -493,6 +510,7 @@ pub(in crate::ui) fn scope_probe(
     canvas(
         |_, _, _| {},
         move |_, _, window, _| {
+            let app_for_up = app.clone();
             let press = {
                 let app = app.clone();
                 move |cx: &mut App| {
@@ -508,9 +526,18 @@ pub(in crate::ui) fn scope_probe(
                     on(cx);
                 }
             });
+            let released = app_for_up;
             window.on_mouse_event(move |_: &MouseUpEvent, phase, _, cx| {
                 if phase == DispatchPhase::Capture {
                     press(cx);
+                    // A drag along a round video's seek ring ends with the
+                    // button, wherever the pointer is and whether or not
+                    // the ring is still painted to hear it.
+                    let _ = released.update(cx, |app, cx| {
+                        if app.players.inline_videos.end_all_seeks() {
+                            cx.notify();
+                        }
+                    });
                 }
             });
             let on = pointer.clone();

@@ -71,11 +71,11 @@ impl QuillApp {
                 move |content, window, cx| {
                     let escape_app = body_app.clone();
                     let body = body_app.update(cx, |this, cx| {
-                        let question = this.chat_ui.poll_dialog.as_mut().and_then(|dialog| {
-                            dialog
-                                .take_focus_question()
-                                .then(|| dialog.question_input.clone())
-                        });
+                        let question = this
+                            .chat_ui
+                            .poll_dialog
+                            .as_mut()
+                            .and_then(|dialog| dialog.take_focus_question());
                         crate::ui::dialog_focus::focus_after_mount(question, window, cx);
                         this.poll_dialog_panel(cx)
                     });

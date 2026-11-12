@@ -197,7 +197,8 @@ fn leaving_settings_closes_the_last_seen_warning(cx: &mut TestAppContext) {
     choose(&app, vcx, key, PrivacyWho::Nobody);
     assert_eq!(dialog(&shell, vcx), Some(DialogKind::LastSeenWarning));
     app.update(vcx, |app, cx| {
-        app.settings.page = Some(quill::settings_catalog::Page::Privacy);
+        app.settings.nav =
+            crate::ui::settings_window::SettingsNav::Page(quill::settings_catalog::Page::Privacy);
         app.close_settings();
         cx.notify();
     });

@@ -83,8 +83,14 @@ impl QuillApp {
             }
             None => (Vec::new(), CandidateStatus::Ready),
         };
-        if status == CandidateStatus::Ready
-            && let Some(error) = session.communities.owned_bots.error()
+        // The owned bots are the second list: the chooser reads "Loading"
+        // while either is on its way, and a failure of either shows once
+        // none is left loading.
+        let bots_fetch = &session.communities.owned_bots;
+        if bots_fetch.is_loading() && !matches!(status, CandidateStatus::Loading) {
+            status = CandidateStatus::Loading;
+        } else if status == CandidateStatus::Ready
+            && let Some(error) = bots_fetch.error()
         {
             status = CandidateStatus::Failed(error.to_string());
         }

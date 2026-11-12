@@ -388,16 +388,16 @@ pub(super) fn session_chat_row(
     // `last_preview` only — draft/typing/activity lines render unstyled.
     // (When the shown text equals `last_preview` the entities describe
     // it even if the text arrived via the draft path.)
-    let from_last = draft.is_none() && preview == chat.last_preview;
+    let from_last = draft.is_none() && preview == chat.last_preview();
     // A sender prefix and a right-to-left preview are one line of text, whose direction
     // comes from the first strong character (a Latin name: left-to-right).
     let combine_prefix = preview_sender.is_some()
         && from_last
         && activity.is_none()
-        && chat.last_preview_thumb.is_none()
+        && chat.last_preview_thumb().is_none()
         && quill::text::has_rtl_text(&preview);
     let icon: Option<&str> = if row_style.media_icons && from_last {
-        chat.last_preview_style.icon
+        chat.last_preview_style().icon
     } else {
         None
     };
@@ -407,10 +407,10 @@ pub(super) fn session_chat_row(
     let entities: &[TextEntity] = if !from_last {
         &[]
     } else if row_style.rich_preview {
-        &chat.last_preview_style.entities
+        &chat.last_preview_style().entities
     } else {
         custom_only = chat
-            .last_preview_style
+            .last_preview_style()
             .entities
             .iter()
             .filter(|e| matches!(e.kind, quill::text::TextEntityKind::CustomEmoji { .. }))
@@ -524,7 +524,7 @@ pub(super) fn session_chat_row(
         .on_mouse_down(
             MouseButton::Right,
             cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                this.chat_list.menu = Some(ChatMenuState::at(id, event.position));
+                this.chat_list.menu.open_row(ChatMenuState::at(id, event.position));
                 cx.notify();
             }),
         )
@@ -713,7 +713,7 @@ pub(super) fn session_chat_row(
                                     .child(if announced {
                                         String::new()
                                     } else {
-                                        chat.last_preview_sender.clone()
+                                        chat.last_preview_sender().to_string()
                                     }),
                             )
                         })
@@ -755,8 +755,8 @@ pub(super) fn session_chat_row(
                                             },
                                         )
                                         .when_some(
-                                            chat.last_preview_thumb
-                                                .clone()
+                                            chat.last_preview_thumb()
+                                                .cloned()
                                                 .filter(|_| from_last),
                                             |this, mini| {
                                                 this.child(

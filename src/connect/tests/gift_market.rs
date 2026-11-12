@@ -79,7 +79,7 @@ impl Drop for Fixture {
     }
 }
 
-fn collectible(number: i32, owner: i64) -> Value {
+pub(super) fn collectible(number: i32, owner: i64) -> Value {
     json!({"@type": "upgradedGift", "id": (9000 + number).to_string(), "regular_gift_id": "500",
         "title": "Plush Pepe", "name": format!("PlushPepe-{number}"), "number": number,
         "model": {"@type": "upgradedGiftModel", "name": "Gold", "rarity": {"@type": "upgradedGiftAttributeRarityRare"}},
@@ -266,11 +266,18 @@ fn auction_link_follow_and_bids() {
         f.driver.session.payments.gift_market.auction,
         crate::gift_market::AuctionFetch::Loading { .. }
     ));
+    let asked = match f.driver.session.payments.gift_market.auction {
+        crate::gift_market::AuctionFetch::Loading { request } => request,
+        other => panic!("expected the fetch in flight, got {other:?}"),
+    };
     f.answer("getGiftAuctionState", auction_state(Value::Null));
     let market = &f.driver.session.payments.gift_market;
     assert_eq!(
         market.auction,
-        crate::gift_market::AuctionFetch::Ready { gift_id: 800 }
+        crate::gift_market::AuctionFetch::Ready {
+            gift_id: 800,
+            request: asked
+        }
     );
     f.driver.follow_gift_auction(Some(800)).unwrap();
     assert_eq!(f.last("openGiftAuction")["gift_id"], "800");
@@ -461,7 +468,7 @@ fn acquired_and_preview_requests() {
     );
 }
 
-fn received(number: i32) -> Value {
+pub(super) fn received(number: i32) -> Value {
     json!({"@type": "receivedGift", "received_gift_id": format!("r{number}"),
         "gift": {"@type": "sentGiftUpgraded", "gift": collectible(number, ME)}, "craft_date": 0})
 }

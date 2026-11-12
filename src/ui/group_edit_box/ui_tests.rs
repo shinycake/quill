@@ -436,7 +436,7 @@ fn a_leave_that_succeeds_closes_the_box_after_a_refused_title_save(cx: &mut Test
 
 #[gpui_kit::test]
 fn a_refused_leave_stays_refused_after_the_registry_forgets_it(cx: &mut TestAppContext) {
-    use super::EditBoxState;
+    use super::EditBoxView;
     let (app, _shell, mut vcx) = open_demo(cx, "ready-group-edit-box");
     let vcx = &mut vcx;
     let chat = open_box(&app, vcx);
@@ -467,7 +467,7 @@ fn a_refused_leave_stays_refused_after_the_registry_forgets_it(cx: &mut TestAppC
         let edit = app.group_edit_box().expect("box");
         assert!(matches!(
             edit.state(app.session()),
-            EditBoxState::Failed { reason, .. } if reason == "CHAT_ADMIN_REQUIRED"
+            EditBoxView::Failed { reason, .. } if reason == "CHAT_ADMIN_REQUIRED"
         ));
     });
 }

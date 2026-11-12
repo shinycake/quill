@@ -371,9 +371,10 @@ fn new_chat_carries_its_last_message_preview() {
         r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Ada","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0,"last_message":{"id":42,"chat_id":7,"is_outgoing":true,"date":1790631720,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"See you soon","entities":[]}}}}}"#,
     );
     let chat = &session.chats[&7];
-    assert_eq!(chat.last_preview, "See you soon");
+    assert_eq!(chat.last_preview(), "See you soon");
     assert_eq!(
-        chat.last_message.map(|last| (last.id.0, last.is_outgoing)),
+        chat.last_message()
+            .map(|last| (last.id.0, last.is_outgoing)),
         Some((42, true))
     );
     // A newer `updateChatLastMessage` that arrived first is never replaced
@@ -390,7 +391,7 @@ fn new_chat_carries_its_last_message_preview() {
         &sink,
         r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Ada","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0,"last_message":{"id":42,"chat_id":7,"is_outgoing":true,"date":1790631720,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"See you soon","entities":[]}}}}}"#,
     );
-    assert_eq!(session.chats[&7].last_preview, "Newer");
+    assert_eq!(session.chats[&7].last_preview(), "Newer");
 }
 
 #[test]
@@ -579,6 +580,9 @@ fn folder_link_chats_are_cached_per_folder() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request_for_folder(RequestPurpose::GetChatsForFolderInviteLink, 3);
+    let share = session.chat_list.folder_shares.entry(3).or_default();
+    share.chats.begin();
+    share.chats.sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -598,7 +602,17 @@ fn folder_link_chats_are_cached_per_folder() {
 fn installed_backgrounds_and_default_updates_are_cached() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    let extra = session.request(RequestPurpose::GetInstalledBackgrounds, None);
+    let extra = session.request(
+        RequestPurpose::Chats(ChatsPurpose::GetInstalledBackgrounds {
+            for_dark_theme: false,
+        }),
+        None,
+    );
+    {
+        let fetch = session.chats_state.installed_backgrounds.theme_mut(false);
+        fetch.begin();
+        fetch.sent(extra);
+    }
     apply_json(
         &mut session,
         &seq,
@@ -611,6 +625,7 @@ fn installed_backgrounds_and_default_updates_are_cached() {
     let list = session
         .chats_state
         .installed_backgrounds
+        .theme(false)
         .data()
         .expect("list");
     assert_eq!(list.len(), 2);
@@ -830,6 +845,13 @@ fn a_late_background_search_answer_never_lands_under_another_link() {
         ),
     );
     assert!(session.chats_state.background_error.is_none(), "A's error");
+    assert!(
+        session
+            .chats_state
+            .background_search
+            .waits_for(Some(link_b)),
+        "B still waits"
+    );
     apply_json(&mut session, &seq, &sink, &background(link_b, 9));
     assert_eq!(
         session.chats_state.background_search.found().map(|b| b.id),

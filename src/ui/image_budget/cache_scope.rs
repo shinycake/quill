@@ -1,5 +1,6 @@
 //! The element that installs a `BoundedImageCache` over its child.
 
+use super::cells::with_cell;
 use super::{BoundedImageCache, SCOPED};
 use gpui_kit::*;
 
@@ -26,10 +27,13 @@ impl CacheScope {
         f: impl FnOnce(&mut Window, &mut App) -> R,
     ) -> R {
         let owner = self.cache.read(cx).window;
-        SCOPED.with(|scoped| scoped.borrow_mut().push((self.cache.clone(), owner)));
+        let entered = with_cell(&SCOPED, |scoped| scoped.push((self.cache.clone(), owner)));
         let result =
             window.with_image_cache(Some(self.cache.clone().into()), |window| f(window, cx));
-        SCOPED.with(|scoped| scoped.borrow_mut().pop());
+        // Only what this call pushed comes off.
+        if entered.is_some() {
+            with_cell(&SCOPED, |scoped| scoped.pop());
+        }
         result
     }
 }

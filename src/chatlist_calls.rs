@@ -8,7 +8,6 @@
 
 use crate::lang::{keys, tr_with};
 use crate::local_time::{CivilTime, hhmm, month_name, needs_year, short_date};
-use crate::state::RecentCalls;
 
 pub const CLEAR_TITLE: &str = "Clear calls";
 pub const CLEAR_ABOUT: &str = "Are you sure you want to completely clear your calls log?";
@@ -18,8 +17,8 @@ pub const CLEAR_ALL_LABEL: &str = "Clear all";
 
 /// Whether the "Clear all" action is offered: there is something to
 /// clear and no clear is already in flight.
-pub fn can_clear(entry_count: usize, stage: RecentCalls) -> bool {
-    entry_count > 0 && !matches!(stage, RecentCalls::Clearing { .. })
+pub fn can_clear(entry_count: usize, clearing: bool) -> bool {
+    entry_count > 0 && !clearing
 }
 
 /// Toast after the server refuses the request.
@@ -85,7 +84,6 @@ pub fn grouped_status(count: usize, status: String) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ids::RequestId;
     use crate::local_time::civil_at;
 
     #[test]
@@ -130,12 +128,9 @@ mod tests {
 
     #[test]
     fn clear_is_offered_only_for_a_non_empty_idle_list() {
-        let clearing = RecentCalls::Clearing {
-            request: RequestId(1),
-        };
-        assert!(can_clear(3, RecentCalls::Idle));
-        assert!(!can_clear(0, RecentCalls::Idle));
-        assert!(!can_clear(3, clearing));
+        assert!(can_clear(3, false));
+        assert!(!can_clear(0, false));
+        assert!(!can_clear(3, true));
     }
 
     #[test]

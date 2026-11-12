@@ -44,7 +44,7 @@ impl QuillApp {
             list_width: f32::from(self.frame.sidebar_width),
             chat_open: session.is_some_and(|s| s.open_chat_id().is_some()),
             forum: session.map_or(ForumColumn::Hidden, |s| {
-                s.forum_column(width, self.history.forum_column.peeking())
+                s.forum_column(width, self.forum_peeking())
             }),
             topic_open: session.is_some_and(|s| s.open_forum_topic().is_some()),
             panels: side_panels_width(self.drawn_panels()),
@@ -134,8 +134,6 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         self.frame.main_width = window.viewport_size().width;
-        // Also records the peek and whether the topics are on screen.
-        self.forum_column_layout(window);
         self.keep_shared_media_search_field(window, cx);
         let layout = self.shell_layout();
         self.settle_sidebar(&layout, window, cx);

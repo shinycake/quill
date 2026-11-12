@@ -27,10 +27,12 @@ pub(super) enum PasteNotice {
     Idle {
         last: Option<Instant>,
     },
-    /// Any other field text closes it, so does the timer of its own `at`.
+    /// Any other field text closes it, so does `_timer`, which dies with
+    /// the stage.
     Showing {
         at: Instant,
         field: String,
+        _timer: Task<()>,
     },
 }
 
@@ -115,13 +117,9 @@ impl QuillApp {
             return;
         }
         let shown_at = Instant::now();
-        *notice = PasteNotice::Showing {
-            at: shown_at,
-            field: now,
-        };
         let toast = self.rich_paste_toast(locked, cx);
         window.push_notification(toast, cx);
-        self.spawn_scoped_in(window, cx, async move |this, cx| {
+        let timer = self.spawn_scoped_in(window, cx, async move |this, cx| {
             cx.background_executor().timer(DURATION).await;
             let _ = this.update_in(cx, |this, window, cx| {
                 let notice = &mut this.composer_ui.rich_draft.paste;
@@ -129,8 +127,12 @@ impl QuillApp {
                     window.remove_notification::<RichPasteToast>(cx);
                 }
             });
-        })
-        .detach();
+        });
+        self.composer_ui.rich_draft.paste = PasteNotice::Showing {
+            at: shown_at,
+            field: now,
+            _timer: timer,
+        };
     }
 
     fn rich_paste_toast(&self, locked: bool, cx: &mut Context<Self>) -> Notification {

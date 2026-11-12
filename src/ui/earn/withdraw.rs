@@ -15,8 +15,6 @@ use gpui_kit::prelude::FluentBuilder;
 use quill::earn::*;
 use quill::lang::{keys, tr, tr_with};
 use quill::premium_hub::group_digits;
-use std::cell::RefCell;
-use std::rc::Rc;
 
 /// tdesktop `lng_bot_earn_balance_about_url`.
 const STARS_TOS_URL: &str = "https://telegram.org/tos/stars";
@@ -141,7 +139,7 @@ impl QuillApp {
         let available = stats.status.available;
         let enabled = stats.status.withdrawal_enabled;
         let max = withdraw_max(limits, available.stars.max(0));
-        let ad_url = page.ad_account_url.clone();
+        let ad_url = page.ad_account_url.ready().cloned();
         let now = quill::local_time::now_unix();
         let left = (stats.status.next_withdrawal_at - now).max(0);
         let locked = stats.status.next_withdrawal_at != 0 && left > 0;
@@ -230,6 +228,35 @@ impl QuillApp {
                 )
                 .child(buttons);
         }
+        if let Load::Failed(line) = &page.ad_account_url {
+            // The Buy Ads link was refused: what failed and a Retry.
+            block = block.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .flex_1()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(line.clone()),
+                    )
+                    .child(
+                        Button::new("earn-buy-ads-retry")
+                            .label(tr(keys::Q_CHAT_RETRY))
+                            .ghost()
+                            .small()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.earn_call(
+                                    tr(keys::Q_MONEY_COULD_NOT_LOAD_REVENUE),
+                                    cx,
+                                    |driver| driver.retry_earn_ad_account_url(peer),
+                                );
+                            })),
+                    ),
+            );
+        }
         let is_self = matches!(peer, EarnPeer::User(id) if session.my_user_id == Some(id));
         block.child(learn_more_band(
             "earn-learn-stars",
@@ -248,6 +275,14 @@ impl QuillApp {
 
     /// Submit the password box; the field is emptied as the request goes.
     fn submit_withdraw_password(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // One in flight: a second Submit keeps what was typed.
+        if self
+            .earn_state()
+            .and_then(|earn| earn.withdraw.as_ref())
+            .is_some_and(|w| matches!(w.step, WithdrawStep::PasswordSending(_)))
+        {
+            return;
+        }
         let password = self.earn.password.read(cx).value().to_string();
         let sent = self
             .live
@@ -454,29 +489,22 @@ impl QuillApp {
                                 .label(tr(keys::Q_MONEY_SUBMIT))
                                 .primary()
                                 .loading(sending)
+                                .disabled(sending)
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.submit_withdraw_password(window, cx);
                                 })),
                         );
                     (tr(keys::SETTINGS_CLOUD_PASSWORD_START_TITLE), body, footer)
                 }
-                WithdrawStep::Checking => {
+                WithdrawStep::Checking(_) => {
                     return dialog.on_close(on_close);
                 }
             };
-            let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+            let body = body.into_any_element();
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(title))
-                .content(crate::ui::shell::scrollable_dialog_content(
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    },
-                ))
+                .content(crate::ui::shell::one_shot_dialog_content(body))
                 .footer(footer)
                 .on_close(on_close)
         })
@@ -490,7 +518,7 @@ crate::ui::shell::register_dialogs! {
         |app| {
             app.earn_state()
                 .and_then(|e| e.withdraw.as_ref())
-                .is_some_and(|w| w.step != WithdrawStep::Checking)
+                .is_some_and(|w| !matches!(w.step, WithdrawStep::Checking(_)))
         },
         QuillApp::build_earn_withdraw_dialog,
     )

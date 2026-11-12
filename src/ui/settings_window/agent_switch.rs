@@ -41,8 +41,12 @@ impl QuillApp {
     /// follows it to where the switch now is: the page once access is on,
     /// Advanced once it is off. An agent driving the window can't flip it
     /// (`access::set_enabled` refuses), so nothing moves then.
-    pub(super) fn set_agent_access(&mut self, on: bool, cx: &mut Context<Self>) {
-        access::set_enabled(on);
+    pub(in crate::ui) fn set_agent_access(&mut self, on: bool, cx: &mut Context<Self>) {
+        if on {
+            access::set_enabled(true);
+        } else {
+            self.turn_agent_access_off(cx);
+        }
         if access::enabled() != on {
             cx.notify();
             return;
@@ -53,6 +57,17 @@ impl QuillApp {
             Page::Advanced
         };
         self.show_settings_page(page, cx);
+    }
+
+    /// Agent access goes off, from this switch or the connected strip's
+    /// Revoke: the one place that turns it off, so the consent and the
+    /// token reset question always end with it. Nothing changes when an
+    /// agent driving the window is refused the flip.
+    pub(in crate::ui) fn turn_agent_access_off(&mut self, cx: &mut Context<Self>) {
+        access::set_enabled(false);
+        if !access::enabled() {
+            self.close_agent_boxes_for_access_off(cx);
+        }
     }
 }
 

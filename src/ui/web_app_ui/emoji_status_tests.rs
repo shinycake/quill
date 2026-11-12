@@ -299,16 +299,13 @@ fn another_switchs_answer_does_not_answer_the_grant(cx: &mut TestAppContext) {
         let received = open_window(app, false, cx);
         let grant = quill::ids::RequestId(7);
         app.mini_apps.window.as_mut().unwrap().emoji.access = AccessStage::Granting(grant);
-        app.answer_emoji_access(vec![quill::state::WebAnswer::new(
-            quill::ids::RequestId(8),
-            true,
-        )]);
+        app.answer_emoji_access(vec![(quill::ids::RequestId(8), true)]);
         assert_eq!(
             app.mini_apps.window.as_ref().unwrap().emoji.access,
             AccessStage::Granting(grant),
             "the other answer is not the grant's"
         );
-        app.answer_emoji_access(vec![quill::state::WebAnswer::new(grant, true)]);
+        app.answer_emoji_access(vec![(grant, true)]);
         let (event, data) = reply(&received);
         assert_eq!(event, "emoji_status_access_requested");
         assert_eq!(data["status"], "allowed");

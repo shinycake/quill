@@ -168,16 +168,22 @@ thread_local! {
 /// go asks, never a silent one, and a device still opening says no: a
 /// reattach restarts the decoder, so it waits for a device that is there.
 pub(in crate::ui) fn video_output_ready() -> bool {
-    VIDEO_OUTPUT.with(|slot| {
-        slot.borrow()
-            .as_ref()
-            .is_some_and(SharedOutput::ready_or_wake)
-    })
+    shared_video_output().is_some_and(|output| output.ready_or_wake())
+}
+
+/// The shared output, cloned out so the cell is not borrowed while the
+/// output's mutex is taken or its thread started.
+fn shared_video_output() -> Option<SharedOutput> {
+    VIDEO_OUTPUT.with(|slot| slot.try_borrow().ok().and_then(|held| held.clone()))
 }
 
 /// Let video soundtracks play on the app's one output.
 pub(super) fn share_output_with_video(output: &SharedOutput) {
-    VIDEO_OUTPUT.with(|slot| *slot.borrow_mut() = Some(output.clone()));
+    VIDEO_OUTPUT.with(|slot| {
+        if let Ok(mut held) = slot.try_borrow_mut() {
+            *held = Some(output.clone());
+        }
+    });
 }
 
 /// A video's soundtrack from the in-process decoder
@@ -207,8 +213,7 @@ impl StreamSound {
     where
         S: Source + Send + 'static,
     {
-        let outlet =
-            VIDEO_OUTPUT.with(|slot| slot.borrow().as_ref().and_then(SharedOutput::outlet))?;
+        let outlet = shared_video_output()?.outlet()?;
         let speed = SharedSpeed::new(speed);
         let flush = Arc::new(AtomicBool::new(false));
         let player = outlet.player();

@@ -84,7 +84,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             // put back, or they would wait on a request that is gone. A
             // conference offer is unwanted because the pending conference
             // is another request's, which must stay.
-            if matches!(send, OfferSend::Rejoin { .. } | OfferSend::Screen) {
+            if matches!(
+                send,
+                OfferSend::Join | OfferSend::Rejoin { .. } | OfferSend::Screen
+            ) {
                 self.undo_offer(key.id(), extra, &send);
             }
             return;
@@ -169,7 +172,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let tracked = calls.group_call(id);
         let is_story = calls.story_stream.as_ref().is_some_and(|c| c.id == id);
         let tracked_muted = tracked.is_some_and(|call| call.is_muted_self);
-        let tracked_video = tracked.is_some_and(|call| call.is_my_video_enabled);
+        let tracked_video = tracked.is_some_and(|call| call.my_video.is_enabled());
         (params.is_muted, params.is_my_video_enabled) = match send {
             OfferSend::Join if is_story => (true, tracked_video),
             OfferSend::Join
@@ -312,7 +315,11 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Puts back what starting the offer changed.
     fn undo_offer(&mut self, id: i32, extra: RequestId, send: &OfferSend) {
         match send {
-            OfferSend::Join => {}
+            OfferSend::Join => {
+                if let Some(call) = self.session.calls.group_call_mut(id) {
+                    call.transport.join_unsent(extra);
+                }
+            }
             OfferSend::Rejoin { .. } => {
                 // Unsent, so not counted (a failed offer already moved on).
                 if let Some(call) = self.session.calls.group_call_mut(id) {

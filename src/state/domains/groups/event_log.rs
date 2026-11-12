@@ -31,12 +31,12 @@ impl Session {
                 let mut merged = page.events.clone();
                 crate::state::paging::append_new_by_id(&mut merged, events, |event| event.id);
                 merged.sort_by_key(|event| std::cmp::Reverse(event.id));
-                let has_more = page.has_more;
+                let older = page.older.clone();
                 self.groups.set_event_log_fetch(
                     chat_id.0,
                     ChatEventLogFetch::Loaded(ChatEventLogPage {
                         events: merged,
-                        has_more,
+                        older,
                     }),
                 );
             }
@@ -45,7 +45,11 @@ impl Session {
                 pending.purpose
             && let Some(chat_id) = pending.chat_id
         {
-            let has_more = events.len() as i32 >= CHAT_EVENT_LOG_PAGE_SIZE;
+            let older = if events.len() as i32 >= CHAT_EVENT_LOG_PAGE_SIZE {
+                OlderEvents::Available
+            } else {
+                OlderEvents::Exhausted
+            };
             let mut merged = match (from_event_id, self.groups.event_log_fetch(chat_id.0)) {
                 (0, _) => events,
                 (_, Some(ChatEventLogFetch::Loaded(page))) => {
@@ -60,9 +64,32 @@ impl Session {
                 chat_id.0,
                 ChatEventLogFetch::Loaded(ChatEventLogPage {
                     events: merged,
-                    has_more,
+                    older,
                 }),
             );
+        }
+    }
+
+    /// The older page of `chat`'s loaded log was refused or never sent: the
+    /// log keeps what it has and draws Retry. Nothing else changes.
+    pub(crate) fn fail_older_events(&mut self, chat: i64, line: String) {
+        if let Some(ChatEventLogFetch::Loaded(page)) = self.groups.event_log_fetch(chat) {
+            let mut page = page.clone();
+            page.older = OlderEvents::Failed(line);
+            self.groups
+                .set_event_log_fetch(chat, ChatEventLogFetch::Loaded(page));
+        }
+    }
+
+    /// An older page goes out again: the failed line is gone.
+    pub(crate) fn begin_older_events(&mut self, chat: i64) {
+        if let Some(ChatEventLogFetch::Loaded(page)) = self.groups.event_log_fetch(chat)
+            && matches!(page.older, OlderEvents::Failed(_))
+        {
+            let mut page = page.clone();
+            page.older = OlderEvents::Available;
+            self.groups
+                .set_event_log_fetch(chat, ChatEventLogFetch::Loaded(page));
         }
     }
 

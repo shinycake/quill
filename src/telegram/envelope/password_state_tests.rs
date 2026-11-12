@@ -12,10 +12,12 @@ fn password_state_parses_pending_email() {
             assert_eq!(state.password_hint, "street");
             assert!(!state.has_recovery_email_address);
             assert_eq!(
-                state.pending_email_pattern.as_deref(),
-                Some("i***@example.com")
+                state.pending_email,
+                Some(PendingRecoveryEmail {
+                    pattern: "i***@example.com".into(),
+                    code_length: 6,
+                })
             );
-            assert_eq!(state.pending_email_code_length, 6);
         }
         other => panic!("unexpected {other:?}"),
     }
@@ -30,8 +32,7 @@ fn password_state_parses_null_code_info() {
     match env.payload {
         EnvelopePayload::Settings(SettingsPayload::PasswordState { state }) => {
             assert!(!state.has_password);
-            assert_eq!(state.pending_email_pattern, None);
-            assert_eq!(state.pending_email_code_length, 0);
+            assert_eq!(state.pending_email, None);
         }
         other => panic!("unexpected {other:?}"),
     }

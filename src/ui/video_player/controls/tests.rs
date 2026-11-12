@@ -2,7 +2,9 @@
 //! (needs the `demo-capture` feature for gpui-kit's test support).
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use super::{IconName, PANEL_OPACITY, VideoControlsState, WaitingCheck, WaitingGate, volume_icon};
+use super::{
+    IconName, PANEL_OPACITY, SliderDrag, VideoControlsState, WaitingCheck, WaitingGate, volume_icon,
+};
 use std::time::{Duration, Instant};
 
 #[test]
@@ -57,13 +59,13 @@ fn the_waiting_gate_waits_half_a_second() {
 fn a_stopped_clip_drops_its_gestures() {
     let mut state = VideoControlsState::default();
     assert!(!state.dragging());
-    state.preview_seek(3.0);
+    state.drag = SliderDrag::Seek(3.0);
     assert!(state.dragging());
-    state.release_seek();
-    state.hold_volume();
-    assert!(state.dragging());
+    assert_eq!(state.seek_preview(), Some(3.0));
+    state.drag = SliderDrag::Volume;
+    assert!(state.dragging() && state.seek_preview().is_none());
     state.hover = Some(0.4);
-    state.preview_speed(1.5);
+    state.drag = SliderDrag::Speed(1.5);
     let t0 = Instant::now();
     state.boost.press(t0);
     assert!(state.boost.tick(t0 + Duration::from_millis(250)));

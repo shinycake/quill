@@ -188,7 +188,7 @@ impl QuillApp {
     /// `QUILL_DEMO_SEEK_HOVER=<0..1>`: the pointer over the active row's
     /// scrubber, at that fraction.
     fn demo_seek_hover(&mut self) {
-        self.playback.seek_hover = std::env::var("QUILL_DEMO_SEEK_HOVER")
+        let hover = std::env::var("QUILL_DEMO_SEEK_HOVER")
             .ok()
             .and_then(|value| value.trim().parse::<f32>().ok())
             .filter(|at| at.is_finite())
@@ -196,6 +196,9 @@ impl QuillApp {
                 site: SeekSite::Row,
                 at: at.clamp(0.0, 1.0),
             });
+        if let Some(track) = self.playback.active.track_mut() {
+            track.hover = hover;
+        }
     }
 
     fn demo_ready_downloads(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
@@ -266,11 +269,11 @@ impl QuillApp {
                 pack(2, "Animals", &["🐶", "🐱", "🦊", "🐼"], true),
                 pack(3, "Food and drink", &["🍕", "🍣", "🍩", "☕"], true),
             ];
-            session.stickers.emoji.trending_sets = vec![
+            session.stickers.emoji.lists.trending = quill::emoji::TrendingSets::ready(vec![
                 pack(4, "Travel", &["✈️", "🏝️", "🗺️", "🚆"], false),
                 pack(5, "Weather", &["☀️", "🌧️", "⛄", "🌈"], false),
                 pack(2, "Animals", &["🐶", "🐱", "🦊", "🐼"], true),
-            ];
+            ]);
             session.settings.media_prefs.recent_emoji_packs = vec![2, 1, 3];
         }
     }
@@ -319,7 +322,8 @@ impl QuillApp {
     }
 
     fn demo_starting_camera(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        self.begin_capture_start(true, CaptureFor::Message);
+        let start = self.recording.next_start_id();
+        self.begin_capture_start(start, true, CaptureFor::Message, Task::ready(()));
         cx.notify();
     }
 

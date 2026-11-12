@@ -6,10 +6,8 @@ use super::{Awaited, WebAppConfirm};
 use quill::ids::RequestId;
 
 /// The launch in progress: waiting on one answer, or on the person's box.
-/// A newer launch replaces an older one (the older one's request is
-/// forgotten with it, so its answer finds no wait and is dropped); an
-/// answer to any other request is dropped and the flow keeps waiting for
-/// its own.
+/// A newer launch replaces an older one; an answer for another request is
+/// dropped and the flow keeps waiting for its own.
 #[derive(Default)]
 pub(super) enum LaunchFlow {
     #[default]
@@ -78,7 +76,7 @@ impl LaunchFlow {
         *self = Self::Adding(awaited);
     }
 
-    /// The search answer to `request`; the flow ends with it.
+    /// The search answer of `request`; the flow ends with it.
     pub(super) fn take_search_for(&mut self, request: RequestId) -> Option<Awaited> {
         match std::mem::take(self) {
             Self::Searching(awaited) if awaited.request == request => Some(awaited),
@@ -111,11 +109,33 @@ impl LaunchFlow {
 }
 
 /// The helper process: starting, loaded, or killed after it stopped reading.
+/// A start that says nothing for [`HELPER_START_TIMEOUT`] is given up: the
+/// window closes and TDLib hears `closeWebApp`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum HelperState {
-    Starting,
+    Starting { since: std::time::Instant },
     Ready,
     Wedged,
+}
+
+/// How long a helper may take to report ready.
+pub(super) const HELPER_START_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+impl HelperState {
+    pub(super) fn starting(now: std::time::Instant) -> Self {
+        Self::Starting { since: now }
+    }
+
+    /// How long until a start that has not reported ready is given up
+    /// (zero once it is); `None` for a helper that is ready or wedged.
+    pub(super) fn start_due_in(self, now: std::time::Instant) -> Option<std::time::Duration> {
+        match self {
+            Self::Starting { since } => {
+                Some(HELPER_START_TIMEOUT.saturating_sub(now.saturating_duration_since(since)))
+            }
+            Self::Ready | Self::Wedged => None,
+        }
+    }
 }
 
 /// The app's "allow messaging" request: none, or one on its way. A second
@@ -141,7 +161,7 @@ mod tests {
 
     fn waiting(request: u64, bot_id: i64) -> Awaited {
         Awaited {
-            request: quill::ids::RequestId(request),
+            request: RequestId(request),
             then: PendingOpen::Attach {
                 chat_id: quill::ids::ChatId(1),
                 bot_id,
@@ -150,28 +170,42 @@ mod tests {
         }
     }
 
-    fn id(request: u64) -> quill::ids::RequestId {
-        quill::ids::RequestId(request)
-    }
-
     #[test]
-    fn an_answer_to_another_request_keeps_the_flow_waiting() {
+    fn an_answer_for_another_request_keeps_the_flow_waiting() {
         let mut flow = LaunchFlow::default();
         flow.search(waiting(1, 7));
-        assert!(flow.take_search_for(id(2)).is_none());
+        assert!(flow.take_search_for(RequestId(2)).is_none());
         assert!(flow.is_waiting());
-        assert!(flow.take_attach_bot_for(id(1)).is_none(), "wrong stage");
-        assert!(flow.take_search_for(id(1)).is_some());
+        assert!(
+            flow.take_attach_bot_for(RequestId(1)).is_none(),
+            "wrong stage"
+        );
+        assert!(flow.take_search_for(RequestId(1)).is_some());
         assert!(!flow.is_waiting());
     }
 
     #[test]
-    fn two_links_of_one_bot_are_told_apart_by_request() {
+    fn two_links_of_one_bot_each_take_only_their_own_answer() {
         let mut flow = LaunchFlow::default();
         flow.search(waiting(1, 7));
         flow.search(waiting(2, 7));
-        assert!(flow.take_search_for(id(1)).is_none(), "the older answer");
-        assert!(flow.take_search_for(id(2)).is_some());
+        assert!(
+            flow.take_search_for(RequestId(1)).is_none(),
+            "the older link's answer is nobody's"
+        );
+        assert!(flow.take_search_for(RequestId(2)).is_some());
+    }
+
+    #[test]
+    fn a_helper_that_never_reports_ready_is_given_up() {
+        use std::time::{Duration, Instant};
+        let began = Instant::now();
+        let helper = HelperState::starting(began);
+        assert_eq!(helper.start_due_in(began), Some(HELPER_START_TIMEOUT));
+        let late = began + HELPER_START_TIMEOUT + Duration::from_secs(1);
+        assert_eq!(helper.start_due_in(late), Some(Duration::ZERO));
+        assert_eq!(HelperState::Ready.start_due_in(late), None);
+        assert_eq!(HelperState::Wedged.start_due_in(late), None);
     }
 
     #[test]
@@ -179,32 +213,8 @@ mod tests {
         let mut flow = LaunchFlow::default();
         flow.search(waiting(1, 7));
         flow.add(waiting(2, 9));
-        assert!(flow.take_search_for(id(1)).is_none());
-        assert!(flow.take_add_for(id(2)).is_some());
-    }
-
-    #[test]
-    fn a_wait_started_over_an_open_box_takes_its_place() {
-        let mut flow = LaunchFlow::default();
-        flow.ask(WebAppConfirm::OpenTerms {
-            then: waiting(0, 7).then,
-            request_write: false,
-            allow_write: false,
-        });
-        flow.search(waiting(3, 7));
-        assert!(flow.confirm().is_none(), "the older box is gone");
-        assert!(flow.take_search_for(id(3)).is_some());
-        flow.search(waiting(4, 7));
-        flow.ask(WebAppConfirm::OpenTerms {
-            then: waiting(0, 8).then,
-            request_write: false,
-            allow_write: false,
-        });
-        assert!(
-            flow.take_search_for(id(4)).is_none(),
-            "the wait it replaced"
-        );
-        assert!(flow.confirm().is_some());
+        assert!(flow.take_search_for(RequestId(1)).is_none());
+        assert!(flow.take_add_for(RequestId(2)).is_some());
     }
 
     #[test]
@@ -212,6 +222,6 @@ mod tests {
         let mut flow = LaunchFlow::default();
         flow.fetch_attach_bot(waiting(1, 7));
         flow.clear_confirm();
-        assert!(flow.take_attach_bot_for(id(1)).is_some());
+        assert!(flow.take_attach_bot_for(RequestId(1)).is_some());
     }
 }

@@ -831,25 +831,22 @@ pub(crate) fn apply_ready_privacy(session: &mut Session, sink: &Arc<MemorySink>,
 /// choice, with the always/never exception counts when non-zero (TGX
 /// `SettingsPrivacyKeyController` shows the mode plus exceptions).
 pub(crate) fn privacy_key_value(session: &Session, key: PrivacySettingKey) -> String {
-    match session.settings.privacy.get(&key) {
-        None | Some(PrivacyKeyState::Loading(_)) => tr(keys::Q_PREFS_LOADING).to_string(),
-        Some(PrivacyKeyState::Failed) => tr(keys::Q_PREFS_COULDNT_LOAD).to_string(),
-        Some(
-            PrivacyKeyState::Ready(detail)
-            | PrivacyKeyState::Saving { detail, .. }
-            | PrivacyKeyState::SaveFailed { detail, .. },
-        ) => {
-            let mut value = detail
-                .who
-                .map(|w| w.label().to_string())
-                .unwrap_or_else(|| tr(keys::Q_PREFS_CUSTOM_2).to_string());
-            let (always, never) = detail.exception_counts();
-            if always > 0 || never > 0 {
-                value.push_str(&format!(" (+{always}/−{never})"));
-            }
-            value
-        }
+    let state = session.settings.privacy.get(&key);
+    let Some(detail) = state.and_then(PrivacyKeyState::detail) else {
+        return match state {
+            Some(PrivacyKeyState::Failed { .. }) => tr(keys::Q_PREFS_COULDNT_LOAD).to_string(),
+            _ => tr(keys::Q_PREFS_LOADING).to_string(),
+        };
+    };
+    let mut value = detail
+        .who
+        .map(|w| w.label().to_string())
+        .unwrap_or_else(|| tr(keys::Q_PREFS_CUSTOM_2).to_string());
+    let (always, never) = detail.exception_counts();
+    if always > 0 || never > 0 {
+        value.push_str(&format!(" (+{always}/−{never})"));
     }
+    value
 }
 
 /// B13: the "Who can message me" row value (tdesktop Messages privacy).

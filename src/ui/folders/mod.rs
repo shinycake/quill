@@ -18,8 +18,6 @@ use quill::folder_picker::PickerMode;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with, trn};
 use quill::telegram::envelope::ChatList;
-use std::cell::RefCell;
-use std::rc::Rc;
 
 impl QuillApp {
     /// kit Phase 2 (redo): folder editor hosted in a kit `Dialog` via
@@ -47,7 +45,7 @@ impl QuillApp {
             let loading = this.folders.editor.as_ref().is_some_and(|d| {
                 !matches!(
                     d.load,
-                    FolderLoad::Ready | FolderLoad::Merging | FolderLoad::Saving(_)
+                    FolderLoad::Ready { .. } | FolderLoad::Merging | FolderLoad::Saving(_)
                 )
             });
             let saving = this
@@ -82,16 +80,9 @@ impl QuillApp {
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(title))
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
+                .content(crate::ui::shell::one_shot_dialog_content(
+                    body.into_any_element(),
+                ))
                 .footer(footer)
                 .on_close(on_close)
         })
@@ -314,16 +305,9 @@ impl QuillApp {
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(title))
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
+                .content(crate::ui::shell::one_shot_dialog_content(
+                    body.into_any_element(),
+                ))
                 .footer(footer)
                 .on_close(on_close)
         })
@@ -617,7 +601,7 @@ impl QuillApp {
         panel = panel.child(
             Textarea::new(&dialog.name_input).aria_label(tr(keys::Q_CHATLIST_CHAT_FOLDER_NAME)),
         );
-        if let Some(error) = dialog.error.clone() {
+        if let Some(error) = dialog.load.error().map(str::to_string) {
             panel = panel.child(
                 div()
                     .id("folder-editor-error")
@@ -627,8 +611,8 @@ impl QuillApp {
             );
         }
         match &dialog.load {
-            FolderLoad::Ready | FolderLoad::Merging | FolderLoad::Saving(_) => {}
-            FolderLoad::Loading => {
+            FolderLoad::Ready { .. } | FolderLoad::Merging | FolderLoad::Saving(_) => {}
+            FolderLoad::Loading(_) => {
                 return panel
                     .child(
                         div()
@@ -874,7 +858,12 @@ impl QuillApp {
             self.show_folder_limit(quill::folder_limits::FolderLimitKind::Folders, cx);
             return;
         }
-        self.folders.editor = Some(FolderEditorDialog::new(window, cx, None));
+        self.folders.editor = Some(FolderEditorDialog::new(
+            window,
+            cx,
+            None,
+            FolderLoad::ready(),
+        ));
         self.open_box(DialogKind::FolderEditor);
         cx.notify();
     }

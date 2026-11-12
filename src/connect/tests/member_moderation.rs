@@ -483,7 +483,7 @@ fn only_the_owner_may_transfer() {
 #[test]
 fn the_next_owner_is_looked_up_once() {
     let (mut driver, recorder, sink, seq) = owner_driver();
-    driver
+    let first = driver
         .fetch_chat_owner_after_leaving(ChatId(-100))
         .unwrap()
         .expect("sent");
@@ -494,7 +494,7 @@ fn the_next_owner_is_looked_up_once() {
             .ownership
             .owner_after_leaving
             .get(&-100),
-        Some(&OwnerLookup::Loading)
+        Some(&OwnerLookup::Loading(first))
     );
     assert_eq!(
         driver.fetch_chat_owner_after_leaving(ChatId(-100)).unwrap(),

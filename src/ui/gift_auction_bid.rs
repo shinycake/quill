@@ -150,7 +150,7 @@ impl QuillApp {
                 return;
             };
             let amount = state.slider().amount_at(value.end());
-            if let Some(ui) = this.gift_market.bid_mut() {
+            if let Some(ui) = this.gift_market.bid_mut(gift_id) {
                 ui.chosen = amount;
             }
             cx.notify();
@@ -167,21 +167,30 @@ impl QuillApp {
     }
 
     /// "+" and the bubble: the "Custom Amount" field.
-    pub(super) fn open_custom_bid(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let chosen = self.gift_market.bid().map_or(0, |ui| ui.chosen);
+    pub(super) fn open_custom_bid(
+        &mut self,
+        gift_id: i64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let chosen = self.gift_market.bid(gift_id).map_or(0, |ui| ui.chosen);
         let input = cx.new(|cx| {
             let mut input = InputState::new(window, cx).placeholder(tr(keys::Q_MONEY_STARS));
             input.set_value(chosen.to_string(), window, cx);
             input
         });
-        if let Some(bid) = self.gift_market.bid_mut() {
+        if let Some(bid) = self.gift_market.bid_mut(gift_id) {
             bid.custom = Some(CustomBidUi { input, error: None });
         }
         cx.notify();
     }
 
     fn save_custom_bid(&mut self, gift_id: i64, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(custom) = self.gift_market.bid().and_then(|bid| bid.custom.as_ref()) else {
+        let Some(custom) = self
+            .gift_market
+            .bid(gift_id)
+            .and_then(|bid| bid.custom.as_ref())
+        else {
             return;
         };
         let typed: String = custom
@@ -212,7 +221,7 @@ impl QuillApp {
         if let Some(error) = error {
             if let Some(custom) = self
                 .gift_market
-                .bid_mut()
+                .bid_mut(gift_id)
                 .and_then(|bid| bid.custom.as_mut())
             {
                 custom.error = Some(error);
@@ -220,11 +229,11 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        if let Some(bid) = self.gift_market.bid_mut() {
+        if let Some(bid) = self.gift_market.bid_mut(gift_id) {
             bid.custom = None;
         }
         let range = state.slider();
-        if let Some(ui) = self.gift_market.bid_mut() {
+        if let Some(ui) = self.gift_market.bid_mut(gift_id) {
             ui.chosen = amount;
             let step = range.step_of(amount);
             ui.state
@@ -247,7 +256,7 @@ impl QuillApp {
         let Some(state) = self.auction_state_cloned(gift_id) else {
             return;
         };
-        let chosen = self.gift_market.bid().map_or(0, |ui| ui.chosen);
+        let chosen = self.gift_market.bid(gift_id).map_or(0, |ui| ui.chosen);
         let stars = match state.bid_action(chosen) {
             BidAction::Close => {
                 self.market_back(cx);
@@ -293,7 +302,7 @@ impl QuillApp {
             .read(cx)
             .value()
             .to_string();
-        let hide = self.gift_market.hide_name;
+        let hide = self.gift_market.flow.hide_name();
         let sent = match self.live.as_mut() {
             Some(live) => live
                 .driver
@@ -328,7 +337,7 @@ impl QuillApp {
         let Some(state) = session.payments.gift_market.auctions.get(&gift_id) else {
             return BoxView::new(tr(keys::AUCTION_JOIN_BID), div());
         };
-        let Some(slider) = self.gift_market.bid() else {
+        let Some(slider) = self.gift_market.bid(gift_id) else {
             return BoxView::new(tr(keys::AUCTION_JOIN_BID), div());
         };
         self.request_animation_tick(1, cx);
@@ -367,8 +376,8 @@ impl QuillApp {
                     ("subtext", &subtext.to_string()),
                 ],
             ))
-            .on_click(cx.listener(|this, _, window, cx| {
-                this.open_custom_bid(window, cx);
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.open_custom_bid(gift_id, window, cx);
             }))
             .child(
                 div()
@@ -418,12 +427,16 @@ impl QuillApp {
                         .small()
                         .tooltip(tr(keys::AUCTION_BID_CUSTOM_TITLE))
                         .accessibility_label(tr(keys::AUCTION_BID_CUSTOM_TITLE))
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.open_custom_bid(window, cx);
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.open_custom_bid(gift_id, window, cx);
                         })),
                 ),
         );
-        if let Some(custom) = self.gift_market.bid().and_then(|bid| bid.custom.as_ref()) {
+        if let Some(custom) = self
+            .gift_market
+            .bid(gift_id)
+            .and_then(|bid| bid.custom.as_ref())
+        {
             body =
                 body.child(
                     div()
@@ -453,8 +466,8 @@ impl QuillApp {
                                         .label(tr(keys::CANCEL))
                                         .ghost()
                                         .small()
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            if let Some(bid) = this.gift_market.bid_mut() {
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            if let Some(bid) = this.gift_market.bid_mut(gift_id) {
                                                 bid.custom = None;
                                             }
                                             cx.notify();
@@ -608,7 +621,7 @@ impl QuillApp {
             return;
         };
         let step = state.slider().step_of(amount);
-        if let Some(ui) = self.gift_market.bid_mut() {
+        if let Some(ui) = self.gift_market.bid_mut(gift_id) {
             ui.chosen = amount;
             ui.state
                 .update(cx, |slider, cx| slider.set_value(step, window, cx));

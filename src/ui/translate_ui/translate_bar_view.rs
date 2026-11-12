@@ -134,7 +134,7 @@ impl QuillApp {
     ) -> Option<AnyElement> {
         self.translate
             .toast
-            .as_ref()
+            .toast()
             .filter(|toast| toast.chat_id == chat_id)?;
         self.translate_toast_view_body(chat_id, cx)
     }
@@ -152,9 +152,10 @@ impl QuillApp {
         let toast = self
             .translate
             .toast
-            .as_ref()
-            .filter(|toast| toast.chat_id == chat_id)?;
-        let (text, label, action) = (toast.text.clone(), toast.label, toast.action);
+            .toast()
+            .filter(|toast| toast.chat_id == chat_id)?
+            .clone();
+        let action = toast.action;
         Some(
             div()
                 .id("translate-toast")
@@ -176,7 +177,7 @@ impl QuillApp {
                         .small()
                         .text_color(accent())
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            this.translate.toast = None;
+                            this.translate.toast = ToastStage::None;
                             match action {
                                 ToastAction::ShowBar => {
                                     this.set_translate_bar_hidden(chat_id, false, cx)
@@ -200,22 +201,24 @@ impl QuillApp {
         action: ToastAction,
         cx: &mut Context<Self>,
     ) {
-        // The toast owns its timer: a newer toast, a click or an account
-        // switch drops the toast and with it the timer.
-        let timer = self.spawn_screen(cx, async move |this, cx| {
+        // The toast is the screen's: its timer lives in the stage, so an
+        // account switch or a newer toast drops it.
+        let hide = self.spawn_screen(cx, async move |this, cx| {
             cx.background_executor().timer(TOAST_DURATION).await;
             let _ = this.update(cx, |this, cx| {
-                this.translate.toast = None;
+                this.translate.toast = ToastStage::None;
                 cx.notify();
             });
         });
-        self.translate.toast = Some(TranslateToast {
-            chat_id,
-            text,
-            label,
-            action,
-            _timer: timer,
-        });
+        self.translate.toast = ToastStage::Shown {
+            toast: TranslateToast {
+                chat_id,
+                text,
+                label,
+                action,
+            },
+            _hide: hide,
+        };
         cx.notify();
     }
 
@@ -225,6 +228,11 @@ impl QuillApp {
             return;
         };
         let to = (!model.translated).then_some(model.to);
+        if to.is_some() {
+            // Turning translation on starts a new scan, which asks once more
+            // for what failed before (as showing the chat again does).
+            self.translate.pump.remove(&chat_id.0);
+        }
         if let Some(live) = self.live.as_mut() {
             live.driver.session.set_chat_translated_to(chat_id, to);
             quill::wake::UPDATES.poke();
@@ -335,6 +343,24 @@ impl QuillApp {
     /// is missing, follow a changed target language, stop when the bar is
     /// no longer offered). Returns whether anything changed.
     pub(in crate::ui) fn pump_translation(&mut self) -> bool {
+        // Only the chats some window shows keep their scan. This runs before
+        // every early return: a chat that was closed, or left for one that
+        // is not translated, must lose its scan, or coming back to it would
+        // not count as shown again and its failures would never be retried.
+        let gone: Vec<i64> = self
+            .translate
+            .pump
+            .keys()
+            .copied()
+            .filter(|chat| {
+                !self
+                    .session()
+                    .is_some_and(|session| session.chat_is_shown(ChatId(*chat)))
+            })
+            .collect();
+        for chat in gone {
+            self.translate.pump.remove(&chat);
+        }
         let Some(chat_id) = self.session().and_then(|s| s.open_chat_id()) else {
             return false;
         };
@@ -373,15 +399,24 @@ impl QuillApp {
         {
             return followed;
         }
-        let mut scan = self.translate.pump.remove(&chat_id.0).unwrap_or_default();
+        // A scan that is new is a chat shown again: what failed before is
+        // asked for once more (not on every pass, which would hammer a
+        // connection that is down).
+        let removed = self.translate.pump.remove(&chat_id.0);
+        let reopened = removed.is_none();
+        let mut scan = removed.unwrap_or_default();
+        let retried = reopened
+            && self
+                .session_mut()
+                .is_some_and(|session| session.retry_failed_translations(chat_id));
         let wanted: Vec<MessageId> = {
             let Some(session) = self.session() else {
                 self.translate.pump.insert(chat_id.0, scan);
-                return followed;
+                return followed || retried;
             };
             let Some(history) = session.histories.get(&chat_id.0) else {
                 self.translate.pump.insert(chat_id.0, scan);
-                return followed;
+                return followed || retried;
             };
             let room = MAX_IN_FLIGHT.saturating_sub(session.messages.translate.in_flight());
             let key = PumpKey {
@@ -415,34 +450,19 @@ impl QuillApp {
             scan.record(key, revision, found.iter().map(|id| id.0).collect());
             found.into_iter().take(room).collect()
         };
-        // Only the chats some window shows keep their scan.
-        let gone: Vec<i64> = self
-            .translate
-            .pump
-            .keys()
-            .copied()
-            .filter(|chat| {
-                !self
-                    .session()
-                    .is_some_and(|session| session.chat_is_shown(ChatId(*chat)))
-            })
-            .collect();
-        for chat in gone {
-            self.translate.pump.remove(&chat);
-        }
         self.translate.pump.insert(chat_id.0, scan);
         let Some(live) = self.live.as_mut() else {
             #[cfg(test)]
             self.translate
                 .asked
                 .extend(wanted.into_iter().map(|id| (id, model.to)));
-            return followed;
+            return followed || retried;
         };
         let mut sent = false;
         for id in wanted {
             sent |= live.driver.translate_message(chat_id, id, model.to).is_ok();
         }
-        followed || sent
+        followed || sent || retried
     }
 
     /// Settings → Translation: Show Translate Button, Translate Entire Chats

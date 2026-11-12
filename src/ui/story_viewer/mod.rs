@@ -100,8 +100,18 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             let joined = live.driver.join_live_story(chat_id, story_id);
-            if joined.is_ok() {
-                self.stories.live.start_watching((chat_id, story_id));
+            match joined {
+                Ok(request) => self
+                    .stories
+                    .live
+                    .start_watching((chat_id, story_id), Some(request)),
+                // A join already waiting on its request goes on; anything
+                // else that was refused shows "Join live", not a spinner
+                // (or a failed stream's Retry) nothing will end.
+                Err(_) if self.stories.live.joining().is_none() => {
+                    self.stories.live.refuse((chat_id, story_id));
+                }
+                Err(_) => {}
             }
             self.screen.connection.set_note_for(
                 &self.screen.windows,
@@ -130,7 +140,7 @@ impl QuillApp {
         }
         if self.stories.viewer_ui().is_open(PanelKind::ReactionPicker) {
             if let Some(live) = self.live.as_mut() {
-                if live.driver.session.stories.available_reactions.is_none() {
+                if live.driver.session.stories.available_reactions.can_ask() {
                     match live.driver.get_story_available_reactions() {
                         Ok(_) => {}
                         Err(_) => self.set_note(StatusNote::error(tr(
@@ -200,8 +210,8 @@ impl QuillApp {
         let mut ids: Vec<i64> = session
             .stories
             .available_reactions
+            .items()
             .iter()
-            .flatten()
             .filter_map(|reaction| match reaction.kind {
                 StoryAvailableReactionKind::CustomEmoji(id) => Some(id),
                 _ => None,
@@ -586,7 +596,7 @@ impl QuillApp {
             session.clear_story_viewers();
             // A failed edit's line was about the story it edited, and a
             // finished page op's about the story or page it acted on.
-            session.stories.manage.error = None;
+            session.stories.manage.clear_error();
             session.settle_story_page_op();
         }
     }
@@ -721,7 +731,6 @@ impl QuillApp {
             let _ = live.driver.sync_story_preloads(&[], &[]);
         }
         self.stories.viewer.close();
-        self.chat_list.pending_story_open = None;
         // The player and the clock belong to the open viewer: a close that
         // skips the rest of `close_story_viewer` (a deleted story, the
         // passcode lock) must not leave the clip playing.
@@ -764,15 +773,16 @@ impl QuillApp {
             || self.stories.viewer_ui().pause.is_paused()
             // A repost's press waits for its story's answer.
             || self
-                .chat_list
-                .pending_story_open
+                .stories
+                .viewer
+                .waiting()
                 .is_some_and(|open| open.if_gone.is_some())
             || self.stories.viewer_ui().menu_open
             || self.stories.stealth_box.is_some()
             // Edit and Repost open the composer over the viewer: the story
             // under it must not play on, and TDLib must not mark the next
             // stories viewed behind it.
-            || self.stories.composer.open
+            || self.stories.composer.is_open()
     }
 
     /// Phase 9.6: 100ms tick while the story viewer is open (mirrors
@@ -884,6 +894,7 @@ mod story_demo;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod story_header_tests;
+mod story_open;
 mod story_viewer_overlay;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
@@ -897,3 +908,4 @@ mod window_active_tests;
 
 pub(in crate::ui) use live_state::LiveStoryUi;
 pub(in crate::ui) use open::PendingStoryOpen;
+pub(in crate::ui) use story_open::StoryOpen;

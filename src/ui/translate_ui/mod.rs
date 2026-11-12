@@ -27,9 +27,8 @@ use quill::translate::{
     TranslatePrefs, bar_label_for, choose_translate_to, detect_language, language_name,
     offer_language, replace_content_text, search_languages, tracking_enabled, translatable_content,
 };
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::HashMap;
-use std::rc::Rc;
 use std::time::Duration;
 
 use dialog_state::{TranslateAsk, TranslateBox, TranslateDialog, TranslateStage};
@@ -64,9 +63,28 @@ pub(super) struct TranslateToast {
     text: String,
     label: &'static str,
     action: ToastAction,
-    /// Clears the toast when it fires; replacing or clearing the toast
-    /// drops (cancels) it.
-    _timer: Task<()>,
+}
+
+/// The toast under the bar: shown with the timer that hides it, or not
+/// there. Replacing or clearing the stage drops the timer, so a newer
+/// toast restarts it and a timer never clears a later toast.
+#[derive(Default)]
+pub(super) enum ToastStage {
+    #[default]
+    None,
+    Shown {
+        toast: TranslateToast,
+        _hide: Task<()>,
+    },
+}
+
+impl ToastStage {
+    fn toast(&self) -> Option<&TranslateToast> {
+        match self {
+            Self::None => None,
+            Self::Shown { toast, .. } => Some(toast),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -116,7 +134,7 @@ impl TranslateUi {
 #[derive(Default)]
 pub(super) struct TranslateScreen {
     pub(super) dialog: Option<TranslateDialog>,
-    toast: Option<TranslateToast>,
+    toast: ToastStage,
     /// The offered language per chat: each window shows its own chat, and
     /// one slot thrashed when two showed different ones.
     offer: RefCell<HashMap<i64, (OfferKey, Option<&'static str>)>>,
@@ -511,15 +529,7 @@ impl QuillApp {
                 .overlay(true)
                 .width(px(480.))
                 .title(crate::ui::shell::dialog_title(title))
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    // `content` needs an `Fn` closure, but the body is built once
-                    // per dialog render — hand it over through a one-shot cell.
-                    let body = Rc::new(Cell::new(Some(body)));
-                    move |content, _, _| {
-                        let body = body.take().unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
+                .content(crate::ui::shell::one_shot_dialog_content(body))
                 .footer(footer)
                 .on_close(on_close)
         })

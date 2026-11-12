@@ -1,6 +1,7 @@
 //! State reducer tests: groups.
 use super::common::*;
 use super::*;
+use crate::telegram::envelope::ParsedCommunityFullInfo;
 
 #[test]
 fn custom_title_failure_surfaces_in_member_dialog() {
@@ -214,7 +215,7 @@ fn invite_link_replace_failure_surfaces_and_broadcast_rolls_back() {
         session
             .groups
             .invite_link_error
-            .as_ref()
+            .last()
             .is_some_and(|m| m.contains("Could not replace primary invite link"))
     );
 
@@ -396,7 +397,7 @@ fn set_community_name_ok_drops_full_info_for_refetch() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(!session.groups.community_full_infos.contains_key(&42));
+    assert!(session.groups.community_full_infos.wants_fetch(42));
     // Error path: the cache stays.
     session.groups.community_full_infos.insert(
         42,
@@ -418,7 +419,7 @@ fn set_community_name_ok_drops_full_info_for_refetch() {
             extra.0
         ),
     );
-    assert!(session.groups.community_full_infos.contains_key(&42));
+    assert!(!session.groups.community_full_infos.wants_fetch(42));
 }
 
 #[test]
@@ -619,6 +620,10 @@ fn invite_link_fetch_flow_loads_and_caches() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetChatInviteLinks, Some(ChatId(13)));
+    session
+        .groups
+        .invite_links
+        .insert(13, InviteLinkFetch::Loading(extra));
 
     let link1 = r#"{"@type":"chatInviteLink","invite_link":"https://t.me/+mods","name":"Mods","creator_user_id":777,"date":1788000000,"edit_date":0,"expiration_date":0,"subscription_pricing":null,"member_limit":25,"member_count":8,"expired_member_count":0,"pending_join_request_count":0,"creates_join_request":false,"is_primary":false,"is_revoked":false}"#;
     let link2 = r#"{"@type":"chatInviteLink","invite_link":"https://t.me/+mods2","name":"Mods 2","creator_user_id":777,"date":1788000000,"edit_date":0,"expiration_date":0,"subscription_pricing":null,"member_limit":25,"member_count":4,"expired_member_count":0,"pending_join_request_count":0,"creates_join_request":false,"is_primary":false,"is_revoked":false}"#;
@@ -663,6 +668,10 @@ fn invite_link_create_upsert_bumps_total() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let fetch_extra = session.request(RequestPurpose::GetChatInviteLinks, Some(ChatId(13)));
+    session
+        .groups
+        .invite_links
+        .insert(13, InviteLinkFetch::Loading(fetch_extra));
 
     let link1 = r#"{"@type":"chatInviteLink","invite_link":"https://t.me/+mods","name":"Mods","creator_user_id":777,"date":1788000000,"edit_date":0,"expiration_date":0,"subscription_pricing":null,"member_limit":25,"member_count":8,"expired_member_count":0,"pending_join_request_count":0,"creates_join_request":false,"is_primary":false,"is_revoked":false}"#;
     let link2 = r#"{"@type":"chatInviteLink","invite_link":"https://t.me/+mods2","name":"Mods 2","creator_user_id":777,"date":1788000000,"edit_date":0,"expiration_date":0,"subscription_pricing":null,"member_limit":25,"member_count":4,"expired_member_count":0,"pending_join_request_count":0,"creates_join_request":false,"is_primary":false,"is_revoked":false}"#;
@@ -702,6 +711,10 @@ fn invite_link_edit_replaces_in_place() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let fetch_extra = session.request(RequestPurpose::GetChatInviteLinks, Some(ChatId(13)));
+    session
+        .groups
+        .invite_links
+        .insert(13, InviteLinkFetch::Loading(fetch_extra));
 
     let link1 = r#"{"@type":"chatInviteLink","invite_link":"https://t.me/+mods","name":"Mods","creator_user_id":777,"date":1788000000,"edit_date":0,"expiration_date":0,"subscription_pricing":null,"member_limit":25,"member_count":8,"expired_member_count":0,"pending_join_request_count":0,"creates_join_request":false,"is_primary":false,"is_revoked":false}"#;
     let link2 = r#"{"@type":"chatInviteLink","invite_link":"https://t.me/+mods2","name":"Mods 2","creator_user_id":777,"date":1788000000,"edit_date":0,"expiration_date":0,"subscription_pricing":null,"member_limit":25,"member_count":4,"expired_member_count":0,"pending_join_request_count":0,"creates_join_request":false,"is_primary":false,"is_revoked":false}"#;
@@ -743,6 +756,10 @@ fn invite_link_revoke_removes_the_revoked_link() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let fetch_extra = session.request(RequestPurpose::GetChatInviteLinks, Some(ChatId(13)));
+    session
+        .groups
+        .invite_links
+        .insert(13, InviteLinkFetch::Loading(fetch_extra));
 
     let link1 = r#"{"@type":"chatInviteLink","invite_link":"https://t.me/+mods","name":"Mods","creator_user_id":777,"date":1788000000,"edit_date":0,"expiration_date":0,"subscription_pricing":null,"member_limit":25,"member_count":8,"expired_member_count":0,"pending_join_request_count":0,"creates_join_request":false,"is_primary":false,"is_revoked":false}"#;
     let link2 = r#"{"@type":"chatInviteLink","invite_link":"https://t.me/+mods2","name":"Mods 2","creator_user_id":777,"date":1788000000,"edit_date":0,"expiration_date":0,"subscription_pricing":null,"member_limit":25,"member_count":4,"expired_member_count":0,"pending_join_request_count":0,"creates_join_request":false,"is_primary":false,"is_revoked":false}"#;
@@ -1019,4 +1036,139 @@ fn can_manage_admins_gate() {
 
     session.groups.supergroup_promote_right.insert(15, false);
     assert!(!session.chat_can_manage_admins(ChatId(15)));
+}
+
+/// A refresh asks again under a new id while the first ask is out. Whichever
+/// order the two answers arrive in, the list is the newer request's.
+#[test]
+fn a_refreshed_list_takes_only_the_newest_answer_in_either_order() {
+    let admins = |extra: RequestId, user: i64| {
+        format!(
+            r#"{{"@type":"chatAdministrators","@extra":"{}","administrators":[{{"@type":"chatAdministrator","user_id":{user},"custom_title":"","is_owner":false,"can_be_edited":true}}]}}"#,
+            extra.0
+        )
+    };
+    let listed = |session: &Session| match session.groups.admin_lists.get(&13) {
+        Some(AdminListFetch::Loaded(list)) => list.iter().map(|a| a.user_id).collect::<Vec<_>>(),
+        _ => Vec::new(),
+    };
+    for newest_first in [false, true] {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let older = session.request(RequestPurpose::GetChatAdministrators, Some(ChatId(13)));
+        let newer = session.request(RequestPurpose::GetChatAdministrators, Some(ChatId(13)));
+        session
+            .groups
+            .admin_lists
+            .insert(13, AdminListFetch::Loading(newer));
+        let order = if newest_first {
+            [(newer, 2), (older, 1)]
+        } else {
+            [(older, 1), (newer, 2)]
+        };
+        for (extra, user) in order {
+            apply_json(&mut session, &seq, &sink, &admins(extra, user));
+        }
+        assert_eq!(listed(&session), vec![2], "newest_first={newest_first}");
+    }
+}
+
+#[test]
+fn an_older_administrators_error_leaves_the_newer_ask_and_the_loaded_list() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let error = |extra: RequestId| {
+        format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHAT_ADMIN_REQUIRED"}}"#,
+            extra.0
+        )
+    };
+    let older = session.request(RequestPurpose::GetChatAdministrators, Some(ChatId(13)));
+    let newer = session.request(RequestPurpose::GetChatAdministrators, Some(ChatId(13)));
+    session
+        .groups
+        .admin_lists
+        .insert(13, AdminListFetch::Loading(newer));
+    apply_json(&mut session, &seq, &sink, &error(older));
+    assert_eq!(
+        session.groups.admin_lists.get(&13),
+        Some(&AdminListFetch::Loading(newer)),
+        "an older error leaves the newer ask waiting"
+    );
+    apply_json(&mut session, &seq, &sink, &error(newer));
+    assert!(matches!(
+        session.groups.admin_lists.get(&13),
+        Some(AdminListFetch::Failed(_))
+    ));
+}
+
+#[test]
+fn a_refreshed_invite_link_list_takes_only_the_newest_answer_in_either_order() {
+    let answer = |extra: RequestId, total: i32| {
+        format!(
+            r#"{{"@type":"chatInviteLinks","@extra":"{}","total_count":{total},"invite_links":[]}}"#,
+            extra.0
+        )
+    };
+    for newest_first in [false, true] {
+        for purpose in [
+            RequestPurpose::GetChatInviteLinks,
+            RequestPurpose::GetRevokedChatInviteLinks,
+        ] {
+            let (mut session, sink) = session();
+            let seq = AtomicU64::new(0);
+            let older = session.request(purpose, Some(ChatId(13)));
+            let newer = session.request(purpose, Some(ChatId(13)));
+            let slot = if purpose == RequestPurpose::GetChatInviteLinks {
+                &mut session.groups.invite_links
+            } else {
+                &mut session.groups.revoked_invite_links
+            };
+            slot.insert(13, InviteLinkFetch::Loading(newer));
+            let order = if newest_first {
+                [(newer, 2), (older, 1)]
+            } else {
+                [(older, 1), (newer, 2)]
+            };
+            for (extra, total) in order {
+                apply_json(&mut session, &seq, &sink, &answer(extra, total));
+            }
+            let slot = if purpose == RequestPurpose::GetChatInviteLinks {
+                &session.groups.invite_links
+            } else {
+                &session.groups.revoked_invite_links
+            };
+            assert!(
+                matches!(slot.get(&13), Some(InviteLinkFetch::Loaded(l)) if l.total_count == 2),
+                "newest_first={newest_first} purpose={purpose:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_refused_boost_settings_ask_fails_and_is_asked_again() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let asked = session.request(RequestPurpose::GetBoostsPerGift, None);
+    session.groups.boosts_per_gift.begin();
+    session.groups.boosts_per_gift.sent(asked);
+    let error = |extra: RequestId| {
+        format!(
+            r#"{{"@type":"error","@extra":"{}","code":500,"message":"INTERNAL"}}"#,
+            extra.0
+        )
+    };
+    apply_json(&mut session, &seq, &sink, &error(asked));
+    assert!(session.groups.boosts_per_gift.error().is_some());
+    assert!(
+        session.groups.boosts_per_gift.can_ask(),
+        "Failed asks again"
+    );
+    // Another request's answer does not fill it.
+    let other = session.request(RequestPurpose::GetBoostsPerGift, None);
+    session.groups.boosts_per_gift.begin();
+    session.groups.boosts_per_gift.sent(other);
+    apply_json(&mut session, &seq, &sink, &error(asked));
+    assert!(session.groups.boosts_per_gift.is_loading());
 }

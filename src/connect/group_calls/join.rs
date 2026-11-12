@@ -77,7 +77,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         use crate::telegram::envelope::CallState;
         let in_call = self.session.calls.active_call.as_ref().is_some_and(|call| {
             !matches!(
-                call.state,
+                call.state(),
                 CallState::HangingUp | CallState::Discarded { .. } | CallState::Error { .. }
             )
         });
@@ -155,6 +155,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Calls(CallsPurpose::JoinVideoChat { group_call_id }),
             None,
         );
+        if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
+            call.transport.begin_join(extra);
+        }
         self.start_group_offer(group_call_id, extra, OfferSend::Join);
         extra
     }
@@ -185,10 +188,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     MessageSender::User { user_id } => MessageSenderRef::User(user_id),
                     MessageSender::Chat { chat_id } => MessageSenderRef::Chat(chat_id),
                 });
-            let hash = crate::call_link::PendingCallLink::hash_for(
-                self.session.calls.call_link.as_ref(),
-                id,
-            );
+            let hash = self.session.calls.call_link_stage.hash_for(id);
             join_video_chat(extra, id, as_ref.as_ref(), params, hash)
         }
     }
@@ -251,6 +251,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // picker is optional, so a failure just leaves it out).
         if let Some(call) = self.session.calls.active_group_call.as_mut() {
             call.join_as_options.begin();
+            call.join_as_options.sent(extra);
         }
         Ok(())
     }
@@ -299,7 +300,10 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// failed — a later tap can retry). The group-call overlay's Join
     /// button stays the manual fallback either way.
     pub(crate) fn maybe_join_live_story(&mut self) -> Result<(), ConnectSendError> {
-        self.maybe_fetch_live_story_extras()?;
+        let extras = self.maybe_fetch_live_story_extras();
+        let bursts = self.maybe_fetch_live_bursts();
+        extras?;
+        bursts?;
         self.maybe_resolve_live_story_custom_emoji()?;
         let intent = match self.session.calls.pending_live_story_join {
             Some(intent) => intent,

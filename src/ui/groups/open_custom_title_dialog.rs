@@ -232,7 +232,27 @@ impl QuillApp {
                 )
             });
         // Delete and Leave: the request the Edit box waits on, so the box
-        // goes when the chat does and stays when TDLib refuses.
+        // goes when the chat does and stays when TDLib refuses. Not while
+        // the box's own Save is out: the exit would replace the stage that
+        // reads that Save's answer.
+        if matches!(
+            dialog.action,
+            GroupConfirmAction::DeleteChat { .. }
+                | GroupConfirmAction::LeaveChat { .. }
+                | GroupConfirmAction::RemoveFromList { .. }
+        ) && dialog
+            .action
+            .chat_id()
+            .is_some_and(|chat_id| self.group_edit_box_saving(chat_id))
+        {
+            // box-host: put back; the box stays where it shows
+            self.admin.group_confirm_dialog = Some(dialog);
+            self.set_note(StatusNote::info(tr(
+                keys::Q_PEOPLE_REQUEST_ALREADY_IN_FLIGHT,
+            )));
+            cx.notify();
+            return;
+        }
         let mut exit_request = None;
         let note = match self.live.as_mut() {
             Some(live) => {
@@ -278,11 +298,16 @@ impl QuillApp {
                     GroupConfirmAction::RemoveFromList { chat_id } if is_basic_group => live
                         .driver
                         .delete_and_leave_basic_group(chat_id)
-                        .map(|sent| sent_note(sent, tr(keys::Q_PEOPLE_DELETING_CHAT))),
-                    GroupConfirmAction::RemoveFromList { chat_id } => live
-                        .driver
-                        .remove_chat_from_list(chat_id)
-                        .map(|sent| sent_note(sent, tr(keys::Q_PEOPLE_DELETING_CHAT))),
+                        .map(|sent| {
+                            exit_request = sent;
+                            sent_note(sent, tr(keys::Q_PEOPLE_DELETING_CHAT))
+                        }),
+                    GroupConfirmAction::RemoveFromList { chat_id } => {
+                        live.driver.remove_chat_from_list(chat_id).map(|sent| {
+                            exit_request = sent;
+                            sent_note(sent, tr(keys::Q_PEOPLE_DELETING_CHAT))
+                        })
+                    }
                     // Slice CL3: row-menu Block/Unblock
                     // (`setMessageSenderBlockList`, schema 1.8.67, line
                     // 14492). TDLib answers `ok`; the new state arrives
@@ -334,9 +359,11 @@ impl QuillApp {
                     // Slice CL3: multi-select bulk delete — one
                     // `deleteChatHistory(remove_from_chat_list:true)`
                     // per chat that was selected when the box opened;
-                    // the selection clears on confirm.
+                    // the chats whose delete went out leave the selection; a
+                    // refused one stays selected, to try again.
                     GroupConfirmAction::RemoveSelectedChats { ref ids } => {
                         let mut sent = 0;
+                        let mut unsent = std::collections::HashSet::new();
                         for id in ids {
                             if live
                                 .driver
@@ -344,10 +371,12 @@ impl QuillApp {
                                 .is_ok_and(|sent| sent.is_some())
                             {
                                 sent += 1;
+                            } else {
+                                unsent.insert(id.0);
                             }
                         }
                         let total = ids.len();
-                        self.chat_list.selected.clear();
+                        self.chat_list.selected.retain(|id| unsent.contains(id));
                         Ok(trn_with(
                             keys::Q_PEOPLE_DELETING_OF_CHATS,
                             total,
@@ -394,12 +423,8 @@ impl QuillApp {
                     Ok(note) => {
                         // The chat goes: its Edit box goes with it, when
                         // TDLib has answered (`track_chat_exit`).
-                        match (dialog.action.chat_id(), &dialog.action, exit_request) {
-                            (Some(chat_id), GroupConfirmAction::RemoveFromList { .. }, _) => {
-                                self.close_group_edit_box_for(chat_id, cx);
-                            }
-                            (Some(chat_id), _, Some(id)) => self.track_chat_exit(chat_id, id),
-                            _ => {}
+                        if let (Some(chat_id), Some(id)) = (dialog.action.chat_id(), exit_request) {
+                            self.track_chat_exit(chat_id, id);
                         }
                         note
                     }
@@ -549,18 +574,9 @@ impl QuillApp {
                 );
             dialog
                 .title(crate::ui::shell::dialog_title(title))
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    // `content` needs an `Fn` closure, but the body is built once
-                    // per dialog render — hand it over through a one-shot cell.
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
+                .content(crate::ui::shell::one_shot_dialog_content(
+                    body.into_any_element(),
+                ))
                 .footer(footer)
                 .on_close(on_close)
         })

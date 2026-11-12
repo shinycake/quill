@@ -105,12 +105,7 @@ impl QuillApp {
         let reply = self.draft_reply(self.chat_ui.reply(), chat_id);
         let markup = self.composer_markup(cx);
         let content = if self.chat_ui.rich.editor_open() {
-            let blocks = self
-                .composer_ui
-                .rich_draft
-                .parsed
-                .borrow_mut()
-                .parse(&markup);
+            let blocks = self.composer_ui.rich_draft.parsed.parse(&markup);
             RichDraft::from_parsed(blocks).map_or(DraftContent::Text(markup), DraftContent::Rich)
         } else if let Some(rich) = self.stored_rich_draft() {
             DraftContent::Rich(rich.clone())
@@ -268,39 +263,36 @@ impl QuillApp {
         delay: Duration,
         cx: &mut Context<Self>,
     ) {
-        if !self
-            .frame
+        // The draft of a client leaving the screen is sent as it leaves
+        // (`take_live`), so the timer only ever commits the client on screen.
+        self.frame
             .draft_timer
-            .arm(token, delay, std::time::Instant::now())
-        {
-            return;
-        }
-        // window-scope: the pending draft names its own chat and topic, so no window.
-        // screen-scope: the driver on screen holds the draft and ignores a token it
-        // did not issue; a task bound to one screen would strand the shared timer.
-        cx.spawn(async move |this, cx| {
-            loop {
-                let step = this
-                    .update(cx, |this, _cx| {
-                        this.frame.draft_timer.step(std::time::Instant::now())
-                    })
-                    .unwrap_or(DraftTimerStep::Idle);
-                match step {
-                    DraftTimerStep::Idle => break,
-                    DraftTimerStep::Sleep(wait) => cx.background_executor().timer(wait).await,
-                    DraftTimerStep::Fire(token) => {
-                        this.update(cx, |this, _cx| {
-                            if let Some(live) = this.live.as_mut() {
-                                let _ = live.driver.commit_debounced_draft(token);
+            .arm(token, delay, std::time::Instant::now(), || {
+                // window-scope: the pending draft names its own chat and topic.
+                // screen-scope: the driver on screen holds the draft and ignores a
+                // token it did not issue; a task bound to one screen would strand it.
+                cx.spawn(async move |this, cx| {
+                    loop {
+                        let step = this
+                            .update(cx, |this, _cx| {
+                                let step = this.frame.draft_timer.step(std::time::Instant::now());
+                                if let DraftTimerStep::Fire(token) = step
+                                    && let Some(live) = this.live.as_mut()
+                                {
+                                    let _ = live.driver.commit_debounced_draft(token);
+                                }
+                                step
+                            })
+                            .unwrap_or(DraftTimerStep::Idle);
+                        match step {
+                            DraftTimerStep::Sleep(wait) => {
+                                cx.background_executor().timer(wait).await
                             }
-                        })
-                        .ok();
-                        break;
+                            DraftTimerStep::Idle | DraftTimerStep::Fire(_) => break,
+                        }
                     }
-                }
-            }
-        })
-        .detach();
+                })
+            });
     }
 
     pub(super) fn forget_local_draft(&mut self, chat_id: ChatId) {

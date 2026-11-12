@@ -466,18 +466,30 @@ impl SharedMediaTabState {
     }
 }
 
+/// What the shared-media panel shows: nothing, a chat's gallery, or a
+/// user's Playlist page, which may sit over a gallery (Esc and the back
+/// button return to it).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum SharedMediaView {
+    #[default]
+    Closed,
+    Gallery(ChatId),
+    Playlist {
+        user_id: i64,
+        /// The gallery under the page, if one was open.
+        under: Option<ChatId>,
+    },
+}
+
 /// Slice media-shared-gallery: the gallery panel state. Opening for another
 /// chat or closing gives every tab a fresh stamp, so late
 /// `foundChatMessages` answers drop; a new fetch restamps only its own tab.
 #[derive(Debug, Clone, Default)]
 pub struct SharedMediaState {
-    /// The chat the gallery is open for; `None` while it is closed.
-    pub chat_id: Option<ChatId>,
+    /// The gallery, or the Playlist page over it, that is open.
+    pub view: SharedMediaView,
     pub active_tab: SharedMediaTab,
     pub tabs: [SharedMediaTabState; SharedMediaTab::COUNT],
-    /// The Playlist page of this user's saved music is open instead of the
-    /// gallery (tdesktop opens it from the profile's music button).
-    pub playlist_user: Option<i64>,
     /// Show Photos and Videos as two tabs instead of Media (tdesktop's
     /// "Expand" / "Collapse" action on the media tab).
     pub media_split: bool,
@@ -490,7 +502,41 @@ pub struct SharedMediaState {
 impl SharedMediaState {
     /// Whether the gallery is open (for [`Self::chat_id`]).
     pub fn open(&self) -> bool {
-        self.chat_id.is_some()
+        self.chat_id().is_some()
+    }
+
+    /// The chat the gallery is open for; `None` while it is closed.
+    pub fn chat_id(&self) -> Option<ChatId> {
+        match &self.view {
+            SharedMediaView::Closed => None,
+            SharedMediaView::Gallery(chat) => Some(*chat),
+            SharedMediaView::Playlist { under, .. } => *under,
+        }
+    }
+
+    /// The user whose Playlist page is open instead of the gallery
+    /// (tdesktop opens it from the profile's music button).
+    pub fn playlist_user(&self) -> Option<i64> {
+        match &self.view {
+            SharedMediaView::Playlist { user_id, .. } => Some(*user_id),
+            _ => None,
+        }
+    }
+
+    /// The Playlist page of `user_id` opens over whatever is open.
+    pub fn open_playlist(&mut self, user_id: i64) {
+        self.view = SharedMediaView::Playlist {
+            user_id,
+            under: self.chat_id(),
+        };
+    }
+
+    /// The Playlist page closes back to the gallery under it, or to
+    /// nothing when it was opened without one.
+    pub fn close_playlist(&mut self) {
+        if let SharedMediaView::Playlist { under, .. } = &self.view {
+            self.view = under.map_or(SharedMediaView::Closed, SharedMediaView::Gallery);
+        }
     }
 
     /// The state of `tab`, `None` only if `tabs` is shorter than the enum.
@@ -515,11 +561,10 @@ impl SharedMediaState {
     /// Like [`Self::open_for`], opening on `initial` (the profile's main
     /// tab) when the gallery is not already open for this chat.
     pub fn open_for_tab(&mut self, chat_id: ChatId, initial: SharedMediaTab) -> SharedMediaTab {
-        if self.chat_id == Some(chat_id) {
+        if self.chat_id() == Some(chat_id) {
             return self.active_tab;
         }
-        self.chat_id = Some(chat_id);
-        self.playlist_user = None;
+        self.view = SharedMediaView::Gallery(chat_id);
         // With Photos and Videos split there is no Media tab.
         self.active_tab = match initial {
             SharedMediaTab::Media if self.media_split => SharedMediaTab::Photos,
@@ -549,15 +594,14 @@ impl SharedMediaState {
     /// Whether `generation` is the stamp `tab` waits on in the gallery open
     /// for `chat_id`.
     pub(crate) fn accepts(&self, chat_id: ChatId, tab: SharedMediaTab, generation: u64) -> bool {
-        self.chat_id == Some(chat_id)
+        self.chat_id() == Some(chat_id)
             && self
                 .tab_at(tab)
                 .is_some_and(|state| state.generation == generation)
     }
 
     pub fn close(&mut self) {
-        self.playlist_user = None;
-        self.chat_id = None;
+        self.view = SharedMediaView::Closed;
         self.selection.clear();
         self.restamp_all_tabs();
     }
@@ -612,6 +656,16 @@ impl SharedMediaState {
         } else {
             SharedMediaTabStatus::ready()
         };
+        // The list was replaced (a search, a calendar jump, a refetch): a
+        // ticked row that is not in it any more is not selected.
+        if tab == self.active_tab {
+            let listed: Vec<MessageId> = self
+                .tab_at(tab)
+                .map(|state| state.items.iter().map(|item| item.message_id).collect())
+                .unwrap_or_default();
+            self.selection
+                .retain(|selected| listed.contains(&selected.message_id));
+        }
     }
 
     /// Start fetching the next older page of `tab`: returns the generation
@@ -681,5 +735,8 @@ impl SharedMediaState {
         state.items.clear();
         state.total_count = 0;
         state.status = SharedMediaTabStatus::Failed(error);
+        if tab == self.active_tab {
+            self.selection.clear();
+        }
     }
 }

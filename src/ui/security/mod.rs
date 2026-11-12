@@ -20,7 +20,7 @@ use quill::key_fingerprint;
 use quill::lang::{keys, tr, tr_with};
 use quill::state::fetch::Fetch;
 use quill::telegram::envelope::{ParsedSecretChat, ParsedSession, ParsedWebsite, PasswordState};
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 use zeroize::Zeroize;
 impl QuillApp {
@@ -103,12 +103,9 @@ impl QuillApp {
                 .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    let body = Rc::new(Cell::new(Some(body.into_any_element())));
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
                 }))
@@ -501,8 +498,7 @@ impl QuillApp {
             return;
         }
         self.open_box(DialogKind::TwoFa);
-        self.twofa.open_at(TwofaView::Status);
-        self.goto_twofa_view(TwofaView::Status);
+        self.twofa_open();
         // The last change's error belongs to the box it was shown in; a
         // cached state skips the fetch that would clear it. One still in
         // flight keeps its answer's line.
@@ -552,8 +548,7 @@ impl QuillApp {
     /// Slice A2: close the overlay and clear every 2FA input — passwords
     /// must not linger in the form after the dialog is gone.
     pub(super) fn close_twofa(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.twofa.close();
-        self.goto_twofa_view(TwofaView::Status);
+        self.twofa_close();
         self.twofa
             .current_password
             .update(cx, |input, cx| input.set_value("", window, cx));
@@ -577,7 +572,7 @@ impl QuillApp {
     /// Leaving the Devices page stops a camera scan and drops a pending
     /// terminate confirmation.
     pub(crate) fn leave_devices(&mut self) {
-        self.clear_device_qr();
+        self.leave_device_link();
         self.privacy.devices.close_all();
     }
 
@@ -599,26 +594,11 @@ impl QuillApp {
     /// fetch refires; demo re-injects the fixture.
     pub(super) fn refresh_sessions(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.settings.sessions = Fetch::Idle;
-            live.driver.session.settings.sessions_op.refetched();
-            let _ = live.driver.maybe_fetch_active_sessions();
+            let _ = live.driver.refresh_active_sessions();
         } else if let Some(session) = self.demo_session.as_mut() {
             session.settings.sessions = Fetch::Ready(demo_sessions());
         }
         cx.notify();
-    }
-
-    /// Slice A2: switch the 2FA view; a fresh form starts with no local
-    /// notice line.
-    pub(super) fn goto_twofa_view(&mut self, view: TwofaView) {
-        self.twofa.goto(view);
-        if view == TwofaView::Status {
-            self.clear_twofa_flow();
-        } else if let Some(session) = self.live.as_mut().map(|l| &mut l.driver.session) {
-            session.auth_state.twofa_flow.notice = None;
-        } else if let Some(session) = self.demo_session.as_mut() {
-            session.auth_state.twofa_flow.notice = None;
-        }
     }
 
     /// Slice A2: one `setPassword` round-trip — enable (empty current),

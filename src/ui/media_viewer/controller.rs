@@ -35,7 +35,7 @@ impl QuillApp {
                 duration: item.duration_secs.map(|secs| f64::from(secs.max(0))),
                 buffered: Vec::new(),
                 rate: self.players.speed,
-                volume: self.players.volume,
+                volume: self.players.volume(),
                 has_sound: true,
                 live: false,
             });
@@ -76,7 +76,7 @@ impl QuillApp {
         };
         Some(
             VideoController::new(row_id, &transport, &self.viewer.controls, actions)
-                .level(self.players.volume)
+                .level(self.players.volume())
                 .fullscreen(self.viewer.extra.video_fullscreen.is_on())
                 .shown(!self.viewer.visibility.is_hidden())
                 .speed_dial(speed_dial)

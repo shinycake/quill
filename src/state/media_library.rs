@@ -161,6 +161,10 @@ pub enum MessageReactionsState {
         message_id: MessageId,
     },
     Ready(MessageReactionOptions),
+    /// The options shown are out of date (the chat's or the account's
+    /// reactions changed): the driver asks again and the strip stays until
+    /// the new answer replaces it.
+    Stale(MessageReactionOptions),
     /// The request failed or the answer held no reaction: no strip.
     Unavailable {
         chat_id: ChatId,
@@ -172,9 +176,22 @@ impl MessageReactionsState {
     /// The options, whichever message they belong to.
     pub fn ready(&self) -> Option<&MessageReactionOptions> {
         match self {
-            Self::Ready(options) => Some(options),
+            Self::Ready(options) | Self::Stale(options) => Some(options),
             _ => None,
         }
+    }
+
+    /// Something changed the options of the picker that is open: they are
+    /// asked for again.
+    pub fn mark_stale(&mut self) {
+        if let Self::Ready(options) = self {
+            *self = Self::Stale(options.clone());
+        }
+    }
+
+    /// The picker's options are out of date.
+    pub fn is_stale(&self) -> bool {
+        matches!(self, Self::Stale(_))
     }
 
     /// The options when they belong to this message.
@@ -213,7 +230,7 @@ impl MessageReactionsState {
                 chat_id,
                 message_id,
             } => Some((*chat_id, *message_id)),
-            Self::Ready(o) => Some((o.chat_id, o.message_id)),
+            Self::Ready(o) | Self::Stale(o) => Some((o.chat_id, o.message_id)),
         }
     }
 
@@ -221,7 +238,7 @@ impl MessageReactionsState {
     /// count (its request may be gone), nor does a failed or empty answer:
     /// reopening the menu asks again unless a request is really pending.
     pub fn covers(&self, chat_id: ChatId, message_id: MessageId) -> bool {
-        self.ready_for(chat_id, message_id).is_some()
+        matches!(self, Self::Ready(_)) && self.ready_for(chat_id, message_id).is_some()
     }
 }
 

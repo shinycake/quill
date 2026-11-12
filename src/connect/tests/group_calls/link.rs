@@ -42,7 +42,7 @@ fn the_join_click_sends_the_links_hash() {
     );
     // Leaving drops the hash: the next join of the call carries none.
     driver.session.leave_group_call_local();
-    assert_eq!(driver.session.calls.call_link, None);
+    assert_eq!(driver.session.calls.call_link_stage, CallLinkStage::Idle);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -57,10 +57,11 @@ fn a_plain_join_has_no_hash() {
 #[test]
 fn a_hash_for_another_call_is_not_sent() {
     let (dir, mut driver, recorder, _handle, _sink, _seq) = ready_group_call_driver();
-    driver.session.calls.call_link = Some(crate::call_link::PendingCallLink {
-        group_call_id: 9,
-        invite_hash: "other".into(),
-    });
+    driver.session.calls.call_link_stage =
+        CallLinkStage::Joinable(crate::call_link::PendingCallLink {
+            group_call_id: 9,
+            invite_hash: "other".into(),
+        });
     driver.join_video_chat(555).expect("join tracked call");
     assert_eq!(sent_request(&recorder, "joinVideoChat")["invite_hash"], "");
     let _ = std::fs::remove_dir_all(&dir);
@@ -78,7 +79,7 @@ fn a_chat_without_a_call_is_a_bad_link_and_sends_nothing() {
     let before = recorder.snapshot().len();
     let step = driver.offer_call_link(ChatId(52), "x", false).unwrap();
     assert_eq!(step, CallLinkStep::NoCall);
-    assert_eq!(driver.session.calls.call_link, None);
+    assert_eq!(driver.session.calls.call_link_stage, CallLinkStage::Idle);
     assert_eq!(recorder.snapshot().len(), before);
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -93,7 +94,7 @@ fn another_joined_call_blocks_the_offer() {
     let step = driver.offer_call_link(ChatId(51), "AbC", false).unwrap();
     assert_eq!(step, CallLinkStep::Busy);
     assert_eq!(recorder.snapshot().len(), before);
-    assert_eq!(driver.session.calls.call_link, None);
+    assert_eq!(driver.session.calls.call_link_stage.hash_for(555), "");
     let ask = driver
         .session
         .calls
@@ -125,22 +126,32 @@ fn confirming_leaves_the_old_call_and_offers_the_new_one() {
         sent_request(&recorder, "getGroupCall")["group_call_id"],
         555
     );
-    assert_eq!(
-        driver.session.calls.call_link_stage,
-        CallLinkStage::Offered(crate::call_link::OfferedCallLink {
+    assert!(matches!(
+        &driver.session.calls.call_link_stage,
+        CallLinkStage::Offered { offered, .. } if *offered == crate::call_link::OfferedCallLink {
             group_call_id: 555,
             live_stream: false,
-        })
-    );
-    assert_eq!(
+        }
+    ));
+    assert_eq!(driver.session.calls.call_link_stage.hash_for(555), "AbC");
+    // The UI takes the note once; the hash stays for the join.
+    assert!(
         driver
             .session
             .calls
-            .call_link
-            .as_ref()
-            .map(|l| l.invite_hash.as_str()),
-        Some("AbC")
+            .call_link_stage
+            .take_offered()
+            .is_some()
     );
+    assert!(
+        driver
+            .session
+            .calls
+            .call_link_stage
+            .take_offered()
+            .is_none()
+    );
+    assert_eq!(driver.session.calls.call_link_stage.hash_for(555), "AbC");
     assert!(
         !sent_types(&recorder).iter().any(|t| t == "joinVideoChat"),
         "the join screen still waits for its own click"
@@ -171,13 +182,10 @@ fn a_confirmed_stream_link_keeps_its_live_stream_into_the_offer() {
     driver.session.calls.active_group_call = Some(other);
     driver.offer_call_link(ChatId(51), "AbC", true).unwrap();
     driver.confirm_call_link_leave().unwrap();
-    assert_eq!(
-        driver.session.calls.call_link_stage,
-        CallLinkStage::Offered(crate::call_link::OfferedCallLink {
-            group_call_id: 555,
-            live_stream: true,
-        })
-    );
+    assert!(matches!(
+        &driver.session.calls.call_link_stage,
+        CallLinkStage::Offered { offered, .. } if offered.live_stream && offered.group_call_id == 555
+    ));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -211,7 +219,7 @@ fn another_call_taking_the_place_drops_the_waiting_link() {
 fn a_failed_fetch_of_the_offered_call_drops_its_hash() {
     let (dir, mut driver, recorder, _handle, sink, seq) = ready_group_call_driver();
     driver.offer_call_link(ChatId(51), "AbC", false).unwrap();
-    assert!(driver.session.calls.call_link.is_some());
+    assert_eq!(driver.session.calls.call_link_stage.hash_for(555), "AbC");
     let fetch = sent_request(&recorder, "getGroupCall");
     let json = serde_json::json!({
         "@type": "error",
@@ -223,6 +231,6 @@ fn a_failed_fetch_of_the_offered_call_drops_its_hash() {
     driver
         .ingest(crate::telegram::client::copy_and_parse(&json, &seq, &sink).unwrap())
         .unwrap();
-    assert_eq!(driver.session.calls.call_link, None);
+    assert_eq!(driver.session.calls.call_link_stage, CallLinkStage::Idle);
     let _ = std::fs::remove_dir_all(&dir);
 }

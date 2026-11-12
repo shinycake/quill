@@ -76,7 +76,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.session
             .groups
-            .note_member_more((chat_id.0, filter), extra);
+            .note_member_more((chat_id.0, filter), extra, offset);
         Ok(Some(extra))
     }
 }
