@@ -241,5 +241,10 @@ fn the_self_destruct_tick_does_not_run_while_the_window_is_hidden(cx: &mut TestA
         app.frame.window_active.set(true);
         app.ensure_self_destruct_tick(cx);
         assert_eq!(app.frame.animation_demand.get(), 1, "shown: ticks");
+        let targets = app.frame.animation_targets.take();
+        assert!(
+            !targets.contains(&None),
+            "the tick redraws the conversation slice, not the whole app: {targets:?}"
+        );
     });
 }

@@ -182,6 +182,11 @@ impl Future for WaitSince<'_> {
 /// TDLib updates for the account on screen (or any other input its poll
 /// loop drains) arrived.
 pub static UPDATES: Signal = Signal::new();
+/// A pass of the main poll loop finished applying what it drained. Poked
+/// after the apply, never by the receive thread, so a waiter that reads
+/// the applied state finds the answer that woke it (`UPDATES` is poked
+/// before the drain).
+pub static APPLIED: Signal = Signal::new();
 /// TDLib updates for an account in the background arrived.
 pub static BACKGROUND_UPDATES: Signal = Signal::new();
 /// A link, activation or quit request arrived from outside the window.

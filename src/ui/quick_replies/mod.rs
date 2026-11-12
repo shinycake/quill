@@ -351,21 +351,22 @@ impl QuillApp {
     /// stage that waits owns the returned poll.
     fn quick_replies_poll(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Poll {
         let task = self.spawn_screen_in(window, cx, async move |this, cx| {
-            let mut seen = quill::wake::UPDATES.epoch();
+            let mut seen = quill::wake::APPLIED.epoch();
             loop {
-                // Rests on the updates signal: TDLib's answer and the
-                // shortcut's update both poke it once the pump drained them.
-                // The long fallback only covers an answer that arrives
-                // without a poke.
+                // Rests on the signal the poll pass pokes after it applied
+                // what TDLib sent: the answer and the shortcut's update are
+                // in the session by then. (`UPDATES` is poked before the
+                // drain, so this pump would find nothing.) The long
+                // fallback only covers an answer that arrives without a pass.
                 super::wake_wait::sleep_or_wake(
                     cx.background_executor(),
-                    &quill::wake::UPDATES,
+                    &quill::wake::APPLIED,
                     seen,
                     Duration::from_secs(2),
                 )
                 .await;
                 // Taken before the pass, so a poke during it ends the next rest.
-                seen = quill::wake::UPDATES.epoch();
+                seen = quill::wake::APPLIED.epoch();
                 let Ok(done) =
                     this.update_in(cx, |this, window, cx| this.quick_replies_pump(window, cx))
                 else {

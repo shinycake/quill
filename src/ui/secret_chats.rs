@@ -120,7 +120,8 @@ impl QuillApp {
             .session()
             .is_some_and(|session| session.open_chat_has_live_self_destruct(now_ms))
         {
-            self.request_animation_tick_for(None, 1, cx);
+            // Only the slice that draws the badges, not the whole app.
+            self.request_animation_tick_for(self.conversation_view_id(), 1, cx);
         }
     }
 
