@@ -71,3 +71,14 @@ src/telegram/envelope/domains/payments/mod.rs 69 read
 src/telegram/envelope/domains/payments/parse.rs 145 read
 src/telegram/envelope/domains/search/mod.rs 46 read
 src/telegram/envelope/domains/search/parse.rs 123 read
+src/telegram/envelope/domains/settings/mod.rs 182 read
+src/telegram/envelope/domains/settings/parse.rs 552 read
+src/telegram/envelope/domains/stickers/mod.rs 155 read
+src/telegram/envelope/domains/stickers/parse.rs 180 read
+src/telegram/envelope/domains/stories/mod.rs 108 read
+src/telegram/envelope/domains/stories/parse.rs 211 read
+src/telegram/envelope/domains/threads/mod.rs 55 read
+src/telegram/envelope/domains/threads/parse.rs 107 read
+src/telegram/envelope/domains/users/mod.rs 105 read
+src/telegram/envelope/domains/users/parse.rs 191 read
+src/telegram/envelope/envelope_types.rs 450 read
