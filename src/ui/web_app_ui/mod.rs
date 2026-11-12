@@ -20,6 +20,7 @@ use super::attach_bots::AttachMenuEntry;
 use super::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
 use awaited::Awaited;
+use popups::{PopupId, PopupPurpose};
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
@@ -116,43 +117,6 @@ pub(super) enum WebAppConfirm {
     RemoveFromMenu { bot_id: i64, name: String },
 }
 
-/// One popup shown to the helper. A stage that waits for the person holds
-/// the id of the popup it opened and acts only on that popup's answer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) struct PopupId(u64);
-
-impl PopupId {
-    /// The id the helper knows the popup by.
-    fn wire(self) -> String {
-        format!("p{}", self.0)
-    }
-
-    /// The popup a helper answer names; `None` for an id this host never
-    /// made.
-    fn from_wire(wire: &str) -> Option<Self> {
-        wire.strip_prefix('p')?.parse().ok().map(Self)
-    }
-}
-
-/// What a shell popup was for, so its answer can be acted on.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum PopupPurpose {
-    /// `web_app_open_popup`: the app gets `popup_closed`.
-    App,
-    /// "Allow messaging": yes calls `allowBotToSendMessages`.
-    WriteAccess,
-    /// "Paste from clipboard": yes reads the clipboard for the app.
-    Clipboard { req_id: String },
-    /// "Close anyway" after `web_app_setup_closing_behavior`.
-    CloseConfirm,
-    /// `web_app_request_emoji_status_access`: "Allow" grants it.
-    EmojiStatusAccess,
-    /// `web_app_set_emoji_status`: "Confirm" sets the status.
-    EmojiStatus,
-    /// `web_app_request_phone`: "Share" sends the contact card.
-    Phone,
-}
-
 /// Something only a render (with the `Window`) can do.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum RenderAction {
@@ -232,7 +196,7 @@ impl MiniAppWindow {
     /// Show a popup; the stage that waits for its answer holds the id.
     fn show_popup(&mut self, purpose: PopupPurpose, popup_without_id: Popup) -> PopupId {
         self.popup_seq += 1;
-        let popup_id = PopupId(self.popup_seq);
+        let popup_id = PopupId::new(self.popup_seq);
         self.popups.insert(popup_id, purpose);
         self.send(&HostCommand::ShowPopup {
             popup: Popup {
@@ -996,6 +960,7 @@ fn bottom_button(setup: quill::web_app::bridge::ButtonSetup) -> BottomButton {
 mod awaited;
 mod emoji_status;
 mod helper_pipe;
+mod popups;
 mod inline_results_button;
 mod invoice;
 mod launch_flow;

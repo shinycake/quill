@@ -14,7 +14,8 @@ hold what ends it:
 
 - `bare`: the variant has no data at all;
 - `unkeyed`: the variant has data, but no `RequestId`, `Task`,
-  `JoinHandle`, `Subscription`, channel end or deadline in it, or in the
+  `JoinHandle`, `Subscription`, `PopupId` (the popup a stage opened, whose
+  answer is matched against it), channel end or deadline in it, or in the
   types it names;
 - `optional`: the only request in it is an `Option<RequestId>`: a stage
   that is `Loading(None)` until a second call fills the request in is the
@@ -76,7 +77,7 @@ IN_FLIGHT = set(
     "Building Cutting Encoding Activating Rendering Listing Jumping Capturing".split()
 )
 CARRIER = re.compile(
-    r"\b(?:RequestId|Task|TaskHold|RenderJob|JoinHandle|Subscription|Receiver|Sender|Instant|SystemTime)\b"
+    r"\b(?:RequestId|Task|TaskHold|RenderJob|JoinHandle|Subscription|Receiver|Sender|Instant|SystemTime|PopupId)\b"
 )
 OPTIONAL_REQUEST = re.compile(r"Option\s*<\s*(?:[\w:]*::)?RequestId\s*>")
 # Enums that name a message, a reason or a derived view, not a stored stage.

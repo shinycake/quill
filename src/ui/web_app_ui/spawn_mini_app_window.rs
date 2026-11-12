@@ -506,7 +506,7 @@ impl QuillApp {
             .window
             .as_ref()
             .map(|window| {
-                let newest = PopupId(window.popup_seq);
+                let newest = PopupId::new(window.popup_seq);
                 window
                     .popups
                     .keys()

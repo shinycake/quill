@@ -40,6 +40,7 @@ preferences.send_to * | the Explorer "Send to" shortcut belongs to the machine: 
 preferences.system_accent.Reading.color | the OS accent color known while its read is in flight
 preferences.system_accent.Reading._wait | the one task waiting for the OS accent read to land
 preferences.link_handler_watch | the one task waiting for the process-wide link handler read to land
+preferences.update_recheck | the one timer to the next release recheck; the update check belongs to the app, not to an account
 preferences.font_picker | the font family picker entity
 preferences.accent_picker | the accent color picker entity
 preferences.translate * | the translation preferences file

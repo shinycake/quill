@@ -71,7 +71,6 @@ src/ui/touch_bar/mac/mod.rs HOST,INBOX,SYNC_SCHEDULER,BAR_SCREEN,APPLIED,BINDING
 src/ui/video_player/mod.rs NEXT | an id counter
 src/ui/video_player/decoder_load.rs LOADS,REFRESHES | counters
 src/ui/video_player/controls/pip/open.rs LATEST,WRITING | the one Picture-in-Picture
-src/ui/video_editor.rs OPENED | a counter
 src/ui/presence.rs LAST_INPUT_MS | the app's last input, any window
 src/ui/tray_settings.rs WINDOW_SKIPS_TASKBAR | an app setting
 src/ui/window_control.rs CONNECTION | the X connection
