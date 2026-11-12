@@ -5,27 +5,21 @@
 //! confirmed. The pending ask itself is per chat (`ChatUi::bot_alert`).
 #![deny(clippy::indexing_slicing)]
 
-/// Whether the warning was confirmed for this account.
-#[derive(Default)]
-enum InlineBotNotice {
-    #[default]
-    Unconfirmed,
-    Confirmed,
-}
-
+/// The user's acknowledgement of the warning for this account: a fact the
+/// user set once (no request, no stages), so it is a plain value.
 #[derive(Default)]
 pub(crate) struct InlineBotUi {
-    notice: InlineBotNotice,
+    acknowledged: bool,
 }
 
 impl crate::ui::on_screen::Farewell for InlineBotUi {}
 
 impl InlineBotUi {
     pub(super) fn is_confirmed(&self) -> bool {
-        matches!(self.notice, InlineBotNotice::Confirmed)
+        self.acknowledged
     }
 
     pub(super) fn confirm(&mut self) {
-        self.notice = InlineBotNotice::Confirmed;
+        self.acknowledged = true;
     }
 }

@@ -64,6 +64,8 @@ pub(crate) struct GroupEditBox {
     pub(crate) auto_translate: Option<bool>,
     /// What the history box's Save chose; sent with this box's Save.
     pub(crate) history_visible: Option<bool>,
+    /// The sticker and emoji pack changes this box sent.
+    packs: extras::PackChanges,
 }
 
 /// The box open over the Edit box: one at a time. It leaves when its own
@@ -311,6 +313,7 @@ impl QuillApp {
             signatures: None,
             auto_translate: None,
             history_visible: None,
+            packs: extras::PackChanges::default(),
         });
         self.open_box(DialogKind::GroupEditBox);
         cx.notify();
@@ -445,14 +448,12 @@ impl QuillApp {
         };
         let toggles = session.map(|s| edit.toggle_edits(s)).unwrap_or_default();
         if edits.is_empty() && type_edits.is_empty() && toggles.is_empty() {
-            self.admin.group_edit_box = None;
-            cx.notify();
+            self.close_group_edit_box(cx);
             return;
         }
         let Some(live) = self.live.as_mut() else {
             self.set_note(StatusNote::info(tr(keys::Q_PEOPLE_DEMO_MODE_THIS_NEEDS_A)));
-            self.admin.group_edit_box = None;
-            cx.notify();
+            self.close_group_edit_box(cx);
             return;
         };
         let sent = live.driver.save_group_type(chat_id, &type_edits, &edits);
@@ -468,10 +469,10 @@ impl QuillApp {
                 // The photo uploads after the box closes, as in tdesktop.
                 edit.photo = None;
                 if sent.is_empty() {
-                    self.admin.group_edit_box = None;
-                } else {
-                    edit.saving = SaveStage::Saving(sent);
+                    self.close_group_edit_box(cx);
+                    return;
                 }
+                edit.saving = SaveStage::Saving(sent);
             }
             Err(err) => {
                 let line = user_error_for(keys::Q_NOTES_FAILED_SAVE_GROUP_INFO, &err);

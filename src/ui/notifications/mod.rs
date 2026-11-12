@@ -244,8 +244,11 @@ impl QuillApp {
         }
         let customs = live.driver.load_custom_keybindings();
         // Empty prefs rebuild defaults too, replacing the previous account's chords.
-        super::keybindings::apply_custom_bindings(cx, &customs);
-        self.preferences.keybinding.keymap = super::keybindings::Keymap::Applied(account);
+        // A keymap borrowed elsewhere is left as it was: the keymap stays
+        // `Stale` and the next call tries again.
+        if super::keybindings::apply_custom_bindings(cx, &customs) {
+            self.preferences.keybinding.keymap = super::keybindings::Keymap::Applied(account);
+        }
     }
 
     /// Redraw for what the TDLib poll applied, as urgently as it needs

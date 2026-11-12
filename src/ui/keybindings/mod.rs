@@ -707,8 +707,9 @@ fn trace_keys(cx: &mut App) {
 /// collide with a fixed (window-chrome/app-lifecycle) keystroke, or that
 /// collide with another rebindable action's live chord are not installed —
 /// that action keeps the defaults that are still free. A chord is bound to
-/// at most one action.
-pub fn apply_custom_bindings(cx: &mut App, customs: &[CustomKeybinding]) {
+/// at most one action. Returns whether the keymap was rebuilt; `false`
+/// when it is borrowed elsewhere and was left as it was.
+pub fn apply_custom_bindings(cx: &mut App, customs: &[CustomKeybinding]) -> bool {
     // Review fix (#242 defect 1): `clear_key_bindings` wipes the whole app
     // keymap, including kit-internal bindings (List / command-palette
     // navigation) registered by `gpui_kit::init`. Keep everything that isn't
@@ -718,7 +719,7 @@ pub fn apply_custom_bindings(cx: &mut App, customs: &[CustomKeybinding]) {
     // from a partial list would drop the kit's own bindings.
     let kept = cx.key_bindings();
     let Ok(keymap) = kept.try_borrow() else {
-        return;
+        return false;
     };
     let mut bindings: Vec<KeyBinding> = keymap
         .bindings()
@@ -746,6 +747,7 @@ pub fn apply_custom_bindings(cx: &mut App, customs: &[CustomKeybinding]) {
     bindings.extend(super::chat_list_keys::chat_list_bindings());
     cx.clear_key_bindings();
     cx.bind_keys(bindings);
+    true
 }
 
 mod capture;

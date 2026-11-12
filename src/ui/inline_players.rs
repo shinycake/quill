@@ -323,6 +323,10 @@ impl Slot {
 #[derive(Default)]
 struct State {
     players: HashMap<Key, Slot>,
+    /// Clips whose file did not open (unreadable, unsupported), with the
+    /// path that failed: a tile asks for a new player only once its path
+    /// changes, not on every frame. Emptied with the players.
+    unopenable: HashMap<Key, PathBuf>,
     /// Each window's pass counts, of its history and of each panel
     /// (`None`: the main window's).
     passes: HashMap<(Option<ChatId>, List), u64>,
@@ -585,6 +589,7 @@ impl InlineVideos {
             // decode at the old size, so restart them at the new one.
             if state.scale > 0. && (state.scale - scale).abs() > f32::EPSILON {
                 dropped = std::mem::take(&mut state.players);
+                state.unopenable.clear();
                 state.forget(&dropped);
             }
             state.scale = scale;
@@ -625,6 +630,7 @@ impl InlineVideos {
     pub(super) fn clear(&self) {
         let dropped = self.with(|state| {
             state.on_demand.clear();
+            state.unopenable.clear();
             std::mem::take(&mut state.players)
         });
         drop(dropped);
@@ -882,7 +888,18 @@ impl InlineVideos {
             return None;
         }
         let path = path()?;
-        let player = VideoPlayer::open(&path, Purpose::Inline { max_edge }, duration, cx).ok()?;
+        if self
+            .with(|state| state.unopenable.get(&key) == Some(&path))
+            .unwrap_or(false)
+        {
+            return None;
+        }
+        let Ok(player) = VideoPlayer::open(&path, Purpose::Inline { max_edge }, duration, cx)
+        else {
+            self.with(|state| state.unopenable.insert(key, path));
+            return None;
+        };
+        self.with(|state| state.unopenable.remove(&key));
         player.set_volume(0.0);
         player.set_looping(true);
         // A history clip starts held, as if off screen: the sweep after

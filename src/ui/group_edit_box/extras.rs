@@ -13,12 +13,57 @@ use gpui_kit::assets::IconName as I;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
-use quill::ids::ChatId;
+use quill::ids::{ChatId, RequestId};
 use quill::lang::{keys, tr, tr_with};
-use quill::state::{RequestPurpose, Submit, SubmitView};
+use quill::state::{Submit, SubmitView};
 use quill::telegram::envelope::ChatKind;
 
+/// A pack change this box sent, until its request is answered (or fails).
+#[derive(Clone, Copy, Default)]
+enum PackAsk {
+    #[default]
+    Idle,
+    Out(RequestId),
+}
+
+/// The sticker pack and emoji pack changes of one Edit box. A change is out
+/// under its own request, so the buttons wait for that request and for no
+/// other one of the chat.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct PackChanges {
+    sticker: PackAsk,
+    emoji: PackAsk,
+}
+
+impl PackChanges {
+    fn busy(&self, in_flight: impl Fn(RequestId) -> bool) -> bool {
+        [self.sticker, self.emoji]
+            .into_iter()
+            .any(|ask| matches!(ask, PackAsk::Out(id) if in_flight(id)))
+    }
+
+    fn sent(&mut self, custom: bool, request: RequestId) {
+        let ask = PackAsk::Out(request);
+        if custom {
+            self.emoji = ask;
+        } else {
+            self.sticker = ask;
+        }
+    }
+}
+
 impl QuillApp {
+    /// Whether one of this box's pack changes is still out.
+    fn pack_change_busy(&self) -> bool {
+        let Some(session) = self.session() else {
+            return false;
+        };
+        self.admin
+            .group_edit_box
+            .as_ref()
+            .is_some_and(|edit| edit.packs.busy(|id| session.requests.get(id).is_some()))
+    }
+
     pub(super) fn quill_manage_rows(
         &self,
         chat_id: ChatId,
@@ -188,12 +233,7 @@ impl QuillApp {
             }
             _ => None,
         });
-        let busy = [
-            RequestPurpose::SetSupergroupStickerSet,
-            RequestPurpose::SetSupergroupCustomEmojiStickerSet,
-        ]
-        .iter()
-        .any(|p| session.requests.has_purpose_for_chat(*p, chat_id));
+        let busy = self.pack_change_busy();
         let loading = session.stickers.stickers.lists.installed.is_loading()
             || session.stickers.emoji.lists.installed.is_loading();
         let mut section = div().flex().flex_col().gap_1().child(
@@ -271,6 +311,9 @@ impl QuillApp {
                         .selected(id == current)
                         .disabled(busy || id == current)
                         .on_click(cx.listener(move |this, _, _, cx| {
+                            if this.pack_change_busy() {
+                                return;
+                            }
                             if let Some(live) = this.live.as_mut() {
                                 let result = if custom {
                                     live.driver
@@ -278,6 +321,11 @@ impl QuillApp {
                                 } else {
                                     live.driver.set_supergroup_sticker_set(chat_id, id)
                                 };
+                                if let (Ok(Some(request)), Some(edit)) =
+                                    (&result, this.admin.group_edit_box.as_mut())
+                                {
+                                    edit.packs.sent(custom, *request);
+                                }
                                 this.set_note(match result {
                                     Ok(Some(_)) => StatusNote::silent(tr(
                                         keys::Q_PEOPLE_GROUP_PACK_CHANGE_REQUESTED,
