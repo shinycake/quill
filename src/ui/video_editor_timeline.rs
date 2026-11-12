@@ -480,17 +480,23 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// The window lost focus with a drag held: the mouse-up goes to
-    /// another window, so the hold ends as if it came.
-    pub(in crate::ui) fn release_video_timeline_on_blur(&mut self, cx: &mut Context<Self>) {
-        self.release_lost_video_drag(cx);
+    /// The pointer moved over the strip's window. With the button down the
+    /// held part follows; with it up, a mouse-up that never came (let go
+    /// outside the window) ends the held part here.
+    fn video_timeline_moved(&mut self, pressed: bool, x: f32, cx: &mut Context<Self>) {
+        if pressed {
+            self.video_timeline_drag(x, cx);
+        } else {
+            self.release_lost_video_drag(cx);
+        }
     }
 
     /// A mouse-up that never came (let go outside the window, or in
-    /// another one): whatever drag is held ends the way its own release
-    /// does (the strip resumes playback, the picture's press ends its crop
-    /// grid or toggles the pause, the quality line lets go).
-    fn release_lost_video_drag(&mut self, cx: &mut Context<Self>) {
+    /// another one; also the window's blur): whatever drag is held ends the
+    /// way its own release does (the strip resumes playback, the picture's
+    /// press ends its crop grid or toggles the pause, the quality line
+    /// lets go).
+    pub(in crate::ui) fn release_lost_video_drag(&mut self, cx: &mut Context<Self>) {
         let release = self
             .composer_ui
             .send_box
@@ -632,14 +638,10 @@ impl QuillApp {
                     if phase != DispatchPhase::Bubble {
                         return;
                     }
-                    if event.pressed_button == Some(MouseButton::Left) {
-                        let x = f32::from(event.position.x - origin);
-                        let _ = move_app.update(cx, |this, cx| this.video_timeline_drag(x, cx));
-                    } else {
-                        // The button is up: a mouse-up that never came (let
-                        // go outside the window) ends the held part here.
-                        let _ = move_app.update(cx, |this, cx| this.release_lost_video_drag(cx));
-                    }
+                    let pressed = event.pressed_button == Some(MouseButton::Left);
+                    let x = f32::from(event.position.x - origin);
+                    let _ =
+                        move_app.update(cx, |this, cx| this.video_timeline_moved(pressed, x, cx));
                 });
                 let up_app = app.clone();
                 window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
@@ -994,6 +996,9 @@ fn paint_labels(
         },
     );
 }
+
+#[cfg(test)]
+mod release_tests;
 
 #[cfg(test)]
 mod tests {

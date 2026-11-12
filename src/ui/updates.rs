@@ -57,27 +57,18 @@ impl QuillApp {
     /// update already found, held (the disk bar), failed or on its way is
     /// not replaced by a check that may fail offline (`Checking` keeps no
     /// offer to return to). The button's check can still start over those.
-    /// A download that failed (offline, say) is tried again by the timer,
-    /// straight from the release it kept: "auto-download, one button".
+    /// A download that failed is checked again by the timer: the release
+    /// that fixes it (a bad checksum, an asset taken down) is found, and the
+    /// kept release, when it is still the latest, is downloaded again by the
+    /// found update's own start (`auto_download_update`).
     pub(super) fn recheck_for_updates(&mut self, cx: &mut Context<Self>) {
-        if let UpdateState::DownloadFailed(release, _) = &self.preferences.update_state {
-            let again = UpdateState::Available(release.clone());
-            if !self.disk.holds_auto_downloads()
-                && let Some(release) = UpdateControl::auto_download(
-                    &again,
-                    quill::update_install::self_update_availability(),
-                )
-            {
-                self.download_update(release, cx);
-            }
-            return;
-        }
         if matches!(
             self.preferences.update_state,
             UpdateState::Idle
                 | UpdateState::UpToDate
                 | UpdateState::NoRelease
                 | UpdateState::Failed(_)
+                | UpdateState::DownloadFailed(..)
         ) {
             self.check_for_updates(cx);
         }

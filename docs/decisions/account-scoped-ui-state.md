@@ -8944,7 +8944,7 @@ Review round and file-complete pass (round 2):
 | 12-D013, 12-D014, 02-002 | A tray read (`Read::Reading { job, _tasks: Held }`) owns its worker and give-up tasks: leaving the stage (answer, give-up, forget, supersede) drops them. Sound, media, photo-size and thumbnail reads use it, as `spawn_app` tasks (the reads are the app's). |
 | price box | `PriceDialog::too_high` is `PriceVerdict { Typing, TooHigh { text } }`: the line shows only while the field holds the refused text, so editing clears it. |
 | 13-037 | `StoryComposer::id` (never 0, new per opening); the file dialog's answer applies only to the composer that asked (`take_story_media_asked_by`). |
-| 14-002 | The timer's `recheck_for_updates` leaves `DownloadFailed` and `InstallFailed` for the button. |
+| 14-002 | The timer's `recheck_for_updates` leaves `InstallFailed` for the button. It no longer leaves `DownloadFailed` for it: superseded by the r4-12 round 3 and round 4 tables (the timer checks again from `DownloadFailed`). |
 | 14-004 | `UpdateState::Checking(Job)`, `Downloading(.., Job)` and `Installing(.., Job)` own their tasks (`updater::Job`): replacing the stage cancels the check, the download wait and its redraw timer. The 4-hour loop is the app's own timer and ends with the app. |
 | 14-005 | A community ban waits as a `PendingBan` that holds its `RequestId` (from `fetch_community_member_chats`, or the one already in flight for the same member); a newer ask for the member is followed, and any wait whose ask answered settles (one still out no longer holds up another). A wait ends with the box it was pressed from (`drop_bans_over`, from the dialog close and the shell's replacement of the box), and, as before, when another box is open at the answer. Nothing is banned for a forgotten press. |
 | 14-004 | `take_draft_clear` no longer falls back to any clear of the chat. A pending `DraftClear` holds its send's messages (`Asked(RequestId)` from the send, `Made(MessageId)` once the answer to that request names the temporary message: `SendAnswered` in `MessagesState::sent_answers`). The ack (`SendAck { chat_id, slot, old_message_id }`) finds its clear by `old_message_id`, so a reply from a supergroup's main composer, acked under the replied-to message's topic, still clears the draft of the slot it was typed in (the clear returns that slot). With no message match only the clear of the very slot the ack names is taken, never a neighbour's. Tests: `a_reply_from_the_main_composer_is_acked_under_another_topic`, `a_send_answer_names_the_temporary_message_of_its_request`. |
@@ -10266,7 +10266,7 @@ launch_flow}`, `widgets_lock_tests`, `wallpaper_preview_tests`, `voice`,
 | mini-app window | `MiniAppWindow::launch_window` replaces `MiniApps::from_window`: the poll and the helper's events run as the window the open app's flow started in. `mini_app_watch_due` ticks only while the phone flow waits on a request. |
 | emoji status | `SetStage::Deferred` is gone: the suggested emoji's own lookup (`ConnectDriver::resolve_suggested_emoji`) does not wait behind the shared slot, so the stage goes straight to `Resolving { request }`. |
 | helper pipe tests | The broken sink holds a sender dropped when the writer thread ends; the tests block on `recv()`. |
-| translate Hide | A Hide that TDLib refuses (the flag is back) ends its Undo toast with an error note (`end_refused_hide_toast`). |
+| translate Hide | A Hide that TDLib refuses (the flag is back) ends its Undo toast with an error note (`end_refused_hide_toast`): superseded, that function is gone; `HideStage` and `end_refused_hide` settle it (r4-12 round 3 table). |
 | suggested posts | The Decline box closes when its post is decided elsewhere (`close_decided_decline`) and `confirm_suggest_decline` sends nothing for a decided post; the dead `.loading/.disabled` and the dead busy branch of Publish are gone. |
 | touch bar | `PickerFill::{Unfilled, Shown(contents), Held { shown, waiting }}` compares against what is shown first; `Anim::{Idle, Animating(timer)}` replaces `Option<NSTimer>`. |
 | update pill | `UpdatePill` is one enum (`Other`, `Percent`, `Ready`) carrying the glide and the swap start. |
@@ -10301,3 +10301,17 @@ launch_flow}`, `widgets_lock_tests`, `wallpaper_preview_tests`, `voice`,
 | video decode | `wait_frame` also stops on `at_end()` and `is_stopped()`. |
 | waiting gate | `WaitingGate::Delayed { since, _timer }` is built whole by `observe`; `shown_in` spawns the redraw timer. |
 | voice | `Recording::{Ours, HandedOn}` replaces the empty `PathBuf` sentinel in `VoiceCapture` and `VoiceFinish`. |
+
+#### Fix round 4 (r4-12)
+
+| Ids | What changed |
+| --- | --- |
+| vanish | `settle_ghosts` turns every answered ghost's `Deletion` into `Local`, waiting or crumbling, so none keeps a request nothing will answer. `vanish_overlay` does not count a ghost at `Phase::Done` as running (`animating`). Test: a delete answered while waiting stops asking for frames after the crumble and is pruned with no later poll. |
+| FFmpeg reopen | The reopen moves the open wake into a fresh slot before the new player forwards to it, so a dropped player still opening fires an empty slot. Test: a gated demuxer is mid-open at `set_volume`; its open does not fire the wake, the new player's does, once. |
+| mini-app window | The window goes into `open_web_app`, `get_web_app_url`, `get_main_web_app` and `get_web_app_link_url`, and `mark_web_app_pending` builds `WebAppPending` whole; `note_open_window` is gone. The connect test passes the window to the driver call; a UI test reads `launch_window()` inside `as_asked_by(Some(12))`. A UI test cannot send through a live driver, so the capture is covered by those two halves. |
+| tests | No wall-clock deadline in the new tests: `Player::wait_open_settled` and `wait_frame_settled` wait on the decode thread's condvar with no deadline; the update test advances the manual clock. |
+| video editor | `release_tests.rs` drives `release_lost_video_drag` (the blur hook) and `video_timeline_moved` (the button-up move hook) with a held quality line and a held picture: the drag is idle and the crop grid goes. |
+| translate Hide | The `TranslateScreen` farewell calls `forget_hide`, so an account switch with a Hide out leaves nothing in the old client's acks. Test: farewell, settle the request, nothing to take. |
+| recheck timer | Supersedes round 3's row: from `DownloadFailed` the timer runs a fresh check (`Checking`), not only a retry of the kept release. A newer release that fixes a bad download is found; the kept one, when still the latest, downloads again from the check's answer. A check that fails offline leaves `Failed`, and the next timer checks again. `updater::force_latest_release` is the test seam; test on the manual clock. |
+| docs | The 14-002 and translate Hide rows of earlier rounds say they are superseded. |
+| suggested posts | The old test's doc comment is back above its test. |

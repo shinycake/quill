@@ -268,9 +268,6 @@ fn a_publish_in_flight_refuses_a_second_terms_box_and_a_decided_post_closes_one(
     });
 }
 
-/// The Decline box closes with nothing sent when the post is decided
-/// elsewhere, as the Accept box does; a Decline confirmed after that sends
-/// nothing either.
 /// Sweep r4-12: a Decline is not opened or confirmed over a Publish that is
 /// still out; the post's own answer settles it.
 #[gpui_kit::test]
@@ -294,6 +291,9 @@ fn a_publish_in_flight_refuses_a_decline_box_and_a_decline_confirm(cx: &mut Test
     );
 }
 
+/// The Decline box closes with nothing sent when the post is decided
+/// elsewhere, as the Accept box does; a Decline confirmed after that sends
+/// nothing either.
 #[gpui_kit::test]
 fn a_decided_post_closes_its_decline_box_and_declines_nothing(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);

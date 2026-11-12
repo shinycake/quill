@@ -579,11 +579,20 @@ impl QuillApp {
         self.request_web_app(open, false, cx);
     }
 
+    /// The window a launch pressed now opens its app in: the chat window
+    /// of the press (`None`: the main window).
+    fn launch_window(&self) -> Option<quill::ids::ChatId> {
+        self.asking_window().flatten()
+    }
+
     /// The TDLib call for a launch.
     fn request_web_app(&mut self, open: PendingOpen, allow_write: bool, cx: &mut Context<Self>) {
         // One app at a time: a new launch replaces the open window.
         self.close_mini_app_window(cx);
         let theme = theme_params(cx);
+        // The window the person pressed in: it rides with the request, so
+        // the app opens there whatever pass lands the answer.
+        let window = self.launch_window();
         let sent = self.live.as_mut().map(|live| match &open {
             PendingOpen::Open {
                 chat_id,
@@ -592,7 +601,7 @@ impl QuillApp {
                 source,
             } => live
                 .driver
-                .open_web_app(*chat_id, *bot_id, url, source.clone(), &theme),
+                .open_web_app(*chat_id, *bot_id, url, source.clone(), &theme, window),
             PendingOpen::Simple {
                 chat_id,
                 bot_id,
@@ -600,7 +609,7 @@ impl QuillApp {
                 button_text,
             } => live
                 .driver
-                .get_web_app_url(*chat_id, *bot_id, url, button_text, &theme),
+                .get_web_app_url(*chat_id, *bot_id, url, button_text, &theme, window),
             PendingOpen::Main {
                 chat_id,
                 bot_id,
@@ -610,6 +619,7 @@ impl QuillApp {
                 *bot_id,
                 start_parameter,
                 &theme,
+                window,
             ),
             PendingOpen::Link {
                 chat_id,
@@ -623,6 +633,7 @@ impl QuillApp {
                 start_parameter,
                 allow_write,
                 &theme,
+                window,
             ),
             PendingOpen::Attach { chat_id, bot_id } => live.driver.open_web_app(
                 *chat_id,
@@ -630,19 +641,10 @@ impl QuillApp {
                 "",
                 LaunchSource::AttachmentMenu,
                 &theme,
+                window,
             ),
         });
-        if let Some(Ok(request)) = sent {
-            // The window the person pressed in: the answer carries it, so
-            // the app opens there whatever pass lands it.
-            let window = self.asking_window().flatten();
-            if let Some(live) = self.live.as_mut() {
-                live.driver
-                    .session
-                    .bots
-                    .web_apps
-                    .note_open_window(request, window);
-            }
+        if let Some(Ok(_)) = sent {
             self.set_status_note(
                 StatusNote::silent(tr(keys::Q_MEDIA_OPENING_THE_MINI_APP)),
                 cx,

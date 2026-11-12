@@ -157,18 +157,6 @@ impl WebApps {
     /// Replace the unconsumed open answer. An `Opened` answer it pushes out
     /// was never shown, but TDLib started that app: its launch is queued
     /// for `closeWebApp`, so the bot keeps no live session.
-    /// The window the launch `request` was pressed in, for its answer to
-    /// carry (a request already answered or replaced is left alone).
-    pub fn note_open_window(
-        &mut self,
-        request: crate::ids::RequestId,
-        window: Option<crate::ids::ChatId>,
-    ) {
-        if let Some(opening) = self.opening.as_mut().filter(|o| o.request == request) {
-            opening.window = window;
-        }
-    }
-
     pub fn replace_open_result(&mut self, result: Option<WebAppOpenResult>) {
         if let Some(WebAppOpenResult::Opened { launch_id, .. }) =
             std::mem::replace(&mut self.open_result, result)

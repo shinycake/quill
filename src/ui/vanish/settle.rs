@@ -37,14 +37,6 @@ pub(super) fn settle_ghosts(
         .into_iter()
         .filter_map(|request| Some((request, acks.take(request)?)))
         .collect();
-    for ghost in ghosts.iter_mut() {
-        if let GhostStage::Crumbling { deletion, .. } = &mut ghost.stage
-            && let Deletion::Sent(request) = *deletion
-            && answered.iter().any(|(asked, _)| *asked == request)
-        {
-            *deletion = Deletion::Local;
-        }
-    }
     ghosts.retain(|ghost| {
         let Some(request) = held_request(ghost) else {
             return true;
@@ -58,6 +50,15 @@ pub(super) fn settle_ghosts(
         }
         true
     });
+    for ghost in ghosts.iter_mut() {
+        let (GhostStage::Waiting { deletion, .. } | GhostStage::Crumbling { deletion, .. }) =
+            &mut ghost.stage;
+        if let Deletion::Sent(request) = *deletion
+            && answered.iter().any(|(asked, _)| *asked == request)
+        {
+            *deletion = Deletion::Local;
+        }
+    }
 }
 
 impl QuillApp {

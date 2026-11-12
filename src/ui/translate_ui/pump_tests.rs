@@ -514,3 +514,33 @@ fn a_refused_hide_ends_its_undo_toast_with_an_error_note(cx: &mut TestAppContext
         );
     });
 }
+
+/// Sweep r4-12 round 4: an account switch with a Hide still out forgets its
+/// request while the old client is current, so its answer is not kept.
+#[gpui_kit::test]
+fn a_switch_forgets_the_hide_still_out(cx: &mut TestAppContext) {
+    use super::HideStage;
+    use crate::ui::on_screen::Farewell;
+    use quill::state::Answer;
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        let request = app
+            .session_mut()
+            .map(|session| {
+                let request = session.request(
+                    quill::state::RequestPurpose::ToggleChatIsTranslatable,
+                    Some(CHANNEL),
+                );
+                session.acks.expect(request);
+                request
+            })
+            .expect("a session");
+        app.translate.hide = HideStage::Sent(request);
+        super::TranslateScreen::farewell(app, window, cx);
+        assert!(matches!(app.translate.hide, HideStage::Idle));
+        if let Some(session) = app.session_mut() {
+            session.acks.settle(request, Answer::Done);
+            assert!(session.acks.take(request).is_none(), "nobody keeps it");
+        }
+    });
+}

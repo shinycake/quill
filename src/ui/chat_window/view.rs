@@ -65,7 +65,7 @@ impl ChatWindowView {
                     let chat_id = this.chat_id;
                     let _ = this.owner.update(cx, |app, cx| {
                         app.in_window_scope(Some(chat_id), cx, |app, cx| {
-                            app.release_video_timeline_on_blur(cx)
+                            app.release_lost_video_drag(cx)
                         })
                     });
                 }

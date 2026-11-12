@@ -94,3 +94,40 @@ fn a_quit_that_never_lands_ends_in_install_failed(cx: &mut TestAppContext) {
         ));
     });
 }
+
+/// Sweep r4-12 round 4: a release whose download fails for good (a bad
+/// checksum) is not stuck: on the 4-hour timer a fresh check runs and finds
+/// the release that fixes it.
+#[gpui_kit::test]
+fn the_timer_finds_a_newer_release_after_a_failed_download(cx: &mut TestAppContext) {
+    let _guard = quill::update_install::FORCE_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let (app, mut vcx) = new_app(cx);
+    let newer = ReleaseInfo {
+        version: "999.1.0".into(),
+        ..release()
+    };
+    quill::updater::force_latest_release(Some(newer));
+    app.update(&mut vcx, |app, cx| {
+        app.preferences.update_state = UpdateState::DownloadFailed(release(), "checksum");
+        app.start_update_checks(cx);
+        assert!(
+            matches!(
+                app.preferences.update_state,
+                UpdateState::DownloadFailed(..)
+            ),
+            "no check until the timer fires"
+        );
+    });
+    vcx.run_until_parked();
+    vcx.executor().advance_clock(super::RECHECK_EVERY);
+    vcx.run_until_parked();
+    app.update(&mut vcx, |app, _| {
+        assert!(
+            matches!(&app.preferences.update_state, UpdateState::Available(r) if r.version == "999.1.0"),
+            "the timer's check found the newer release"
+        );
+    });
+    quill::updater::force_latest_release(None);
+}

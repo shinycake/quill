@@ -121,6 +121,9 @@ pub(super) struct FfmpegBackend {
     /// for settles: every player the backend opens forwards to it, so a
     /// volume reopen neither fires it early nor loses it.
     open_wake: OpenWake,
+    /// What the next reopen runs over instead of the file (tests).
+    #[cfg(test)]
+    reopen_with: Option<Box<dyn quill::video_decode::Demuxer>>,
 }
 
 /// The wake for the clip's open, shared by the players the backend opens.
@@ -159,7 +162,18 @@ impl FfmpegBackend {
             nv12_paused_until: None,
             pending_step: None,
             open_wake: OpenWake::default(),
+            #[cfg(test)]
+            reopen_with: None,
         }
+    }
+
+    /// Open the file again for `options` on a new player.
+    fn open_player(&mut self, options: &OpenOptions) -> Result<Player, String> {
+        #[cfg(test)]
+        if let Some(demuxer) = self.reopen_with.take() {
+            return Player::with_demuxer(demuxer, options.clone());
+        }
+        Player::open(&self.path, options.clone())
     }
 
     /// Whether to hand over NV12 surfaces now: off macOS, unless the
@@ -378,7 +392,12 @@ impl Backend for FfmpegBackend {
             };
             let position = self.player.position();
             let running = self.player.is_playing();
-            if let Ok(mut player) = Player::open(&self.path, reopened.clone()) {
+            // The wake moves to a slot of its own before the new player
+            // opens: the dropped player may still be opening, and its
+            // forwarder then finds nothing to fire early.
+            let wake = self.open_wake.lock().ok().and_then(|mut wake| wake.take());
+            let fresh: OpenWake = Arc::new(Mutex::new(wake));
+            if let Ok(mut player) = self.open_player(&reopened) {
                 player.set_rate(self.want.rate);
                 player.seek(position);
                 if running {
@@ -386,11 +405,17 @@ impl Backend for FfmpegBackend {
                 }
                 // The new player says when it opened, for a wake still
                 // waiting on the clip's open.
+                self.open_wake = fresh;
                 player.on_open(forward_open(&self.open_wake));
                 self.options = reopened;
                 self.player = player;
                 self.sound = None;
                 self.pending_step = None;
+            } else if let Some(wake) = fresh.lock().ok().and_then(|mut wake| wake.take())
+                && let Ok(mut slot) = self.open_wake.lock()
+            {
+                // Refused: the old player's open still settles it.
+                slot.get_or_insert(wake);
             }
         }
         if let Some(sound) = &self.sound {
@@ -571,27 +596,72 @@ mod tests {
         assert!(!backend.player.has_sound(), "the wall clock is");
     }
 
-    /// A wake asked for before a volume reopen runs exactly once, whichever
-    /// player's open settles it.
+    /// A clip whose `info` waits for a signal, so its open can be held.
+    struct Gated {
+        opening: mpsc::Receiver<()>,
+    }
+
+    impl Demuxer for Gated {
+        fn info(&self) -> MediaInfo {
+            let _ = self.opening.recv();
+            MediaInfo {
+                frame_rate: 25.0,
+                has_video: true,
+                ..MediaInfo::default()
+            }
+        }
+
+        fn next(&mut self) -> Result<Option<Item>, String> {
+            Ok(None)
+        }
+
+        fn seek(&mut self, _secs: f64) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    /// A volume reopen while the first player is still opening: the open
+    /// wake is not fired by the dropped player's open, only by the new
+    /// player's, which is the open that is drawn.
     #[test]
-    fn a_reopen_for_volume_keeps_the_open_wake_and_fires_it_once() {
+    fn a_reopen_for_volume_mid_open_fires_the_wake_for_the_new_players_open_only() {
         let options = OpenOptions {
             want_audio: false,
             ..OpenOptions::viewer()
         };
-        let tone = Tone {
-            started: None,
-            pts: 0.0,
-        };
-        let player = Player::with_demuxer(Box::new(tone), options.clone()).unwrap();
-        let mut backend = FfmpegBackend::with_player(Path::new("tone"), options, player);
+        let (release_first, first_gate) = mpsc::channel();
+        let first = Player::with_demuxer(
+            Box::new(Gated {
+                opening: first_gate,
+            }),
+            options.clone(),
+        )
+        .unwrap();
+        let mut backend = FfmpegBackend::with_player(Path::new("gated"), options, first);
+        let (release_second, second_gate) = mpsc::channel();
+        backend.reopen_with = Some(Box::new(Gated {
+            opening: second_gate,
+        }));
         let (woken, heard) = mpsc::channel();
         assert!(backend.on_open(Box::new(move || {
             let _ = woken.send(());
         })));
+        // Runs right after the forwarder on the first player's open.
+        let (first_opened, first_open_done) = mpsc::channel();
+        backend.player.on_open(move || {
+            let _ = first_opened.send(());
+        });
         backend.set_volume(0.5);
-        assert!(heard.recv().is_ok(), "the open woke it");
-        assert!(heard.try_recv().is_err(), "once, not once per player");
+        assert!(backend.options.want_audio, "the reopen started");
+        let _ = release_first.send(());
+        assert!(first_open_done.recv().is_ok(), "the first open settled");
+        assert!(
+            heard.try_recv().is_err(),
+            "the dropped player's open woke it"
+        );
+        let _ = release_second.send(());
+        assert!(heard.recv().is_ok(), "the new player's open wakes it");
+        assert!(heard.try_recv().is_err(), "once");
     }
 
     /// A clip whose decoding failed.
@@ -623,9 +693,8 @@ mod tests {
             ..OpenOptions::viewer()
         };
         let player = Player::with_demuxer(Box::new(Broken), options.clone()).unwrap();
-        // Returns once the decode thread hit the error: nothing to wait on
-        // but the failure itself, so the deadline is a day away.
-        player.wait_frame(Instant::now() + std::time::Duration::from_secs(24 * 60 * 60));
+        // Returns once the decode thread hit the error.
+        player.wait_frame_settled();
         assert!(player.error().is_some());
         let mut backend = FfmpegBackend::with_player(Path::new("broken"), options, player);
         backend.set_volume(0.5);

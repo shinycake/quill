@@ -312,6 +312,59 @@ fn a_ghost_that_ends_or_crumbles_leaves_no_ack(cx: &mut TestAppContext) {
     });
 }
 
+/// Sweep r4-12 round 4: the answer to a delete that comes while its ghost
+/// still waits is consumed there; the ghost that crumbles afterwards holds
+/// no request, so at the end of the dust it is pruned by the next frame and
+/// asks for no more, with no later poll to settle it.
+#[gpui_kit::test]
+fn frames_stop_after_the_crumble_of_a_delete_answered_while_waiting(cx: &mut TestAppContext) {
+    use quill::ids::RequestId;
+    use quill::state::{Answer, RequestAcks};
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    open_group(&app, vcx);
+    dissolves_enabled();
+    let request = RequestId(930);
+    app.update(vcx, |app, _| {
+        app.freeze_vanish_clock();
+        app.begin_vanish(ChatId(GROUP), &[MessageId(202)], Deletion::Sent(request));
+        app.paint_vanishing_for_test();
+        let mut acks = RequestAcks::default();
+        acks.expect(request);
+        acks.settle(request, Answer::Done);
+        // The poll pass takes the answer while the ghost still waits.
+        app.settle_ghosts_for_test(&mut acks);
+        assert!(acks.take(request).is_none(), "the answer was consumed");
+    });
+    apply(
+        &app,
+        vcx,
+        &[
+            r#"{"@type":"updateDeleteMessages","chat_id":31,"message_ids":[202],"is_permanent":true,"from_cache":false}"#,
+        ],
+    );
+    frames(vcx);
+    app.update(vcx, |app, _| {
+        assert!(app.vanishing_animating_for_test(), "the dust is playing");
+        assert_eq!(
+            app.vanishing_held_for_test(),
+            0,
+            "the consumed answer left no request to wait on"
+        );
+        app.advance_vanish_clock(11.0);
+        app.pin_vanish_now();
+        assert!(
+            !app.vanishing_animating_for_test(),
+            "a finished ghost asks for no frames"
+        );
+    });
+    frames(vcx);
+    app.update(vcx, |app, _| {
+        let (left, _) = app.vanishing_state_for_test();
+        assert_eq!(left, 0, "pruned by the frame, with no poll after it");
+    });
+}
+
 /// A waiting ghost whose message is already gone, in a chat that is not the
 /// one shown, is dropped: back in that chat the message must not reappear
 /// and crumble on arrival.

@@ -359,10 +359,26 @@ fn check_endpoint(list: bool) -> (String, bool) {
     (url.to_string(), true)
 }
 
+/// The release a check finds instead of asking the server (tests).
+#[cfg(all(feature = "ui", any(test, feature = "demo-capture")))]
+static FORCED_LATEST: std::sync::Mutex<Option<ReleaseInfo>> = std::sync::Mutex::new(None);
+
+/// Make [`check_latest_release`] find `release` (`None`: ask the server).
+#[cfg(all(feature = "ui", any(test, feature = "demo-capture")))]
+pub fn force_latest_release(release: Option<ReleaseInfo>) {
+    if let Ok(mut forced) = FORCED_LATEST.lock() {
+        *forced = release;
+    }
+}
+
 /// Blocking, bounded check of the latest stable release; callers run it on
 /// the background executor.
 #[cfg(feature = "ui")]
 pub fn check_latest_release() -> UpdateState {
+    #[cfg(any(test, feature = "demo-capture"))]
+    if let Some(release) = FORCED_LATEST.lock().ok().and_then(|forced| forced.clone()) {
+        return UpdateState::Available(release);
+    }
     match fetch_release_json(false) {
         Ok((status, body)) => interpret_release(status, &body, crate::version::APP),
         Err(Fetch::Unreachable) => UpdateState::Failed(

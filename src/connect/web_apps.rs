@@ -36,6 +36,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         bot_user_id: i64,
         chat_id: Option<ChatId>,
         source: LaunchSource,
+        window: Option<ChatId>,
     ) {
         // The latest launch asked is the current one: an older one still
         // out is dropped, so its answer opens nothing (the app TDLib
@@ -45,7 +46,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             bot_user_id,
             chat_id: chat_id.map(|id| id.0),
             source,
-            window: None,
+            window,
         });
         self.session.bots.web_apps.replace_open_result(None);
     }
@@ -76,12 +77,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         url: &str,
         source: LaunchSource,
         theme: &ThemeParams,
+        window: Option<ChatId>,
     ) -> Result<RequestId, ConnectSendError> {
         let extra = self.web_app_extra(
             RequestPurpose::Bots(BotsPurpose::OpenWebApp { bot_user_id }),
             Some(chat_id),
         )?;
-        self.mark_web_app_pending(extra, bot_user_id, Some(chat_id), source);
+        self.mark_web_app_pending(extra, bot_user_id, Some(chat_id), source, window);
         let json = open_web_app(extra, chat_id, bot_user_id, url, theme.td_json());
         self.send_web_app_open(extra, &json)
     }
@@ -95,6 +97,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         url: &str,
         button_text: &str,
         theme: &ThemeParams,
+        window: Option<ChatId>,
     ) -> Result<RequestId, ConnectSendError> {
         let extra = self.web_app_extra(
             RequestPurpose::Bots(BotsPurpose::GetWebAppUrl { bot_user_id }),
@@ -107,6 +110,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             LaunchSource::KeyboardButton {
                 button_text: button_text.to_string(),
             },
+            window,
         );
         let json = get_web_app_url(extra, bot_user_id, url, theme.td_json());
         self.send_web_app_open(extra, &json)
@@ -119,12 +123,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         bot_user_id: i64,
         start_parameter: &str,
         theme: &ThemeParams,
+        window: Option<ChatId>,
     ) -> Result<RequestId, ConnectSendError> {
         let extra = self.web_app_extra(
             RequestPurpose::Bots(BotsPurpose::GetMainWebApp { bot_user_id }),
             Some(chat_id),
         )?;
-        self.mark_web_app_pending(extra, bot_user_id, Some(chat_id), LaunchSource::MainApp);
+        self.mark_web_app_pending(
+            extra,
+            bot_user_id,
+            Some(chat_id),
+            LaunchSource::MainApp,
+            window,
+        );
         let json = get_main_web_app(
             extra,
             chat_id,
@@ -145,6 +156,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         start_parameter: &str,
         allow_write_access: bool,
         theme: &ThemeParams,
+        window: Option<ChatId>,
     ) -> Result<RequestId, ConnectSendError> {
         let extra = self.web_app_extra(
             RequestPurpose::Bots(BotsPurpose::GetWebAppLinkUrl { bot_user_id }),
@@ -157,6 +169,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             LaunchSource::Link {
                 short_name: short_name.to_string(),
             },
+            window,
         );
         let json = get_web_app_link_url(
             extra,

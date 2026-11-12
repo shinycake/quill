@@ -385,6 +385,23 @@ fn the_open_app_keeps_the_window_its_flow_started_in(cx: &mut TestAppContext) {
     });
 }
 
+/// Sweep r4-12 round 4: a launch pressed in a chat window takes that window
+/// (it rides with the open request into `WebAppPending`, see the connect
+/// test), not the main window's.
+#[gpui_kit::test]
+fn a_launch_takes_the_window_it_was_pressed_in(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, main, cx| {
+        app.open_chat_in_new_window(quill::ids::ChatId(12), main, cx)
+    });
+    vcx.run_until_parked();
+    app.update(&mut vcx, |app, _| {
+        assert_eq!(app.launch_window(), None, "the main window");
+        let pressed = app.as_asked_by(Some(quill::ids::ChatId(12)), |app| app.launch_window());
+        assert_eq!(pressed, Some(quill::ids::ChatId(12)));
+    });
+}
+
 /// A write-access answer moves the window only when it is the answer to the
 /// request the window waits on; the consent popup then leads to a second
 /// request with its own answer.

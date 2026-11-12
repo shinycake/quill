@@ -160,10 +160,14 @@ pub(super) struct TranslateScreen {
 }
 
 /// The dialog's `translateText` job is dropped from the old client's
-/// session (it counts toward the pump's in-flight cap and keeps its result).
+/// session (it counts toward the pump's in-flight cap and keeps its result),
+/// and a Hide still out is forgotten with it.
 impl super::on_screen::Farewell for TranslateScreen {
     fn farewell(app: &mut QuillApp, _: &mut Window, cx: &mut Context<QuillApp>) {
         app.close_translate_dialog(cx);
+        // A Hide still out is not awaited by the next account: its answer
+        // would stay in this client's acks with no owner.
+        app.forget_hide();
     }
 }
 

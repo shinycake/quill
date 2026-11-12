@@ -443,6 +443,11 @@ pub fn self_update_available() -> bool {
 static FORCED_AVAILABLE: std::sync::Mutex<Option<Result<(), Unavailable>>> =
     std::sync::Mutex::new(None);
 
+/// The forced answers here and in the updater are process-wide: the tests
+/// that set them hold this lock.
+#[cfg(any(test, feature = "demo-capture"))]
+pub static FORCE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[cfg(any(test, feature = "demo-capture"))]
 pub fn force_self_update_available(answer: Option<Result<(), Unavailable>>) {
     if let Ok(mut guard) = FORCED_AVAILABLE.lock() {

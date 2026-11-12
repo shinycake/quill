@@ -35,7 +35,15 @@ impl Player {
     /// Sleep until the file is open or failed to open, or `deadline`
     /// passes (tests and screenshot captures; never the UI thread).
     pub fn wait_open(&self, deadline: Instant) {
-        self.sleep_while(deadline, |state| {
+        self.sleep_while(Some(deadline), |state| {
+            state.info.is_none() && state.decoding.error().is_none()
+        });
+    }
+
+    /// [`Player::wait_open`] with no deadline: it returns when the open
+    /// settles, so a test waits on the decode thread, not on the clock.
+    pub fn wait_open_settled(&self) {
+        self.sleep_while(None, |state| {
             state.info.is_none() && state.decoding.error().is_none()
         });
     }
@@ -44,27 +52,46 @@ impl Player {
     /// or past the last picture) or stopped, or `deadline` passes (tests
     /// and screenshot captures; never the UI thread).
     pub fn wait_frame(&self, deadline: Instant) {
-        self.sleep_while(deadline, |state| {
-            state.video.is_empty()
-                && state.decoding.error().is_none()
-                && !state.decoding.at_end()
-                && !state.decoding.is_stopped()
-        });
+        self.sleep_while(Some(deadline), Self::frame_pending);
     }
 
-    fn sleep_while(&self, deadline: Instant, mut waiting: impl FnMut(&State) -> bool) {
+    /// [`Player::wait_frame`] with no deadline: it returns when a picture
+    /// is queued or decoding ended, failed or stopped, so a test waits on
+    /// the decode thread, not on the clock.
+    pub fn wait_frame_settled(&self) {
+        self.sleep_while(None, Self::frame_pending);
+    }
+
+    fn frame_pending(state: &State) -> bool {
+        state.video.is_empty()
+            && state.decoding.error().is_none()
+            && !state.decoding.at_end()
+            && !state.decoding.is_stopped()
+    }
+
+    /// Sleep while `waiting` holds: until `deadline`, or for as long as it
+    /// takes when there is none.
+    fn sleep_while(&self, deadline: Option<Instant>, waiting: impl Fn(&State) -> bool) {
         let mut state = lock(&self.shared.state);
         while waiting(&state) {
-            let left = deadline.saturating_duration_since(Instant::now());
-            if left.is_zero() {
-                return;
-            }
-            state = self
-                .shared
-                .progress
-                .wait_timeout(state, left)
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .0;
+            state = match deadline {
+                None => self
+                    .shared
+                    .progress
+                    .wait(state)
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()),
+                Some(deadline) => {
+                    let left = deadline.saturating_duration_since(Instant::now());
+                    if left.is_zero() {
+                        return;
+                    }
+                    self.shared
+                        .progress
+                        .wait_timeout(state, left)
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .0
+                }
+            };
         }
     }
 }

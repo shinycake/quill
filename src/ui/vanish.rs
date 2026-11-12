@@ -321,6 +321,14 @@ pub(super) struct Vanishing {
     palette: Palette,
 }
 
+/// Whether any ghost is on screen and moving: a waiting one shows nothing
+/// and one that is over is only waiting to be pruned.
+fn animating(ghosts: &[Vanishing], now: Instant) -> bool {
+    ghosts
+        .iter()
+        .any(|ghost| !ghost.is_waiting() && ghost.phase(now) != Phase::Done)
+}
+
 /// How far a crumbling message has got, as far as the history rows care:
 /// the rows change when this does, never while the animation runs on.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -693,12 +701,14 @@ impl QuillApp {
         // tick is requested with no borrow held.
         // A conflict keeps the tick going for a bounded run of frames: the
         // next frame normally sorts it out.
+        let now = self.vanish_now();
         let running = match self.history.vanishing.try_borrow() {
             Ok(vanishing) => {
                 self.history.vanish_conflicts.set(0);
                 // A delete still waiting for its answer shows nothing, so it
                 // asks for no frames: the answer renders and starts it.
-                vanishing.iter().any(|ghost| !ghost.is_waiting())
+                // One that is over is only waiting to be pruned.
+                animating(&vanishing, now)
             }
             Err(_) => conflict_keeps_running(&self.history.vanish_conflicts),
         };
@@ -772,6 +782,20 @@ impl QuillApp {
     /// Settle the dissolves with `acks`, as the poll does with the session's.
     pub(super) fn settle_ghosts_for_test(&self, acks: &mut quill::state::RequestAcks) {
         settle::settle_ghosts(&self.history.vanishing, self.vanish_clock_now(), acks);
+    }
+
+    /// How many dissolves still hold a sent delete's request.
+    pub(super) fn vanishing_held_for_test(&self) -> usize {
+        let ghosts = self.history.vanishing.borrow();
+        ghosts
+            .iter()
+            .filter(|ghost| settle::held_request(ghost).is_some())
+            .count()
+    }
+
+    /// Whether the dissolves ask for animation frames now.
+    pub(super) fn vanishing_animating_for_test(&self) -> bool {
+        animating(&self.history.vanishing.borrow(), self.vanish_now())
     }
 
     /// Whether each dissolve held a painted row to start its dust from.
