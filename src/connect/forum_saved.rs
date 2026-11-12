@@ -60,15 +60,19 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// `getForumTopicDefaultIcons` once; the answer fills
-    /// `Session::forum_topic_icons`.
+    /// `Session::forum_topic_icons`. `Ok(None)` when the list is here;
+    /// when an earlier asker's request is still out, its id (a second
+    /// editor waits on that one).
     pub fn load_forum_topic_icons(&mut self) -> Sent {
-        if !self.session.threads.forum_topic_icons.is_empty()
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetForumTopicDefaultIcons)
-        {
+        if !self.session.threads.forum_topic_icons.is_empty() {
             return Ok(None);
+        }
+        if let Some(out) = self
+            .session
+            .requests
+            .id_for_purpose(RequestPurpose::GetForumTopicDefaultIcons)
+        {
+            return Ok(Some(out));
         }
         self.send_purpose(RequestPurpose::GetForumTopicDefaultIcons, None, |extra| {
             get_forum_topic_default_icons(extra)

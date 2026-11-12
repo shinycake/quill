@@ -47,7 +47,17 @@ mod mac {
         can_evaluate(1)
     }
 
-    pub fn authenticate(reason: &str, done: futures_channel::oneshot::Sender<bool>) {
+    /// Close the prompt: the reply then comes with a failure.
+    pub fn invalidate(ctx: &AnyObject) {
+        // SAFETY: documented selector, callable from any thread; it ends an
+        // evaluation still in flight.
+        let _: () = unsafe { msg_send![ctx, invalidate] };
+    }
+
+    pub fn authenticate(
+        reason: &str,
+        done: futures_channel::oneshot::Sender<bool>,
+    ) -> Retained<AnyObject> {
         let ctx = context();
         let reason = NSString::from_str(reason);
         let keep = ctx.clone();
@@ -65,6 +75,7 @@ mod mac {
         let _: () = unsafe {
             msg_send![&*ctx, evaluatePolicy: POLICY, localizedReason: &*reason, reply: &*block]
         };
+        ctx
     }
 }
 
@@ -91,15 +102,61 @@ pub fn label() -> &'static str {
     tr(keys::SETTINGS_USE_SYSTEMPWD)
 }
 
-/// Show the prompt; the answer arrives on the receiver.
-pub fn authenticate(reason: &str) -> Receiver<bool> {
+/// Closes the OS prompt when dropped (macOS: `LAContext invalidate`), so a
+/// prompt nobody waits for any more leaves the screen with its wait.
+pub struct Close {
+    #[cfg(target_os = "macos")]
+    context: Option<objc2::rc::Retained<objc2::runtime::AnyObject>>,
+}
+
+impl Drop for Close {
+    fn drop(&mut self) {
+        #[cfg(target_os = "macos")]
+        {
+            if let Some(context) = self.context.take() {
+                mac::invalidate(&context);
+            }
+        }
+    }
+}
+
+/// The prompt on screen: its answer, and the handle that closes it.
+pub struct Prompt {
+    pub answer: Receiver<bool>,
+    pub close: Close,
+}
+
+impl Prompt {
+    /// An answer with no OS prompt behind it.
+    pub fn without_prompt(answer: Receiver<bool>) -> Self {
+        Self {
+            answer,
+            close: Close {
+                #[cfg(target_os = "macos")]
+                context: None,
+            },
+        }
+    }
+}
+
+/// Show the prompt; the answer arrives on the prompt's receiver, and
+/// dropping the prompt closes it.
+pub fn authenticate(reason: &str) -> Prompt {
     let (tx, rx) = channel();
     #[cfg(target_os = "macos")]
-    mac::authenticate(reason, tx);
+    {
+        let context = mac::authenticate(reason, tx);
+        Prompt {
+            answer: rx,
+            close: Close {
+                context: Some(context),
+            },
+        }
+    }
     #[cfg(not(target_os = "macos"))]
     {
         let _ = reason;
         let _ = tx.send(false);
+        Prompt::without_prompt(rx)
     }
-    rx
 }

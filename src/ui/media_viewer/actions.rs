@@ -309,6 +309,7 @@ impl QuillApp {
         ) {
             return;
         }
+        let shown = self.viewer_item_key();
         let mut viewer = std::mem::take(&mut self.viewer.state);
         let changed = match self.session() {
             Some(session) => viewer.retain(|item| {
@@ -324,7 +325,10 @@ impl QuillApp {
             return;
         }
         if self.viewer.state.is_open() {
-            self.reset_viewer_item_state(cx);
+            // Another message's deletion leaves the item on show alone.
+            if self.viewer_item_key() != shown {
+                self.reset_viewer_item_state(cx);
+            }
         } else {
             // Emptied: the same close as Esc (full screen, caption, seek).
             self.close_media_viewer(cx);

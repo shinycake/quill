@@ -87,3 +87,25 @@ fn close_keeps_a_gift_code_that_is_applying_and_closes_one_that_is_not(cx: &mut 
     });
     assert_eq!(stage_of(&app, vcx), None, "a checked code just closes");
 }
+
+#[gpui_kit::test]
+fn a_second_gift_link_while_applying_says_it_was_left(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let applying = GiftCodeStage::Applying {
+        request: RequestId(7),
+        info: info(),
+    };
+    app.update(vcx, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.payments.gift_code = Some(GiftCodeLookup {
+                code: "first".into(),
+                stage: applying.clone(),
+            });
+        }
+        app.open_gift_code_link("second".into(), cx);
+    });
+    assert_eq!(stage_of(&app, vcx), Some(applying), "the first code stays");
+    let note = app.read_with(vcx, |app, _| app.connection.note().text().to_string());
+    assert_eq!(note, "Wait for the current gift code");
+}

@@ -304,14 +304,24 @@ impl QuillApp {
         self.viewer.pointer = Pointer::Panning(pos);
     }
 
+    /// The message the viewer shows, to tell a step that moved from one that
+    /// did not (the first item's Left, the last item's Right).
+    pub(in crate::ui) fn viewer_item_key(&self) -> Option<quill::ids::ChatMessage> {
+        let item = self.viewer.state.current()?;
+        Some(quill::ids::ChatMessage::new(item.chat_id, item.message_id))
+    }
+
     pub(in crate::ui) fn step_media_viewer(&mut self, delta: i32, cx: &mut Context<Self>) {
+        let before = self.viewer_item_key();
         if delta < 0 {
             self.viewer.state.prev();
         } else {
             self.viewer.state.next();
         }
         self.viewer_note_activity(cx);
-        self.reset_viewer_item_state(cx);
+        if self.viewer_item_key() != before {
+            self.reset_viewer_item_state(cx);
+        }
         cx.notify();
     }
 

@@ -615,8 +615,6 @@ impl QuillApp {
         if !self.account.passcode.is_locked() || self.account.passcode.job.is_hashing() {
             return;
         }
-        // Typing the passcode leaves a system prompt nobody answers.
-        self.account.passcode.job.leave_system_prompt();
         let typed = self.read_field(&self.account.passcode.lock.input, cx);
         if typed.is_empty() {
             self.lock_failed(tr(keys::Q_PREFS_ENTER_YOUR_PASSCODE).into(), cx);
@@ -630,6 +628,10 @@ impl QuillApp {
         let Some(root) = self.passcode_root() else {
             return;
         };
+        // Typing the passcode leaves a system prompt nobody answers: its
+        // wait goes, and the OS prompt closes with it. An empty field or a
+        // fixture leaves it be.
+        self.account.passcode.job.leave_system_prompt();
         self.run_passcode_job(
             move || {
                 passcode::unlock(&root, &global_unlock(), &typed, passcode::unix_ms_now())
@@ -679,8 +681,8 @@ impl QuillApp {
         if self.account.passcode.job.is_running() {
             return;
         }
-        let receiver = super::system_unlock::authenticate(tr(keys::Q_PREFS_UNLOCK_QUILL));
-        self.spawn_system_unlock_wait(receiver, master, window, cx);
+        let prompt = super::system_unlock::authenticate(tr(keys::Q_PREFS_UNLOCK_QUILL));
+        self.spawn_system_unlock_wait(prompt, master, window, cx);
     }
 
     /// Auto-lock by idle time, and the flood countdown on the lock screen.

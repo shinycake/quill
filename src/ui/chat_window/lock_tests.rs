@@ -231,7 +231,12 @@ fn a_system_unlock_answered_after_its_window_closed_ends_the_wait(cx: &mut TestA
         app.update(cx, |app, cx| {
             app.in_window_scope(Some(OTHER), cx, |app, cx| {
                 let master = quill::passcode::MasterKey::from_bytes([7; 32]);
-                app.spawn_system_unlock_wait(receiver, master, window, cx);
+                app.spawn_system_unlock_wait(
+                    crate::ui::system_unlock::Prompt::without_prompt(receiver),
+                    master,
+                    window,
+                    cx,
+                );
             });
         });
         window.remove_window();

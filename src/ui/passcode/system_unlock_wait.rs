@@ -8,10 +8,10 @@ use super::{JobFate, JobKind};
 
 impl QuillApp {
     /// Wait for the OS prompt's answer. The job holds the wait: typing the
-    /// passcode instead (`submit_unlock`) drops it with the receiver.
+    /// passcode instead (`submit_unlock`) drops it, and the OS prompt with it.
     pub(in crate::ui) fn spawn_system_unlock_wait(
         &mut self,
-        receiver: futures_channel::oneshot::Receiver<bool>,
+        prompt: super::super::system_unlock::Prompt,
         master: MasterKey,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -19,7 +19,10 @@ impl QuillApp {
         // screen-scope: the passcode lock is the app's, not an account's; unlocking
         // finishes whichever account is on screen (it starts a deferred connect).
         let waiting = Self::spawn_app_in(window, cx, async move |this, cx| {
-            let ok = receiver.await.unwrap_or(false);
+            // The wait holds the prompt: dropping the job closes it.
+            let super::super::system_unlock::Prompt { answer, close } = prompt;
+            let ok = answer.await.unwrap_or(false);
+            drop(close);
             // The master key goes with the answer, unless a log-out from the
             // lock screen cancelled the job meanwhile.
             let master = std::rc::Rc::new(std::cell::Cell::new(Some(master)));

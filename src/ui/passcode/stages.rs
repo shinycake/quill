@@ -123,8 +123,8 @@ pub(crate) enum JobFate {
     /// A lock was asked while it ran: it lands with the answer.
     ThenLock,
     /// The lock screen's Log out ran meanwhile: the job's thread still
-    /// runs, and its answer is dropped (`run_passcode_job`,
-    /// `spawn_system_unlock_wait`).
+    /// runs, and its answer is dropped (`run_passcode_job`; a system prompt
+    /// is left at once instead, see `PasscodeJob::cancel`).
     Cancelled,
 }
 
@@ -184,10 +184,17 @@ impl PasscodeJob {
         }
     }
 
-    /// Log out from the lock screen: the answer is dropped.
+    /// Log out from the lock screen: a system prompt is left at once (its
+    /// wait goes, and the OS prompt with it); a passcode check still runs
+    /// and its answer is dropped, which `Cancelled` records.
     pub(crate) fn cancel(&mut self) {
-        if let Self::Running { fate, .. } = self {
-            *fate = JobFate::Cancelled;
+        match self {
+            Self::Running {
+                kind: JobKind::SystemPrompt,
+                ..
+            } => *self = Self::Idle,
+            Self::Running { fate, .. } => *fate = JobFate::Cancelled,
+            Self::Idle => {}
         }
     }
 }

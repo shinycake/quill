@@ -169,9 +169,12 @@ impl QuillApp {
         }
         let orientation = self.viewer.reorient.orientation();
         let fullscreen = self.viewer.extra.video_fullscreen;
+        // The same item in another rendition keeps its caption as it is.
+        let caption = std::mem::take(&mut self.viewer.extra.caption);
         self.reset_viewer_item_state(cx);
         self.viewer.reorient.reset(orientation);
         self.viewer.extra.video_fullscreen = fullscreen;
+        self.viewer.extra.caption = caption;
         cx.notify();
     }
 

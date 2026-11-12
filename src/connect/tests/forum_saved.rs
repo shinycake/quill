@@ -208,10 +208,12 @@ fn reading_marks_and_unpinning_in_a_topic_send_their_requests() {
 fn topic_icons_load_once_and_create_edit_carry_the_icon() {
     let mut f = Fixture::new();
     f.forum(true);
-    f.driver.load_forum_topic_icons().unwrap();
+    let first = f.driver.load_forum_topic_icons().unwrap();
+    assert!(first.is_some());
     assert_eq!(f.sent("getForumTopicDefaultIcons").len(), 1);
-    // Deduped while in flight.
-    assert!(f.driver.load_forum_topic_icons().unwrap().is_none());
+    // Deduped while in flight: the second asker waits on the first's request.
+    assert_eq!(f.driver.load_forum_topic_icons().unwrap(), first);
+    assert_eq!(f.sent("getForumTopicDefaultIcons").len(), 1);
 
     f.driver
         .create_forum_topic_with_icon(ChatId(16), "  Ideas ", 0xFFD67E, 5005)

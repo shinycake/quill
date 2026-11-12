@@ -119,23 +119,27 @@ impl QuillApp {
 
     /// `giftcode` link: open the box and check the code. Nothing is applied.
     pub(super) fn open_gift_code_link(&mut self, code: String, cx: &mut Context<Self>) {
-        match self.live.as_mut() {
-            Some(live) => {
-                // A code being applied keeps its box (the new link is not
-                // checked; the box shows the apply and its answer).
-                let applying = live
-                    .driver
-                    .session
-                    .payments
-                    .gift_code
-                    .as_ref()
-                    .is_some_and(|lookup| lookup.applying());
-                if !applying && live.driver.request_gift_code_info(&code).is_err() {
-                    self.set_note(StatusNote::error(tr(keys::Q_REST_COULD_NOT_CHECK_THE_GIFT)));
+        // A code being applied keeps its box: the new link is not checked
+        // (nor queued), the box shows the apply and its answer, and a note
+        // says the link was left.
+        let applying = self
+            .session()
+            .and_then(|session| session.payments.gift_code.as_ref())
+            .is_some_and(|lookup| lookup.applying());
+        if applying {
+            self.set_note(StatusNote::info(tr(keys::Q_REST_WAIT_FOR_THE_CURRENT_GIFT)));
+        } else {
+            match self.live.as_mut() {
+                Some(live) => {
+                    if live.driver.request_gift_code_info(&code).is_err() {
+                        self.set_note(StatusNote::error(tr(
+                            keys::Q_REST_COULD_NOT_CHECK_THE_GIFT,
+                        )));
+                    }
                 }
-            }
-            None => {
-                self.set_note(StatusNote::info(tr(keys::Q_REST_GIFT_CODES_NEED_A_SIGNED)));
+                None => {
+                    self.set_note(StatusNote::info(tr(keys::Q_REST_GIFT_CODES_NEED_A_SIGNED)));
+                }
             }
         }
         self.open_box(crate::ui::shell::DialogKind::GiftCodeLink);
@@ -347,7 +351,11 @@ impl QuillApp {
                     )
                 })
                 .into_any_element();
+            // Applying: the box stays until the answer, whatever way closes it.
             finish(dialog, tr(keys::GIFT_LINK_TITLE), body, footer, on_close)
+                .close_button(!applying)
+                .overlay_closable(!applying)
+                .keyboard(!applying)
         })
     }
 

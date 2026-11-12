@@ -131,3 +131,24 @@ fn a_long_caption_collapses_and_expands(cx: &mut TestAppContext) {
     settle(vcx);
     app.read_with(vcx, |app, _| assert!(!app.viewer.extra.caption.expanded()));
 }
+
+#[gpui_kit::test]
+fn a_step_that_does_not_move_keeps_the_expanded_caption(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let long = "A long trail report. ".repeat(400);
+    add_photo(&app, vcx, 8901, &long);
+    app.update_in(vcx, |app, _, cx| {
+        app.open_media_viewer(ChatId(11), MessageId(8901), cx);
+    });
+    settle(vcx);
+    app.update_in(vcx, |app, _, cx| {
+        app.toggle_viewer_caption(cx);
+        // The only item: Right and Left stay on it, the caption stays open.
+        app.step_media_viewer(1, cx);
+        app.step_media_viewer(-1, cx);
+        let at = 0;
+        app.open_viewer_group_item(at, cx);
+    });
+    app.read_with(vcx, |app, _| assert!(app.viewer.extra.caption.expanded()));
+}
