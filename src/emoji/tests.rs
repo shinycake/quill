@@ -207,6 +207,58 @@ fn open_chat_custom_emoji_files_cover_text_and_reactions() {
     assert!(session.open_chat_custom_emoji_files().is_empty());
 }
 
+/// A status-id list takes only the answer of the ask it waits for: the one
+/// of a request it never sent (an older ask, a status change away) is dropped.
+#[test]
+fn a_status_list_answer_of_another_request_is_dropped() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let waited = session.request(RequestPurpose::GetThemedEmojiStatuses, None);
+    session.stickers.emoji.lists.themed_statuses.begin();
+    session.stickers.emoji.lists.themed_statuses.sent(waited);
+    let other = session.request(RequestPurpose::GetThemedEmojiStatuses, None);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"emojiStatusCustomEmojis","custom_emoji_ids":["11","22"],"@extra":"{}"}}"#,
+            other.0
+        ),
+    );
+    assert!(session.stickers.emoji.themed_status_ids().is_empty());
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"emojiStatusCustomEmojis","custom_emoji_ids":["11","22"],"@extra":"{}"}}"#,
+            waited.0
+        ),
+    );
+    assert_eq!(session.stickers.emoji.themed_status_ids(), &[11, 22]);
+
+    let waited = session.request(RequestPurpose::GetUpgradedGiftEmojiStatuses, None);
+    session.stickers.emoji.lists.upgraded_gift_statuses.begin();
+    session
+        .stickers
+        .emoji
+        .lists
+        .upgraded_gift_statuses
+        .sent(waited);
+    let other = session.request(RequestPurpose::GetUpgradedGiftEmojiStatuses, None);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"emojiStatuses","emoji_statuses":[{{"@type":"emojiStatus","type":{{"@type":"emojiStatusTypeCustomEmoji","custom_emoji_id":"5"}},"expiration_date":0}}],"@extra":"{}"}}"#,
+            other.0
+        ),
+    );
+    assert!(session.stickers.emoji.upgraded_gift_statuses().is_empty());
+}
+
 /// Slice S10: emoji-backend answers are stored only under a matching
 /// request purpose (stray answers ignored, never landing in the regular
 /// sticker panel), and mutation `ok`s invalidate the affected caches.

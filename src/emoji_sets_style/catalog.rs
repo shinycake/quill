@@ -132,7 +132,7 @@ pub fn save_current(app_root: &Path, id: EmojiSetId) -> std::io::Result<()> {
         })
 }
 
-/// A row's state (tdesktop `SetRowView`).
+/// A row's view, rebuilt each frame (tdesktop `SetState`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SetRowView {
     /// The set in use.

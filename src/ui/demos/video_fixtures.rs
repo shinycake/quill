@@ -40,10 +40,8 @@ pub(in crate::ui) fn apply_ready_gifs(
         }
     }
     session.stickers.gifs.open = true;
-    session.stickers.gifs.saved_asked(quill::ids::RequestId(0));
     let extra = session.request(RequestPurpose::GetSavedAnimations, None);
-    session.stickers.gifs.saved.begin();
-    session.stickers.gifs.saved.sent(extra);
+    session.stickers.gifs.saved_asked(extra);
     let saved = format!(
         r#"{{"@type":"animations","@extra":"{}","animations":[{}]}}"#,
         extra.0,

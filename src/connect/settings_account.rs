@@ -36,8 +36,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let EnvelopePayload::Users(UsersPayload::Me { user_id, .. }) = &envelope.payload else {
             return None;
         };
-        // Only the answer of the ask the row waits for opens the chat: an
-        // earlier `getSupportUser`, whose box was left, opens nothing.
+        // Only the answer of the ask the row holds opens the chat.
         let asked = envelope
             .extra
             .filter(|id| self.session.settings.support_user.waits_for(*id))?;

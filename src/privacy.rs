@@ -687,6 +687,38 @@ mod tests {
     }
 
     #[test]
+    fn a_fetch_answer_is_taken_only_by_the_stage_that_waits_for_it() {
+        let v = NewChatPrivacy {
+            allow_from_unknown: true,
+            incoming_paid_message_star_count: 0,
+        };
+        let other = NewChatPrivacy {
+            allow_from_unknown: false,
+            incoming_paid_message_star_count: 0,
+        };
+        assert_ne!(v, other);
+        let mut ready = NewChatPrivacyState::Ready(v);
+        ready.fetched(RequestId(9), other);
+        assert_eq!(ready, NewChatPrivacyState::Ready(v));
+        let mut refreshing = NewChatPrivacyState::Refreshing {
+            value: v,
+            request: RequestId(5),
+        };
+        refreshing.fetched(RequestId(6), other);
+        assert_eq!(
+            refreshing,
+            NewChatPrivacyState::Refreshing {
+                value: v,
+                request: RequestId(5)
+            }
+        );
+        refreshing.fetch_failed(RequestId(6));
+        assert!(matches!(refreshing, NewChatPrivacyState::Refreshing { .. }));
+        refreshing.fetch_failed(RequestId(5));
+        assert_eq!(refreshing, NewChatPrivacyState::Ready(v));
+    }
+
+    #[test]
     fn privacy_get_maps_rules_with_exceptions() {
         let (mut session, sink) = session();
         let seq = AtomicU64::new(0);

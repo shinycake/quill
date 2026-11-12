@@ -10273,3 +10273,14 @@ notification edits), `connect::tests::sticker_tabs` / `sticker_creator` (the sta
 | 19 | `covers_requested` is cleared when the Emoji Sets box opens. |
 | 20 | `poll_widget_public_data` relies on the widget's `Poll::Asking`; quick-reply writes are recorded in `QuickRepliesState::writes` by the request they hold. |
 | 21 | Doc comments corrected; `fail_more` and `ipv6_ended` take only the request their stage holds. |
+
+### Sweep fixes (r4-03, fix round 3)
+
+| Review item | What changed |
+| --- | --- |
+| 1 | `a_fetch_answer_is_taken_only_by_the_stage_that_waits_for_it` (privacy.rs): `Ready` and a `Refreshing` of another request drop `fetched`, `fetch_failed` of the refresh returns to `Ready`. Fails if `fetched` takes any answer. |
+| 2 | `a_refused_send_leaves_the_open_set_box_and_the_earlier_asks_alone` (sticker_tabs.rs): a refused `view_sticker_set`, `fetch_attached_sticker_sets` or `update_sticker_suggestions` leaves the box, `attached` and `suggest_for` as they were. Fails if the box is written before the send. |
+| 3 | `a_status_list_answer_of_another_request_is_dropped` (emoji/tests.rs): the themed ids and the upgraded gift statuses ignore an answer of a request they do not wait for. Fails if the answer is applied unmatched. |
+| 4 | The `SetRowView` comment names tdesktop's `SetState`. |
+| 5 | The `support_chat_answer` comment says what the filter does. |
+| 6 | The video demo registers the saved-GIF request first and calls `saved_asked` once. |

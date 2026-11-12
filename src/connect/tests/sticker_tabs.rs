@@ -984,3 +984,44 @@ fn gif_search_pages_and_saved_mutations_use_current_confirmed_state() {
     assert!(driver.set_gif_saved(FileId(9), true).is_err());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// A refused send leaves the open set box, the attached sets and the
+/// earlier suggestion ask as they were.
+#[test]
+fn a_refused_send_leaves_the_open_set_box_and_the_earlier_asks_alone() {
+    use crate::state::{AttachedSets, StickerSetView, StickerSetViewStage, SuggestFor};
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let mut view = StickerSetView::loading(77, crate::ids::RequestId(800));
+    view.stage = StickerSetViewStage::Ready {
+        title: "Set".into(),
+        name: "set".into(),
+        installed: false,
+        is_emoji: false,
+        is_owned: false,
+        stickers: Vec::new(),
+        files: crate::state::SetFiles::Unasked,
+    };
+    driver.session.stickers.sticker_set_view = Some(view.clone());
+    let ready = driver.session.stickers.sticker_set_view.clone();
+    recorder.refuse_sends(true);
+    assert!(driver.view_sticker_set(78).is_err());
+    assert_eq!(driver.session.stickers.sticker_set_view, ready);
+    let attached = driver.session.stickers.stickers.attached;
+    assert!(driver.fetch_attached_sticker_sets(FileId(5)).is_err());
+    assert_eq!(driver.session.stickers.sticker_set_view, ready);
+    assert_eq!(driver.session.stickers.stickers.attached, attached);
+    assert!(matches!(attached, AttachedSets::Idle));
+    // A suggestion ask that cannot go out leaves the earlier one standing.
+    let earlier = SuggestFor::Asked {
+        emoji: "😀".into(),
+        request: crate::ids::RequestId(900),
+    };
+    driver.session.stickers.stickers.suggest_for = earlier.clone();
+    assert!(driver.update_sticker_suggestions("🔥").is_err());
+    assert_eq!(driver.session.stickers.stickers.suggest_for, earlier);
+    drop(dir);
+}
