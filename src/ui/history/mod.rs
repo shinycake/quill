@@ -1,7 +1,7 @@
 //! message history: loading, rows, albums, skeletons.
 #![deny(clippy::indexing_slicing)]
 
-use super::app::{PaneView, QuillApp};
+use super::app::{PaneMode, QuillApp};
 use super::bubble_header::{forward_header_line, reply_header_strip, via_bot_line};
 use super::demo::{demo_file_json, demo_media_allowlist, demo_thumb_png_path};
 use super::message_checklist::checklist_body;

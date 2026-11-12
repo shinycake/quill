@@ -53,7 +53,7 @@ impl QuillApp {
             cx.notify();
             return MenuSend::Sent;
         }
-        if !matches!(self.pane_mode(), PaneView::Ready) {
+        if !matches!(self.pane_mode(), PaneMode::Ready) {
             return MenuSend::Unavailable;
         }
         if self.session().is_some_and(|s| s.is_frozen()) {

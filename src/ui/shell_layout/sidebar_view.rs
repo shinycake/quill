@@ -5,7 +5,7 @@
 
 use super::ShellLayout;
 use crate::ui::actions::ToggleSidebar;
-use crate::ui::app::{PaneView, QuillApp};
+use crate::ui::app::{PaneMode, QuillApp};
 use crate::ui::sidebar_reveal::{LEAVE_GRACE, Peek, REVEAL_EDGE_WIDTH};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
@@ -25,7 +25,7 @@ impl QuillApp {
     /// signed-in main window, with the list beside the chat.
     fn sidebar_hideable(&self, layout: &ShellLayout) -> bool {
         self.windows.scope.is_none()
-            && self.pane_mode() == PaneView::Ready
+            && self.pane_mode() == PaneMode::Ready
             && layout.sidebar_toggle()
             && layout.list.is_some()
     }

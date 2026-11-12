@@ -46,7 +46,7 @@ pub struct QuillApp {
     pub(super) start_files: super::start_files_state::StartFilesUi,
     /// The title bar update pill's motion (`ui/update_pill.rs`).
     pub(super) update_pill: super::update_pill::UpdatePill,
-    /// Agent access, the app's side: the wake task, the input commands in line, the reads in flight and a send handed over (`ui/agent_state.rs`).
+    /// Agent access, the app's side: the wake task, the activity rows shown, a send handed over (`ui/agent_state.rs`).
     pub(super) agent_bridge: Box<super::agent_state::AgentBridge>,
     /// The agent takeover's wake-up and Esc (`ui/agent_takeover_state.rs`).
     pub(super) takeover: super::agent_takeover_state::TakeoverUi,
@@ -101,7 +101,7 @@ pub struct QuillApp {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum PaneView {
+pub(super) enum PaneMode {
     Synthetic,
     Connecting,
     Ready,
@@ -223,18 +223,18 @@ impl QuillApp {
         }
     }
 
-    pub(super) fn pane_mode(&self) -> PaneView {
+    pub(super) fn pane_mode(&self) -> PaneMode {
         if self
             .session()
             .is_some_and(|session| matches!(session.auth, AuthorizationState::Ready))
         {
-            return PaneView::Ready;
+            return PaneMode::Ready;
         }
         match self.auth_demo.stage {
             ConnectStage::NeedCredentials if self.live.is_none() && !self.auth_demo.demo_inputs => {
-                PaneView::Synthetic
+                PaneMode::Synthetic
             }
-            _ => PaneView::Connecting,
+            _ => PaneMode::Connecting,
         }
     }
 }

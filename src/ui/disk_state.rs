@@ -1,6 +1,6 @@
 #![deny(clippy::indexing_slicing)]
 
-use super::app::{PaneView, QuillApp};
+use super::app::{PaneMode, QuillApp};
 use super::connect_ui::ConnectStage;
 use super::message_media::format_bytes;
 use super::status_note::StatusNote;
@@ -543,7 +543,7 @@ impl QuillApp {
             } else {
                 tr(keys::Q_DISK_ALMOST_FULL)
             };
-            let settings_can_show = self.pane_mode() != PaneView::Connecting;
+            let settings_can_show = self.pane_mode() != PaneMode::Connecting;
             h_flex()
                 .w_full()
                 .flex_none()

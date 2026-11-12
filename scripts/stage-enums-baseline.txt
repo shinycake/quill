@@ -48,6 +48,7 @@ bare:MuteState::Connecting 1
 bare:Opening::Pending 1
 bare:OwnLinkState::Waiting 1
 bare:PaidStage::Waiting 1
+bare:PaneMode::Connecting 1
 bare:PasscodeJob::Running 1
 bare:Phase::Downloading 1
 bare:Phase::Loading 1

@@ -21,7 +21,7 @@
 
 use super::layout::{BoxRows, MOSAIC_WIDTH, TrayLayout, media_room, scroll_room};
 use super::options::tray_title;
-use crate::ui::app::{PaneView, QuillApp};
+use crate::ui::app::{PaneMode, QuillApp};
 use crate::ui::composer_sends::SendOnce;
 use crate::ui::dismiss_layer::DismissLayer;
 use crate::ui::media_panel::PanelTab;
@@ -52,8 +52,8 @@ impl QuillApp {
     pub(in crate::ui) fn send_box_shown(&self) -> bool {
         !self.pending_attachments().is_empty()
             && !self.chat_ui.is_editing()
-            && matches!(self.pane_mode(), PaneView::Ready)
-            && self.composer_available(PaneView::Ready)
+            && matches!(self.pane_mode(), PaneMode::Ready)
+            && self.composer_available(PaneMode::Ready)
             && !self
                 .viewer
                 .photo_editor

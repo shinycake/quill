@@ -23,7 +23,7 @@ impl QuillApp {
         let mode = self.pane_mode();
         let history = match mode {
             _ if !part.top() => Empty.into_any_element(),
-            PaneView::Synthetic => div()
+            PaneMode::Synthetic => div()
                 .id("conversation-history")
                 .flex()
                 .flex_1()
@@ -33,23 +33,23 @@ impl QuillApp {
                 .aria_label(tr(keys::Q_CHAT_MESSAGE_HISTORY))
                 .child(self.chat.clone())
                 .into_any_element(),
-            PaneView::Connecting => pane_placeholder(
+            PaneMode::Connecting => pane_placeholder(
                 tr(keys::Q_CHAT_NOT_SIGNED_IN),
                 tr(keys::Q_CHAT_SIGN_IN_TO_SEE_YOUR),
                 cx,
             )
             .into_any_element(),
-            PaneView::Ready => self.session_history(forum_on_screen, cx).into_any_element(),
+            PaneMode::Ready => self.session_history(forum_on_screen, cx).into_any_element(),
         };
         let composer = self.composer_available(mode).then_some(true);
         let composer_note: Option<String> = match mode {
-            PaneView::Connecting => Some(tr(keys::Q_CHAT_SIGN_IN_TO_SEND_MESSAGES).to_string()),
-            PaneView::Ready
+            PaneMode::Connecting => Some(tr(keys::Q_CHAT_SIGN_IN_TO_SEND_MESSAGES).to_string()),
+            PaneMode::Ready
                 if composer.is_none() && self.session().is_some_and(|s| s.is_frozen()) =>
             {
                 Some(tr(keys::Q_CHAT_YOUR_ACCOUNT_IS_FROZEN_AND_2).to_string())
             }
-            PaneView::Ready if composer.is_none() => {
+            PaneMode::Ready if composer.is_none() => {
                 let open = self.session().and_then(|s| s.open_chat_id());
                 let in_topic = self
                     .session()
@@ -149,7 +149,7 @@ impl QuillApp {
                 |this, banner| this.child(banner),
             )
             .when(composer.is_some() && part.bottom(), |this| {
-                let show_attach = matches!(mode, PaneView::Ready) && !self.chat_ui.is_editing();
+                let show_attach = matches!(mode, PaneMode::Ready) && !self.chat_ui.is_editing();
                 // Something to send (text, an attachment, an edit): the
                 // composer shows Send instead of the mic.
                 // A rich draft shown in place of the field sends too.

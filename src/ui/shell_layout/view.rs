@@ -6,7 +6,7 @@ use super::{
     DOWNLOADS_PANEL_WIDTH, ForumPane, INFO_PANEL_WIDTH, PanelPane, SHARED_MEDIA_PANEL_WIDTH,
     ShellInput, ShellLayout, chat_pane_width, max_list_width, shell_layout,
 };
-use crate::ui::app::{PaneView, QuillApp};
+use crate::ui::app::{PaneMode, QuillApp};
 use crate::ui::navigation::SidebarResize;
 use crate::ui::panel_reveal::PanelSet;
 use gpui_kit::component::button::*;
@@ -26,7 +26,7 @@ impl QuillApp {
     /// Left and right space outside the conversation pane this frame. The
     /// sign-in, passcode and onboarding screens have no columns, so none.
     pub(in crate::ui) fn chat_insets(&self) -> (Pixels, Pixels) {
-        if self.pane_mode() != PaneView::Ready {
+        if self.pane_mode() != PaneMode::Ready {
             return (px(0.), px(0.));
         }
         let (left, right) = self.shell_layout().chat_insets(self.folder_rail_width());
@@ -47,7 +47,7 @@ impl QuillApp {
             }),
             topic_open: session.is_some_and(|s| s.open_forum_topic().is_some()),
             panels: side_panels_width(self.drawn_panels()),
-            docked: if self.pane_mode() == PaneView::Ready {
+            docked: if self.pane_mode() == PaneMode::Ready {
                 self.frame.sidebar.docked(self.frame.sidebar.now())
             } else {
                 1.
@@ -142,7 +142,7 @@ impl QuillApp {
         self.seed_history_width(chat_pane_width(input, &layout));
         let open = self.session().and_then(|s| s.open_chat_id());
         let list = layout.list.and_then(|list| {
-            let column = if self.pane_mode() == PaneView::Ready {
+            let column = if self.pane_mode() == PaneMode::Ready {
                 self.docked_sidebar(&layout)?
             } else {
                 self.sidebar(

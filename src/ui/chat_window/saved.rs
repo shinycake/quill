@@ -223,7 +223,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.pane_mode() != super::super::app::PaneView::Ready {
+        if self.pane_mode() != super::super::app::PaneMode::Ready {
             return;
         }
         let Some(account) = self.saved_windows_account() else {

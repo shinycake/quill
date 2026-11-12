@@ -152,7 +152,7 @@ impl Render for ChatWindowView {
         // closes when its peer becomes unavailable). So does a window the
         // session keeps no view for: it could only show another window's.
         let (alive, title) = app.update(cx, |app, cx| {
-            let alive = app.pane_mode() == super::super::app::PaneView::Ready
+            let alive = app.pane_mode() == super::super::app::PaneMode::Ready
                 && app.session().is_some_and(|session| {
                     session.chats.contains_key(&chat_id.0)
                         && session.window_chats.contains(&chat_id)
