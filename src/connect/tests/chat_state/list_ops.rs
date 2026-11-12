@@ -683,13 +683,16 @@ fn mark_chat_as_read_works_after_the_history_was_dropped() {
     let seq = AtomicU64::new(0);
     ready_private_chat(&mut driver, &seq, &dyn_sink);
     if let Some(chat) = driver.session.chats.get_mut(&7) {
-        chat.last_message = Some(crate::state::ChatLastMessage {
-            id: MessageId(11),
-            date: 0,
-            is_outgoing: false,
-            sender: None,
-            send_state: Default::default(),
-        });
+        chat.last = Some(crate::state::LastPreview::plain(
+            "",
+            crate::state::ChatLastMessage {
+                id: MessageId(11),
+                date: 0,
+                is_outgoing: false,
+                sender: None,
+                send_state: Default::default(),
+            },
+        ));
     }
     driver.session.histories.remove(&7);
 

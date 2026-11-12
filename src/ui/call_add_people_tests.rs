@@ -207,7 +207,11 @@ fn ended_summary(call_id: i32, busy: bool) -> quill::state::CallSummary {
         duration_secs: 30,
         had_audio: true,
         end_line: String::new(),
-        busy,
+        end: if busy {
+            quill::state::CallEnd::Declined
+        } else {
+            quill::state::CallEnd::Ended
+        },
         rating: quill::state::CallRating::NotNeeded,
         debug_information: quill::state::CallUpload::NotNeeded,
         log: quill::state::CallUpload::NotNeeded,

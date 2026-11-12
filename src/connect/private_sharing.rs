@@ -36,7 +36,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .chats
             .get(&chat_id.0)
-            .and_then(|chat| chat.last_message.as_ref())
+            .and_then(|chat| chat.last_message())
             .map(|message| message.id)
             .filter(|id| id.0 > 0 && !recent);
         let Some(message_id) = last else {

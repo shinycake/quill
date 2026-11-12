@@ -369,7 +369,7 @@ impl QuillApp {
                     call.id == call_id
                         && (call.is_joined || call.rejoining())
                         && !call.rejoin.is_left()
-                        && call.stream != StreamState::Ended
+                        && call.media.stream_state() != StreamState::Ended
                 })
             }
             LivePipSource::Story { chat_id, story_id } => {
@@ -377,7 +377,7 @@ impl QuillApp {
                     && !calls
                         .story_stream
                         .as_ref()
-                        .is_some_and(|call| call.stream == StreamState::Ended)
+                        .is_some_and(|call| call.media.stream_state() == StreamState::Ended)
             }
         }
     }

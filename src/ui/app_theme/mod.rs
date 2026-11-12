@@ -366,25 +366,13 @@ impl QuillApp {
     /// auto-night would switch straight back, it is turned off, as
     /// tdesktop's "Disable" answer to its auto-night warning does.
     pub(crate) fn choose_app_theme(&mut self, id: ThemeId, night: bool, cx: &mut Context<Self>) {
-        use quill::settings::{AutoNight, ThemeChoice};
+        use quill::settings::AutoNight;
         let auto_disagrees =
             self.appearance.auto_night != AutoNight::Off && self.night_mode_now(cx) != night;
         if auto_disagrees {
             self.set_note(StatusNote::silent(tr(keys::Q_MISC_AUTO_NIGHT_MODE_IS_OFF)));
         }
-        self.set_appearance(cx, |a| {
-            a.follow_omarchy = false;
-            if night {
-                a.night_theme = id;
-                a.theme = ThemeChoice::Dark;
-            } else {
-                a.day_theme = id;
-                a.theme = ThemeChoice::Light;
-            }
-            if auto_disagrees {
-                a.auto_night = AutoNight::Off;
-            }
-        });
+        self.set_appearance(cx, |a| a.choose_theme(id, night, auto_disagrees));
     }
 
     /// tdesktop's accent circles: `accent` (0xRRGGBB) for the built-in

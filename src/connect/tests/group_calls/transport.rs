@@ -93,6 +93,7 @@ fn group_rejoin_answer_reconnects_native_transport() {
         .as_mut()
         .expect("tracked call")
         .screen_share = crate::state::GroupScreenShare::Starting {
+        request: crate::ids::RequestId(1),
         answer: "old-answer".into(),
     };
     // `need_rejoin` auto-rejoins with a fresh offer and a reset

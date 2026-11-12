@@ -221,12 +221,12 @@ impl Session {
                 remote_battery_low: false,
                 signal_bars: None,
                 media_note: None,
-                state: CallState::Pending {
+                progress: crate::state::CallProgress::Signaling(CallState::Pending {
                     is_created: true,
                     is_received: false,
-                },
+                }),
+                action: CallAction::Idle,
                 started_at: Instant::now(),
-                ready: None,
                 transport: CallTransport::default(),
                 signaling_queue: Vec::new(),
                 signaling_dropped: 0,

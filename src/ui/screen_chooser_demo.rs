@@ -226,7 +226,7 @@ impl QuillApp {
         participants.extend((0..crowd).map(listener));
         session.calls.active_group_call = Some(ActiveGroupCall {
             is_joined: true,
-            screen_share: quill::state::GroupScreenShare::Sharing { paused: true },
+            screen_share: quill::state::GroupScreenShare::Paused,
             participants: participants.into(),
             ..ActiveGroupCall::fresh(7)
         });

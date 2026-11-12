@@ -9,7 +9,7 @@ use gpui_kit::component::Root;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
 use quill::gift_manage::ExportError;
 use quill::premium_hub::TxFilter;
-use quill::premium_hub::ton::{GramWithdraw, WithdrawOutcome};
+use quill::premium_hub::ton::{GramWithdraw, PeerAsk, PeerKey, WithdrawOutcome};
 
 fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     let (app, _shell, vcx) = new_app_with_shell(cx);
@@ -124,7 +124,7 @@ fn an_unknown_peer_shows_a_placeholder_then_a_name(cx: &mut TestAppContext) {
                 .payments
                 .hub
                 .grams
-                .entries
+                .rows
                 .iter()
                 .find(|tx| tx.id == "tx-sale")?;
             super::peer_name(session, tx.peer()?)
@@ -146,7 +146,12 @@ fn an_unknown_peer_shows_a_placeholder_then_a_name(cx: &mut TestAppContext) {
     // TDLib could not return it: a deleted account.
     app.update_in(vcx, |app, _, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.payments.hub.grams.missing_users.insert(12);
+            session
+                .payments
+                .hub
+                .grams
+                .peers
+                .insert(PeerKey::User(12), PeerAsk::Missing);
         }
         cx.notify();
     });
@@ -242,7 +247,7 @@ fn the_withdrawal_url_opens_only_through_the_link_policy(cx: &mut TestAppContext
         let url = url.to_string();
         app.update_in(vcx, |app, _, cx| {
             if let Some(grams) = app.demo_session.as_mut().map(|s| &mut s.payments.hub.grams) {
-                grams.withdraw = Some(GramWithdraw::Done(WithdrawOutcome::Url(url)));
+                grams.withdraw = Some(GramWithdraw::Finished(WithdrawOutcome::Url(url)));
             }
             cx.notify();
         });
@@ -275,7 +280,7 @@ fn the_withdrawal_url_opens_only_through_the_link_policy(cx: &mut TestAppContext
     );
     let left = app.read_with(vcx, |app, _| {
         app.session()
-            .is_some_and(|s| matches!(s.payments.hub.grams.withdraw, Some(GramWithdraw::Done(_))))
+            .and_then(|s| s.payments.hub.grams.withdraw.clone())
     });
-    assert!(!left, "taken once");
+    assert_eq!(left, None);
 }

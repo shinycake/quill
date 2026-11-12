@@ -650,7 +650,7 @@ impl QuillApp {
         let as_files = ComposerAttachment::sends_as_files(self.pending_attachments());
         let remember = self
             .session()
-            .map(|s| s.settings.media_prefs.remember_media_grouping)
+            .map(|s| s.settings.media_prefs.media_grouping.is_remembered())
             .unwrap_or(false);
         let timer = self.self_destruct_picker_visible().then(|| {
             let owner = cx.entity().downgrade();

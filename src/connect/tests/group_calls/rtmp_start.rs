@@ -257,9 +257,12 @@ fn creating_while_a_one_to_one_call_hangs_up_is_allowed() {
         user_id: 11,
         is_outgoing: true,
         is_video: false,
-        state: CallState::Ready(Default::default()),
+        progress: crate::state::CallProgress::first(
+            CallState::Ready(Default::default()),
+            std::time::Instant::now(),
+        ),
+        action: crate::state::CallAction::Idle,
         started_at: std::time::Instant::now(),
-        ready: None,
         transport: Default::default(),
         signaling_queue: Vec::new(),
         signaling_dropped: 0,
@@ -277,7 +280,8 @@ fn creating_while_a_one_to_one_call_hangs_up_is_allowed() {
         "not while the call is on"
     );
     if let Some(call) = driver.session.calls.active_call.as_mut() {
-        call.state = CallState::HangingUp;
+        call.progress
+            .update(CallState::HangingUp, std::time::Instant::now());
     }
     driver
         .start_video_chat(CHAT, String::new(), 0)

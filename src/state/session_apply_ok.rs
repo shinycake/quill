@@ -108,6 +108,7 @@ impl Session {
             }
             Some(RequestPurpose::Groups(GroupsPurpose::TransferChatOwnership { user_id })) => {
                 self.finish_ownership_transfer(
+                    pending.map(|p| p.id),
                     user_id,
                     pending.and_then(|p| p.chat_id).map(|c| c.0),
                 );
@@ -879,14 +880,8 @@ impl Session {
         for later in self.requests.pending.values_mut().filter(|p| {
             p.purpose == RequestPurpose::SetChatPermissions && p.chat_id == Some(chat_id)
         }) {
-            if let Some(RequestRollback::ChatPermissions {
-                previous,
-                previous_can_send,
-                ..
-            }) = &mut later.rollback
-            {
+            if let Some(RequestRollback::ChatPermissions { previous, .. }) = &mut later.rollback {
                 *previous = Some(sent);
-                *previous_can_send = sent.can_send_basic_messages;
             }
         }
     }

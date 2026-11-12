@@ -76,7 +76,7 @@ fn last_message_positions_replace_main_list_membership() {
     );
     let chat = session.chats.get(&3).unwrap();
     assert!(chat.in_main_list);
-    assert_eq!(chat.last_preview, "CANARY_PREVIEW_hi");
+    assert_eq!(chat.last_preview(), "CANARY_PREVIEW_hi");
     assert_eq!(session.ordered_chats()[0].id.0, 3);
     apply_json(
         &mut session,
@@ -117,7 +117,7 @@ fn edits_refresh_the_preview_only_for_the_chats_last_message() {
         &sink,
         r#"{"@type":"updateMessageContent","chat_id":11,"message_id":100,"new_content":{"@type":"messageText","text":{"@type":"formattedText","text":"edited","entities":[]}}}"#,
     );
-    assert_eq!(session.chats[&11].last_preview, "edited");
+    assert_eq!(session.chats[&11].last_preview(), "edited");
     // The last message becomes unknown.
     apply_json(
         &mut session,
@@ -125,8 +125,8 @@ fn edits_refresh_the_preview_only_for_the_chats_last_message() {
         &sink,
         r#"{"@type":"updateChatLastMessage","chat_id":11,"last_message":null,"positions":[{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"8","is_pinned":false}]}"#,
     );
-    assert_eq!(session.chats[&11].last_preview, "");
-    assert!(session.chats[&11].last_message.is_none());
+    assert_eq!(session.chats[&11].last_preview(), "");
+    assert!(session.chats[&11].last_message().is_none());
     assert!(session.chats[&11].in_main_list);
     // A loaded row being edited does not invent a preview.
     session.open_chat(ChatId(11));
@@ -147,7 +147,7 @@ fn edits_refresh_the_preview_only_for_the_chats_last_message() {
         &sink,
         r#"{"@type":"updateMessageContent","chat_id":11,"message_id":100,"new_content":{"@type":"messageText","text":{"@type":"formattedText","text":"again","entities":[]}}}"#,
     );
-    assert_eq!(session.chats[&11].last_preview, "");
+    assert_eq!(session.chats[&11].last_preview(), "");
 }
 
 #[test]
@@ -492,6 +492,13 @@ fn folder_chats_to_leave_cached_per_folder() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request_for_folder(RequestPurpose::GetChatFolderChatsToLeave, 3);
+    let to_leave = session
+        .chat_list
+        .folder_chats_to_leave
+        .entry(3)
+        .or_default();
+    to_leave.begin();
+    to_leave.sent(extra);
     let json = format!(
         r#"{{"@type":"chats","@extra":"{}","total_count":2,"chat_ids":[5,6]}}"#,
         extra.0

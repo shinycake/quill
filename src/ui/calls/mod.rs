@@ -697,12 +697,12 @@ impl QuillApp {
                     user_id,
                     is_outgoing: false,
                     is_video,
-                    state: CallState::Pending {
+                    progress: quill::state::CallProgress::Signaling(CallState::Pending {
                         is_created: false,
                         is_received: true,
-                    },
+                    }),
                     started_at: Instant::now(),
-                    ready: None,
+                    action: quill::state::CallAction::Idle,
                     transport: Default::default(),
                     signaling_queue: Vec::new(),
                     signaling_dropped: 0,

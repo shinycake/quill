@@ -7,7 +7,7 @@ mod recent;
 mod second_call;
 mod state;
 
-pub use hang_up::{CallProgress, HangUp};
+pub use hang_up::{CallAction, HangUp};
 pub use purpose::*;
 pub use recent::{CallPage, RecentCalls};
 pub use second_call::SecondCall;

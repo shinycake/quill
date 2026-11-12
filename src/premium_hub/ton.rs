@@ -14,7 +14,7 @@ use crate::lang::{keys, tr};
 use crate::state::fetch::Fetch;
 use crate::telegram::envelope::{MessageSender, ParsedFile, StickerContent};
 use serde_json::{Value, json};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Rows per `getTonTransactions` page (the design's limit).
 pub const PAGE: i32 = 50;
@@ -406,7 +406,7 @@ pub enum GramsPurpose {
     /// `getGramRevenueStatistics`.
     Revenue,
     /// `getUser` for a user the history names but the session does not
-    /// know yet; the pending request's `chat_id` carries the user id.
+    /// know yet ([`GramsHub::peers`] holds the request).
     PeerUser,
     /// `getChat` for such a chat.
     PeerChat,
@@ -454,84 +454,54 @@ pub fn get_gram_revenue_statistics(extra: RequestId, is_dark: bool) -> String {
     .to_string()
 }
 
-/// The Grams screen and the Settings row's balance.
-#[derive(Debug, Clone, Default)]
-pub struct GramsHub {
-    pub open: bool,
-    /// Known after the first answer (probe or page).
-    pub balance_nano: Option<i64>,
-    /// The Settings probe of the balance, asked once per session: a
-    /// failure leaves the row hidden and is not asked again until the
-    /// session restarts.
-    pub probe: Fetch<()>,
-    pub filter: TxFilter,
-    pub entries: Vec<TonTx>,
-    pub next_offset: String,
-    /// The newest page request (older answers are dropped), its answer or
-    /// its failure ([`crate::gift_market::PageLoad`]); the rows stay under
-    /// every stage.
-    pub load: crate::gift_market::PageLoad,
-    /// The first All page had incoming / outgoing rows (tdesktop shows the
-    /// tabs only when both directions exist).
-    pub has_in: bool,
-    pub has_out: bool,
-    /// Key of the transaction whose receipt is showing.
-    pub selected: Option<String>,
-    pub revenue: Option<GramRevenue>,
-    /// Users and chats already asked for (each once per session).
-    pub asked_users: BTreeSet<i64>,
-    pub asked_chats: BTreeSet<i64>,
-    /// Asked for and refused: shown as a deleted account, not a
-    /// placeholder that never fills.
-    pub missing_users: BTreeSet<i64>,
-    pub missing_chats: BTreeSet<i64>,
-    /// How many of `entries` have had their peers checked; the rows after
-    /// it still need checking. A new first page starts again at zero.
-    pub peers_checked: usize,
-    /// Collect's password box or security check while open, then how it
-    /// ended until the UI has acted on it.
-    pub withdraw: Option<GramWithdraw>,
+/// A user or chat a history row names, as the lookup map keys it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum PeerKey {
+    User(i64),
+    Chat(i64),
 }
 
-impl GramsHub {
-    /// tdesktop shows "My Grams" in Settings while the balance is not zero.
-    pub fn shows_settings_row(&self) -> bool {
-        self.balance_nano.is_some_and(|nanos| nanos != 0)
+/// Where the lookup of one unknown peer stands (each once per session).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PeerAsk {
+    /// `getUser` / `getChat` is out under this request; only its refusal
+    /// counts, its answer is the session learning the peer.
+    Asked(RequestId),
+    /// Asked for and refused: shown as a deleted account, not a
+    /// placeholder that never fills.
+    Missing,
+}
+
+/// The history rows and how many of them have had their peers checked, so
+/// a cleared list starts its cursor again by construction.
+#[derive(Debug, Clone, Default)]
+pub struct TxRows {
+    entries: Vec<TonTx>,
+    /// The rows after it still need checking.
+    peers_checked: usize,
+}
+
+impl TxRows {
+    pub fn iter(&self) -> std::slice::Iter<'_, TonTx> {
+        self.entries.iter()
     }
 
-    /// Reset the list for a fresh first page of `filter`.
-    pub fn restart(&mut self, filter: TxFilter) {
-        self.filter = filter;
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    pub fn push(&mut self, tx: TonTx) {
+        self.entries.push(tx);
+    }
+
+    /// Drop every row; the peers cursor goes with them.
+    pub fn clear(&mut self) {
         self.entries.clear();
-        self.next_offset.clear();
-        self.load = crate::gift_market::PageLoad::Idle;
         self.peers_checked = 0;
-        self.selected = None;
-    }
-
-    pub fn apply_page(&mut self, page: TonTxPage, append: bool) {
-        self.load = crate::gift_market::PageLoad::Ready;
-        self.balance_nano = Some(page.balance_nano);
-        self.next_offset = page.next_offset;
-        if !append && self.filter == TxFilter::All {
-            self.has_in = page.transactions.iter().any(TonTx::is_incoming);
-            self.has_out = page.transactions.iter().any(|tx| !tx.is_incoming());
-        }
-        if !append {
-            self.entries.clear();
-            self.peers_checked = 0;
-        }
-        let mut keys: BTreeSet<String> = self.entries.iter().map(|tx| tx.key.clone()).collect();
-        for mut tx in page.transactions {
-            let index = self.entries.len();
-            tx.key = if tx.id.is_empty() || keys.contains(&tx.id) {
-                format!("{index}-{}", tx.date)
-            } else {
-                tx.id.clone()
-            };
-            keys.insert(tx.key.clone());
-            self.entries.push(tx);
-        }
     }
 
     /// Peers of the rows not checked yet, for the resolver. Pass the
@@ -544,9 +514,134 @@ impl GramsHub {
             .map(|(index, tx)| (index, tx.peer()))
     }
 
+    /// Where the peers cursor stands.
+    pub fn peers_checked(&self) -> usize {
+        self.peers_checked
+    }
+
     /// Rows up to (not including) `count` have had their peers checked.
     pub fn peers_handled(&mut self, count: usize) {
         self.peers_checked = self.peers_checked.max(count.min(self.entries.len()));
+    }
+}
+
+impl<'a> IntoIterator for &'a TxRows {
+    type Item = &'a TonTx;
+    type IntoIter = std::slice::Iter<'a, TonTx>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.entries.iter()
+    }
+}
+
+/// The Grams screen and the Settings row's balance.
+#[derive(Debug, Clone, Default)]
+pub struct GramsHub {
+    pub open: bool,
+    /// Known after the first answer (probe or page).
+    pub balance_nano: Option<i64>,
+    /// The Settings probe of the balance: asked on a Settings open, never
+    /// from the tick after a failure. A failure leaves the row hidden
+    /// until Settings is closed and opened again ([`Self::settings_closed`]).
+    pub probe: Fetch<()>,
+    pub filter: TxFilter,
+    pub rows: TxRows,
+    pub next_offset: String,
+    /// The newest page request (older answers are dropped), its answer or
+    /// its failure ([`crate::gift_market::PageLoad`]); the rows stay under
+    /// every stage.
+    pub load: crate::gift_market::PageLoad,
+    /// The first All page had incoming / outgoing rows (tdesktop shows the
+    /// tabs only when both directions exist).
+    pub has_in: bool,
+    pub has_out: bool,
+    /// Key of the transaction whose receipt is showing.
+    pub selected: Option<String>,
+    pub revenue: Option<GramRevenue>,
+    /// Users and chats the history names that the session did not know:
+    /// each asked once per session, then refused or learned.
+    pub peers: BTreeMap<PeerKey, PeerAsk>,
+    /// Collect's password box, security check or finished outcome, while
+    /// open.
+    pub withdraw: Option<GramWithdraw>,
+}
+
+impl GramsHub {
+    /// tdesktop shows "My Grams" in Settings while the balance is not zero.
+    pub fn shows_settings_row(&self) -> bool {
+        self.balance_nano.is_some_and(|nanos| nanos != 0)
+    }
+
+    /// Reset the list for a fresh first page of `filter`.
+    pub fn restart(&mut self, filter: TxFilter) {
+        self.filter = filter;
+        self.rows.clear();
+        self.next_offset.clear();
+        self.load = crate::gift_market::PageLoad::Idle;
+        self.selected = None;
+    }
+
+    /// The Grams screen was closed: the receipt and Collect's box (with an
+    /// outcome it had not acted on) go with it, in one place.
+    pub fn close(&mut self) {
+        self.open = false;
+        self.selected = None;
+        self.withdraw = None;
+    }
+
+    /// Settings closed: a failed balance probe may be asked again the next
+    /// time it opens (not from the tick, so a flaky link cannot loop it).
+    pub fn settings_closed(&mut self) {
+        self.probe.clear_error();
+    }
+
+    /// The lookup of `request` was refused: its peer reads as deleted.
+    pub fn peer_refused(&mut self, request: RequestId) {
+        for ask in self.peers.values_mut() {
+            if *ask == PeerAsk::Asked(request) {
+                *ask = PeerAsk::Missing;
+            }
+        }
+    }
+
+    /// The peer was asked for and refused.
+    pub fn peer_missing(&self, peer: PeerKey) -> bool {
+        self.peers.get(&peer) == Some(&PeerAsk::Missing)
+    }
+
+    /// Collect's finished outcome, once: the box is done with it.
+    pub fn take_withdraw_outcome(&mut self) -> Option<WithdrawOutcome> {
+        match self.withdraw.take() {
+            Some(GramWithdraw::Finished(outcome)) => Some(outcome),
+            other => {
+                self.withdraw = other;
+                None
+            }
+        }
+    }
+
+    pub fn apply_page(&mut self, page: TonTxPage, append: bool) {
+        self.load = crate::gift_market::PageLoad::Ready;
+        self.balance_nano = Some(page.balance_nano);
+        self.next_offset = page.next_offset;
+        if !append && self.filter == TxFilter::All {
+            self.has_in = page.transactions.iter().any(TonTx::is_incoming);
+            self.has_out = page.transactions.iter().any(|tx| !tx.is_incoming());
+        }
+        if !append {
+            self.rows.clear();
+        }
+        let mut keys: BTreeSet<String> = self.rows.iter().map(|tx| tx.key.clone()).collect();
+        for mut tx in page.transactions {
+            let index = self.rows.len();
+            tx.key = if tx.id.is_empty() || keys.contains(&tx.id) {
+                format!("{index}-{}", tx.date)
+            } else {
+                tx.id.clone()
+            };
+            keys.insert(tx.key.clone());
+            self.rows.push(tx);
+        }
     }
 
     /// Whether the All / Incoming / Outgoing tabs show.
@@ -560,7 +655,7 @@ impl GramsHub {
 
     pub fn selected_tx(&self) -> Option<&TonTx> {
         let key = self.selected.as_deref()?;
-        self.entries.iter().find(|tx| tx.key == key)
+        self.rows.iter().find(|tx| tx.key == key)
     }
 
     /// The withdrawal section shows while revenue is available

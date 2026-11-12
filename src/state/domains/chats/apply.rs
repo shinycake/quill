@@ -86,7 +86,7 @@ impl Session {
                 notification_settings,
                 draft,
                 photo,
-                can_send_basic_messages,
+                can_send_basic_messages: _,
                 permissions,
                 can_be_deleted_for_all_users,
                 can_be_deleted_only_for_self,
@@ -156,7 +156,6 @@ impl Session {
                     notification_settings,
                     draft,
                     photo,
-                    can_send_basic_messages,
                     permissions,
                     can_be_deleted_for_all_users,
                     can_be_deleted_only_for_self,
@@ -181,7 +180,7 @@ impl Session {
                     let newer_known = self
                         .chats
                         .get(&chat_id.0)
-                        .and_then(|chat| chat.last_message)
+                        .and_then(|chat| chat.last_message().copied())
                         .is_some_and(|known| known.id.0 > message.id.0);
                     if !newer_known {
                         self.remember_files(&message.files);
@@ -223,14 +222,13 @@ impl Session {
             }
             ChatsPayload::UpdateChatPermissions {
                 chat_id,
-                can_send_basic_messages,
+                can_send_basic_messages: _,
                 permissions,
             } => {
                 let chat = self
                     .chats
                     .entry(chat_id.0)
                     .or_insert_with(|| placeholder_chat(chat_id));
-                chat.can_send_basic_messages = can_send_basic_messages;
                 // Slice G1: keep the full default permissions block for
                 // the editor.
                 chat.permissions = permissions;

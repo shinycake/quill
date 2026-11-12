@@ -44,6 +44,7 @@ mod join_requests;
 mod lost_requests;
 mod main_profile_tab;
 mod masks;
+mod matched_answers;
 mod message_story;
 mod messages;
 mod messages_more;

@@ -68,20 +68,6 @@ impl QuillApp {
             .cloned()
     }
 
-    /// The window that acts on a finished withdrawal: the one that hosted
-    /// the box (or else the Grams screen it was opened from), the main
-    /// window once that one is closed. `None` while none has finished. Not
-    /// tied to the box's flag, so an answer that landed after the box closed
-    /// is still taken at once.
-    pub(in crate::ui) fn grams_outcome_window(&self) -> Option<Option<quill::ids::ChatId>> {
-        let done = matches!(self.grams_withdraw(), Some(GramWithdraw::Done(_)));
-        done.then(|| {
-            self.windows
-                .window_of_box_or(DialogKind::GramsWithdraw, DialogKind::Grams)
-                .filter(|chat| self.windows.has(*chat))
-        })
-    }
-
     fn clear_grams_withdraw_password(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.payments
             .grams_withdraw_password
@@ -172,8 +158,11 @@ impl QuillApp {
     ) {
         let (outcome, field) = match self.grams_mut() {
             Some(grams) => {
-                let showing =
-                    grams.open && matches!(grams.withdraw, Some(GramWithdraw::Password { .. }));
+                let showing = grams.open
+                    && grams
+                        .withdraw
+                        .as_ref()
+                        .is_some_and(GramWithdraw::shows_password);
                 let idle = grams.open
                     && grams
                         .withdraw
@@ -184,7 +173,7 @@ impl QuillApp {
                     (true, true) => Showing::Idle,
                     (true, false) => Showing::Sending,
                 };
-                (GramWithdraw::take_done(&mut grams.withdraw), field)
+                (grams.take_withdraw_outcome(), field)
             }
             None => (None, Showing::Off),
         };
@@ -226,22 +215,25 @@ impl QuillApp {
             let (Some(session), Some(withdraw)) = (this.session(), this.grams_withdraw()) else {
                 return dialog.on_close(on_close);
             };
-            let (title, (body, footer)) = match withdraw {
-                GramWithdraw::Password { request, error } => (
+            let (title, (body, footer)) = match withdraw.clone() {
+                GramWithdraw::Finished(_) => return dialog.on_close(on_close),
+                GramWithdraw::Password { .. } | GramWithdraw::Sending(_) => (
                     tr(keys::BOT_EARN_BALANCE_PASSWORD_TITLE),
                     PasswordBox {
                         id: "grams-withdraw",
                         input: &this.payments.grams_withdraw_password,
                         description: tr(keys::BOT_EARN_BALANCE_PASSWORD_DESCRIPTION),
-                        sending: request.is_some(),
-                        error: error.as_ref(),
+                        sending: withdraw.sending(),
+                        error: match &withdraw {
+                            GramWithdraw::Password { error } => error.as_ref(),
+                            _ => None,
+                        },
                         on_submit: QuillApp::submit_grams_withdraw_password,
                         on_cancel: QuillApp::cancel_grams_withdraw,
                         on_forgot: QuillApp::forgot_grams_withdraw_password,
                     }
                     .render(session, cx),
                 ),
-                GramWithdraw::Done(_) => return dialog.on_close(on_close),
                 GramWithdraw::SecurityCheck { later } => (
                     tr(keys::Q_MONEY_SECURITY_CHECK),
                     SecurityCheck {

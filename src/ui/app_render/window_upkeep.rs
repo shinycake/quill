@@ -264,7 +264,6 @@ impl QuillApp {
         if self
             .windows
             .dialog_may_show_in(DialogKind::GramsWithdraw, here)
-            || self.grams_outcome_window() == Some(here)
         {
             self.grams_withdraw_frame_upkeep(window, cx);
         }

@@ -213,6 +213,8 @@ fn a_donors_answer_older_than_a_commit_keeps_its_stars_in_the_total() {
     // The answer to a `getLiveStoryTopDonors` asked (id 4) before the
     // commit (id 5) does not count it.
     if let Some(l) = session.live_story_mut(42) {
+        l.donors.begin();
+        l.donors.sent(RequestId(4));
         l.set_donors(
             LiveStoryDonors {
                 total_star_count: 10,
@@ -223,6 +225,24 @@ fn a_donors_answer_older_than_a_commit_keeps_its_stars_in_the_total() {
     }
     assert_eq!(live(&session).stars_total(), 13);
     // One asked after it does.
+    if let Some(l) = session.live_story_mut(42) {
+        l.donors.begin();
+        l.donors.sent(RequestId(6));
+        // The first request's late answer is not the one the list waits
+        // for: dropped, the batch stays.
+        l.set_donors(
+            LiveStoryDonors {
+                total_star_count: 99,
+                top_donors: Vec::new(),
+            },
+            Some(RequestId(4)),
+        );
+    }
+    assert_eq!(live(&session).stars_total(), 13);
+    assert!(
+        !live(&session).committed.is_empty(),
+        "a dropped answer settles nothing"
+    );
     if let Some(l) = session.live_story_mut(42) {
         l.set_donors(
             LiveStoryDonors {

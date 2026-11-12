@@ -105,7 +105,7 @@ impl QuillApp {
             .retain(|key, _| players.contains_key(key));
         let mut built: Vec<Tile> = Vec::new();
         for participant in call.participants.iter() {
-            let own_camera = participant.is_current_user && call.is_my_video_enabled;
+            let own_camera = participant.is_current_user && call.my_video.is_enabled();
             if !own_camera && !participant.video_enabled() && !participant.screen_sharing_enabled()
             {
                 continue;
@@ -121,7 +121,8 @@ impl QuillApp {
                     name: name.clone(),
                     picture,
                     overlay: call
-                        .is_my_video_paused
+                        .my_video
+                        .is_paused()
                         .then_some(PictureState::LivePaused { wide: contain }),
                     own: true,
                 });
@@ -152,7 +153,7 @@ impl QuillApp {
                     .screen_sharing_video_info
                     .as_ref()
                     .is_some_and(|info| info.is_paused)
-                    || (participant.is_current_user && call.screen_share.paused());
+                    || (participant.is_current_user && call.screen_share.is_paused());
                 if let Some((picture, overlay)) =
                     self.group_stream_tile(call, participant, true, &name, paused, contain, cx)
                 {
@@ -325,7 +326,7 @@ impl QuillApp {
 /// participant's camera or screen that is on.
 fn call_streams(call: &ActiveGroupCall, key: LiveKey) -> bool {
     match key {
-        LiveKey::Local { .. } => call.is_my_video_enabled,
+        LiveKey::Local { .. } => call.my_video.is_enabled(),
         LiveKey::Stream { .. } | LiveKey::Call { .. } => false,
         LiveKey::Video {
             user_id, screen, ..

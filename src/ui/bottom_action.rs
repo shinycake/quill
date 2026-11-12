@@ -46,7 +46,7 @@ impl QuillApp {
         let history = session.histories.get(&chat.id.0);
         let empty_history = history
             .is_some_and(|history| history.loaded_complete() && history.messages.is_empty())
-            && chat.last_message.is_none();
+            && chat.last_message().is_none();
         BarFacts {
             blocked: peer.is_some() && chat.blocked,
             is_bot: bot.is_some(),

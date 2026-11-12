@@ -117,7 +117,11 @@ impl Session {
                     CallsPurpose::GetVideoChatAvailableParticipants { group_call_id },
                 )) = pending.map(|p| p.purpose)
                 {
-                    self.set_group_call_join_as_options(group_call_id, senders);
+                    self.set_group_call_join_as_options(
+                        group_call_id,
+                        pending.map(|p| p.id),
+                        senders,
+                    );
                 } else if let Some(RequestPurpose::Calls(CallsPurpose::CreateVideoChatJoinAs {
                     ..
                 })) = pending.map(|p| p.purpose)
@@ -298,11 +302,12 @@ impl Session {
                 // The answer is authoritative: it replaces the list and
                 // clears any stale error. No optimistic mutation ever
                 // happens client-side.
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetActiveSessions)
-                    && pending.is_some_and(|p| self.settings.sessions.waits_for(p.id))
+                if let Some(asked) = pending
+                    && asked.purpose == RequestPurpose::GetActiveSessions
+                    && self.settings.sessions.waits_for(asked.id)
                 {
                     self.resolve_unconfirmed_entries(&sessions);
-                    self.settings.sessions.succeed(sessions);
+                    self.settings.sessions.answered(Some(asked.id), sessions);
                     if inactive_session_ttl_days.is_some() {
                         self.settings.privacy_data.inactive_session_ttl_days =
                             inactive_session_ttl_days;

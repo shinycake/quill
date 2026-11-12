@@ -295,7 +295,7 @@ impl super::app::QuillApp {
                         ..SoundMarks::default()
                     };
                 }
-                let ringing = match call.state {
+                let ringing = match call.phase() {
                     CallState::Pending { .. } if !call.is_outgoing => Some(CallSound::Incoming),
                     CallState::Pending {
                         is_received: true, ..
@@ -305,7 +305,7 @@ impl super::app::QuillApp {
                 .or(second_rings.then_some(CallSound::Incoming));
                 sounds.keep_looping(ringing);
                 let connected =
-                    matches!(call.state, CallState::Ready(_)) && call.transport.is_connected();
+                    matches!(call.phase(), CallState::Ready(_)) && call.transport.is_connected();
                 if connected && marks.cue < CueStage::Connected {
                     marks.cue = CueStage::Connected;
                     sounds.play_cue(CallSound::Connect);
@@ -326,7 +326,7 @@ impl super::app::QuillApp {
                 sounds.keep_looping(background_ring.then_some(CallSound::Incoming));
                 if marks.call_id == Some(summary.call_id) && marks.cue < CueStage::Ended {
                     marks.cue = CueStage::Ended;
-                    sounds.play(if summary.busy {
+                    sounds.play(if summary.busy() {
                         CallSound::Busy
                     } else {
                         CallSound::End

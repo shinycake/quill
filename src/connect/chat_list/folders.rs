@@ -244,12 +244,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request_for_folder(RequestPurpose::GetChatFolderChatsToLeave, folder_id);
-        self.session
+        let to_leave = self
+            .session
             .chat_list
             .folder_chats_to_leave
             .entry(folder_id)
-            .or_default()
-            .begin();
+            .or_default();
+        to_leave.begin();
+        to_leave.sent(extra);
         if let Err(err) = self.sender.send_json(&{
             serde_json::json!({
                 "@type": "getChatFolderChatsToLeave",

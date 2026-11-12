@@ -15,13 +15,17 @@ pub struct ActiveCall {
     pub user_id: i64,
     pub is_outgoing: bool,
     pub is_video: bool,
-    pub state: CallState,
+    /// How far the call got and TDLib's last word on it, as one value:
+    /// `callStateReady`'s record exists exactly from the Ready update on.
+    /// Read the state through [`Self::state`] and the phase to show through
+    /// [`Self::phase`], which says `HangingUp` while a hang-up is in flight.
+    pub progress: CallProgress,
+    /// What this side did to the call: answered it, or hung it up (the
+    /// `discardCall` in flight owns the `HangingUp` phase).
+    pub action: CallAction,
     /// When the call was created (outgoing) or first rang (incoming) —
     /// drives the "ringing" time on the overlay.
     pub started_at: Instant,
-    /// The call is ready (`callStateReady`): what it carried and when it
-    /// arrived, where the call-duration clock starts. `None` before.
-    pub ready: Option<CallReady>,
     /// The media transport, its retained connect parameters and its
     /// error, as one value (see `CallTransport`).
     pub transport: CallTransport,
@@ -62,11 +66,16 @@ pub struct ActiveCall {
     pub media_note: Option<String>,
 }
 
-/// What `callStateReady` brought, and when.
-#[derive(Debug, Clone)]
-pub struct CallReady {
-    pub params: Option<ReadyParams>,
-    pub since: Instant,
+/// How a call ended, from its terminal update.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallEnd {
+    /// Hung up, missed or any other discard.
+    Ended,
+    /// An outgoing call the peer declined before it connected: tdesktop
+    /// shows "line busy" with Redial / Cancel.
+    Declined,
+    /// TDLib's `callStateError`.
+    Failed,
 }
 
 /// How many `CallProblem` constructors the rating editor offers.
@@ -190,9 +199,8 @@ pub struct CallSummary {
     pub had_audio: bool,
     /// Human-readable end line (reason-aware).
     pub end_line: String,
-    /// An outgoing call the peer declined before it connected: tdesktop
-    /// shows "line busy" with Redial / Cancel.
-    pub busy: bool,
+    /// How the call ended, for the end screen and its sound.
+    pub end: CallEnd,
     /// The rating card's stage (`need_rating`); one value so the card comes
     /// back when the send fails.
     pub rating: CallRating,
@@ -333,20 +341,13 @@ impl ActiveCall {
         is_video: bool,
         state: CallState,
     ) -> Self {
-        let ready = match &state {
-            CallState::Ready(params) => Some(CallReady {
-                params: Some(params.clone()),
-                since: Instant::now(),
-            }),
-            _ => None,
-        };
         Self {
             id,
             user_id,
             is_outgoing,
             is_video,
-            ready,
-            state,
+            progress: CallProgress::first(state, Instant::now()),
+            action: CallAction::Idle,
             started_at: Instant::now(),
             transport: CallTransport::default(),
             signaling_queue: Vec::new(),
@@ -363,6 +364,16 @@ impl ActiveCall {
             remote_battery_low: false,
             signal_bars: None,
             media_note: None,
+        }
+    }
+
+    /// The phase to show and act on: `HangingUp` while the `discardCall` is
+    /// in flight, else TDLib's.
+    pub fn phase(&self) -> CallState {
+        if self.action.hang_up().is_some() {
+            CallState::HangingUp
+        } else {
+            self.state().clone()
         }
     }
 
@@ -398,8 +409,8 @@ impl ActiveCall {
 
     /// Seconds since `callStateReady` (the billable call duration).
     pub fn connected_secs(&self) -> i64 {
-        self.ready
-            .as_ref()
+        self.progress
+            .ready()
             .map(|ready| ready.since.elapsed().as_secs() as i64)
             .unwrap_or(0)
     }
@@ -407,7 +418,48 @@ impl ActiveCall {
     /// The parameters `callStateReady` carried (the key emojis, the group
     /// call support).
     pub fn ready_params(&self) -> Option<&ReadyParams> {
-        self.ready.as_ref().and_then(|ready| ready.params.as_ref())
+        self.progress.ready().map(|ready| &ready.params)
+    }
+
+    /// TDLib's last state of the call (the phase to show is
+    /// [`Self::phase`]).
+    pub fn state(&self) -> &CallState {
+        self.progress.state()
+    }
+}
+
+/// Your camera in a group call: off, on, or on and paused. Paused is only
+/// ever a camera that is on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MyVideo {
+    #[default]
+    Off,
+    On,
+    Paused,
+}
+
+impl MyVideo {
+    /// What `groupCall.is_my_video_enabled` / `is_my_video_paused` say
+    /// (paused with the camera off is off).
+    pub fn from_server(enabled: bool, paused: bool) -> Self {
+        match (enabled, paused) {
+            (false, _) => Self::Off,
+            (true, false) => Self::On,
+            (true, true) => Self::Paused,
+        }
+    }
+
+    pub fn is_enabled(self) -> bool {
+        self != Self::Off
+    }
+
+    pub fn is_paused(self) -> bool {
+        self == Self::Paused
+    }
+
+    /// The camera is on and sending frames.
+    pub fn is_live(self) -> bool {
+        self == Self::On
     }
 }
 
@@ -471,8 +523,9 @@ pub struct ActiveGroupCall {
     /// is no audio path yet (C2) — the UI labels this honestly as
     /// local-only. Sent as `is_muted` on (re)join.
     pub is_muted_self: bool,
-    pub is_my_video_enabled: bool,
-    pub is_my_video_paused: bool,
+    /// Your camera in the call (`is_my_video_enabled` and
+    /// `is_my_video_paused` of the group call, as one value).
+    pub my_video: MyVideo,
     pub can_enable_video: bool,
     pub mute_new_participants: bool,
     pub can_toggle_mute_new_participants: bool,
@@ -482,7 +535,10 @@ pub struct ActiveGroupCall {
     /// connect, subscribe). The join itself is never blocked by these.
     pub transport: GroupTransport,
     /// Screen-share presentation: the `startGroupCallScreenSharing`
-    /// handshake, then the connected presentation.
+    /// handshake, then the connected presentation, paused while your shared
+    /// window is hidden (the driver sent
+    /// `toggleGroupCallScreenSharingIsPaused`; your own tile shows it at
+    /// once, before the participant update).
     pub screen_share: GroupScreenShare,
     /// The last screen share's failure (its offer, start, connect or
     /// stop). Kept apart from `transport_error`: a failed share leaves
@@ -501,8 +557,7 @@ pub struct ActiveGroupCall {
     pub enabled_start_notification: bool,
     /// Phase C2h: `rtmpUrl` from `getVideoChatRtmpUrl` /
     /// `replaceVideoChatRtmpUrl`, fetched on demand by an admin.
-    pub rtmp_url: Option<String>,
-    pub rtmp_stream_key: Option<String>,
+    pub rtmp: Option<crate::calls::rtmp_start::RtmpInfo>,
     /// Phase C2h: in-call chat flags (schema 1.8.67, lines
     /// 7147-7150).
     pub can_send_messages: bool,
@@ -524,14 +579,12 @@ pub struct ActiveGroupCall {
     pub join_as_options: crate::state::fetch::Fetch<Vec<MessageSender>>,
     /// The identity the next join uses; `None` joins as yourself.
     pub join_as: Option<MessageSender>,
-    /// How the joined call carries media, from the engine after the
-    /// native connect (`CallEngine::group_call_mode`). Stream modes get their
-    /// segments from TDLib (`calls::engine::StreamFeeder`).
-    pub stream_mode: crate::calls::engine::GroupCallMode,
-    /// What a stream-mode call shows: connecting, nobody broadcasting,
-    /// live, ended or not playable on this build. Meaningful only while
-    /// `stream_mode` is a stream mode.
-    pub stream: crate::calls::engine::StreamState,
+    /// How the joined call carries media, from the engine after the native
+    /// connect (`CallEngine::group_call_mode`), and for a stream mode what
+    /// the call shows: connecting, nobody broadcasting, live, ended or not
+    /// playable on this build. Stream modes get their segments from TDLib
+    /// (`calls::engine::StreamFeeder`).
+    pub media: crate::state::GroupMedia,
     /// `participant_count` as the stream's "{count} viewers" (tdesktop
     /// shows no listener rows for RTMP streams).
     pub viewer_count: u32,
@@ -744,8 +797,7 @@ impl ActiveGroupCall {
             participants: ParticipantList::default(),
             recent_speaker_order: Vec::new(),
             is_muted_self: false,
-            is_my_video_enabled: false,
-            is_my_video_paused: false,
+            my_video: MyVideo::Off,
             can_enable_video: false,
             mute_new_participants: false,
             can_toggle_mute_new_participants: false,
@@ -757,8 +809,7 @@ impl ActiveGroupCall {
             is_rtmp_stream: false,
             scheduled_start_date: 0,
             enabled_start_notification: false,
-            rtmp_url: None,
-            rtmp_stream_key: None,
+            rtmp: None,
             can_send_messages: false,
             are_messages_allowed: false,
             can_toggle_are_messages_allowed: false,
@@ -768,8 +819,7 @@ impl ActiveGroupCall {
             is_video_recorded: false,
             join_as_options: Default::default(),
             join_as: None,
-            stream_mode: Default::default(),
-            stream: Default::default(),
+            media: Default::default(),
             viewer_count: 0,
             paid_message_star_count: 0,
             message_sender_id: None,
@@ -838,6 +888,11 @@ fn next_participants_revision() -> u64 {
 }
 
 impl CallSummary {
+    /// An outgoing call the peer declined before it connected.
+    pub fn busy(&self) -> bool {
+        self.end == CallEnd::Declined
+    }
+
     /// Build the end screen from a terminal `updateCall`. `duration_secs`
     /// is the connected time (0 when the call never reached `Ready`).
     pub(crate) fn from_terminal(call: &ParsedCall, duration_secs: i64, had_audio: bool) -> Self {
@@ -867,17 +922,16 @@ impl CallSummary {
             }
             _ => ("Call ended".to_string(), false, false, false),
         };
-        let busy = call.is_outgoing
-            && duration_secs == 0
-            && matches!(
-                call.state,
-                CallState::Discarded {
-                    reason: crate::telegram::envelope::CallDiscardReason::Declined,
-                    ..
-                }
-            );
+        let end = match &call.state {
+            CallState::Discarded {
+                reason: crate::telegram::envelope::CallDiscardReason::Declined,
+                ..
+            } if call.is_outgoing && duration_secs == 0 => CallEnd::Declined,
+            CallState::Error { .. } => CallEnd::Failed,
+            _ => CallEnd::Ended,
+        };
         CallSummary {
-            busy,
+            end,
             call_id: call.id,
             user_id: call.user_id,
             is_outgoing: call.is_outgoing,

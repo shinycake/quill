@@ -172,12 +172,12 @@ impl QuillApp {
             crate::ui::call_conference_ui::shown_call_summary(session),
         ) {
             (Some(call), _)
-                if matches!(call.state, CallState::Pending { .. }) && !call.is_outgoing =>
+                if matches!(call.phase(), CallState::Pending { .. }) && !call.is_outgoing =>
             {
                 CallWindowTarget::Ringing { id: call.id }
             }
             (Some(call), _) => CallWindowTarget::Active { id: call.id },
-            (None, Some(summary)) if summary.busy => CallWindowTarget::Busy {
+            (None, Some(summary)) if summary.busy() => CallWindowTarget::Busy {
                 id: summary.call_id,
             },
             (None, Some(summary)) => CallWindowTarget::Ended {

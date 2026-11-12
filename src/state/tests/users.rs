@@ -400,6 +400,8 @@ fn failed_color_requests_surface_the_error_and_icons_flag() {
     );
 
     let extra = session.request(RequestPurpose::GetBackgroundEmojiIcons, None);
+    session.users_state.background_emoji_icons.begin();
+    session.users_state.background_emoji_icons.sent(extra);
     apply_json(
         &mut session,
         &seq,

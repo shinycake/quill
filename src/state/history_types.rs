@@ -55,11 +55,7 @@ pub(crate) fn placeholder_chat(chat_id: ChatId) -> ChatSummary {
         archive_is_pinned: false,
         folder_positions: BTreeMap::new(),
         notification_settings: ChatNotificationSettings::default(),
-        last_preview: String::new(),
-        last_preview_style: ChatPreviewStyle::default(),
-        last_preview_sender: String::new(),
-        last_preview_thumb: None,
-        last_message: None,
+        last: None,
         sender_actions: Vec::new(),
         draft: None,
         my_member: Default::default(),
@@ -69,7 +65,6 @@ pub(crate) fn placeholder_chat(chat_id: ChatId) -> ChatSummary {
         // Parity slice 4: lenient default true — the real `chat` object
         // always carries `permissions`; only `updateNewChat` /
         // `updateChatPermissions` ever set it to false.
-        can_send_basic_messages: true,
         permissions: None,
         can_be_deleted_for_all_users: false,
         can_be_deleted_only_for_self: false,

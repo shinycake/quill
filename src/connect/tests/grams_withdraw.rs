@@ -161,7 +161,9 @@ fn the_url_is_asked_only_from_the_password_box() {
     let grams = &p.0.session.payments.hub.grams;
     assert_eq!(
         grams.withdraw,
-        Some(GramWithdraw::Done(WithdrawOutcome::Url(URL.to_string())))
+        Some(GramWithdraw::Finished(WithdrawOutcome::Url(
+            URL.to_string()
+        )))
     );
 }
 
@@ -204,7 +206,6 @@ fn an_answer_to_a_cancelled_try_is_not_taken_for_the_next_one() {
         json!({"@type": "httpUrl", "@extra": first.as_extra(), "url": first_url}),
     );
     let grams = &p.0.session.payments.hub.grams;
-    assert!(!matches!(grams.withdraw, Some(GramWithdraw::Done(_))));
     assert_eq!(
         grams.withdraw.as_ref().and_then(|w| w.pending()),
         Some(second)
@@ -217,7 +218,9 @@ fn an_answer_to_a_cancelled_try_is_not_taken_for_the_next_one() {
     let grams = &p.0.session.payments.hub.grams;
     assert_eq!(
         grams.withdraw,
-        Some(GramWithdraw::Done(WithdrawOutcome::Url(URL.to_string())))
+        Some(GramWithdraw::Finished(WithdrawOutcome::Url(
+            URL.to_string()
+        )))
     );
     assert_no_password_kept(&p);
 }
@@ -233,7 +236,7 @@ fn fail(message: &str, code: i32) -> Parts {
     );
     assert!(!matches!(
         p.0.session.payments.hub.grams.withdraw,
-        Some(GramWithdraw::Done(WithdrawOutcome::Url(_)))
+        Some(GramWithdraw::Finished(WithdrawOutcome::Url(_)))
     ));
     assert_no_password_kept(&p);
     p
@@ -272,7 +275,6 @@ fn errors_land_in_the_password_box() {
         matches!(
             &other,
             Some(GramWithdraw::Password {
-                request: None,
                 error: Some(ExportError::Other(reason)),
             }) if !reason.is_empty()
         ),
@@ -283,7 +285,7 @@ fn errors_land_in_the_password_box() {
     let grams = &small.0.session.payments.hub.grams;
     assert_eq!(
         grams.withdraw,
-        Some(GramWithdraw::Done(WithdrawOutcome::TooSmall))
+        Some(GramWithdraw::Finished(WithdrawOutcome::TooSmall))
     );
 }
 

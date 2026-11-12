@@ -18,9 +18,12 @@ impl Session {
             GramsPayload::Transactions(page) => {
                 let files = page.files.clone();
                 match purpose {
-                    Some((GramsPurpose::Probe, _)) => {
-                        self.payments.hub.grams.balance_nano = Some(page.balance_nano);
-                        self.payments.hub.grams.probe.succeed(());
+                    Some((GramsPurpose::Probe, request)) => {
+                        let request = Some(request);
+                        let grams = &mut self.payments.hub.grams;
+                        if grams.probe.answered(request, ()) {
+                            grams.balance_nano = Some(page.balance_nano);
+                        }
                     }
                     Some((GramsPurpose::Page { append }, id))
                         if self.payments.hub.grams.load.waits_for(id.0) =>
@@ -54,13 +57,18 @@ impl Session {
         pending: Option<&PendingRequest>,
     ) {
         let grams = &mut self.payments.hub.grams;
-        let peer = pending.and_then(|p| p.chat_id).map(|id| id.0);
+        let request = pending.map(|p| p.id);
         match purpose {
-            // The Settings row just stays hidden.
-            GramsPurpose::Probe => grams.probe.fail(error_reason(err)),
+            // The Settings row just stays hidden until Settings opens again.
+            GramsPurpose::Probe => {
+                grams.probe.failed(request, error_reason(err), false);
+            }
             GramsPurpose::Revenue => {}
-            GramsPurpose::PeerUser => grams.missing_users.extend(peer),
-            GramsPurpose::PeerChat => grams.missing_chats.extend(peer),
+            GramsPurpose::PeerUser | GramsPurpose::PeerChat => {
+                if let Some(request) = request {
+                    grams.peer_refused(request);
+                }
+            }
             GramsPurpose::Page { .. } => {
                 if pending.is_some_and(|p| grams.load.waits_for(p.id.0)) {
                     grams.load = crate::gift_market::PageLoad::Failed(error_reason(err));
@@ -81,7 +89,11 @@ impl Session {
         if !grams.withdraw.as_ref().is_some_and(|w| w.waits_for(id)) {
             return;
         }
-        grams.withdraw = (!url.is_empty()).then_some(GramWithdraw::Done(WithdrawOutcome::Url(url)));
+        grams.withdraw = if url.is_empty() {
+            None
+        } else {
+            Some(GramWithdraw::Finished(WithdrawOutcome::Url(url)))
+        };
     }
 
     /// A fresh `passwordState` arrived: with no password, the idle
@@ -104,7 +116,7 @@ impl Session {
             return;
         }
         if err.earn_hint == Some(EarnErrorHint::AmountTooSmall) {
-            grams.withdraw = Some(GramWithdraw::Done(WithdrawOutcome::TooSmall));
+            grams.withdraw = Some(GramWithdraw::Finished(WithdrawOutcome::TooSmall));
             return;
         }
         grams.withdraw = Some(match password_check_failure(err, &error_reason(err)) {

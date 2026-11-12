@@ -54,7 +54,7 @@ impl QuillApp {
                 (
                     call.id,
                     uses_stream_layout(call),
-                    call.stream == StreamState::Ended,
+                    call.media.stream_state() == StreamState::Ended,
                     call.is_joined,
                 )
             });

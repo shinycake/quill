@@ -12,14 +12,13 @@ use crate::gift_manage::ExportError;
 use crate::ids::RequestId;
 use serde_json::json;
 
-/// How a withdrawal ended, for the UI to act on once (open Fragment's page,
-/// show the toast). It lives in the stage, so a box that goes away takes it.
+/// How Collect's box ended, for the window to act on once.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WithdrawOutcome {
-    /// Fragment's page from `getGramWithdrawalUrl`, opened through the link
-    /// policy.
+    /// Fragment's page from `getGramWithdrawalUrl`, to open through the
+    /// link policy.
     Url(String),
-    /// `AMOUNT_TOO_SMALL`: tdesktop closes the box with a toast.
+    /// `AMOUNT_TOO_SMALL` closed the box: show the toast.
     TooSmall,
 }
 
@@ -27,19 +26,21 @@ pub enum WithdrawOutcome {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GramWithdraw {
     /// tdesktop `PasscodeBox` with "Two-step verification" and "Please
-    /// enter your password to collect."; `request` is the `@extra` of the
-    /// request out with the password (only its answer counts). The password
-    /// itself is never kept here.
-    Password {
-        request: Option<RequestId>,
-        error: Option<ExportError>,
-    },
+    /// enter your password to collect.", waiting for a password; `error`
+    /// is the last refusal. Leaves by Submit, Cancel or a security check.
+    /// The password itself is never kept here.
+    Password { error: Option<ExportError> },
+    /// The request with the password is out; `@extra` is its id (only its
+    /// answer counts) and the buttons wait. Leaves by its answer, its error
+    /// or Cancel.
+    Sending(RequestId),
     /// tdesktop `PrePasswordErrorBox`: no password set (`later: false`) or
     /// one set too recently (`later: true`).
     SecurityCheck { later: bool },
-    /// The request was answered and the box is closed; the UI takes the
-    /// outcome ([`Self::take_done`]) in the window that hosted the box.
-    Done(WithdrawOutcome),
+    /// The box is done and its window acts once on the outcome
+    /// ([`crate::premium_hub::ton::GramsHub::take_withdraw_outcome`]);
+    /// closing the screen drops it.
+    Finished(WithdrawOutcome),
 }
 
 impl GramWithdraw {
@@ -57,10 +58,7 @@ impl GramWithdraw {
 
     /// The password box waiting for a password, with the last error.
     pub fn idle(error: Option<ExportError>) -> Self {
-        Self::Password {
-            request: None,
-            error,
-        }
+        Self::Password { error }
     }
 
     /// The request with the password is out (the buttons wait).
@@ -68,27 +66,21 @@ impl GramWithdraw {
         self.pending().is_some()
     }
 
+    /// A box is on screen (not a finished outcome waiting to be taken).
+    pub fn shows_box(&self) -> bool {
+        !matches!(self, Self::Finished(_))
+    }
+
+    /// The password field is on screen (waiting or sending).
+    pub fn shows_password(&self) -> bool {
+        matches!(self, Self::Password { .. } | Self::Sending(_))
+    }
+
     /// The `@extra` of the request out with the password.
     pub fn pending(&self) -> Option<RequestId> {
         match self {
-            Self::Password { request, .. } => *request,
-            Self::SecurityCheck { .. } | Self::Done(_) => None,
-        }
-    }
-
-    /// The box is on screen (a password box or the security check).
-    pub fn shows_box(&self) -> bool {
-        !matches!(self, Self::Done(_))
-    }
-
-    /// Take the outcome of a finished withdrawal, leaving no stage.
-    pub fn take_done(slot: &mut Option<Self>) -> Option<WithdrawOutcome> {
-        match slot.take() {
-            Some(Self::Done(outcome)) => Some(outcome),
-            other => {
-                *slot = other;
-                None
-            }
+            Self::Sending(request) => Some(*request),
+            Self::Password { .. } | Self::SecurityCheck { .. } | Self::Finished(_) => None,
         }
     }
 
@@ -99,7 +91,7 @@ impl GramWithdraw {
 
     /// The password box is open and idle: Submit may send.
     pub fn can_submit(&self) -> bool {
-        matches!(self, Self::Password { request: None, .. })
+        matches!(self, Self::Password { .. })
     }
 
     /// A fresh password state arrived: with no password set, the idle

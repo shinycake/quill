@@ -253,7 +253,7 @@ impl Session {
     pub fn chat_invite_link_count_loading(&self, chat_id: ChatId) -> bool {
         matches!(
             self.groups.invite_link_counts.get(&chat_id.0),
-            Some(InviteLinkCountsFetch::Loading)
+            Some(InviteLinkCountsFetch::Loading(_))
         )
     }
 

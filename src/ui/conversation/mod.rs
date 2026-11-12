@@ -360,7 +360,7 @@ impl QuillApp {
                 let restricted = self.composer_restriction().is_some();
                 match (chat, topic) {
                     (Some(c), Some(t)) => {
-                        c.can_post() && !t.is_closed && c.can_send_basic_messages && !restricted
+                        c.can_post() && !t.is_closed && c.can_send_basic_messages() && !restricted
                     }
                     // Saved sublists and tag filters are read-only views.
                     (Some(_), None) if self.saved_readonly() => false,

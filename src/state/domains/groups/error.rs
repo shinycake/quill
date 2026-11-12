@@ -79,13 +79,17 @@ impl Session {
         self.apply_group_type_error(err, pending);
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::CanTransferOwnership) => {
-                self.groups.ownership.check.fail_dropping_data(format!(
-                    "Could not check whether you can transfer ownership: {}",
-                    error_reason(err)
-                ));
+                self.groups.ownership.check.failed(
+                    pending.map(|p| p.id),
+                    format!(
+                        "Could not check whether you can transfer ownership: {}",
+                        error_reason(err)
+                    ),
+                    true,
+                );
             }
             Some(RequestPurpose::Groups(GroupsPurpose::TransferChatOwnership { .. })) => {
-                self.fail_ownership_transfer(err);
+                self.fail_ownership_transfer(pending.map(|p| p.id), err);
             }
             Some(RequestPurpose::Groups(GroupsPurpose::AnswerSharingRequest { .. })) => {
                 self.chats_state
@@ -97,7 +101,7 @@ impl Session {
             }
             Some(RequestPurpose::GetChatOwnerAfterLeaving) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.fail_owner_lookup(chat_id.0, err);
+                    self.fail_owner_lookup(chat_id.0, pending.map(|p| p.id), err);
                 }
             }
             // tdesktop toasts a refused create; the box stays, and the
@@ -401,10 +405,11 @@ impl Session {
                 }
             }
             Some(RequestPurpose::GetChatInviteLinkCounts) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id)
-                    && !matches!(
+                if let Some(p) = pending
+                    && let Some(chat_id) = p.chat_id
+                    && matches!(
                         self.groups.invite_link_counts.get(&chat_id.0),
-                        Some(InviteLinkCountsFetch::Loaded(_))
+                        Some(InviteLinkCountsFetch::Loading(asked)) if *asked == p.id
                     )
                 {
                     self.groups.invite_link_counts.insert(
