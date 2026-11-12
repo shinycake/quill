@@ -603,14 +603,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let extra = self.session.request(purpose, Some(chat_id));
-        if let Err(err) = self
-            .sender
-            .send_json(&set_chat_member_tag(extra, chat_id, user_id, tag))
-        {
-            self.session.requests.take(extra);
-            return Err(err);
-        }
-        Ok(Some(extra))
+        self.send_member_action(
+            chat_id,
+            extra,
+            &set_chat_member_tag(extra, chat_id, user_id, tag),
+        )
+        .map(Some)
     }
 
     /// Phase A1: forced `getSupergroupFullInfo` refresh for the slow-mode

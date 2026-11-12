@@ -16,6 +16,7 @@ use crate::telegram::requests::{
     send_call_debug_information, send_call_log, send_call_rating_detail, send_call_signaling_data,
 };
 use std::sync::Arc;
+use std::time::Instant;
 
 mod history;
 mod lifecycle;
@@ -637,6 +638,21 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// other report moves the transport to that phase. A report for a
     /// transport Quill never connected has nothing to describe and is
     /// dropped.
+    /// A retry the engine never reported on counts as a failed report: the
+    /// next retry, or the end of the budget. Returns whether it moved.
+    pub(crate) fn expire_call_reconnect(&mut self, now: Instant) -> bool {
+        let overdue = self
+            .session
+            .calls
+            .active_call
+            .as_ref()
+            .is_some_and(|call| call.transport.reconnect_overdue(now));
+        if overdue {
+            self.apply_transport_report(TransportState::Failed);
+        }
+        overdue
+    }
+
     fn apply_transport_report(&mut self, state: TransportState) {
         let Some(call) = self.session.calls.active_call.as_ref() else {
             return;
@@ -667,8 +683,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                     link.reconnect_attempts += 1;
                     match self.connect_call_transport(call_id, &link.params) {
                         // The retry is in flight: `Reconnecting` until the
-                        // engine's own reports move it on.
-                        Ok(()) => CallTransport::Reconnecting(link),
+                        // engine's own reports move it on, or its deadline
+                        // passes (`expire_call_reconnect`).
+                        Ok(()) => CallTransport::reconnecting(link, Instant::now()),
                         Err(err) => CallTransport::Failed {
                             reason: err.to_string(),
                             link: Some(link),

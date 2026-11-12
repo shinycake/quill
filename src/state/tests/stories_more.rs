@@ -573,7 +573,7 @@ fn set_account_ttl_ok_stores_confirmed_days() {
         RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { days: 365 }),
         None,
     );
-    session.settings.account_ttl.begin_with(extra);
+    session.settings.account_write = crate::state::AccountWrite::SetTtl { request: extra };
     apply_json(
         &mut session,
         &seq,

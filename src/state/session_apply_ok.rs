@@ -208,20 +208,15 @@ impl Session {
         // `updateAuthorizationState` → `Closed` (`set_auth`
         // invalidates the account there). Both clear the
         // in-flight flag and any stale error.
-        self.settings.account_write.settle(pending.map(|p| p.id));
         if let Some(RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { days })) =
             pending.map(|p| p.purpose)
         {
-            self.settings
-                .account_ttl
-                .answered(pending.map(|p| p.id), days);
+            // Only the write in flight is confirmed by its own `ok`.
+            if self.settings.account_write.request() == pending.map(|p| p.id) {
+                self.settings.account_ttl.pushed(days);
+            }
         }
-        if matches!(
-            pending.map(|p| p.purpose),
-            Some(RequestPurpose::DeleteAccount)
-        ) {
-            self.settings.account_delete = crate::state::fetch::Fetch::Idle;
-        }
+        self.settings.account_write.settle(pending.map(|p| p.id));
         // Slice A8: a `checkPhoneNumberCode` succeeded — the
         // server completed the number change of the number the
         // code was sent to, so the own user's `phone_number` is

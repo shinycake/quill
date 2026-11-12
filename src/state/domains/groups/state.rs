@@ -353,6 +353,14 @@ impl GroupsState {
         self.member_actions_for(chat_id).sent.push(request);
     }
 
+    /// Member actions of `chat_id` sent and not yet answered since its
+    /// dialog opened.
+    pub fn member_actions_out(&self, chat_id: i64) -> usize {
+        self.member_actions
+            .get(&chat_id)
+            .map_or(0, |actions| actions.sent.len())
+    }
+
     fn member_actions_for(&mut self, chat_id: i64) -> &mut MemberActions {
         self.member_actions
             .entry(chat_id)

@@ -309,6 +309,9 @@ impl Session {
             Some(RequestPurpose::Calls(CallsPurpose::GetGroupCall { group_call_id })) => {
                 self.calls.call_link_stage.forget_hash(Some(group_call_id));
                 self.calls.note_group_call_fetch_failed(group_call_id);
+                if let Some(pending) = pending {
+                    self.group_call_fetch_ended(pending.id, false);
+                }
                 self.calls.group_call_error =
                     Some(call_request_error_line(err, "Voice chat request failed"));
             }

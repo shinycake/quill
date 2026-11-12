@@ -246,20 +246,14 @@ impl Session {
                 );
             }
             Some(RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { .. })) => {
-                self.settings.account_write.settle(extra);
-                self.settings.account_ttl.failed(
-                    extra,
-                    sessions_error_line("update the account", err),
-                    false,
-                );
+                self.settings
+                    .account_write
+                    .refused(extra, sessions_error_line("update the account", err));
             }
             Some(RequestPurpose::DeleteAccount) => {
-                self.settings.account_write.settle(extra);
-                self.settings.account_delete.failed(
-                    extra,
-                    sessions_error_line("update the account", err),
-                    false,
-                );
+                self.settings
+                    .account_write
+                    .refused(extra, sessions_error_line("update the account", err));
             }
             // A refused saved-sound list is not asked for again by itself;
             // the next change of the list does.

@@ -460,19 +460,20 @@ impl<S: JsonSender> ConnectDriver<S> {
 }
 
 impl<S: JsonSender> ConnectDriver<S> {
-    /// A conference made from a 1:1 call whose group call could not be
-    /// fetched never gets its link: it leaves the handover (the invites
+    /// A conference made from a 1:1 call whose `getGroupCall` failed, was
+    /// lost or answered with no link (`ConferenceStage::HandoverFailed`)
+    /// never gets its link: it leaves the handover (the invites
     /// count as failed), and the 1:1 call ends instead of staying up for a
     /// link that will not come. `None` when no handover failed.
     fn leave_failed_handover(&mut self) -> Option<Result<(), ConnectSendError>> {
-        let (group_call_id, upgrade) = self
-            .session
-            .calls
-            .active_group_call
-            .as_ref()
-            .filter(|call| call.invite_link.is_empty())
-            .and_then(|call| Some((call.id, call.conference.as_ref()?.upgrade()?.clone())))
-            .filter(|(id, _)| self.session.calls.group_call_fetch_failed(*id))?;
+        let (group_call_id, upgrade) =
+            self.session
+                .calls
+                .active_group_call
+                .as_ref()
+                .and_then(|call| {
+                    Some((call.id, call.conference.as_ref()?.failed_upgrade()?.clone()))
+                })?;
         if let Some(conference) = self
             .session
             .calls

@@ -107,6 +107,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let mut changed = self.pump_group_call_streams(now);
         // 1:1 calls: what the engine reported between Telegram updates.
         changed |= self.pump_call_engine_reports();
+        changed |= self.expire_call_reconnect(now);
         changed |= self.pump_call_media(now);
         // Group calls: your own level and speaking state, and the
         // connected transports' camera and mute.

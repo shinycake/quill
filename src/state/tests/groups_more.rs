@@ -351,7 +351,7 @@ fn adding_members_marks_the_member_list_stale() {
             total_count: 0,
         },
     );
-    let extra = session.request(RequestPurpose::AddChatMember, Some(ChatId(13)));
+    let extra = member_request(&mut session, RequestPurpose::AddChatMember, ChatId(13));
     apply_json(
         &mut session,
         &seq,

@@ -212,7 +212,6 @@ fn the_account_write_ends_with_its_own_answer_or_error() {
             RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { days }),
             None,
         );
-        session.settings.account_ttl.begin_with(id);
         session.settings.account_write = AccountWrite::SetTtl { request: id };
         id
     };
@@ -228,6 +227,11 @@ fn the_account_write_ends_with_its_own_answer_or_error() {
     assert!(session.settings.account_write.is_out());
     apply_json(&mut session, &seq, &sink, &error_json(first));
     assert!(!session.settings.account_write.is_out());
+    assert!(
+        session.settings.account_error().is_some(),
+        "the refusal is the write's own line"
+    );
+    assert!(session.settings.account_ttl.error().is_none());
     let second = set(&mut session, 180);
     apply_json(
         &mut session,
@@ -243,10 +247,10 @@ fn member_action_answers_leave_the_open_dialogs_list_and_an_old_open_is_dropped(
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let tag = RequestPurpose::Groups(GroupsPurpose::SetChatMemberTag { user_id: 42 });
-    let old = session.request(tag, Some(ChatId(13)));
+    let old = member_request(&mut session, tag, ChatId(13));
     session.groups.open_member_actions(13);
-    let confirmed = session.request(tag, Some(ChatId(13)));
-    let refused = session.request(tag, Some(ChatId(13)));
+    let confirmed = member_request(&mut session, tag, ChatId(13));
+    let refused = member_request(&mut session, tag, ChatId(13));
     apply_json(
         &mut session,
         &seq,

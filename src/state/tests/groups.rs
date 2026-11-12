@@ -15,9 +15,10 @@ fn custom_title_failure_surfaces_in_member_dialog() {
         .groups
         .admin_lists
         .insert(13, AdminListFetch::Loaded(Vec::new()));
-    let extra = session.request(
+    let extra = member_request(
+        &mut session,
         RequestPurpose::Groups(GroupsPurpose::SetChatMemberTag { user_id: 42 }),
-        Some(ChatId(13)),
+        ChatId(13),
     );
     apply_json(
         &mut session,
@@ -47,12 +48,13 @@ fn a_refused_member_status_change_keeps_the_loaded_administrators() {
         .groups
         .admin_lists
         .insert(13, AdminListFetch::Loaded(Vec::new()));
-    let extra = session.request(
+    let extra = member_request(
+        &mut session,
         RequestPurpose::Groups(GroupsPurpose::SetChatMemberStatus {
             user_id: 42,
             kind: MemberStatusChange::Demote,
         }),
-        Some(ChatId(13)),
+        ChatId(13),
     );
     apply_json(
         &mut session,
@@ -85,7 +87,7 @@ fn basic_group_add_member_failures_accumulate() {
         )
     };
     for (user_id, extra_count) in [(7, 1), (8, 0)] {
-        let extra = session.request(RequestPurpose::AddChatMember, Some(ChatId(13)));
+        let extra = member_request(&mut session, RequestPurpose::AddChatMember, ChatId(13));
         let members = (0..extra_count)
             .map(|_| failed_member(user_id))
             .collect::<Vec<_>>()
@@ -101,7 +103,7 @@ fn basic_group_add_member_failures_accumulate() {
         );
     }
     assert_eq!(session.groups.add_members_failed(13), 1);
-    let extra = session.request(RequestPurpose::AddChatMember, Some(ChatId(13)));
+    let extra = member_request(&mut session, RequestPurpose::AddChatMember, ChatId(13));
     apply_json(
         &mut session,
         &seq,
@@ -121,7 +123,7 @@ fn bulk_add_members_response_replaces_count() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     for count in [3, 1] {
-        let extra = session.request(RequestPurpose::AddChatMembers, Some(ChatId(13)));
+        let extra = member_request(&mut session, RequestPurpose::AddChatMembers, ChatId(13));
         let members = (0..count)
             .map(|_| r#"{"@type":"failedToAddMember","user_id":9,"premium_would_allow_invite":false,"premium_required_to_send_messages":false}"#)
             .collect::<Vec<_>>()
@@ -1211,9 +1213,9 @@ fn a_late_member_action_error_never_lands_on_a_newer_dialog() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let tag = RequestPurpose::Groups(GroupsPurpose::SetChatMemberTag { user_id: 42 });
-    let old = session.request(tag, Some(ChatId(13)));
+    let old = member_request(&mut session, tag, ChatId(13));
     session.groups.open_member_actions(13);
-    let new = session.request(tag, Some(ChatId(13)));
+    let new = member_request(&mut session, tag, ChatId(13));
     let refused = |extra: RequestId| {
         format!(
             r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHAT_ADMIN_REQUIRED"}}"#,

@@ -233,8 +233,14 @@ pub enum CallTransport {
     /// connecting. The engine's next state report ends it.
     Attempt(CallLink),
     Connected(CallLink),
-    /// A retry of the retained parameters is in flight.
-    Reconnecting(CallLink),
+    /// A retry of the retained parameters is in flight. It ends with the
+    /// engine's next report, or at `deadline` (see
+    /// [`CallTransport::reconnect_overdue`]), when the driver counts it as
+    /// a failed report: the next retry, or the end of the budget.
+    Reconnecting {
+        link: CallLink,
+        deadline: Instant,
+    },
     /// The engine closed the transport.
     Closed(CallLink),
     /// No transport. `link` is kept when one was connected, so a later
@@ -256,6 +262,9 @@ pub struct CallLink {
 /// Reconnects Quill tries on its own after the engine reports a failure.
 pub const MAX_CALL_RECONNECT_ATTEMPTS: usize = 3;
 
+/// How long a retry may stay silent before it counts as failed.
+pub const CALL_RECONNECT_WINDOW: std::time::Duration = std::time::Duration::from_secs(20);
+
 impl Default for CallTransport {
     fn default() -> Self {
         Self::NotStarted { start_error: None }
@@ -269,7 +278,7 @@ impl CallTransport {
             Self::NotStarted { .. } => None,
             Self::Attempt(_) => Some(TransportState::Connecting),
             Self::Connected(_) => Some(TransportState::Connected),
-            Self::Reconnecting(_) => Some(TransportState::Reconnecting),
+            Self::Reconnecting { .. } => Some(TransportState::Reconnecting),
             Self::Closed(_) => Some(TransportState::Closed),
             Self::Failed { .. } => Some(TransportState::Failed),
         }
@@ -298,7 +307,7 @@ impl CallTransport {
             Self::NotStarted { .. } => None,
             Self::Attempt(link)
             | Self::Connected(link)
-            | Self::Reconnecting(link)
+            | Self::Reconnecting { link, .. }
             | Self::Closed(link) => Some(link),
             Self::Failed { link, .. } => link.as_ref(),
         }
@@ -319,6 +328,19 @@ impl CallTransport {
         }
     }
 
+    /// A retry of `link` started at `now`.
+    pub fn reconnecting(link: CallLink, now: Instant) -> Self {
+        Self::Reconnecting {
+            link,
+            deadline: now + CALL_RECONNECT_WINDOW,
+        }
+    }
+
+    /// A retry that the engine has not reported on by `now`.
+    pub fn reconnect_overdue(&self, now: Instant) -> bool {
+        matches!(self, Self::Reconnecting { deadline, .. } if *deadline <= now)
+    }
+
     /// A live phase the engine reported, carrying `link`. `Failed` is not
     /// one: a reported failure goes through the reconnect decision.
     pub fn reported(state: TransportState, link: CallLink) -> Option<Self> {
@@ -328,7 +350,7 @@ impl CallTransport {
                 reconnect_attempts: 0,
                 ..link
             })),
-            TransportState::Reconnecting => Some(Self::Reconnecting(link)),
+            TransportState::Reconnecting => Some(Self::reconnecting(link, Instant::now())),
             TransportState::Closed => Some(Self::Closed(link)),
             TransportState::Failed => None,
         }

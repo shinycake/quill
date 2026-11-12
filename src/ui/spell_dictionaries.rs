@@ -55,8 +55,9 @@ enum DictDownload {
     /// The user switched the download off: the row is a plain off switch
     /// again at once, but the worker may be past its last cancel check, so
     /// the task goes on to see it end and read the dictionary folder once
-    /// more. A new download replaces this stage and drops that task (its own
-    /// end reads the folder).
+    /// more. A new download waits for this worker to end (it still has
+    /// `.X.*.part` and `.X.aff.old` open), and this stage leaves when that
+    /// task ends.
     Cancelling { _task: Task<()> },
     /// The last download of `code` failed with `message`; starting another
     /// (or any download) clears it.
@@ -454,6 +455,13 @@ mod tests {
                 DictDownload::Cancelling { .. }
             ));
             assert!(progress.is_cancelled(), "the worker is told to stop");
+            // A new download waits: it does not replace the stage and drop
+            // the task that sees the worker out.
+            app.start_dictionary_download("de", cx);
+            assert!(matches!(
+                app.spell.dict_manager.download,
+                DictDownload::Cancelling { .. }
+            ));
         });
     }
 }

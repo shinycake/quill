@@ -85,7 +85,9 @@ pub struct GroupVideoSource {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransportState {
     Connecting,
-    /// Driver-only state while retrying the retained connect parameters.
+    /// Driver-only state while retrying the retained connect parameters; it
+    /// ends with the engine's next report or the driver's retry deadline
+    /// (`CallTransport::Reconnecting`).
     Reconnecting,
     Connected,
     Failed,

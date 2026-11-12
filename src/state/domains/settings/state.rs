@@ -331,17 +331,14 @@ pub struct SettingsState {
     pub device_login: DeviceLogin,
     /// Slice A7: cached `getAccountTtl` answer, in days — drives the
     /// self-destruct-if-away picker (UI half ships post-Phase-9).
-    /// A `getAccountTtl` or `setAccountTtl` round trip is in flight, the
-    /// days are known, or the last try failed with the honest one-line
-    /// failure (classified from the TDLib error code, never the native
-    /// message); the known days stay. Cleared on the next attempt and on
-    /// success.
+    /// A `getAccountTtl` round trip is in flight, the days are known, or
+    /// the read failed with the honest one-line failure (classified from
+    /// the TDLib error code, never the native message); the known days
+    /// stay. A write never touches it until the server confirms.
     pub account_ttl: Fetch<i32>,
-    /// Slice A7: a `deleteAccount` round trip is in flight — the account
-    /// surfaces stay disabled meanwhile — or its honest one-line failure.
-    pub account_delete: Fetch<()>,
-    /// The account write (`setAccountTtl` or `deleteAccount`) in flight:
-    /// one at a time.
+    /// The account write (`setAccountTtl` or `deleteAccount`) in flight, one
+    /// at a time, or its honest one-line failure: the only record of a
+    /// write, so the account surfaces stay disabled while it is out.
     pub account_write: super::AccountWrite,
     /// Slice A4: cached `getConnectedWebsites` answer (TGX
     /// `SettingsWebsitesController` style); drives the Connected Websites
@@ -477,13 +474,13 @@ impl SettingsState {
 
     /// The failure line of the last account-lifecycle op.
     pub fn account_error(&self) -> Option<&str> {
-        self.account_ttl.error().or(self.account_delete.error())
+        self.account_ttl.error().or(self.account_write.error())
     }
 
     /// An account-lifecycle round trip is in flight: the surfaces stay
     /// disabled.
     pub fn account_busy(&self) -> bool {
-        self.account_ttl.is_loading() || self.account_delete.is_loading()
+        self.account_ttl.is_loading() || self.account_write.is_out()
     }
 
     /// A refused block or unblock: the optimistic change of `user_id`
@@ -598,7 +595,6 @@ impl SettingsState {
             sessions_note: Default::default(),
             device_login: DeviceLogin::Idle,
             account_ttl: Fetch::Idle,
-            account_delete: Fetch::Idle,
             connected_websites: Fetch::Idle,
             passkeys: Default::default(),
             websites_op: Default::default(),

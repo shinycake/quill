@@ -171,8 +171,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.settings.account_ttl.clear_error();
+        self.session.settings.account_write.clear_error();
         let extra = self.session.request(RequestPurpose::DeleteAccount, None);
-        self.session.settings.account_delete.begin_with(extra);
         self.session.settings.account_write = AccountWrite::Delete { request: extra };
         match self
             .sender
@@ -181,7 +181,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.account_delete.cancel();
                 self.session.settings.account_write.settle(Some(extra));
                 Err(err)
             }
@@ -271,18 +270,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || self.session.settings.account_write.is_out() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.settings.account_delete.clear_error();
+        self.session.settings.account_write.clear_error();
         let extra = self.session.request(
             RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { days }),
             None,
         );
-        self.session.settings.account_ttl.begin_with(extra);
         self.session.settings.account_write = AccountWrite::SetTtl { request: extra };
         match self.sender.send_json(&set_account_ttl(extra, days)) {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.account_ttl.cancel();
                 self.session.settings.account_write.settle(Some(extra));
                 Err(err)
             }

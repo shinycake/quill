@@ -362,6 +362,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        self.session
+            .note_group_call_fetch_sent(group_call_id, extra);
         Ok(extra)
     }
 

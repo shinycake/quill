@@ -419,6 +419,46 @@ fn call_transport_retries_same_params_three_times_then_stops() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A retry the engine never reports on does not stay `Reconnecting`: at its
+/// deadline it counts as a failed report, so the budget runs out and the
+/// call shows the failure.
+#[test]
+fn a_silent_retry_runs_out_at_its_deadline_and_spends_the_budget() {
+    use crate::state::{CALL_RECONNECT_WINDOW, MAX_CALL_RECONNECT_ATTEMPTS};
+    let (dir, mut driver, handle, sink, seq) = ready_call_driver();
+    ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+    handle.emit_transport_state(77, TransportState::Failed);
+    ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+    let state = |driver: &ConnectDriver<_>| {
+        driver
+            .session
+            .calls
+            .active_call
+            .as_ref()
+            .unwrap()
+            .transport
+            .state()
+    };
+    assert_eq!(state(&driver), Some(TransportState::Reconnecting));
+    let start = std::time::Instant::now();
+    // Before its deadline the retry is left alone.
+    assert!(!driver.expire_call_reconnect(start));
+    assert_eq!(handle.connects().len(), 2);
+    // Each silent retry that passes its deadline asks again, until the
+    // budget is spent.
+    let mut now = start;
+    for _ in 1..MAX_CALL_RECONNECT_ATTEMPTS {
+        now += CALL_RECONNECT_WINDOW + std::time::Duration::from_secs(1);
+        assert!(driver.expire_call_reconnect(now));
+        assert_eq!(state(&driver), Some(TransportState::Reconnecting));
+    }
+    now += CALL_RECONNECT_WINDOW + std::time::Duration::from_secs(1);
+    assert!(driver.expire_call_reconnect(now));
+    assert_eq!(state(&driver), Some(TransportState::Failed));
+    assert_eq!(handle.connects().len(), 1 + MAX_CALL_RECONNECT_ATTEMPTS);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn call_transport_connected_resets_reconnect_attempts() {
     let (dir, mut driver, handle, sink, seq) = ready_call_driver();

@@ -318,13 +318,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let extra = self.session.request(purpose, Some(chat_id));
         let member_id = MessageSenderRef::User(user_id).to_value();
-        if let Err(err) = self.sender.send_json(&set_chat_member_status(
-            extra, chat_id.0, &member_id, status,
-        )) {
-            self.session.requests.take(extra);
-            return Err(err);
-        }
-        Ok(Some(extra))
+        self.send_member_action(
+            chat_id,
+            extra,
+            &set_chat_member_status(extra, chat_id.0, &member_id, status),
+        )
+        .map(Some)
     }
 
     /// Phase D3b: promote a member to administrator with the given rights
