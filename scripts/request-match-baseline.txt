@@ -31,7 +31,6 @@ purpose:ConnectDriver::leave_live_story 1
 purpose:ConnectDriver::load_forum_topic_icons 1
 purpose:ConnectDriver::load_saved_tags 1
 purpose:ConnectDriver::load_saved_topics 1
-purpose:ConnectDriver::load_wearable_gifts 1
 purpose:ConnectDriver::login_request 1
 purpose:ConnectDriver::manage_sticker_set 2
 purpose:ConnectDriver::mark_all_chats_as_read 1
@@ -104,14 +103,8 @@ unmatched:PaidReactions::set_senders 1
 unmatched:QuillApp::refresh_storage_usage 1
 unmatched:QuillApp::submit_default_auto_delete 1
 unmatched:SearchState::accept_recommended 1
-unmatched:Session::accept_archived_mask_sets 1
-unmatched:Session::accept_installed_mask_sets 1
-unmatched:Session::accept_installed_sticker_sets 1
-unmatched:Session::accept_mask_set 1
 unmatched:Session::apply_auth_payload 1
 unmatched:Session::apply_chat_list_payload 2
-unmatched:Session::apply_language_payload 1
-unmatched:Session::apply_payments_payload 2
 unmatched:Session::apply_privacy_data_payload 1
 unmatched:Session::apply_quick_replies_ok 1
 unmatched:Session::apply_saved_tags 1

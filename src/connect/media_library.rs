@@ -55,13 +55,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .requests
                 .has_purpose(RequestPurpose::GetRecentStickers)
         {
-            let extra = self
-                .session
-                .request(RequestPurpose::GetRecentStickers, None);
-            if let Err(err) = self.sender.send_json(&get_recent_stickers(extra, false)) {
-                self.session.requests.take(extra);
-                return Err(err);
-            }
+            self.sticker_request(RequestPurpose::GetRecentStickers, |id| {
+                get_recent_stickers(id, false)
+            })?;
         }
         if self.session.stickers.stickers.favorites.is_empty() {
             self.sticker_request_favorites()?;

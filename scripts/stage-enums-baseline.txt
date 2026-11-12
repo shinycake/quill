@@ -140,7 +140,6 @@ unkeyed:GiftValueStage::Loading 1
 unkeyed:GiftsRest::Waiting 1
 unkeyed:IconState::Requested 1
 unkeyed:IdLookup::Asking 1
-unkeyed:LanguageStage::Fetching 1
 unkeyed:Lifecycle::Loading 1
 unkeyed:Lifecycle::Running 1
 unkeyed:Lifecycle::Waiting 1

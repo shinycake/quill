@@ -94,7 +94,6 @@ impl Session {
 
     pub fn accept_installed_sticker_sets(&mut self, sets: Vec<StickerSetInfo>) {
         self.stickers.stickers.sets = sets;
-        self.stickers.stickers.lists.installed.succeed(());
         if self.stickers.stickers.tab != StickerTab::Installed {
             return;
         }

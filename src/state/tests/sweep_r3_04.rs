@@ -181,3 +181,35 @@ fn a_gift_text_limit_failure_keeps_the_limit_an_update_set() {
     );
     assert_eq!(session.payments.gift_text_length_max, Some(255));
 }
+
+#[test]
+fn an_older_sticker_list_answer_does_not_replace_the_newer_one() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let sticker = |id: i64| {
+        format!(
+            r#"{{"@type":"sticker","id":"{id}","set_id":"77","width":512,"height":512,"emoji":"😀","format":{{"@type":"stickerFormatWebp"}},"full_type":{{"@type":"stickerFullTypeRegular","premium_animation":null}},"thumbnail":null,"sticker":null}}"#
+        )
+    };
+    let answer = |extra: RequestId, id: i64| {
+        format!(
+            r#"{{"@type":"stickers","stickers":[{}],"@extra":"{}"}}"#,
+            sticker(id),
+            extra.0
+        )
+    };
+    let old = session.request(RequestPurpose::GetFavoriteStickers, None);
+    let new = session.request(RequestPurpose::GetFavoriteStickers, None);
+    let list = &mut session.stickers.stickers.lists.favorites;
+    list.begin();
+    list.sent(new);
+    apply_json(&mut session, &seq, &sink, &answer(old, 1));
+    assert!(session.stickers.stickers.favorites.is_empty());
+    assert!(session.stickers.stickers.lists.favorites.is_loading());
+    apply_json(&mut session, &seq, &sink, &answer(new, 2));
+    assert_eq!(session.stickers.stickers.favorites.len(), 1);
+    // The newer answer was applied first; the older one lands late.
+    apply_json(&mut session, &seq, &sink, &answer(old, 1));
+    assert_eq!(session.stickers.stickers.favorites.len(), 1);
+    assert_eq!(session.stickers.stickers.favorites[0].emoji, "😀");
+}
