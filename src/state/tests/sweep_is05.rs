@@ -82,12 +82,14 @@ fn hiding_ads_keeps_a_report_in_flight() {
         },
         request: RequestId(11),
     };
+    session.my_user_id = Some(5);
+    session.payments.premium_option = Some(true);
     session.accept_sponsored_hidden(ChatId(3));
     assert!(matches!(
         session.messages.sponsored_report,
         SponsoredReportFlow::Asking { .. }
     ));
-    assert!(session.messages.sponsored_hidden);
+    assert!(session.sponsored_hidden());
 }
 
 #[test]

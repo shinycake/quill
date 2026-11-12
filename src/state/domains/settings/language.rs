@@ -27,9 +27,9 @@ pub enum LanguagePurpose {
     /// Response is `languagePackStrings`.
     Strings,
     /// `getLanguagePackStrings` of the announcement badge texts
-    /// (`cloud_lng_badge_psa_<type>`) of one pack; `epoch` tells whether the
-    /// pack is still the one asked about. Response is `languagePackStrings`.
-    PsaLabels { epoch: u32 },
+    /// (`cloud_lng_badge_psa_<type>`) of one pack; the label set waits for the
+    /// request itself. Response is `languagePackStrings`.
+    PsaLabels,
     /// `synchronizeLanguagePack` / `addCustomServerLanguagePack` of a
     /// switch. Response is `ok`.
     Synchronize,
@@ -290,12 +290,12 @@ impl Session {
             }
             LanguagePayload::Strings(strings) => {
                 if let Some(RequestPurpose::Settings(SettingsPurpose::Language(
-                    LanguagePurpose::PsaLabels { epoch },
+                    LanguagePurpose::PsaLabels,
                 ))) = pending.map(|p| p.purpose)
                 {
                     self.chat_list
                         .psa_labels
-                        .store(epoch, pending.map(|p| p.id), strings);
+                        .store(pending.map(|p| p.id), strings);
                     return;
                 }
                 let Some(pending) = pending.filter(|p| {
@@ -400,7 +400,7 @@ impl Session {
                 }
             }
             // The badge types it asked for are asked again by the next pump.
-            LanguagePurpose::PsaLabels { .. } => {
+            LanguagePurpose::PsaLabels => {
                 if let Some(request) = request {
                     self.chat_list.psa_labels.fail_request(request);
                 }

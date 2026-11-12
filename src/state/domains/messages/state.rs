@@ -168,11 +168,6 @@ pub struct MessagesState {
     pub deferred_captions: Vec<crate::composer::DeferredCaption>,
     /// Sponsored messages per chat (`getChatSponsoredMessages`).
     pub sponsored: HashMap<i64, ChatSponsoredMessages>,
-    /// Set once Telegram confirmed `reportSponsoredResultAdsHidden` or
-    /// `toggleHasSponsoredMessagesEnabled(false)`: no ads are fetched or
-    /// shown until the account's own full info says they are enabled again
-    /// (`apply_user_full_info`).
-    pub sponsored_hidden: bool,
     /// The sponsored-message report flow: its target and the request
     /// awaited, the option picker, or the last outcome note
     /// ([`SponsoredReportFlow`]).
@@ -246,7 +241,6 @@ impl MessagesState {
             failed_sends: Vec::new(),
             deferred_captions: Vec::new(),
             sponsored: HashMap::new(),
-            sponsored_hidden: false,
             sponsored_report: SponsoredReportFlow::Idle,
             translate: TranslateState::default(),
             tone_limits: crate::message_menu::ToneLimits::default(),

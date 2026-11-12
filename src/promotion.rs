@@ -131,10 +131,9 @@ pub enum PsaAsk {
 }
 
 /// What one pump asks for: the language-pack keys of the types still
-/// wanted, tagged with the pack's epoch.
+/// wanted.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PsaPlan {
-    pub epoch: u32,
     pub keys: Vec<String>,
     kinds: Vec<String>,
 }
@@ -144,8 +143,6 @@ pub struct PsaPlan {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PsaLabels {
     pack: String,
-    /// Changes with the pack, so an answer for an older pack is ignored.
-    epoch: u32,
     cloud: HashMap<String, String>,
     /// The server's "about" text per type.
     about: HashMap<String, String>,
@@ -176,7 +173,6 @@ impl PsaLabels {
     pub fn plan<'a>(&mut self, pack: &str, kinds: impl IntoIterator<Item = &'a str>) -> PsaPlan {
         if self.pack != pack {
             self.pack = pack.to_string();
-            self.epoch = self.epoch.wrapping_add(1);
             self.cloud.clear();
             self.about.clear();
             self.asks.clear();
@@ -202,7 +198,6 @@ impl PsaLabels {
             })
             .collect();
         PsaPlan {
-            epoch: self.epoch,
             keys,
             kinds: wanted,
         }
@@ -210,9 +205,6 @@ impl PsaLabels {
 
     /// The plan's request exists: its types wait for its answer.
     pub fn begin(&mut self, plan: &PsaPlan, request: crate::ids::RequestId) {
-        if plan.epoch != self.epoch {
-            return;
-        }
         for kind in &plan.kinds {
             let tries = match self.asks.get(kind) {
                 Some(PsaAsk::Failed { attempts }) => *attempts,
@@ -244,20 +236,22 @@ impl PsaLabels {
     }
 
     /// Keep the labels a `languagePackStrings` answer of `request` carries,
-    /// if it is for the pack asked about last.
+    /// when some type waits for that request. A new pack forgets its
+    /// waiters, so an older pack's answer finds none and is dropped.
     pub fn store(
         &mut self,
-        epoch: u32,
         request: Option<crate::ids::RequestId>,
         strings: Vec<(String, PackValue)>,
     ) {
-        if epoch != self.epoch {
-            return;
-        }
+        let mut waited = false;
         for ask in self.asks.values_mut() {
             if matches!(*ask, PsaAsk::Asking { request: waiting, .. } if Some(waiting) == request) {
                 *ask = PsaAsk::Ready;
+                waited = true;
             }
+        }
+        if !waited {
+            return;
         }
         for (key, value) in strings {
             let PackValue::Ordinary(text) = value else {
@@ -294,16 +288,18 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    /// A pump that asked: the plan and its request (ids count up).
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+    /// A pump that asked: its request (ids count up) and the keys.
     fn ask<'a>(
         labels: &mut PsaLabels,
         pack: &str,
         kinds: impl IntoIterator<Item = &'a str>,
-    ) -> (u32, crate::ids::RequestId, Vec<String>) {
+    ) -> (crate::ids::RequestId, Vec<String>) {
         let plan = labels.plan(pack, kinds);
-        let id = crate::ids::RequestId(labels.asks.len() as u64 + u64::from(plan.epoch) * 100);
+        let id = crate::ids::RequestId(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
         labels.begin(&plan, id);
-        (plan.epoch, id, plan.keys)
+        (id, plan.keys)
     }
 
     fn psa(kind: &str, text: &str) -> Promotion {
@@ -340,9 +336,8 @@ mod tests {
         let covid = psa("covid", "");
         assert_eq!(labels.row(&covid).label, "PSA");
         assert_eq!(labels.row(&Promotion::MtprotoProxy).label, "Proxy sponsor");
-        let (epoch, id, _) = ask(&mut labels, "en", ["covid"]);
+        let (id, _) = ask(&mut labels, "en", ["covid"]);
         labels.store(
-            epoch,
             Some(id),
             vec![
                 (
@@ -365,7 +360,7 @@ mod tests {
     #[test]
     fn each_type_is_asked_for_once_per_pack() {
         let mut labels = PsaLabels::default();
-        let (_, _, keys) = ask(&mut labels, "en", ["covid", "covid", "war"]);
+        let (_, keys) = ask(&mut labels, "en", ["covid", "covid", "war"]);
         assert_eq!(
             keys,
             vec![
@@ -376,7 +371,7 @@ mod tests {
             ]
         );
         assert!(labels.plan("en", ["covid", "war"]).keys.is_empty());
-        let (_, _, keys) = ask(&mut labels, "ru", ["covid"]);
+        let (_, keys) = ask(&mut labels, "ru", ["covid"]);
         assert_eq!(
             keys,
             vec!["cloud_lng_badge_psa_covid", "cloud_lng_about_psa_covid"]
@@ -392,9 +387,8 @@ mod tests {
         assert_eq!(labels.about(&Promotion::MtprotoProxy), proxy);
         assert_eq!(labels.about(&psa("", "text")), proxy, "no type");
         assert_eq!(labels.about(&covid), default, "unknown to the server");
-        let (epoch, id, _) = ask(&mut labels, "en", ["covid", "empty"]);
+        let (id, _) = ask(&mut labels, "en", ["covid", "empty"]);
         labels.store(
-            epoch,
             Some(id),
             vec![
                 (
@@ -492,21 +486,21 @@ mod tests {
     fn a_new_pack_drops_the_old_text_and_late_answers() {
         let mut labels = PsaLabels::default();
         let covid = psa("covid", "");
-        let (old, old_id, _) = ask(&mut labels, "en", ["covid"]);
+        let (old_id, _) = ask(&mut labels, "en", ["covid"]);
         let answer = || {
             vec![(
                 "cloud_lng_badge_psa_covid".to_string(),
                 PackValue::Ordinary("COVID-19 Info".into()),
             )]
         };
-        labels.store(old, Some(old_id), answer());
+        labels.store(Some(old_id), answer());
         assert_eq!(labels.row(&covid).label, "COVID-19 Info");
-        let (new, new_id, _) = ask(&mut labels, "ru", ["covid"]);
+        let (new_id, _) = ask(&mut labels, "ru", ["covid"]);
         assert_eq!(labels.row(&covid).label, "PSA");
         // The English answer arrives late: ignored.
-        labels.store(old, Some(old_id), answer());
+        labels.store(Some(old_id), answer());
         assert_eq!(labels.row(&covid).label, "PSA");
-        labels.store(new, Some(new_id), answer());
+        labels.store(Some(new_id), answer());
         assert_eq!(labels.row(&covid).label, "COVID-19 Info");
     }
 
@@ -533,7 +527,7 @@ mod tests {
         let plan = labels.plan("ru", ["covid"]);
         assert_eq!(plan.keys.len(), 2);
         labels.begin(&plan, RequestId(50));
-        labels.store(plan.epoch, Some(RequestId(50)), Vec::new());
+        labels.store(Some(RequestId(50)), Vec::new());
         assert!(labels.plan("ru", ["covid"]).keys.is_empty());
         assert_eq!(labels.row(&psa("covid", "")).label, "PSA");
     }

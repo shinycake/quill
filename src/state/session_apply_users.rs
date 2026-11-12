@@ -29,12 +29,6 @@ impl Session {
                     .and_then(|chat_id| self.private_chat_user_id(chat_id))
             });
             if let Some(user_id) = user_id {
-                // The account's own setting wins over the local record of
-                // hiding ads: ads turned back on elsewhere (or a Premium
-                // lapse) show again.
-                if Some(user_id) == self.my_user_id && extras.sponsored_enabled {
-                    self.messages.sponsored_hidden = false;
-                }
                 self.cache_profile_photo_files(&extras);
                 let photo_file_id = photo.map(|file| {
                     let id = file.id.0;

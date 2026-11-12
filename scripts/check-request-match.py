@@ -59,7 +59,9 @@ OWNER = "src/state/requests.rs"
 PURPOSE = re.compile(r"\.\s*(?:has_purpose|take_purpose|has_auth_submit)\s*\(")
 SUCCEED = re.compile(r"\.\s*succeed\s*\(")
 PURPOSE_ENUM = re.compile(r"\benum\s+(\w*Purpose)\b[^{;]*\{")
-COUNTER = re.compile(r"\b(?:generation|epoch|token)\s*:\s*u(?:8|16|32|64)\b")
+COUNTER = re.compile(
+    r"\b(?:generation|epoch|token)\s*:\s*(?:Option\s*<\s*)?u(?:8|16|32|64)\b"
+)
 
 
 def hits(root):

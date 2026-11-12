@@ -8,8 +8,9 @@ fn the_accounts_own_full_info_turns_hidden_ads_back_on() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     session.my_user_id = Some(5);
+    session.payments.premium_option = Some(true);
     session.accept_sponsored_hidden(ChatId(3));
-    assert!(session.messages.sponsored_hidden);
+    assert!(session.sponsored_hidden());
     // Another user's full info says nothing about this account's ads.
     let other = session.request_for_user(RequestPurpose::GetUserFullInfo, 31);
     apply_json(
@@ -21,7 +22,7 @@ fn the_accounts_own_full_info_turns_hidden_ads_back_on() {
             other.0
         ),
     );
-    assert!(session.messages.sponsored_hidden);
+    assert!(session.sponsored_hidden());
     let own = session.request_for_user(RequestPurpose::GetUserFullInfo, 5);
     apply_json(
         &mut session,
@@ -32,7 +33,7 @@ fn the_accounts_own_full_info_turns_hidden_ads_back_on() {
             own.0
         ),
     );
-    assert!(!session.messages.sponsored_hidden);
+    assert!(!session.sponsored_hidden());
 }
 
 #[test]
@@ -437,4 +438,47 @@ fn a_language_switch_takes_only_the_strings_its_own_requests_bring() {
     apply_json(&mut session, &seq, &sink, &error(own));
     assert!(session.settings.language.switching().is_none());
     assert!(session.settings.language.failure().is_some());
+}
+
+fn own_user_json(premium: bool) -> String {
+    format!(
+        r#"{{"@type":"updateUser","user":{{"id":5,"first_name":"Me","type":{{"@type":"userTypeRegular"}},"is_premium":{premium}}}}}"#
+    )
+}
+
+#[test]
+fn ads_turned_back_on_by_an_update_show_again() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.my_user_id = Some(5);
+    session.payments.premium_option = Some(true);
+    session.accept_sponsored_hidden(ChatId(3));
+    assert!(session.sponsored_hidden());
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateUserFullInfo","user_id":5,"user_full_info":{"@type":"userFullInfo","bio":null,"has_sponsored_messages_enabled":true}}"#,
+    );
+    assert!(!session.sponsored_hidden());
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateUserFullInfo","user_id":5,"user_full_info":{"@type":"userFullInfo","bio":null,"has_sponsored_messages_enabled":false}}"#,
+    );
+    assert!(session.sponsored_hidden());
+}
+
+#[test]
+fn a_premium_lapse_shows_ads_again() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.my_user_id = Some(5);
+    session.payments.premium_option = None;
+    apply_json(&mut session, &seq, &sink, &own_user_json(true));
+    session.accept_sponsored_hidden(ChatId(3));
+    assert!(session.sponsored_hidden());
+    apply_json(&mut session, &seq, &sink, &own_user_json(false));
+    assert!(!session.sponsored_hidden());
 }

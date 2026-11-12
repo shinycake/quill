@@ -3,7 +3,6 @@
 counter:AiComposePurpose 5
 counter:BotsPurpose 3
 counter:ChatsPurpose 5
-counter:LanguagePurpose 1
 counter:LocationPickerPurpose 1
 counter:MediaPurpose 2
 counter:RequestPurpose 1
