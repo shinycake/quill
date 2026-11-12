@@ -16,3 +16,8 @@ src/ui/group_moderation/promote_dialog_panel.rs 237 read
 src/ui/group_moderation/stops_slider.rs 204 read
 src/ui/group_panels/link_rows.rs 175 read
 src/ui/group_panels/mod.rs 629 read
+src/ui/group_panels/user_info_panel.rs 646 read
+src/ui/group_type_box/demo.rs 167 read
+src/ui/group_type_box/mod.rs 603 read
+src/ui/group_type_box/sections.rs 488 read
+src/ui/group_type_box/usernames.rs 237 read
