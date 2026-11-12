@@ -117,7 +117,7 @@ impl Session {
                 // empty (Telegram X `ListManager.processData`), or only the
                 // boundary message itself, which the identical next request
                 // would return again forever.
-                let from = pending.around_message_id.map_or(0, |id| id.0);
+                let from = pending.around_message_id().map_or(0, |id| id.0);
                 let reached_start = !messages.iter().any(|m| from == 0 || m.id.0 < from);
                 if from == 0 {
                     self.store_first_page(chat_id, &messages);
@@ -160,7 +160,7 @@ impl Session {
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::GetStoryAlbumStories) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id)
-                    && let Some(album_id) = pending.and_then(|p| p.story_album_id)
+                    && let Some(album_id) = pending.and_then(|p| p.story_album_id())
                 {
                     let list = self
                         .stories
@@ -195,16 +195,18 @@ impl Session {
                 }
             }
             Some(RequestPurpose::GetChatPostedToChatPageStories) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                if let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                    && let Some(request) = pending.map(|p| p.id)
+                {
                     // A page the gallery asked for before it was closed and
-                    // reopened is dropped whole, so it neither shows alone
+                    // reopened (it is no longer the request the Stories tab
+                    // waits for) is dropped whole, so it neither shows alone
                     // nor lands ahead of the new first page.
-                    let generation = pending.and_then(|p| p.search_generation);
-                    if let Some(generation) = generation
-                        && !self.media.shared_media.accepts(
+                    if pending.is_some_and(|p| p.is_gallery_tab_page())
+                        && !self.media.shared_media.accepts_profile(
                             chat_id,
                             SharedMediaTab::Stories,
-                            generation,
+                            request,
                         )
                     {
                         self.clear_story_page_op(pending);
@@ -225,7 +227,7 @@ impl Session {
                     self.clear_story_page_op(pending);
                     // The shared-media gallery's Stories tab lists the same
                     // chat-page stories.
-                    self.apply_profile_stories(chat_id, generation, total_count);
+                    self.apply_profile_stories(chat_id, request, total_count);
                 }
             }
             _ => {}
@@ -313,10 +315,11 @@ impl Session {
                 .accept_hits(hits, total_count, next_from_message_id, false);
         }
         // Slice media-shared-gallery: one gallery-tab page.
-        // Correlated by chat + tab + generation stamped on the
-        // request purpose; late answers drop in `accept`.
-        if let Some(RequestPurpose::GetSharedMedia { tab, generation }) = pending.map(|p| p.purpose)
+        // Correlated by chat + tab + the request the tab waits for; late
+        // answers drop in `accept`.
+        if let Some(RequestPurpose::GetSharedMedia { tab }) = pending.map(|p| p.purpose)
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+            && let Some(request) = pending.map(|p| p.id)
         {
             for message in &messages {
                 self.remember_files(&message.files);
@@ -329,15 +332,16 @@ impl Session {
             self.media.shared_media.accept(
                 chat_id,
                 tab,
-                generation,
+                request,
                 items,
                 total_count,
                 next_from_message_id,
             );
         }
-        if let Some(RequestPurpose::Media(MediaPurpose::GetSharedMediaMore { tab, generation })) =
+        if let Some(RequestPurpose::Media(MediaPurpose::GetSharedMediaMore { tab })) =
             pending.map(|p| p.purpose)
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+            && let Some(request) = pending.map(|p| p.id)
         {
             for message in &messages {
                 self.remember_files(&message.files);
@@ -350,7 +354,7 @@ impl Session {
             self.media.shared_media.accept_more(
                 chat_id,
                 tab,
-                generation,
+                request,
                 items,
                 total_count,
                 next_from_message_id,

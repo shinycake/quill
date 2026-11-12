@@ -220,3 +220,116 @@ fn a_picked_report_option_closes_the_picker_until_the_answer() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// An ad whose `viewMessages` fails is asked for again with a later frame
+/// (not stuck as counted), and stops after `AD_VIEW_ATTEMPTS` failures; the
+/// ok answer counts it for good.
+#[test]
+fn a_failed_ad_view_is_asked_again_a_bounded_number_of_times() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    for json in [
+        r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+        r#"{"@type":"updateNewChat","chat":{"id":13,"title":"Demo channel","type":{"@type":"chatTypeSupergroup","supergroup_id":13,"is_channel":true},"unread_count":0}}"#,
+    ] {
+        driver
+            .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+            .unwrap();
+    }
+    let chat = ChatId(13);
+    driver.session.open_chat(chat);
+    let extra = driver
+        .fetch_sponsored_messages(chat)
+        .unwrap()
+        .expect("fetch sent");
+    let response = format!(
+        r#"{{"@type":"sponsoredMessages","@extra":"{}","messages_between":0,"messages":[{{"@type":"sponsoredMessage","message_id":9001,"is_recommended":false,"can_be_reported":true,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"ad","entities":[]}}}},"sponsor":{{"@type":"advertisementSponsor","url":"https://example.com","photo":{{"@type":"photo","has_stickers":false,"sizes":[]}},"info":""}},"title":"T","button_text":"Go","accent_color_id":0,"background_custom_emoji_id":"0","additional_info":""}}]}}"#,
+        extra.0
+    );
+    driver
+        .ingest(copy_and_parse(&response, &seq, &dyn_sink).unwrap())
+        .unwrap();
+    for round in 0..crate::state::AD_VIEW_ATTEMPTS {
+        let request = driver
+            .view_sponsored_messages(chat, &[9001])
+            .unwrap()
+            .unwrap_or_else(|| panic!("round {round} asks"));
+        assert!(
+            driver
+                .view_sponsored_messages(chat, &[9001])
+                .unwrap()
+                .is_none(),
+            "one request at a time"
+        );
+        let error = format!(
+            r#"{{"@type":"error","@extra":"{}","code":429,"message":"Too Many Requests: retry after 1"}}"#,
+            request.0
+        );
+        driver
+            .ingest(copy_and_parse(&error, &seq, &dyn_sink).unwrap())
+            .unwrap();
+    }
+    assert!(
+        driver
+            .view_sponsored_messages(chat, &[9001])
+            .unwrap()
+            .is_none(),
+        "the failures are capped"
+    );
+    drop(dir);
+}
+
+/// The ok answer of a view counts the ad: no later frame asks again.
+#[test]
+fn an_answered_ad_view_is_counted_for_good() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    for json in [
+        r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+        r#"{"@type":"updateNewChat","chat":{"id":13,"title":"Demo channel","type":{"@type":"chatTypeSupergroup","supergroup_id":13,"is_channel":true},"unread_count":0}}"#,
+    ] {
+        driver
+            .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+            .unwrap();
+    }
+    let chat = ChatId(13);
+    driver.session.open_chat(chat);
+    let extra = driver
+        .fetch_sponsored_messages(chat)
+        .unwrap()
+        .expect("fetch sent");
+    let response = format!(
+        r#"{{"@type":"sponsoredMessages","@extra":"{}","messages_between":0,"messages":[{{"@type":"sponsoredMessage","message_id":9001,"is_recommended":false,"can_be_reported":true,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"ad","entities":[]}}}},"sponsor":{{"@type":"advertisementSponsor","url":"https://example.com","photo":{{"@type":"photo","has_stickers":false,"sizes":[]}},"info":""}},"title":"T","button_text":"Go","accent_color_id":0,"background_custom_emoji_id":"0","additional_info":""}}]}}"#,
+        extra.0
+    );
+    driver
+        .ingest(copy_and_parse(&response, &seq, &dyn_sink).unwrap())
+        .unwrap();
+    let request = driver
+        .view_sponsored_messages(chat, &[9001])
+        .unwrap()
+        .expect("asked");
+    let ok = format!(r#"{{"@type":"ok","@extra":"{}"}}"#, request.0);
+    driver
+        .ingest(copy_and_parse(&ok, &seq, &dyn_sink).unwrap())
+        .unwrap();
+    assert!(
+        driver
+            .view_sponsored_messages(chat, &[9001])
+            .unwrap()
+            .is_none()
+    );
+    drop(dir);
+}

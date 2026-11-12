@@ -203,7 +203,7 @@ impl QuillApp {
         };
         let apps = &mut live.driver.session.bots.web_apps;
         let open_result = apps.open_result.take();
-        let write_access = apps.write_access.take();
+        let write_access = std::mem::take(&mut apps.write_access);
         let custom_replies = std::mem::take(&mut apps.custom_replies);
         let attach_bots = std::mem::take(&mut apps.attachment_menu_bot);
         let toggled = std::mem::take(&mut apps.attachment_menu_toggled);
@@ -242,7 +242,7 @@ impl QuillApp {
                 }
             }
         }
-        if let Some(answer) = write_access {
+        for answer in write_access {
             self.finish_write_access(answer, cx);
         }
         for reply in custom_replies {

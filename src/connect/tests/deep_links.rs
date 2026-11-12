@@ -30,8 +30,13 @@ fn invite_check_confirm_cancel_and_stale_answers() {
             .iter()
             .any(|j| j.contains("joinChatByInviteLink"))
     );
-    let generation = driver.session.chats_state.deep_link_seq;
-    assert_eq!(driver.confirm_deep_link_invite(generation).unwrap(), None);
+    let asked = driver
+        .session
+        .chats_state
+        .deep_link_stage()
+        .and_then(crate::state::DeepLinkState::request)
+        .expect("the invite check is out");
+    assert_eq!(driver.confirm_deep_link_invite(asked).unwrap(), None);
     let preview = |extra: crate::ids::RequestId| {
         json!({
             "@type": "chatInviteLinkInfo", "@extra": extra.as_extra(),
@@ -49,18 +54,18 @@ fn invite_check_confirm_cancel_and_stale_answers() {
     }) if title == "Rust Community")
     );
     assert_eq!(
-        driver.confirm_deep_link_invite(generation + 1).unwrap(),
-        None
+        driver
+            .confirm_deep_link_invite(crate::ids::RequestId(asked.0 + 1_000))
+            .unwrap(),
+        None,
+        "another request's box does not join"
     );
-    let join = driver
-        .confirm_deep_link_invite(generation)
-        .unwrap()
-        .unwrap();
+    let join = driver.confirm_deep_link_invite(asked).unwrap().unwrap();
     assert_eq!(
         sent_request(&recorder, "joinChatByInviteLink")["invite_link"],
         "https://t.me/+AbCd"
     );
-    assert_eq!(driver.confirm_deep_link_invite(generation).unwrap(), None);
+    assert_eq!(driver.confirm_deep_link_invite(asked).unwrap(), None);
     driver
         .ingest(
             copy_and_parse(
@@ -91,12 +96,7 @@ fn invite_check_confirm_cancel_and_stale_answers() {
     // Cancel clears the retained preview; a later confirmation cannot join.
     driver.session.chats_state.deep_link = None;
     let before = recorder.snapshot().len();
-    assert_eq!(
-        driver
-            .confirm_deep_link_invite(driver.session.chats_state.deep_link_seq)
-            .unwrap(),
-        None
-    );
+    assert_eq!(driver.confirm_deep_link_invite(current).unwrap(), None);
     assert_eq!(recorder.snapshot().len(), before);
     std::fs::remove_dir_all(dir).unwrap();
 }

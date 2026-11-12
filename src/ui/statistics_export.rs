@@ -38,7 +38,7 @@ fn resolve(
         StatisticalGraph::Async { token } => match session.groups.stats.graph(chat_id, token, 0) {
             Some(GraphFetch::Loaded(StatisticalGraph::Data { json_data, .. })) => json_data,
             Some(GraphFetch::Loaded(_) | GraphFetch::Failed(_)) => return None,
-            None | Some(GraphFetch::Loading) => {
+            None | Some(GraphFetch::Loading { .. }) => {
                 unsettled.set(true);
                 return None;
             }

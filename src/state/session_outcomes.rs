@@ -28,10 +28,10 @@ impl Session {
         apps.found.clear();
         apps.attachment_menu_bot.clear();
         apps.attachment_menu_toggled.clear();
-        apps.write_access = None;
+        apps.write_access.clear();
         apps.emoji_access.clear();
         apps.data_sent.clear();
-        apps.phone_share = None;
+        apps.phone_share.clear();
         apps.custom_replies.clear();
         // The consent box and the raw-URL fallback of a login button
         // answered while away: its request goes with its answer. A request

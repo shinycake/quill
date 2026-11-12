@@ -319,7 +319,7 @@ impl Session {
                 // scope is correlated via the pending request (the response
                 // carries no scope field).
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetScopeNotificationSettings)
-                    && let Some(scope) = pending.and_then(|p| p.scope)
+                    && let Some(scope) = pending.and_then(|p| p.scope())
                 {
                     self.settings.scope_notification_settings.answered(
                         scope,

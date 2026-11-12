@@ -268,7 +268,7 @@ impl QuillApp {
                 );
         }
         match &state.statistics {
-            StoryStatsFetch::Loading(_) => {
+            StoryStatsFetch::Idle | StoryStatsFetch::Loading { .. } => {
                 panel = panel.child(
                     div()
                         .text_sm()

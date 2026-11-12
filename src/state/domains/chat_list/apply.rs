@@ -125,7 +125,7 @@ impl Session {
                     Some(existing) => *existing = info,
                     None => self.chat_list.chat_folders.push(info),
                 }
-                if let Some(folder_id) = pending.and_then(|p| p.folder_id) {
+                if let Some(folder_id) = pending.and_then(|p| p.folder_id()) {
                     self.chat_list.mark_spec_stale(folder_id);
                 }
             }
@@ -133,14 +133,14 @@ impl Session {
                 // Parity slice: `getChatFolder` response — cache the full
                 // spec for the edit dialog prefill / remove-from-folder
                 // chain (correlated via `PendingRequest::folder_id`).
-                if let Some(folder_id) = pending.and_then(|p| p.folder_id) {
+                if let Some(folder_id) = pending.and_then(|p| p.folder_id()) {
                     self.chat_list.store_spec(folder_id, spec);
                 }
             }
             ChatListPayload::ChatFolderInviteLink(link) => {
                 // `createChatFolderInviteLink` / `editChatFolderInviteLink`:
                 // upsert into the folder's cached link list.
-                if let Some(folder_id) = pending.and_then(|p| p.folder_id) {
+                if let Some(folder_id) = pending.and_then(|p| p.folder_id()) {
                     let share = self.chat_list.folder_shares.entry(folder_id).or_default();
                     share.links.insert_data_if_missing(Vec::new);
                     if let Some(links) = share.links.data_mut() {
@@ -164,7 +164,7 @@ impl Session {
                 }
             }
             ChatListPayload::ChatFolderInviteLinks(links) => {
-                if let Some(folder_id) = pending.and_then(|p| p.folder_id) {
+                if let Some(folder_id) = pending.and_then(|p| p.folder_id()) {
                     self.chat_list
                         .folder_shares
                         .entry(folder_id)

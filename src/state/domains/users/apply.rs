@@ -73,7 +73,7 @@ impl Session {
                         .answered(pending.map(|p| p.id), user_ids);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBotSimilarBots)
                     && let Some(pending) = pending
-                    && let Some(bot_user_id) = pending.user_id
+                    && let Some(bot_user_id) = pending.user_id()
                 {
                     // Slice B2: `getBotSimilarBots` answer — the user
                     // objects arrive via `updateUser`; ids alone drive the
@@ -107,7 +107,7 @@ impl Session {
                     // names; store it unless an update already did.
                     if let Some(pending) = pending
                         && pending.purpose == RequestPurpose::Bots(BotsPurpose::GroupBotUser)
-                        && let Some(bot) = pending.user_id
+                        && let Some(bot) = pending.user_id()
                         && self
                             .bots
                             .bot_users
@@ -158,21 +158,21 @@ impl Session {
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
                 {
                     self.accept_owner_after_leaving(chat_id.0, pending.map(|p| p.id), user_id);
-                } else if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve {
-                    generation,
-                })) = pending.map(|p| p.purpose)
+                } else if let Some(request) = pending
+                    .filter(|p| p.purpose == RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve))
+                    .map(|p| p.id)
                     && let Some(DeepLinkState::ResolvingChat {
                         action: DeepLinkAction::UserPhone { draft, .. },
-                        generation: slot,
+                        request: slot,
                     }) = self.chats_state.deep_link_stage().cloned()
-                    && slot == generation
+                    && slot == request
                 {
                     // `searchUserByPhoneNumber` answer: open the private chat.
                     self.chats_state.enter_deep_link_stage(DeepLinkState::Info {
                         text: String::new(),
                         need_update: false,
                         action: Some(DeepLinkAction::OpenUserDraft { user_id, draft }),
-                        generation,
+                        request,
                     });
                 }
             }
@@ -192,7 +192,7 @@ impl Session {
                 let user_id = pending
                     .filter(|p| p.purpose == RequestPurpose::GetUserFullInfo)
                     .and_then(|p| {
-                        p.user_id.or_else(|| {
+                        p.user_id().or_else(|| {
                             p.chat_id
                                 .and_then(|chat_id| self.private_chat_user_id(chat_id))
                         })

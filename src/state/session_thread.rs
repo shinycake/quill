@@ -4,18 +4,34 @@ use crate::telegram::envelope::{MessageReplyInfo, ParsedMessageThreadInfo};
 
 impl Session {
     /// Start resolving a thread (`getMessageThread`) for `message_id` of
-    /// `chat_id`. Replaces any open thread.
-    pub fn begin_thread(&mut self, chat_id: ChatId, message_id: MessageId) {
-        self.begin_thread_for(chat_id, message_id, ThreadAsker::Nobody);
+    /// `chat_id`. Replaces any open thread. Returns the request to send.
+    pub fn begin_thread(&mut self, chat_id: ChatId, message_id: MessageId) -> RequestId {
+        self.begin_thread_for(chat_id, message_id, ThreadAsker::Nobody)
     }
 
-    /// Open the thread view for the window that asked.
-    pub fn begin_thread_for(&mut self, chat_id: ChatId, message_id: MessageId, asker: ThreadAsker) {
-        let mut view = ThreadView::resolving(chat_id, message_id);
+    /// Open the thread view for the window that asked. The view waits for the
+    /// `getMessageThread` request this registers and returns, for the caller
+    /// to send.
+    pub fn begin_thread_for(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        asker: ThreadAsker,
+    ) -> RequestId {
+        let request = self.request(
+            RequestPurpose::GetMessageThread {
+                message_id: message_id.0,
+            },
+            Some(chat_id),
+        );
+        let mut view = ThreadView::resolving(chat_id, message_id, request);
         view.asker = asker;
         // Pages the replaced view asked for answer to a window that is gone:
         // they are forgotten, so their answers are ignored.
         if let Some(old) = self.threads.thread.as_ref() {
+            if let ThreadStatus::Resolving { request } = old.status {
+                drop(self.requests.take(request));
+            }
             let id = old.origin_message_id.0;
             let purposes = [
                 RequestPurpose::GetMessageThreadHistory { message_id: id },
@@ -33,13 +49,19 @@ impl Session {
         }
         self.threads.thread = Some(view);
         self.view_generation.bump();
+        request
     }
 
     /// Leave the thread view. Returns the thread so the driver can restore
     /// the origin chat.
     pub fn close_thread(&mut self) -> Option<ThreadView> {
         self.view_generation.bump();
-        self.threads.thread.take()
+        let thread = self.threads.thread.take();
+        // A resolve still out has nobody to answer to.
+        if let Some(ThreadStatus::Resolving { request }) = thread.as_ref().map(|t| &t.status) {
+            drop(self.requests.take(*request));
+        }
+        thread
     }
 
     /// The thread whose replies are shown in `chat_id` (the open chat).
@@ -80,11 +102,11 @@ impl Session {
         info: ParsedMessageThreadInfo,
         pending: Option<&PendingRequest>,
     ) {
-        let Some(RequestPurpose::GetMessageThread { message_id }) = pending.map(|p| p.purpose)
+        let Some(pending) =
+            pending.filter(|p| matches!(p.purpose, RequestPurpose::GetMessageThread { .. }))
         else {
             return;
         };
-        let origin_chat = pending.and_then(|p| p.chat_id);
         for message in &info.messages {
             self.remember_files(&message.files);
         }
@@ -92,7 +114,7 @@ impl Session {
         let Some(thread) = self.threads.thread.as_mut() else {
             return;
         };
-        if Some(thread.origin_chat_id) != origin_chat || thread.origin_message_id.0 != message_id {
+        if !thread.status.waits_for_resolve(pending.id) {
             return;
         }
         thread.chat_id = info.chat_id;
@@ -248,8 +270,8 @@ impl Session {
                 thread.history.fail_newer();
             }
         } else if resolving {
-            // Only a thread still waiting for its resolve fails by it.
-            if thread.status == ThreadStatus::Resolving {
+            // Only a thread still waiting for this very resolve fails by it.
+            if thread.status.waits_for_resolve(pending.id) {
                 thread.status = ThreadStatus::Failed(line);
             }
         } else if thread.status.is_loaded() {

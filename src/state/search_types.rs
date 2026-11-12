@@ -366,7 +366,7 @@ impl SearchState {
 
     pub(crate) fn matches_generation(&self, pending: Option<&PendingRequest>) -> bool {
         pending
-            .and_then(|p| p.search_generation)
+            .and_then(|p| p.search_generation())
             .is_some_and(|search_gen| search_gen == self.generation)
             && self.is_open()
     }
@@ -514,9 +514,12 @@ pub enum JumpLanding {
 pub enum ChatSearchJump {
     None,
     /// `getChatHistory` around the target is in flight — not yet loaded.
-    /// `then` is what the loaded window does next: land on the message, or
-    /// retarget a date jump (the jump leaves with this stage).
+    /// Only the answer of `request` settles it (a page asked for an earlier
+    /// jump, even for the same message, does not). `then` is what the loaded
+    /// window does next: land on the message, or retarget a date jump (the
+    /// jump leaves with this stage).
     Loading {
+        request: RequestId,
         message_id: MessageId,
         then: JumpLanding,
     },
@@ -576,7 +579,13 @@ pub fn oldest_message_id(ids: impl IntoIterator<Item = MessageId>) -> Option<Mes
 pub enum ChatSearchJumpNeed {
     AlreadyReady,
     Missing,
-    LoadAround,
+    /// The target is outside the loaded window, which was replaced; the
+    /// `getChatHistory` around it is registered as `request` for the caller
+    /// to send (the jump is `Loading` under it).
+    LoadAround {
+        request: RequestId,
+        chat_id: ChatId,
+    },
 }
 
 /// How the older end of a thread or topic window stands after its last page

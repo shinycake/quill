@@ -428,7 +428,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .and_then(|id| self.session.requests.get(id))
             .and_then(|pending| {
                 (pending.purpose == RequestPurpose::SetCommunityName)
-                    .then_some(pending.community_id)
+                    .then_some(pending.community_id())
                     .flatten()
             });
         // Batch 6: a confirmed `optimizeStorage` drops the cached storage

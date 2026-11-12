@@ -23,8 +23,34 @@ fn tab(session: &Session, tab: SharedMediaTab) -> &SharedMediaTabState {
     &session.media.shared_media.tabs[tab.index()]
 }
 
-fn gifts_stamp(session: &Session) -> u64 {
-    tab(session, SharedMediaTab::Gifts).generation
+/// The Gifts tab asks for a page: the request is registered and the tab waits
+/// for it alone.
+fn ask_gifts(session: &mut Session, append: bool, chat: i64) -> RequestId {
+    let request = session.request(
+        RequestPurpose::Media(MediaPurpose::GetProfileGifts { append }),
+        Some(ChatId(chat)),
+    );
+    let gallery = &mut session.media.shared_media;
+    if append {
+        gallery.begin_profile_more(SharedMediaTab::Gifts, request);
+    } else {
+        gallery.begin_profile_fetch(SharedMediaTab::Gifts, request);
+    }
+    request
+}
+
+/// The gallery's Stories tab asks for its first page.
+fn ask_gallery_stories(session: &mut Session, chat: i64) -> RequestId {
+    let request = session.request(
+        RequestPurpose::GetChatPostedToChatPageStories,
+        Some(ChatId(chat)),
+    );
+    session.requests.correlate(request, Correlation::GalleryTab);
+    session
+        .media
+        .shared_media
+        .begin_profile_fetch(SharedMediaTab::Stories, request);
+    request
 }
 
 #[test]
@@ -32,23 +58,10 @@ fn a_gifts_page_asked_before_the_gallery_reopened_is_dropped() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(1);
     open_user_gallery(&mut session, &seq, &sink);
-    let first = session
-        .media
-        .shared_media
-        .begin_profile_fetch(SharedMediaTab::Gifts);
-    let late = session.request(
-        RequestPurpose::Media(MediaPurpose::GetProfileGifts {
-            append: true,
-            generation: first,
-        }),
-        Some(ChatId(6)),
-    );
+    let late = ask_gifts(&mut session, false, 6);
     session.media.shared_media.close();
     session.media.shared_media.open_for(ChatId(6));
-    session
-        .media
-        .shared_media
-        .begin_profile_fetch(SharedMediaTab::Gifts);
+    ask_gifts(&mut session, false, 6);
     apply_json(
         &mut session,
         &seq,
@@ -69,21 +82,10 @@ fn a_stories_page_asked_before_the_gallery_reopened_is_dropped() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(1);
     open_user_gallery(&mut session, &seq, &sink);
-    let first = session
-        .media
-        .shared_media
-        .begin_profile_fetch(SharedMediaTab::Stories);
-    let late = session.request_chat_search(
-        RequestPurpose::GetChatPostedToChatPageStories,
-        ChatId(6),
-        first,
-    );
+    let late = ask_gallery_stories(&mut session, 6);
     session.media.shared_media.close();
     session.media.shared_media.open_for(ChatId(6));
-    session
-        .media
-        .shared_media
-        .begin_profile_fetch(SharedMediaTab::Stories);
+    ask_gallery_stories(&mut session, 6);
     apply_json(
         &mut session,
         &seq,
@@ -99,18 +101,15 @@ fn a_stories_page_asked_before_the_gallery_reopened_is_dropped() {
     assert!(!session.stories.chat_page_stories.contains_key(&6));
 }
 
-/// A page the stories page asked for carries no stamp: it fills the list
+/// A page the stories page asked for is not the request the tab waits for: it fills the list
 /// the stories page draws but never answers the gallery tab that waits for
 /// its own request, open or reopened.
 #[test]
-fn a_stories_page_without_a_stamp_never_fills_the_gallery_tab() {
+fn a_stories_page_the_tab_does_not_wait_for_never_fills_the_gallery_tab() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(1);
     open_user_gallery(&mut session, &seq, &sink);
-    session
-        .media
-        .shared_media
-        .begin_profile_fetch(SharedMediaTab::Stories);
+    ask_gallery_stories(&mut session, 6);
     let page = session.request(
         RequestPurpose::GetChatPostedToChatPageStories,
         Some(ChatId(6)),
@@ -244,17 +243,7 @@ fn received_gifts_fill_the_gifts_tab_without_touching_the_gifts_dialog() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(1);
     open_user_gallery(&mut session, &seq, &sink);
-    session
-        .media
-        .shared_media
-        .begin_profile_fetch(SharedMediaTab::Gifts);
-    let extra = session.request(
-        RequestPurpose::Media(MediaPurpose::GetProfileGifts {
-            append: false,
-            generation: gifts_stamp(&session),
-        }),
-        Some(ChatId(6)),
-    );
+    let extra = ask_gifts(&mut session, false, 6);
     apply_json(
         &mut session,
         &seq,
@@ -282,17 +271,7 @@ fn a_late_gifts_page_for_another_chat_leaves_the_open_gallerys_offset() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(1);
     open_user_gallery(&mut session, &seq, &sink);
-    session
-        .media
-        .shared_media
-        .begin_profile_fetch(SharedMediaTab::Gifts);
-    let extra = session.request(
-        RequestPurpose::Media(MediaPurpose::GetProfileGifts {
-            append: false,
-            generation: gifts_stamp(&session),
-        }),
-        Some(ChatId(6)),
-    );
+    let extra = ask_gifts(&mut session, false, 6);
     apply_json(
         &mut session,
         &seq,
@@ -304,10 +283,7 @@ fn a_late_gifts_page_for_another_chat_leaves_the_open_gallerys_offset() {
     );
     assert_eq!(tab(&session, SharedMediaTab::Gifts).next_offset, "mine");
     let other = session.request(
-        RequestPurpose::Media(MediaPurpose::GetProfileGifts {
-            append: true,
-            generation: gifts_stamp(&session),
-        }),
+        RequestPurpose::Media(MediaPurpose::GetProfileGifts { append: true }),
         Some(ChatId(7)),
     );
     apply_json(
@@ -327,15 +303,7 @@ fn chat_page_stories_fill_the_stories_tab_and_a_failure_keeps_it_for_retry() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(1);
     open_user_gallery(&mut session, &seq, &sink);
-    let stamp = session
-        .media
-        .shared_media
-        .begin_profile_fetch(SharedMediaTab::Stories);
-    let extra = session.request_chat_search(
-        RequestPurpose::GetChatPostedToChatPageStories,
-        ChatId(6),
-        stamp,
-    );
+    let extra = ask_gallery_stories(&mut session, 6);
     apply_json(
         &mut session,
         &seq,
@@ -361,17 +329,7 @@ fn chat_page_stories_fill_the_stories_tab_and_a_failure_keeps_it_for_retry() {
     // A failed refetch keeps the loaded stories; a failed first fetch
     // shows the error, leaves the count unknown and keeps the tab for its
     // Retry.
-    session
-        .media
-        .shared_media
-        .begin_profile_fetch(SharedMediaTab::Gifts);
-    let extra = session.request(
-        RequestPurpose::Media(MediaPurpose::GetProfileGifts {
-            append: false,
-            generation: gifts_stamp(&session),
-        }),
-        Some(ChatId(6)),
-    );
+    let extra = ask_gifts(&mut session, false, 6);
     apply_json(
         &mut session,
         &seq,
@@ -412,14 +370,11 @@ fn round_videos_and_polls_get_their_own_row_labels() {
             vec!["Lunch?"],
         ),
     ] {
-        let generation = session.media.shared_media.begin_fetch(tab_kind);
         let extra = session.request(
-            RequestPurpose::GetSharedMedia {
-                tab: tab_kind,
-                generation,
-            },
+            RequestPurpose::GetSharedMedia { tab: tab_kind },
             Some(ChatId(6)),
         );
+        session.media.shared_media.begin_fetch(tab_kind, extra);
         apply_json(
             &mut session,
             &seq,
@@ -474,15 +429,7 @@ fn story_thumbnails_are_queued_once_for_download() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(1);
     open_user_gallery(&mut session, &seq, &sink);
-    let stamp = session
-        .media
-        .shared_media
-        .begin_profile_fetch(SharedMediaTab::Stories);
-    let extra = session.request_chat_search(
-        RequestPurpose::GetChatPostedToChatPageStories,
-        ChatId(6),
-        stamp,
-    );
+    let extra = ask_gallery_stories(&mut session, 6);
     let file = |id: i32| {
         format!(
             r#"{{"@type":"file","id":{id},"size":10,"expected_size":10,"local":{{"@type":"localFile","path":"","can_be_downloaded":true,"is_downloading_active":false,"is_downloading_completed":false}},"remote":{{"@type":"remoteFile","id":"r{id}","unique_id":"u{id}"}}}}"#

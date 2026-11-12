@@ -3,7 +3,7 @@ use super::*;
 use crate::ids::{ChatId, RequestId};
 use crate::quick_replies as qr;
 use crate::state::fetch::Fetch;
-use crate::state::{RequestPurpose, SettingsPurpose};
+use crate::state::{Correlation, RequestPurpose, SettingsPurpose};
 
 impl<S: JsonSender> ConnectDriver<S> {
     fn quick_replies_ready(&self) -> Result<(), ConnectSendError> {
@@ -33,14 +33,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             && self.session.requests.pending.values().any(|p| {
                 p.purpose == purpose
                     && p.chat_id == chat_id
-                    && p.subject_id.as_ref() == Some(subject)
+                    && p.subject_id() == Some(subject.as_str())
             })
         {
             return Ok(None);
         }
         let extra = self.session.request(purpose, chat_id);
-        if let Some(pending) = self.session.requests.pending_mut(extra) {
-            pending.subject_id = subject;
+        if let Some(subject) = subject {
+            self.session
+                .requests
+                .correlate(extra, Correlation::Subject(subject));
         }
         let json = build(&extra.as_extra());
         self.send_json_request(extra, &json).map(Some)

@@ -97,13 +97,19 @@ fn reads_refused_for_money_settle_like_tdlib_errors() {
             .as_ref()
             .map(|page| page.stars.clone())
     };
-    assert_eq!(gifts_status(&driver), Some(SharedMediaTabStatus::Loading));
+    assert!(matches!(
+        gifts_status(&driver),
+        Some(SharedMediaTabStatus::Loading { .. })
+    ));
     assert!(matches!(stars(&driver), Some(Load::Loading(_))));
 
     // The next poll ingests the answers: nothing is left loading or pending.
     assert!(driver.ingest_refused_answers());
     assert!(!driver.ingest_refused_answers(), "answered once");
-    assert_ne!(gifts_status(&driver), Some(SharedMediaTabStatus::Loading));
+    assert!(!matches!(
+        gifts_status(&driver),
+        Some(SharedMediaTabStatus::Loading { .. })
+    ));
     assert!(
         matches!(stars(&driver), Some(Load::Failed(_))),
         "{:?}",
@@ -161,15 +167,14 @@ fn a_channel_and_a_profile_opened_by_the_agent_leave_nothing_pending() {
             stuck.is_empty(),
             "{chat:?}: refused and still pending: {stuck:?}"
         );
-        assert_ne!(
-            driver
+        assert!(
+            !driver
                 .session
                 .media
                 .shared_media
                 .tabs
                 .get(SharedMediaTab::Gifts.index())
-                .map(|tab| tab.status.clone()),
-            Some(SharedMediaTabStatus::Loading),
+                .is_some_and(|tab| tab.status.is_loading()),
             "{chat:?}"
         );
     }

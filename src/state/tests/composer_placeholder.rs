@@ -190,7 +190,7 @@ fn other_chats_and_threads_have_no_topic() {
 
     let mut forum = forum_session(&[(1, "General", true)]);
     forum.open_chat(ChatId(FORUM));
-    let mut thread = ThreadView::resolving(ChatId(FORUM), MessageId(3));
+    let mut thread = ThreadView::resolving(ChatId(FORUM), MessageId(3), RequestId(1));
     thread.status = ThreadStatus::Ready;
     thread.chat_id = ChatId(FORUM);
     thread.thread_id = 3;

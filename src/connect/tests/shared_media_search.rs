@@ -59,10 +59,10 @@ fn searching_a_tab_sends_the_query_with_its_filter_and_pages_with_it() {
     assert_eq!(request["from_message_id"], 0);
     let gallery = &driver.session.media.shared_media;
     assert_eq!(gallery.active_query(), "report");
-    assert_eq!(
+    assert!(matches!(
         gallery.tab_at(SharedMediaTab::Files).unwrap().status,
-        SharedMediaTabStatus::Loading
-    );
+        SharedMediaTabStatus::Loading { .. }
+    ));
 
     // The same text again asks for nothing.
     let before = recorder.snapshot().len();

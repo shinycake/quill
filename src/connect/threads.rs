@@ -43,11 +43,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let _ = self.cancel_outgoing_typing();
-        self.session.begin_thread_for(chat_id, message_id, asker);
-        let purpose = RequestPurpose::GetMessageThread {
-            message_id: message_id.0,
-        };
-        let extra = self.session.request(purpose, Some(chat_id));
+        let extra = self.session.begin_thread_for(chat_id, message_id, asker);
         if let Err(err) = self
             .sender
             .send_json(&get_message_thread(extra, chat_id, message_id))

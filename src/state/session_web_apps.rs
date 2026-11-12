@@ -166,12 +166,22 @@ impl Session {
         crate::wake::MINI_APPS.poke();
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::Bots(BotsPurpose::CanBotSendMessages { bot_user_id })) => {
-                self.bots.web_apps.write_access = pending
-                    .map(|p| WriteAnswer::new(p.id, bot_user_id, WriteAccessResult::Allowed));
+                if let Some(p) = pending {
+                    self.bots.web_apps.write_access.push(WriteAnswer::new(
+                        p.id,
+                        bot_user_id,
+                        WriteAccessResult::Allowed,
+                    ));
+                }
             }
             Some(RequestPurpose::Bots(BotsPurpose::AllowBotToSendMessages { bot_user_id })) => {
-                self.bots.web_apps.write_access = pending
-                    .map(|p| WriteAnswer::new(p.id, bot_user_id, WriteAccessResult::Granted));
+                if let Some(p) = pending {
+                    self.bots.web_apps.write_access.push(WriteAnswer::new(
+                        p.id,
+                        bot_user_id,
+                        WriteAccessResult::Granted,
+                    ));
+                }
             }
             Some(RequestPurpose::Bots(BotsPurpose::ToggleBotEmojiStatusAccess { .. })) => {
                 if let Some(p) = pending {
@@ -235,7 +245,7 @@ impl Session {
                 self.bots.web_apps.found.push((p.id, Err(message)));
             }
             RequestPurpose::Bots(BotsPurpose::CanBotSendMessages { bot_user_id }) => {
-                self.bots.web_apps.write_access = Some(WriteAnswer::new(
+                self.bots.web_apps.write_access.push(WriteAnswer::new(
                     p.id,
                     bot_user_id,
                     if err.code == 404 {
@@ -246,14 +256,17 @@ impl Session {
                 ));
             }
             RequestPurpose::Bots(BotsPurpose::AllowBotToSendMessages { bot_user_id }) => {
-                self.bots.web_apps.write_access = Some(WriteAnswer::new(
+                self.bots.web_apps.write_access.push(WriteAnswer::new(
                     p.id,
                     bot_user_id,
                     WriteAccessResult::Denied,
                 ));
             }
             RequestPurpose::Bots(BotsPurpose::SharePhoneWithMiniApp { .. }) => {
-                self.bots.web_apps.phone_share = Some(PhoneShare::Refused(p.id));
+                self.bots
+                    .web_apps
+                    .phone_share
+                    .push(PhoneShare::Refused(p.id));
             }
             RequestPurpose::Bots(BotsPurpose::ToggleBotEmojiStatusAccess {
                 bot_user_id,

@@ -1,14 +1,15 @@
 //! The deep-link flow's one owner: `ChatsState` moves it, the UI only asks.
+use crate::ids::RequestId;
 use crate::state::{ChatsState, DeepLinkState};
 
-fn invite(generation: u64) -> DeepLinkState {
+fn invite(request: u64) -> DeepLinkState {
     DeepLinkState::InvitePreview {
         hash: "h".into(),
         title: "Club".into(),
         member_count: 3,
         creates_join_request: false,
         is_channel: false,
-        generation,
+        request: RequestId(request),
     }
 }
 
@@ -18,7 +19,7 @@ fn a_request_in_flight_stays_and_a_terminal_step_is_taken_once() {
     assert!(chats.take_deep_link_step().is_none());
     chats.start_deep_link(
         DeepLinkState::ResolvingInfo {
-            generation: 1,
+            request: RequestId(1),
             original: String::new(),
         },
         true,
@@ -37,10 +38,8 @@ fn an_invite_stays_until_its_own_box_cancels_it() {
     chats.start_deep_link(invite(4), false);
     assert!(chats.take_deep_link_step().is_some());
     assert!(chats.deep_link_stage().is_some(), "the preview stays");
-    chats.cancel_deep_link_invite(3);
+    chats.cancel_deep_link_invite(RequestId(3));
     assert!(chats.deep_link_stage().is_some(), "another flow's box");
-    chats.cancel_deep_link_invite(4);
+    chats.cancel_deep_link_invite(RequestId(4));
     assert!(chats.deep_link_stage().is_none());
-    assert_eq!(chats.next_deep_link_generation(), 1);
-    assert_eq!(chats.next_deep_link_generation(), 2);
 }

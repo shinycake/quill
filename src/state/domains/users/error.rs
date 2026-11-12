@@ -27,7 +27,7 @@ impl Session {
             }
             Some(RequestPurpose::GetUserFullInfo) => {
                 let user = pending.and_then(|p| {
-                    p.user_id.or_else(|| {
+                    p.user_id().or_else(|| {
                         p.chat_id
                             .and_then(|chat_id| self.private_chat_user_id(chat_id))
                     })
@@ -146,7 +146,7 @@ impl Session {
             // Slice A6: contacts mutations — the notice surfaces
             // in the contacts settings section.
             Some(RequestPurpose::RemoveContact) => {
-                let what = if pending.and_then(|p| p.user_id).is_some() {
+                let what = if pending.and_then(|p| p.user_id()).is_some() {
                     "the contact"
                 } else {
                     "synced contacts"

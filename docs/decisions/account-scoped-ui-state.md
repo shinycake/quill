@@ -9905,3 +9905,43 @@ and `location_picker/{picker,sharing}_tests` (dropped requests),
 `proxy_ops` and `connect/tests/sweep_s3_payments_1` (retry after the wait, on a
 fixed clock), `icon_badge` (backoff), `settings/{accounts,window_save}`,
 `state/tests/{calls,groups_more}`, `media_viewer`, `new_chat`.
+
+### Sweep fixes (r3-06)
+
+Bundle `r3-06` of the third full sweep (state: requests, search, sponsored,
+translate, web apps, shared media, statistics, story insights, threads; envelope:
+chats, giveaway, sessions). Every stage that waits for an answer holds the
+`RequestId` of its request, written in the same call that registers it; the
+answer is applied only when it is that request's.
+
+| ids | fix |
+| --- | --- |
+| 09-008 | `PendingRequest`'s eighteen optional correlation fields (`user_id`, `story_ids`, `around_message_id`, `window_epoch`, `scope`, `folder_id`, `file_id`, `search_generation`, ...) are one `Correlation` enum (`state/request_correlation.rs`), set once by the `request_for_*` builders through `RequestRegistry::correlate`. A history page is `HistoryPage { window_epoch, from }`; a request that is about a user is `User(id)` and no other reader sees a field it did not set. Readers use the accessors (`pending.user_id()`), which answer `None` for another purpose's data. `Correlation::GalleryTab` marks the shared-media gallery's Stories page, which shares its purpose with the stories page. |
+| 09-009 | `ChatSearchJump::Loading { request, message_id, then }`. `begin_jump` resets the window, registers the around page and writes the stage in one step and returns `ChatSearchJumpNeed::LoadAround { request, chat_id }` for the driver to send. `finish_history_around` and the error arm settle the jump only for the stage's own request, so jump A, jump B, jump A while the first page is out cannot be settled by the first page. `jump_serial` stays: it is the UI's highlight key for a repeated jump to the same row, never matched against an answer. |
+| 09-010 | `ChatSponsoredMessages::views: HashMap<ad, AdView>` with `AdView::{Counting { request, attempts }, Counted, Failed { attempts }}` replaces `viewed`. `begin_sponsored_views` registers `viewMessages` and marks the ads `Counting` together; the `ok` counts them, an error answer (or a send that went nowhere) makes them `Failed` and the next frame asks again until `AD_VIEW_ATTEMPTS`. A refetched list keeps `Counted` and `Counting`, and resets `Failed`. |
+| 09-012 | `Translation::Pending { request, attempts }`; `TranslateState::next_job` and the job numbers are gone (`TranslateJob` is a unit purpose, a selection translation is keyed by its `RequestId`). `finish_translation(request, ..)` finds the entry by the request; an older request of a replaced entry settles nothing. `fail_orphaned_translations` looks the request up in the registry instead of scanning by purpose. |
+| 09-013 | `WebApps::write_access` and `phone_share` are `Vec`s like the other one-shot queues; the send no longer clears them, the poll drains `write_access`, and `WebApps::take_phone_share(waiting)` drains `phone_share` every poll: the window's `Sending` request takes its answer, any other (timed-out send, window closed) is dropped. |
+| 09-014 | `SharedMediaTabStatus::Loading { request }` and `NextPage::Loading { request }`; the `generation` counters and `restamp_all_tabs` are gone (a cleared tab waits for nothing). `begin_fetch`, `begin_fetch_at_day`, `begin_fetch_more` and `begin_profile_*` take the request registered just before. The first-page and older-page answers are matched separately (`accepts_first`, `accepts_more`). `SharedMediaTabState::list_epoch` stays for the UI's scroll memory only (`PageKey`). The Stories tab's own request is `Correlation::GalleryTab`; a stale gallery page is dropped whole by asking the tab. |
+| 09-015 | `GraphFetch::Loading { request }`; `graph_requests` is gone (`accept_graph` / `fail_graph` find the graph waiting for the request). |
+| 09-016 | `fetch_message_statistics` adopts the request in flight for that post (`id_for_purpose_for_chat`) into `MessageStatsFetch::Loading { request }` instead of returning with the state left unwaiting; the baseline line for the purpose scan is gone. |
+| 09-017 | `MessageStatsFetch`, `StoryStatsFetch` and `PageFetch` are `Idle` until the request exists and `Loading { request }` after; no `Loading(None)`. `story_search_page_requested` is gone. |
+| 09-018 | `ThreadStatus::Resolving { request }`. `begin_thread_for` registers `getMessageThread` and returns it; `apply_message_thread_info` and `fail_thread` settle the thread only for that request. A replaced or closed view takes its resolve out of the registry. `SwitchingChat`, `Starting` and `ReloadNeeded` stay: they wait for a local action of the driver, not an answer, and leave by it, by `Failed` or by closing the thread. |
+| 10-001 | The deep-link stages hold the `RequestId` (`ResolvingInfo { request, original }`, `ResolvingChat { action, request }`, `Info { .. request }`, `InvitePreview { .. request }`); the `ChatsPurpose::DeepLink*` purposes carry nothing and `ChatsState::deep_link_seq` is gone. Confirming an invite starts the join under its own request; the invite box (`InviteBox::Open { request }`) and the Premium bot's `/start` (`PremiumAutoStart::request`) are tied to the request too. |
+| 10-002 | `GiveawaySummary::card: GiveawayCard::{Start, Results { info_message_id, unclaimed_count, was_refunded }}`; `finished` is gone. |
+| 11-001 | `ParsedSession::kind: SessionKind::{Current, PasswordPending, Other}` replaces `is_current` + `is_password_pending` (the running device wins). |
+
+Guards: `check-stage-enums.py` has a new `optional` rule (an in-flight
+variant whose only request is an `Option<RequestId>`), `check-request-match.py`
+a new `generation` rule (a purpose variant that carries `generation: u64`, on its own line or inline as `Variant { generation: u64 }`; the script self-tests both shapes on every run);
+the existing hits are in their baselines and only shrink. The purpose-scan
+baselines of `fetch_message_statistics` and `fail_orphaned_translations` and
+the stage baseline of `Translation::Pending` are removed.
+
+Tests: `state/tests/search.rs` (jump A, B, A), `connect/tests/sponsored.rs`
+(failed view asked again a bounded number of times, ok counts for good),
+`state/tests/history_prune.rs` (a replaced translation ignores the older
+request), `connect/tests/web_apps.rs` (two write-access answers survive),
+`state/tests/shared_media.rs` (duplicate older page), `connect/tests/stats.rs`
+(back on a post whose statistics are out), `state/tests/threads.rs` (reopened
+thread), `state/tests/deep_link_flow.rs`, `state/tests/premium_limit.rs`,
+`connect/tests/deep_links.rs`, `envelope/giveaway.rs`, `envelope/sessions_tests.rs`.

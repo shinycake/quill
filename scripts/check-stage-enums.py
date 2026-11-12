@@ -15,7 +15,11 @@ hold what ends it:
 - `bare`: the variant has no data at all;
 - `unkeyed`: the variant has data, but no `RequestId`, `Task`,
   `JoinHandle`, `Subscription`, channel end or deadline in it, or in the
-  types it names.
+  types it names;
+- `optional`: the only request in it is an `Option<RequestId>`: a stage
+  that is `Loading(None)` until a second call fills the request in is the
+  "asked but not sent" flag again. Hold `Idle` until the request exists
+  and write `Loading { request }` together with the registry entry.
 
 Any variant, in flight or not, is also checked for `rawid`: a field named
 `request`, `extra`, `request_id`, `generation` or `serial` typed `u64`,
@@ -73,6 +77,7 @@ IN_FLIGHT = set(
 CARRIER = re.compile(
     r"\b(?:RequestId|Task|JoinHandle|Subscription|Receiver|Sender|Instant|SystemTime)\b"
 )
+OPTIONAL_REQUEST = re.compile(r"Option\s*<\s*(?:[\w:]*::)?RequestId\s*>")
 # Enums that name a message, a reason or a derived view, not a stored stage.
 NOT_A_STAGE = re.compile(
     r"(?:View|Action|Event|Command|Refusal|Reason|Error|Outcome|Result|Label|Line|Icon|Demo|Reply)$"
@@ -144,8 +149,11 @@ def hits(root):
                     yield f"rawid:{match.group(1)}::{name}", path, line
                 if name not in IN_FLIGHT:
                     continue
+                optional = OPTIONAL_REQUEST.findall(data)
                 if not data:
                     yield f"bare:{match.group(1)}::{name}", path, line
+                elif optional and len(optional) == len(re.findall(r"\bRequestId\b", data)):
+                    yield f"optional:{match.group(1)}::{name}", path, line
                 elif not carries(data, types):
                     yield f"unkeyed:{match.group(1)}::{name}", path, line
 

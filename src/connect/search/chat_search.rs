@@ -73,11 +73,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         };
         let query = self.shared_media_query(tab);
-        let generation = self.session.media.shared_media.begin_fetch(tab);
-        let extra = self.session.request(
-            RequestPurpose::GetSharedMedia { tab, generation },
-            Some(chat_id),
-        );
+        let extra = self
+            .session
+            .request(RequestPurpose::GetSharedMedia { tab }, Some(chat_id));
+        self.session.media.shared_media.begin_fetch(tab, extra);
         let filter = search_messages_filter_json(filter);
         match self.sender.send_json(&search_chat_messages(
             extra,
@@ -95,7 +94,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session.media.shared_media.fail(
                     chat_id,
                     tab,
-                    generation,
+                    extra,
                     "Could not send the shared-media request.".to_string(),
                 );
                 Err(err)
@@ -117,16 +116,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(chat_id) = self.session.media.shared_media.chat_id() else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        let Some((generation, from_message_id)) =
-            self.session.media.shared_media.begin_fetch_more(tab)
-        else {
+        let Some(from_message_id) = self.session.media.shared_media.more_from(tab) else {
             return Ok(());
         };
         let query = self.shared_media_query(tab);
         let extra = self.session.request(
-            RequestPurpose::Media(MediaPurpose::GetSharedMediaMore { tab, generation }),
+            RequestPurpose::Media(MediaPurpose::GetSharedMediaMore { tab }),
             Some(chat_id),
         );
+        self.session.media.shared_media.begin_fetch_more(tab, extra);
         let filter = search_messages_filter_json(filter);
         match self.sender.send_json(&search_chat_messages(
             extra,
@@ -144,7 +142,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session.media.shared_media.fail_more(
                     chat_id,
                     tab,
-                    generation,
+                    extra,
                     crate::lang::tr(crate::lang::keys::Q_MEDIA_COULD_NOT_LOAD_MORE_MEDIA)
                         .to_string(),
                 );
@@ -602,19 +600,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         match self.session.begin_date_jump(message_id, mode) {
             ChatSearchJumpNeed::AlreadyReady | ChatSearchJumpNeed::Missing => Ok(None),
-            ChatSearchJumpNeed::LoadAround => {
-                // The target is outside the loaded window: replace the
-                // window instead of dropping a disconnected slice into it.
-                if let Some(chat_id) = self
-                    .session
-                    .search
-                    .chat_search
-                    .chat_id()
-                    .or(self.session.open_chat_id())
-                {
-                    self.session.reset_history_window(chat_id);
-                }
-                self.fetch_history_around(message_id)
+            ChatSearchJumpNeed::LoadAround { request, chat_id } => {
+                self.send_history_around(request, chat_id, message_id)
             }
         }
     }
@@ -664,14 +651,12 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Unigram `GetChatHistory(chatId, maxId, -25, 50)` around the jump target.
-    fn fetch_history_around(
+    fn send_history_around(
         &mut self,
+        extra: RequestId,
+        chat_id: ChatId,
         message_id: MessageId,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        let Some(chat_id) = self.session.open_chat_id() else {
-            return Err(ConnectSendError::InvalidRequest);
-        };
-        let extra = self.session.request_history_around(chat_id, message_id);
         match self.sender.send_json(&self.main_history_request(
             extra,
             chat_id,

@@ -66,7 +66,7 @@ impl Session {
             Some(RequestPurpose::AcceptTermsOfService) => {
                 // The failure of an older terms' answer is not the current
                 // box's.
-                let asked = pending.and_then(|p| p.subject_id.as_deref());
+                let asked = pending.and_then(|p| p.subject_id());
                 self.settings.notices.terms.fail_accept_of(
                     asked,
                     &sessions_error_line("accept the terms of service", err),
@@ -300,7 +300,7 @@ impl Session {
         // nothing asks again by itself (every ingest would), the
         // Notifications page asks again when it opens.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetScopeNotificationSettings)
-            && let Some(scope) = pending.and_then(|p| p.scope)
+            && let Some(scope) = pending.and_then(|p| p.scope())
         {
             self.settings.scope_notification_settings.failed(
                 &scope,
@@ -312,7 +312,7 @@ impl Session {
         // loading stage: the list says so, with a Retry, and nothing asks
         // again by itself.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatNotificationSettingsExceptions)
-            && let Some(scope) = pending.and_then(|p| p.scope)
+            && let Some(scope) = pending.and_then(|p| p.scope())
             && let Some(list) = self.settings.notification_exceptions.get_mut(&scope)
         {
             list.failed(pending.map(|p| p.id), error_reason(err), false);

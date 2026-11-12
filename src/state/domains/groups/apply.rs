@@ -37,7 +37,7 @@ impl Session {
             } => {
                 let full_info_group = pending
                     .filter(|p| p.purpose == RequestPurpose::GetSupergroupFullInfo)
-                    .and_then(|p| p.supergroup_id);
+                    .and_then(|p| p.supergroup_id());
                 self.apply_supergroup_full_info(
                     description,
                     member_count,
@@ -179,7 +179,7 @@ impl Session {
             GroupsPayload::CommunityFullInfo { full_info } => {
                 if let Some(pending) = pending
                     && pending.purpose == RequestPurpose::GetCommunityFullInfo
-                    && let Some(community_id) = pending.community_id
+                    && let Some(community_id) = pending.community_id()
                 {
                     let infos = &mut self.groups.community_full_infos;
                     infos.answered(community_id, Some(pending.id), full_info);
@@ -908,13 +908,14 @@ impl Session {
                 // `parity:platform-deep-links`: `joinChatByInviteLink`
                 // answer for a deep-link invite. Success opens the chat;
                 // the other variants surface as an honest note.
-                if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin { generation })) =
-                    pending.map(|p| p.purpose)
+                if let Some(request) = pending
+                    .filter(|p| p.purpose == RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin))
+                    .map(|p| p.id)
                     && let Some(DeepLinkState::ResolvingChat {
                         action,
-                        generation: slot,
+                        request: slot,
                     }) = self.chats_state.deep_link_stage().cloned()
-                    && slot == generation
+                    && slot == request
                 {
                     self.chats_state.enter_deep_link_stage(match result {
                         ChatJoinResult::Success { chat_id } => {
@@ -944,13 +945,16 @@ impl Session {
                 creates_join_request,
                 is_channel,
             } => {
-                if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkCheckInvite { generation })) =
-                    pending.map(|p| p.purpose)
+                if let Some(request) = pending
+                    .filter(|p| {
+                        p.purpose == RequestPurpose::Chats(ChatsPurpose::DeepLinkCheckInvite)
+                    })
+                    .map(|p| p.id)
                     && let Some(DeepLinkState::ResolvingChat {
                         action: DeepLinkAction::JoinInvite { hash },
-                        generation: slot,
+                        request: slot,
                     }) = self.chats_state.deep_link_stage().cloned()
-                    && slot == generation
+                    && slot == request
                 {
                     self.chats_state
                         .enter_deep_link_stage(DeepLinkState::InvitePreview {
@@ -959,7 +963,7 @@ impl Session {
                             member_count,
                             creates_join_request,
                             is_channel,
-                            generation,
+                            request,
                         });
                 }
             }

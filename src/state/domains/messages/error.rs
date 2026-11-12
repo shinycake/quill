@@ -271,10 +271,21 @@ impl Session {
                     _ => {}
                 }
             }
+            // The impression was not counted: the ads ask again with the
+            // next frame, up to `AD_VIEW_ATTEMPTS` times.
+            Some(RequestPurpose::ViewSponsoredMessages) => {
+                if let Some(p) = pending
+                    && let Some(chat_id) = p.chat_id
+                {
+                    self.settle_sponsored_views(chat_id, p.id, false);
+                }
+            }
             // A failed translation shows "Translate failed." where the text
             // would have gone, in the box and in the translated bubble alike.
-            Some(RequestPurpose::Messages(MessagesPurpose::TranslateJob { job })) => {
-                self.finish_translation(job, Translation::failed(error_reason(err)));
+            Some(RequestPurpose::Messages(MessagesPurpose::TranslateJob)) => {
+                if let Some(request) = pending.map(|p| p.id) {
+                    self.finish_translation(request, Translation::failed(error_reason(err)));
+                }
             }
             // M1 fix-up: a failed `resendMessages` surfaces in the
             // status note instead of vanishing into `_ => {}` —
@@ -362,10 +373,10 @@ impl Session {
         {
             self.fail_history_newer(pending);
         }
-        if pending.map(|p| p.purpose) == Some(RequestPurpose::GetHistoryAround)
-            && let Some(message_id) = pending.and_then(|p| p.around_message_id)
+        if let Some(pending) = pending
+            && pending.purpose == RequestPurpose::GetHistoryAround
         {
-            self.finish_history_around(pending, message_id, true, seq);
+            self.finish_history_around(pending, seq);
         }
         // A failed share box search ends that half with nothing found, as
         // "Add People" does, so the box says "No matching chats" instead of

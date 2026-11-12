@@ -271,7 +271,7 @@ fn translate(session: &mut Session, chat: i64, message: i64) {
         chat_id: chat,
         message_id: message,
     };
-    let (job, _) = session.begin_translation(target, "en", Some(ChatId(chat)));
+    let job = session.begin_translation(target, "en", Some(ChatId(chat)));
     let done = Translation::Done {
         text: "t".into(),
         entities: Vec::new(),
@@ -302,7 +302,7 @@ fn a_dropped_chat_forgets_its_translations() {
         chat_id: 1,
         message_id: 7,
     };
-    let (late, _) = session.begin_translation(target, "en", Some(ChatId(1)));
+    let late = session.begin_translation(target, "en", Some(ChatId(1)));
     leave(&mut session);
     assert!(!session.histories.contains_key(&1), "the oldest went");
     assert!(!translated(&session, 1, 5));
@@ -964,17 +964,17 @@ fn a_translation_job_whose_request_is_gone_fails_and_frees_its_place() {
         chat_id: 1,
         message_id,
     };
-    let (lost, lost_request) = session.begin_translation(target(5), "en", Some(ChatId(1)));
-    let (live, _live_request) = session.begin_translation(target(6), "en", Some(ChatId(1)));
+    let lost = session.begin_translation(target(5), "en", Some(ChatId(1)));
+    let live = session.begin_translation(target(6), "en", Some(ChatId(1)));
     // The first request left without an answer (a restarted client).
-    session.requests.take(lost_request);
+    session.requests.take(lost);
     session.fail_orphaned_translations();
     assert!(
         !session
             .messages
             .translate
-            .pending_jobs()
-            .any(|job| job == lost)
+            .pending_requests()
+            .any(|request| request == lost)
     );
     assert!(matches!(
         session.message_translation(ChatId(1), MessageId(5), "en"),
@@ -984,8 +984,8 @@ fn a_translation_job_whose_request_is_gone_fails_and_frees_its_place() {
         session
             .messages
             .translate
-            .pending_jobs()
-            .any(|job| job == live),
+            .pending_requests()
+            .any(|request| request == live),
         "a job still asking keeps its place"
     );
 }
@@ -997,7 +997,7 @@ fn a_failed_translation_is_asked_again_by_the_pump_a_bounded_number_of_times() {
     let (chat, message) = (ChatId(5), MessageId(9));
     assert!(session.needs_translation(chat, message, "en"));
     for round in 1..=TRANSLATE_PUMP_ATTEMPTS {
-        let (job, _) = session.begin_translation(
+        let job = session.begin_translation(
             TranslateTarget::Message {
                 chat_id: chat.0,
                 message_id: message.0,
@@ -1032,4 +1032,41 @@ fn hiding_ads_does_not_drop_a_report_in_flight() {
         Some(report),
         "the report still waits for its answer"
     );
+}
+
+#[test]
+fn a_replaced_translation_ignores_the_older_request_s_answer() {
+    let (mut session, _sink) = session();
+    let target = || TranslateTarget::Message {
+        chat_id: 1,
+        message_id: 5,
+    };
+    let older = session.begin_translation(target(), "en", Some(ChatId(1)));
+    let newer = session.begin_translation(target(), "en", Some(ChatId(1)));
+    session.finish_translation(
+        older,
+        Translation::Done {
+            text: "old".into(),
+            entities: Vec::new(),
+        },
+    );
+    assert_eq!(
+        session.message_translation(ChatId(1), MessageId(5), "en"),
+        Some(&Translation::Pending {
+            request: newer,
+            attempts: 0
+        }),
+        "the older answer does not settle the newer ask"
+    );
+    session.finish_translation(
+        newer,
+        Translation::Done {
+            text: "new".into(),
+            entities: Vec::new(),
+        },
+    );
+    assert!(matches!(
+        session.message_translation(ChatId(1), MessageId(5), "en"),
+        Some(Translation::Done { text, .. }) if text == "new"
+    ));
 }

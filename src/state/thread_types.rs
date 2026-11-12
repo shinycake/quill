@@ -25,9 +25,13 @@ impl ThreadAsker {
 /// Where the open thread view is in its load sequence.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ThreadStatus {
-    /// `getMessageThread` is in flight; its answer is matched to the
-    /// thread's origin message. The error line leaves it as `Failed`.
-    Resolving,
+    /// `getMessageThread` is in flight as `request`; only its answer
+    /// resolves the thread, so a request of an earlier view of the same
+    /// origin message (closed and reopened) cannot. The error line leaves it
+    /// as `Failed`.
+    Resolving {
+        request: RequestId,
+    },
     /// The thread is known but lives in another chat (a channel post's
     /// discussion group): the driver still has to open that chat. Leaves
     /// by `switch_to_thread_chat` (`Starting`, or `Failed` when the chat
@@ -49,6 +53,11 @@ pub enum ThreadStatus {
 }
 
 impl ThreadStatus {
+    /// Whether `request` is the `getMessageThread` this thread waits for.
+    pub(crate) fn waits_for_resolve(&self, request: RequestId) -> bool {
+        matches!(self, Self::Resolving { request: waiting } if *waiting == request)
+    }
+
     /// The thread chat still has to be opened.
     pub fn needs_chat_switch(&self) -> bool {
         matches!(self, Self::SwitchingChat)
@@ -134,13 +143,17 @@ pub struct ThreadView {
 }
 
 impl ThreadView {
-    pub(crate) fn resolving(origin_chat_id: ChatId, origin_message_id: MessageId) -> Self {
+    pub(crate) fn resolving(
+        origin_chat_id: ChatId,
+        origin_message_id: MessageId,
+        request: RequestId,
+    ) -> Self {
         Self {
             origin_chat_id,
             origin_message_id,
             chat_id: origin_chat_id,
             thread_id: 0,
-            status: ThreadStatus::Resolving,
+            status: ThreadStatus::Resolving { request },
             asker: ThreadAsker::Nobody,
             reply_count: 0,
             unread_count: 0,

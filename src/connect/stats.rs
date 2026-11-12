@@ -28,7 +28,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let stats = &self.session.groups.stats;
         if matches!(
             stats.graph(chat_id.0, token, x),
-            Some(crate::state::GraphFetch::Loading | crate::state::GraphFetch::Loaded(_))
+            Some(crate::state::GraphFetch::Loading { .. } | crate::state::GraphFetch::Loaded(_))
         ) {
             return Ok(None);
         }
@@ -110,10 +110,21 @@ impl<S: JsonSender> ConnectDriver<S> {
         if loaded {
             return Ok(None);
         }
-        if self.session.requests.has_purpose(purpose) {
-            // The statistics are on the way, but the forwards may have
-            // come while another post was shown and gone with its page:
-            // ask for them again (deduped while in flight).
+        if let Some(waiting) = self
+            .session
+            .requests
+            .id_for_purpose_for_chat(purpose, chat_id)
+        {
+            // The statistics are on the way (asked before this page was
+            // opened again): the page waits under that request, so its
+            // answer lands. The forwards may have come while another post
+            // was shown and gone with its page: ask for them again
+            // (deduped while in flight).
+            self.session.groups.stats.message_statistics_requested(
+                chat_id.0,
+                message_id.0,
+                waiting,
+            );
             if !self.message_forwards_loaded(chat_id, message_id) {
                 let _ = self.fetch_message_public_forwards(chat_id, message_id, "");
             }

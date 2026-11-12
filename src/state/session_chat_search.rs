@@ -29,8 +29,17 @@ impl Session {
             self.search.chat_search.jump = ChatSearchJump::Ready { message_id };
             return ChatSearchJumpNeed::AlreadyReady;
         }
-        self.search.chat_search.jump = ChatSearchJump::Loading { message_id, then };
-        ChatSearchJumpNeed::LoadAround
+        // The target is outside the loaded window: replace the window
+        // instead of dropping a disconnected slice into it, then ask for the
+        // page around the target under the epoch of the new window.
+        self.reset_history_window(chat_id);
+        let request = self.request_history_around(chat_id, message_id);
+        self.search.chat_search.jump = ChatSearchJump::Loading {
+            request,
+            message_id,
+            then,
+        };
+        ChatSearchJumpNeed::LoadAround { request, chat_id }
     }
 
     pub fn apply_local_chat_search_filter(&mut self, query: &str) {

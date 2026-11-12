@@ -175,7 +175,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let offset = search.next_offset.clone();
-        self.session.story_search_page_requested();
         self.send_story_search_page(&offset)
     }
 
@@ -194,7 +193,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         // Only this search's own page in flight holds the next one back; an
         // earlier search's answer lands in nothing (`story_search_sent`).
-        if matches!(waiting, PageFetch::Loading(Some(id)) if self.session.requests.get(id).is_some())
+        if matches!(waiting, PageFetch::Loading { request } if self.session.requests.get(request).is_some())
         {
             return Ok(None);
         }

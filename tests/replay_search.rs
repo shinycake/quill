@@ -186,11 +186,12 @@ fn replay_chat_search_generation_jump_and_empty() {
         session.begin_chat_search_jump(quill::ids::MessageId(50)),
         quill::state::ChatSearchJumpNeed::AlreadyReady
     );
-    assert_eq!(
-        session.begin_chat_search_jump(quill::ids::MessageId(40)),
-        quill::state::ChatSearchJumpNeed::LoadAround
-    );
-    let around = session.request_history_around(quill::ids::ChatId(7), quill::ids::MessageId(40));
+    let quill::state::ChatSearchJumpNeed::LoadAround {
+        request: around, ..
+    } = session.begin_chat_search_jump(quill::ids::MessageId(40))
+    else {
+        panic!("40 is outside the loaded window");
+    };
     apply_all_seq(
         &mut session,
         &sink,

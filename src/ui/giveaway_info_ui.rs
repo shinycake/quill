@@ -44,8 +44,8 @@ pub(super) fn info_target(
     chat_id: ChatId,
     message_id: MessageId,
 ) -> (i64, i64) {
-    if summary.info_message_id != 0 {
-        (summary.boosted_chat_id, summary.info_message_id)
+    if summary.info_message_id() != 0 {
+        (summary.boosted_chat_id, summary.info_message_id())
     } else {
         (chat_id.0, message_id.0)
     }

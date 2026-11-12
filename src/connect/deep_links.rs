@@ -315,10 +315,21 @@ impl<S: JsonSender> ConnectDriver<S> {
         internal: bool,
         from_agent: bool,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        let generation = self.session.chats_state.next_deep_link_generation();
+        let (purpose, build): (_, fn(RequestId, &str) -> String) = if internal {
+            (
+                RequestPurpose::Chats(ChatsPurpose::DeepLinkInternalType),
+                get_internal_link_type,
+            )
+        } else {
+            (
+                RequestPurpose::Chats(ChatsPurpose::DeepLinkInfo),
+                get_deep_link_info,
+            )
+        };
+        let extra = self.session.request(purpose, None);
         self.session.chats_state.start_deep_link(
             DeepLinkState::ResolvingInfo {
-                generation,
+                request: extra,
                 original: if internal {
                     link.to_string()
                 } else {
@@ -327,18 +338,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             },
             from_agent,
         );
-        let (purpose, build): (_, fn(RequestId, &str) -> String) = if internal {
-            (
-                RequestPurpose::Chats(ChatsPurpose::DeepLinkInternalType { generation }),
-                get_internal_link_type,
-            )
-        } else {
-            (
-                RequestPurpose::Chats(ChatsPurpose::DeepLinkInfo { generation }),
-                get_deep_link_info,
-            )
-        };
-        let extra = self.session.request(purpose, None);
         let json = build(extra, link);
         match self.sender.send_json(&json) {
             Ok(()) => Ok(Some(extra)),
@@ -354,35 +353,35 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
-    /// Join only the currently displayed, checked invite generation.
+    /// Join only the currently displayed, checked invite (the preview that
+    /// `request` answered).
     pub fn confirm_deep_link_invite(
         &mut self,
-        generation: u64,
+        request: RequestId,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let Some(DeepLinkState::InvitePreview {
             hash,
-            generation: slot,
+            request: slot,
             ..
         }) = self.session.chats_state.deep_link_stage().cloned()
         else {
             return Ok(None);
         };
-        if slot != generation {
+        if slot != request {
             return Ok(None);
         }
         let from_agent = crate::agent::ui_driver::guard::injecting();
-        let extra = self.session.request(
-            RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin { generation }),
-            None,
-        );
+        let extra = self
+            .session
+            .request(RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin), None);
         let json = join_chat_by_invite_link(extra, &format!("https://t.me/+{hash}"));
         self.session.chats_state.start_deep_link(
             DeepLinkState::ResolvingChat {
                 action: DeepLinkAction::JoinInvite { hash },
-                generation,
+                request: extra,
             },
             from_agent,
         );
@@ -426,12 +425,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || matches!(action, DeepLinkAction::ShareDraft { .. }) {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let generation = self.session.chats_state.next_deep_link_generation();
         let purpose = match &action {
             DeepLinkAction::JoinInvite { .. } => {
-                RequestPurpose::Chats(ChatsPurpose::DeepLinkCheckInvite { generation })
+                RequestPurpose::Chats(ChatsPurpose::DeepLinkCheckInvite)
             }
-            _ => RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve { generation }),
+            _ => RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve),
         };
         let extra = self.session.request(purpose, None);
         let json = match &action {
@@ -466,7 +464,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
         };
         self.session.chats_state.start_deep_link(
-            DeepLinkState::ResolvingChat { action, generation },
+            DeepLinkState::ResolvingChat {
+                action,
+                request: extra,
+            },
             from_agent,
         );
         match self.sender.send_json(&json) {

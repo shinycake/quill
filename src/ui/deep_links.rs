@@ -17,7 +17,7 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::*;
 use quill::agent::ui_driver::guard;
-use quill::ids::{ChatId, MessageId};
+use quill::ids::{ChatId, MessageId, RequestId};
 use quill::lang::{keys, tr};
 use quill::state::{DeepLinkAction, DeepLinkFlow, DeepLinkState, HistoryOpen};
 use quill::telegram::envelope::AuthorizationState;
@@ -25,13 +25,13 @@ use quill::telegram::envelope::AuthorizationState;
 /// Whether one `pump_deep_link` step has something to show: a terminal
 /// state to consume, or an invite preview not on screen yet. No flow, a
 /// request in flight, and the invite already shown (its box is up for that
-/// flow generation) change nothing.
-fn deep_link_step_redraws(state: Option<&DeepLinkState>, shown_invite: Option<u64>) -> bool {
+/// flow's request) change nothing.
+fn deep_link_step_redraws(state: Option<&DeepLinkState>, shown_invite: Option<RequestId>) -> bool {
     match state {
         None | Some(DeepLinkState::ResolvingInfo { .. } | DeepLinkState::ResolvingChat { .. }) => {
             false
         }
-        Some(DeepLinkState::InvitePreview { generation, .. }) => shown_invite != Some(*generation),
+        Some(DeepLinkState::InvitePreview { request, .. }) => shown_invite != Some(*request),
         Some(_) => true,
     }
 }
@@ -127,7 +127,7 @@ impl QuillApp {
         // decision. The flow carries its origin window, so every terminal
         // state (and no flow at all, after an error or a closed box) leaves
         // none behind.
-        let shown_invite = self.screen.links.invite_box.generation();
+        let shown_invite = self.screen.links.invite_box.request();
         let waiting = live
             .driver
             .session
@@ -188,7 +188,7 @@ impl QuillApp {
                 }
             }
             // The user decides on the invite; Join starts its own origin.
-            DeepLinkState::InvitePreview { generation, .. } => {
+            DeepLinkState::InvitePreview { request, .. } => {
                 // A preview already up is the same flow's: it stays where
                 // it shows. A new one belongs to the window the link was
                 // clicked in, not to the window the pointer is over now.
@@ -200,7 +200,7 @@ impl QuillApp {
                         waits.clone(),
                     );
                 }
-                self.screen.links.invite_box.show(generation);
+                self.screen.links.invite_box.show(request);
                 self.cancel_inline_opening();
             }
             DeepLinkState::ChatReady { chat_id, action } => {
@@ -551,13 +551,13 @@ impl QuillApp {
     }
 
     fn cancel_deep_link_invite(&mut self, cx: &mut Context<Self>) {
-        if let Some(generation) = self.links.invite_box.take()
+        if let Some(request) = self.links.invite_box.take()
             && let Some(live) = self.live.as_mut()
         {
             live.driver
                 .session
                 .chats_state
-                .cancel_deep_link_invite(generation);
+                .cancel_deep_link_invite(request);
         }
         cx.notify();
     }
@@ -626,7 +626,7 @@ impl QuillApp {
                         .label(tr(keys::Q_MISC_JOIN))
                         .primary()
                         .on_click(cx.listener(|this, _, window, cx| {
-                            if let Some(generation) = this.links.invite_box.take() {
+                            if let Some(request) = this.links.invite_box.take() {
                                 // Join starts its own flow, from the window
                                 // of this box: the joined chat and the
                                 // request-sent or error box go there, a
@@ -634,7 +634,7 @@ impl QuillApp {
                                 // window is set whatever the send returns.
                                 let from = this.asking_window().flatten();
                                 if let Some(live) = this.live.as_mut() {
-                                    let _ = live.driver.confirm_deep_link_invite(generation);
+                                    let _ = live.driver.confirm_deep_link_invite(request);
                                     live.driver.session.chats_state.set_deep_link_window(from);
                                 }
                             }
@@ -726,7 +726,7 @@ crate::ui::shell::register_dialogs! {
 mod pump_tests {
     use super::QueuedLink;
     use super::deep_link_step_redraws;
-    use quill::ids::AccountKey;
+    use quill::ids::{AccountKey, RequestId};
     use quill::state::DeepLinkState;
 
     /// Round 15 (area B, finding 5): a link clicked in an account goes
@@ -763,7 +763,7 @@ mod pump_tests {
         // No deep-link flow at all: the case on every idle poll.
         assert!(!deep_link_step_redraws(None, None));
         let resolving = DeepLinkState::ResolvingInfo {
-            generation: 1,
+            request: RequestId(1),
             original: String::new(),
         };
         assert!(!deep_link_step_redraws(Some(&resolving), None));
@@ -777,12 +777,12 @@ mod pump_tests {
             member_count: 3,
             creates_join_request: false,
             is_channel: false,
-            generation: 1,
+            request: RequestId(1),
         };
         assert!(deep_link_step_redraws(Some(&invite), None));
-        assert!(!deep_link_step_redraws(Some(&invite), Some(1)));
+        assert!(!deep_link_step_redraws(Some(&invite), Some(RequestId(1))));
         assert!(
-            deep_link_step_redraws(Some(&invite), Some(2)),
+            deep_link_step_redraws(Some(&invite), Some(RequestId(2))),
             "a newer invite is another box's"
         );
         let text = DeepLinkState::ShowText("Unknown link".into());

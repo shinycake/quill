@@ -37,7 +37,6 @@ bare:ExtractionStage::Starting 1
 bare:FeederState::Syncing 1
 bare:GiftsLayout::Loading 1
 bare:GoalNow::Waiting 1
-bare:GraphFetch::Loading 1
 bare:Health::Running 1
 bare:Kind::Applying 1
 bare:Leg::Pending 1
@@ -49,7 +48,6 @@ bare:Lookup::Waiting 1
 bare:MediaFile::Downloading 1
 bare:MenuSend::Sent 1
 bare:MuteState::Connecting 1
-bare:NextPage::Loading 1
 bare:Opening::Pending 1
 bare:OwnLinkState::Waiting 1
 bare:PaidStage::Waiting 1
@@ -79,7 +77,6 @@ bare:SendState::Sent 1
 bare:SendToMenu::Reading 1
 bare:Sent::Queued 1
 bare:SetFiles::Asked 1
-bare:SharedMediaTabStatus::Loading 1
 bare:ShutdownPhase::Running 1
 bare:Slot::Loading 2
 bare:SoundResolution::Pending 1
@@ -95,7 +92,6 @@ bare:StoryPageOpState::Sending 1
 bare:StreamPhase::Connecting 1
 bare:StreamState::Connecting 2
 bare:SuggestedPostState::Pending 1
-bare:ThreadStatus::Resolving 1
 bare:ThreadStatus::Starting 1
 bare:ToldStage::Loading 1
 bare:TopicsLoad::Asked 1
@@ -170,9 +166,15 @@ unkeyed:Stage::Running 1
 unkeyed:StoryFetch::Asked 1
 unkeyed:TitleCheck::Sent 1
 unkeyed:TonConnectRequestState::Pending 1
-unkeyed:Translation::Pending 1
 unkeyed:UpdateControl::Downloading 1
 unkeyed:VcardImport::Reading 1
 unkeyed:WaitingCheck::Pending 1
 unkeyed:Watch::Running 1
 unkeyed:Writer::Running 1
+optional:Fetch::Loading 1
+optional:LiveJoin::Joining 1
+optional:MembersStage::Loading 1
+optional:SetStage::Resolving 1
+optional:SupergroupMembersFetch::Loading 1
+optional:TrendingSets::Loading 1
+optional:VenueBot::Resolving 1

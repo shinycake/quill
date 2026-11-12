@@ -161,9 +161,10 @@ impl Session {
                 manage.collections_fetch.mark_stale();
                 manage.note = Some("Collection deleted.".into());
             }
-            PaymentsPurpose::DeleteGift => {
-                self.finish_gift_delete(pending.and_then(|p| p.subject_id.clone()), request)
-            }
+            PaymentsPurpose::DeleteGift => self.finish_gift_delete(
+                pending.and_then(|p| p.subject_id().map(str::to_owned)),
+                request,
+            ),
             PaymentsPurpose::SendStarGift => {
                 // Stars were spent whichever dialog asked.
                 hub.stars.page.invalidate();

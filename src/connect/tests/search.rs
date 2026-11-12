@@ -127,12 +127,16 @@ fn driver_search_happy_empty_error_and_select() {
     assert_eq!(driver.session.open_chat_id(), Some(ChatId(7)));
     // The hit opens in context: a window loads around it (highlighted)
     // instead of the lone hit being spliced into the history.
-    assert_eq!(
-        driver.session.search.chat_search.jump,
-        crate::state::ChatSearchJump::Loading {
-            message_id: MessageId(50),
-            then: crate::state::JumpLanding::Message,
-        }
+    assert!(
+        matches!(
+            driver.session.search.chat_search.jump,
+            crate::state::ChatSearchJump::Loading {
+                message_id: MessageId(50),
+                then: crate::state::JumpLanding::Message,
+                ..
+            }
+        ),
+        "the jump waits on its around page"
     );
     assert!(recorder.snapshot().iter().any(|j| {
         j.contains("\"@type\":\"getChatHistory\"") && j.contains("\"from_message_id\":50")

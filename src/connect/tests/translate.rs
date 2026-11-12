@@ -4,6 +4,7 @@ use super::super::*;
 use super::*;
 use crate::diagnostics::DiagnosticSink;
 use crate::diagnostics::MemorySink;
+use crate::ids::RequestId;
 use crate::ids::{AccountKey, ChatId, MessageId};
 use crate::platform::MemorySecretStore;
 use crate::state::{Session, Translation};
@@ -59,6 +60,15 @@ impl Drop for Harness {
     }
 }
 
+fn extra_of(request: &serde_json::Value) -> RequestId {
+    RequestId(
+        request["@extra"]
+            .as_str()
+            .and_then(|id| id.parse().ok())
+            .unwrap_or_default(),
+    )
+}
+
 #[test]
 fn translate_message_sends_the_request_and_keeps_the_entities() {
     let mut h = Harness::new();
@@ -75,7 +85,7 @@ fn translate_message_sends_the_request_and_keeps_the_entities() {
             .session
             .message_translation(ChatId(7), MessageId(42), "en"),
         Some(&Translation::Pending {
-            job: 1,
+            request: extra_of(&v),
             attempts: 0
         })
     );
@@ -109,12 +119,13 @@ fn translate_message_sends_the_request_and_keeps_the_entities() {
     h.driver
         .translate_message(ChatId(7), MessageId(42), "de")
         .expect("another language");
+    let v = sent_request(&h.recorder, "translateMessageText");
     assert_eq!(
         h.driver
             .session
             .message_translation(ChatId(7), MessageId(42), "de"),
         Some(&Translation::Pending {
-            job: 2,
+            request: extra_of(&v),
             attempts: 0
         })
     );
@@ -158,10 +169,11 @@ fn translate_selection_round_trips_a_text_job() {
     assert_eq!(
         h.driver.session.text_translation(job),
         Some(&Translation::Pending {
-            job: 1,
+            request: job,
             attempts: 0
         })
     );
+    assert_eq!(job, extra_of(&v));
     let json = format!(
         r#"{{"@type":"formattedText","text":"Hello, world","entities":[],"@extra":"{id}"}}"#,
         id = v["@extra"].as_str().unwrap(),

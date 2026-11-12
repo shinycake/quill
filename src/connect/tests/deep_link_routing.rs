@@ -170,17 +170,14 @@ fn a_failed_premium_bot_link_drops_its_auto_start() {
         })
         .unwrap()
         .unwrap();
-    let generation = driver.session.chats_state.deep_link_seq;
     driver.session.payments.hub.auto_start = Some(PremiumAutoStart {
         username: "premiumbot".into(),
         start_ref: "ref".into(),
-        generation,
+        request: extra,
     });
-    // Another flow's failure (an older generation) leaves it.
+    // Another flow's failure (an older request) leaves it.
     let other = driver.session.request(
-        crate::state::RequestPurpose::Chats(crate::state::ChatsPurpose::DeepLinkResolve {
-            generation: generation + 7,
-        }),
+        crate::state::RequestPurpose::Chats(crate::state::ChatsPurpose::DeepLinkResolve),
         None,
     );
     feed(

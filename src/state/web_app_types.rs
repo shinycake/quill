@@ -127,6 +127,19 @@ pub struct CustomRequestReply {
 }
 
 impl WebApps {
+    /// Drains every phone-share answer. The one for `waiting` (the send
+    /// the open window's flow waits on) is returned as "was it sent";
+    /// the rest belong to a send nobody waits on (timed out, window
+    /// closed) and are dropped, so none outlives the next poll.
+    pub fn take_phone_share(&mut self, waiting: Option<crate::ids::RequestId>) -> Option<bool> {
+        let answers = std::mem::take(&mut self.phone_share);
+        let waiting = waiting?;
+        answers
+            .into_iter()
+            .find(|answer| answer.request() == waiting)
+            .map(PhoneShare::is_sent)
+    }
+
     /// The mini app launch `launch_id` closed: its custom requests in
     /// flight and the answers nobody took go with it.
     pub fn forget_custom_requests_of(&mut self, launch_id: i64) {
@@ -179,8 +192,9 @@ pub struct WebApps {
     /// first, each with the request it answers: the flow waiting takes only
     /// its own request's.
     pub attachment_menu_toggled: Vec<AttachmentToggle>,
-    /// One-shot: the write-access answer, with the request it answers.
-    pub write_access: Option<WriteAnswer>,
+    /// One-shot: write-access answers, oldest first, each with the request
+    /// it answers. Two mini apps asking before the poll runs keep both.
+    pub write_access: Vec<WriteAnswer>,
     /// One-shot: `toggleBotCanManageEmojiStatus` outcomes, oldest first,
     /// each by its request: the mini app waiting for a grant takes only its
     /// own request's, not the bot permissions panel's, and two answers in
@@ -202,7 +216,7 @@ pub struct WebApps {
     /// One-shot: `sendWebAppData` outcomes, oldest first, each by its
     /// request.
     pub data_sent: Vec<DataSent>,
-    /// One-shot: the contact card sent for `web_app_request_phone` was
-    /// taken by TDLib or refused, with the request it answers.
-    pub phone_share: Option<PhoneShare>,
+    /// One-shot: contact cards sent for `web_app_request_phone` that TDLib
+    /// took or refused, oldest first, each with the request it answers.
+    pub phone_share: Vec<PhoneShare>,
 }

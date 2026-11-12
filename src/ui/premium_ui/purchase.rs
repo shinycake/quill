@@ -4,7 +4,7 @@
 
 use super::*;
 use crate::ui::status_note::StatusNote;
-use quill::ids::ChatId;
+use quill::ids::{ChatId, RequestId};
 use quill::lang::{keys, tr};
 use quill::premium_hub::PremiumAutoStart;
 use quill::premium_hub::promo::PromoPage;
@@ -51,12 +51,18 @@ impl QuillApp {
                 if sent != Some(false) {
                     // Offline (demos) nothing is sent and nothing answers.
                     // Tied to the resolve just sent: its error drops it.
-                    let generation = self.session().map_or(0, |s| s.chats_state.deep_link_seq);
+                    // Without a driver (demos) no request exists; request 0 is
+                    // never allocated, so no error ever drops this.
+                    let request = self
+                        .session()
+                        .and_then(|s| s.chats_state.deep_link_stage())
+                        .and_then(quill::state::DeepLinkState::request)
+                        .unwrap_or(RequestId(0));
                     if let Some(hub) = self.hub_mut() {
                         hub.auto_start = Some(PremiumAutoStart {
                             username: auto_start.0,
                             start_ref: auto_start.1,
-                            generation,
+                            request,
                         });
                     }
                 }
