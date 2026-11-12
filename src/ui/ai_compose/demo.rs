@@ -19,7 +19,7 @@ use quill::ai_compose::{
     TextCompositionStyle, prefs,
 };
 use quill::diagnostics::{DiagnosticSink, MemorySink};
-use quill::state::{AiBoxAnswer, Session};
+use quill::state::Session;
 use quill::text::{TextEntity, TextEntityKind};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -131,12 +131,16 @@ pub(super) fn fix_result() -> AiResult {
 
 impl QuillApp {
     pub(super) fn demo_ai_answer(&mut self, outcome: Result<AiResult, AiBoxError>) {
-        let token = match self.ai_compose.open.as_ref().map(|open| open.ai.card()) {
-            Some(CardState::Loading { token }) => *token,
+        let request = match self.ai_compose.open.as_ref().map(|open| open.ai.card()) {
+            Some(CardState::Loading { request }) => *request,
             _ => return,
         };
         if let Some(session) = session_mut(self) {
-            session.messages.ai_compose.box_answer = Some(AiBoxAnswer { token, outcome });
+            session
+                .messages
+                .ai_compose
+                .box_answers
+                .push(request, outcome);
         }
     }
 

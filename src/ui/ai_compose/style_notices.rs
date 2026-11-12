@@ -125,7 +125,19 @@ impl QuillApp {
     }
 
     pub(super) fn ai_style_edit_upkeep(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(answer) = session_mut(self).and_then(|s| s.messages.ai_compose.style_edit.take())
+        let Some(open) = self.ai_compose.open.as_mut() else {
+            return;
+        };
+        let Some(editor) = open.view.editor_mut() else {
+            return;
+        };
+        // Only the save this editor sent answers it: it takes the answer
+        // filed under that request, whatever else answered meanwhile.
+        let StyleSave::Sent { request } = editor.save else {
+            return;
+        };
+        let Some(outcome) =
+            session_mut(self).and_then(|s| s.messages.ai_compose.style_edits.take(request))
         else {
             return;
         };
@@ -135,15 +147,7 @@ impl QuillApp {
         let Some(editor) = open.view.editor_mut() else {
             return;
         };
-        // Only the save this editor sent answers it.
-        if editor.save
-            != (StyleSave::Sent {
-                request: answer.request,
-            })
-        {
-            return;
-        }
-        let toast = match answer.outcome {
+        let toast = match outcome {
             Ok(style) => {
                 let key = match editor.editing {
                     Some(_) => keys::AI_COMPOSE_TONE_UPDATED,
@@ -189,7 +193,7 @@ impl QuillApp {
     pub(super) fn ai_style_notice_upkeep(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // A request that failed frees the preview that waited on it.
         let failed = session_mut(self)
-            .map(|s| std::mem::take(&mut s.messages.ai_compose.style_op_failures))
+            .map(|s| s.messages.ai_compose.take_style_op_failures())
             .unwrap_or_default();
         if let Some(preview) = self.ai_compose.preview.as_mut()
             && failed.iter().any(|request| preview.waits_on(*request))
@@ -197,11 +201,21 @@ impl QuillApp {
             preview.show_again();
             cx.notify();
         }
-        let Some(notice) =
-            session_mut(self).and_then(|s| s.messages.ai_compose.style_notice.take())
-        else {
-            return;
-        };
+        let notices = session_mut(self)
+            .map(|s| s.messages.ai_compose.take_style_notices())
+            .unwrap_or_default();
+        for notice in notices {
+            self.show_ai_style_notice(notice, window, cx);
+        }
+    }
+
+    /// One style notice's toast (each of several that arrived together).
+    fn show_ai_style_notice(
+        &mut self,
+        notice: StyleNotice,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let toast = match notice {
             StyleNotice::Added { name, request } => {
                 // Only the Add this preview sent closes it.

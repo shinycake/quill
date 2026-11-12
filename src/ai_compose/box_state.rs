@@ -1,10 +1,11 @@
 //! The AI compose box (tdesktop `ComposeAiContent` and `ComposeAiBox` in
 //! boxes/compose_ai_box.cpp) as a state machine. Every transition returns
 //! the request to send, if any; answers come back through
-//! [`AiComposeBox::accept`] / [`AiComposeBox::fail`] with the token they
-//! were sent with, and an answer for any other token is ignored (tdesktop
+//! [`AiComposeBox::accept`] / [`AiComposeBox::fail`] with the request they
+//! were sent as ([`AiComposeBox::sent`]), and an answer for any other request is ignored (tdesktop
 //! cancels the older request instead).
-use super::{DiffText, StyleList, fresh_token};
+use super::{DiffText, StyleList};
+use crate::ids::RequestId;
 use crate::text::TextEntity;
 use crate::text_split::utf16_len;
 
@@ -46,8 +47,10 @@ pub struct AiResult {
 pub enum CardState {
     /// Nothing asked yet (Style tab with no style picked).
     Waiting,
+    /// The request is out as `request`: only its answer or error leaves
+    /// the stage (a new request replaces it).
     Loading {
-        token: u64,
+        request: RequestId,
     },
     Ready(AiResult),
     /// The request failed; the error stays with the card so the footer can
@@ -73,7 +76,6 @@ pub enum AiRequest {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AiSend {
-    pub token: u64,
     pub request: AiRequest,
 }
 
@@ -222,10 +224,23 @@ impl AiComposeBox {
         self.original_expanded = !self.original_expanded;
     }
 
-    /// The answer for `token`. An empty text fails the card with the
+    /// The request `AiSend` described went out as `request`: the card waits
+    /// for it.
+    pub fn sent(&mut self, request: RequestId) {
+        self.card = CardState::Loading { request };
+    }
+
+    /// The request `AiSend` described could not be sent: the card fails with
+    /// `error`, returned for the toast.
+    pub fn send_failed(&mut self, error: AiBoxError) -> AiBoxError {
+        self.card = CardState::Failed(error.clone());
+        error
+    }
+
+    /// The answer for `request`. An empty text fails the card with the
     /// generic error, returned for the toast.
-    pub fn accept(&mut self, token: u64, result: AiResult) -> Option<AiBoxError> {
-        if self.card != (CardState::Loading { token }) {
+    pub fn accept(&mut self, request: RequestId, result: AiResult) -> Option<AiBoxError> {
+        if self.card != (CardState::Loading { request }) {
             return None;
         }
         if result.text.is_empty() {
@@ -237,9 +252,9 @@ impl AiComposeBox {
         None
     }
 
-    /// The error for `token`, returned for the toast when it is current.
-    pub fn fail(&mut self, token: u64, error: AiBoxError) -> Option<AiBoxError> {
-        if self.card != (CardState::Loading { token }) {
+    /// The error for `request`, returned for the toast when it is current.
+    pub fn fail(&mut self, request: RequestId, error: AiBoxError) -> Option<AiBoxError> {
+        if self.card != (CardState::Loading { request }) {
             return None;
         }
         self.card = CardState::Failed(error.clone());
@@ -368,8 +383,6 @@ impl AiComposeBox {
             self.card = CardState::Waiting;
             return None;
         }
-        let token = fresh_token();
-        self.card = CardState::Loading { token };
         let text = self.source_text.clone();
         let request = match self.mode {
             AiComposeMode::Translate => AiRequest::Compose {
@@ -386,7 +399,7 @@ impl AiComposeBox {
             },
             AiComposeMode::Fix => AiRequest::Fix { text },
         };
-        Some(AiSend { token, request })
+        Some(AiSend { request })
     }
 }
 
