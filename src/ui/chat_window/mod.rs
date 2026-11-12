@@ -135,12 +135,12 @@ pub(crate) struct MainWindow {
     place: Option<WindowPlace>,
     /// New windows cascade from the main window; this counts them.
     cascade: u32,
-    /// The windows whose kit dialog was closed from outside their shell
-    /// (an account switch closed every one in the main window; an action's
-    /// `close_kit_dialog_if_done`): the shell forgets the one it showed
-    /// (`QuillShell::sync_kit_dialogs_in`) and does not close again, which
-    /// would close an unrelated dialog now on top.
-    pub(super) dialogs_closed: ClosedKitDialogs,
+    /// The kit dialog each window's shell shows. A shell registers its
+    /// own cell at its first sync, so an account switch or an action's
+    /// `close_kit_dialog_if_done` moves the same value the shell reads and
+    /// never closes a dialog twice, which would close an unrelated one now
+    /// on top.
+    pub(super) shown_dialogs: ShownDialogs,
     /// The exit a Quit left waiting behind the "Stop and quit" alert. The
     /// alert is the window's and the Quit is the app's, so an account
     /// switch under the alert does not take the exit with it.
@@ -150,27 +150,90 @@ pub(crate) struct MainWindow {
     _key_scope: Subscription,
 }
 
-/// The mailbox of [`MainWindow::dialogs_closed`]. A closer holds only
-/// `&QuillApp` (often inside a shell's own update), so the marks sit in a
-/// cell; every borrow is `try_borrow_mut` and a busy cell reads as "no
-/// mark" instead of panicking.
-#[derive(Default)]
-pub(super) struct ClosedKitDialogs(std::cell::RefCell<std::collections::HashSet<WindowId>>);
+/// What a window's kit dialog layer shows: one value, moved by the shell
+/// when it opens or swaps a dialog and by every closer (`on_close_kind`,
+/// `close_kit_dialog_if_done`, an account switch).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) enum Shown {
+    #[default]
+    None,
+    Open(super::shell::DialogKind),
+}
 
-impl ClosedKitDialogs {
-    /// `window`'s kit dialog was closed from outside its shell.
-    pub(super) fn mark(&self, window: WindowId) {
-        if let Ok(mut marks) = self.0.try_borrow_mut() {
-            marks.insert(window);
+/// A window's [`Shown`], shared by its shell and the closers that hold only
+/// `&QuillApp` (often inside a shell's own update). The cell is `Copy`
+/// data, so no borrow outlives a call.
+#[derive(Clone, Default)]
+pub(crate) struct ShownDialog(std::rc::Rc<std::cell::Cell<Shown>>);
+
+impl ShownDialog {
+    pub(super) fn kind(&self) -> Option<super::shell::DialogKind> {
+        match self.0.get() {
+            Shown::Open(kind) => Some(kind),
+            Shown::None => None,
         }
     }
 
-    /// The shell of `window` reads (and clears) the mark: true when its
-    /// dialog was already closed.
-    pub(super) fn take(&self, window: WindowId) -> bool {
-        self.0
-            .try_borrow_mut()
-            .is_ok_and(|mut marks| marks.remove(&window))
+    pub(super) fn set(&self, shown: Shown) {
+        self.0.set(shown);
+    }
+
+    /// The dialog layer closed `kind` itself (Esc, backdrop, the close
+    /// button); a different dialog shown since stays.
+    pub(super) fn close_kind(&self, kind: super::shell::DialogKind) {
+        if self.0.get() == Shown::Open(kind) {
+            self.0.set(Shown::None);
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn is_none(&self) -> bool {
+        self.kind().is_none()
+    }
+}
+
+impl std::fmt::Debug for ShownDialog {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.kind().fmt(f)
+    }
+}
+
+impl PartialEq<Option<super::shell::DialogKind>> for ShownDialog {
+    fn eq(&self, other: &Option<super::shell::DialogKind>) -> bool {
+        self.kind() == *other
+    }
+}
+
+/// [`MainWindow::shown_dialogs`]: each window's cell by window id. The
+/// registry sits in a cell itself; every borrow is `try_borrow_mut` and a
+/// busy cell reads as "nothing shown" instead of panicking.
+#[derive(Default)]
+pub(super) struct ShownDialogs(
+    std::cell::RefCell<std::collections::HashMap<WindowId, ShownDialog>>,
+);
+
+impl ShownDialogs {
+    /// The shell of `window` keeps its dialog in `shown`.
+    pub(super) fn register(&self, window: WindowId, shown: &ShownDialog) {
+        if let Ok(mut all) = self.0.try_borrow_mut() {
+            all.insert(window, shown.clone());
+        }
+    }
+
+    /// `window`'s kit dialog was closed from outside its shell.
+    pub(super) fn close(&self, window: WindowId) {
+        if let Ok(all) = self.0.try_borrow_mut()
+            && let Some(shown) = all.get(&window)
+        {
+            shown.set(Shown::None);
+        }
+    }
+
+    /// The window is gone; nothing is left to show.
+    pub(super) fn forget(&self, window: WindowId) {
+        if let Ok(mut all) = self.0.try_borrow_mut() {
+            all.remove(&window);
+        }
     }
 }
 
@@ -188,7 +251,7 @@ impl MainWindow {
             handle: None,
             place: None,
             cascade: 0,
-            dialogs_closed: Default::default(),
+            shown_dialogs: Default::default(),
             quit_gate: Default::default(),
             _key_scope: key_scope,
         }
@@ -685,8 +748,7 @@ impl QuillApp {
         }
         self.end_recording_of_window(chat_id, cx);
         self.close_location_picker_of_window(chat_id, cx);
-        // A mark that its kit dialog was closed from outside goes with the
-        // window: nothing is left to read it.
+        // Its shown-dialog cell goes with the window.
         if let Some(open) = self
             .windows
             .open
@@ -694,8 +756,8 @@ impl QuillApp {
             .find(|open| open.chat_id == chat_id)
         {
             self.main_window
-                .dialogs_closed
-                .take(open.handle.window_id());
+                .shown_dialogs
+                .forget(open.handle.window_id());
         }
         self.windows.open.retain(|open| open.chat_id != chat_id);
         // Its media panel goes: the GIF downloads follow the panels left.

@@ -24,7 +24,7 @@ fn chat_window_shell(h: &Harness, cx: &mut TestAppContext) -> Entity<QuillShell>
 }
 
 fn shown(shell: &Entity<QuillShell>, cx: &mut TestAppContext) -> Option<DialogKind> {
-    shell.read_with(cx, |shell, _| shell.open_dialog)
+    shell.read_with(cx, |shell, _| shell.open_dialog.kind())
 }
 
 /// The chat window's Mute box, asked for by its own input.
@@ -50,6 +50,21 @@ fn a_box_shows_only_in_the_window_that_asked_for_it(cx: &mut TestAppContext) {
     draw(h.main, cx);
     assert_eq!(shown(&h.shell, cx), None, "still not the main window's");
     assert_eq!(shown(&in_chat_window, cx), Some(DialogKind::MuteMenu));
+}
+
+/// A closer that holds only the app moves the value the window's shell
+/// reads, with no mailbox for the shell to take on its next render.
+#[gpui_kit::test]
+fn an_app_side_close_moves_the_shells_own_value(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    let chat_window = h.open_in_new_window(OTHER, cx);
+    open_mute_in_chat_window(&h, chat_window, cx);
+    let in_chat_window = chat_window_shell(&h, cx);
+    assert_eq!(shown(&in_chat_window, cx), Some(DialogKind::MuteMenu));
+    h.app.read_with(cx, |app, _| {
+        app.main_window.shown_dialogs.close(chat_window.window_id());
+    });
+    assert_eq!(shown(&in_chat_window, cx), None, "closed before any render");
 }
 
 /// Finding 17, the window close: the box goes with its window.

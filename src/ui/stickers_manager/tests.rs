@@ -89,7 +89,7 @@ fn installed_rows_have_a_handle_a_count_and_a_remove_button(cx: &mut TestAppCont
     let (app, shell, mut vcx) = open_demo(cx);
     let vcx = &mut vcx;
     assert_eq!(
-        shell.read_with(vcx, |shell, _| shell.open_dialog),
+        shell.read_with(vcx, |shell, _| shell.open_dialog.kind()),
         Some(DialogKind::ArchivedStickers)
     );
     for id in [101, 102, 103, 104] {
@@ -235,7 +235,10 @@ fn closing_applies_removals_and_the_dragged_order(cx: &mut TestAppContext) {
     );
     vcx.executor().advance_clock(Duration::from_millis(300));
     frames(vcx);
-    assert_eq!(shell.read_with(vcx, |shell, _| shell.open_dialog), None);
+    assert_eq!(
+        shell.read_with(vcx, |shell, _| shell.open_dialog.kind()),
+        None
+    );
 }
 
 #[gpui_kit::test]
@@ -278,7 +281,7 @@ fn masks_open_in_their_own_box_with_masks_and_archived_tabs(cx: &mut TestAppCont
     vcx.executor().advance_clock(Duration::from_millis(300));
     frames(vcx);
     assert_eq!(
-        shell.read_with(vcx, |shell, _| shell.open_dialog),
+        shell.read_with(vcx, |shell, _| shell.open_dialog.kind()),
         Some(DialogKind::MaskSets)
     );
     assert!(has(vcx, "manager-open-501"));
@@ -335,7 +338,7 @@ fn settings_chats_page_opens_the_box_and_holds_the_suggestion_choice(cx: &mut Te
     vcx.executor().advance_clock(Duration::from_millis(300));
     frames(vcx);
     assert_eq!(
-        shell.read_with(vcx, |shell, _| shell.open_dialog),
+        shell.read_with(vcx, |shell, _| shell.open_dialog.kind()),
         Some(DialogKind::ArchivedStickers)
     );
     assert!(app.read_with(vcx, |app, _| app.settings.open()));

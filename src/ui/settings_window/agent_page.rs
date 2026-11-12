@@ -103,8 +103,6 @@ pub(in crate::ui) struct AgentPageUi {
     /// over with the filter, the account and each visit.
     pub(in crate::ui) activity_shown: usize,
     pub(in crate::ui) picker: Option<BuiltPicker>,
-    /// The "Reset the agent token?" dialog is open.
-    pub(in crate::ui) reset_confirm: bool,
 }
 
 impl AgentPageUi {
@@ -124,7 +122,6 @@ impl AgentPageUi {
             filter: ActivityFilter::default(),
             activity_shown: super::super::agent_state::ACTIVITY_PAGE,
             picker: None,
-            reset_confirm: false,
         }
     }
 

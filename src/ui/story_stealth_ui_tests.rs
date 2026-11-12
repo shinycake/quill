@@ -50,7 +50,7 @@ fn click(vcx: &mut VisualTestContext, selector: &'static str) {
 }
 
 fn dialog(shell: &Entity<QuillShell>, vcx: &mut VisualTestContext) -> Option<DialogKind> {
-    shell.read_with(vcx, |shell, _| shell.open_dialog)
+    shell.read_with(vcx, |shell, _| shell.open_dialog.kind())
 }
 
 fn now() -> i32 {

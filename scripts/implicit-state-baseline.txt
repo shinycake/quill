@@ -25,7 +25,6 @@ GiveawaySummary::finished
 
 
 
-ParsedSession::is_password_pending
 
 
 PlaybackHealth::output_failed

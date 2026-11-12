@@ -41,11 +41,36 @@ impl SessionDevice {
     }
 }
 
+/// What a listed session is to this device, parsed once from TDLib's
+/// `is_current` and `is_password_pending`. The current session wins when
+/// TDLib sets both, as the Devices page always treated it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SessionKind {
+    /// This device.
+    Current,
+    /// A login attempt that has not passed the two-step password.
+    IncompleteLogin,
+    /// Any other signed-in device.
+    #[default]
+    Other,
+}
+
+impl SessionKind {
+    pub fn from_flags(is_current: bool, is_password_pending: bool) -> Self {
+        if is_current {
+            Self::Current
+        } else if is_password_pending {
+            Self::IncompleteLogin
+        } else {
+            Self::Other
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ParsedSession {
     pub id: i64,
-    pub is_current: bool,
-    pub is_password_pending: bool,
+    pub kind: SessionKind,
     /// Batch 4: `is_unconfirmed` — a login the user has not confirmed
     /// from another device (the new-login alert).
     pub is_unconfirmed: bool,
@@ -91,6 +116,16 @@ pub struct ParsedWebsite {
     pub location: String,
 }
 
+impl ParsedSession {
+    pub fn is_current(&self) -> bool {
+        self.kind == SessionKind::Current
+    }
+
+    pub fn is_incomplete_login(&self) -> bool {
+        self.kind == SessionKind::IncompleteLogin
+    }
+}
+
 /// Slice A3: one `session` from a `sessions` answer (schema 1.8.67, line
 /// 9144). The `@type` guard keeps a malformed entry from poisoning the
 /// list; only the session id is required (`id:int64` is the terminate
@@ -113,8 +148,7 @@ pub(crate) fn parse_session(value: &Value) -> Option<ParsedSession> {
     let bool_field = |name: &str| value.get(name).and_then(Value::as_bool).unwrap_or(false);
     Some(ParsedSession {
         id,
-        is_current: bool_field("is_current"),
-        is_password_pending: bool_field("is_password_pending"),
+        kind: SessionKind::from_flags(bool_field("is_current"), bool_field("is_password_pending")),
         is_unconfirmed: bool_field("is_unconfirmed"),
         can_accept_secret_chats: bool_field("can_accept_secret_chats"),
         can_accept_calls: bool_field("can_accept_calls"),

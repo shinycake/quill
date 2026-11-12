@@ -1,6 +1,7 @@
 //! State reducer tests: sessions.
 use super::common::*;
 use super::*;
+use crate::telegram::envelope::SessionKind;
 
 #[test]
 fn password_state_response_replaces_cache_and_clears_error() {
@@ -198,8 +199,12 @@ fn sessions_answer_replaces_cache_for_matching_request() {
     );
     let sessions = session.settings.sessions.data().expect("cached");
     assert_eq!(sessions.len(), 2);
-    assert!(sessions.iter().any(|s| s.is_current && s.id == 11));
-    assert!(sessions.iter().any(|s| s.is_password_pending && s.id == 33));
+    assert!(sessions.iter().any(|s| s.is_current() && s.id == 11));
+    assert!(
+        sessions
+            .iter()
+            .any(|s| s.is_incomplete_login() && s.id == 33)
+    );
     assert!(!session.settings.sessions.is_loading());
     assert!(session.settings.sessions.error().is_none());
     assert!(!session.settings.sessions_op.is_stale());
@@ -225,8 +230,7 @@ fn terminate_session_ok_keeps_cache_and_marks_stale() {
     let seq = AtomicU64::new(0);
     session.settings.sessions = crate::state::fetch::Fetch::Ready(vec![ParsedSession {
         id: 22,
-        is_current: false,
-        is_password_pending: false,
+        kind: SessionKind::Other,
         is_unconfirmed: false,
         can_accept_secret_chats: true,
         can_accept_calls: true,
@@ -640,8 +644,7 @@ fn toggle_session_calls_ok_marks_sessions_stale() {
     let seq = AtomicU64::new(0);
     session.settings.sessions = crate::state::fetch::Fetch::Ready(vec![ParsedSession {
         id: 22,
-        is_current: false,
-        is_password_pending: false,
+        kind: SessionKind::Other,
         is_unconfirmed: false,
         can_accept_secret_chats: true,
         can_accept_calls: true,

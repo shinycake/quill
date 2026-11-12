@@ -105,7 +105,7 @@ fn the_demo_opens_your_own_box_with_colors_and_emoji(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     frames(vcx);
     assert_eq!(
-        shell.read_with(vcx, |shell, _| shell.open_dialog),
+        shell.read_with(vcx, |shell, _| shell.open_dialog.kind()),
         Some(DialogKind::PeerQr)
     );
     assert_eq!(subject(&app, vcx), Some(QrSubject::Peer(QrPeer::User(ME))));
@@ -617,13 +617,13 @@ fn share_hides_the_box_under_the_chat_chooser_until_cancelled(cx: &mut TestAppCo
         );
     });
     assert_eq!(
-        shell.read_with(vcx, |shell, _| shell.open_dialog),
+        shell.read_with(vcx, |shell, _| shell.open_dialog.kind()),
         Some(DialogKind::DeepLinkShare)
     );
     vcx.update(|window, cx| window.click("share-link-cancel", cx));
     frames(vcx);
     assert_eq!(
-        shell.read_with(vcx, |shell, _| shell.open_dialog),
+        shell.read_with(vcx, |shell, _| shell.open_dialog.kind()),
         Some(DialogKind::PeerQr)
     );
     app.read_with(vcx, |app, _| {

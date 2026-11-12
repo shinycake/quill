@@ -48,7 +48,7 @@ fn form(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<InviteLin
 }
 
 fn shown(shell: &Entity<QuillShell>, vcx: &mut VisualTestContext) -> Option<DialogKind> {
-    shell.read_with(vcx, |s, _| s.open_dialog)
+    shell.read_with(vcx, |s, _| s.open_dialog.kind())
 }
 
 fn click_in(vcx: &mut VisualTestContext, group: &'static str, index: usize) {

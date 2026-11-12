@@ -133,7 +133,7 @@ fn the_request_box_opens_from_state_and_cancel_closes_it(cx: &mut TestAppContext
         frames(vcx);
     };
     let open = |shell: &Entity<QuillShell>, vcx: &mut VisualTestContext| {
-        shell.read_with(vcx, |shell, _| shell.open_dialog)
+        shell.read_with(vcx, |shell, _| shell.open_dialog.kind())
     };
     let request_box = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
         app.read_with(vcx, |app, _| {

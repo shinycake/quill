@@ -3,6 +3,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::{PaneMode, QuillApp};
+use super::chat_window::{Shown, ShownDialog};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::{Dialog, DialogContent};
@@ -247,15 +248,15 @@ fn registry() -> &'static [&'static DialogSpec] {
 pub struct QuillShell {
     pub(super) app: Entity<QuillApp>,
     /// The kit dialog is modal: this window shows at most one at a time.
-    /// `None` means no kit dialog is currently open.
-    pub(super) open_dialog: Option<DialogKind>,
+    /// The app's closers move the same cell (`MainWindow::shown_dialogs`).
+    pub(crate) open_dialog: ShownDialog,
 }
 
 impl QuillShell {
     pub fn new(app: Entity<QuillApp>) -> Self {
         Self {
             app,
-            open_dialog: None,
+            open_dialog: ShownDialog::default(),
         }
     }
 
@@ -400,7 +401,7 @@ impl QuillShell {
 
     /// Whether this shell shows a kit dialog now.
     pub(super) fn dialog_open(&self) -> bool {
-        self.open_dialog.is_some()
+        self.open_dialog.kind().is_some()
     }
 
     /// [`Self::sync_kit_dialogs`] for the window `host` (`None`: the main
@@ -446,16 +447,17 @@ impl QuillShell {
         if host.is_none() {
             Self::close_left_dialogs(&app, window, cx);
         }
-        // The kit dialog this shell showed was already closed (an account
-        // switch, or the action that finished it): closing again would
-        // take whichever dialog is on top now.
+        // The closers of an account switch or an action that finished the
+        // dialog move this cell themselves: closing again would take
+        // whichever dialog is on top now.
         let window_id = window.window_handle().window_id();
-        if app.update(cx, |app, _| app.main_window.dialogs_closed.take(window_id)) {
-            self.open_dialog = None;
-        }
+        app.read(cx)
+            .main_window
+            .shown_dialogs
+            .register(window_id, &self.open_dialog);
         // A session-wide box this window showed whose flag is clear (its own
         // close, or the kit's Esc, backdrop or close button) is free again.
-        let shown = self.open_dialog;
+        let shown = self.open_dialog.kind();
         app.update(cx, |app, _| {
             for kind in app.windows.dialogs_shown_by(host) {
                 if Some(kind) != shown && !Self::flag_open(app, kind) {
@@ -502,11 +504,11 @@ impl QuillShell {
             app.update(cx, |app, _| app.windows.dialog_opened_in(kind, host));
         }
         let first_open = winner.map(|spec| spec.kind);
-        if self.open_dialog != first_open {
+        if self.open_dialog.kind() != first_open {
             // Close the currently shown dialog (if any) before opening
             // the next one, so a transition (e.g. folder manager ->
             // editor) never stacks two kit dialogs.
-            if let Some(shown) = self.open_dialog {
+            if let Some(shown) = self.open_dialog.kind() {
                 window.close_dialog(cx);
                 app.update(cx, |app, _| {
                     if !Self::flag_open(app, shown) {
@@ -514,7 +516,8 @@ impl QuillShell {
                     }
                 });
             }
-            self.open_dialog = first_open;
+            self.open_dialog
+                .set(first_open.map_or(Shown::None, Shown::Open));
             if let Some(spec) = winner {
                 let build = spec.build;
                 let app_c = app.clone();
@@ -559,11 +562,7 @@ impl QuillShell {
         let shell = shell.clone();
         move |_, window, cx: &mut App| {
             app.update(cx, |this, cx| clear(this, window, cx));
-            shell.update(cx, |shell, _| {
-                if shell.open_dialog == Some(kind) {
-                    shell.open_dialog = None;
-                }
-            });
+            shell.read(cx).open_dialog.close_kind(kind);
         }
     }
 }
@@ -574,7 +573,7 @@ impl Render for QuillShell {
         div()
             .size_full()
             .child(self.app.clone())
-            .when(self.open_dialog.is_some(), |this| {
+            .when(self.open_dialog.kind().is_some(), |this| {
                 // Kit dialog contents paint at priority 10. Occlude the app immediately below them.
                 this.child(
                     deferred(
@@ -620,8 +619,8 @@ impl QuillApp {
         if !QuillShell::dialog_is_open(self, kind) {
             window.close_dialog(cx);
             self.main_window
-                .dialogs_closed
-                .mark(window.window_handle().window_id());
+                .shown_dialogs
+                .close(window.window_handle().window_id());
         }
     }
 

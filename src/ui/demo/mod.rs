@@ -818,7 +818,7 @@ pub(super) fn demo_file_json(id: i32, path: &str, completed: bool) -> String {
 /// screenshot demo — the current device, two other sessions, and one
 /// incomplete login attempt (injected, no live Telegram).
 pub(super) fn demo_sessions() -> Vec<ParsedSession> {
-    use quill::telegram::envelope::SessionDevice;
+    use quill::telegram::envelope::{SessionDevice, SessionKind};
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i32)
@@ -826,8 +826,7 @@ pub(super) fn demo_sessions() -> Vec<ParsedSession> {
     vec![
         ParsedSession {
             id: 987654321,
-            is_current: true,
-            is_password_pending: false,
+            kind: SessionKind::Current,
             is_unconfirmed: false,
             can_accept_secret_chats: false,
             can_accept_calls: true,
@@ -845,8 +844,7 @@ pub(super) fn demo_sessions() -> Vec<ParsedSession> {
         },
         ParsedSession {
             id: 123456789,
-            is_current: false,
-            is_password_pending: false,
+            kind: SessionKind::Other,
             is_unconfirmed: false,
             can_accept_secret_chats: true,
             can_accept_calls: false,
@@ -864,8 +862,7 @@ pub(super) fn demo_sessions() -> Vec<ParsedSession> {
         },
         ParsedSession {
             id: 555111222,
-            is_current: false,
-            is_password_pending: false,
+            kind: SessionKind::Other,
             is_unconfirmed: false,
             can_accept_secret_chats: false,
             can_accept_calls: true,
@@ -883,8 +880,7 @@ pub(super) fn demo_sessions() -> Vec<ParsedSession> {
         },
         ParsedSession {
             id: 999888777,
-            is_current: false,
-            is_password_pending: true,
+            kind: SessionKind::IncompleteLogin,
             is_unconfirmed: false,
             can_accept_secret_chats: false,
             can_accept_calls: false,

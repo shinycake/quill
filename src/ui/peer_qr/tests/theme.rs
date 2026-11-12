@@ -224,7 +224,7 @@ fn with_no_gifts_the_panel_offers_browse_gifts_in_your_own_box(cx: &mut TestAppC
     assert!(shown(vcx, "peer-qr-gifts-empty"));
     assert!(!shown(vcx, "peer-qr-gifts-browse"));
     assert_eq!(
-        shell.read_with(vcx, |shell, _| shell.open_dialog),
+        shell.read_with(vcx, |shell, _| shell.open_dialog.kind()),
         Some(DialogKind::PeerQr)
     );
 }

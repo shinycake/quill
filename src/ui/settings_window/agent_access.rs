@@ -90,7 +90,7 @@ impl QuillApp {
                     .outline()
                     .small()
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.agent_ui.page.reset_confirm = true;
+                        this.agent_ui.shown = crate::ui::agent_state::AgentBox::ResetToken;
                         this.open_box(crate::ui::shell::DialogKind::AgentResetToken);
                         cx.notify();
                     })),
@@ -318,7 +318,7 @@ impl QuillApp {
         if quill::agent::ui_driver::guard::refuse_if_injecting("reset the agent token") {
             return;
         }
-        self.agent_ui.page.reset_confirm = false;
+        self.agent_ui.close_reset();
         access::reset_token();
         self.set_note(StatusNote::info(tr(keys::Q_AGENT_PAGE_RESET_DONE)));
         cx.notify();

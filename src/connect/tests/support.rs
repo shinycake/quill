@@ -10,7 +10,7 @@ use crate::platform::MemorySecretStore;
 use crate::state::ActiveGroupCall;
 use crate::state::Session;
 use crate::telegram::client::copy_and_parse;
-use crate::telegram::envelope::ParsedSession;
+use crate::telegram::envelope::{ParsedSession, SessionKind};
 use serde_json::Value;
 use std::sync::Mutex as StdMutex;
 use std::sync::atomic::AtomicU64;
@@ -461,8 +461,7 @@ pub(crate) fn sessions_driver() -> SessionsDriverHarness {
 pub(crate) fn session_fixture(id: i64, current: bool, pending: bool) -> ParsedSession {
     ParsedSession {
         id,
-        is_current: current,
-        is_password_pending: pending,
+        kind: SessionKind::from_flags(current, pending),
         is_unconfirmed: false,
         can_accept_secret_chats: false,
         can_accept_calls: true,
