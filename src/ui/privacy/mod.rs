@@ -318,6 +318,16 @@ impl QuillApp {
                 cx,
             ),
         );
+        if let Some(line) = session.and_then(|s| s.settings.block_note.line()) {
+            section = section.child(
+                div()
+                    .id("privacy-block-error")
+                    .text_xs()
+                    .text_color(super::danger())
+                    .px_2()
+                    .child(line.to_string()),
+            );
+        }
         if error && list.is_empty() {
             section = section.child(
                 div()

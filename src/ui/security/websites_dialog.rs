@@ -28,9 +28,13 @@ impl QuillApp {
             let loading = session.is_some_and(|s| s.settings.connected_websites.is_loading());
             let mutating = session.is_some_and(|s| s.settings.websites_op.is_mutating());
             let stale = session.is_some_and(|s| s.settings.websites_op.is_stale());
-            let error = session
-                .as_ref()
-                .and_then(|s| s.settings.connected_websites.error().map(str::to_string));
+            let error = session.as_ref().and_then(|s| {
+                s.settings
+                    .connected_websites
+                    .error()
+                    .or(s.settings.websites_note.line())
+                    .map(str::to_string)
+            });
 
             let mut body = div().flex().flex_col().gap_2();
             if let Some(line) = error {

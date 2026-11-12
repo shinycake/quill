@@ -124,9 +124,10 @@ impl Session {
                 // Only the optimistic change goes back; a page fetch in
                 // flight keeps its place.
                 self.settings.undo_block_change(user_id, block);
-                self.settings
-                    .blocked_senders
-                    .fail_unless_loading(sessions_error_line("change the block list", err));
+                self.settings.block_note.refused(
+                    pending.map(|p| p.id),
+                    sessions_error_line("change the block list", err),
+                );
             }
             // Phase S2: a failed `getStorageStatistics` clears the
             // in-flight flag so the overlay shows "No storage data
@@ -153,9 +154,10 @@ impl Session {
                         .settle(asked.id, crate::auth::DeviceLoginResult::Failed);
                 }
                 self.settings.sessions_op.failed(pending.map(|p| p.id));
-                self.settings
-                    .sessions
-                    .fail_unless_loading(sessions_error_line("link the device", err));
+                self.settings.sessions_note.refused(
+                    pending.map(|p| p.id),
+                    sessions_error_line("link the device", err),
+                );
             }
             Some(
                 purpose @ (RequestPurpose::GetProxies
@@ -198,9 +200,10 @@ impl Session {
                 | RequestPurpose::TerminateAllOtherSessions,
             ) => {
                 self.settings.sessions_op.failed(pending.map(|p| p.id));
-                self.settings
-                    .sessions
-                    .fail_unless_loading(sessions_error_line("terminate the session", err));
+                self.settings.sessions_note.refused(
+                    pending.map(|p| p.id),
+                    sessions_error_line("terminate the session", err),
+                );
             }
             // Slice A4: a refused session toggle surfaces an honest
             // classified error and leaves the list untouched (the
@@ -210,9 +213,10 @@ impl Session {
                 | RequestPurpose::Settings(SettingsPurpose::ToggleSessionCalls { .. }),
             ) => {
                 self.settings.sessions_op.failed(pending.map(|p| p.id));
-                self.settings
-                    .sessions
-                    .fail_unless_loading(sessions_error_line("change the session setting", err));
+                self.settings.sessions_note.refused(
+                    pending.map(|p| p.id),
+                    sessions_error_line("change the session setting", err),
+                );
             }
             // Slice A7: a refused account-lifecycle op (TTL fetch
             // or set, account deletion) clears the in-flight
@@ -287,9 +291,10 @@ impl Session {
                 | RequestPurpose::DisconnectAllWebsites,
             ) => {
                 self.settings.websites_op.failed(pending.map(|p| p.id));
-                self.settings
-                    .connected_websites
-                    .fail_unless_loading(sessions_error_line("disconnect the website", err));
+                self.settings.websites_note.refused(
+                    pending.map(|p| p.id),
+                    sessions_error_line("disconnect the website", err),
+                );
             }
             _ => {}
         }

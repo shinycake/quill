@@ -282,7 +282,7 @@ fn terminate_session_error_surfaces_honestly() {
     );
     assert!(!session.settings.sessions_op.is_mutating());
     assert_eq!(
-        session.settings.sessions.error(),
+        session.settings.sessions_note.line(),
         Some("Could not terminate the session: Telegram refused the request")
     );
 }
@@ -601,7 +601,7 @@ fn disconnect_all_websites_error_surfaces_honestly() {
     );
     assert!(!session.settings.websites_op.is_mutating());
     assert_eq!(
-        session.settings.connected_websites.error(),
+        session.settings.websites_note.line(),
         Some("Could not disconnect the website: Telegram refused the request")
     );
 }
@@ -699,7 +699,7 @@ fn toggle_session_secret_chats_error_surfaces_honestly() {
     );
     assert!(!session.settings.sessions_op.is_mutating());
     assert_eq!(
-        session.settings.sessions.error(),
+        session.settings.sessions_note.line(),
         Some("Could not change the session setting: Telegram refused the request")
     );
 }
@@ -762,7 +762,7 @@ fn a_failed_terminate_keeps_the_list_and_shows_the_error() {
             extra.0
         ),
     );
-    assert!(session.settings.sessions.error().is_some());
+    assert!(session.settings.sessions_note.line().is_some());
     assert!(session.settings.sessions.data().is_some());
     assert!(!session.settings.sessions.is_loading());
 }

@@ -139,7 +139,9 @@ impl QuillApp {
                     Vec::new(),
                     masks.archived_sets().to_vec(),
                     loading,
-                    masks.installed.error().is_some() || masks.archived.error().is_some(),
+                    masks.installed.error().is_some()
+                        || masks.archived.error().is_some()
+                        || masks.change_note.line().is_some(),
                 )
             }
         };

@@ -41,6 +41,11 @@ fn a_refused_unblock_leaves_the_blocked_page_in_flight_and_puts_the_user_back() 
     );
     assert_eq!(session.settings.blocked_total, 5);
     assert_eq!(session.settings.blocked_senders.data(), Some(&vec![62, 61]));
+    // The refusal is not silent: it is the unblock's own line, matched to
+    // its request, and the page still waits for its own answer.
+    assert_eq!(session.settings.block_note.request(), Some(unblock));
+    assert!(session.settings.block_note.line().is_some());
+    assert!(session.settings.blocked_senders.error().is_none());
     // The page then lands.
     apply_json(
         &mut session,
@@ -73,7 +78,12 @@ fn a_refused_block_without_a_page_out_reports_and_keeps_the_list() {
     apply_json(&mut session, &seq, &sink, &error_json(block));
     assert_eq!(session.settings.blocked_senders.data(), Some(&vec![61]));
     assert_eq!(session.settings.blocked_total, 1);
-    assert!(session.settings.blocked_senders.error().is_some());
+    assert_eq!(session.settings.block_note.request(), Some(block));
+    assert!(session.settings.block_note.line().is_some());
+    assert!(
+        session.settings.blocked_senders.error().is_none(),
+        "the list is not failed by a refused change, so paging does not wait"
+    );
 }
 
 #[test]
@@ -101,15 +111,21 @@ fn a_refused_terminate_leaves_a_session_refetch_in_flight() {
     );
     assert!(session.settings.sessions.data().is_some());
     assert!(session.settings.sessions.error().is_none());
+    assert_eq!(
+        session.settings.sessions_note.request(),
+        Some(terminate),
+        "shown even while the refetch was out"
+    );
 
-    // With no refetch out, the refusal is the list's error line.
+    // With no refetch out, the refusal is the same kind of line.
     let again = session.request(
         RequestPurpose::Settings(SettingsPurpose::TerminateSession { session_id: 4 }),
         None,
     );
     session.settings.sessions_op.begin(again);
     apply_json(&mut session, &seq, &sink, &error_json(again));
-    assert!(session.settings.sessions.error().is_some());
+    assert_eq!(session.settings.sessions_note.request(), Some(again));
+    assert!(session.settings.sessions.error().is_none());
 }
 
 #[test]

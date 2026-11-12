@@ -203,6 +203,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        self.session.settings.block_note.clear();
         let extra = self.session.request(
             RequestPurpose::Settings(SettingsPurpose::SetSenderBlockList {
                 user_id,
@@ -217,8 +218,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             self.session
                 .settings
-                .blocked_senders
-                .fail_unless_loading("The unblock request was not sent.");
+                .block_note
+                .refused(None, "The unblock request was not sent.");
             return Err(err);
         }
         if let Some(list) = self.session.settings.blocked_senders.data_mut() {
@@ -236,6 +237,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        self.session.settings.block_note.clear();
         let extra = self.session.request(
             RequestPurpose::Settings(SettingsPurpose::SetSenderBlockList {
                 user_id,
@@ -250,8 +252,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             self.session
                 .settings
-                .blocked_senders
-                .fail_unless_loading("The block request was not sent.");
+                .block_note
+                .refused(None, "The block request was not sent.");
             return Err(err);
         }
         let blocked = &mut self.session.settings.blocked_senders;

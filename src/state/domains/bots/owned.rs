@@ -13,7 +13,7 @@ pub enum BotText {
     /// What the load `request` read.
     Loaded { text: String, request: RequestId },
     /// What the save `request` confirmed: the server holds it now.
-    Saved { text: String, request: RequestId },
+    Saved { text: String },
     /// The load `request` failed; the dialog says so instead of waiting
     /// forever.
     Failed(RequestId),
@@ -22,7 +22,7 @@ pub enum BotText {
 impl BotText {
     pub fn text(&self) -> Option<&str> {
         match self {
-            Self::Loaded { text, .. } | Self::Saved { text, .. } => Some(text),
+            Self::Loaded { text, .. } | Self::Saved { text } => Some(text),
             Self::Loading(_) | Self::Failed(_) => None,
         }
     }
@@ -50,9 +50,6 @@ pub enum BotSave {
     /// Sent as `request` and not yet confirmed by `ok`; `text` is what the
     /// server holds once it is (empty for the photo).
     Saving { request: RequestId, text: String },
-    /// `request` was confirmed by `ok` (the end state a photo save has: it
-    /// holds no text).
-    Saved(RequestId),
     /// Why the last try failed.
     Failed(String),
 }
@@ -76,6 +73,10 @@ pub struct BotEditTexts {
     pub name_save: BotSave,
     pub about_save: BotSave,
     pub photo_save: BotSave,
+    /// The saves the server confirmed since the dialog opened, each once,
+    /// by its request: a later save, started or failed, does not undo what
+    /// an earlier one confirmed.
+    pub confirmed: Vec<RequestId>,
 }
 
 /// Where the typed username's availability check stands. The answer does
@@ -186,6 +187,7 @@ impl BotEditTexts {
             name_save: BotSave::Idle,
             about_save: BotSave::Idle,
             photo_save: BotSave::Idle,
+            confirmed: Vec::new(),
         }
     }
 
@@ -198,11 +200,7 @@ impl BotEditTexts {
 
     /// The server confirmed a save since the dialog opened.
     pub fn has_saved(&self) -> bool {
-        matches!(self.name, BotText::Saved { .. })
-            || matches!(self.about, BotText::Saved { .. })
-            || [&self.name_save, &self.about_save, &self.photo_save]
-                .into_iter()
-                .any(|save| matches!(save, BotSave::Saved(_)))
+        !self.confirmed.is_empty()
     }
 
     /// Saves sent and not yet answered.
@@ -298,10 +296,12 @@ impl Session {
         let BotSave::Saving { request, text } = std::mem::take(save) else {
             return;
         };
-        *save = BotSave::Saved(request);
+        // Confirmed: the save is done (it holds no stage of its own) and
+        // the confirmation is recorded once.
+        edit.confirmed.push(request);
         match purpose {
-            BotsPurpose::SetBotName { .. } => edit.name = BotText::Saved { text, request },
-            BotsPurpose::SetBotAbout { .. } => edit.about = BotText::Saved { text, request },
+            BotsPurpose::SetBotName { .. } => edit.name = BotText::Saved { text },
+            BotsPurpose::SetBotAbout { .. } => edit.about = BotText::Saved { text },
             _ => {}
         }
     }

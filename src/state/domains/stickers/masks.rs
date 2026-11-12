@@ -13,6 +13,7 @@ use std::collections::HashMap;
 
 /// The line a failed mask list or change leaves under the dialog.
 const MASK_LIST_FAILED: &str = "Could not load mask sets";
+const MASK_CHANGE_FAILED: &str = "Could not change the mask sets";
 
 /// The page size `getArchivedStickerSets` is asked for.
 pub const ARCHIVED_MASK_PAGE: usize = 100;
@@ -96,6 +97,9 @@ pub struct MasksPanel {
     pub sets: HashMap<i64, Fetch<Vec<StickerItem>>>,
     /// The set whose Remove button was pressed and now asks to confirm.
     pub confirm_remove: Option<i64>,
+    /// The refusal of the last change (install, archive, remove, reorder),
+    /// beside the lists: a list fetch in flight keeps its place and answers.
+    pub change_note: crate::state::fetch::ChangeNote,
 }
 
 impl MasksPanel {
@@ -133,6 +137,7 @@ impl MasksPanel {
 
     /// A change goes out as `request`.
     pub fn begin_change(&mut self, request: RequestId, target: MaskChangeTarget) {
+        self.change_note.clear();
         self.changes.push(MaskChange { request, target });
     }
 
@@ -287,12 +292,14 @@ impl Session {
                 StickersPurpose::ChangeMaskSet { .. } | StickersPurpose::ReorderInstalledMaskSets,
             )) => {
                 // A list fetch in flight keeps its place: its answer is the
-                // truth after the change.
+                // truth after the change. The refusal is the change's own
+                // line.
                 if let Some(pending) = pending {
                     masks.settle_change(pending.id);
                 }
-                masks.installed.fail_unless_loading(MASK_LIST_FAILED);
-                masks.archived.fail_unless_loading(MASK_LIST_FAILED);
+                masks
+                    .change_note
+                    .refused(pending.map(|p| p.id), MASK_CHANGE_FAILED);
             }
             _ => return,
         }

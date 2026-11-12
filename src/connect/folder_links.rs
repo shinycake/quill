@@ -178,6 +178,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             extra,
             delete_chat_folder_invite_link(extra, folder_id, invite_link),
         )?;
+        if let Some(share) = self.session.chat_list.folder_shares.get_mut(&folder_id) {
+            share.links_note.clear();
+        }
         if let Some(links) = self
             .session
             .chat_list

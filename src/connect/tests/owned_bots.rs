@@ -207,6 +207,24 @@ fn a_confirmed_photo_only_save_reads_as_saved() {
     );
     let edit = driver.session.bots.owned.edit.clone().unwrap();
     assert_eq!((edit.saving(), edit.has_saved()), (0, true));
+
+    // A second save, started and then refused, does not undo the first.
+    driver.set_bot_photo(21, "/tmp/b.png").unwrap();
+    let edit = driver.session.bots.owned.edit.clone().unwrap();
+    assert_eq!((edit.saving(), edit.has_saved()), (1, true));
+    let second = sent_request(&recorder, "setBotProfilePhoto");
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        &answer(
+            &extra_of(&second),
+            r#"{"@type":"error","code":400,"message":"PHOTO_INVALID"}"#,
+        ),
+    );
+    let edit = driver.session.bots.owned.edit.clone().unwrap();
+    assert!(edit.error().is_some());
+    assert!(edit.has_saved(), "the first confirmation still stands");
 }
 
 #[test]

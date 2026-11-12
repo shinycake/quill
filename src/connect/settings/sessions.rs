@@ -19,6 +19,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .request(RequestPurpose::ConfirmDeviceLogin, None);
         self.session.settings.device_login = DeviceLogin::Waiting { request: id };
         self.session.settings.sessions_op.begin(id);
+        self.session.settings.sessions_note.clear();
         self.session.settings.sessions.clear_error();
         let request = zeroize::Zeroizing::new(
             crate::telegram::requests::confirm_qr_code_authentication(id, scanned_link),
@@ -123,6 +124,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             None,
         );
         self.session.settings.sessions_op.begin(extra);
+        self.session.settings.sessions_note.clear();
         match self.sender.send_json(&terminate_session(extra, session_id)) {
             Ok(()) => Ok(extra),
             Err(err) => {
@@ -145,6 +147,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request(RequestPurpose::TerminateAllOtherSessions, None);
         self.session.settings.sessions_op.begin(extra);
+        self.session.settings.sessions_note.clear();
         match self.sender.send_json(&terminate_all_other_sessions(extra)) {
             Ok(()) => Ok(extra),
             Err(err) => {
@@ -355,6 +358,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         self.session.settings.sessions.clear_error();
         self.session.settings.sessions_op.begin(extra);
+        self.session.settings.sessions_note.clear();
         match self.sender.send_json(&json) {
             Ok(()) => Ok(extra),
             Err(err) => {
@@ -452,6 +456,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             None,
         );
         self.session.settings.websites_op.begin(extra);
+        self.session.settings.websites_note.clear();
         match self
             .sender
             .send_json(&disconnect_website(extra, website_id))
@@ -486,6 +491,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request(RequestPurpose::DisconnectAllWebsites, None);
         self.session.settings.websites_op.begin(extra);
+        self.session.settings.websites_note.clear();
         match self.sender.send_json(&disconnect_all_websites(extra)) {
             Ok(()) => Ok(extra),
             Err(err) => {

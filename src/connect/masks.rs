@@ -36,16 +36,14 @@ impl<S: JsonSender> ConnectDriver<S> {
     fn note_mask_send_failed(&mut self, purpose: StickersPurpose) {
         let masks = &mut self.session.stickers.masks;
         match purpose {
-            StickersPurpose::GetInstalledMaskSets => {
-                masks.installed.fail_unless_loading("not sent");
-            }
-            StickersPurpose::GetArchivedMaskSets { .. } => {
-                masks.archived.fail_unless_loading("not sent");
-            }
-            _ => {
-                masks.installed.fail_unless_loading("not sent");
-                masks.archived.fail_unless_loading("not sent");
-            }
+            // The list's own fetch never left (callers checked it was not
+            // in flight): its stage ends in the error.
+            StickersPurpose::GetInstalledMaskSets => masks.installed.fail("not sent"),
+            StickersPurpose::GetArchivedMaskSets { .. } => masks.archived.fail("not sent"),
+            // A change that never left is the change's own line.
+            _ => masks
+                .change_note
+                .refused(None, "Could not change the mask sets"),
         }
     }
 

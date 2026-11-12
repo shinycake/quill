@@ -3,6 +3,7 @@ use super::*;
 use crate::ids::{ChatId, MessageId, RequestId, TopicId};
 use crate::settings::InstantViewMode;
 use crate::state::MessagesPurpose;
+use crate::state::fetch::Fetch;
 use crate::state::{RequestPurpose, UnreadJumpKind};
 use crate::telegram::requests::{
     add_message_reaction, get_link_preview, get_message_link, get_message_properties,
@@ -283,7 +284,13 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// request per chat at a time.
     pub fn fetch_pinned_messages(&mut self, chat_id: ChatId) -> Result<(), ConnectSendError> {
         let purpose = RequestPurpose::GetPinnedMessages;
-        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+        if self
+            .session
+            .messages
+            .pinned_messages
+            .get(&chat_id.0)
+            .is_some_and(Fetch::is_loading)
+        {
             return Ok(());
         }
         let extra = self.session.request(purpose, Some(chat_id));

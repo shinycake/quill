@@ -323,6 +323,9 @@ pub struct SettingsState {
     /// refetched from the authoritative answer on the next ingest (the
     /// `saved_sounds_stale` pattern); never an optimistic delete.
     pub sessions_op: crate::state::fetch::ListOp,
+    /// The refusal of the last sessions change (terminate, device link, a
+    /// session toggle), beside the list; the list's own fetch is not touched.
+    pub sessions_note: crate::state::fetch::ChangeNote,
     /// The device-link (`confirmQrCodeAuthentication`) round trip and how
     /// it ended until the screen has reacted.
     pub device_login: DeviceLogin,
@@ -357,6 +360,8 @@ pub struct SettingsState {
     /// refetched from the authoritative answer on the next ingest (the
     /// `saved_sounds_stale` pattern); never an optimistic delete.
     pub websites_op: crate::state::fetch::ListOp,
+    /// The refusal of the last website disconnect, beside the list.
+    pub websites_note: crate::state::fetch::ChangeNote,
     /// Parity slice: downloaded-file id → notification sound id, for files
     /// fetched as notification sounds.
     pub sound_file_ids: HashMap<i32, i64>,
@@ -383,6 +388,9 @@ pub struct SettingsState {
     /// A blocked-senders page in flight or a failed get/set shows in the
     /// same value; the loaded ids stay meanwhile.
     pub blocked_senders: Fetch<Vec<i64>>,
+    /// The refusal of the last block or unblock, beside the list: a page in
+    /// flight keeps its place and the paging does not wait for a scroll.
+    pub block_note: crate::state::fetch::ChangeNote,
     /// `total_count` from the last `messageSenders` answer; more pages
     /// exist while `blocked_senders.len() < blocked_total`.
     pub blocked_total: i32,
@@ -587,18 +595,21 @@ impl SettingsState {
             notices: AccountNotices::default(),
             sessions: Fetch::Idle,
             sessions_op: Default::default(),
+            sessions_note: Default::default(),
             device_login: DeviceLogin::Idle,
             account_ttl: Fetch::Idle,
             account_delete: Fetch::Idle,
             connected_websites: Fetch::Idle,
             passkeys: Default::default(),
             websites_op: Default::default(),
+            websites_note: Default::default(),
             sound_file_ids: HashMap::new(),
             pending_sound_downloads: HashSet::new(),
             pending_sound_plays: Vec::new(),
             privacy: HashMap::new(),
             read_date: ReadDate::Unknown,
             blocked_senders: Fetch::Idle,
+            block_note: Default::default(),
             blocked_total: 0,
             media_prefs: MediaPrefs::default(),
             contact_prefs: ContactPrefs::default(),

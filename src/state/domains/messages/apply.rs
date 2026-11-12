@@ -363,16 +363,18 @@ impl Session {
                 self.edit_loaded_message(chat_id, message_id, |message| {
                     message.is_pinned = is_pinned;
                 });
-                // An unpin leaves the pinned list at once; a pin is added
-                // by the refetch the driver sends for the open chat.
-                // A fetch in flight asked before the unpin: its answer would
-                // bring the message back, so it is outdated and asked again.
+                // An unpin leaves the pinned list at once, also from the
+                // answer a fetch in flight is holding; a pin is added by the
+                // refetch the driver sends for the open chat. A fetch in
+                // flight asked before the unpin: its answer would bring the
+                // message back, so it is outdated and asked again.
                 if !is_pinned && let Some(fetch) = self.messages.pinned_messages.get_mut(&chat_id.0)
                 {
+                    if let Some(list) = fetch.data_mut() {
+                        list.retain(|message| message.id != message_id);
+                    }
                     if fetch.is_loading() {
                         fetch.outdate();
-                    } else if let Some(list) = fetch.data_mut() {
-                        list.retain(|message| message.id != message_id);
                     }
                 }
             }

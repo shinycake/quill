@@ -162,8 +162,15 @@ fn a_confirmed_change_drops_both_lists_and_an_error_marks_failure() {
             extra.0
         ),
     );
-    assert!(session.stickers.masks.installed.error().is_some());
-    assert!(session.stickers.masks.archived.error().is_some());
+    // The refusal is the change's own line; the lists stay as they are.
+    assert_eq!(
+        session.stickers.masks.change_note.request(),
+        Some(extra),
+        "the note belongs to the change's request"
+    );
+    assert!(session.stickers.masks.change_note.line().is_some());
+    assert!(session.stickers.masks.installed.error().is_none());
+    assert!(session.stickers.masks.archived.error().is_none());
 }
 
 #[test]

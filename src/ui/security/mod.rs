@@ -130,9 +130,13 @@ impl QuillApp {
             let loading = session.is_some_and(|s| s.settings.sessions.is_loading());
             let mutating = session.is_some_and(|s| s.settings.sessions_op.is_mutating());
             let stale = session.is_some_and(|s| s.settings.sessions_op.is_stale());
-            let error = session
-                .as_ref()
-                .and_then(|s| s.settings.sessions.error().map(str::to_string));
+            let error = session.as_ref().and_then(|s| {
+                s.settings
+                    .sessions
+                    .error()
+                    .or(s.settings.sessions_note.line())
+                    .map(str::to_string)
+            });
             let current = sessions.iter().find(|s| s.is_current());
             let mut incomplete: Vec<&ParsedSession> = sessions
                 .iter()

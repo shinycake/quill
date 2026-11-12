@@ -86,6 +86,38 @@ impl ListOp {
     }
 }
 
+/// The refusal of a change to a fetched list (a block, a terminate, a mask
+/// reorder), shown beside the list. It belongs to the change's own request:
+/// the list's fetch is never touched by it, so a page or refetch in flight
+/// still answers and the list is never turned into `Failed` by a refused
+/// change. The next change (or the owner's retry) clears it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ChangeNote {
+    refused: Option<(Option<crate::ids::RequestId>, String)>,
+}
+
+impl ChangeNote {
+    /// `request` (a change) was refused; `None` when it never left.
+    pub fn refused(&mut self, request: Option<crate::ids::RequestId>, line: impl Into<String>) {
+        self.refused = Some((request, line.into()));
+    }
+
+    /// The line to show, if the last change was refused.
+    pub fn line(&self) -> Option<&str> {
+        self.refused.as_ref().map(|(_, line)| line.as_str())
+    }
+
+    /// The request whose refusal is shown.
+    pub fn request(&self) -> Option<crate::ids::RequestId> {
+        self.refused.as_ref().and_then(|(request, _)| *request)
+    }
+
+    /// A new change starts, or the owner dismisses the line.
+    pub fn clear(&mut self) {
+        self.refused = None;
+    }
+}
+
 /// The state of a fetched `T`.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum Fetch<T> {
@@ -303,18 +335,6 @@ impl<T> Fetch<T> {
             error: error.into(),
             stale,
         };
-    }
-
-    /// A refusal of a change to the list (not of the list's own fetch): it
-    /// is parked as the error line, unless a fetch is in flight, whose
-    /// answer would then be dropped. That answer shows the truth anyway.
-    /// `false` when a fetch was left alone.
-    pub fn fail_unless_loading(&mut self, error: impl Into<String>) -> bool {
-        if self.is_loading() {
-            return false;
-        }
-        self.fail(error);
-        true
     }
 
     /// The request failed and what was held is wrong now.
