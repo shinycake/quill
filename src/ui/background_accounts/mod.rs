@@ -247,9 +247,9 @@ pub(crate) struct BackgroundAccounts {
     restarts: restart::Restarts,
     /// The quit observer that closes every client together.
     quit_close: Option<Subscription>,
-    /// Accounts whose folder is being deleted (`deleting`): nothing opens
-    /// them.
-    pub(super) deleting: std::collections::HashMap<AccountKey, std::rc::Rc<Task<()>>>,
+    /// Accounts whose folder is being deleted (`deleting`) or whose deletion
+    /// is left for the next start: nothing opens them.
+    pub(super) deleting: std::collections::HashMap<AccountKey, deleting::AccountDeletion>,
     pub(super) local: LocalData,
     /// The keychain the account database keys live in.
     pub(super) secrets: deleting::SecretsFactory,

@@ -427,6 +427,49 @@ fn an_unconfirmed_log_out_tells_the_user_to_restart_quill(cx: &mut TestAppContex
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// A deletion whose client's close cannot be confirmed is deferred to the
+/// next start: its entry holds no task (`Deferred`), the account does not
+/// start, and a second Remove is refused.
+#[gpui_kit::test]
+fn an_unconfirmed_close_defers_the_deletion_with_no_task(cx: &mut TestAppContext) {
+    use super::deleting::AccountDeletion;
+    let (app, mut vcx) = new_app(cx);
+    let root = temp_root();
+    isolate(&app, &mut vcx, &root, &[account(1)]);
+    app.update_in(&mut vcx, |app, _, cx| {
+        let started = Instant::now();
+        app.background
+            .closing
+            .push(account(1), Fake::default().boxed(), false);
+        app.remove_account_in(root.clone(), &account(1), cx);
+        assert!(matches!(
+            app.background.deleting.get(&account(1)),
+            Some(AccountDeletion::Running(_))
+        ));
+        app.close_all_for_quit(started + Duration::from_millis(100));
+    });
+    run_for(&mut vcx, 100);
+    app.update_in(&mut vcx, |app, _, cx| {
+        assert!(
+            matches!(
+                app.background.deleting.get(&account(1)),
+                Some(AccountDeletion::Deferred)
+            ),
+            "the entry stays, with no task"
+        );
+        assert!(app.background.client(&account(1)).is_none());
+        // A second Remove changes nothing.
+        app.remove_account_in(root.clone(), &account(1), cx);
+        assert!(matches!(
+            app.background.deleting.get(&account(1)),
+            Some(AccountDeletion::Deferred)
+        ));
+    });
+    assert!(folder(&root, &account(1)), "nothing deleted this run");
+    assert_eq!(pending_deletes(&root), vec![account(1)]);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 #[gpui_kit::test]
 fn a_removed_account_takes_its_composer_choices_with_it(cx: &mut TestAppContext) {
     use crate::ui::composer_sends::SendSlot;

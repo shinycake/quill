@@ -28,6 +28,18 @@ pub(in crate::ui) fn live_secrets() -> SecretsFactory {
     Arc::new(quill::platform::live_secret_store)
 }
 
+/// An account whose folder is in `BackgroundAccounts::deleting`: nothing
+/// opens it either way.
+pub(in crate::ui) enum AccountDeletion {
+    /// Deleting now: the task owns the deletion (it waits for the clients
+    /// to close, deletes on a worker, finishes), and the entry leaves with
+    /// its end.
+    Running(std::rc::Rc<Task<()>>),
+    /// A client's close could not be confirmed: the folder stays recorded
+    /// and the next start deletes it. No task is left to hold.
+    Deferred,
+}
+
 /// How a deletion ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::ui) enum Deletion {
@@ -314,8 +326,14 @@ impl QuillApp {
         let task = Self::spawn_app(cx, async move |this, cx| {
             let go = go_rx.await.unwrap_or(false);
             if !go {
-                // Stays in `deleting`: nothing opens it in this run.
+                // Nothing opens it in this run: the entry stays, as
+                // `Deferred`, with no task left to hold.
                 let _ = this.update(cx, |this, cx| {
+                    for key in &owned {
+                        this.background
+                            .deleting
+                            .insert(key.clone(), AccountDeletion::Deferred);
+                    }
                     done(this, Deletion::Deferred, cx);
                     cx.notify();
                 });
@@ -355,7 +373,9 @@ impl QuillApp {
         });
         let task = Rc::new(task);
         for key in &keys {
-            self.background.deleting.insert(key.clone(), task.clone());
+            self.background
+                .deleting
+                .insert(key.clone(), AccountDeletion::Running(task.clone()));
         }
         let waiting = keys.clone();
         self.after_closing(
