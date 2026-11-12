@@ -195,14 +195,15 @@ fn a_date_lookup_that_fails_says_so_after_the_box_closed() {
         r#"{{"@type":"error","@extra":"{}","code":420,"message":"FLOOD_WAIT_3"}}"#,
         asked.0
     ));
+    assert_eq!(
+        h.driver.session.take_failed_date_jumps(),
+        vec![Some(ALICE)],
+        "the failure goes to the window that asked, not the main window"
+    );
+    assert!(h.driver.session.chats_state.chat_action_error.is_empty());
     assert!(
-        h.driver
-            .session
-            .chats_state
-            .chat_action_error
-            .last()
-            .is_some(),
-        "the failed lookup is a line in the status note"
+        h.driver.session.take_failed_date_jumps().is_empty(),
+        "and says so once"
     );
 }
 
@@ -215,7 +216,7 @@ fn a_date_lookup_the_chat_left_does_not_say_anything_when_it_fails() {
         r#"{{"@type":"error","@extra":"{}","code":420,"message":"FLOOD_WAIT_3"}}"#,
         asked.0
     ));
-    assert!(h.driver.session.chats_state.chat_action_error.is_empty());
+    assert!(h.driver.session.take_failed_date_jumps().is_empty());
 }
 
 #[test]

@@ -46,6 +46,7 @@ impl JumpLookups {
         };
         self.0.retain(|window, lookup| match lookup {
             JumpLookup::NoMedia => window.is_some(),
+            JumpLookup::Failed => true,
             JumpLookup::Asking { chat: asked, .. } => !(window.is_none() && *asked == chat),
             JumpLookup::Resolved(jump) => !(window.is_none() && jump.chat_id == chat),
         });
@@ -76,6 +77,19 @@ impl JumpLookups {
             _ => true,
         });
         jumps
+    }
+
+    /// The windows whose date lookup failed since the last call, each once.
+    pub(crate) fn take_failed(&mut self) -> Vec<Option<ChatId>> {
+        let mut windows = Vec::new();
+        self.0.retain(|window, lookup| match lookup {
+            JumpLookup::Failed => {
+                windows.push(*window);
+                false
+            }
+            _ => true,
+        });
+        windows
     }
 
     /// Whether `window`'s calendar box says "no media".
@@ -256,9 +270,9 @@ impl Session {
     }
 
     /// `getChatMessageByDate` failed: a 404 means nothing is that old, so
-    /// the jump goes to the start of the chat. Any other error is a line in
-    /// the status note (the box closed when the day was picked, so nothing
-    /// there could draw it).
+    /// the jump goes to the start of the chat. Any other error is kept with
+    /// its window for the UI's status note there (the box closed when the
+    /// day was picked, so nothing in it could draw it).
     pub(crate) fn fail_date_jump(&mut self, not_found: bool, pending: Option<&PendingRequest>) {
         if !self.search.jump_lookups.settle(pending) {
             return;
@@ -267,9 +281,9 @@ impl Session {
             return;
         };
         if !not_found {
-            self.chats_state.chat_action_error.push(
-                crate::lang::tr(crate::lang::keys::Q_MISC_COULD_NOT_JUMP_TO_THAT).to_string(),
-            );
+            self.search
+                .jump_lookups
+                .set(pending.asked_in.chat(), JumpLookup::Failed);
             return;
         }
         if let Some(jump) =
@@ -279,6 +293,12 @@ impl Session {
                 .jump_lookups
                 .set(pending.asked_in.chat(), JumpLookup::Resolved(jump));
         }
+    }
+
+    /// The windows whose date lookup failed, for the UI to say so in each
+    /// ([`JumpLookups::take_failed`]); `None` is the main window.
+    pub fn take_failed_date_jumps(&mut self) -> Vec<Option<ChatId>> {
+        self.search.jump_lookups.take_failed()
     }
 
     /// A chat window closed: its date lookup goes with it.

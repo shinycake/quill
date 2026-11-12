@@ -256,6 +256,26 @@ fn a_closed_windows_flow_asks_as_the_main_window(cx: &mut TestAppContext) {
     });
 }
 
+/// A date lookup that failed says so in the window that asked, not in the
+/// main window's toast host.
+#[gpui_kit::test]
+fn a_failed_date_lookup_toasts_in_the_window_that_asked(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    let _chat_window = h.open_in_new_window(OTHER, cx);
+    h.app.update(cx, |app, _| {
+        assert!(app.say_date_jumps_failed(vec![Some(OTHER)]));
+        assert_eq!(
+            app.connection.toasts.visible_host(),
+            Some(Some(OTHER)),
+            "the chat window's toast"
+        );
+        app.connection.toasts.clear_note();
+        assert!(app.say_date_jumps_failed(vec![None]));
+        assert_eq!(app.connection.toasts.visible_host(), Some(None));
+        assert!(!app.say_date_jumps_failed(Vec::new()));
+    });
+}
+
 /// Round 16 (area B, finding 6): "Start video chat" pressed in a chat
 /// window's header goes on in that window's frames. The "join as" answer
 /// moves the box past its hidden waiting step with only the chat window

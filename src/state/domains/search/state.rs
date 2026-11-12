@@ -22,7 +22,8 @@ pub struct SearchDomainState {
 /// (`Session::clear_date_jump_ui`) or the window closing; `Resolved` when
 /// the driver starts the jump ([`crate::state::JumpLookups::take_resolved`])
 /// or with its chat; `NotFound` when the calendar box opens again, a day
-/// is picked, or the chat goes.
+/// is picked, or the chat goes; `Failed` when the UI poll takes it
+/// ([`crate::state::JumpLookups::take_failed`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JumpLookup {
     /// `getChatMessageByDate` is out as `request`, asked in `chat`.
@@ -34,6 +35,9 @@ pub enum JumpLookup {
     /// The picked day of the shared-media calendar has no media near it:
     /// the box draws "No media" until it is opened again.
     NoMedia,
+    /// The lookup failed (not "nothing that old"): the window's toast says
+    /// so, in the window that asked.
+    Failed,
 }
 
 impl SearchDomainState {
