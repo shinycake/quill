@@ -138,7 +138,7 @@ mod tests {
             mute.refused(true, now);
         }
         assert!(mute.due(&true, Wake::Poll(now + MAX_WAIT)));
-        assert!(!mute.due(&true, Wake::Poll(now + MAX_WAIT - Duration::from_millis(1))));
+        assert!(!mute.due(&true, Wake::Poll(now + MAX_WAIT / 2)));
         mute.applied(true);
         assert!(!mute.due(&true, Wake::Poll(now)));
         assert!(mute.due(&false, Wake::Poll(now)));

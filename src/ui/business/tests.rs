@@ -722,7 +722,6 @@ fn a_found_bot_is_added_and_asked_about_on_leave(cx: &mut TestAppContext) {
             },
         );
         session.settings.business_extra.lookup = quill::state::BotLookup {
-            generation: 1,
             query: "shop_bot".into(),
             exact: quill::state::fetch::Fetch::Ready(Some(bot)),
             mine: quill::state::fetch::Fetch::Ready(Vec::new()),
