@@ -2,7 +2,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::*;
-use quill::ids::ChatId;
+use quill::ids::{ChatId, RequestId};
 
 /// A chat a link resolved to, with what to do there, waiting for render
 /// to open it. Who asked travels with it, so a later open cannot inherit
@@ -111,7 +111,7 @@ pub(super) enum InviteBox {
     #[default]
     Closed,
     Open {
-        generation: u64,
+        request: RequestId,
     },
 }
 
@@ -120,24 +120,24 @@ impl InviteBox {
         matches!(self, Self::Open { .. })
     }
 
-    /// The generation of the invite the box is up for, if it is.
-    pub(super) fn generation(&self) -> Option<u64> {
+    /// The request of the invite the box is up for, if it is.
+    pub(super) fn request(&self) -> Option<RequestId> {
         match self {
-            Self::Open { generation } => Some(*generation),
+            Self::Open { request } => Some(*request),
             Self::Closed => None,
         }
     }
 
-    /// The box is up for the invite of `generation`.
-    pub(super) fn show(&mut self, generation: u64) {
-        *self = Self::Open { generation };
+    /// The box is up for the invite the check `request` answered.
+    pub(super) fn show(&mut self, request: RequestId) {
+        *self = Self::Open { request };
     }
 
-    /// The invite is answered or dropped: the generation it was up for.
-    pub(super) fn take(&mut self) -> Option<u64> {
-        let generation = self.generation();
+    /// The invite is answered or dropped: the request it was up for.
+    pub(super) fn take(&mut self) -> Option<RequestId> {
+        let request = self.request();
         *self = Self::Closed;
-        generation
+        request
     }
 }
 
@@ -214,9 +214,9 @@ mod tests {
     fn the_invite_box_answers_once_for_its_generation() {
         let mut invite = InviteBox::default();
         assert!(!invite.is_open());
-        invite.show(4);
-        assert_eq!(invite.generation(), Some(4));
-        assert_eq!(invite.take(), Some(4));
+        invite.show(RequestId(4));
+        assert_eq!(invite.request(), Some(RequestId(4)));
+        assert_eq!(invite.take(), Some(RequestId(4)));
         assert_eq!(invite.take(), None, "answered once");
         assert!(!invite.is_open());
     }

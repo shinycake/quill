@@ -541,12 +541,14 @@ impl Session {
                     .insert(chat_id, online_member_count);
             }
             ChatsPayload::InternalLinkType(link) => {
-                if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkInternalType {
-                    generation,
-                })) = pending.map(|p| p.purpose)
+                if let Some(request) = pending
+                    .filter(|p| {
+                        p.purpose == RequestPurpose::Chats(ChatsPurpose::DeepLinkInternalType)
+                    })
+                    .map(|p| p.id)
                     && matches!(
                         self.chats_state.deep_link_stage(),
-                        Some(DeepLinkState::ResolvingInfo { generation: slot, .. }) if *slot == generation
+                        Some(DeepLinkState::ResolvingInfo { request: slot, .. }) if *slot == request
                     )
                 {
                     use crate::deep_link_types::{LinkRoute, route};
@@ -567,7 +569,7 @@ impl Session {
                                 text: String::new(),
                                 need_update: false,
                                 action: Some(action),
-                                generation,
+                                request,
                             },
                             LinkRoute::Ui(ui) => DeepLinkState::Ui(ui),
                             LinkRoute::Unknown(link) => DeepLinkState::Unknown { link },
@@ -586,14 +588,15 @@ impl Session {
                 media_timestamp,
                 thread_id,
             } => {
-                if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve { generation })) =
-                    pending.map(|p| p.purpose)
+                if let Some(request) = pending
+                    .filter(|p| p.purpose == RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve))
+                    .map(|p| p.id)
                     && matches!(
                         self.chats_state.deep_link_stage(),
                         Some(DeepLinkState::ResolvingChat {
                             action: DeepLinkAction::MessageLink { .. },
-                            generation: slot,
-                        }) if *slot == generation
+                            request: slot,
+                        }) if *slot == request
                     )
                 {
                     self.chats_state.enter_deep_link_stage(if chat_id == 0 {
@@ -610,20 +613,21 @@ impl Session {
                                 media_timestamp,
                                 thread_id,
                             }),
-                            generation,
+                            request,
                         }
                     });
                 }
             }
             ChatsPayload::ChatBoostLinkInfo { chat_id } => {
-                if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve { generation })) =
-                    pending.map(|p| p.purpose)
+                if let Some(request) = pending
+                    .filter(|p| p.purpose == RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve))
+                    .map(|p| p.id)
                     && matches!(
                         self.chats_state.deep_link_stage(),
                         Some(DeepLinkState::ResolvingChat {
                             action: DeepLinkAction::BoostLink { .. },
-                            generation: slot,
-                        }) if *slot == generation
+                            request: slot,
+                        }) if *slot == request
                     )
                 {
                     self.chats_state.enter_deep_link_stage(if chat_id == 0 {
@@ -633,7 +637,7 @@ impl Session {
                             text: String::new(),
                             need_update: false,
                             action: Some(DeepLinkAction::OpenChannelBoost { chat_id }),
-                            generation,
+                            request,
                         }
                     });
                 }
@@ -648,14 +652,15 @@ impl Session {
                 need_update,
                 entities,
             } => {
-                if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkInfo { generation })) =
-                    pending.map(|p| p.purpose)
+                if let Some(request) = pending
+                    .filter(|p| p.purpose == RequestPurpose::Chats(ChatsPurpose::DeepLinkInfo))
+                    .map(|p| p.id)
                     && matches!(
                         self.chats_state.deep_link_stage(),
                         Some(DeepLinkState::ResolvingInfo {
-                            generation: slot,
+                            request: slot,
                             ..
-                        }) if *slot == generation
+                        }) if *slot == request
                     )
                 {
                     let action = crate::connect::parse_deep_link_action(&entities);
@@ -663,7 +668,7 @@ impl Session {
                         text,
                         need_update,
                         action,
-                        generation,
+                        request,
                     });
                 }
             }

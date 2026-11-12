@@ -11,9 +11,14 @@ fn fail(
     chat: Option<ChatId>,
     message: &str,
 ) {
+    let extra = session.request(purpose, chat);
+    fail_request(session, sink, extra, message);
+}
+
+/// TDLib refuses the request `extra`.
+fn fail_request(session: &mut Session, sink: &Arc<MemorySink>, extra: RequestId, message: &str) {
     static SEQ: AtomicU64 = AtomicU64::new(1);
     let seq = AtomicU64::new(SEQ.fetch_add(100, std::sync::atomic::Ordering::Relaxed));
-    let extra = session.request(purpose, chat);
     apply_json(
         session,
         &seq,
@@ -117,19 +122,14 @@ fn premium_availability_follows_the_option() {
 #[test]
 fn invite_link_join_over_the_limit_opens_the_channels_box() {
     let (mut session, sink) = session();
+    let join = session.request(RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin), None);
     session
         .chats_state
         .enter_deep_link_stage(DeepLinkState::ResolvingChat {
             action: DeepLinkAction::JoinInvite { hash: "h".into() },
-            generation: 3,
+            request: join,
         });
-    fail(
-        &mut session,
-        &sink,
-        RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin { generation: 3 }),
-        None,
-        "CHANNELS_TOO_MUCH",
-    );
+    fail_request(&mut session, &sink, join, "CHANNELS_TOO_MUCH");
     assert_eq!(session.chats_state.deep_link_stage().cloned(), None);
     assert_eq!(
         session.payments.hub.limit_box(),
@@ -147,7 +147,7 @@ fn a_stale_invite_link_join_opens_no_limit_box() {
     fail(
         &mut session,
         &sink,
-        RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin { generation: 3 }),
+        RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin),
         None,
         "CHANNELS_TOO_MUCH",
     );
@@ -160,6 +160,7 @@ fn a_stale_invite_link_join_opens_no_limit_box() {
 #[test]
 fn a_join_failure_is_shown_when_the_flow_sits_at_the_preview() {
     let (mut session, sink) = session();
+    let current = session.request(RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin), None);
     session
         .chats_state
         .enter_deep_link_stage(DeepLinkState::InvitePreview {
@@ -168,12 +169,12 @@ fn a_join_failure_is_shown_when_the_flow_sits_at_the_preview() {
             member_count: 3,
             creates_join_request: false,
             is_channel: false,
-            generation: 3,
+            request: current,
         });
     fail(
         &mut session,
         &sink,
-        RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin { generation: 2 }),
+        RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin),
         None,
         "INVITE_HASH_EXPIRED",
     );
@@ -181,13 +182,7 @@ fn a_join_failure_is_shown_when_the_flow_sits_at_the_preview() {
         session.chats_state.deep_link_stage().cloned(),
         Some(DeepLinkState::InvitePreview { .. })
     ));
-    fail(
-        &mut session,
-        &sink,
-        RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin { generation: 3 }),
-        None,
-        "INVITE_HASH_EXPIRED",
-    );
+    fail_request(&mut session, &sink, current, "INVITE_HASH_EXPIRED");
     assert!(matches!(
         session.chats_state.deep_link_stage().cloned(),
         Some(DeepLinkState::ShowText(_))

@@ -181,8 +181,6 @@ pub struct ChatsState {
     /// value ([`DeepLinkFlow`]); the UI takes each terminal step once
     /// ([`Self::take_deep_link_step`]).
     pub deep_link: Option<DeepLinkFlow>,
-    /// Generation counter for deep-link request correlation.
-    pub deep_link_seq: u64,
 }
 
 impl ChatsState {
@@ -216,7 +214,6 @@ impl ChatsState {
             chat_available_reactions: HashMap::new(),
             chat_upgrades: Vec::new(),
             deep_link: None,
-            deep_link_seq: 0,
         }
     }
 
@@ -226,13 +223,6 @@ impl ChatsState {
     /// by itself (tdesktop ties the flow to the session's window).
     pub fn end_deep_link_flow(&mut self) {
         self.deep_link = None;
-    }
-
-    /// The next generation for a request of the flow: answers of an older
-    /// one are dropped by comparing it.
-    pub fn next_deep_link_generation(&mut self) -> u64 {
-        self.deep_link_seq = self.deep_link_seq.wrapping_add(1);
-        self.deep_link_seq
     }
 
     /// The flow's step the UI acts on now. A request in flight is left in
@@ -247,12 +237,12 @@ impl ChatsState {
         }
     }
 
-    /// The user closed the invite box of `generation` unanswered: the flow
-    /// ends when it is still that preview.
-    pub fn cancel_deep_link_invite(&mut self, generation: u64) {
+    /// The user closed the invite box of the preview `request` answered,
+    /// unanswered: the flow ends when it is still that preview.
+    pub fn cancel_deep_link_invite(&mut self, request: RequestId) {
         if matches!(
             self.deep_link_stage(),
-            Some(DeepLinkState::InvitePreview { generation: shown, .. }) if *shown == generation
+            Some(DeepLinkState::InvitePreview { request: shown, .. }) if *shown == request
         ) {
             self.deep_link = None;
         }

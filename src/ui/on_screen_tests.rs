@@ -246,7 +246,7 @@ fn a_switch_ends_the_link_flow_the_account_was_running(cx: &mut TestAppContext) 
                 member_count: 12,
                 creates_join_request: false,
                 is_channel: false,
-                generation: 3,
+                request: quill::ids::RequestId(3),
             },
             true,
         );

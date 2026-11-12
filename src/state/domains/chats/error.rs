@@ -108,20 +108,22 @@ impl Session {
             // flow is already in flight) are ignored via the generation
             // guard.
             Some(
-                RequestPurpose::Chats(ChatsPurpose::DeepLinkInfo { generation })
-                | RequestPurpose::Chats(ChatsPurpose::DeepLinkInternalType { generation })
-                | RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve { generation })
-                | RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin { generation })
-                | RequestPurpose::Chats(ChatsPurpose::DeepLinkCheckInvite { generation }),
+                RequestPurpose::Chats(ChatsPurpose::DeepLinkInfo)
+                | RequestPurpose::Chats(ChatsPurpose::DeepLinkInternalType)
+                | RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve)
+                | RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin)
+                | RequestPurpose::Chats(ChatsPurpose::DeepLinkCheckInvite),
             ) => {
                 // The flow this request belongs to is the one in whatever
-                // stage carries its generation (a preview or an info that
-                // the user already acted on is still that flow).
-                let stale = self
-                    .chats_state
-                    .deep_link_stage()
-                    .and_then(DeepLinkState::generation)
-                    != Some(generation);
+                // stage carries it (a preview or an info that the user
+                // already acted on is still that flow).
+                let request = pending.map(|p| p.id);
+                let stale = request.is_none()
+                    || self
+                        .chats_state
+                        .deep_link_stage()
+                        .and_then(DeepLinkState::request)
+                        != request;
                 // `joinChatByInviteLink` over the community limit opens the
                 // limit box (tdesktop `ChannelsLimitBox`) instead of a dialog.
                 // A stale answer (the flow ended, as an account switch
@@ -151,7 +153,7 @@ impl Session {
                     .hub
                     .auto_start
                     .as_ref()
-                    .is_some_and(|auto| auto.generation == generation)
+                    .is_some_and(|auto| Some(auto.request) == request)
                 {
                     self.payments.hub.auto_start = None;
                 }

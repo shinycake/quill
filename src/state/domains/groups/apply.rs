@@ -907,13 +907,14 @@ impl Session {
                 // `parity:platform-deep-links`: `joinChatByInviteLink`
                 // answer for a deep-link invite. Success opens the chat;
                 // the other variants surface as an honest note.
-                if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin { generation })) =
-                    pending.map(|p| p.purpose)
+                if let Some(request) = pending
+                    .filter(|p| p.purpose == RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin))
+                    .map(|p| p.id)
                     && let Some(DeepLinkState::ResolvingChat {
                         action,
-                        generation: slot,
+                        request: slot,
                     }) = self.chats_state.deep_link_stage().cloned()
-                    && slot == generation
+                    && slot == request
                 {
                     self.chats_state.enter_deep_link_stage(match result {
                         ChatJoinResult::Success { chat_id } => {
@@ -943,13 +944,16 @@ impl Session {
                 creates_join_request,
                 is_channel,
             } => {
-                if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkCheckInvite { generation })) =
-                    pending.map(|p| p.purpose)
+                if let Some(request) = pending
+                    .filter(|p| {
+                        p.purpose == RequestPurpose::Chats(ChatsPurpose::DeepLinkCheckInvite)
+                    })
+                    .map(|p| p.id)
                     && let Some(DeepLinkState::ResolvingChat {
                         action: DeepLinkAction::JoinInvite { hash },
-                        generation: slot,
+                        request: slot,
                     }) = self.chats_state.deep_link_stage().cloned()
-                    && slot == generation
+                    && slot == request
                 {
                     self.chats_state
                         .enter_deep_link_stage(DeepLinkState::InvitePreview {
@@ -958,7 +962,7 @@ impl Session {
                             member_count,
                             creates_join_request,
                             is_channel,
-                            generation,
+                            request,
                         });
                 }
             }

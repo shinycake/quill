@@ -885,13 +885,15 @@ pub enum DeepLinkState {
         member_count: i32,
         creates_join_request: bool,
         is_channel: bool,
-        generation: u64,
+        /// The `checkChatInviteLink` request that answered; the box is up
+        /// for it.
+        request: RequestId,
     },
-    /// `getDeepLinkInfo` / `getInternalLinkType` in flight; `generation`
-    /// drops stale answers. `original` is the link text a
-    /// `getInternalLinkType` lookup resolves (the proxy hand-off and the
+    /// `getDeepLinkInfo` / `getInternalLinkType` in flight as `request`;
+    /// only its answer or error moves the flow. `original` is the link text
+    /// a `getInternalLinkType` lookup resolves (the proxy hand-off and the
     /// web fallback need it back); empty for a `getDeepLinkInfo` lookup.
-    ResolvingInfo { generation: u64, original: String },
+    ResolvingInfo { request: RequestId, original: String },
     /// `deepLinkInfo` answer parsed. The UI consumes this once: with an
     /// action it fires the follow-up request, otherwise (or when
     /// `need_update`) it shows `text` in a dialog.
@@ -899,13 +901,14 @@ pub enum DeepLinkState {
         text: String,
         need_update: bool,
         action: Option<DeepLinkAction>,
-        generation: u64,
+        /// The lookup request that answered.
+        request: RequestId,
     },
     /// Follow-up request (`searchPublicChat` / `createPrivateChat` /
     /// `checkChatInviteLink` / confirmed `joinChatByInviteLink` / `getChat`) in flight.
     ResolvingChat {
         action: DeepLinkAction,
-        generation: u64,
+        request: RequestId,
     },
     /// Follow-up resolved to a chat; the UI consumes this once to open
     /// the chat (and jump / prefill / open the story per `action`).
@@ -937,14 +940,14 @@ pub struct DeepLinkFlow {
 }
 
 impl DeepLinkState {
-    /// The flow generation of a stage that belongs to one; answers of an
-    /// older flow are dropped by comparing it.
-    pub fn generation(&self) -> Option<u64> {
+    /// The request a stage belongs to; answers of an older flow's requests
+    /// are dropped by comparing it.
+    pub fn request(&self) -> Option<RequestId> {
         match self {
-            Self::InvitePreview { generation, .. }
-            | Self::ResolvingInfo { generation, .. }
-            | Self::Info { generation, .. }
-            | Self::ResolvingChat { generation, .. } => Some(*generation),
+            Self::InvitePreview { request, .. }
+            | Self::ResolvingInfo { request, .. }
+            | Self::Info { request, .. }
+            | Self::ResolvingChat { request, .. } => Some(*request),
             Self::ChatReady { .. } | Self::ShowText(_) | Self::Ui(_) | Self::Unknown { .. } => None,
         }
     }
