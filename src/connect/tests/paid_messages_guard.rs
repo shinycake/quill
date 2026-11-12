@@ -125,7 +125,13 @@ fn a_trusted_price_whose_write_failed_is_written_again_after_the_wait() {
     std::fs::create_dir_all(&file).unwrap();
     f.1.session.payments.paid_messages.remember_trust(600, 10);
     f.1.paid_trust_tick(now);
-    let failed = |f: &Fixture| f.1.session.payments.paid_messages.trust_save_error().is_some();
+    let failed = |f: &Fixture| {
+        f.1.session
+            .payments
+            .paid_messages
+            .trust_save_error()
+            .is_some()
+    };
     assert!(failed(&f), "the write failed");
     // Not before the wait is over.
     f.1.paid_trust_tick(now + TRUST_RETRY_MS - 1);
