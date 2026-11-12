@@ -15,7 +15,7 @@ pub mod venues;
 pub use geo::{GeoOutcome, GeoPoint};
 pub use map_view::{MapSize, MapView, TileKey};
 pub use picker::{AddressLine, HereState, LocationPicker};
-pub use venues::{Venue, VenueList};
+pub use venues::{Venue, VenueView};
 
 use crate::ids::{ChatId, FileId, RequestId};
 use std::collections::{HashMap, HashSet};

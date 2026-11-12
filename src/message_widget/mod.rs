@@ -9,7 +9,7 @@ pub mod storage;
 
 use crate::ids::{ChatId, MessageId};
 use crate::telegram::envelope::TdError;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// One widget message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -78,8 +78,9 @@ pub const MONO_FONTS: &[&str] = &[
 pub enum Lifecycle<R = ()> {
     /// Never on screen yet: nothing runs and nothing was drawn.
     Idle,
-    /// On screen, waiting for one of the [`MAX_LIVE`] sandboxes.
-    Waiting { streak: u8 },
+    /// On screen, waiting for one of the [`MAX_LIVE`] sandboxes since
+    /// `since`; the one waiting longest starts first.
+    Waiting { streak: u8, since: Instant },
     /// The sandbox boots and runs the widget's scripts; its first frame has
     /// not come yet.
     Loading { runtime: R, streak: u8 },
@@ -127,7 +128,7 @@ impl<R> Lifecycle<R> {
     /// Stops in a row since the widget last ran.
     pub fn streak(&self) -> u8 {
         match self {
-            Self::Waiting { streak }
+            Self::Waiting { streak, .. }
             | Self::Loading { streak, .. }
             | Self::Stopped { streak, .. } => *streak,
             _ => 0,

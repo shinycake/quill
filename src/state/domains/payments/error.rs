@@ -142,7 +142,7 @@ impl Session {
                 // TDLib refused the commit: its Stars are released and
                 // nothing is sent again; the user is told.
                 if let Some(id) = extra {
-                    self.payments.paid.refused(id);
+                    self.payments.paid.refused(id, crate::state::unix_ms_now());
                 }
                 self.payments.notify(
                     NoticeKind::Error,
@@ -156,7 +156,7 @@ impl Session {
                 ..
             })) => {
                 if let Some(id) = extra {
-                    self.payments.paid.refused(id);
+                    self.payments.paid.refused(id, crate::state::unix_ms_now());
                 }
                 self.payments.notify(
                     NoticeKind::Error,

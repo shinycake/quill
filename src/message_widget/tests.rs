@@ -102,7 +102,13 @@ fn stopped_and_failed_both_show_the_stopped_label() {
     assert!(!Lifecycle::<()>::Released.is_stopped());
     let loading = |runtime: u8| Lifecycle::Loading { runtime, streak: 1 };
     assert!(loading(0).is_live() && Lifecycle::Running(0).is_live());
-    assert!(!Lifecycle::<u8>::Waiting { streak: 0 }.is_live());
+    assert!(
+        !Lifecycle::<u8>::Waiting {
+            streak: 0,
+            since: std::time::Instant::now()
+        }
+        .is_live()
+    );
     assert_eq!(loading(7).started(), Lifecycle::Running(7));
     assert_eq!(Lifecycle::<u8>::Released.started(), Lifecycle::Released);
 }
@@ -116,7 +122,10 @@ fn the_stop_streak_lives_in_the_stage_and_resets_when_it_runs() {
     assert_eq!(first.streak(), 1);
     assert_eq!(first.restarts_on_return(), Some(1));
     // Restarted: the streak rides through Waiting and Loading.
-    let waiting = Lifecycle::<u8>::Waiting { streak: 1 };
+    let waiting = Lifecycle::<u8>::Waiting {
+        streak: 1,
+        since: std::time::Instant::now(),
+    };
     let loading = Lifecycle::Loading {
         runtime: 2,
         streak: waiting.streak(),

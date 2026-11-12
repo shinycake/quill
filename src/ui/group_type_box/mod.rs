@@ -20,7 +20,7 @@ use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::group_type::{
-    CHECK_DELAY_MS, GroupTypeData, LinkProblem, LinkStatus, USERNAME_MAX, check_outcome,
+    CHECK_DELAY_MS, GroupTypeData, LinkLine, LinkProblem, USERNAME_MAX, check_outcome,
     join_approval_applies, link_status, local_link_status,
 };
 use quill::ids::ChatId;
@@ -98,7 +98,7 @@ impl GroupTypeBox {
     }
 
     /// The line under the link field.
-    pub(super) fn status(&self, app: &QuillApp, facts: &TypeBoxFacts, cx: &App) -> LinkStatus {
+    pub(super) fn status(&self, app: &QuillApp, facts: &TypeBoxFacts, cx: &App) -> LinkLine {
         let text = self.link_text(cx);
         let verdict = app
             .session()
@@ -108,10 +108,10 @@ impl GroupTypeBox {
             .session()
             .is_some_and(|s| s.group_username_check_failed(facts.chat_id, &text));
         match link_status(&text, &facts.editable, verdict) {
-            LinkStatus::Empty if matches!(self.link, LinkCheck::Refused { .. }) => {
-                LinkStatus::Problem(LinkProblem::TooShort)
+            LinkLine::Empty if matches!(self.link, LinkCheck::Refused { .. }) => {
+                LinkLine::Problem(LinkProblem::TooShort)
             }
-            LinkStatus::Pending if failed => LinkStatus::Problem(LinkProblem::CheckFailed),
+            LinkLine::Pending if failed => LinkLine::Problem(LinkProblem::CheckFailed),
             status => status,
         }
     }
@@ -248,7 +248,7 @@ impl QuillApp {
             self.new_chat_link_edited();
         }
         cx.notify();
-        if local_link_status(&text) != LinkStatus::Pending || text == facts.editable {
+        if local_link_status(&text) != LinkLine::Pending || text == facts.editable {
             return;
         }
         let pause = self.spawn_screen(cx, async move |this, cx| {
@@ -303,7 +303,7 @@ impl QuillApp {
             return;
         };
         let text = type_box.link_text(cx);
-        if local_link_status(&text) == LinkStatus::Pending && text != facts.editable {
+        if local_link_status(&text) == LinkLine::Pending && text != facts.editable {
             self.check_group_link(cx);
         }
     }
@@ -336,7 +336,7 @@ impl QuillApp {
         if !join_approval_applies(public, facts.group) {
             type_box.draft.request_to_join = false;
         }
-        let pending = public && local_link_status(&type_box.link_text(cx)) == LinkStatus::Pending;
+        let pending = public && local_link_status(&type_box.link_text(cx)) == LinkLine::Pending;
         if pending {
             self.check_group_link(cx);
         }
@@ -370,7 +370,7 @@ impl QuillApp {
         let public = type_box.draft.public && !facts.public_blocked;
         let status = type_box.status(self, &facts, cx);
         if public && !status.is_good() {
-            if status == LinkStatus::Problem(LinkProblem::CheckFailed) {
+            if status == LinkLine::Problem(LinkProblem::CheckFailed) {
                 // The last check failed: Save asks again, once per press.
                 self.recheck_group_type_link(cx);
             }
@@ -581,7 +581,7 @@ impl QuillApp {
     /// The answer the box last got for exactly this text.
     #[cfg(test)]
     #[cfg(feature = "demo-capture")]
-    pub(crate) fn group_type_link_status(&self, cx: &App) -> Option<LinkStatus> {
+    pub(crate) fn group_type_link_status(&self, cx: &App) -> Option<LinkLine> {
         let facts = self.group_type_facts()?;
         Some(self.group_type_box()?.status(self, &facts, cx))
     }

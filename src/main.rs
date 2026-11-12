@@ -651,7 +651,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
             ui::reduce_motion_probe::apply_at_startup(cx);
             ui::bind_keys(cx);
             ui::setup_app_menus(cx);
-            cx.spawn(async move |cx| {
+            let driver = cx.spawn(async move |cx| {
                 let demo_window = cx
                     .open_window(
                         WindowOptions {
@@ -773,17 +773,18 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                 // synthetic wheel events (~60/s, `dy` px each, turning
                 // around every `steps`, stopping after `stop` events when
                 // given), to profile scrolling and what stays after it.
-                if let Some((x, y, step_dy, turn, stop)) =
-                    std::env::var("QUILL_DEMO_AUTOSCROLL").ok().and_then(|v| {
-                        let mut parts = v.split(',').map(|p| p.trim().parse::<f32>().ok());
-                        let x = parts.next()??;
-                        let y = parts.next()??;
-                        let dy = parts.next().flatten().unwrap_or(24.);
-                        let turn = parts.next().flatten().unwrap_or(120.).max(1.) as u32;
-                        let stop = parts.next().flatten().map_or(u32::MAX, |stop| stop as u32);
-                        Some((x, y, dy, turn, stop))
-                    })
-                {
+                let scroll_params = std::env::var("QUILL_DEMO_AUTOSCROLL").ok().and_then(|v| {
+                    let mut parts = v.split(',').map(|p| p.trim().parse::<f32>().ok());
+                    let x = parts.next()??;
+                    let y = parts.next()??;
+                    let dy = parts.next().flatten().unwrap_or(24.);
+                    let turn = parts.next().flatten().unwrap_or(120.).max(1.) as u32;
+                    let stop = parts.next().flatten().map_or(u32::MAX, |stop| stop as u32);
+                    Some((x, y, dy, turn, stop))
+                });
+                // Held until the demo quits: the driver ends the process, and
+                // dropping it here would stop the scroll.
+                let _autoscroll = scroll_params.map(|(x, y, step_dy, turn, stop)| {
                     cx.spawn(async move |cx| {
                         for step in 0_u32..stop {
                             cx.background_executor()
@@ -811,8 +812,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                             }
                         }
                     })
-                    .detach();
-                }
+                });
                 cx.background_executor()
                     .timer(Duration::from_millis(
                         std::env::var("QUILL_DEMO_LINGER_MS")
@@ -823,10 +823,20 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                     ))
                     .await;
                 cx.update(|cx| cx.quit());
-            })
-            .detach();
+            });
+            // The demo's driver lives as long as the app: the global owns it.
+            cx.set_global(DemoDriver(driver));
         });
 }
+
+/// The screenshot demo's driver task, owned by the app until it quits.
+#[cfg(feature = "ui")]
+struct DemoDriver(
+    #[allow(dead_code, reason = "held so the driver is not dropped")] gpui_kit::Task<()>,
+);
+
+#[cfg(feature = "ui")]
+impl gpui_kit::Global for DemoDriver {}
 
 #[cfg(test)]
 #[cfg(feature = "ui")]

@@ -109,7 +109,7 @@ impl GiftListFetch {
 /// Where the send-gift dialog stands, open or not, with its `sendGift`.
 /// The dialog is rebuilt for each recipient, so only the answer of the
 /// sending stage's own request leaves it; picking another gift, closing the
-/// box or sending again leaves `Sent` and `Failed`.
+/// box or sending again leaves `Done` and `Failed`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum SendStage {
     /// No dialog: nothing open, nothing out.
@@ -123,8 +123,8 @@ pub enum SendStage {
     /// notice. Opening the dialog again for the same recipient returns to
     /// `Sending`.
     SendingClosed(crate::ids::RequestId),
-    /// The gift went out; the line the box shows.
-    Sent(String),
+    /// The gift went out and its answer is in; the line the box shows.
+    Done(String),
     /// The send failed; the line the box shows.
     Failed(String),
 }
@@ -185,7 +185,7 @@ impl SendGiftState {
     /// The line after a sent gift.
     pub fn done_line(&self) -> Option<&str> {
         match &self.stage {
-            SendStage::Sent(line) => Some(line),
+            SendStage::Done(line) => Some(line),
             _ => None,
         }
     }

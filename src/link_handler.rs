@@ -44,10 +44,6 @@ pub enum LinkHandlerState {
     /// This build cannot manage the handler (unbundled dev run, missing
     /// `xdg-mime`, unsupported OS). The text says why.
     Unavailable(String),
-    /// The first read of the handler is still running (see [`state`]). Not a
-    /// failure: the page shows it as checking and draws again when the
-    /// answer lands.
-    Checking,
 }
 
 /// How the setting is presented.
@@ -68,8 +64,13 @@ pub const fn control_kind() -> ControlKind {
     }
 }
 
-/// Status line under the control.
-pub fn status_text(state: &LinkHandlerState) -> String {
+/// Status line under the control. `None` is the first read still running
+/// (see [`state`]): not a failure, the page shows it as checking and draws
+/// again when the answer lands.
+pub fn status_text(state: Option<&LinkHandlerState>) -> String {
+    let Some(state) = state else {
+        return tr(keys::Q_PREFS_CHECKING_THE_DEFAULT_APP).into();
+    };
     match state {
         LinkHandlerState::Ours => tr(keys::Q_PREFS_DEFAULT_APP_OURS).into(),
         LinkHandlerState::Other(name) => {
@@ -77,7 +78,6 @@ pub fn status_text(state: &LinkHandlerState) -> String {
         }
         LinkHandlerState::Unset => tr(keys::Q_PREFS_DEFAULT_APP_UNSET).into(),
         LinkHandlerState::Unavailable(why) => why.clone(),
-        LinkHandlerState::Checking => tr(keys::Q_PREFS_CHECKING_THE_DEFAULT_APP).into(),
     }
 }
 
@@ -545,12 +545,14 @@ const READ_ON_CALLER: bool = cfg!(target_os = "macos");
 /// Windows. So there the last answer comes back at once and a stale one is
 /// read again on a thread of its own ([`refreshing`] says when the new answer
 /// is in); the first call has no answer yet and returns
-/// [`LinkHandlerState::Checking`]. On macOS a stale answer is kept until
+/// `None`. On macOS a stale answer is kept until
 /// [`read_now`] (the System page opening, the re-reads after "Make default");
 /// only a missing one is read here, once, so the row is never left checking.
-pub fn state() -> LinkHandlerState {
-    if let Some(pinned) = lock_demo_pin().clone() {
-        return pinned;
+pub fn state() -> Option<LinkHandlerState> {
+    match lock_demo_pin().clone() {
+        DemoPin::Off => {}
+        DemoPin::Unread => return None,
+        DemoPin::Is(pinned) => return Some(pinned),
     }
     let (generation, cached, stale) = {
         let cell = CELL.lock_or_recover();
@@ -558,12 +560,12 @@ pub fn state() -> LinkHandlerState {
         (cell.generation, cached, stale)
     };
     match cached {
-        None if READ_ON_CALLER => read_on_caller(generation),
+        None if READ_ON_CALLER => Some(read_on_caller(generation)),
         cached => {
             if stale && !READ_ON_CALLER {
                 start_refresh();
             }
-            cached.unwrap_or(LinkHandlerState::Checking)
+            cached
         }
     }
 }
@@ -585,7 +587,7 @@ fn read_on_caller(generation: u64) -> LinkHandlerState {
 /// System page opening, or a re-read after "Make default". Elsewhere it
 /// starts a background read.
 pub fn read_now() {
-    if lock_demo_pin().is_some() {
+    if !matches!(*lock_demo_pin(), DemoPin::Off) {
         return;
     }
     if READ_ON_CALLER {
@@ -597,15 +599,25 @@ pub fn read_now() {
     }
 }
 
-/// Screenshot demos: show this state instead of reading the OS (`None` goes
-/// back to the real read).
-pub fn demo_pin(state: Option<LinkHandlerState>) {
-    *lock_demo_pin() = state;
+/// What a screenshot demo shows in place of the OS read.
+#[derive(Clone)]
+pub enum DemoPin {
+    /// The real read.
+    Off,
+    /// The first read still running.
+    Unread,
+    /// This answer.
+    Is(LinkHandlerState),
 }
 
-static DEMO_PIN: Mutex<Option<LinkHandlerState>> = Mutex::new(None);
+/// Screenshot demos: show `pin` instead of reading the OS.
+pub fn demo_pin(pin: DemoPin) {
+    *lock_demo_pin() = pin;
+}
 
-fn lock_demo_pin() -> std::sync::MutexGuard<'static, Option<LinkHandlerState>> {
+static DEMO_PIN: Mutex<DemoPin> = Mutex::new(DemoPin::Off);
+
+fn lock_demo_pin() -> std::sync::MutexGuard<'static, DemoPin> {
     DEMO_PIN.lock_or_recover()
 }
 
@@ -790,11 +802,11 @@ mod tests {
 
     #[test]
     fn the_first_read_is_checking_not_a_failure() {
-        let text = status_text(&LinkHandlerState::Checking);
+        let text = status_text(None);
         assert!(!text.is_empty());
         assert_ne!(
-            LinkHandlerState::Checking,
-            LinkHandlerState::Unavailable(text)
+            status_text(None),
+            status_text(Some(&LinkHandlerState::Unavailable(String::new())))
         );
     }
 
@@ -895,8 +907,10 @@ mod tests {
 
     #[test]
     fn status_text_names_the_current_handler() {
-        assert!(status_text(&LinkHandlerState::Ours).contains("Quill is the default"));
-        assert!(status_text(&LinkHandlerState::Other("Telegram".into())).contains("Telegram"));
+        assert!(status_text(Some(&LinkHandlerState::Ours)).contains("Quill is the default"));
+        assert!(
+            status_text(Some(&LinkHandlerState::Other("Telegram".into()))).contains("Telegram")
+        );
     }
 
     #[test]

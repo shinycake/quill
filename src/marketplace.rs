@@ -118,7 +118,7 @@ pub enum GiftPurchaseStage {
         request: crate::ids::RequestId,
     },
     /// The gift was sent.
-    Sent(GiftQuote),
+    Completed(GiftQuote),
     /// No quote to buy from: the load failed, the answer was not the gift
     /// asked for, or the price went away. Load again.
     Failed(String),
@@ -165,14 +165,14 @@ impl GiftPurchase {
     }
 
     pub fn is_completed(&self) -> bool {
-        matches!(self.stage, GiftPurchaseStage::Sent(_))
+        matches!(self.stage, GiftPurchaseStage::Completed(_))
     }
 
     pub fn quote(&self) -> Option<&GiftQuote> {
         match &self.stage {
             GiftPurchaseStage::Quoted { quote, .. }
             | GiftPurchaseStage::Sending { quote, .. }
-            | GiftPurchaseStage::Sent(quote) => Some(quote),
+            | GiftPurchaseStage::Completed(quote) => Some(quote),
             GiftPurchaseStage::Loading(_) | GiftPurchaseStage::Failed(_) => None,
         }
     }
@@ -192,7 +192,7 @@ impl GiftPurchase {
             GiftPurchaseStage::Loading(_) => None,
             GiftPurchaseStage::Quoted { note, .. } => note.clone(),
             GiftPurchaseStage::Sending { .. } => Some("Sending the gift…".into()),
-            GiftPurchaseStage::Sent(_) => Some("Gift sent successfully.".into()),
+            GiftPurchaseStage::Completed(_) => Some("Gift sent successfully.".into()),
             GiftPurchaseStage::Failed(note) => Some(note.clone()),
         }
     }
@@ -256,7 +256,7 @@ impl GiftPurchase {
         };
         self.stage = match result {
             // The receipt id is intentionally empty for gifts sent to others.
-            GiftPurchaseResult::Sent(_) => GiftPurchaseStage::Sent(quote),
+            GiftPurchaseResult::Sent(_) => GiftPurchaseStage::Completed(quote),
             GiftPurchaseResult::PriceIncreased(None) => GiftPurchaseStage::Failed(
                 "The price increased. Review the new amount and confirm again; nothing was purchased."
                     .into(),

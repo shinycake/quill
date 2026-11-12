@@ -88,8 +88,8 @@ pub struct Summary {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Stage {
-    Starting,
-    /// Reading the chat's messages: how many are in so far.
+    /// Reading the chat's messages: how many are in so far. Nothing read
+    /// yet is the start of the export.
     Collecting {
         read: usize,
     },
@@ -113,7 +113,7 @@ pub struct Progress {
 impl Progress {
     pub fn starting() -> Self {
         Self {
-            stage: Stage::Starting,
+            stage: Stage::Collecting { read: 0 },
             files: 0,
             skipped: 0,
         }
@@ -129,7 +129,7 @@ impl Progress {
     /// One line for the progress box.
     pub fn label(&self) -> String {
         match &self.stage {
-            Stage::Starting => "Starting the export…".into(),
+            Stage::Collecting { read: 0 } => "Starting the export…".into(),
             Stage::Collecting { read } => format!("Reading messages… {read}"),
             Stage::Writing { done, total } => {
                 format!("Saving messages… {done} of {total} · {} files", self.files)

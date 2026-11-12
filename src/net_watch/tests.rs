@@ -1,7 +1,10 @@
 use super::link::{Gateway, Link};
-use super::{Hop, NO_SUCH_IP_VERSION, OFFLINE_LOOK_EVERY, Path, Route, Tracker};
+use super::{
+    Hop, NO_SUCH_IP_VERSION, OFFLINE_LOOK_EVERY, Path, RESOLVE_AGAIN_AFTER, Route, Tracker,
+};
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::time::Instant;
 
 const HOME: IpAddr = IpAddr::V4(Ipv4Addr::new(192, 168, 0, 10));
 const ROUTER: IpAddr = IpAddr::V4(Ipv4Addr::new(192, 168, 0, 1));
@@ -192,28 +195,57 @@ fn a_new_router_on_the_same_address_is_looked_up_at_once_and_only_once() {
         }),
         Path::NoRoute,
     );
-    assert_eq!(tracker.gateways_to_resolve(unresolved), vec![ROUTER]);
+    let now = Instant::now();
+    assert_eq!(tracker.gateways_to_resolve(unresolved, now), vec![ROUTER]);
     assert!(!tracker.observe(unresolved));
     assert_eq!(
-        tracker.gateways_to_resolve(unresolved),
+        tracker.gateways_to_resolve(unresolved, now),
         Vec::<IpAddr>::new(),
         "the failed lookup's own event asks no more"
     );
     tracker.observe(unresolved);
     assert_eq!(
-        tracker.gateways_to_resolve(on(Path::Via(WIFI), Path::NoRoute)),
+        tracker.gateways_to_resolve(on(Path::Via(WIFI), Path::NoRoute), now),
         Vec::<IpAddr>::new()
     );
     tracker.observe(on(Path::Via(WIFI), Path::NoRoute));
     assert_eq!(
-        tracker.gateways_to_resolve(unresolved),
+        tracker.gateways_to_resolve(unresolved, now),
         vec![ROUTER],
         "a later loss asks again"
     );
     let cafe = on(Path::Via(CAFE), Path::NoRoute);
     assert_eq!(
-        tracker.gateways_to_resolve(cafe),
+        tracker.gateways_to_resolve(cafe, now),
         Vec::<IpAddr>::new(),
         "already a new network"
+    );
+}
+
+#[test]
+fn a_router_that_never_answers_is_asked_again_after_the_wait() {
+    let mut tracker = Tracker::new(on(Path::Via(WIFI), Path::NoRoute));
+    let unresolved = on(
+        Path::Via(Hop {
+            link: Link {
+                gateway: Gateway::Unresolved(ROUTER),
+                ..WIFI.link
+            },
+            ..WIFI
+        }),
+        Path::NoRoute,
+    );
+    let start = Instant::now();
+    assert_eq!(tracker.gateways_to_resolve(unresolved, start), vec![ROUTER]);
+    assert!(
+        tracker
+            .gateways_to_resolve(unresolved, start + RESOLVE_AGAIN_AFTER / 2)
+            .is_empty(),
+        "still waiting"
+    );
+    assert_eq!(
+        tracker.gateways_to_resolve(unresolved, start + RESOLVE_AGAIN_AFTER),
+        vec![ROUTER],
+        "the wait ran out"
     );
 }

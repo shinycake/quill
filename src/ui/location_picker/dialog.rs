@@ -18,7 +18,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
-use quill::location_picker::{AddressLine, HereState, Venue, VenueList};
+use quill::location_picker::{AddressLine, HereState, Venue, VenueView};
 
 /// tdesktop `pickLocationWindow` width and the list rows' height
 /// (`pickLocationRowHeight`).
@@ -270,7 +270,7 @@ impl QuillApp {
             return Vec::new();
         };
         match picker.venues() {
-            VenueList::Loading => vec![
+            VenueView::Loading => vec![
                 div()
                     .id("location-venues-loading")
                     .debug_selector(|| "location-venues-loading".to_string())
@@ -281,12 +281,12 @@ impl QuillApp {
                     .child(Spinner::new())
                     .into_any_element(),
             ],
-            VenueList::NothingFound { .. } => vec![self.location_note(
+            VenueView::NothingFound { .. } => vec![self.location_note(
                 "location-venues-none",
                 tr(keys::MAPS_NO_PLACES).into(),
                 cx,
             )],
-            VenueList::Failed => vec![
+            VenueView::Failed => vec![
                 div()
                     .id("location-venues-failed")
                     .debug_selector(|| "location-venues-failed".to_string())
@@ -308,7 +308,7 @@ impl QuillApp {
                     )
                     .into_any_element(),
             ],
-            VenueList::WaitingForLocation => {
+            VenueView::WaitingForLocation => {
                 let why = match picker.here() {
                     HereState::Denied => Some(tr(keys::Q_LOCATION_DENIED)),
                     HereState::Unavailable => Some(tr(keys::Q_LOCATION_UNAVAILABLE)),
@@ -325,7 +325,7 @@ impl QuillApp {
                 ));
                 out
             }
-            VenueList::Found(venues) => {
+            VenueView::Found(venues) => {
                 let mut out: Vec<AnyElement> = venues
                     .iter()
                     .map(|venue| self.location_venue_row(venue, cx))

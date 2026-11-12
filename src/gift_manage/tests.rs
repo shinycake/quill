@@ -369,7 +369,7 @@ fn only_the_send_the_dialog_waits_for_leaves_sending() {
         ..Default::default()
     };
     assert!(send.sending() && send.done_line().is_none());
-    send.stage = SendStage::Sent("Gift sent.".into());
+    send.stage = SendStage::Done("Gift sent.".into());
     assert!(!send.sending());
     assert_eq!(send.done_line(), Some("Gift sent."));
     assert_eq!(send.error_line(), None);

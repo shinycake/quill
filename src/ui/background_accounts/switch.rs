@@ -5,6 +5,7 @@
 use super::*;
 use crate::ui::connect_ui::{ConnectStage, live_status_for};
 use crate::ui::status_note::StatusNote;
+use std::time::Instant;
 
 impl QuillApp {
     /// Hand the account on screen to the background instead of closing it.
@@ -16,7 +17,7 @@ impl QuillApp {
             return;
         };
         let key = live.driver.session.account.clone();
-        let status = background_status(&live.driver.session.auth);
+        let status = background_status(&live.driver.session.auth, Instant::now());
         let in_call = live.driver.session.calls.active_call.is_some()
             || live.driver.session.calls.active_group_call.is_some();
         self.background

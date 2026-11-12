@@ -65,19 +65,22 @@ pub fn parse_venue_result(value: &Value) -> Option<Venue> {
 }
 
 /// What the "Or choose a venue" list shows (tdesktop `PickerVenueState`).
-#[derive(Debug, Clone, PartialEq)]
-pub enum VenueList {
+/// Worked out from the picker's search and its ask each time it is read
+/// ([`super::LocationPicker::venues`]), so "loading" is never a second copy
+/// of the ask's stage.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum VenueView<'a> {
     Loading,
     /// The bot found nothing; `query` is the search text, empty for
     /// places around the pin.
     NothingFound {
-        query: String,
+        query: &'a str,
     },
     /// No place to search around yet ("Choose location to see places nearby.").
     WaitingForLocation,
     /// The lookup failed; the list offers a retry.
     Failed,
-    Found(Vec<Venue>),
+    Found(&'a [Venue]),
 }
 
 /// tdesktop `NormalizeVenuesQuery`: trimmed and lower-cased.

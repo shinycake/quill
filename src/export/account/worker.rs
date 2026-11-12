@@ -472,7 +472,7 @@ fn export_chats<T: Tdlib>(
     for (index, dialog) in dialogs.iter().enumerate() {
         // The next chat starts from its own first step; only the file
         // counts carry over from the one before.
-        chat_progress.stage = Stage::Starting;
+        chat_progress.stage = Stage::Collecting { read: 0 };
         let chat_stage = |chat: Progress| AccountProgress {
             stage: AccountStage::Chats {
                 index,

@@ -592,7 +592,7 @@ fn a_full_export_follows_tdesktops_layout() {
     let mut last_writing = None;
     for report in &run.reports {
         if let AccountStage::Chats { index, chat, .. } = &report.stage {
-            if matches!(chat.stage, crate::export::Stage::Starting) {
+            if matches!(chat.stage, crate::export::Stage::Collecting { read: 0 }) {
                 assert_ne!(last_writing, Some(*index), "stale writing counts");
             }
             if matches!(chat.stage, crate::export::Stage::Writing { .. }) {

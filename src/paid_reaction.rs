@@ -109,22 +109,52 @@ impl Refusal {
 /// `SendPaidReactionQuery::on_error`), so a refused commit holds nothing.
 /// A commit that could not be sent and a refused undo never reached that
 /// point: TDLib still holds the Stars, so the entry is `Stuck`, a note is
-/// shown and nothing is re-sent on its own. The next tap on the message
-/// takes its Stars back into a waiting entry, and the toast shows what
-/// TDLib would commit.
+/// shown, and the send is tried again on a growing delay
+/// ([`MAX_TRIES`] times, then the entry is let go). The next tap on the
+/// message takes its Stars back into a waiting entry, and the toast shows
+/// what TDLib would commit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaidStage {
-    /// Held for the Undo window.
-    Waiting,
+    /// Held for the Undo window, until `commit_at_ms` (unix milliseconds).
+    Waiting { commit_at_ms: u64 },
     /// `commitPendingPaidMessageReactions` is out.
     Committing(RequestId),
     /// `removePendingPaidMessageReactions` is out.
-    Undoing(RequestId),
+    /// `tries` earlier undo sends of this entry were refused.
+    Undoing { request: RequestId, tries: u8 },
     /// A commit could not be sent, or an undo was refused: TDLib still
-    /// holds the Stars. Nothing shows them and nothing sends them; they stay
-    /// reserved against the balance and the cap until a new tap on the
-    /// message joins them or a later commit or undo of it is answered.
-    Stuck,
+    /// holds the Stars. Nothing shows them; they stay reserved against the
+    /// balance and the cap until a new tap on the message joins them, a
+    /// later commit or undo of it is answered, or the `tries` run out. The
+    /// `settle` that failed is sent again at `retry_at_ms`.
+    Stuck {
+        settle: Settle,
+        retry_at_ms: u64,
+        tries: u8,
+    },
+}
+
+/// What a stuck entry sends again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Settle {
+    Commit,
+    Undo,
+}
+
+/// How many times a stuck entry is sent again before it is let go (TDLib
+/// then still holds its Stars until the next tap on the message or the end
+/// of the session, as before).
+pub const MAX_TRIES: u8 = 5;
+/// The wait before the first resend; it doubles each try, up to
+/// [`MAX_RETRY_MS`].
+const FIRST_RETRY_MS: u64 = 2_000;
+const MAX_RETRY_MS: u64 = 60_000;
+
+/// The wait after `tries` failed sends.
+fn retry_after(tries: u8) -> u64 {
+    FIRST_RETRY_MS
+        .saturating_mul(1 << tries.saturating_sub(1).min(5))
+        .min(MAX_RETRY_MS)
 }
 
 /// One tap's Stars, with the `addPendingPaidMessageReaction` that holds
@@ -146,8 +176,6 @@ pub struct PendingPaid {
     /// The sender choice of the latest tap; `None` keeps the account's
     /// current default (TDLib: "type: pass null").
     pub sender: Option<PaidSender>,
-    /// When the Stars are committed (unix milliseconds).
-    pub commit_at_ms: u64,
 }
 
 impl PendingPaid {
@@ -158,10 +186,29 @@ impl PendingPaid {
             .fold(0i64, |total, tap| total.saturating_add(tap.stars))
     }
 
+    /// The Stars wait out the Undo window.
+    pub fn is_waiting(&self) -> bool {
+        matches!(self.stage, PaidStage::Waiting { .. })
+    }
+
+    /// A send failed and TDLib still holds the Stars.
+    pub fn is_stuck(&self) -> bool {
+        matches!(self.stage, PaidStage::Stuck { .. })
+    }
+
+    /// When the Stars are committed (unix milliseconds); 0 once they are
+    /// not waiting.
+    pub fn commit_at_ms(&self) -> u64 {
+        match self.stage {
+            PaidStage::Waiting { commit_at_ms } => commit_at_ms,
+            _ => 0,
+        }
+    }
+
     /// Whole seconds left on the toast's countdown, never below 1 while
     /// the Stars are still waiting.
     pub fn seconds_left(&self, now_ms: u64) -> u64 {
-        self.commit_at_ms
+        self.commit_at_ms()
             .saturating_sub(now_ms)
             .div_ceil(1000)
             .max(1)
@@ -260,9 +307,9 @@ impl PaidReactions {
 
     /// The entry still held for Undo.
     fn find(&self, chat_id: i64, message_id: i64) -> Option<&PendingPaid> {
-        self.pending.iter().find(|p| {
-            p.stage == PaidStage::Waiting && p.chat_id == chat_id && p.message_id == message_id
-        })
+        self.pending
+            .iter()
+            .find(|p| p.is_waiting() && p.chat_id == chat_id && p.message_id == message_id)
     }
 
     /// How many more Stars `message` may take before the cap.
@@ -310,18 +357,19 @@ impl PaidReactions {
             return None;
         }
         let mut entry = PendingPaid {
-            stage: PaidStage::Waiting,
+            stage: PaidStage::Waiting {
+                commit_at_ms: now_ms.saturating_add(ACCUMULATE_MS),
+            },
             chat_id,
             message_id,
             taps: Vec::new(),
             sender: None,
-            commit_at_ms: 0,
         };
         // The waiting entry and Stars TDLib still holds from a failed commit
         // or undo of this message become one: TDLib commits them together.
         let mut ix = 0;
         while let Some(p) = self.pending.get(ix) {
-            if matches!(p.stage, PaidStage::Waiting | PaidStage::Stuck)
+            if (p.is_waiting() || p.is_stuck())
                 && p.chat_id == chat_id
                 && p.message_id == message_id
             {
@@ -336,7 +384,6 @@ impl PaidReactions {
         if sender.is_some() {
             entry.sender = sender;
         }
-        entry.commit_at_ms = now_ms.saturating_add(ACCUMULATE_MS);
         let total = entry.stars();
         self.pending.push(entry);
         Some(total)
@@ -368,15 +415,16 @@ impl PaidReactions {
     /// offline demo, which has none). Returns whether any were waiting.
     pub fn undo(&mut self, chat_id: i64, message_id: i64) -> bool {
         let before = self.pending.len();
-        self.pending.retain(|p| {
-            !(p.stage == PaidStage::Waiting && p.chat_id == chat_id && p.message_id == message_id)
-        });
+        self.pending
+            .retain(|p| !(p.is_waiting() && p.chat_id == chat_id && p.message_id == message_id));
         self.pending.len() != before
     }
 
+    /// Moves the entry of the message that is waiting, or stuck and sent
+    /// again, to `stage`.
     fn set_stage(&mut self, chat_id: i64, message_id: i64, stage: PaidStage) {
         if let Some(entry) = self.pending.iter_mut().find(|p| {
-            p.stage == PaidStage::Waiting && p.chat_id == chat_id && p.message_id == message_id
+            (p.is_waiting() || p.is_stuck()) && p.chat_id == chat_id && p.message_id == message_id
         }) {
             entry.stage = stage;
         }
@@ -384,7 +432,19 @@ impl PaidReactions {
 
     /// The Undo request `request` went out: the Stars wait for TDLib's answer.
     pub fn begin_undo(&mut self, chat_id: i64, message_id: i64, request: RequestId) {
-        self.set_stage(chat_id, message_id, PaidStage::Undoing(request));
+        let tries = self
+            .pending
+            .iter()
+            .find_map(|p| match p.stage {
+                PaidStage::Stuck { tries, .. }
+                    if p.chat_id == chat_id && p.message_id == message_id =>
+                {
+                    Some(tries)
+                }
+                _ => None,
+            })
+            .unwrap_or(0);
+        self.set_stage(chat_id, message_id, PaidStage::Undoing { request, tries });
     }
 
     /// The commit request `request` went out: the Stars wait for TDLib's answer.
@@ -392,14 +452,43 @@ impl PaidReactions {
         self.set_stage(chat_id, message_id, PaidStage::Committing(request));
     }
 
-    /// The commit could not be sent: TDLib still holds the Stars, so the
-    /// entry is `Stuck` and nothing is sent again on its own (an uncapped
-    /// retry every window would loop). Returns whether an entry was waiting.
-    pub fn commit_unsent(&mut self, chat_id: i64, message_id: i64) -> bool {
+    /// The commit, or the undo of a stuck entry, could not be sent: TDLib
+    /// still holds the Stars, so the entry is `Stuck` and sent again after a
+    /// growing wait; past [`MAX_TRIES`] it is let go. Returns whether an
+    /// entry was waiting (the user is told once, not on each resend).
+    pub fn commit_unsent(&mut self, chat_id: i64, message_id: i64, now_ms: u64) -> bool {
         let was_waiting = self.find(chat_id, message_id).is_some();
-        self.set_stage(chat_id, message_id, PaidStage::Stuck);
-        self.join_stuck(chat_id, message_id);
+        let failed = self.pending.iter().find_map(|p| match p.stage {
+            PaidStage::Stuck { settle, tries, .. }
+                if p.chat_id == chat_id && p.message_id == message_id =>
+            {
+                Some((settle, tries))
+            }
+            _ => None,
+        });
+        let (settle, tries) = failed.unwrap_or((Settle::Commit, 0));
+        self.stick(chat_id, message_id, settle, tries.saturating_add(1), now_ms);
         was_waiting
+    }
+
+    /// Marks the entry of the message stuck after `tries` failed sends of
+    /// `settle`, or lets it go when the tries are used up.
+    fn stick(&mut self, chat_id: i64, message_id: i64, settle: Settle, tries: u8, now_ms: u64) {
+        if tries > MAX_TRIES {
+            self.pending
+                .retain(|p| !(p.chat_id == chat_id && p.message_id == message_id && p.is_stuck()));
+            return;
+        }
+        self.set_stage(
+            chat_id,
+            message_id,
+            PaidStage::Stuck {
+                settle,
+                retry_at_ms: now_ms.saturating_add(retry_after(tries)),
+                tries,
+            },
+        );
+        self.join_stuck(chat_id, message_id);
     }
 
     /// Every `Stuck` entry of the message becomes one: part of the waiting
@@ -408,12 +497,25 @@ impl PaidReactions {
     fn join_stuck(&mut self, chat_id: i64, message_id: i64) {
         let mut taps = Vec::new();
         let mut sender = None;
+        let mut stage = None;
         let mut ix = 0;
         while let Some(p) = self.pending.get(ix) {
-            if p.stage == PaidStage::Stuck && p.chat_id == chat_id && p.message_id == message_id {
+            if let PaidStage::Stuck {
+                settle: kept,
+                retry_at_ms: at,
+                tries: spent,
+            } = p.stage
+                && p.chat_id == chat_id
+                && p.message_id == message_id
+            {
                 let mut stuck = self.pending.remove(ix);
                 taps.append(&mut stuck.taps);
                 sender = stuck.sender.or(sender);
+                stage = Some(PaidStage::Stuck {
+                    settle: kept,
+                    retry_at_ms: at,
+                    tries: spent,
+                });
             } else {
                 ix += 1;
             }
@@ -421,23 +523,27 @@ impl PaidReactions {
         if taps.is_empty() {
             return;
         }
-        let waiting = self.pending.iter_mut().find(|p| {
-            p.stage == PaidStage::Waiting && p.chat_id == chat_id && p.message_id == message_id
-        });
+        let waiting = self
+            .pending
+            .iter_mut()
+            .find(|p| p.is_waiting() && p.chat_id == chat_id && p.message_id == message_id);
         match waiting {
             Some(waiting) => {
                 taps.append(&mut waiting.taps);
                 waiting.taps = taps;
                 waiting.sender = waiting.sender.or(sender);
             }
-            None => self.pending.push(PendingPaid {
-                stage: PaidStage::Stuck,
-                chat_id,
-                message_id,
-                taps,
-                sender,
-                commit_at_ms: 0,
-            }),
+            None => {
+                if let Some(stage) = stage {
+                    self.pending.push(PendingPaid {
+                        stage,
+                        chat_id,
+                        message_id,
+                        taps,
+                        sender,
+                    });
+                }
+            }
         }
     }
 
@@ -445,9 +551,7 @@ impl PaidReactions {
     /// the Stars of that message an earlier failure left `Stuck` (a commit
     /// or an undo covers everything TDLib holds for the message).
     pub fn settled(&mut self, request: RequestId) {
-        let answered = |p: &PendingPaid| {
-            p.stage == PaidStage::Committing(request) || p.stage == PaidStage::Undoing(request)
-        };
+        let answered = |p: &PendingPaid| matches!(p.stage, PaidStage::Committing(asked) | PaidStage::Undoing { request: asked, .. } if asked == request);
         let messages: Vec<(i64, i64)> = self
             .pending
             .iter()
@@ -455,48 +559,62 @@ impl PaidReactions {
             .map(|p| (p.chat_id, p.message_id))
             .collect();
         self.pending.retain(|p| {
-            !answered(p)
-                && !(p.stage == PaidStage::Stuck && messages.contains(&(p.chat_id, p.message_id)))
+            !answered(p) && !(p.is_stuck() && messages.contains(&(p.chat_id, p.message_id)))
         });
     }
 
     /// TDLib refused `request`. A refused commit releases its Stars, as in
     /// Telegram Desktop: TDLib took them out of the message with the commit
     /// and unlocked them on the error, so nothing is held and nothing is
-    /// sent again on its own (a permanent error, a low balance, would
-    /// otherwise loop). A refused undo removed nothing: TDLib still holds
-    /// those Stars, so the entry is `Stuck`.
-    pub fn refused(&mut self, request: RequestId) {
+    /// sent again (a permanent error, a low balance, would otherwise loop).
+    /// A refused undo removed nothing: TDLib still holds those Stars, so the
+    /// entry is `Stuck` and the undo is sent again after a wait.
+    pub fn refused(&mut self, request: RequestId, now_ms: u64) {
         self.pending
             .retain(|p| p.stage != PaidStage::Committing(request));
         let mut messages = Vec::new();
         for p in &mut self.pending {
-            if p.stage == PaidStage::Undoing(request) {
-                p.stage = PaidStage::Stuck;
+            if let PaidStage::Undoing {
+                request: asked,
+                tries,
+            } = p.stage
+                && asked == request
+            {
+                let tries = tries.saturating_add(1);
+                p.stage = PaidStage::Stuck {
+                    settle: Settle::Undo,
+                    retry_at_ms: now_ms.saturating_add(retry_after(tries)),
+                    tries,
+                };
                 messages.push((p.chat_id, p.message_id));
             }
         }
         for (chat_id, message_id) in messages {
             self.join_stuck(chat_id, message_id);
         }
+        // A refused undo sent again too often is let go.
+        self.pending
+            .retain(|p| !matches!(p.stage, PaidStage::Stuck { tries, .. } if tries > MAX_TRIES));
     }
 
-    /// Every waiting reaction whose time is up, still waiting: the driver
-    /// calls `begin_commit` once its request went out, else `commit_unsent`.
+    /// Every waiting reaction whose time is up, and every stuck one whose
+    /// wait is over, still as they were: the driver calls `begin_commit`
+    /// (or `begin_undo`) once the request went out, else `commit_unsent`.
     pub fn due(&self, now_ms: u64) -> Vec<PendingPaid> {
         self.pending
             .iter()
-            .filter(|p| p.stage == PaidStage::Waiting && p.commit_at_ms <= now_ms)
+            .filter(|p| match p.stage {
+                PaidStage::Waiting { commit_at_ms } => commit_at_ms <= now_ms,
+                PaidStage::Stuck { retry_at_ms, .. } => retry_at_ms <= now_ms,
+                PaidStage::Committing(_) | PaidStage::Undoing { .. } => false,
+            })
             .cloned()
             .collect()
     }
 
     /// The reaction the toast shows: the most recently tapped one.
     pub fn toast(&self) -> Option<&PendingPaid> {
-        self.pending
-            .iter()
-            .rev()
-            .find(|p| p.stage == PaidStage::Waiting)
+        self.pending.iter().rev().find(|p| p.is_waiting())
     }
 
     /// Whether any Stars are held for Undo (the toast ticks).
@@ -506,23 +624,29 @@ impl PaidReactions {
 
     /// Whether a commit or undo still waits for TDLib.
     pub fn in_flight(&self) -> bool {
-        self.pending
-            .iter()
-            .any(|p| matches!(p.stage, PaidStage::Committing(_) | PaidStage::Undoing(_)))
+        self.pending.iter().any(|p| {
+            matches!(
+                p.stage,
+                PaidStage::Committing(_) | PaidStage::Undoing { .. }
+            )
+        })
     }
 
     /// How long until a countdown shows another second or a reaction is
-    /// due. `None` when none is waiting.
+    /// due, or a stuck one is sent again. `None` when none is waiting.
     pub fn next_change_ms(&self, now_ms: u64) -> Option<u64> {
         self.pending
             .iter()
-            .filter(|paid| paid.stage == PaidStage::Waiting)
-            .map(|paid| {
-                let left = paid.commit_at_ms.saturating_sub(now_ms);
-                match left % 1000 {
-                    0 if left > 0 => 1000,
-                    into_second => into_second,
+            .filter_map(|paid| match paid.stage {
+                PaidStage::Waiting { commit_at_ms } => {
+                    let left = commit_at_ms.saturating_sub(now_ms);
+                    Some(match left % 1000 {
+                        0 if left > 0 => 1000,
+                        into_second => into_second,
+                    })
                 }
+                PaidStage::Stuck { retry_at_ms, .. } => Some(retry_at_ms.saturating_sub(now_ms)),
+                PaidStage::Committing(_) | PaidStage::Undoing { .. } => None,
             })
             .min()
     }

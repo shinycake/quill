@@ -98,7 +98,6 @@ fn sysctl_string(name: &std::ffi::CStr) -> Option<String> {
 }
 
 /// Where writing this launch's glyphs and line layouts stands.
-#[derive(Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(
     not(all(target_os = "macos", feature = "ui")),
     allow(dead_code, reason = "only the macOS launch writes its caches")
@@ -107,19 +106,25 @@ enum GlyphSave {
     /// Not written yet: the first drawn chat list starts it. Also where a
     /// writer that could not be started leaves it, for the next frame to
     /// try again.
-    Pending,
-    /// The writer thread runs.
-    Saving,
+    Unwritten,
+    /// The writer thread runs; this is its handle. The thread's [`SaveEnd`]
+    /// replaces the stage when it ends, however it ends.
+    Saving {
+        _writer: std::thread::JoinHandle<Option<()>>,
+    },
     /// It ran (or panicked, which is not tried again).
     Saved,
 }
 
-static GLYPH_SAVE: std::sync::Mutex<GlyphSave> = std::sync::Mutex::new(GlyphSave::Pending);
+static GLYPH_SAVE: std::sync::Mutex<GlyphSave> = std::sync::Mutex::new(GlyphSave::Unwritten);
 
 /// Whether this launch's glyphs are still to be written.
 pub fn glyphs_pending() -> bool {
     cfg!(all(target_os = "macos", feature = "ui"))
-        && *crate::locks::lock_or_recover(&GLYPH_SAVE) == GlyphSave::Pending
+        && matches!(
+            *crate::locks::lock_or_recover(&GLYPH_SAVE),
+            GlyphSave::Unwritten
+        )
 }
 
 /// Ends the write, however the writer thread ends.
@@ -138,12 +143,11 @@ impl Drop for SaveEnd {
 /// call does anything, unless the worker could not be started.
 #[cfg(all(target_os = "macos", feature = "ui"))]
 pub fn chat_list_drawn() {
-    {
-        let mut save = crate::locks::lock_or_recover(&GLYPH_SAVE);
-        if *save != GlyphSave::Pending {
-            return;
-        }
-        *save = GlyphSave::Saving;
+    // The lock is held across the spawn, so a writer that ends at once waits
+    // in `SaveEnd` until its handle is in the stage.
+    let mut save = crate::locks::lock_or_recover(&GLYPH_SAVE);
+    if !matches!(*save, GlyphSave::Unwritten) {
+        return;
     }
     let started = crate::thread_guard::spawn_guarded("quill-glyph-cache", || {
         let _end = SaveEnd;
@@ -152,8 +156,8 @@ pub fn chat_list_drawn() {
             let _ = gpui_macos::glyph_cache::save(&path, &cache_stamp());
         }
     });
-    if started.is_err() {
-        *crate::locks::lock_or_recover(&GLYPH_SAVE) = GlyphSave::Pending;
+    if let Ok(writer) = started {
+        *save = GlyphSave::Saving { _writer: writer };
     }
 }
 

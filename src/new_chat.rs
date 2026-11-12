@@ -203,7 +203,8 @@ pub enum CreationOutcome {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ViewState {
     Idle,
-    Waiting,
+    /// The requests of the stage the step is showing.
+    Waiting(Vec<RequestId>),
     Refused {
         failure: CreateFailure,
         reason: String,
@@ -220,7 +221,7 @@ pub struct NewChatView {
 impl NewChatView {
     /// A request of this step is out: its confirm button waits.
     pub fn busy(&self) -> bool {
-        self.state == ViewState::Waiting
+        matches!(self.state, ViewState::Waiting(_))
     }
 
     /// The refused create, shown on the step it returned to.
@@ -241,9 +242,9 @@ pub fn view(stage: &NewChatStage) -> NewChatView {
         NewChatStage::Info => plain(NewChatStep::Info),
         NewChatStage::AutoDelete => plain(NewChatStep::AutoDelete),
         NewChatStage::Members => plain(NewChatStep::Members),
-        NewChatStage::Creating { back, .. } => NewChatView {
+        NewChatStage::Creating { back, request } => NewChatView {
             step: back.step(),
-            state: ViewState::Waiting,
+            state: ViewState::Waiting(vec![*request]),
         },
         NewChatStage::Created(chat) => plain(NewChatStep::Done(*chat)),
         NewChatStage::CreateRefused {
@@ -260,10 +261,9 @@ pub fn view(stage: &NewChatStage) -> NewChatView {
         NewChatStage::CreateLost { back } => plain(back.step()),
         NewChatStage::Type { chat, save } => NewChatView {
             step: NewChatStep::Type(*chat),
-            state: if matches!(save, TypeSaveStage::Saving(_)) {
-                ViewState::Waiting
-            } else {
-                ViewState::Idle
+            state: match save {
+                TypeSaveStage::Saving(requests) => ViewState::Waiting(requests.clone()),
+                _ => ViewState::Idle,
             },
         },
         NewChatStage::Subscribers { chat } => plain(NewChatStep::Subscribers(*chat)),

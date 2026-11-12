@@ -299,7 +299,10 @@ impl QuillApp {
             };
             if let Some(streak) = restart {
                 redraw |= entry.lifecycle.is_stopped();
-                entry.lifecycle = Lifecycle::Waiting { streak };
+                entry.lifecycle = Lifecycle::Waiting {
+                    streak,
+                    since: Instant::now(),
+                };
             }
         }
         if resume {
@@ -337,16 +340,20 @@ impl QuillApp {
 
     /// Starts the widgets waiting for a sandbox, releasing hidden ones to stay in the limit.
     fn start_waiting_widgets(&mut self, cx: &mut Context<Self>) {
-        let mut waiting: Vec<WidgetKey> = self
+        let mut queue: Vec<(Instant, WidgetKey)> = self
             .widgets
             .entries
             .iter()
-            .filter(|(_, entry)| {
-                matches!(entry.lifecycle, Lifecycle::Waiting { .. }) && entry.presence.is_shown()
+            .filter_map(|(key, entry)| match entry.lifecycle {
+                Lifecycle::Waiting { since, .. } if entry.presence.is_shown() => {
+                    Some((since, *key))
+                }
+                _ => None,
             })
-            .map(|(key, _)| *key)
             .collect();
-        waiting.sort();
+        // The one waiting longest starts first.
+        queue.sort();
+        let waiting: Vec<WidgetKey> = queue.into_iter().map(|(_, key)| key).collect();
         let visible = self
             .widgets
             .entries

@@ -10,7 +10,7 @@ use crate::ui::shell::{DialogKind, QuillShell};
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
-use quill::group_type::{LinkProblem, LinkStatus};
+use quill::group_type::{LinkLine, LinkProblem};
 use quill::ids::ChatId;
 use quill::telegram::envelope::UsernameCheckResult;
 
@@ -42,7 +42,7 @@ fn open_demo(
     (app, shell, vcx)
 }
 
-fn status(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<LinkStatus> {
+fn status(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<LinkLine> {
     app.read_with(vcx, |app, cx| app.group_type_link_status(cx))
 }
 
@@ -51,7 +51,7 @@ fn a_taken_link_shows_the_error_and_blocks_save(cx: &mut TestAppContext) {
     let (app, shell, mut vcx) = open_demo(cx, "ready-group-type-box");
     let vcx = &mut vcx;
     assert!(shell.read_with(vcx, |s, _| s.open_dialog == Some(DialogKind::GroupTypeBox)));
-    assert_eq!(status(&app, vcx), Some(LinkStatus::Current));
+    assert_eq!(status(&app, vcx), Some(LinkLine::Current));
     vcx.update(|window, cx| window.click("group-type-private", cx));
     frames(vcx);
     assert_eq!(
@@ -70,7 +70,7 @@ fn a_taken_link_shows_the_error_and_blocks_save(cx: &mut TestAppContext) {
         });
     });
     frames(vcx);
-    assert_eq!(status(&app, vcx), Some(LinkStatus::Pending));
+    assert_eq!(status(&app, vcx), Some(LinkLine::Pending));
     app.update(vcx, |app, cx| {
         app.demo_answer_username_check(ChatId(PUBLIC_GROUP), TAKEN, UsernameCheckResult::Occupied);
         cx.notify();
@@ -78,7 +78,7 @@ fn a_taken_link_shows_the_error_and_blocks_save(cx: &mut TestAppContext) {
     frames(vcx);
     assert_eq!(
         status(&app, vcx),
-        Some(LinkStatus::Problem(LinkProblem::Occupied))
+        Some(LinkLine::Problem(LinkProblem::Occupied))
     );
     vcx.update(|window, cx| window.click("group-type-save", cx));
     frames(vcx);

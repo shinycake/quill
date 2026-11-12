@@ -210,7 +210,7 @@ impl QuillApp {
     ) {
         self.message_ui
             .dismissed_keyboards
-            .insert((chat_id.0, message_id.0));
+            .insert(quill::ids::ChatMessage::new(chat_id, message_id));
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.delete_chat_reply_markup(chat_id, message_id);
         }

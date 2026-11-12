@@ -15,7 +15,9 @@ hold what ends it:
 - `bare`: the variant has no data at all;
 - `unkeyed`: the variant has data, but no `RequestId`, `Task`,
   `JoinHandle`, `Subscription`, channel end or deadline in it, or in the
-  types it names;
+  types it names. A field typed by one of the enum's own generic
+  parameters (`enum Lifecycle<R> { Running(R) }`) counts: the caller picks
+  the owned handle it stands for, and dropping the stage drops it;
 - `optional`: the only request in it is an `Option<RequestId>`: a stage
   that is `Loading(None)` until a second call fills the request in is the
   "asked but not sent" flag again. Hold `Idle` until the request exists
@@ -85,7 +87,8 @@ NOT_A_STAGE = re.compile(
 )
 RAW_ID = re.compile(r"\b(?:request|extra|request_id|generation|serial)\s*:\s*(?:Option\s*<\s*)?[ui]64\b")
 TYPE = re.compile(r"\b(?:struct|enum)\s+([A-Z]\w*)\s*(?:<[^{;(]*>)?\s*(?:where[^{;(]*)?([({])")
-ENUM = re.compile(r"\benum\s+([A-Z]\w*)\s*(?:<[^{;]*>)?\s*(?:where[^{;]*)?\{")
+ENUM = re.compile(r"\benum\s+([A-Z]\w*)\s*(<[^{;]*?>)?\s*(?:where[^{;]*)?\{")
+GENERIC = re.compile(r"(?:^|[<,])\s*([A-Z]\w*)\s*(?=[,=:>])")
 ATTR = re.compile(r"#\[[^\]]*\]")
 VARIANT = re.compile(r"([A-Z]\w*)\s*(.*)$", re.S)
 NAME = re.compile(r"\b[A-Z]\w*\b")
@@ -125,6 +128,11 @@ def carries(data, types, depth=3):
     )
 
 
+def generic_field(data, params):
+    """Whether `data` holds a value of one of the enum's generic parameters."""
+    return any(re.search(rf"\b{name}\b", data) for name in params)
+
+
 def hits(root):
     files = list(shape_guard.source(root))
     types = {}
@@ -139,6 +147,7 @@ def hits(root):
         for match in ENUM.finditer(text):
             if NOT_A_STAGE.search(match.group(1)):
                 continue
+            params = set(GENERIC.findall(match.group(2) or ""))
             brace = match.end() - 1
             body = text[brace + 1 : shape_guard.closing(text, brace)]
             offset = brace + 1
@@ -155,7 +164,7 @@ def hits(root):
                     yield f"bare:{match.group(1)}::{name}", path, line
                 elif optional and len(optional) == len(re.findall(r"\bRequestId\b", data)):
                     yield f"optional:{match.group(1)}::{name}", path, line
-                elif not carries(data, types):
+                elif not carries(data, types) and not generic_field(data, params):
                     yield f"unkeyed:{match.group(1)}::{name}", path, line
 
 

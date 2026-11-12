@@ -189,15 +189,29 @@ pub struct NetworkState {
     pub available: bool,
 }
 
+/// How long a gateway that never answered stays asked for: the next network
+/// event after this asks again.
+const RESOLVE_AGAIN_AFTER: Duration = Duration::from_secs(60);
+
 /// Where one IP version's gateway stands in having its link-layer address
 /// resolved. It leaves `Asking` when the route no longer carries the old
-/// address over (the system resolved it, or the gateway changed).
+/// address over (the system resolved it, or the gateway changed), or
+/// [`RESOLVE_AGAIN_AFTER`] after the ask.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Neighbour {
     /// Nothing is awaited.
     Unasked,
-    /// This gateway was asked for; not asked again until it changes.
-    Asking(IpAddr),
+    /// This gateway was asked for at `since`; not asked again until it
+    /// changes, or the wait runs out.
+    Asking { gateway: IpAddr, since: Instant },
+}
+
+impl Neighbour {
+    /// Whether `gateway` is still awaited at `now`.
+    fn awaits(self, gateway: IpAddr, now: Instant) -> bool {
+        matches!(self, Self::Asking { gateway: asked, since }
+            if asked == gateway && now.saturating_duration_since(since) < RESOLVE_AGAIN_AFTER)
+    }
 }
 
 #[derive(Debug)]
@@ -231,7 +245,7 @@ impl Tracker {
 
     /// The gateways to resolve now, before `route` is observed: those whose
     /// link-layer address would be carried over, each named once.
-    fn gateways_to_resolve(&mut self, route: Route) -> Vec<IpAddr> {
+    fn gateways_to_resolve(&mut self, route: Route, now: Instant) -> Vec<IpAddr> {
         let carried = [
             route.v4.carried(self.route.v4),
             route.v6.carried(self.route.v6),
@@ -239,10 +253,20 @@ impl Tracker {
         let fresh = carried
             .iter()
             .zip(self.neighbours)
-            .filter_map(|(now, asked)| now.filter(|gateway| asked != Neighbour::Asking(*gateway)))
+            .filter_map(|(carried, asked)| carried.filter(|gateway| !asked.awaits(*gateway, now)))
             .collect();
-        self.neighbours =
-            carried.map(|gateway| gateway.map_or(Neighbour::Unasked, Neighbour::Asking));
+        let before = self.neighbours;
+        self.neighbours = [0, 1].map(|version| {
+            let (carried, asked) = (carried.get(version).copied().flatten(), before.get(version));
+            match (carried, asked) {
+                (Some(gateway), Some(asked)) if asked.awaits(gateway, now) => *asked,
+                (Some(gateway), _) => Neighbour::Asking {
+                    gateway,
+                    since: now,
+                },
+                (None, _) => Neighbour::Unasked,
+            }
+        });
         fresh
     }
 
@@ -330,13 +354,14 @@ fn is_gateway(ip: IpAddr) -> bool {
 fn still_resolving(gateway: IpAddr) -> bool {
     lock_or_recover(tracker())
         .neighbours
-        .contains(&Neighbour::Asking(gateway))
+        .iter()
+        .any(|asked| asked.awaits(gateway, Instant::now()))
 }
 
 fn network_changed() {
     let route = route_now();
     let mut tracker = lock_or_recover(tracker());
-    let resolve = tracker.gateways_to_resolve(route);
+    let resolve = tracker.gateways_to_resolve(route, Instant::now());
     let moved = tracker.observe(route);
     drop(tracker);
     // The answer comes back as a neighbour change (Linux), from the

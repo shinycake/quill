@@ -188,7 +188,7 @@ impl Session {
                 }
                 manage.send.selected = None;
                 manage.send.stage =
-                    SendStage::Sent(crate::lang::tr(crate::lang::keys::Q_MONEY_GIFT_SENT).into());
+                    SendStage::Done(crate::lang::tr(crate::lang::keys::Q_MONEY_GIFT_SENT).into());
             }
             _ => {}
         }

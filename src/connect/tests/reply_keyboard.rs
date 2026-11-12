@@ -85,7 +85,10 @@ fn update_chat_reply_markup_shows_a_keyboard_outside_the_loaded_window() {
     assert_eq!((chat, message), (ChatId(7), MessageId(900)));
     assert_eq!(keyboard.rows[0][0].text, "Yes");
     // A one-time keyboard the user used is dismissed.
-    let dismissed: HashSet<(i64, i64)> = [(7, 900)].into_iter().collect();
+    let dismissed: HashSet<crate::ids::ChatMessage> =
+        [crate::ids::ChatMessage::new(ChatId(7), MessageId(900))]
+            .into_iter()
+            .collect();
     assert!(
         h.driver
             .session
