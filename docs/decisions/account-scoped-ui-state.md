@@ -10622,3 +10622,11 @@ Tests: `location_picker::picker_tests` (typing before a place, a new place stops
 | Wall clock in `a_trusted_price_whose_write_failed_is_written_again_after_the_wait` | The test drives fixed times (`now`, `now + TRUST_RETRY_MS - 1`, `now + TRUST_RETRY_MS`) and holds no `unix_ms_now`. |
 | `src/main.rs` (hotspot) | Restored to base. The g-476/g-477 and `main.rs` rows above live on `claude/sweep-r4-04-main` pending the owner's hotspot decision (it needs the `hotspot-ok` label). The base line `detached:run_screenshot_demo 2` is back in `scripts/owned-timers-baseline.txt`. |
 | `src/ui/app_demo.rs` (hotspot) | Restored to base. `link_handler::demo_pin` takes `impl Into<DemoPin>`, with `From<Option<LinkHandlerState>> for DemoPin`. |
+### Sweep fixes (r4-04, `main.rs` part)
+
+`src/main.rs` is a no-edit hotspot, so this part is a branch of its own.
+
+| Where | Decision |
+|---|---|
+| g-476, g-477 | The screenshot demo's driver task is held by the `DemoDriver` global; its autoscroll task by the driver. No detach. The base line `detached:run_screenshot_demo 2` leaves `scripts/owned-timers-baseline.txt`. |
+| `main.rs` | The wake subscription, the first window open, the macOS menu install and the tray/chrome loop are held in globals (`WakeWatch`, `OpeningMainWindow`, `InstallingMenus`, `ChromeLoop`), like `DemoDriver`. |

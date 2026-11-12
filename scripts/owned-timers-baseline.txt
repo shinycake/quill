@@ -9,7 +9,6 @@ detached:QuillApp::spawn_passcode_tick 1
 detached:QuillApp::spawn_system_unlock_wait 1
 detached:QuillApp::start_update_checks 1
 detached:hide_main_window 1
-detached:run_screenshot_demo 2
 detached:spawn_menu_sync 1
 detached:watch_saver 1
 poll:QuillApp::arm_stream_hide_timer 1
