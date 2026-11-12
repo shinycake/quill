@@ -25,6 +25,10 @@ pub(super) struct DraftClear {
 /// id and never another send's.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum ClearStage {
+    /// The send is under way but no request is out yet (a recording whose
+    /// file is being finished): the tap took the slot, so a newer send
+    /// replaces it, and only the recording's own `Reservation` can arm it.
+    Reserved(Reservation),
     /// The send named no request (a menu command): only a slot match finds it.
     Unasked,
     /// The send's messages wait for their answers and acks; the first ack
@@ -35,6 +39,10 @@ enum ClearStage {
     /// list is empty.
     Spent(Vec<SentMessage>),
 }
+
+/// The claim a recording makes on its slot's draft clear when Send is tapped.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Reservation(pub(super) u64);
 
 /// One message of a send: asked for under a request, then made by it.
 /// A request that sends an album is answered once per message.
@@ -50,14 +58,14 @@ enum SentMessage {
 impl ClearStage {
     fn messages_mut(&mut self) -> Option<&mut Vec<SentMessage>> {
         match self {
-            Self::Unasked => None,
+            Self::Unasked | Self::Reserved(_) => None,
             Self::Armed(messages) | Self::Spent(messages) => Some(messages),
         }
     }
 
     fn messages(&self) -> &[SentMessage] {
         match self {
-            Self::Unasked => &[],
+            Self::Unasked | Self::Reserved(_) => &[],
             Self::Armed(messages) | Self::Spent(messages) => messages,
         }
     }
@@ -65,7 +73,7 @@ impl ClearStage {
     /// `message` left the send, acked or failed; the stage is `Spent`.
     fn spend(&mut self, message: MessageId) {
         let mut messages = match std::mem::replace(self, Self::Unasked) {
-            Self::Unasked => Vec::new(),
+            Self::Unasked | Self::Reserved(_) => Vec::new(),
             Self::Armed(messages) | Self::Spent(messages) => messages,
         };
         messages.retain(|m| !matches!(m, SentMessage::Made { message: id, .. } if *id == message));
@@ -88,6 +96,29 @@ impl DraftClear {
             sent,
             stage: ClearStage::Unasked,
         }
+    }
+
+    /// The whole composer's clear, held for a recording until its file is
+    /// ready and its send goes out.
+    pub(super) fn reserved(chat_id: ChatId, claim: Reservation) -> Self {
+        let mut clear = Self::new(chat_id, None);
+        clear.stage = ClearStage::Reserved(claim);
+        clear
+    }
+
+    /// Whether this is the clear `claim` reserved.
+    pub(super) fn is_reserved_by(&self, claim: Reservation) -> bool {
+        self.stage == ClearStage::Reserved(claim)
+    }
+
+    /// The recording that reserved this clear sent as `request`: it waits
+    /// for its ack now. False when `claim` no longer holds it.
+    pub(super) fn arm(&mut self, claim: Reservation, request: RequestId) -> bool {
+        let held = self.is_reserved_by(claim);
+        if held {
+            self.stage = ClearStage::Armed(vec![SentMessage::Asked(request)]);
+        }
+        held
     }
 
     /// The send went out as `requests`.

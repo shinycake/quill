@@ -1170,48 +1170,56 @@ fn album_failures_from_one_slot_never_drop_the_texts_clear() {
     );
 }
 
-/// Sweep r4-10 (20-003/20-004): a voice note whose file is ready after a
-/// text was sent from the same slot adds its clear beside the text's. The
-/// text's ack still finds the text's clear, whether the voice send is acked
-/// or fails.
+/// Sweep r4-10 (20-003/20-004): a recording holds its slot's draft clear
+/// from the tap. A text sent from the slot before the file is ready takes
+/// the slot over; the recording's arming then changes nothing, and the
+/// text's ack still clears the text's draft.
 #[test]
-fn a_voice_clear_in_the_slot_of_a_text_send_keeps_the_texts_clear() {
+fn a_recording_finished_after_a_text_send_leaves_the_texts_clear() {
     use crate::ui::composer_state::DraftClear;
     let chat = ChatId(7);
     let slot = forum_slot(1);
     let account = slot.account.clone();
-    let armed = |sends: &mut crate::ui::composer_sends::ComposerSends| {
-        sends.set_draft_clear(
-            &slot,
-            Some(DraftClear::of_text(chat, "text").asked([RequestId(1)])),
-        );
-        sends.set_draft_clear(
-            &slot,
-            Some(DraftClear::whole_composer(chat).asked([RequestId(2)])),
-        );
-        sends.note_send_answer(&account, RequestId(1), MessageId(-1));
-        sends.note_send_answer(&account, RequestId(2), MessageId(-2));
-    };
-    // The voice fails: only its entry goes, the text's ack still clears.
     let mut sends = crate::ui::composer_sends::ComposerSends::default();
-    armed(&mut sends);
-    sends.fail_draft_clear(&account, MessageId(-2), slot.draft);
+    let claim = sends.reserve_draft_clear(&slot, chat);
+    sends.set_draft_clear(
+        &slot,
+        Some(DraftClear::of_text(chat, "text").asked([RequestId(1)])),
+    );
+    // The file is ready; the voice goes out as request 2.
+    sends.arm_draft_clear(&slot, claim, RequestId(2));
+    sends.note_send_answer(&account, RequestId(2), MessageId(-2));
+    sends.note_send_answer(&account, RequestId(1), MessageId(-1));
+    // The voice failing releases nothing of the text's.
+    sends.release_draft_clear(&slot, claim);
     let taken = sends.take_draft_clear(&account, MessageId(-1), slot.draft);
     assert_eq!(
         taken.map(|(_, clear)| clear.sent),
         Some(Some("text".to_string()))
     );
-    assert!(!sends.has_draft_clear(&slot));
-    // The text is acked first, then the voice: each takes its own.
+}
+
+/// The recording alone in its slot: arming makes its ack clear the draft,
+/// and a send that never goes releases the held clear.
+#[test]
+fn a_recording_alone_in_its_slot_clears_on_its_ack_or_releases() {
+    let chat = ChatId(7);
+    let slot = forum_slot(1);
+    let account = slot.account.clone();
     let mut sends = crate::ui::composer_sends::ComposerSends::default();
-    armed(&mut sends);
-    let text = sends.take_draft_clear(&account, MessageId(-1), slot.draft);
+    let claim = sends.reserve_draft_clear(&slot, chat);
+    assert!(sends.has_draft_clear(&slot));
+    sends.arm_draft_clear(&slot, claim, RequestId(5));
+    sends.note_send_answer(&account, RequestId(5), MessageId(-5));
+    let taken = sends.take_draft_clear(&account, MessageId(-5), slot.draft);
+    assert_eq!(taken.map(|(_, clear)| clear.sent), Some(None));
+
+    let claim = sends.reserve_draft_clear(&slot, chat);
+    sends.release_draft_clear(&slot, claim);
+    assert!(!sends.has_draft_clear(&slot), "a send that never went");
+    // An ack with nothing held finds nothing.
     assert_eq!(
-        text.map(|(_, clear)| clear.sent),
-        Some(Some("text".to_string()))
+        sends.take_draft_clear(&account, MessageId(-9), slot.draft),
+        None
     );
-    assert!(sends.has_draft_clear(&slot), "the voice's clear remains");
-    let voice = sends.take_draft_clear(&account, MessageId(-2), slot.draft);
-    assert_eq!(voice.map(|(_, clear)| clear.sent), Some(None));
-    assert!(!sends.has_draft_clear(&slot));
 }

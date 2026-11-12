@@ -243,7 +243,10 @@ impl QuillApp {
             (found, Some(saved)) => {
                 // A PNG: only its header is read, and a held Send goes now.
                 let check = check_photo(&saved);
-                self.composer_sends.reads.media.set_done(saved, check.claim());
+                self.composer_sends
+                    .reads
+                    .media
+                    .set_done(saved, check.claim());
                 found.unwrap_or_default()
             }
         }

@@ -11,12 +11,12 @@
 use super::account_job::StartedOn;
 use super::app::QuillApp;
 use super::composer_sends::SendSlot;
-use super::composer_state::DraftClear;
+use super::composer_state::Reservation;
 use super::recording_state::{CaptureFor, CaptureMedia, StartId};
 use super::status_note::StatusNote;
 use gpui_kit::*;
 use quill::composer::{AttachmentKind, ComposerAttachment, ComposerReplyTo};
-use quill::ids::ChatId;
+use quill::ids::{ChatId, RequestId};
 use quill::lang::{keys, tr};
 use quill::telegram::SendReply;
 use quill::video::{VideoNoteCapture, VideoNoteDraft};
@@ -38,6 +38,9 @@ pub(super) struct SendTarget {
     place: quill::connect::SendPlace,
     reply: Option<ComposerReplyTo>,
     caption: String,
+    /// The draft clear held for this recording from the tap until its send
+    /// goes out or is given up (`settle_claim`).
+    claim: Option<Reservation>,
 }
 
 impl SendTarget {
@@ -55,7 +58,14 @@ impl SendTarget {
             place: Default::default(),
             reply,
             caption: caption.trim().to_owned(),
+            claim: None,
         }
+    }
+
+    /// The target with the claim its tap made on the slot's draft clear.
+    fn claiming(mut self, claim: Reservation) -> Self {
+        self.claim = Some(claim);
+        self
     }
 
     /// The topic and thread of the chat the send goes to.
@@ -147,6 +157,30 @@ impl QuillApp {
         }
     }
 
+    /// Send was tapped: the slot's draft clear is held for the recording
+    /// until its file is ready, so a text sent from the slot meanwhile
+    /// keeps its own.
+    fn reserve_draft_clear_for(&mut self, target: SendTarget) -> SendTarget {
+        let claim = self
+            .composer_sends
+            .reserve_draft_clear(&target.slot, target.chat_id);
+        target.claiming(claim)
+    }
+
+    /// The recording's send went out as `request` (its clear waits for the
+    /// ack), or did not go (the clear it held goes).
+    fn settle_claim(&mut self, target: &SendTarget, request: Option<RequestId>) {
+        let Some(claim) = target.claim else {
+            return;
+        };
+        match request {
+            Some(request) => self
+                .composer_sends
+                .arm_draft_clear(&target.slot, claim, request),
+            None => self.composer_sends.release_draft_clear(&target.slot, claim),
+        }
+    }
+
     /// The send failed: put the caption and reply back unless the user
     /// started something new in the meantime.
     fn restore_composer_after_failed_send(
@@ -182,6 +216,7 @@ impl QuillApp {
         let Some(capture) = self.take_voice_capture() else {
             return;
         };
+        let target = self.reserve_draft_clear_for(target);
         self.consume_composer_for_send(&target, true, window, cx);
         let finish = capture.close_microphone();
         self.sync_voice_action();
@@ -222,6 +257,7 @@ impl QuillApp {
         if let Some(path) = path {
             let _ = std::fs::remove_file(path);
         }
+        self.settle_claim(target, None);
         let key = if self.on_screen(&target.account) {
             window_closed
         } else {
@@ -239,13 +275,27 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let request = self.send_voice_draft(result, target, play_once, window, cx);
+        self.settle_claim(target, request);
+    }
+
+    /// The request the voice note went out as, `None` when it did not go.
+    fn send_voice_draft(
+        &mut self,
+        result: Result<VoiceDraft, String>,
+        target: &SendTarget,
+        play_once: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<RequestId> {
+        let mut sent_as = None;
         let draft = match result {
             Ok(draft) => draft,
             Err(err) => {
                 self.restore_composer_after_failed_send(target, window, cx);
                 self.set_note(StatusNote::error(err));
                 cx.notify();
-                return;
+                return None;
             }
         };
         if let Some(live) = self.live.as_mut() {
@@ -259,10 +309,7 @@ impl QuillApp {
             );
             if let Ok(request) = sent {
                 self.set_note(StatusNote::silent(tr(keys::Q_MISC_SENDING_VOICE_NOTE)));
-                self.composer_sends.set_draft_clear(
-                    &target.slot,
-                    Some(DraftClear::whole_composer(target.chat_id).asked([request])),
-                );
+                sent_as = Some(request);
             } else {
                 let _ = std::fs::remove_file(&draft.path);
                 self.restore_composer_after_failed_send(target, window, cx);
@@ -289,6 +336,7 @@ impl QuillApp {
             )));
         }
         cx.notify();
+        sent_as
     }
 
     /// Send the finished recording, whichever mode is active, from the
@@ -319,6 +367,7 @@ impl QuillApp {
         let Some(capture) = self.recording.take_video() else {
             return;
         };
+        let target = self.reserve_draft_clear_for(target);
         self.consume_composer_for_send(&target, false, window, cx);
         self.sync_voice_action();
         cx.notify();
@@ -351,13 +400,26 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let request = self.send_video_note_draft(result, target, window, cx);
+        self.settle_claim(target, request);
+    }
+
+    /// The request the round video went out as, `None` when it did not go.
+    fn send_video_note_draft(
+        &mut self,
+        result: Result<VideoNoteDraft, String>,
+        target: &SendTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<RequestId> {
+        let mut sent_as = None;
         let draft = match result {
             Ok(draft) => draft,
             Err(err) => {
                 self.restore_composer_after_failed_send(target, window, cx);
                 self.set_note(StatusNote::error(err));
                 cx.notify();
-                return;
+                return None;
             }
         };
         if let Some(live) = self.live.as_mut() {
@@ -369,10 +431,7 @@ impl QuillApp {
             );
             if let Ok(request) = sent {
                 self.set_note(StatusNote::silent(tr(keys::Q_MISC_SENDING_VIDEO_NOTE)));
-                self.composer_sends.set_draft_clear(
-                    &target.slot,
-                    Some(DraftClear::whole_composer(target.chat_id).asked([request])),
-                );
+                sent_as = Some(request);
             } else {
                 let _ = std::fs::remove_file(&draft.path);
                 self.restore_composer_after_failed_send(target, window, cx);
@@ -406,6 +465,7 @@ impl QuillApp {
             )));
         }
         cx.notify();
+        sent_as
     }
 
     /// Start a round video capture for `purpose`. Finding the encoder and

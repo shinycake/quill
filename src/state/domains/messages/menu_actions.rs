@@ -49,10 +49,7 @@ impl MenuActions {
     /// or error lands. An answer already known (kept while a gallery row
     /// refreshes it) stays; a newer ask replaces an older one in flight.
     pub fn asked(&mut self, chat_id: ChatId, message_id: MessageId, request: RequestId) {
-        if matches!(
-            self.find(chat_id, message_id),
-            None | Some(Know::Asked(_))
-        ) {
+        if matches!(self.find(chat_id, message_id), None | Some(Know::Asked(_))) {
             self.put(chat_id, message_id, Know::Asked(request));
         }
     }

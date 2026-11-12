@@ -16,7 +16,7 @@
 
 use super::app::QuillApp;
 use super::composer::LeftSend;
-use super::composer_state::DraftClear;
+use super::composer_state::{DraftClear, Reservation};
 use quill::composer::{
     ComposerAttachment, ComposerScheduling, DraftKey, LinkPreviewChoice, PreviewMediaSize,
     RenderToken,
@@ -281,13 +281,11 @@ struct AccountSends {
     /// `default_disable_notification`, per chat (tdesktop's silent toggle
     /// is the channel's own setting).
     silent: HashMap<ChatId, bool>,
-    /// The sends whose acknowledgement clears their slot's draft, whichever
-    /// window sent them (a slot is one chat and topic of this account). A
-    /// slot holds one entry per send in flight, so a voice note encoding
-    /// beside a text send keeps both. An entry goes with its ack or
-    /// failure; a newer send of the slot replaces the older ones that named
-    /// no request; the account's go with it.
-    draft_clears: HashMap<DraftKey, Vec<DraftClear>>,
+    /// The sends whose acknowledgement clears their slot's draft, one per
+    /// slot, whichever window sent them (a slot is one chat and topic of
+    /// this account). An entry goes with its ack; a newer send of the slot
+    /// replaces it; the account's goes with it.
+    draft_clears: HashMap<DraftKey, DraftClear>,
     /// Rich sends of chat views since replaced, still waiting for TDLib's
     /// answer (`LeftSend`); each goes with its answer.
     left_sends: Vec<LeftSend>,
@@ -297,17 +295,6 @@ struct AccountSends {
 const KEPT_LEFT_SENDS: usize = 8;
 
 impl AccountSends {
-    /// A slot with no clear left holds no entry.
-    fn drop_slot_if_empty(&mut self, slot: DraftKey) {
-        if self
-            .draft_clears
-            .get(&slot)
-            .is_some_and(|clears| clears.is_empty())
-        {
-            self.draft_clears.remove(&slot);
-        }
-    }
-
     fn is_empty(&self) -> bool {
         self.slots.is_empty()
             && self.silent.is_empty()
@@ -326,9 +313,53 @@ pub(crate) struct ComposerSends {
     pub(super) prep: super::send_prep::SendPrepState,
     /// What was read about the files of every tray (`send_box_state`).
     pub(super) reads: super::send_box_state::TrayReads,
+    /// The next claim a recording makes on a slot's draft clear.
+    next_claim: u64,
 }
 
 impl ComposerSends {
+    /// A recording's Send was tapped: the slot's draft clear is held for
+    /// it until its file is ready (`arm_draft_clear`), replacing the
+    /// earlier send's, as any send of the slot does. A send made after the
+    /// tap replaces this one, so the recording's ack can never clear what
+    /// that send owns.
+    pub(super) fn reserve_draft_clear(&mut self, slot: &SendSlot, chat: ChatId) -> Reservation {
+        let claim = Reservation(self.next_claim);
+        self.next_claim = self.next_claim.wrapping_add(1);
+        self.set_draft_clear(slot, Some(DraftClear::reserved(chat, claim)));
+        claim
+    }
+
+    /// The recording `claim` was sent as `request`: its clear waits for the
+    /// ack, unless a newer send of the slot took it over meanwhile.
+    pub(super) fn arm_draft_clear(
+        &mut self,
+        slot: &SendSlot,
+        claim: Reservation,
+        request: RequestId,
+    ) {
+        if let Some(clear) = self
+            .accounts
+            .get_mut(&slot.account)
+            .and_then(|account| account.draft_clears.get_mut(&slot.draft))
+        {
+            clear.arm(claim, request);
+        }
+    }
+
+    /// The recording `claim` was not sent: its held clear goes, and a newer
+    /// send's stays.
+    pub(super) fn release_draft_clear(&mut self, slot: &SendSlot, claim: Reservation) {
+        let held = self
+            .accounts
+            .get(&slot.account)
+            .and_then(|account| account.draft_clears.get(&slot.draft))
+            .is_some_and(|clear| clear.is_reserved_by(claim));
+        if held {
+            self.set_draft_clear(slot, None);
+        }
+    }
+
     /// A send whose chat view went waits on its own. Returns the oldest one
     /// when the account holds too many: the caller forgets its ack.
     pub(super) fn keep_left_send(&mut self, send: LeftSend) -> Option<LeftSend> {
@@ -477,22 +508,16 @@ impl ComposerSends {
     }
 
     /// A send of `slot` was made: its ack clears the slot's draft. `None`
-    /// when the send leaves the draft alone, which also drops the earlier
-    /// entries of the slot.
+    /// when the send leaves the draft alone, which also drops an earlier
+    /// send's entry of the slot.
     pub(super) fn set_draft_clear(&mut self, slot: &SendSlot, clear: Option<DraftClear>) {
         match clear {
             Some(clear) => {
-                let clears = self
-                    .accounts
+                self.accounts
                     .entry(slot.account.clone())
                     .or_default()
                     .draft_clears
-                    .entry(slot.draft)
-                    .or_default();
-                // Only a slot match finds an unasked clear, and the newest
-                // send owns the slot; sends with requests keep their own.
-                clears.retain(|earlier| !earlier.is_unasked());
-                clears.push(clear);
+                    .insert(slot.draft, clear);
             }
             None => {
                 if let Some(account) = self.accounts.get_mut(&slot.account) {
@@ -512,7 +537,7 @@ impl ComposerSends {
         made: MessageId,
     ) {
         if let Some(sends) = self.accounts.get_mut(account) {
-            for clear in sends.draft_clears.values_mut().flatten() {
+            for clear in sends.draft_clears.values_mut() {
                 clear.answered(request, made);
             }
         }
@@ -533,37 +558,31 @@ impl ComposerSends {
         ack_slot: DraftKey,
     ) -> Option<(DraftKey, DraftClear)> {
         let sends = self.accounts.get_mut(account)?;
-        let by_id = sends.draft_clears.iter().find_map(|(slot, clears)| {
-            let index = clears.iter().position(|clear| clear.made(message))?;
-            Some((*slot, index))
-        });
+        let by_id = sends
+            .draft_clears
+            .iter()
+            .find_map(|(slot, clear)| clear.made(message).then_some(*slot));
         let taken = match by_id {
-            Some((slot, index)) => {
-                let clears = sends.draft_clears.get_mut(&slot);
-                let taken = clears.and_then(|clears| {
-                    let clear = clears.get_mut(index)?;
+            Some(slot) => {
+                let clear = sends.draft_clears.get_mut(&slot);
+                let taken = clear.map(|clear| {
                     let before = clear.clone();
-                    let acks = clear.ack(message);
-                    let settled = clear.is_settled();
-                    if settled {
-                        clears.remove(index);
-                    }
-                    Some(acks.then_some((slot, before)))
+                    (clear.ack(message), before, clear.is_settled())
                 });
-                sends.drop_slot_if_empty(slot);
-                taken.flatten()
+                taken.and_then(|(clears, before, settled)| {
+                    if settled {
+                        sends.draft_clears.remove(&slot);
+                    }
+                    clears.then_some((slot, before))
+                })
             }
             None => sends
                 .draft_clears
-                .get_mut(&ack_slot)
-                .and_then(|clears| {
-                    let index = clears.iter().position(DraftClear::is_unasked)?;
-                    Some(clears.remove(index))
-                })
-                .map(|clear| {
-                    sends.drop_slot_if_empty(ack_slot);
-                    (ack_slot, clear)
-                }),
+                .get(&ack_slot)
+                .is_some_and(DraftClear::is_unasked)
+                .then(|| sends.draft_clears.remove(&ack_slot))
+                .flatten()
+                .map(|clear| (ack_slot, clear)),
         };
         self.drop_if_empty(account);
         taken
@@ -580,29 +599,27 @@ impl ComposerSends {
         let Some(sends) = self.accounts.get_mut(account) else {
             return;
         };
-        let by_id = sends.draft_clears.iter().find_map(|(slot, clears)| {
-            let index = clears.iter().position(|clear| clear.made(message))?;
-            Some((*slot, index))
-        });
+        let by_id = sends
+            .draft_clears
+            .iter()
+            .find_map(|(slot, clear)| clear.made(message).then_some(*slot));
         match by_id {
-            Some((slot, index)) => {
-                if let Some(clears) = sends.draft_clears.get_mut(&slot)
-                    && let Some(clear) = clears.get_mut(index)
-                {
+            Some(slot) => {
+                if let Some(clear) = sends.draft_clears.get_mut(&slot) {
                     clear.fail(message);
                     if clear.is_settled() {
-                        clears.remove(index);
+                        sends.draft_clears.remove(&slot);
                     }
                 }
-                sends.drop_slot_if_empty(slot);
             }
             None => {
-                if let Some(clears) = sends.draft_clears.get_mut(&ack_slot)
-                    && let Some(index) = clears.iter().position(DraftClear::is_unasked)
+                if sends
+                    .draft_clears
+                    .get(&ack_slot)
+                    .is_some_and(DraftClear::is_unasked)
                 {
-                    clears.remove(index);
+                    sends.draft_clears.remove(&ack_slot);
                 }
-                sends.drop_slot_if_empty(ack_slot);
             }
         }
         self.drop_if_empty(account);

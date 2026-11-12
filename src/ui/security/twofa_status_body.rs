@@ -294,7 +294,11 @@ impl QuillApp {
                 .child(tr(keys::Q_PREFS_SENT_SECURELY_TO_TELEGRAM)),
         )
         .child(self.twofa_forgot_link(cx))
-        .child(self.twofa_form_buttons(cx, TwofaForm::Password(PasswordForm::Disable), tr(keys::Q_PREFS_TURN_OFF)))
+        .child(self.twofa_form_buttons(
+            cx,
+            TwofaForm::Password(PasswordForm::Disable),
+            tr(keys::Q_PREFS_TURN_OFF),
+        ))
     }
 
     /// Slice A2: recovery-email form — current password + new address
