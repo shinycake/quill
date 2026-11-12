@@ -439,7 +439,7 @@ fn a_lost_data_send_ends_with_an_error(cx: &mut TestAppContext) {
             .data_sends
             .push(quill::ids::RequestId(987_654));
         assert!(
-            app.poll_mini_apps(cx) == false,
+            !app.poll_mini_apps(cx),
             "the poll has nothing left to wait for"
         );
         assert!(app.mini_apps.data_sends.is_empty());

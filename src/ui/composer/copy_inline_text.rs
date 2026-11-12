@@ -473,15 +473,15 @@ impl QuillApp {
             let result = live.driver.delete_confirmed(&confirm);
             // The message dissolves only once the delete went out: a refused
             // send leaves it on screen, and so does a refused delete.
-            if let Ok(request) = result.as_ref().copied() {
-                if self.begin_vanish(
+            if let Ok(request) = result.as_ref().copied()
+                && self.begin_vanish(
                     confirm.chat_id,
                     &[confirm.message_id],
                     Deletion::Sent(request),
-                ) && let Some(live) = self.live.as_mut()
-                {
-                    live.driver.session.acks.expect(request);
-                }
+                )
+                && let Some(live) = self.live.as_mut()
+            {
+                live.driver.session.acks.expect(request);
             }
             self.set_note(match result {
                 Ok(_) => StatusNote::silent(tr(keys::Q_CHAT_DELETING)),

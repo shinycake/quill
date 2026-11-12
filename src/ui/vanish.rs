@@ -45,7 +45,7 @@ const VANISH_WAIT: Duration = Duration::from_secs(10);
 
 mod painted;
 mod settle;
-use settle::{held_request, settle_ghosts};
+use settle::held_request;
 
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
@@ -771,7 +771,7 @@ impl QuillApp {
 
     /// Settle the dissolves with `acks`, as the poll does with the session's.
     pub(super) fn settle_ghosts_for_test(&self, acks: &mut quill::state::RequestAcks) {
-        settle_ghosts(&self.history.vanishing, self.vanish_clock_now(), acks);
+        settle::settle_ghosts(&self.history.vanishing, self.vanish_clock_now(), acks);
     }
 
     /// Whether each dissolve held a painted row to start its dust from.
