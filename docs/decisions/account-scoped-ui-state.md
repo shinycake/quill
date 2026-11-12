@@ -10225,7 +10225,7 @@ orders), `deep_link_routes_tests` (seek stays with its account).
 
 | Ids | What changed |
 | --- | --- |
-| g-073, g-075, g-074, g-077, g-079, g-072, g-080, g-078, g-085, g-071, g-068, g-084, g-083, g-396, g-390, g-070, g-393 | Enums that are a derived view or a fact, not a stage, say so by name or stop looking like work in flight: `SearchStatus` is `SearchStateView`, `StoryCardState` is `StoryCardView`, `ReplyState` is `ReplyTargetView`, `ClipState` is `ClipView`, `PaneMode` is `PaneView`, `MenuFile` is `MenuFileView`, `StartupStep` is `StartupOutcome`; `SendState` is `Delivered` / `Unconfirmed` / `Failed`, `ShutdownPhase::Running` is `Active`, `WorkerLife::Running` is `Alive`, `PlayHead::Waiting` is `Unstarted`, `Stage::Opening` is gone (round 4 folded it into `Stage::Decoding { by }`, the thread the clip was handed to), `ThreadStatus::Starting` is `ChatOpen`, `SuggestedPostState::Pending` is `Proposed`, `TonConnectRequestState::Pending` is `Unanswered`, `DebugConfirm::Asking` is `Open`. The two `allow` lines for `MenuFile` and `StartupStep` are gone. |
+| g-073, g-075, g-074, g-077, g-079, g-072, g-080, g-078, g-085, g-071, g-068, g-084, g-083, g-396, g-390, g-070, g-393 | Enums that are a derived view or a fact, not a stage, say so by name or stop looking like work in flight: `SearchStatus` is `SearchStateView`, `StoryCardState` is `StoryCardView`, `ReplyState` is `ReplyTargetView`, `ClipState` is `ClipView`, `MenuFile` is `MenuFileView`; `PaneMode` and `StartupStep` keep their names (round 4 undid the renames; `PaneMode::Connecting` is in the baseline, `StartupStep::Waiting` has its allow line); `SendState` is `Delivered` / `Unconfirmed` / `Failed`, `ShutdownPhase::Running` is `Active`, `WorkerLife::Running` is `Alive`, `PlayHead::Waiting` is `Unstarted`, `Stage::Opening` is gone (round 4 folded it into `Stage::Decoding { by }`, the thread the clip was handed to), `ThreadStatus::Starting` is `ChatOpen`, `SuggestedPostState::Pending` is `Proposed`, `TonConnectRequestState::Pending` is `Unanswered`, `DebugConfirm::Asking` is `Open`. The `allow` line for `MenuFile` is gone. |
 | g-079, g-076 | `StickerSetViewStage::Loading { request }`: the view is made after its request exists (`view_sticker_set`, `fetch_attached_sticker_sets`), `accept_sticker_set_view` and `fail_sticker_set_view` act on that request only, and the error path hands them `pending.id`. `SetFiles` is gone: `download_file` already skips a file local, in flight or stalled, so the upkeep asks again without a flag (test `a_refused_preview_download_is_asked_again_for_the_set_view`). |
 | g-081, g-082, 10-003 | `StoryPageOpState` is `Checking`/`Sending`/`Succeeded`/`Failed { request, .. }`; `StoryPageOp` has no `request` field beside its state. The cap no longer drops a call in flight (finished ones go first; a list twice the cap sheds the oldest). |
 | g-086 | `AccentRead::Reading { deadline }`: a read still out past twice the query limit is taken for lost and another may start. |
@@ -10286,9 +10286,11 @@ sweep_r2_13}`, `ui::ai_compose::dialog_tests`, `ui::agent_driver_tests`
 
 
 Round 3 of r4-06: the bundle adds no allow or baseline line (the `pushed` guard
-rule and its three allows are gone; `WorkerTicket` is the stage-enums carrier
-for the thread that ends a sticker clip's `Opening` / `Decoding`). A failed
-history date lookup is a status note, and a chat window's "no media" note is
+rule and its three allows are gone; `WorkerTicket` was the stage-enums carrier
+for the thread that ends a sticker clip's `Opening` / `Decoding`, superseded
+in round 4: both are gone, the clip is `Stage::Decoding { by: Taking }`). A
+failed history date lookup was a status note (superseded in round 4: it is
+`JumpLookup::Failed`, shown in the window that asked), and a chat window's "no media" note is
 its own. The poll option menu, edit, delete-account and ban answers match the
 request their stage holds; the story lists, the trending sticker sets and the
 mini-app launch are one value each with the request in the stage; the invite
@@ -10301,7 +10303,8 @@ thread cannot name another thread's clip, and `check-stage-enums.py` is the
 base script with the base `Decoding` allow line. `Fetch::pushed` and
 `Fetch::set_local` are gone: a push is not an answer, so `Fetch::replace_data`
 swaps the held value and leaves the stage and its request (the ton wallet's
-`ok` then settles the fetch from the pushed state); `explorer_answered` no
+push settles the load in flight; round 5 made the `ok` fail a load that no
+update settled); `explorer_answered` no
 longer writes from another request's answer. A failed date lookup is kept with
 its window (`JumpLookup::Failed`, taken by the poll) and its note shows in the
 window that asked (test `a_failed_date_lookup_toasts_in_the_window_that_asked`).
@@ -10317,3 +10320,12 @@ in `main.rs`): those files are the base again, and the baseline line of
 `PaneMode::Connecting` and the allow line of `StartupStep::Waiting` are back
 byte for byte. Earlier rows that name `PaneView` or `StartupOutcome` are
 superseded by this.
+
+#### Fix round 5 (r4-06)
+
+| Item | Change |
+|---|---|
+| `check-request-match --strict` | `--prune` removed the stale line `purpose:ConnectDriver::fetch_trending_stickers 1`; no line was added or reworded. |
+| 12-003, `apply_ton_wallet_ok` | An `updateTonWalletState` pushed while `own` is `Loading { request: Some(r) }` answers that load (`own.answered(Some(r), state)`); otherwise `Fetch::replace_data` keeps the stage. The `ok` of `loadTonWalletState` only fails a load still waiting, so a state an earlier load left no longer settles it and the fetch is asked again. Tests `the_update_then_the_ok_settles_the_load` and `an_ok_with_no_update_for_this_load_fails_it_despite_an_earlier_state`. |
+| g-073 row, round-3 paragraph | Written as the code is: no `PaneView` / `StartupOutcome`, the `StartupStep::Waiting` allow line stays, `WorkerTicket` and `Opening` are gone, and a failed date lookup is `JumpLookup::Failed` in the asking window. |
+| `Hotspot-change` trailer of 4fbce02bf | History is not rewritten; the integrator squashes r4-06 with a message that has no such trailer. |
