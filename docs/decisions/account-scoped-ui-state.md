@@ -10262,3 +10262,5 @@ and `sweep_r4_08` (countries not asked again; share folder waits for a delete),
 `folders::box_stage_tests`
 (second addlist link waits), `deep_link_routes_tests` (seek deadline owned),
 `draft_timer`, `event_log_tests`, `emoji_effect` (wait deadline).
+
+Fix round 3 (review `r4-08-r2`): a link queued behind a closed folder add opens only when no newer box is up, the newest queued link wins, and an evicted add still opens its link (`folder_share/closed.rs`). A spent GIF re-ask draws "could not update" instead of a blank tab (`gif_status_text`). `begin_opening` takes `OpeningFrom::{SendBox, Elsewhere}` and every open sets the recipient from it. `QuitGate::Held` keeps the alert's dialog id (new `last_dialog_id` / `close_dialog_by_id` in the vendored kit) so the hold's end closes only that alert. `PollAddOption` drops its refusal on the next Add. `EditorPurpose::MessageEdit` carries the `EditId`. `ScrollGoal::ThreadRoot { thread_id }` ends when another thread is open. `GroupCallUi::level_seen` is gone (`retarget` ignores an unchanged target).
