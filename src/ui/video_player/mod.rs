@@ -39,6 +39,8 @@ pub(crate) mod surface;
 mod transport;
 
 #[cfg(target_os = "macos")]
+mod avplayer_open;
+#[cfg(target_os = "macos")]
 mod backend_avplayer;
 
 #[cfg(test)]
@@ -291,7 +293,7 @@ impl VideoPlayer {
         Ok(player)
     }
 
-    /// A player over an opened backend (no open poll: `pull` polls too).
+    /// A player over an opened backend (no open wake: its frames ask for the picture a short while).
     fn from_backend(backend: Box<dyn Backend>, duration_hint: Option<f64>) -> Self {
         let now = Instant::now();
         Self::assemble(
@@ -404,7 +406,7 @@ impl VideoPlayer {
     /// picture, keeping the handle: the element paints nothing, asks for
     /// no frames, and still counts being painted in view, so an inline
     /// tile released off screen can be reopened once it is seen again
-    /// (`inline_players`). The open poll ends with the state.
+    /// (`inline_players`). The open wake ends with the state.
     pub(crate) fn hibernate(&self) {
         self.sleep(false);
     }
@@ -761,9 +763,7 @@ impl VideoPlayer {
         self.read_inner(|inner| {
             let transport = inner.machine.snapshot(now);
             let awaiting = inner.life.awaiting().is_some_and(|since| {
-                transport
-                    .state
-                    .awaits_picture(now.saturating_duration_since(since))
+                transport::awaits_picture(now.saturating_duration_since(since))
             });
             // A surface the renderer hasn't drawn yet, or refused: another
             // frame settles it (drawn, or replaced by an image), even while

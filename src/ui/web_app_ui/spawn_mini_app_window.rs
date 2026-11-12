@@ -123,6 +123,7 @@ impl QuillApp {
             settings_button: false,
             popups: HashMap::new(),
             popup_seq: 0,
+            launch_window: self.asking_window().flatten(),
             write_access: launch_flow::WriteAccess::Idle,
             privacy_policy_url,
             in_attachment_menu,
@@ -418,21 +419,24 @@ impl QuillApp {
             }
             WriteAccessResult::NeedsConsent => {
                 let name = window.launch.bot_name.clone();
-                let popup = window.show_popup(
-                    PopupPurpose::WriteAccess,
-                    popup(
-                        tr(keys::Q_MEDIA_ALLOW_MESSAGING),
-                        tr_with(
-                            keys::Q_MEDIA_ALLOW_TO_SEND_YOU_MESSAGES,
-                            &[("name", &name.to_string())],
-                        ),
-                        vec![
-                            ("cancel", tr(keys::CANCEL), "cancel"),
-                            ("allow", tr(keys::Q_MEDIA_ALLOW), "default"),
-                        ],
+                // The consent popup replaces the check that asked for it.
+                window.write_access = launch_flow::WriteAccess::Idle;
+                let consent = popup(
+                    tr(keys::Q_MEDIA_ALLOW_MESSAGING),
+                    tr_with(
+                        keys::Q_MEDIA_ALLOW_TO_SEND_YOU_MESSAGES,
+                        &[("name", &name.to_string())],
                     ),
+                    vec![
+                        ("cancel", tr(keys::CANCEL), "cancel"),
+                        ("allow", tr(keys::Q_MEDIA_ALLOW), "default"),
+                    ],
                 );
-                window.write_access = launch_flow::WriteAccess::Asking { popup };
+                if let Some(popup) = self.show_mini_app_popup(None, consent, cx) {
+                    self.with_window(|window| {
+                        window.write_access = launch_flow::WriteAccess::Asking { popup }
+                    });
+                }
             }
         }
         cx.notify();
@@ -489,32 +493,32 @@ impl QuillApp {
                 self.set_status_note(note, cx);
             }
         }
-        self.answer_replaced_popups(cx);
     }
 
-    /// The helper shows one popup at a time, so a newer one (the close
-    /// confirm over a write-access prompt) replaced the others, which never
-    /// get `popup_closed`: each is answered as dismissed, or its request
-    /// would wait unanswered and later ones get "busy".
-    fn answer_replaced_popups(&mut self, cx: &mut Context<Self>) {
-        let replaced: Vec<String> = self
-            .mini_apps
-            .window
-            .as_ref()
-            .map(|window| {
-                let newest = PopupId::new(window.popup_seq);
-                window
-                    .popups
-                    .keys()
-                    .filter(|id| **id != newest)
-                    .map(|id| id.wire())
-                    .collect()
-            })
-            .unwrap_or_default();
-        for id in replaced {
-            let button = String::new();
-            self.handle_shell_event(ShellEvent::PopupClosed { id, button }, cx);
+    /// Shows `popup` to the helper (a plain one remembered by `purpose`, or
+    /// a stage's own, which the stage then holds the id of). The helper shows
+    /// one popup at a time, so the ones it replaced never get `popup_closed`:
+    /// each is answered as dismissed here, or its request would wait
+    /// unanswered and later ones get "busy". `None` with no window.
+    pub(super) fn show_mini_app_popup(
+        &mut self,
+        purpose: Option<PopupPurpose>,
+        popup: Popup,
+        cx: &mut Context<Self>,
+    ) -> Option<PopupId> {
+        let window = self.mini_apps.window.as_mut()?;
+        let shown = match purpose {
+            Some(purpose) => window.show_purpose_popup(purpose, popup),
+            None => window.show_popup(popup),
+        };
+        for replaced in shown.replaced {
+            let event = ShellEvent::PopupClosed {
+                id: replaced.wire(),
+                button: String::new(),
+            };
+            self.handle_shell_event(event, cx);
         }
+        Some(shown.id)
     }
 
     /// A URL the page tried to leave the frame for.
@@ -653,25 +657,23 @@ impl QuillApp {
                 cx.notify();
             }
             WebAppEvent::OpenInvoice { slug } => self.request_mini_app_invoice(slug, cx),
-            WebAppEvent::OpenPopup(spec) => self.with_window(|window| {
-                window.show_popup(
-                    PopupPurpose::App,
-                    Popup {
-                        id: String::new(),
-                        title: spec.title,
-                        message: spec.message,
-                        buttons: spec
-                            .buttons
-                            .into_iter()
-                            .map(|button| PopupButton {
-                                id: button.id,
-                                text: button.text,
-                                kind: button.kind,
-                            })
-                            .collect(),
-                    },
-                );
-            }),
+            WebAppEvent::OpenPopup(spec) => {
+                let app_popup = Popup {
+                    id: String::new(),
+                    title: spec.title,
+                    message: spec.message,
+                    buttons: spec
+                        .buttons
+                        .into_iter()
+                        .map(|button| PopupButton {
+                            id: button.id,
+                            text: button.text,
+                            kind: button.kind,
+                        })
+                        .collect(),
+                };
+                self.show_mini_app_popup(Some(PopupPurpose::App), app_popup, cx);
+            }
             WebAppEvent::RequestWriteAccess => {
                 if waiting_write_access {
                     self.with_window(|window| {
@@ -690,28 +692,26 @@ impl QuillApp {
                     _ => window.emit(BridgeReply::write_access_requested(false)),
                 });
             }
-            WebAppEvent::RequestPhone => self.request_mini_app_phone(),
+            WebAppEvent::RequestPhone => self.request_mini_app_phone(cx),
             WebAppEvent::RequestEmojiStatusAccess => self.request_emoji_status_access(cx),
             WebAppEvent::SetEmojiStatus {
                 custom_emoji_id,
                 duration_secs,
             } => self.request_set_emoji_status(custom_emoji_id, duration_secs, cx),
-            WebAppEvent::ReadTextFromClipboard { req_id } => self.with_window(|window| {
-                window.show_popup(
-                    PopupPurpose::Clipboard { req_id },
-                    popup(
-                        tr(keys::Q_MEDIA_PASTE_FROM_THE_CLIPBOARD),
-                        tr_with(
-                            keys::Q_MEDIA_ASKS_TO_READ_WHAT_YOU,
-                            &[("bot_name", &bot_name.to_string())],
-                        ),
-                        vec![
-                            ("cancel", tr(keys::CANCEL), "cancel"),
-                            ("allow", tr(keys::Q_MEDIA_PASTE), "default"),
-                        ],
+            WebAppEvent::ReadTextFromClipboard { req_id } => {
+                let paste = popup(
+                    tr(keys::Q_MEDIA_PASTE_FROM_THE_CLIPBOARD),
+                    tr_with(
+                        keys::Q_MEDIA_ASKS_TO_READ_WHAT_YOU,
+                        &[("bot_name", &bot_name.to_string())],
                     ),
+                    vec![
+                        ("cancel", tr(keys::CANCEL), "cancel"),
+                        ("allow", tr(keys::Q_MEDIA_PASTE), "default"),
+                    ],
                 );
-            }),
+                self.show_mini_app_popup(Some(PopupPurpose::Clipboard { req_id }), paste, cx);
+            }
             WebAppEvent::SetupClosingBehavior { need_confirmation } => {
                 self.with_window(|window| window.closing_confirmation = need_confirmation);
             }
@@ -775,19 +775,15 @@ impl QuillApp {
         match event {
             ShellEvent::Close { force } => {
                 if closing_confirmation && !force {
-                    self.with_window(|window| {
-                        window.show_popup(
-                            PopupPurpose::CloseConfirm,
-                            popup(
-                                tr(keys::Q_MEDIA_CLOSE_THE_MINI_APP),
-                                tr(keys::Q_MEDIA_CHANGES_YOU_MADE_MAY_NOT).into(),
-                                vec![
-                                    ("cancel", tr(keys::CANCEL), "cancel"),
-                                    ("close", tr(keys::Q_MEDIA_CLOSE_ANYWAY), "destructive"),
-                                ],
-                            ),
-                        );
-                    });
+                    let confirm = popup(
+                        tr(keys::Q_MEDIA_CLOSE_THE_MINI_APP),
+                        tr(keys::Q_MEDIA_CHANGES_YOU_MADE_MAY_NOT).into(),
+                        vec![
+                            ("cancel", tr(keys::CANCEL), "cancel"),
+                            ("close", tr(keys::Q_MEDIA_CLOSE_ANYWAY), "destructive"),
+                        ],
+                    );
+                    self.show_mini_app_popup(Some(PopupPurpose::CloseConfirm), confirm, cx);
                 } else {
                     self.close_mini_app_window(cx);
                 }
@@ -826,43 +822,19 @@ impl QuillApp {
                 let Some(popup) = PopupId::from_wire(&id) else {
                     return;
                 };
-                let Some(purpose) = self
+                let purpose = self
                     .mini_apps
                     .window
                     .as_mut()
-                    .and_then(|window| window.popups.remove(&popup))
-                else {
+                    .and_then(|window| window.popups.remove(&popup));
+                let Some(purpose) = purpose else {
+                    self.answer_stage_popup(popup, &button, cx);
                     return;
                 };
                 match purpose {
                     PopupPurpose::App => self.with_window(|window| {
                         window.emit(BridgeReply::popup_closed(&button));
                     }),
-                    PopupPurpose::WriteAccess => {
-                        // Only the popup the stage opened answers it.
-                        let asked = self.mini_apps.window.as_ref().is_some_and(|window| {
-                            window.write_access == launch_flow::WriteAccess::Asking { popup }
-                        });
-                        if !asked {
-                            return;
-                        }
-                        let sent = (button == "allow")
-                            .then(|| {
-                                self.live
-                                    .as_mut()
-                                    .map(|live| live.driver.allow_bot_to_send_messages(bot_id))
-                            })
-                            .flatten();
-                        self.with_window(|window| match sent {
-                            Some(Ok(request)) => {
-                                window.write_access = launch_flow::WriteAccess::Allowing(request)
-                            }
-                            _ => {
-                                window.write_access = launch_flow::WriteAccess::Idle;
-                                window.emit(BridgeReply::write_access_requested(false));
-                            }
-                        });
-                    }
                     PopupPurpose::Clipboard { req_id } => {
                         let text = (button == "allow")
                             .then(|| cx.read_from_clipboard().and_then(|item| item.text()))
@@ -879,13 +851,43 @@ impl QuillApp {
                             self.close_mini_app_window(cx);
                         }
                     }
-                    PopupPurpose::EmojiStatusAccess => {
-                        self.answer_emoji_status_access(popup, &button, cx);
-                    }
-                    PopupPurpose::EmojiStatus => self.answer_set_emoji_status(popup, &button, cx),
-                    PopupPurpose::Phone => self.answer_phone_prompt(popup, &button, cx),
                 }
             }
+        }
+    }
+
+    /// A popup no plain purpose was kept for: the stage that holds its id,
+    /// if any, takes the answer. An id no stage holds is nobody's.
+    fn answer_stage_popup(&mut self, popup: PopupId, button: &str, cx: &mut Context<Self>) {
+        let Some((owner, bot_id)) = self.mini_apps.window.as_ref().and_then(|window| {
+            window
+                .popup_owner(popup)
+                .map(|owner| (owner, window.launch.bot_user_id))
+        }) else {
+            return;
+        };
+        match owner {
+            PopupOwner::WriteAccess => {
+                let sent = (button == "allow")
+                    .then(|| {
+                        self.live
+                            .as_mut()
+                            .map(|live| live.driver.allow_bot_to_send_messages(bot_id))
+                    })
+                    .flatten();
+                self.with_window(|window| match sent {
+                    Some(Ok(request)) => {
+                        window.write_access = launch_flow::WriteAccess::Allowing(request)
+                    }
+                    _ => {
+                        window.write_access = launch_flow::WriteAccess::Idle;
+                        window.emit(BridgeReply::write_access_requested(false));
+                    }
+                });
+            }
+            PopupOwner::EmojiAccess => self.answer_emoji_status_access(popup, button, cx),
+            PopupOwner::EmojiStatus => self.answer_set_emoji_status(popup, button, cx),
+            PopupOwner::Phone => self.answer_phone_prompt(popup, button, cx),
         }
     }
 

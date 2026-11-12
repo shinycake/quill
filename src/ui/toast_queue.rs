@@ -97,6 +97,10 @@ enum Footer {
     /// The note whose toast was queued last; current while that toast is
     /// on screen or waiting, blank once it is over.
     Toasted(StatusNote),
+    /// A toast-kind note whose toast was dropped because no session exists
+    /// yet (the footer line shows it instead). The first frame with a session
+    /// ([`ToastQueue::advance`]) blanks it, as a toast over.
+    Kept(StatusNote),
 }
 
 impl Default for Footer {
@@ -132,7 +136,7 @@ impl ToastQueue {
     /// message set again shows again.
     pub(crate) fn note(&self) -> &StatusNote {
         match &self.footer {
-            Footer::Plain(note) => note,
+            Footer::Plain(note) | Footer::Kept(note) => note,
             Footer::Toasted(note) if self.holds(note) => note,
             Footer::Toasted(_) => &NO_NOTE,
         }
@@ -166,12 +170,24 @@ impl ToastQueue {
     /// Drops queued toasts without touching the current note: the footer
     /// line shows that note while there is no session.
     pub(crate) fn drop_toasts(&mut self) {
-        *self = Self::with_note(self.note().clone());
+        let note = self.note().clone();
+        let footer = match (&self.footer, note.is_toast()) {
+            (Footer::Plain(_), _) => Footer::Plain(note),
+            (_, true) => Footer::Kept(note),
+            (_, false) => Footer::Plain(note),
+        };
+        *self = Self {
+            footer,
+            ..Self::default()
+        };
     }
 
     /// Advances the timers to `now`. The current note follows its toast
     /// ([`Self::note`]).
     pub(crate) fn advance(&mut self, now: Instant) {
+        if matches!(self.footer, Footer::Kept(_)) {
+            self.footer = Footer::default();
+        }
         self.tick(now);
     }
 
@@ -627,5 +643,18 @@ mod tests {
         assert_eq!(queue.visible(), None);
         queue.clear_note();
         assert!(queue.note().text().is_empty());
+    }
+
+    #[test]
+    fn a_note_kept_before_sign_in_is_blank_with_a_session_and_progress_shows() {
+        let t0 = Instant::now();
+        let mut queue = ToastQueue::default();
+        queue.set_note_in(StatusNote::error("sign-in failed"), None, t0);
+        queue.drop_toasts();
+        assert_eq!(queue.note().text(), "sign-in failed");
+        queue.advance(secs(t0, 1));
+        assert!(queue.note().text().is_empty());
+        queue.set_note_in(StatusNote::silent("sending"), None, secs(t0, 2));
+        assert_eq!(queue.note().text(), "sending");
     }
 }

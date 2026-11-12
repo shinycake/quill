@@ -342,6 +342,39 @@ impl QuillApp {
     /// is missing, follow a changed target language, stop when the bar is
     /// no longer offered). Returns whether anything changed.
     pub(in crate::ui) fn pump_translation(&mut self) -> bool {
+        let refused = self.end_refused_hide_toast();
+        self.pump_translation_pass() || refused
+    }
+
+    /// A Hide that TDLib refused is put back (`RequestRollback::
+    /// ChatIsTranslatable`), so a "hidden, Undo" toast over a bar that
+    /// shows again is over: it goes, and the note says the hide failed.
+    /// True when it ended.
+    fn end_refused_hide_toast(&mut self) -> bool {
+        let Some(toast) = self.translate.toast.toast() else {
+            return false;
+        };
+        let ToastAction::ShowBar = toast.action else {
+            return false;
+        };
+        let chat_id = toast.chat_id;
+        let shown_again = self.session().is_some_and(|session| {
+            session.chat_is_translatable(chat_id)
+                && !self
+                    .preferences
+                    .translate
+                    .prefs
+                    .bar_hidden(&session.account, chat_id.0)
+        });
+        if !shown_again {
+            return false;
+        }
+        self.translate.toast = ToastStage::None;
+        self.set_note(StatusNote::error(tr(keys::Q_TRANSLATE_HIDE_FAILED)));
+        true
+    }
+
+    fn pump_translation_pass(&mut self) -> bool {
         // Only the chats some window shows keep their scan. This runs before
         // every early return: a chat that was closed, or left for one that
         // is not translated, must lose its scan, or coming back to it would
@@ -443,11 +476,17 @@ impl QuillApp {
                             && text.chars().any(char::is_alphabetic)
                     })
                 })
-                .filter(|m| session.needs_translation(chat_id, m.id, model.to))
+                .filter(|m| session.translation_unsettled(chat_id, m.id, model.to))
                 .map(|m| m.id)
                 .collect();
+            // The scan keeps every unsettled message, failed ones that ran
+            // out of attempts included: a reconnect gives them back.
             scan.record(key, revision, found.iter().map(|id| id.0).collect());
-            found.into_iter().take(room).collect()
+            found
+                .into_iter()
+                .filter(|id| session.needs_translation(chat_id, *id, model.to))
+                .take(room)
+                .collect()
         };
         self.translate.pump.insert(chat_id.0, scan);
         let Some(live) = self.live.as_mut() else {

@@ -25,7 +25,7 @@ use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::*;
 use gpui_kit::*;
-use popups::{PopupId, PopupPurpose};
+use popups::{PopupId, PopupOwner, PopupPurpose, Shown};
 use quill::deep_link_types::is_telegram_link;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
@@ -141,8 +141,13 @@ pub(super) struct MiniAppWindow {
     /// The app asked to confirm before it closes (`setup_closing_behavior`).
     closing_confirmation: bool,
     settings_button: bool,
+    /// The popups no stage waits on, by what they were for. A stage's own
+    /// popup is not here: the stage holds the id.
     popups: HashMap<PopupId, PopupPurpose>,
     popup_seq: u64,
+    /// The window (`None`: the main window) whose flow opened the app: the
+    /// poll's steps and the helper's events open their boxes and notes there.
+    launch_window: Option<ChatId>,
     write_access: launch_flow::WriteAccess,
     privacy_policy_url: Option<String>,
     in_attachment_menu: bool,
@@ -193,18 +198,64 @@ impl MiniAppWindow {
         });
     }
 
-    /// Show a popup; the stage that waits for its answer holds the id.
-    fn show_popup(&mut self, purpose: PopupPurpose, popup_without_id: Popup) -> PopupId {
+    /// Every popup the helper is still showing: the plain ones and the ones
+    /// a stage waits on.
+    fn open_popups(&self) -> Vec<PopupId> {
+        let stages = [
+            match self.write_access {
+                launch_flow::WriteAccess::Asking { popup } => Some(popup),
+                _ => None,
+            },
+            self.emoji.access_popup(),
+            self.emoji.status_popup(),
+            self.phone.popup(),
+        ];
+        self.popups
+            .keys()
+            .copied()
+            .chain(stages.into_iter().flatten())
+            .collect()
+    }
+
+    /// The stage that holds `popup`, asked stage by stage.
+    fn popup_owner(&self, popup: PopupId) -> Option<PopupOwner> {
+        if matches!(self.write_access, launch_flow::WriteAccess::Asking { popup: held } if held == popup)
+        {
+            Some(PopupOwner::WriteAccess)
+        } else if self.emoji.access_popup() == Some(popup) {
+            Some(PopupOwner::EmojiAccess)
+        } else if self.emoji.status_popup() == Some(popup) {
+            Some(PopupOwner::EmojiStatus)
+        } else if self.phone.popup() == Some(popup) {
+            Some(PopupOwner::Phone)
+        } else {
+            None
+        }
+    }
+
+    /// Show a popup; the stage that waits for its answer holds the id, and
+    /// the ones it replaced are in the result.
+    fn show_popup(&mut self, popup_without_id: Popup) -> Shown {
+        let replaced = self.open_popups();
         self.popup_seq += 1;
         let popup_id = PopupId::new(self.popup_seq);
-        self.popups.insert(popup_id, purpose);
         self.send(&HostCommand::ShowPopup {
             popup: Popup {
                 id: popup_id.wire(),
                 ..popup_without_id
             },
         });
-        popup_id
+        Shown {
+            id: popup_id,
+            replaced,
+        }
+    }
+
+    /// Show a popup no stage waits on, remembering what it was for.
+    fn show_purpose_popup(&mut self, purpose: PopupPurpose, popup: Popup) -> Shown {
+        let shown = self.show_popup(popup);
+        self.popups.insert(shown.id, purpose);
+        shown
     }
 
     fn menu(&self) -> Vec<MenuItem> {
@@ -268,24 +319,25 @@ pub(super) struct MiniApps {
     data_sends: Vec<quill::ids::RequestId>,
     /// The poll task, alive while a window is.
     poll: Option<Task<()>>,
-    /// The window the last mini-app flow was started in (`None`: the main
-    /// window): the poll's answers and the helper's events open their
-    /// boxes and links there, not in the main window the poll runs in.
-    from_window: Option<quill::ids::ChatId>,
 }
 
 impl QuillApp {
     /// The window the mini-app flow runs for (`None`: the main window).
     #[cfg(test)]
     pub(in crate::ui) fn mini_app_window(&self) -> Option<quill::ids::ChatId> {
-        self.mini_apps.from_window
+        self.mini_apps
+            .window
+            .as_ref()
+            .and_then(|window| window.launch_window)
     }
 
     /// The chat window `chat` closed: a mini-app flow started there goes
     /// on as the main window's (its boxes and toasts show there).
     pub(in crate::ui) fn mini_app_window_closed(&mut self, chat: quill::ids::ChatId) {
-        if self.mini_apps.from_window == Some(chat) {
-            self.mini_apps.from_window = None;
+        if let Some(window) = self.mini_apps.window.as_mut()
+            && window.launch_window == Some(chat)
+        {
+            window.launch_window = None;
         }
     }
 

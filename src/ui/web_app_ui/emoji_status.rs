@@ -49,12 +49,25 @@ impl EmojiStatusFlow {
     /// A suggested emoji is being looked up: nothing pokes when the lookup
     /// lands, so the poll looks again on a short tick.
     pub(super) fn is_active(&self) -> bool {
-        self.set.as_ref().is_some_and(|request| {
-            matches!(
-                request.stage,
-                SetStage::Deferred | SetStage::Resolving { .. }
-            )
-        })
+        self.set
+            .as_ref()
+            .is_some_and(|request| matches!(request.stage, SetStage::Resolving { .. }))
+    }
+
+    /// The access prompt the flow waits on, if it is up.
+    pub(super) fn access_popup(&self) -> Option<PopupId> {
+        match self.access {
+            AccessStage::Asking { popup } => Some(popup),
+            AccessStage::Idle | AccessStage::Granting(_) => None,
+        }
+    }
+
+    /// The confirmation prompt the flow waits on, if it is up.
+    pub(super) fn status_popup(&self) -> Option<PopupId> {
+        match self.set.as_ref()?.stage {
+            SetStage::Confirming { popup, .. } => Some(popup),
+            SetStage::Resolving { .. } => None,
+        }
     }
 
     #[cfg(test)]
@@ -72,9 +85,6 @@ struct SetRequest {
 }
 
 enum SetStage {
-    /// The shared lookup is busy with another batch: asked again on each
-    /// tick until the lookup goes out or [`RESOLVE_TIMEOUT`] passes.
-    Deferred,
     /// Looking the emoji up; `request` is this lookup's
     /// `getCustomEmojiStickers`, on its way.
     Resolving { request: quill::ids::RequestId },
@@ -149,10 +159,9 @@ impl QuillApp {
             });
             return;
         }
-        self.with_window(|window| {
-            let popup = window.show_popup(PopupPurpose::EmojiStatusAccess, access_popup(&bot_name));
-            window.emoji.access = AccessStage::Asking { popup };
-        });
+        if let Some(popup) = self.show_mini_app_popup(None, access_popup(&bot_name), cx) {
+            self.with_window(|window| window.emoji.access = AccessStage::Asking { popup });
+        }
         cx.notify();
     }
 
@@ -182,11 +191,11 @@ impl QuillApp {
         if !self.premium_for_emoji_status() {
             // tdesktop shows the Premium preview and leaves the box open.
             self.open_premium_at(quill::premium_hub::PremiumFeature::EmojiStatus, cx);
-            self.with_window(|window| {
-                let popup =
-                    window.show_popup(PopupPurpose::EmojiStatusAccess, access_popup(&bot_name));
-                window.emoji.access = AccessStage::Asking { popup };
-            });
+            // The answered prompt is over: the new one replaces nothing of it.
+            self.with_window(|window| window.emoji.access = AccessStage::Idle);
+            if let Some(popup) = self.show_mini_app_popup(None, access_popup(&bot_name), cx) {
+                self.with_window(|window| window.emoji.access = AccessStage::Asking { popup });
+            }
             return;
         }
         let sent = self
@@ -222,15 +231,70 @@ impl QuillApp {
             });
             return;
         }
+        if let Some(alt) = self.suggested_emoji_alt(custom_emoji_id) {
+            self.confirm_suggested_emoji(custom_emoji_id, duration_secs, alt, cx);
+            return;
+        }
+        // Not in the cache: its own lookup, which does not wait behind the
+        // shared one (`ConnectDriver::resolve_suggested_emoji`).
+        let lookup = self
+            .live
+            .as_mut()
+            .map(|live| live.driver.resolve_suggested_emoji(custom_emoji_id));
+        self.with_window(|window| match lookup {
+            Some(Ok(request)) => {
+                window.emoji.set = Some(SetRequest {
+                    custom_emoji_id,
+                    duration_secs,
+                    since: Instant::now(),
+                    stage: SetStage::Resolving { request },
+                });
+            }
+            _ => window.emit(BridgeReply::emoji_status_failed("SUGGESTED_EMOJI_INVALID")),
+        });
+    }
+
+    /// The custom emoji's character, when its sticker is already known.
+    fn suggested_emoji_alt(&self, id: i64) -> Option<String> {
+        self.session().and_then(|session| {
+            session
+                .stickers
+                .emoji
+                .custom_emoji_stickers
+                .iter()
+                .find(|item| item.custom_emoji_id == Some(id))
+                .map(|item| item.emoji.clone())
+        })
+    }
+
+    /// Shows the confirmation for the suggested emoji `alt` and waits for
+    /// its answer.
+    fn confirm_suggested_emoji(
+        &mut self,
+        custom_emoji_id: i64,
+        duration_secs: i32,
+        alt: String,
+        cx: &mut Context<Self>,
+    ) {
+        let bot_name = self
+            .mini_apps
+            .window
+            .as_ref()
+            .map(|window| window.launch.bot_name.clone())
+            .unwrap_or_default();
+        let prompt = confirm_popup(&bot_name, &alt);
+        let Some(popup) = self.show_mini_app_popup(None, prompt, cx) else {
+            return;
+        };
         self.with_window(|window| {
             window.emoji.set = Some(SetRequest {
                 custom_emoji_id,
                 duration_secs,
                 since: Instant::now(),
-                stage: SetStage::Deferred,
+                stage: SetStage::Confirming { alt, popup },
             });
         });
-        self.poll_emoji_status(cx);
+        cx.notify();
     }
 
     /// The confirmation prompt was answered.
@@ -240,14 +304,6 @@ impl QuillApp {
         button: &str,
         cx: &mut Context<Self>,
     ) {
-        let Some(bot_name) = self
-            .mini_apps
-            .window
-            .as_ref()
-            .map(|window| window.launch.bot_name.clone())
-        else {
-            return;
-        };
         // Only the popup the stage opened answers it.
         let asked = self.mini_apps.window.as_ref().is_some_and(|window| {
             window.emoji.set.as_ref().is_some_and(|request| {
@@ -257,7 +313,7 @@ impl QuillApp {
         if !asked {
             return;
         }
-        let Some(mut request) = self
+        let Some(request) = self
             .mini_apps
             .window
             .as_mut()
@@ -277,14 +333,8 @@ impl QuillApp {
         if !self.premium_for_emoji_status() {
             // The prompt stays, behind the Premium preview.
             self.open_premium_at(quill::premium_hub::PremiumFeature::EmojiStatus, cx);
-            let prompt = confirm_popup(&bot_name, alt);
-            self.with_window(|window| {
-                let popup = window.show_popup(PopupPurpose::EmojiStatus, prompt);
-                if let SetStage::Confirming { popup: shown, .. } = &mut request.stage {
-                    *shown = popup;
-                }
-                window.emoji.set = Some(request);
-            });
+            let (id, duration, alt) = (request.custom_emoji_id, request.duration_secs, alt.clone());
+            self.confirm_suggested_emoji(id, duration, alt, cx);
             return;
         }
         let sent = self.live.as_mut().map(|live| {
@@ -347,83 +397,45 @@ impl QuillApp {
         self.resolve_suggested_emoji(cx);
     }
 
+    /// The suggested emoji's own lookup: found (the confirmation comes),
+    /// or ended without the sticker, or too slow: tdesktop's
+    /// `SUGGESTED_EMOJI_INVALID`.
     fn resolve_suggested_emoji(&mut self, cx: &mut Context<Self>) {
-        let Some((id, stage, since)) = self.mini_apps.window.as_ref().and_then(|window| {
-            let request = window.emoji.set.as_ref()?;
-            match request.stage {
-                SetStage::Deferred => Some((request.custom_emoji_id, None, request.since)),
-                SetStage::Resolving { request: asked } => {
-                    Some((request.custom_emoji_id, Some(asked), request.since))
+        let Some((id, duration_secs, asked, since)) =
+            self.mini_apps.window.as_ref().and_then(|window| {
+                let request = window.emoji.set.as_ref()?;
+                match request.stage {
+                    SetStage::Resolving { request: asked } => Some((
+                        request.custom_emoji_id,
+                        request.duration_secs,
+                        asked,
+                        request.since,
+                    )),
+                    SetStage::Confirming { .. } => None,
                 }
-                SetStage::Confirming { .. } => None,
-            }
-        }) else {
+            })
+        else {
             return;
         };
-        let found = self.session().and_then(|session| {
-            session
-                .stickers
-                .emoji
-                .custom_emoji_stickers
-                .iter()
-                .find(|item| item.custom_emoji_id == Some(id))
-                .map(|item| item.emoji.clone())
-        });
-        if let Some(alt) = found {
-            let bot_name = self
-                .mini_apps
-                .window
-                .as_ref()
-                .map(|window| window.launch.bot_name.clone())
-                .unwrap_or_default();
-            self.with_window(|window| {
-                if window.emoji.set.is_some() {
-                    let prompt = confirm_popup(&bot_name, &alt);
-                    let popup = window.show_popup(PopupPurpose::EmojiStatus, prompt);
-                    if let Some(request) = window.emoji.set.as_mut() {
-                        request.stage = SetStage::Confirming { alt, popup };
-                    }
-                }
-            });
-            cx.notify();
+        if let Some(alt) = self.suggested_emoji_alt(id) {
+            // The lookup is over: the confirmation takes the stage's place.
+            self.with_window(|window| window.emoji.set = None);
+            self.confirm_suggested_emoji(id, duration_secs, alt, cx);
             return;
         }
-        let mut failed = since.elapsed() > RESOLVE_TIMEOUT;
-        match stage {
-            // The shared lookup may be busy with another batch: try again
-            // on the next tick.
-            None if !failed => {
-                match self
-                    .live
-                    .as_mut()
-                    .map(|live| live.driver.resolve_custom_emoji(id))
-                {
-                    Some(Ok(Some(lookup))) => self.with_window(|window| {
-                        if let Some(request) = window.emoji.set.as_mut() {
-                            request.stage = SetStage::Resolving { request: lookup };
-                        }
-                    }),
-                    Some(Ok(None)) => {}
-                    _ => failed = true,
-                }
-            }
-            // This request's own lookup, not any other batch's: answered
-            // (it left flight) and the emoji is not an emoji-set sticker
-            // (or does not exist): tdesktop's `SUGGESTED_EMOJI_INVALID`.
-            Some(asked) if !failed => {
-                let in_flight = self
-                    .session()
-                    .is_some_and(|session| session.requests.get(asked).is_some());
-                failed = !in_flight;
-            }
-            None | Some(_) => {}
+        // This request's own lookup, not any other batch's: answered (it
+        // left flight) and the emoji is not an emoji-set sticker (or does
+        // not exist), or it never answered.
+        let in_flight = self
+            .session()
+            .is_some_and(|session| session.requests.get(asked).is_some());
+        if in_flight && since.elapsed() <= RESOLVE_TIMEOUT {
+            return;
         }
-        if failed {
-            self.with_window(|window| {
-                window.emoji.set = None;
-                window.emit(BridgeReply::emoji_status_failed("SUGGESTED_EMOJI_INVALID"));
-            });
-        }
+        self.with_window(|window| {
+            window.emoji.set = None;
+            window.emit(BridgeReply::emoji_status_failed("SUGGESTED_EMOJI_INVALID"));
+        });
     }
 }
 

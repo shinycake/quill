@@ -67,6 +67,27 @@ fn the_timer_leaves_a_failed_download_for_the_button(cx: &mut TestAppContext) {
     });
 }
 
+/// A known update, held or not, is not replaced by the timer's check: it
+/// would lose the offer when the check fails offline.
+#[gpui_kit::test]
+fn the_timer_leaves_a_known_update_alone(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update(&mut vcx, |app, cx| {
+        app.preferences.update_state = UpdateState::Available(release());
+        app.recheck_for_updates(cx);
+        assert!(matches!(
+            app.preferences.update_state,
+            UpdateState::Available(..)
+        ));
+        app.preferences.update_state = UpdateState::Staged(release(), Default::default());
+        app.recheck_for_updates(cx);
+        assert!(matches!(
+            app.preferences.update_state,
+            UpdateState::Staged(..)
+        ));
+    });
+}
+
 /// A quit that never ends the process must not leave "Installing" for good.
 #[gpui_kit::test]
 fn a_quit_that_never_lands_ends_in_install_failed(cx: &mut TestAppContext) {

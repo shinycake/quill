@@ -182,9 +182,12 @@ fn finish_previous_update() {
         .ok()
         .and_then(|p| fs::canonicalize(p).ok())
     else {
+        // No path to clean: still answer, so the Settings rows leave
+        // "checking" (the probe finds the same failure and says so).
+        let _ = can_install_here();
         return;
     };
-    let _ = crate::thread_guard::spawn_guarded("quill-update-cleanup", move || {
+    let spawned = crate::thread_guard::spawn_guarded("quill-update-cleanup", move || {
         // First, so the Settings rows stop saying "checking" at once; render
         // never computes it (`availability_now`).
         let _ = can_install_here();
@@ -198,6 +201,10 @@ fn finish_previous_update() {
             let _ = swap::recover_or_clear_backup(&layout.install, &exe, &backup);
         }
     });
+    if spawned.is_err() {
+        // No thread to probe on: answer here, once.
+        let _ = can_install_here();
+    }
 }
 
 /// What the last update left for this start, shown once: the receipt is

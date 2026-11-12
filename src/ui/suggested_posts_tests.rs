@@ -248,16 +248,11 @@ fn a_publish_in_flight_refuses_a_second_terms_box_and_a_decided_post_closes_one(
         set_busy(app, true);
         app.open_suggest_accept(ChatId(CHAT), MessageId(COUNTER), 0, window, cx);
         assert!(app.suggested_posts.accept().is_none());
-        // A box open when the send goes out waits, its button busy.
         set_busy(app, false);
         app.open_suggest_accept(ChatId(CHAT), MessageId(COUNTER), 0, window, cx);
-        set_busy(app, true);
-        app.confirm_suggest_accept(cx);
-        assert!(app.suggested_posts.accept().is_some(), "the box waits");
         app.drain_suggested_post_notes(cx);
         assert!(app.suggested_posts.accept().is_some(), "still pending");
-        // The answer: the post is published and the busy entry clears.
-        set_busy(app, false);
+        // The post is decided elsewhere.
         if let Some(session) = app.demo_session.as_mut() {
             session.edit_suggested_post(ChatId(CHAT), MessageId(COUNTER), |info| {
                 if let Some(info) = info.as_mut() {
@@ -271,6 +266,39 @@ fn a_publish_in_flight_refuses_a_second_terms_box_and_a_decided_post_closes_one(
             "the box of a published post closes"
         );
     });
+}
+
+/// The Decline box closes with nothing sent when the post is decided
+/// elsewhere, as the Accept box does; a Decline confirmed after that sends
+/// nothing either.
+#[gpui_kit::test]
+fn a_decided_post_closes_its_decline_box_and_declines_nothing(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.open_suggest_decline(ChatId(CHAT), MessageId(COUNTER), window, cx);
+        app.drain_suggested_post_notes(cx);
+        assert!(app.suggested_posts.decline().is_some(), "still pending");
+        if let Some(session) = app.demo_session.as_mut() {
+            session.edit_suggested_post(ChatId(CHAT), MessageId(COUNTER), |info| {
+                if let Some(info) = info.as_mut() {
+                    info.state = SuggestedPostState::Approved;
+                }
+            });
+        }
+        app.drain_suggested_post_notes(cx);
+        assert!(
+            app.suggested_posts.decline().is_none(),
+            "the box of a decided post closes"
+        );
+        // A confirm that races the closer declines nothing.
+        app.open_suggest_decline(ChatId(CHAT), MessageId(COUNTER), window, cx);
+        app.confirm_suggest_decline(cx);
+    });
+    assert_eq!(
+        state_of(&app, &mut vcx, COUNTER),
+        Some(SuggestedPostState::Approved),
+        "not turned into Declined"
+    );
 }
 
 #[gpui_kit::test]

@@ -24,21 +24,37 @@ impl PopupId {
     }
 }
 
-/// What a shell popup was for, so its answer can be acted on.
+/// What a shell popup was for, so its answer can be acted on. Only the
+/// popups no stage waits on are here; a stage that opened its popup holds
+/// the [`PopupId`] and says it [`owns`](PopupOwner) it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum PopupPurpose {
     /// `web_app_open_popup`: the app gets `popup_closed`.
     App,
-    /// "Allow messaging": yes calls `allowBotToSendMessages`.
-    WriteAccess,
     /// "Paste from clipboard": yes reads the clipboard for the app.
     Clipboard { req_id: String },
     /// "Close anyway" after `web_app_setup_closing_behavior`.
     CloseConfirm,
-    /// `web_app_request_emoji_status_access`: "Allow" grants it.
-    EmojiStatusAccess,
-    /// `web_app_set_emoji_status`: "Confirm" sets the status.
+}
+
+/// The stage whose popup an answer is for, found by asking each stage
+/// whether it holds the id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PopupOwner {
+    /// `WriteAccess::Asking`: "Allow messaging".
+    WriteAccess,
+    /// The emoji status access prompt.
+    EmojiAccess,
+    /// The emoji status confirmation.
     EmojiStatus,
-    /// `web_app_request_phone`: "Share" sends the contact card.
+    /// The phone share prompt.
     Phone,
+}
+
+/// A popup just shown, and the ones it replaced: the helper shows one at a
+/// time, so each of those never gets `popup_closed` and is answered as
+/// dismissed by whoever showed the new one.
+pub(super) struct Shown {
+    pub(super) id: PopupId,
+    pub(super) replaced: Vec<PopupId>,
 }

@@ -287,14 +287,18 @@ struct State {
     fill: PickerFill,
 }
 
-/// How far the picker's scrubbers are filled.
+/// How far the picker's scrubbers are filled, and with what.
 enum PickerFill {
     /// Never filled: the first lists fill them at once.
     Unfilled,
-    /// Filled; no newer lists wait.
-    Shown,
-    /// Newer lists are held back until the next tap.
-    Held(PickerContents),
+    /// Filled with these lists; no newer lists wait.
+    Shown(PickerContents),
+    /// `shown` is on the scrubbers; newer lists `waiting` are held back
+    /// until the next tap.
+    Held {
+        shown: PickerContents,
+        waiting: PickerContents,
+    },
 }
 
 /// Everything built once per window. Cloning shares the same objects.
@@ -657,15 +661,42 @@ impl Host {
         {
             self.stickers_scrubber.reloadData();
         }
+        // Lists equal to what is on the scrubbers (or already waiting) are
+        // neither cloned nor kept.
         let first = self.state.try_borrow_mut().is_ok_and(|mut state| {
-            let first = matches!(state.fill, PickerFill::Unfilled);
-            if !matches!(&state.fill, PickerFill::Held(waiting) if waiting == picker) {
-                state.fill = PickerFill::Held(picker.clone());
+            match std::mem::replace(&mut state.fill, PickerFill::Unfilled) {
+                PickerFill::Unfilled => {
+                    state.fill = PickerFill::Shown(picker.clone());
+                    true
+                }
+                PickerFill::Shown(shown) => {
+                    state.fill = if shown == *picker {
+                        PickerFill::Shown(shown)
+                    } else {
+                        PickerFill::Held {
+                            shown,
+                            waiting: picker.clone(),
+                        }
+                    };
+                    false
+                }
+                PickerFill::Held { shown, waiting } => {
+                    state.fill = if shown == *picker {
+                        PickerFill::Shown(shown)
+                    } else if waiting == *picker {
+                        PickerFill::Held { shown, waiting }
+                    } else {
+                        PickerFill::Held {
+                            shown,
+                            waiting: picker.clone(),
+                        }
+                    };
+                    false
+                }
             }
-            first
         });
         if first {
-            self.fill_pending_picker();
+            self.fill_picker(picker);
         }
     }
 
@@ -673,9 +704,15 @@ impl Host {
     fn fill_pending_picker(&self) {
         let pending =
             self.state.try_borrow_mut().ok().and_then(|mut state| {
-                match std::mem::replace(&mut state.fill, PickerFill::Shown) {
-                    PickerFill::Held(picker) => Some(picker),
-                    PickerFill::Unfilled | PickerFill::Shown => None,
+                match std::mem::replace(&mut state.fill, PickerFill::Unfilled) {
+                    PickerFill::Held { waiting, .. } => {
+                        state.fill = PickerFill::Shown(waiting.clone());
+                        Some(waiting)
+                    }
+                    other => {
+                        state.fill = other;
+                        None
+                    }
                 }
             });
         if let Some(picker) = pending {

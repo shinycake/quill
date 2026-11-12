@@ -223,6 +223,8 @@ impl Session {
                     self.threads.saved.retry_after_reconnect();
                     // So do sticker and emoji sets whose load failed.
                     self.media.media_library.forget_failures();
+                    // And translations that ran out of attempts offline.
+                    self.translations_back_online();
                 }
                 self.connection = state;
             }

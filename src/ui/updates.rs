@@ -21,10 +21,10 @@ use quill::updater::{
 };
 use std::time::Duration;
 
-/// How often a running Quill looks for a new release.
 /// How long Quill waits for its own quit after handing the update over.
 const RESTART_GIVE_UP: Duration = Duration::from_secs(30);
 
+/// How often a running Quill looks for a new release.
 const RECHECK_EVERY: Duration = Duration::from_secs(4 * 60 * 60);
 
 impl QuillApp {
@@ -53,17 +53,20 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// The timer's check. A failed download or hand-off waits for the
-    /// button (`UpdateControl::auto_download`): a check would turn it back
-    /// into Available, retry it silently and lose the failure message.
+    /// The timer's check, which starts only where it has nothing to lose: an
+    /// update already found, held (the disk bar), failed or on its way is
+    /// not replaced by a check that may fail offline (`Checking` keeps no
+    /// offer to return to). The button's check can still start over those.
     pub(super) fn recheck_for_updates(&mut self, cx: &mut Context<Self>) {
         if matches!(
             self.preferences.update_state,
-            UpdateState::DownloadFailed(..) | UpdateState::InstallFailed(..)
+            UpdateState::Idle
+                | UpdateState::UpToDate
+                | UpdateState::NoRelease
+                | UpdateState::Failed(_)
         ) {
-            return;
+            self.check_for_updates(cx);
         }
-        self.check_for_updates(cx);
     }
 
     /// Checks at launch, then every few hours while Quill runs (tdesktop's

@@ -142,8 +142,23 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// `getCustomEmojiStickers` for one custom emoji a mini app suggests as the
-    /// emoji status, so its sticker can be checked and shown. `Ok(None)`: the
-    /// shared lookup is busy with another batch; ask again on the next tick.
+    /// emoji status, so its sticker can be checked and shown. It does not wait
+    /// for the shared lookup's other batches (a resolve pass that gets the
+    /// slot first every time would starve it): TDLib answers the two side by
+    /// side. A rate-limit hold is not bypassed; the lookup then fails, as the
+    /// mini app hears `SUGGESTED_EMOJI_INVALID`.
+    pub fn resolve_suggested_emoji(
+        &mut self,
+        custom_emoji_id: i64,
+    ) -> Result<RequestId, ConnectSendError> {
+        if custom_emoji_id <= 0 || !self.chats_path_active() || self.custom_emoji_hold.is_some() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.send_custom_emoji_lookup(&[custom_emoji_id])
+    }
+
+    /// `getCustomEmojiStickers` for one custom emoji on the shared lookup.
+    /// `Ok(None)`: it is busy with another batch; ask again later.
     pub fn resolve_custom_emoji(
         &mut self,
         custom_emoji_id: i64,
@@ -181,6 +196,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if ids.is_empty() || !self.custom_emoji_lookup_idle() {
             return Ok(None);
         }
+        self.send_custom_emoji_lookup(ids).map(Some)
+    }
+
+    /// Sends the lookup for `ids` and records it as out.
+    fn send_custom_emoji_lookup(&mut self, ids: &[i64]) -> Result<RequestId, ConnectSendError> {
         let extra = self
             .session
             .request(RequestPurpose::GetCustomEmojiStickers, None);
@@ -195,7 +215,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             emoji.custom_emoji_lookup_not_sent(extra);
             return Err(err);
         }
-        Ok(Some(extra))
+        Ok(extra)
     }
 
     pub(crate) fn maybe_resolve_emoji_status_choices(&mut self) -> Result<(), ConnectSendError> {

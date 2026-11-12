@@ -350,6 +350,36 @@ impl Session {
         self.messages.translate.revision += 1;
     }
 
+    /// Whether `message_id` has no translation into `to` yet or its last
+    /// ask failed: what the pump keeps in its scan, so a failure that ran
+    /// out of attempts is tested again once they are given back
+    /// ([`Self::translations_back_online`]).
+    pub fn translation_unsettled(&self, chat_id: ChatId, message_id: MessageId, to: &str) -> bool {
+        matches!(
+            self.message_translation(chat_id, message_id, to),
+            None | Some(Translation::Failed { .. })
+        )
+    }
+
+    /// The connection came back: every failed translation gets its
+    /// attempts again, so the pump of a chat that stayed open asks once
+    /// more (a failure that ran out of attempts offline is not final).
+    pub fn translations_back_online(&mut self) {
+        let translate = &mut self.messages.translate;
+        let mut changed = false;
+        for translation in translate.messages.values_mut() {
+            if let Translation::Failed { attempts, .. } = translation
+                && *attempts != 0
+            {
+                *attempts = 0;
+                changed = true;
+            }
+        }
+        if changed {
+            translate.revision += 1;
+        }
+    }
+
     /// Whether the translated chat's pump should ask for `message_id` into
     /// `to`: nothing was asked yet, or the asks failed fewer than
     /// `TRANSLATE_PUMP_ATTEMPTS` times (`ConnectDriver::translate_message`

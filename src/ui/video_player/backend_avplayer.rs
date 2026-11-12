@@ -11,6 +11,7 @@
 //! player only calls its backend from the UI thread).
 #![deny(clippy::indexing_slicing)]
 
+use super::avplayer_open::OpenWatch;
 use super::transport::{
     BackendStatus, Correction, Engine, EngineHealth, RATE_TOLERANCE, Want, reconcile,
 };
@@ -71,6 +72,9 @@ pub(super) struct AvPlayerBackend {
     /// The buffer state as last read, and when.
     buffer: BufferState,
     buffer_read: Option<Instant>,
+    /// The observer that says when the item left `unknown`, while it is
+    /// registered.
+    open_watch: Option<OpenWatch>,
 }
 
 #[derive(Clone, Default)]
@@ -125,6 +129,7 @@ impl AvPlayerBackend {
                 last_present: None,
                 buffer: BufferState::default(),
                 buffer_read: None,
+                open_watch: None,
             })
         }
     }
@@ -264,6 +269,14 @@ impl AvPlayerBackend {
 }
 
 impl Backend for AvPlayerBackend {
+    fn on_open(&mut self, wake: Box<dyn FnOnce() + Send>) -> bool {
+        if let Some(old) = self.open_watch.take() {
+            old.end(&self.item);
+        }
+        self.open_watch = Some(OpenWatch::start(&self.item, wake));
+        true
+    }
+
     fn status(&mut self) -> BackendStatus {
         self.read_buffer(Instant::now());
         let (status, rate) = self.engine_state();
@@ -425,6 +438,9 @@ impl Drop for AvPlayerBackend {
         // SAFETY: stop audio before the player is released (main thread:
         // the player is dropped where it lives). An output left attached
         // keeps the item's timebases and listeners alive for good.
+        if let Some(watch) = self.open_watch.take() {
+            watch.end(&self.item);
+        }
         unsafe {
             self.player.pause();
             self.item.removeOutput(&self.output);

@@ -304,3 +304,100 @@ fn turning_translation_on_again_asks_for_failed_messages(cx: &mut TestAppContext
         );
     });
 }
+
+/// Sweep r4-12 23-011: a failure that ran out of attempts while offline is
+/// asked for again after the reconnect, with the chat open all along.
+#[gpui_kit::test]
+fn a_failure_out_of_attempts_is_asked_again_after_a_reconnect(cx: &mut TestAppContext) {
+    use quill::state::{TRANSLATE_PUMP_ATTEMPTS, Translation};
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.toggle_chat_translation(CHANNEL, cx);
+        app.open_translate_chooser("en", window, cx);
+        // The newest post is not Arabic: it is asked for.
+        app.choose_translate_language("ar", cx);
+    });
+    let to = "ar".to_string();
+    app.update(&mut vcx, |app, _| {
+        // Shown once (as the reopen tests above get it): the pass asks.
+        let other = app
+            .session()
+            .and_then(|s| s.chats.keys().copied().find(|id| *id != CHANNEL.0))
+            .map(ChatId)
+            .expect("the demo has another chat");
+        if let Some(session) = app.session_mut() {
+            session.open_chat(other);
+        }
+        app.pump_translation();
+        if let Some(session) = app.session_mut() {
+            session.open_chat(CHANNEL);
+        }
+        app.pump_translation();
+        assert!(
+            app.translate.asked.contains(&(NEWEST_POST, to.as_str())),
+            "first pass asked: {:?}",
+            app.translate.asked
+        );
+        if let Some(session) = app.session_mut() {
+            session.messages.translate.messages.insert(
+                (CHANNEL.0, NEWEST_POST.0, to.to_string()),
+                Translation::Failed {
+                    reason: "offline".into(),
+                    attempts: TRANSLATE_PUMP_ATTEMPTS,
+                },
+            );
+        }
+        app.translate.asked.clear();
+        app.pump_translation();
+        assert!(
+            !app.translate.asked.iter().any(|(id, _)| *id == NEWEST_POST),
+            "out of attempts: {:?}",
+            app.translate.asked
+        );
+        if let Some(session) = app.session_mut() {
+            session.translations_back_online();
+        }
+        app.pump_translation();
+        assert!(
+            app.translate.asked.contains(&(NEWEST_POST, to.as_str())),
+            "asked: {:?}",
+            app.translate.asked
+        );
+    });
+}
+
+/// A Hide that TDLib refuses is put back by the rollback; the "hidden,
+/// Undo" toast over the bar that shows again goes, and the note says why.
+#[gpui_kit::test]
+fn a_refused_hide_ends_its_undo_toast_with_an_error_note(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update(&mut vcx, |app, cx| {
+        // A live account's optimistic hide: the server flag off, the local
+        // preference not set.
+        if let Some(demo) = app.demo_session.as_mut() {
+            demo.messages
+                .translate
+                .translatable_chats
+                .remove(&CHANNEL.0);
+        }
+        app.show_translate_toast(
+            CHANNEL,
+            "hidden".into(),
+            "Undo",
+            super::ToastAction::ShowBar,
+            cx,
+        );
+        app.pump_translation();
+        assert!(app.translate.toast.toast().is_some(), "the hide stands");
+        // The refusal puts the flag back.
+        if let Some(demo) = app.demo_session.as_mut() {
+            demo.messages.translate.translatable_chats.insert(CHANNEL.0);
+        }
+        assert!(app.pump_translation(), "the pass reports the change");
+        assert!(app.translate.toast.toast().is_none(), "the toast ended");
+        assert_eq!(
+            app.connection.note().text(),
+            quill::lang::tr(quill::lang::keys::Q_TRANSLATE_HIDE_FAILED)
+        );
+    });
+}

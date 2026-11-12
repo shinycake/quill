@@ -29,8 +29,8 @@ pub(in crate::ui) enum StoryOpen {
 pub(in crate::ui) enum StoryAsk {
     /// This request is out; the story's arrival or failure settles it.
     Out(RequestId),
-    /// No request went out (the send was refused, or a retry clock holds
-    /// the ask back): nothing can answer, so the next check settles it.
+    /// No request went out (the send was refused, or the story was already
+    /// cached): nothing can answer, so the next check settles it.
     NoneOut,
 }
 

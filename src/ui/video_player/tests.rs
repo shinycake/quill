@@ -71,6 +71,10 @@ struct Script {
     /// The decoder failed.
     error: Option<PlayerError>,
     dropped: bool,
+    /// The backend says when it opened (`Backend::on_open`); the wake
+    /// waits here.
+    signals: bool,
+    wake: Option<Box<dyn FnOnce() + Send>>,
 }
 
 struct Scripted(Rc<RefCell<Script>>);
@@ -89,6 +93,12 @@ fn image() -> Arc<RenderImage> {
 }
 
 impl Backend for Scripted {
+    fn on_open(&mut self, wake: Box<dyn FnOnce() + Send>) -> bool {
+        let mut script = self.0.borrow_mut();
+        script.wake = Some(wake);
+        script.signals
+    }
+
     fn status(&mut self) -> BackendStatus {
         let mut script = self.0.borrow_mut();
         if script.at_end {
@@ -205,6 +215,28 @@ fn a_player_stuck_opening_stops_asking_for_frames() {
             .frame_demand(start + Duration::from_secs(60))
             .animates
     );
+}
+
+#[gpui_kit::test]
+fn a_backend_that_signals_its_open_needs_no_frames_while_opening(
+    cx: &mut gpui_kit::TestAppContext,
+) {
+    let (player, script) = scripted(false);
+    script.borrow_mut().signals = true;
+    let _wake = cx
+        .update(|cx| player.await_open(cx))
+        .expect("the backend signals");
+    player.play();
+    assert!(
+        !player.frame_demand(Instant::now()).animates,
+        "nothing to poll while it opens"
+    );
+    // The open lands, however late: the wake asks for the first picture.
+    script.borrow_mut().ready = true;
+    let wake = script.borrow_mut().wake.take().expect("the wake was kept");
+    wake();
+    cx.run_until_parked();
+    assert!(player.frame_demand(Instant::now()).animates);
 }
 
 #[test]

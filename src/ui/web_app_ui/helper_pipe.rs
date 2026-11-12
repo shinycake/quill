@@ -68,7 +68,6 @@ mod tests {
     use super::{HelperWriter, SendResult};
     use std::io::{self, Write};
     use std::sync::mpsc;
-    use std::time::Duration;
 
     /// A pipe that never drains: it says when a write starts, then parks
     /// that write until released.
@@ -128,33 +127,29 @@ mod tests {
         let writer = HelperWriter::spawn(Collect(tx));
         assert_eq!(writer.send(b"one\n".to_vec()), SendResult::Queued);
         assert_eq!(writer.send(b"two\n".to_vec()), SendResult::Queued);
-        assert_eq!(
-            rx.recv_timeout(Duration::from_secs(5)).ok(),
-            Some(b"one\n".to_vec())
-        );
-        assert_eq!(
-            rx.recv_timeout(Duration::from_secs(5)).ok(),
-            Some(b"two\n".to_vec())
-        );
+        assert_eq!(rx.recv().ok(), Some(b"one\n".to_vec()));
+        assert_eq!(rx.recv().ok(), Some(b"two\n".to_vec()));
     }
 
+    /// The broken sink holds a sender that drops when the writer thread
+    /// ends, so the test blocks until the writer is gone: no clock.
     #[test]
     fn a_dead_helper_reports_wedged() {
-        struct Broken;
+        struct Broken(mpsc::Sender<()>);
         impl Write for Broken {
             fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+                let _ = &self.0;
                 Err(io::ErrorKind::BrokenPipe.into())
             }
             fn flush(&mut self) -> io::Result<()> {
                 Ok(())
             }
         }
-        let writer = HelperWriter::spawn(Broken);
+        let (exited, writer_gone) = mpsc::channel::<()>();
+        let writer = HelperWriter::spawn(Broken(exited));
         let _ = writer.send(b"a\n".to_vec());
-        let wedged = (0..200).any(|_| {
-            std::thread::sleep(Duration::from_millis(10));
-            writer.send(b"b\n".to_vec()) == SendResult::Wedged
-        });
-        assert!(wedged);
+        // Nothing is ever sent: `recv` ends when the sink is dropped.
+        assert!(writer_gone.recv().is_err());
+        assert_eq!(writer.send(b"b\n".to_vec()), SendResult::Wedged);
     }
 }

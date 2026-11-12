@@ -42,6 +42,14 @@ pub(super) enum PhoneStep {
 }
 
 impl PhoneFlow {
+    /// The confirmation popup the flow waits on, if it is up.
+    pub(super) fn popup(self) -> Option<PopupId> {
+        match self {
+            PhoneFlow::Asking { popup } => Some(popup),
+            PhoneFlow::Idle | PhoneFlow::Unblocking { .. } | PhoneFlow::Sending { .. } => None,
+        }
+    }
+
     /// The request the flow waits on, if any.
     pub(super) fn waiting_on(self) -> Option<RequestId> {
         match self {
@@ -95,7 +103,7 @@ fn phone_popup() -> Popup {
 
 impl QuillApp {
     /// `web_app_request_phone`: ask first.
-    pub(super) fn request_mini_app_phone(&mut self) {
+    pub(super) fn request_mini_app_phone(&mut self, cx: &mut Context<Self>) {
         let idle = self
             .mini_apps
             .window
@@ -105,10 +113,9 @@ impl QuillApp {
             self.with_window(|window| window.emit(BridgeReply::phone_requested(false)));
             return;
         }
-        self.with_window(|window| {
-            let popup = window.show_popup(PopupPurpose::Phone, phone_popup());
-            window.phone = PhoneFlow::Asking { popup };
-        });
+        if let Some(popup) = self.show_mini_app_popup(None, phone_popup(), cx) {
+            self.with_window(|window| window.phone = PhoneFlow::Asking { popup });
+        }
     }
 
     /// The confirmation was answered.

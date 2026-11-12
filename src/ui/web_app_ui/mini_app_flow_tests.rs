@@ -8,7 +8,7 @@ use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::web_app_ui::helper_pipe::HelperWriter;
 use crate::ui::web_app_ui::invoice::InvoiceWatch;
 use crate::ui::web_app_ui::{
-    Awaited, MiniAppWindow, PendingOpen, PopupPurpose, RenderAction, theme_params,
+    Awaited, MiniAppWindow, PendingOpen, PopupOwner, RenderAction, theme_params,
 };
 use gpui_kit::component::Root;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
@@ -73,6 +73,7 @@ fn open_window(app: &mut QuillApp, cx: &mut gpui_kit::App) -> mpsc::Receiver<Hos
         settings_button: false,
         popups: Default::default(),
         popup_seq: 0,
+        launch_window: None,
         write_access: crate::ui::web_app_ui::launch_flow::WriteAccess::Idle,
         privacy_policy_url: None,
         in_attachment_menu: false,
@@ -133,15 +134,14 @@ fn the_phone_prompt_asks_and_cancel_answers_cancelled(cx: &mut TestAppContext) {
                 .collect::<Vec<_>>(),
             [("cancel", "Cancel"), ("share", "Share")]
         );
-        assert!(matches!(
+        assert_eq!(
             app.mini_apps
                 .window
                 .as_ref()
                 .unwrap()
-                .popups
-                .get(&super::PopupId::from_wire(&popup.id).unwrap()),
-            Some(PopupPurpose::Phone)
-        ));
+                .popup_owner(super::PopupId::from_wire(&popup.id).unwrap()),
+            Some(PopupOwner::Phone)
+        );
         // A second request while the prompt is up is refused.
         app.handle_web_app_event(WebAppEvent::RequestPhone, cx);
         assert_eq!(reply(&received).1["status"], "cancelled");
@@ -353,7 +353,7 @@ fn a_popup_replaced_by_another_is_answered(cx: &mut TestAppContext) {
             .mini_apps
             .window
             .as_ref()
-            .map(|window| window.popups.keys().map(|id| id.wire()).collect())
+            .map(|window| window.open_popups().iter().map(|id| id.wire()).collect())
             .unwrap_or_default();
         assert_eq!(open, std::slice::from_ref(&confirm.id));
         answer(app, &confirm.id, "cancel", cx);
@@ -362,11 +362,11 @@ fn a_popup_replaced_by_another_is_answered(cx: &mut TestAppContext) {
     });
 }
 
-/// Area C's startattach finding: the poll that answers a mini-app flow runs
-/// as the main window, so it keeps the window the flow started in and its
-/// boxes open there. The poll's own steps (no window asked) keep it.
+/// Area C's startattach finding, per window: the window an open app's flow
+/// started in is kept by that app's window, so a later flow started in
+/// another window does not take its notes and boxes.
 #[gpui_kit::test]
-fn the_mini_app_poll_keeps_the_window_its_flow_started_in(cx: &mut TestAppContext) {
+fn the_open_app_keeps_the_window_its_flow_started_in(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let window = Some(quill::ids::ChatId(12));
     app.update_in(&mut vcx, |app, main, cx| {
@@ -374,18 +374,17 @@ fn the_mini_app_poll_keeps_the_window_its_flow_started_in(cx: &mut TestAppContex
     });
     vcx.run_until_parked();
     app.update(&mut vcx, |app, cx| {
-        app.as_asked_by(window, |app| app.ensure_mini_app_poll(cx));
-        assert_eq!(app.mini_apps.from_window, window);
-        app.unasked(|app| app.ensure_mini_app_poll(cx));
-        assert_eq!(
-            app.mini_apps.from_window, window,
-            "the poll's own steps keep it"
-        );
-        app.ensure_mini_app_poll(cx);
-        assert_eq!(
-            app.mini_apps.from_window, None,
-            "a flow the main window started"
-        );
+        let _received = open_window(app, cx);
+        assert_eq!(app.mini_app_window(), None);
+        app.with_window(|window| window.launch_window = Some(quill::ids::ChatId(12)));
+        assert_eq!(app.mini_app_window(), window);
+        // A mini-app link started from another window does not move it.
+        app.as_asked_by(Some(quill::ids::ChatId(13)), |app| {
+            app.ensure_mini_app_poll(cx)
+        });
+        assert_eq!(app.mini_app_window(), window, "the app's own window");
+        app.mini_app_window_closed(quill::ids::ChatId(12));
+        assert_eq!(app.mini_app_window(), None, "its window closed");
     });
 }
 

@@ -394,6 +394,7 @@ impl QuillApp {
     /// Errors of approve, decline and offers become status toasts.
     pub(super) fn drain_suggested_post_notes(&mut self, cx: &mut Context<Self>) {
         self.close_decided_accept(cx);
+        self.close_decided_decline(cx);
         // A locked app shows nothing: the failures wait, capped, for the
         // unlock.
         if self.refused_while_locked() {

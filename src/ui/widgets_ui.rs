@@ -752,10 +752,16 @@ impl QuillApp {
             .entries
             .iter()
             .filter_map(|(key, entry)| match entry.poll {
+                // An answered request also left flight: its answer waits in
+                // `bots.widget_answers` until the drain lands it (held back
+                // while the app is locked), and is not a dropped one.
                 Poll::Asking { request, .. }
-                    if self
-                        .session()
-                        .is_some_and(|session| session.requests.get(request).is_none()) =>
+                    if self.session().is_some_and(|session| {
+                        session.requests.get(request).is_none()
+                            && !session.bots.widget_answers.iter().any(|answer| {
+                                matches!(answer, WidgetAnswer::PublicData { request: asked, .. } if *asked == request)
+                            })
+                    }) =>
                 {
                     Some(*key)
                 }

@@ -6,7 +6,7 @@ use super::AccessStage;
 use crate::ui::app::QuillApp;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::web_app_ui::helper_pipe::HelperWriter;
-use crate::ui::web_app_ui::{MiniAppWindow, PopupPurpose, theme_params};
+use crate::ui::web_app_ui::{MiniAppWindow, PopupOwner, theme_params};
 use gpui_kit::component::Root;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
 use quill::ids::FileId;
@@ -84,6 +84,7 @@ fn open_window(
         settings_button: false,
         popups: Default::default(),
         popup_seq: 0,
+        launch_window: None,
         write_access: crate::ui::web_app_ui::launch_flow::WriteAccess::Idle,
         privacy_policy_url: None,
         in_attachment_menu: false,
@@ -228,15 +229,14 @@ fn a_suggested_emoji_is_confirmed_and_a_decline_says_so(cx: &mut TestAppContext)
             popup.message.contains('\u{1F31F}'),
             "the emoji is named in the prompt"
         );
-        assert!(matches!(
+        assert_eq!(
             app.mini_apps
                 .window
                 .as_ref()
                 .unwrap()
-                .popups
-                .get(&super::PopupId::from_wire(&popup.id).unwrap()),
-            Some(PopupPurpose::EmojiStatus)
-        ));
+                .popup_owner(super::PopupId::from_wire(&popup.id).unwrap()),
+            Some(PopupOwner::EmojiStatus)
+        );
         answer(app, &popup.id, "cancel", cx);
         let (event, data) = reply(&received);
         assert_eq!(event, "emoji_status_failed");

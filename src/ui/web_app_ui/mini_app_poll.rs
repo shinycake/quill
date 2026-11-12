@@ -22,9 +22,6 @@ impl QuillApp {
     /// Poll the helper and the session's mini-app answers while something
     /// is going on; stops by itself when nothing is left.
     pub(in crate::ui) fn ensure_mini_app_poll(&mut self, cx: &mut Context<Self>) {
-        if let Some(window) = self.asking_window() {
-            self.mini_apps.from_window = window;
-        }
         if self.mini_apps.poll.is_some() {
             return;
         }
@@ -34,8 +31,8 @@ impl QuillApp {
             let hold = backlog_hold(&executor);
             run_poll_loop(executor, &quill::wake::MINI_APPS, POLL_PACE, hold, || {
                 this.update(cx, |this, cx| {
-                    let keep = this
-                        .as_asked_by(this.mini_apps.from_window, |this| this.poll_mini_apps(cx));
+                    let from = this.mini_app_asker();
+                    let keep = this.as_asked_by(from, |this| this.poll_mini_apps(cx));
                     if keep {
                         return Some(PassEnd {
                             work_left: false,
@@ -53,6 +50,16 @@ impl QuillApp {
             .await;
         });
         self.mini_apps.poll = Some(task);
+    }
+
+    /// The window the open app's flow started in: its answers and events
+    /// open their boxes and links there (`None`: the main window, also
+    /// while no app is open).
+    fn mini_app_asker(&self) -> Option<quill::ids::ChatId> {
+        self.mini_apps
+            .window
+            .as_ref()
+            .and_then(|window| window.launch_window)
     }
 
     /// One poll step; `true` while there is still something to wait for.
@@ -91,7 +98,7 @@ impl QuillApp {
             return Some(due.max(WATCH_TICK));
         }
         let watching = window.emoji.is_active()
-            || window.phone != phone::PhoneFlow::Idle
+            || window.phone.waiting_on().is_some()
             || window.invoice.is_some();
         watching.then_some(WATCH_TICK)
     }

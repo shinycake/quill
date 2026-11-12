@@ -116,7 +116,16 @@ pub(super) struct Ivars {
     entries: RefCell<Vec<Entry>>,
     palette: Cell<Option<Palette>>,
     touch: RefCell<Option<PinTouch>>,
-    timer: RefCell<Option<Retained<NSTimer>>>,
+    anim: RefCell<Anim>,
+}
+
+/// The redraw timer: none while nothing slides, the scheduled timer
+/// (which this value owns) while something does.
+#[derive(Default)]
+enum Anim {
+    #[default]
+    Idle,
+    Animating(Retained<NSTimer>),
 }
 
 define_class!(
@@ -439,10 +448,10 @@ impl PinnedPanel {
                 .iter()
                 .any(|entry| entry.shift.animating(now) || entry.online.animating(now))
         });
-        let Ok(mut timer) = self.ivars().timer.try_borrow_mut() else {
+        let Ok(mut anim) = self.ivars().anim.try_borrow_mut() else {
             return;
         };
-        if !animating || timer.is_some() {
+        if !animating || matches!(*anim, Anim::Animating(_)) {
             return;
         }
         let weak = Weak::from_retained(&self.retain());
@@ -462,8 +471,8 @@ impl PinnedPanel {
             if done {
                 // SAFETY: as above.
                 unsafe { timer.as_ref() }.invalidate();
-                if let Ok(mut slot) = view.ivars().timer.try_borrow_mut() {
-                    *slot = None;
+                if let Ok(mut slot) = view.ivars().anim.try_borrow_mut() {
+                    *slot = Anim::Idle;
                 }
             }
         });
@@ -472,7 +481,7 @@ impl PinnedPanel {
         let scheduled = unsafe {
             NSTimer::scheduledTimerWithTimeInterval_repeats_block(1. / 60., true, &block)
         };
-        *timer = Some(scheduled);
+        *anim = Anim::Animating(scheduled);
     }
 
     fn draw_pins(&self) {
