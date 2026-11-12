@@ -9844,6 +9844,13 @@ entry; `forget_chat_window` closes a selector open in that window. Test:
 `window_menu_tests.rs` (open the selector from a menu, close it, the book holds
 no entry).
 
+Third round (08-024): `react_from_panel` reacts first and closes the selector
+after, because `toggle_reaction` reads the message's `premium_locked` options for the
+Premium gate and closing forgets them. A free account picking a locked reaction in the
+selector opens the Premium preview and sends nothing. Test:
+`reaction_rows_tests.rs` (`a_locked_reaction_in_the_selector_opens_the_premium_preview`,
+which also finds no book entry afterwards).
+
 Shared file touched: `src/state/session_apply_error.rs` reads `file_id()` where it read the
 field (08-025); nothing else of it changed.
 

@@ -151,6 +151,34 @@ fn a_locked_reaction_in_the_strip_opens_the_premium_preview(cx: &mut TestAppCont
 }
 
 #[gpui_kit::test]
+fn a_locked_reaction_in_the_selector_opens_the_premium_preview(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-reactions");
+    let vcx = &mut vcx;
+    free_account(&app, vcx);
+    open_menu(&app, vcx);
+    let before = reactions(&app, vcx);
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.open_reaction_selector(CHAT, MESSAGE, point(px(420.), px(300.)), window, cx);
+        });
+    });
+    frames(vcx);
+    let picked = app.update(vcx, |app, cx| {
+        app.react_from_panel(ReactionChoice::CustomEmoji(77), cx)
+    });
+    frames(vcx);
+    assert!(picked);
+    assert_eq!(premium_page(&app, vcx), Some(REACTIONS_PREVIEW));
+    assert_eq!(reactions(&app, vcx), before, "nothing was sent");
+    let kept = app.read_with(vcx, |app, _| {
+        app.session()
+            .and_then(|s| s.stickers.message_reaction_options.ready_for(CHAT, MESSAGE))
+            .is_some()
+    });
+    assert!(!kept, "the closed selector forgot the options");
+}
+
+#[gpui_kit::test]
 fn a_free_account_swaps_its_reaction_from_the_strip(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, "ready-reactions");
     let vcx = &mut vcx;
