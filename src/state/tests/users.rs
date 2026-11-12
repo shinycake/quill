@@ -161,7 +161,7 @@ fn a_full_info_ask_loads_then_fails_then_retries() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let infos = |session: &Session| session.users_state.user_full_infos.shows_loading(&31);
-    assert!(infos(&session), "nothing asked yet shows no failure");
+    assert!(!infos(&session), "nothing was asked: nothing loads");
     let extra = session.request_for_user(RequestPurpose::GetUserFullInfo, 31);
     session.users_state.user_full_infos.begin(31, extra);
     assert!(infos(&session));

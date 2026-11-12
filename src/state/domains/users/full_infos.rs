@@ -42,9 +42,12 @@ impl UserFullInfos {
         self.by_user.entry(user_id).or_default();
     }
 
-    /// Whether [`Self::want`] is still waiting for its answer.
+    /// Whether [`Self::want`] is still waiting for its answer: not asked
+    /// yet, or asked and not answered.
     pub fn is_wanted(&self, user_id: &i64) -> bool {
-        self.by_user.get(user_id).is_some_and(Fetch::is_idle)
+        self.by_user
+            .get(user_id)
+            .is_some_and(|entry| entry.is_idle() || entry.is_loading())
     }
 
     /// Users that are wanted and not yet asked for or answered.
@@ -75,11 +78,12 @@ impl UserFullInfos {
         entry.sent(request);
     }
 
-    /// The box has nothing to show yet and an ask is out (or due).
+    /// An ask is out or due and nothing was answered: a spinner shows. An
+    /// entry that was never asked, or that failed, does not load.
     pub fn shows_loading(&self, user_id: &i64) -> bool {
         self.by_user
             .get(user_id)
-            .is_none_or(|entry| !entry.error().is_some() && entry.data().is_none())
+            .is_some_and(|entry| entry.is_idle() || entry.shows_loading())
     }
 
     /// Why the last ask failed, until an answer or a retry.
