@@ -25,19 +25,55 @@ use quill::telegram::envelope::ForumTopic;
 use quill::telegram::requests::TOPIC_ICON_COLORS;
 
 impl QuillApp {
-    /// Slice G2: open the forum-topic management dialog.
+    /// Whether the open dialog's topic editor has a submit on its way: its
+    /// answer lands in that editor, so the dialog must not be replaced.
+    fn forum_editor_sending(&self) -> bool {
+        self.admin
+            .forum_manage_dialog
+            .as_ref()
+            .and_then(|dialog| dialog.editor.as_ref())
+            .is_some_and(|editor| {
+                editor
+                    .submit
+                    .is_sending(self.session().map(|session| &session.requests))
+            })
+    }
+
+    /// Slice G2: open the forum-topic management dialog. While the open
+    /// dialog's editor is sending, the same forum's dialog is kept (it moves
+    /// to this window) and another forum's is refused with a note, so the
+    /// answer is never lost and a retry never makes a duplicate topic.
+    /// `false` when it was refused.
     pub(super) fn open_forum_manage_dialog(
         &mut self,
         chat_id: ChatId,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
+        if self.forum_editor_sending() {
+            let same = self
+                .admin
+                .forum_manage_dialog
+                .as_ref()
+                .is_some_and(|dialog| dialog.chat_id == chat_id);
+            if !same {
+                self.set_note(StatusNote::silent(tr(
+                    keys::Q_PEOPLE_REQUEST_ALREADY_IN_FLIGHT,
+                )));
+                cx.notify();
+                return false;
+            }
+            self.open_box(DialogKind::ForumManage);
+            cx.notify();
+            return true;
+        }
         self.admin.forum_manage_dialog = Some(ForumManageDialog::new(window, cx, chat_id));
         self.open_box(DialogKind::ForumManage);
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.refresh_forum_topics(chat_id);
         }
         cx.notify();
+        true
     }
 
     pub(super) fn close_forum_manage_dialog(&mut self, cx: &mut Context<Self>) {
@@ -62,7 +98,9 @@ impl QuillApp {
             .as_ref()
             .is_none_or(|dialog| dialog.chat_id != chat_id)
         {
-            self.open_forum_manage_dialog(chat_id, window, cx);
+            if !self.open_forum_manage_dialog(chat_id, window, cx) {
+                return;
+            }
         } else {
             // The same forum's box, maybe open in another window: it moves
             // to the window that asked, as a new box would open there.
@@ -89,17 +127,7 @@ impl QuillApp {
             .unwrap_or_default();
         // A save is on its way: its answer lands in this editor, so a new
         // form must not replace it (the duplicate would send again).
-        if self
-            .admin
-            .forum_manage_dialog
-            .as_ref()
-            .and_then(|dialog| dialog.editor.as_ref())
-            .is_some_and(|editor| {
-                editor
-                    .submit
-                    .is_sending(self.session().map(|session| &session.requests))
-            })
-        {
+        if self.forum_editor_sending() {
             return;
         }
         let existing = topic_id.and_then(|id| topics.iter().find(|t| t.forum_topic_id == id));
