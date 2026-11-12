@@ -132,7 +132,7 @@ impl Session {
                 let limit_box = !stale
                     && matches!(
                         pending.map(|p| p.purpose),
-                        Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin { .. }))
+                        Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin))
                     )
                     && self.note_premium_limit(err, pending);
                 // A web link TDLib calls not internal (`t.me/` itself, a
@@ -141,9 +141,7 @@ impl Session {
                 let web_fallback =
                     matches!(
                         pending.map(|p| p.purpose),
-                        Some(RequestPurpose::Chats(
-                            ChatsPurpose::DeepLinkInternalType { .. }
-                        ))
+                        Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkInternalType))
                     ) && crate::text::openable_http_url(self.chats_state.deep_link_original());
                 // The Premium bot's `/start` was for the link that failed
                 // (stale or not): a later link to the bot must not send it

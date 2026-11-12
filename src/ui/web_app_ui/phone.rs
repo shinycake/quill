@@ -188,16 +188,16 @@ impl QuillApp {
             .as_ref()
             .and_then(|window| window.phone.waiting_on());
         // An answer that comes after this (a timed-out send) is nobody's.
-        if let Some(live) = self.live.as_mut() {
-            if let Some(request) = waiting {
-                live.driver
-                    .session
-                    .bots
-                    .web_apps
-                    .phone_share
-                    .retain(|answer| answer.request() != request);
-                live.driver.session.acks.forget(request);
-            }
+        if let Some(live) = self.live.as_mut()
+            && let Some(request) = waiting
+        {
+            live.driver
+                .session
+                .bots
+                .web_apps
+                .phone_share
+                .retain(|answer| answer.request() != request);
+            live.driver.session.acks.forget(request);
         }
         self.with_window(|window| {
             window.phone = PhoneFlow::Idle;

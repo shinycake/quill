@@ -57,21 +57,17 @@ impl Session {
         }
         // The gallery's Gifts tab loads from its own request (Stories fail in
         // the stories error arm, which owns that purpose).
-        if let Some(purpose) = pending.map(|p| p.purpose)
+        if let Some(RequestPurpose::Media(MediaPurpose::GetProfileGifts { .. })) =
+            pending.map(|p| p.purpose)
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+            && let Some(request) = pending.map(|p| p.id)
         {
-            if matches!(
-                purpose,
-                RequestPurpose::Media(MediaPurpose::GetProfileGifts { .. })
-            ) && let Some(request) = pending.map(|p| p.id)
-            {
-                self.fail_profile_tab(
-                    chat_id,
-                    SharedMediaTab::Gifts,
-                    request,
-                    call_request_error_line(err, "Could not load this tab"),
-                );
-            }
+            self.fail_profile_tab(
+                chat_id,
+                SharedMediaTab::Gifts,
+                request,
+                call_request_error_line(err, "Could not load this tab"),
+            );
         }
         if let Some(RequestPurpose::Media(MediaPurpose::GetProfileAudios { .. })) =
             pending.map(|p| p.purpose)
