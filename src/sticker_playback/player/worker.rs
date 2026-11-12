@@ -3,7 +3,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::engine::{Job, Shared, State};
-use super::engine::{Open, Stage};
+use super::engine::{Open, Stage, Taking, WorkerTicket};
 use super::source::{Source, frame_len};
 use super::store::{self, Scratch, StoredFrame};
 use super::{ClipInfo, ClipKey, Rendered};
@@ -73,10 +73,12 @@ pub(super) fn work(
         Job::Decode {
             key,
             id,
+            worker,
             decode,
             cancel,
         } => {
-            super::opener::open(shared, scratch, key, id, decode, &cancel);
+            let taking = Taking::Worker(WorkerTicket::new(worker));
+            super::opener::open(shared, scratch, (key, id), taking, decode, &cancel);
             true
         }
         Job::Frame {
@@ -108,7 +110,7 @@ fn open(
     let mut state = lock_or_recover(&shared.state);
     let Some(clip) = state
         .clip_mut(&key, id)
-        .filter(|clip| matches!(clip.stage, Stage::Opening { worker: taken } if taken == worker))
+        .filter(|clip| clip.stage.taken_by(Taking::Worker(WorkerTicket::new(worker))))
     else {
         // Closed meanwhile, or no longer opened by this worker.
         return;

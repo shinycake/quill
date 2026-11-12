@@ -64,6 +64,28 @@ pub(super) struct Clip {
     pub(super) coarse: bool,
 }
 
+/// The thread (a draw worker or an opener, by index) holding a clip in
+/// `Opening` or `Decoding`: the thread's `WorkerEnd`, dropped when it
+/// returns, panics or never starts, fails every clip that holds its ticket,
+/// and a late open of a clip lands only for the ticket it holds.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) struct WorkerTicket(usize);
+
+impl WorkerTicket {
+    pub(super) fn new(index: usize) -> Self {
+        Self(index)
+    }
+}
+
+/// Which stage a thread took a clip into, for the open that lands it.
+#[derive(Clone, Copy)]
+pub(super) enum Taking {
+    /// A draw worker opening (or decoding, with no opener thread) it.
+    Worker(WorkerTicket),
+    /// An opener thread decoding it.
+    Opener(WorkerTicket),
+}
+
 /// A clip's stage: one value for what the worker holding it is doing.
 pub(super) enum Stage {
     /// Not taken yet: a worker takes `Origin` to open it.
@@ -72,11 +94,11 @@ pub(super) enum Stage {
     /// it, with no opener thread running). The worker's `WorkerEnd` fails
     /// it if the thread ends first, and only that worker's open lands.
     Opening {
-        worker: usize,
+        worker: WorkerTicket,
     },
     /// Opener thread `opener` is decoding it.
     Decoding {
-        opener: usize,
+        opener: WorkerTicket,
     },
     /// Open, and no worker is on it.
     Ready(Open),
@@ -131,7 +153,17 @@ impl Stage {
     }
 
     fn decoding_on(&self, index: usize) -> bool {
-        matches!(self, Self::Decoding { opener } if *opener == index)
+        matches!(self, Self::Decoding { opener } if *opener == WorkerTicket::new(index))
+    }
+
+    /// Whether `taking` is the thread this clip was handed to, so its open
+    /// may land.
+    pub(super) fn taken_by(&self, taking: Taking) -> bool {
+        match (self, taking) {
+            (Self::Opening { worker }, Taking::Worker(me)) => *worker == me,
+            (Self::Decoding { opener }, Taking::Opener(me)) => *opener == me,
+            _ => false,
+        }
     }
 
     fn drawing(&self) -> Option<u32> {
@@ -234,6 +266,7 @@ pub(super) enum Job {
     Decode {
         key: ClipKey,
         id: u64,
+        worker: usize,
         decode: DecodeAll,
         cancel: Cancel,
     },
@@ -793,7 +826,7 @@ impl State {
         let clip = self.clips.get_mut(&key)?;
         let id = clip.id;
         let Stage::Waiting(origin) =
-            std::mem::replace(&mut clip.stage, Stage::Opening { worker: me })
+            std::mem::replace(&mut clip.stage, Stage::Opening { worker: WorkerTicket::new(me) })
         else {
             return None;
         };
@@ -807,6 +840,7 @@ impl State {
             Origin::Decoded(decode) => Some(Job::Decode {
                 key,
                 id,
+                worker: me,
                 decode,
                 cancel: clip.cancel.clone(),
             }),
@@ -858,7 +892,7 @@ impl State {
             .iter_mut()
             .find(|(_, clip)| matches!(clip.stage, Stage::Waiting(Origin::Decoded(_))))?;
         let Stage::Waiting(Origin::Decoded(decode)) =
-            std::mem::replace(&mut clip.stage, Stage::Decoding { opener })
+            std::mem::replace(&mut clip.stage, Stage::Decoding { opener: WorkerTicket::new(opener) })
         else {
             return None;
         };

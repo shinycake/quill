@@ -322,9 +322,9 @@ impl<T> Fetch<T> {
     /// is the newer word or the same as its answer.
     ///
     /// Only for a value a server push carries; a local value no request
-    /// stands behind (the demo's) goes through [`Fetch::set_local`].
-    /// `scripts/check-request-match.py` lists every caller of `pushed` and
-    /// fails a new one that is not in its allow list.
+    /// stands behind (the demo's) goes through [`Fetch::set_local`]. The
+    /// push names no request, and a late answer of the fetch it replaced
+    /// finds `Ready` and is dropped (`answered` takes only a waiting fetch).
     pub fn pushed(&mut self, value: T) {
         *self = Self::Ready(value);
     }

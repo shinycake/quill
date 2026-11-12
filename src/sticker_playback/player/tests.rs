@@ -2,6 +2,7 @@ use super::head::{PAUSE_GAP, REPAINT_GAP, pick};
 use super::source::{Packer, Source};
 use super::store::{self, Scratch, Store};
 use super::*;
+use super::engine::{Taking, WorkerTicket};
 use std::io::Write;
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -1118,4 +1119,44 @@ fn clips_of_an_ended_worker_fail_and_new_clips_go_to_the_others() {
     let third = key(3, 16);
     engine.open(third, synthetic(16, 3));
     assert_eq!(engine.state(&third), Some(ClipView::Opening));
+}
+
+#[test]
+fn a_late_open_does_not_bring_back_a_clip_its_ended_opener_failed() {
+    // One opener "starts" without running; its body is dropped later, as
+    // its thread ending drops it, while it is decoding a clip.
+    let started = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let kept = started.clone();
+    let spawn = move |name: String, body: Box<dyn FnOnce() + Send>| {
+        crate::locks::lock_or_recover(&kept).push((name, body));
+        Ok(())
+    };
+    let engine = engine::Engine::start(1, 64 << 20, &spawn);
+    let clip = key(1, 16);
+    engine.open(clip, synthetic(16, 3));
+    let taken = crate::locks::lock_or_recover(&engine.shared().state).next_decode(0);
+    let (_, id, decode, cancel) = taken.expect("the opener takes the waiting clip");
+    let ended = {
+        let mut bodies = crate::locks::lock_or_recover(&started);
+        let at = bodies
+            .iter()
+            .position(|(name, _)| name.starts_with("quill-sticker-open"));
+        at.map(|at| bodies.remove(at))
+    };
+    drop(ended);
+    assert!(matches!(engine.state(&clip), Some(ClipView::Failed(_))));
+    // The decode finishes after its thread's end failed the clip.
+    opener::open(
+        engine.shared(),
+        &mut Scratch::default(),
+        (clip, id),
+        Taking::Opener(WorkerTicket::new(0)),
+        decode,
+        &cancel,
+    );
+    assert!(
+        matches!(engine.state(&clip), Some(ClipView::Failed(_))),
+        "{:?}",
+        engine.state(&clip)
+    );
 }
