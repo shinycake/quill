@@ -222,18 +222,6 @@ impl DeviceLogin {
             _ => None,
         }
     }
-
-    /// The result of the confirmation `asked` sent, once: the stage returns
-    /// to `Idle`. A result for another request is not this asker's.
-    pub fn take_result_for(&mut self, asked: RequestId) -> Option<crate::auth::DeviceLoginResult> {
-        match *self {
-            Self::Done { request, result } if request == asked => {
-                *self = Self::Idle;
-                Some(result)
-            }
-            _ => None,
-        }
-    }
 }
 
 /// The local storage clear (`optimizeStorage`): one at a time. `Clearing`

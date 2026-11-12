@@ -65,7 +65,7 @@ fn a_device_link_answer_after_its_screen_went_away_lands_nowhere() {
         ),
     );
     assert_eq!(
-        session.settings.device_login.take_result_for(id),
+        session.settings.device_login.take_result(),
         Some(crate::auth::DeviceLoginResult::Failed)
     );
 }

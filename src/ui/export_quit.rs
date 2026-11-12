@@ -24,7 +24,7 @@ pub(crate) enum QuitGate {
 }
 
 impl QuitGate {
-    pub(crate) fn is_asking(&self) -> bool {
+    pub(crate) fn is_held(&self) -> bool {
         matches!(self, Self::Held { .. })
     }
 
@@ -92,7 +92,7 @@ impl QuillApp {
         raise_main_window(window, cx);
         // A second Quit under the alert keeps the alert and takes over the
         // exit it will run.
-        let asking = self.main_window.quit_gate.is_asking();
+        let asking = self.main_window.quit_gate.is_held();
         self.main_window.quit_gate = QuitGate::Held {
             exit: Box::new(exit),
         };
@@ -133,7 +133,7 @@ impl QuillApp {
     /// carried out: the user was asked about stopping, not about quitting
     /// now.
     pub(in crate::ui) fn quit_gate_upkeep(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.main_window.quit_gate.is_asking() || self.exporting_anywhere() {
+        if !self.main_window.quit_gate.is_held() || self.exporting_anywhere() {
             return;
         }
         self.main_window.quit_gate = QuitGate::Open;

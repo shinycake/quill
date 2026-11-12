@@ -50,7 +50,7 @@ fn with_vec<T, R>(cell: &Cell<Vec<T>>, f: impl FnOnce(&mut Vec<T>) -> R) -> R {
 }
 
 /// Focus handles of the enabled items of the open menu. Handles are kept by
-/// claim position so they survive re-renders; `begin` runs at the top of
+/// claim position so they survive re-renders; `reset_claims` runs at the top of
 /// every frame and each enabled item drawn after it claims the next slot,
 /// with a sort key that says where the row sits in the menu (menus that sort
 /// their rows after building them pass the row's order).

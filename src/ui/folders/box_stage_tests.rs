@@ -809,3 +809,96 @@ fn cancelling_the_form_keeps_the_save_it_sent(cx: &mut TestAppContext) {
         assert_eq!(form.cancelled_form().op(), &LinkOp::Idle);
     });
 }
+
+/// Sweep r4-08 fix round (16-004): an `addlist` link that came while an add
+/// was out opens once the add settles, whichever way it ended, and an add
+/// refusal the next box replaces is told in a toast. The link being added
+/// queues nothing, and a close does not open it from inside the close.
+mod queued_invite {
+    use super::*;
+
+    const ADDED: &str = r#""@type":"ok""#;
+    const LIMIT: &str = r#""@type":"error","code":400,"message":"CHATLISTS_TOO_MUCH""#;
+
+    fn start_add(app: &mut QuillApp) -> RequestId {
+        let request = sent(app, RequestPurpose::AddChatFolderByInviteLink, None);
+        let info = Box::new(quill::telegram::envelope::ChatFolderInviteLinkInfo {
+            folder: quill::telegram::envelope::ChatFolderInfo {
+                id: 0,
+                name: "Work".into(),
+                icon_name: String::new(),
+                color_id: -1,
+                is_shareable: false,
+                has_my_invite_links: false,
+            },
+            missing_chat_ids: vec![],
+            added_chat_ids: vec![],
+        });
+        app.folders.invite = Some(FolderInviteDialog::new(
+            "first".into(),
+            InviteStage::Adding {
+                request,
+                info,
+                next: None,
+            },
+        ));
+        request
+    }
+
+    fn opened_link(app: &QuillApp) -> Option<&str> {
+        app.folders.invite.as_ref().map(|d| d.link.as_str())
+    }
+
+    fn notes_error(app: &QuillApp) -> bool {
+        !app.screen.connection.status_note().is_empty()
+    }
+
+    #[gpui_kit::test]
+    fn the_queued_link_opens_after_each_way_the_add_ends(cx: &mut TestAppContext) {
+        for body in [ADDED, REFUSED, LIMIT] {
+            let (app, mut vcx) = open(cx);
+            app.update_in(&mut vcx, |app, _, cx| {
+                let request = start_add(app);
+                app.open_folder_invite("second".into(), cx);
+                assert_eq!(opened_link(app), Some("first"));
+                answer(app, request, body);
+                assert!(app.drive_folder_invite(cx));
+                assert_eq!(opened_link(app), Some("second"), "{body}");
+                if body == REFUSED {
+                    assert!(notes_error(app), "the refusal is told before the swap");
+                }
+            });
+        }
+    }
+
+    #[gpui_kit::test]
+    fn the_link_being_added_queues_nothing(cx: &mut TestAppContext) {
+        let (app, mut vcx) = open(cx);
+        app.update_in(&mut vcx, |app, _, cx| {
+            let request = start_add(app);
+            app.open_folder_invite("first".into(), cx);
+            answer(app, request, ADDED);
+            assert!(app.drive_folder_invite(cx));
+            assert!(
+                app.folders.invite.is_none(),
+                "no second box for the folder just added"
+            );
+        });
+    }
+
+    #[gpui_kit::test]
+    fn closing_keeps_the_queued_link_for_the_adds_answer(cx: &mut TestAppContext) {
+        let (app, mut vcx) = open(cx);
+        app.update_in(&mut vcx, |app, _, cx| {
+            let request = start_add(app);
+            app.open_folder_invite("second".into(), cx);
+            // A caller that closes until the box is gone opens nothing.
+            app.close_folder_invite(cx);
+            app.close_folder_invite(cx);
+            assert!(app.folders.invite.is_none());
+            answer(app, request, ADDED);
+            assert!(app.settle_folder_share(cx));
+            assert_eq!(opened_link(app), Some("second"));
+        });
+    }
+}

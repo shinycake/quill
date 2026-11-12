@@ -1,6 +1,8 @@
 use super::super::app::QuillApp;
 use super::super::pressable::action_row;
 use super::super::shell::{DialogKind, QuillShell};
+use super::super::status_note::StatusNote;
+use super::super::user_error::user_error_for;
 use super::super::*;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
@@ -367,7 +369,8 @@ pub fn build_community_hub_dialog(
 /// counts, the member chats with hidden badges, and the TDLib 1.8.68
 /// management controls: the member chat-list permission switch
 /// (`can_ban_members`) and "Delete community" (owner). `getCommunityFullInfo` is kicked off by
-/// `open_info_panel_target`; a missing pack renders "Loading…".
+/// `open_info_panel_target`; a missing pack renders "Loading…" while its
+/// ask is out and the error with a Retry when it failed.
 pub fn render_community_info_panel(
     app: &QuillApp,
     community_id: i64,
@@ -385,6 +388,11 @@ pub fn render_community_info_panel(
     let full_info = session
         .and_then(|s| s.groups.community_full_infos.get(&community_id))
         .cloned();
+    // A failed ask is drawn with its error and a Retry, not as "Loading".
+    let failed = session
+        .and_then(|s| s.groups.community_full_infos.fetch(community_id))
+        .and_then(|fetch| fetch.error())
+        .map(str::to_string);
     let mut body = div()
         .flex()
         .flex_col()
@@ -440,10 +448,26 @@ pub fn render_community_info_panel(
                 .child(stats)
                 .child(app.community_info_sections(community_id, cx))
         }
-        None => div()
-            .text_sm()
-            .text_color(cx.theme().muted_foreground)
-            .child(tr(keys::COMMUNITY_CHAT_LOADING)),
+        None => match failed {
+            Some(error) => div()
+                .flex()
+                .flex_col()
+                .items_center()
+                .gap_2()
+                .child(div().text_sm().text_color(cx.theme().danger).child(error))
+                .child(
+                    Button::new(format!("community-info-retry-{community_id}"))
+                        .label(tr(keys::Q_PEOPLE_RETRY))
+                        .outline()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.retry_community_full_info(community_id, cx);
+                        })),
+                ),
+            None => div()
+                .text_sm()
+                .text_color(cx.theme().muted_foreground)
+                .child(tr(keys::COMMUNITY_CHAT_LOADING)),
+        },
     });
     // TDLib 1.8.68 `setCommunityPermissions` (needs `can_ban_members`):
     // the community's single member permission. Not optimistic — the
@@ -522,4 +546,19 @@ crate::ui::shell::register_dialogs! {
         build_community_hub_dialog,
     )
     .close(|app, _, cx| app.close_community_hub(cx)),
+}
+
+impl QuillApp {
+    /// Retry of the community info panel after its ask failed.
+    fn retry_community_full_info(&mut self, community_id: i64, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut()
+            && let Err(err) = live.driver.get_community_full_info(community_id)
+        {
+            self.set_note(StatusNote::error(user_error_for(
+                keys::Q_NOTES_FAILED_GROUP_INFO,
+                &err,
+            )));
+        }
+        cx.notify();
+    }
 }

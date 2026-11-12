@@ -11,8 +11,13 @@ use quill::state::DialogAnswer;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ClosedAsk {
     /// The add of a shared folder: the toast says it was added, with how
-    /// many chats were joined.
-    FolderAdded { folder: String, joined: usize },
+    /// many chats were joined. `next` is an `addlist` link that came while
+    /// the add was out: its box opens when the add is settled.
+    FolderAdded {
+        folder: String,
+        joined: usize,
+        next: Option<String>,
+    },
     /// A link save or delete of the Share Folder box: the list is the
     /// session's, so only a failure has something to say; a success asks
     /// the list of a box reopened since (`refetch_open_folder_links`).
@@ -28,6 +33,7 @@ impl QuillApp {
         }
         let waiting: Vec<RequestId> = self.folders.closed_asks.keys().copied().collect();
         let mut changed = false;
+        let mut queued: Option<String> = None;
         for request in waiting {
             let Some(session) = self.session_mut_any() else {
                 continue;
@@ -45,17 +51,35 @@ impl QuillApp {
                 continue;
             };
             match (ask, answer) {
+                (ClosedAsk::FolderAdded { next, .. }, DialogAnswer::Failed(line)) => {
+                    self.set_note(StatusNote::error(line));
+                    queued = queued.or(next);
+                }
+                (ClosedAsk::FolderAdded { next, .. }, DialogAnswer::LimitHit) => {
+                    queued = queued.or(next);
+                }
                 (_, DialogAnswer::Failed(line)) => self.set_note(StatusNote::error(line)),
                 // The limit box says it; no toast on top.
                 (_, DialogAnswer::LimitHit) => {}
-                (ClosedAsk::FolderAdded { folder, joined }, _) => {
+                (
+                    ClosedAsk::FolderAdded {
+                        folder,
+                        joined,
+                        next,
+                    },
+                    _,
+                ) => {
                     self.set_note(folder_added_note(&folder, joined));
+                    queued = queued.or(next);
                 }
                 // The delete or save landed: a box reopened meanwhile held its
                 // list back for it (`fetch_folder_share`) and asks it now.
                 (ClosedAsk::LinkChange, _) => self.refetch_open_folder_links(),
             }
             changed = true;
+        }
+        if let Some(link) = queued {
+            self.open_folder_invite(link, cx);
         }
         if changed {
             cx.notify();

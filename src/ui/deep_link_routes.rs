@@ -206,7 +206,9 @@ impl QuillApp {
         seconds: i32,
         cx: &mut Context<Self>,
     ) {
-        let give_up = self.spawn_scoped(cx, async move |this, cx| {
+        // The seek is the account's (`playback`), not a chat window's: the timer
+        // must outlive the window the link finished in.
+        let give_up = self.spawn_screen(cx, async move |this, cx| {
             cx.background_executor().timer(SEEK_WAIT).await;
             let _ = this.update(cx, |this, _| this.playback.media_seek = MediaSeek::Idle);
         });

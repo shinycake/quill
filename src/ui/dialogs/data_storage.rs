@@ -12,9 +12,6 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::data_settings::{AutoDownloadNetSettings, DataStoragePrefs};
 use quill::lang::{keys, tr, tr_with};
-use std::cell::Cell;
-use std::rc::Rc;
-use std::time::{Duration, Instant};
 /// Slice S4: bytes formatter that handles 0 and GB — the shared
 /// `format_bytes` returns "" for 0 and tops out at MB.
 pub(crate) fn format_storage_bytes(n: i64) -> String {
@@ -31,89 +28,35 @@ pub(crate) fn format_storage_bytes(n: i64) -> String {
     }
 }
 
-/// How long a scroll request waits for a frame of the settings window.
-const SCROLL_REQUEST_LIFE: Duration = Duration::from_secs(2);
-
-/// Where the scroll to the storage list stands. `placed` is the page's
-/// vertical offset the last scroll left (set a frame after it).
-enum StorageScrollStage {
-    Idle,
-    /// A scroll to the list is due on the next frame of the settings
-    /// window. A request no frame took by `until` (the executor clock) is
-    /// dropped, so settings opened much later do not scroll by themselves.
-    Requested {
-        until: Instant,
-    },
-    /// The list was scrolled to.
-    Placed {
-        placed: Rc<Cell<Option<Pixels>>>,
-    },
-}
-
 pub(crate) struct StorageScroll {
     pub(in crate::ui) page: ScrollHandle,
     usage: ScrollAnchor,
-    stage: StorageScrollStage,
 }
 
 impl StorageScroll {
     pub(crate) fn new() -> Self {
         let page = ScrollHandle::new();
         let usage = ScrollAnchor::for_handle(page.clone());
-        Self {
-            page,
-            usage,
-            stage: StorageScrollStage::Idle,
-        }
+        Self { page, usage }
     }
 }
 
 impl QuillApp {
+    /// Settings on the storage list. The scroll waits on nothing Quill
+    /// keeps: it is one callback of the main window's next frame, which
+    /// runs when that window draws (however late) and goes with the window.
     pub(crate) fn open_local_storage(&mut self, cx: &mut Context<Self>) {
         self.open_data_storage(cx);
-        if self.settings.open()
-            && self.settings.page() == Some(quill::settings_catalog::Page::DataStorage)
-        {
-            self.settings.storage_scroll.stage = StorageScrollStage::Requested {
-                until: cx.background_executor().now() + SCROLL_REQUEST_LIFE,
-            };
-        }
-    }
-
-    pub(in crate::ui) fn ensure_storage_scroll(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let scroll = &mut self.settings.storage_scroll;
-        let offset = scroll.page.offset().y;
-        let user_moved = match &scroll.stage {
-            StorageScrollStage::Placed { placed } => {
-                placed.get().is_some_and(|placed| placed != offset)
-            }
-            StorageScrollStage::Idle | StorageScrollStage::Requested { .. } => false,
+        let Some(main) = self.main_window.handle else {
+            return;
         };
-        if user_moved {
-            scroll.stage = StorageScrollStage::Idle;
-        }
-        let now = cx.background_executor().now();
-        if matches!(scroll.stage, StorageScrollStage::Requested { until } if now >= until) {
-            scroll.stage = StorageScrollStage::Idle;
-        }
-        if matches!(scroll.stage, StorageScrollStage::Requested { .. }) {
-            let placed: Rc<Cell<Option<Pixels>>> = Rc::default();
-            scroll.stage = StorageScrollStage::Placed {
-                placed: placed.clone(),
-            };
-            scroll.usage.scroll_to(window, cx);
-            let page = scroll.page.clone();
-            // Runs after the anchor's own next-frame scroll. The new offset
-            // paints nothing on its own.
-            window.on_next_frame(move |window, _| {
-                placed.set(Some(page.offset().y));
+        let usage = self.settings.storage_scroll.usage.clone();
+        cx.defer(move |cx| {
+            let _ = main.update(cx, |_, window, _| {
+                window.on_next_frame(move |window, cx| usage.scroll_to(window, cx));
                 window.refresh();
             });
-        }
+        });
     }
 
     /// Slice S4: open the Data & Storage dialog — reset the transient
@@ -167,7 +110,6 @@ impl QuillApp {
     /// Leaving the page drops an unsaved editor and any pending confirm.
     pub(crate) fn leave_data_storage(&mut self) {
         self.apply_unreleased_storage_drag();
-        self.settings.storage_scroll.stage = StorageScrollStage::Idle;
         self.close_auto_download();
         self.settings.storage_confirm = None;
         self.privacy.extra.network_reset = Default::default();

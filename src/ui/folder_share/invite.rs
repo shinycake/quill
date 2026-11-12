@@ -22,10 +22,14 @@ impl QuillApp {
         // An add in flight keeps its box: its answer is the only word on
         // whether that folder was added. Another link waits for it in the
         // stage and is checked when the add settles.
-        if let Some(InviteStage::Adding { next, .. }) =
-            self.folders.invite.as_mut().map(|d| &mut d.stage)
+        if let Some(dialog) = self.folders.invite.as_mut()
+            && let InviteStage::Adding { next, .. } = &mut dialog.stage
         {
-            *next = Some(link);
+            // The link being added again (a double click) queues nothing:
+            // a second box would open for the folder just added.
+            if link != dialog.link {
+                *next = Some(link);
+            }
             // box-host: re-raises the box the add already shows, where it is.
             self.open_box(DialogKind::FolderInvite);
             cx.notify();
@@ -45,16 +49,18 @@ impl QuillApp {
         };
         self.folders.invite = Some(FolderInviteDialog::new(link, stage));
         // box-host: the folder box is the account's one, drawn where it was
-        // already shown; a link queued behind an add opens from the poll.
+        // already shown.
         self.open_box(DialogKind::FolderInvite);
         cx.notify();
     }
 
     /// Closing the box while the add is out hands that request to
-    /// `closed_asks`: its answer still says whether the folder was added.
+    /// `closed_asks`: its answer still says whether the folder was added,
+    /// and a link queued behind the add is checked when that answer comes
+    /// (`settle_closed_folder_asks`), not from this close, which a caller
+    /// may repeat until the box is gone.
     pub(in crate::ui) fn close_folder_invite(&mut self, cx: &mut Context<Self>) {
         self.drop_folder_invite_check();
-        let mut next = None;
         if let Some(dialog) = self.folders.invite.take()
             && let InviteStage::Adding {
                 request,
@@ -67,13 +73,9 @@ impl QuillApp {
                 ClosedAsk::FolderAdded {
                     folder: info.folder.name.to_string(),
                     joined: dialog.selected.len(),
+                    next: queued,
                 },
             );
-            next = queued;
-        }
-        // A link that came while the add was out is checked now.
-        if let Some(link) = next {
-            self.open_folder_invite(link, cx);
         }
         cx.notify();
     }
@@ -111,7 +113,9 @@ impl QuillApp {
             if let Some(answer) = answer {
                 changed = true;
                 let (over, next) = self.settle_folder_invite(answer);
-                // A link that came while the add was out is checked now.
+                // A link that came while the add was out is checked now. The
+                // box it replaces may hold the add's refusal: that was told
+                // in a toast first (`settle_folder_invite`).
                 if let Some(link) = next {
                     self.open_folder_invite(link, cx);
                 }
@@ -168,8 +172,13 @@ impl QuillApp {
             (InviteStage::Adding { info, next, .. }, DialogAnswer::Failed(line)) => {
                 dialog.stage = InviteStage::Ready {
                     info,
-                    error: Some(line),
+                    error: Some(line.clone()),
                 };
+                // The queued link replaces this form, and the form was the
+                // only place the refusal showed.
+                if next.is_some() {
+                    self.set_note(StatusNote::error(line));
+                }
                 (false, next)
             }
             (InviteStage::Adding { info, next, .. }, DialogAnswer::LimitHit) => {

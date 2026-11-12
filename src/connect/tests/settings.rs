@@ -782,14 +782,7 @@ fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
     assert!(!driver.session.settings.sessions_op.is_mutating());
     // The screen that asked went away: nobody takes the answer.
     driver.session.settings.device_login.discard();
-    assert_eq!(
-        driver
-            .session
-            .settings
-            .device_login
-            .take_result_for(request),
-        None
-    );
+    assert_eq!(driver.session.settings.device_login.take_result(), None);
     assert!(
         recorder.snapshot()[sent..]
             .iter()
@@ -825,20 +818,7 @@ fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
         }
     );
     assert_eq!(
-        driver
-            .session
-            .settings
-            .device_login
-            .take_result_for(crate::ids::RequestId(request.0 + 1)),
-        None,
-        "another request's result is not this asker's"
-    );
-    assert_eq!(
-        driver
-            .session
-            .settings
-            .device_login
-            .take_result_for(request),
+        driver.session.settings.device_login.take_result(),
         Some(crate::auth::DeviceLoginResult::PasswordRequired)
     );
     driver.session.auth = crate::telegram::envelope::AuthorizationState::WaitPhoneNumber;

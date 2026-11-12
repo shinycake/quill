@@ -115,13 +115,14 @@ impl QuillApp {
             }
             // A new flow gives way to an invite box still up.
             self.screen.links.invite_box.take();
-            // A link whose send fails leaves a note: it was taken from its
-            // slot, and nothing else would say it did not go out.
-            if live
+            // A link whose send fails and enters no flow leaves a note: it was
+            // taken from its slot, and nothing else would say it did not go
+            // out. A send that failed into the flow's own "Couldn't reach
+            // Telegram" box already said it.
+            let sent = live
                 .driver
-                .request_deep_link_info_from(&queued.link, queued.by_agent)
-                .is_err()
-            {
+                .request_deep_link_info_from(&queued.link, queued.by_agent);
+            if sent.is_err() && live.driver.session.chats_state.deep_link_stage().is_none() {
                 self.screen.connection.set_note_for(
                     &self.screen.windows,
                     StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_OPEN_LINK)),

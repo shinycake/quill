@@ -775,7 +775,7 @@ fn closing_the_panel_drops_the_gif_typing_pause(cx: &mut TestAppContext) {
 /// and settles to `Asked` when it ends, however it ended.
 #[gpui_kit::test]
 fn a_gif_ask_settles_when_its_own_request_ends(cx: &mut TestAppContext) {
-    use crate::ui::gifs_ui::{GifTab, GifWanted};
+    use crate::ui::gifs_ui::{AskEnd, GifTab, GifWanted};
     use quill::state::RequestPurpose;
     let h = new_app(cx);
     h.app.update(cx, |app, cx| {
@@ -801,8 +801,8 @@ fn a_gif_ask_settles_when_its_own_request_ends(cx: &mut TestAppContext) {
         }
         app.gif_tab_upkeep(cx);
         assert!(
-            matches!(&app.pickers.gif_tab, GifTab::Asked(shown) if *shown == wanted),
-            "the request ended: the ask is settled and is not asked again"
+            matches!(&app.pickers.gif_tab, GifTab::Asked { wanted: shown, ended: AskEnd::Failed } if *shown == wanted),
+            "the request ended with nothing held: the ask is settled and is not asked again"
         );
     });
 }
@@ -870,4 +870,82 @@ fn typed_gif_text_keeps_its_pause_through_the_upkeep(cx: &mut TestAppContext) {
             app.set_window_scope(None);
         });
     }
+}
+
+/// Sweep r4-08 (16-008): a window whose ask ended, but whose answer the
+/// session's one list no longer shows or keeps, asks again without a press.
+#[gpui_kit::test]
+fn an_asked_gif_tab_whose_answer_was_replaced_asks_again(cx: &mut TestAppContext) {
+    use crate::ui::gifs_ui::{AskEnd, GifTab, GifWanted};
+    use crate::ui::media_panel::PanelTab;
+    let h = new_app(cx);
+    let _chat_window = h.open_in_new_window(OTHER, cx);
+    h.app.update(cx, |app, cx| {
+        let searching = |app: &crate::ui::app::QuillApp| {
+            app.session().and_then(|s| {
+                let gifs = &s.stickers.gifs;
+                gifs.search_mode().then(|| gifs.search_query().to_string())
+            })
+        };
+        // The main window searched "dogs" and is in use.
+        app.note_window_press(None);
+        app.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
+        app.pickers.media_panel.tab = PanelTab::Gifs;
+        app.pickers.gif_tab = GifTab::Wants(GifWanted::Search("dogs".into()));
+        app.gif_tab_upkeep(cx);
+        assert_eq!(searching(app).as_deref(), Some("dogs"));
+        // The chat window asked for "cats" earlier; its answer is gone.
+        app.set_window_scope(Some(OTHER));
+        app.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
+        app.pickers.media_panel.tab = PanelTab::Gifs;
+        app.pickers.gif_tab = GifTab::Asked {
+            wanted: GifWanted::Search("cats".into()),
+            ended: AskEnd::Answered,
+        };
+        app.gif_tab_upkeep(cx);
+        assert_eq!(
+            searching(app).as_deref(),
+            Some("cats"),
+            "it asks again without a press"
+        );
+    });
+}
+
+/// Sweep r4-08 fix round (16-008): a window whose search failed does not
+/// ask again from upkeep, so two windows never trade the list for ever.
+#[gpui_kit::test]
+fn a_failed_gif_ask_waits_for_a_press(cx: &mut TestAppContext) {
+    use crate::ui::gifs_ui::{AskEnd, GifTab, GifWanted};
+    use crate::ui::media_panel::PanelTab;
+    let h = new_app(cx);
+    let _chat_window = h.open_in_new_window(OTHER, cx);
+    h.app.update(cx, |app, cx| {
+        let searching = |app: &crate::ui::app::QuillApp| {
+            app.session().and_then(|s| {
+                let gifs = &s.stickers.gifs;
+                gifs.search_mode().then(|| gifs.search_query().to_string())
+            })
+        };
+        app.note_window_press(None);
+        app.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
+        app.pickers.media_panel.tab = PanelTab::Gifs;
+        app.pickers.gif_tab = GifTab::Wants(GifWanted::Search("dogs".into()));
+        app.gif_tab_upkeep(cx);
+        assert_eq!(searching(app).as_deref(), Some("dogs"));
+        app.set_window_scope(Some(OTHER));
+        app.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
+        app.pickers.media_panel.tab = PanelTab::Gifs;
+        app.pickers.gif_tab = GifTab::Asked {
+            wanted: GifWanted::Search("cats".into()),
+            ended: AskEnd::Failed,
+        };
+        for _ in 0..3 {
+            app.gif_tab_upkeep(cx);
+        }
+        assert_eq!(
+            searching(app).as_deref(),
+            Some("dogs"),
+            "a failed ask is not asked again without a press"
+        );
+    });
 }
