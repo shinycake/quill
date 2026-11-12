@@ -648,3 +648,49 @@ fn an_answered_empty_send_as_list_opens_no_menu(cx: &mut TestAppContext) {
         assert!(!app.chat_ui.send_as_open, "an empty list is not a menu");
     });
 }
+
+/// Sweep r4-08 fix round: the full-size decode of "Edit Image" belongs to
+/// its edit. Cancelling the edit drops the decode, so editing the same
+/// message again does not get the photo editor opened by the old decode;
+/// the edit that is still in place gets its own answer.
+#[gpui_kit::test]
+fn an_edit_image_decode_answers_only_its_own_edit(cx: &mut TestAppContext) {
+    use quill::composer::{ComposerEdit, ComposerEditKind};
+    let (app, mut vcx) = new_app(cx);
+    let edit = || ComposerEdit {
+        chat_id: CHAT,
+        message_id: MessageId(20),
+        kind: ComposerEditKind::Text,
+        scheduled: false,
+        caption_above: false,
+        media_edit: Default::default(),
+        link_preview: Default::default(),
+    };
+    let answered = Rc::new(std::cell::Cell::new(0u32));
+    let decode = |app: &mut QuillApp, cx: &mut gpui_kit::Context<QuillApp>| {
+        let id = app.chat_ui.edit_id().expect("an edit");
+        let seen = answered.clone();
+        let task = app.decode_image_task(
+            std::path::PathBuf::from("/nonexistent/edit-image.png"),
+            move |this, _, _| {
+                if this.chat_ui.end_image_decode(id) {
+                    seen.set(seen.get() + 1);
+                }
+            },
+            cx,
+        );
+        app.chat_ui.begin_image_decode(task);
+    };
+    app.update(&mut vcx, |app, cx| {
+        app.chat_ui.enter_edit(edit(), String::new(), None);
+        decode(app, cx);
+        // Cancelled, then the same message edited again.
+        app.chat_ui.leave_edit();
+        app.chat_ui.enter_edit(edit(), String::new(), None);
+    });
+    vcx.run_until_parked();
+    assert_eq!(answered.get(), 0, "the first edit's decode is gone");
+    app.update(&mut vcx, |app, cx| decode(app, cx));
+    vcx.run_until_parked();
+    assert_eq!(answered.get(), 1, "the edit in place gets its own answer");
+}

@@ -112,14 +112,20 @@ impl QuillApp {
         let typed = self.spawn_scoped(cx, async move |this, cx| {
             cx.background_executor().timer(SEARCH_DELAY).await;
             this.update(cx, |this, cx| {
-                if this.event_log_open_chat() == Some(chat_id) {
+                // The timer is spent: a page replaced meanwhile has none.
+                let waiting = this
+                    .admin
+                    .event_log_page
+                    .as_mut()
+                    .is_some_and(|page| page.chat == chat_id && page.typed.fire());
+                if waiting && this.event_log_open_chat() == Some(chat_id) {
                     this.apply_event_log_search(chat_id, cx);
                 }
             })
             .ok();
         });
         // Replacing the page's timer stops the one of the earlier edit.
-        self.event_log_page_for(chat_id).typed = Some(typed);
+        self.event_log_page_for(chat_id).typed.arm(typed);
     }
 
     /// The page of `chat_id`; the page of another chat is replaced (its

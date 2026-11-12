@@ -93,6 +93,21 @@ pub(super) struct EditMode {
     /// The "Edit Cover" file dialog, while it is up. It belongs to this edit:
     /// ending the edit, or starting another, drops the wait with it.
     pub(super) cover_pick: CoverPick,
+    /// The "Edit Image" decode of the photo to edit, while it runs. It
+    /// belongs to this edit like the cover dialog: ending the edit, or
+    /// starting another, drops the decode with it.
+    pub(super) image_decode: ImageDecode,
+}
+
+/// The full-size decode "Edit Image" waits for: not running, or running
+/// as the task that holds its answer.
+#[derive(Debug, Default)]
+pub(super) enum ImageDecode {
+    #[default]
+    Idle,
+    Decoding {
+        _task: Task<()>,
+    },
 }
 
 /// The file dialog of "Edit Cover" (tdesktop `VideoCoverUploader::choose`):
@@ -486,6 +501,7 @@ impl ChatUi {
             stashed_draft,
             stashed_reply,
             cover_pick: CoverPick::Idle,
+            image_decode: ImageDecode::Idle,
         });
     }
 
@@ -502,6 +518,25 @@ impl ChatUi {
         match self.edit_mode.as_mut() {
             Some(mode) if mode.id == asked_for => {
                 mode.cover_pick = CoverPick::Idle;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// The edit in place waits for its photo's decode in `task`.
+    pub(super) fn begin_image_decode(&mut self, task: Task<()>) {
+        if let Some(mode) = self.edit_mode.as_mut() {
+            mode.image_decode = ImageDecode::Decoding { _task: task };
+        }
+    }
+
+    /// The decode of edit `asked_for` answered: whether that edit is still
+    /// the one in place (and the wait ends).
+    pub(super) fn end_image_decode(&mut self, asked_for: EditId) -> bool {
+        match self.edit_mode.as_mut() {
+            Some(mode) if mode.id == asked_for => {
+                mode.image_decode = ImageDecode::Idle;
                 true
             }
             _ => false,

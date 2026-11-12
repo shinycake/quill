@@ -457,6 +457,7 @@ pub fn render_community_info_panel(
                 .child(div().text_sm().text_color(cx.theme().danger).child(error))
                 .child(
                     Button::new(format!("community-info-retry-{community_id}"))
+                        .debug_selector(|| "community-info-retry".into())
                         .label(tr(keys::Q_PEOPLE_RETRY))
                         .outline()
                         .on_click(cx.listener(move |this, _, _, cx| {

@@ -454,8 +454,15 @@ fn the_full_disk_notice_offers_no_reply_or_mark_as_read() {
 fn the_full_screen_links_to_the_cached_files(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_demo_app(cx, "wait-phone", 800.);
     let folder = quill::scratch::unique_dir("quill-disk-cache");
-    app.update_in(&mut vcx, |app, _, _| {
-        app.disk.cache_folder = Some(folder.clone())
+    app.update_in(&mut vcx, |app, _, cx| {
+        app.note_account_files(
+            super::AccountFiles {
+                account: quill::ids::AccountKey::primary(),
+                cache_folder: Some(folder.clone()),
+                database_bytes: None,
+            },
+            cx,
+        )
     });
     vcx.update(|window, cx| window.render_frame(cx));
     assert!(vcx.update(|window, _| window.try_find("disk-full-reveal").is_none()));
@@ -470,7 +477,16 @@ fn the_full_screen_links_to_the_cached_files(cx: &mut TestAppContext) {
         tr(keys::Q_AV_COULDNT_OPEN_THE_FOLDER),
         "a failed reveal says so"
     );
-    app.update_in(&mut vcx, |app, _, _| app.disk.cache_folder = None);
+    app.update_in(&mut vcx, |app, _, cx| {
+        app.note_account_files(
+            super::AccountFiles {
+                account: quill::ids::AccountKey::primary(),
+                cache_folder: None,
+                database_bytes: None,
+            },
+            cx,
+        )
+    });
     vcx.update(|window, cx| window.render_frame(cx));
     assert!(
         vcx.update(|window, _| window.try_find("disk-full-reveal").is_none()),
@@ -488,8 +504,14 @@ fn manage_local_storage_shows_the_message_database_size(cx: &mut TestAppContext)
     vcx.update(|window, cx| window.render_frame(cx));
     assert!(vcx.debug_bounds("storage-database-size").is_none());
     app.update_in(&mut vcx, |app, _, cx| {
-        app.disk.database_bytes = Some(3 << 20);
-        cx.notify();
+        app.note_account_files(
+            super::AccountFiles {
+                account: quill::ids::AccountKey::primary(),
+                cache_folder: None,
+                database_bytes: Some(3 << 20),
+            },
+            cx,
+        );
     });
     vcx.run_until_parked();
     vcx.update(|window, cx| window.render_frame(cx));
@@ -508,7 +530,7 @@ fn a_switch_drops_the_previous_accounts_storage_figures(cx: &mut TestAppContext)
     let first = AccountKey::primary();
     let second = AccountKey("second".into());
     let bytes = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
-        app.read_with(vcx, |app, _| app.disk.database_bytes)
+        app.read_with(vcx, |app, _| app.disk.database_bytes())
     };
     app.update_in(&mut vcx, |app, _, cx| {
         app.note_account_files(files(&first, 7 << 20), cx)
@@ -542,7 +564,7 @@ fn storage_figures_go_on_after_every_account_was_wiped(cx: &mut TestAppContext) 
         };
         app.note_account_files(files, cx)
     });
-    let shown = app.read_with(&vcx, |app, _| app.disk.database_bytes);
+    let shown = app.read_with(&vcx, |app, _| app.disk.database_bytes());
     assert_eq!(shown, Some(5 << 20));
 }
 

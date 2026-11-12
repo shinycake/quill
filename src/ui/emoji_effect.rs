@@ -140,7 +140,7 @@ enum EffectKind {
 /// it ends when the sticker has played or the wait ran out.
 enum Playback {
     /// Until `until` (on the executor clock, `cx.background_executor().now()`,
-    /// like `missing`; a clip's `started` is on the real clock).
+    /// like the badge grace; a clip's `started` is on the real clock).
     Waiting {
         until: Instant,
     },
@@ -237,11 +237,58 @@ impl Drawn {
 #[derive(Clone, Copy)]
 struct MessageEffectPlay {
     effect_id: i64,
-    /// Where the badge was last seen, to find the message again when it
-    /// gets its final id while the effect plays.
-    last: Option<Point<Pixels>>,
-    /// Since when the badge has not been on screen (executor clock).
-    missing: Option<Instant>,
+    badge: BadgeTrack,
+}
+
+/// Where the badge of a message effect stands. Where it was last seen finds
+/// the message again when it gets its final id while the effect plays; the
+/// time it has been off screen (executor clock) ends the effect.
+#[derive(Clone, Copy)]
+enum BadgeTrack {
+    /// Never seen yet; `since` is when the first look failed to find it.
+    Unseen { since: Option<Instant> },
+    /// On screen at `at` as of the last look.
+    Seen { at: Point<Pixels> },
+    /// Off screen since `since`, last seen at `last`.
+    Lost { last: Point<Pixels>, since: Instant },
+}
+
+impl BadgeTrack {
+    fn last(self) -> Option<Point<Pixels>> {
+        match self {
+            Self::Unseen { .. } => None,
+            Self::Seen { at } => Some(at),
+            Self::Lost { last, .. } => Some(last),
+        }
+    }
+
+    fn seen_at(&mut self, at: Point<Pixels>) {
+        *self = Self::Seen { at };
+    }
+
+    /// The look at `now` found no badge: the first miss starts the grace.
+    fn missed(&mut self, now: Instant) {
+        *self = match *self {
+            Self::Unseen { since } => Self::Unseen {
+                since: since.or(Some(now)),
+            },
+            Self::Seen { at } => Self::Lost {
+                last: at,
+                since: now,
+            },
+            lost @ Self::Lost { .. } => lost,
+        };
+    }
+
+    /// Whether the badge is on screen or off it for less than the grace.
+    fn within_grace(self, now: Instant) -> bool {
+        match self {
+            Self::Unseen { since: None } | Self::Seen { .. } => true,
+            Self::Unseen { since: Some(at) } | Self::Lost { since: at, .. } => {
+                badge_within_grace(now, at)
+            }
+        }
+    }
 }
 
 /// A message effect whose badge is off screen this long has ended
@@ -338,8 +385,7 @@ pub(super) fn push_message(
             playback: Playback::Waiting { until: now + wait },
             kind: EffectKind::Message(MessageEffectPlay {
                 effect_id,
-                last: None,
-                missing: None,
+                badge: BadgeTrack::Unseen { since: None },
             }),
         });
     });
@@ -360,11 +406,10 @@ fn follow_badges(chat: ChatId, now: Instant) {
             };
             let key = (a.effect.chat_id.0, a.effect.message_id.0);
             if let Some(seen) = super::message_effect_badge::seen(key) {
-                play.last = Some(seen.bounds.origin);
-                play.missing = None;
+                play.badge.seen_at(seen.bounds.origin);
                 continue;
             }
-            let moved = play.last.and_then(|last| {
+            let moved = play.badge.last().and_then(|last| {
                 super::message_effect_badge::nearest(
                     key.0,
                     play.effect_id,
@@ -376,12 +421,9 @@ fn follow_badges(chat: ChatId, now: Instant) {
             match moved {
                 Some((new_key, seen)) => {
                     a.effect.message_id = MessageId(new_key.1);
-                    play.last = Some(seen.bounds.origin);
-                    play.missing = None;
+                    play.badge.seen_at(seen.bounds.origin);
                 }
-                None => {
-                    play.missing.get_or_insert(now);
-                }
+                None => play.badge.missed(now),
             }
         }
     });
@@ -814,9 +856,7 @@ impl QuillApp {
                     return shown.contains(&a.effect.chat_id.0);
                 }
                 let badge_ok = match &a.kind {
-                    EffectKind::Message(play) => {
-                        play.missing.is_none_or(|at| badge_within_grace(now, at))
-                    }
+                    EffectKind::Message(play) => play.badge.within_grace(now),
                     EffectKind::Emoji | EffectKind::Premium => true,
                 };
                 badge_ok

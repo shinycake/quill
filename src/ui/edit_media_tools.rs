@@ -146,11 +146,14 @@ impl QuillApp {
             return;
         };
         let asked_for = (edit.chat_id, edit.message_id);
-        self.decode_image_then(
+        let Some(edit_id) = self.chat_ui.edit_id() else {
+            return;
+        };
+        let decoding = self.decode_image_task(
             source,
             move |this, result, cx| {
                 // The edit it was started for is gone or another one now.
-                if this.edited_message() != Some(asked_for) {
+                if !this.chat_ui.end_image_decode(edit_id) {
                     return;
                 }
                 match result {
@@ -171,6 +174,7 @@ impl QuillApp {
             },
             cx,
         );
+        self.chat_ui.begin_image_decode(decoding);
     }
 
     /// The photo isn't on disk yet: ask TDLib for it; the editor opens

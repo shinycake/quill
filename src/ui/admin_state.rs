@@ -70,10 +70,34 @@ pub(super) struct EventLogPage {
     pub(super) autoload: std::cell::Cell<Option<usize>>,
     /// The search debounce: each edit replaces it, so only the last one
     /// searches.
-    pub(super) typed: Option<gpui_kit::Task<()>>,
+    pub(super) typed: SearchPause,
     /// The poll timer, which ends by itself when the page closes or the app
     /// goes inactive (`resume_event_log_poll` starts it again).
     pub(super) poll: EventLogPoll,
+}
+
+/// The page's search debounce: not waiting, or waiting on the timer it
+/// owns. The timer's own firing sets `Idle` (`fire`), so a finished task is
+/// never read as a pending one.
+#[derive(Default)]
+pub(super) enum SearchPause {
+    #[default]
+    Idle,
+    Waiting {
+        _timer: gpui_kit::Task<()>,
+    },
+}
+
+impl SearchPause {
+    /// Wait for `timer` (replacing, and so cancelling, an earlier one).
+    pub(super) fn arm(&mut self, timer: gpui_kit::Task<()>) {
+        *self = Self::Waiting { _timer: timer };
+    }
+
+    /// The timer ended: whether a search was waiting for it (once).
+    pub(super) fn fire(&mut self) -> bool {
+        matches!(std::mem::take(self), Self::Waiting { .. })
+    }
 }
 
 /// Whether the page's poll runs. The loop's own exit sets `Stopped`, so a
@@ -93,7 +117,7 @@ impl EventLogPage {
             chat,
             search: None,
             autoload: std::cell::Cell::new(None),
-            typed: None,
+            typed: SearchPause::Idle,
             poll: EventLogPoll::Stopped,
         }
     }
@@ -147,5 +171,22 @@ impl AdminUi {
             welcome_dialog: None,
             group_edit_box: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod search_pause_tests {
+    use super::SearchPause;
+
+    /// The debounce fires once per arming, and a later arming replaces the
+    /// earlier one.
+    #[test]
+    fn a_search_pause_fires_once() {
+        let mut pause = SearchPause::default();
+        assert!(!pause.fire(), "nothing was typed");
+        pause.arm(gpui_kit::Task::ready(()));
+        pause.arm(gpui_kit::Task::ready(()));
+        assert!(pause.fire());
+        assert!(!pause.fire(), "a fired pause is idle, not a finished task");
     }
 }
