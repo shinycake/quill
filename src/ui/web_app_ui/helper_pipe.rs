@@ -54,7 +54,9 @@ impl HelperWriter {
     pub(super) fn send(&self, message: Vec<u8>) -> SendResult {
         match self.queue.as_ref().map(|queue| queue.try_send(message)) {
             Some(Ok(())) => SendResult::Queued,
-            Some(Err(TrySendError::Full(_) | TrySendError::Disconnected(_))) | None => SendResult::Wedged,
+            Some(Err(TrySendError::Full(_) | TrySendError::Disconnected(_))) | None => {
+                SendResult::Wedged
+            }
         }
     }
 }

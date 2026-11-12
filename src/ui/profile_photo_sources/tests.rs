@@ -229,5 +229,8 @@ fn opening_an_editor_over_another_deletes_the_first_ones_cover_file(cx: &mut Tes
         }
     });
     edit_avatar(&app, vcx, clip);
-    assert!(!cover.exists(), "the replaced editor's cover frame is deleted");
+    assert!(
+        !cover.exists(),
+        "the replaced editor's cover frame is deleted"
+    );
 }

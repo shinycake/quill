@@ -13,9 +13,9 @@
 use super::ble::{ScanEvent, Scanner, is_cable_uuid};
 use super::eid::ADVERT_LEN;
 use crate::webauthn::log;
+use futures_channel::oneshot;
 use futures_lite::StreamExt;
 use std::collections::HashMap;
-use futures_channel::oneshot;
 use std::sync::mpsc::Sender;
 use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
 

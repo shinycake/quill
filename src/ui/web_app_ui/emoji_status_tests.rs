@@ -229,7 +229,12 @@ fn a_suggested_emoji_is_confirmed_and_a_decline_says_so(cx: &mut TestAppContext)
             "the emoji is named in the prompt"
         );
         assert!(matches!(
-            app.mini_apps.window.as_ref().unwrap().popups.get(&super::PopupId::from_wire(&popup.id).unwrap()),
+            app.mini_apps
+                .window
+                .as_ref()
+                .unwrap()
+                .popups
+                .get(&super::PopupId::from_wire(&popup.id).unwrap()),
             Some(PopupPurpose::EmojiStatus)
         ));
         answer(app, &popup.id, "cancel", cx);

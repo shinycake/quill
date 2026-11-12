@@ -321,14 +321,10 @@ impl QuillApp {
         }
         // A wait whose request left flight with no answer was dropped: the
         // launch cannot happen, and the poll would wait for it for good.
-        let out = self
-            .mini_apps
-            .flow
-            .awaited_request()
-            .map(|request| {
-                self.session()
-                    .is_some_and(|session| session.requests.get(request).is_some())
-            });
+        let out = self.mini_apps.flow.awaited_request().map(|request| {
+            self.session()
+                .is_some_and(|session| session.requests.get(request).is_some())
+        });
         if out == Some(false)
             && let Some(Awaited { window, .. }) = self.mini_apps.flow.take_lost()
         {

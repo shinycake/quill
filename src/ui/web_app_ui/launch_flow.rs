@@ -174,7 +174,9 @@ pub(super) enum WriteAccess {
     Checking(quill::ids::RequestId),
     /// The person has the consent popup with this id; only its answer
     /// moves the stage.
-    Asking { popup: PopupId },
+    Asking {
+        popup: PopupId,
+    },
     /// `allowBotToSendMessages` is out, after the person said yes.
     Allowing(quill::ids::RequestId),
 }

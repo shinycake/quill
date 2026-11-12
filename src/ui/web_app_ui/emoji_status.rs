@@ -49,11 +49,12 @@ impl EmojiStatusFlow {
     /// A suggested emoji is being looked up: nothing pokes when the lookup
     /// lands, so the poll looks again on a short tick.
     pub(super) fn is_active(&self) -> bool {
-        self.set
-            .as_ref()
-            .is_some_and(|request| {
-                matches!(request.stage, SetStage::Deferred | SetStage::Resolving { .. })
-            })
+        self.set.as_ref().is_some_and(|request| {
+            matches!(
+                request.stage,
+                SetStage::Deferred | SetStage::Resolving { .. }
+            )
+        })
     }
 
     #[cfg(test)]

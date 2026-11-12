@@ -154,7 +154,11 @@ pub(crate) fn reorder_echo(dropped: &[PinKey], shown: &[PinKey]) -> Echo {
         return Echo::Caught;
     }
     let same_pins = dropped.len() == shown.len() && dropped.iter().all(|key| shown.contains(key));
-    if same_pins { Echo::OldOrder } else { Echo::Gone }
+    if same_pins {
+        Echo::OldOrder
+    } else {
+        Echo::Gone
+    }
 }
 
 /// The pinned chats panel, left to right.

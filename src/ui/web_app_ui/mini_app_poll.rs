@@ -34,9 +34,8 @@ impl QuillApp {
             let hold = backlog_hold(&executor);
             run_poll_loop(executor, &quill::wake::MINI_APPS, POLL_PACE, hold, || {
                 this.update(cx, |this, cx| {
-                    let keep = this.as_asked_by(this.mini_apps.from_window, |this| {
-                        this.poll_mini_apps(cx)
-                    });
+                    let keep = this
+                        .as_asked_by(this.mini_apps.from_window, |this| this.poll_mini_apps(cx));
                     if keep {
                         return Some(PassEnd {
                             work_left: false,

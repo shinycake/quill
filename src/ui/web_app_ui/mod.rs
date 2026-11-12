@@ -20,12 +20,12 @@ use super::attach_bots::AttachMenuEntry;
 use super::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
 use awaited::Awaited;
-use popups::{PopupId, PopupPurpose};
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::*;
 use gpui_kit::*;
+use popups::{PopupId, PopupPurpose};
 use quill::deep_link_types::is_telegram_link;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
@@ -960,12 +960,12 @@ fn bottom_button(setup: quill::web_app::bridge::ButtonSetup) -> BottomButton {
 mod awaited;
 mod emoji_status;
 mod helper_pipe;
-mod popups;
 mod inline_results_button;
 mod invoice;
 mod launch_flow;
 mod mini_app_poll;
 mod phone;
+mod popups;
 mod spawn_mini_app_window;
 
 crate::ui::shell::register_dialogs! {

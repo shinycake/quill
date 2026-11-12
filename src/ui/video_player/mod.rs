@@ -20,7 +20,6 @@
 #![deny(clippy::indexing_slicing)]
 
 mod backend_ffmpeg;
-mod open_wait;
 mod backend_live;
 #[cfg(feature = "demo-capture")]
 mod backend_still;
@@ -32,6 +31,7 @@ mod live_follow;
 mod live_picture;
 #[cfg(any(not(target_os = "macos"), test))]
 mod live_surface;
+mod open_wait;
 pub(super) mod pacing;
 mod picture;
 mod rotate;

@@ -134,7 +134,12 @@ fn the_phone_prompt_asks_and_cancel_answers_cancelled(cx: &mut TestAppContext) {
             [("cancel", "Cancel"), ("share", "Share")]
         );
         assert!(matches!(
-            app.mini_apps.window.as_ref().unwrap().popups.get(&super::PopupId::from_wire(&popup.id).unwrap()),
+            app.mini_apps
+                .window
+                .as_ref()
+                .unwrap()
+                .popups
+                .get(&super::PopupId::from_wire(&popup.id).unwrap()),
             Some(PopupPurpose::Phone)
         ));
         // A second request while the prompt is up is refused.

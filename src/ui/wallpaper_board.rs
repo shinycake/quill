@@ -25,20 +25,12 @@ pub(super) struct Job {
 /// for a key that is no longer wanted is dropped.
 enum Stage {
     /// Waiting for the worker; `order` is the request's place in line.
-    Queued {
-        job: Job,
-        order: u64,
-    },
+    Queued { job: Job, order: u64 },
     /// Handed to the worker, which ends it with `finish` (a render that
     /// panics still finishes, `render_guarded`).
-    Claimed {
-        slot: u64,
-    },
+    Claimed { slot: u64 },
     /// Finished, with its slot, until a lookup takes it.
-    Done {
-        slot: u64,
-        result: Option<Rendered>,
-    },
+    Done { slot: u64, result: Option<Rendered> },
 }
 
 impl Stage {

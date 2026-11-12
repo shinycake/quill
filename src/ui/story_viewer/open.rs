@@ -5,8 +5,8 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::story_open::StoryAsk;
-use quill::state::RequestPurpose;
 use super::*;
+use quill::state::RequestPurpose;
 use quill::state::StoryCardState;
 use quill::story_repost::RepostGone;
 use quill::story_tray_walk::TrayWalk;

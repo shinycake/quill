@@ -64,8 +64,7 @@ impl QuillApp {
             .map_or(0, |elapsed| elapsed.as_nanos());
         // Removed unless the profile photo request takes it, also when the
         // window or screen is gone before the encode ends.
-        let output =
-            quill::scratch::OwnedFile::new(work_dir().join(format!("avatar-{stamp}.mp4")));
+        let output = quill::scratch::OwnedFile::new(work_dir().join(format!("avatar-{stamp}.mp4")));
         let args = encode_args(&input, &output.path().to_string_lossy(), &edits, &info);
         let log = work_dir().join("encode.log");
         let worker = cx.background_spawn(async move { run_ffmpeg(&args, &log) });

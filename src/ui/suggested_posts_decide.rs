@@ -428,8 +428,7 @@ impl QuillApp {
             .title(crate::ui::shell::dialog_title(title))
             .content(crate::ui::shell::scrollable_dialog_content(
                 move |content, _, _| {
-                    let body = body.take()
-                        .unwrap_or_else(|| div().into_any_element());
+                    let body = body.take().unwrap_or_else(|| div().into_any_element());
                     content.child(body)
                 },
             ))
@@ -609,8 +608,7 @@ impl QuillApp {
                 .title(crate::ui::shell::dialog_title(title))
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |content, _, _| {
-                        let body = body.take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     },
                 ))
