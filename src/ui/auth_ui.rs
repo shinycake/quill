@@ -12,6 +12,27 @@ use smallvec::SmallVec;
 use std::sync::Arc;
 use zeroize::Zeroize;
 impl QuillApp {
+    /// A sign-in request through the driver, unless a submit is out
+    /// already (`None`, nothing sent); a send that went out holds the
+    /// submit busy until its answer.
+    pub(super) fn send_auth<E>(
+        &mut self,
+        send: impl FnOnce(
+            &mut quill::connect::ConnectDriver<quill::connect::LiveSender>,
+        ) -> Result<quill::ids::RequestId, E>,
+    ) -> Option<Result<quill::ids::RequestId, E>> {
+        let live = self.live.as_mut()?;
+        let busy = self
+            .screen
+            .auth_ui
+            .submit
+            .is_out(&live.driver.session.requests);
+        self.screen
+            .auth_ui
+            .submit
+            .send(busy, || send(&mut live.driver))
+    }
+
     /// A sign-in submit is out: Enter in a field must not send a second one
     /// (the buttons are disabled by the same answer).
     pub(super) fn auth_submit_busy(&self) -> bool {

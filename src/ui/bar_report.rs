@@ -278,15 +278,11 @@ fn refusal_key(kind: BarKind) -> quill::lang::Key {
 mod tests {
     // No `use super::*`: the kit's glob brings its own `test` attribute.
     use super::{BarEnd, BarKind, BarWork, BlockPlan, Started};
-    use quill::connect::{ConnectDriver, RecordingSender, prepare_connect};
-    use quill::credentials::TelegramCredentials;
-    use quill::diagnostics::{DiagnosticSink, MemorySink};
-    use quill::ids::{AccountKey, ChatId, RequestId};
-    use quill::platform::MemorySecretStore;
-    use quill::state::{Answer, RequestAcks, Session};
-    use quill::telegram::client::copy_and_parse;
+    use crate::ui::driver_fixture::{driver_with, sent_types};
+    use quill::connect::{ConnectDriver, RecordingSender};
+    use quill::ids::{ChatId, RequestId};
+    use quill::state::{Answer, RequestAcks};
     use std::sync::Arc;
-    use std::sync::atomic::AtomicU64;
 
     const PRIVATE: ChatId = ChatId(11);
     const GROUP: ChatId = ChatId(-12);
@@ -301,59 +297,28 @@ mod tests {
     /// A ready account with a private chat and a basic group, both
     /// reportable, and a recorder of what the driver sends.
     fn driver() -> (ConnectDriver<Arc<RecordingSender>>, Arc<RecordingSender>) {
-        let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
-        let recorder = Arc::new(RecordingSender::new());
-        let credentials = TelegramCredentials {
-            api_id: 99,
-            api_hash: "unit-test-hash-not-for-network".into(),
-        };
-        let dir = quill::scratch::unique_dir("quill-bar-report");
-        let store = MemorySecretStore::new();
-        let prepared =
-            prepare_connect(&dir, AccountKey::primary(), &store, &credentials).expect("prepare");
-        let session = Session::new(AccountKey::primary(), sink.clone());
-        let mut driver = ConnectDriver::new(session, recorder.clone(), credentials, prepared);
-        let seq = AtomicU64::new(0);
-        let mut ingest = |json: &str| {
-            if let Some(parsed) = copy_and_parse(json, &seq, &sink) {
-                let _ = driver.ingest(parsed);
-            }
-        };
-        ingest(
-            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
-        );
+        let mut updates = vec![
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#.to_string(),
+        ];
         for (id, kind) in [
-            (
-                PRIVATE.0,
-                r#"{"@type":"chatTypePrivate","user_id":11}"#.to_string(),
-            ),
+            (PRIVATE.0, r#"{"@type":"chatTypePrivate","user_id":11}"#),
             (
                 GROUP.0,
-                r#"{"@type":"chatTypeBasicGroup","basic_group_id":12}"#.to_string(),
+                r#"{"@type":"chatTypeBasicGroup","basic_group_id":12}"#,
             ),
         ] {
-            ingest(&format!(
+            updates.push(format!(
                 r#"{{"@type":"updateNewChat","chat":{{"id":{id},"title":"T","type":{kind},"can_be_reported":true,"can_be_deleted_only_for_self":true,"unread_count":0}}}}"#
             ));
-            ingest(&format!(
+            updates.push(format!(
                 r#"{{"@type":"updateChatPosition","chat_id":{id},"position":{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"9","is_pinned":false}}}}"#
             ));
         }
-        (driver, recorder)
+        driver_with(&updates)
     }
 
-    /// The types of what was sent after `before` requests of setup.
     fn types(recorder: &RecordingSender, before: usize) -> Vec<String> {
-        recorder
-            .snapshot()
-            .iter()
-            .skip(before)
-            .filter_map(|json| {
-                let start = json.find(r#""@type":""#)? + 9;
-                let rest = json.get(start..)?;
-                Some(rest.get(..rest.find('"')?)?.to_string())
-            })
-            .collect()
+        sent_types(recorder, before)
     }
 
     /// A private chat's "Report spam" is a report alone: TDLib refuses

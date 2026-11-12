@@ -846,11 +846,12 @@ impl QuillApp {
 
     /// `resetAuthenticationEmailAddress` from the email-code step.
     fn reset_login_email(&mut self, cx: &mut Context<Self>) {
-        let Some(live) = self.live.as_mut() else {
+        if self.live.is_none() {
+            return;
+        }
+        let Some(result) = self.send_auth(|driver| driver.reset_login_email()) else {
             return;
         };
-        let result = live.driver.reset_login_email();
-        self.screen.auth_ui.submit.sent(&result);
         self.screen.connection.set_note_for(
             &self.screen.windows,
             match result {

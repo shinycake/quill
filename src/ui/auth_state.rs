@@ -66,10 +66,11 @@ macro_rules! submit_on_enter {
     };
 }
 
-/// The sign-in submit this screen sent. The session lets one go at a time,
-/// and is the one that knows when it is answered: the submit is out while
-/// its own request is still in the session's table, so another account's
-/// request, or an older one, never reads as this one.
+/// The sign-in submit this screen sent. One goes at a time: a press while
+/// one is out sends nothing ([`Self::send`]). The session is the one that
+/// knows when it is answered: the submit is out while its own request is
+/// still in the session's table, so another account's request, or an older
+/// one, never reads as this one.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AuthSubmit {
     #[default]
@@ -97,6 +98,27 @@ impl AuthSubmit {
         {
             *self = Self::Idle;
         }
+    }
+
+    /// Sends through `send` unless a submit is out already (`busy`, from
+    /// [`Self::is_out`]): `None`, nothing sent. A send that went out holds
+    /// the stage.
+    pub(super) fn send<E>(
+        &mut self,
+        busy: bool,
+        send: impl FnOnce() -> Result<quill::ids::RequestId, E>,
+    ) -> Option<Result<quill::ids::RequestId, E>> {
+        if busy {
+            return None;
+        }
+        let result = send();
+        self.sent(&result);
+        Some(result)
+    }
+
+    /// A new client is on screen: no request of an older one is out.
+    pub(super) fn new_client(&mut self) {
+        *self = Self::Idle;
     }
 
     /// A send that went out holds its request; a refused one leaves the
@@ -298,6 +320,79 @@ mod submit_tests {
         submit.settle(Some(&registry));
         assert!(!submit.is_out(&registry));
         assert_eq!(submit, AuthSubmit::Idle, "the answer ends the stage");
+    }
+
+    fn driver_in(
+        auth: &str,
+    ) -> (
+        quill::connect::ConnectDriver<std::sync::Arc<quill::connect::RecordingSender>>,
+        std::sync::Arc<quill::connect::RecordingSender>,
+    ) {
+        crate::ui::driver_fixture::driver_with(&[format!(
+            r#"{{"@type":"updateAuthorizationState","authorization_state":{auth}}}"#
+        )])
+    }
+
+    /// The real driver's reset holds the submit busy, and a second press
+    /// while it is out sends nothing.
+    #[test]
+    fn the_reset_through_the_driver_holds_the_submit_and_blocks_a_second() {
+        let (mut driver, recorder) = driver_in(
+            r#"{"@type":"authorizationStateWaitEmailCode","code_info":{"email_address_pattern":"a***@b.c","length":5},"email_address_reset_state":{"@type":"emailAddressResetStateAvailable","wait_period":3600}}"#,
+        );
+        let before = recorder.snapshot().len();
+        let mut submit = AuthSubmit::Idle;
+        let busy = |submit: AuthSubmit, driver: &quill::connect::ConnectDriver<_>| {
+            submit.is_out(&driver.session.requests)
+        };
+        assert!(!busy(submit, &driver));
+        let first = submit.send(false, || driver.reset_login_email());
+        assert!(matches!(first, Some(Ok(_))), "it went out");
+        assert!(busy(submit, &driver), "the submit is out");
+        let second = submit.send(busy(submit, &driver), || driver.reset_login_email());
+        assert!(second.is_none(), "a second press sends nothing");
+        assert_eq!(
+            crate::ui::driver_fixture::sent_types(&recorder, before).len(),
+            1
+        );
+    }
+
+    /// A resend of the recovery code while the first request is out is not
+    /// sent: it would overwrite the stage of the one still in flight.
+    #[test]
+    fn a_recovery_resend_waits_for_the_request_out() {
+        let (mut driver, recorder) = driver_in(
+            r#"{"@type":"authorizationStateWaitPassword","has_recovery_email_address":true}"#,
+        );
+        let before = recorder.snapshot().len();
+        let mut submit = AuthSubmit::Idle;
+        let first = submit.send(false, || driver.request_password_recovery());
+        let Some(Ok(request)) = first else {
+            panic!("the request went out: {first:?}");
+        };
+        assert_eq!(submit, AuthSubmit::Out { request });
+        let busy = submit.is_out(&driver.session.requests);
+        assert!(
+            submit
+                .send(busy, || driver.request_password_recovery())
+                .is_none()
+        );
+        assert_eq!(submit, AuthSubmit::Out { request }, "still the first");
+        assert_eq!(
+            crate::ui::driver_fixture::sent_types(&recorder, before).len(),
+            1
+        );
+    }
+
+    /// A new client on screen starts with no submit out: the old client's
+    /// request number would match the new one's.
+    #[test]
+    fn a_new_client_holds_no_old_request() {
+        let mut submit = AuthSubmit::Out {
+            request: quill::ids::RequestId(4),
+        };
+        submit.new_client();
+        assert_eq!(submit, AuthSubmit::Idle);
     }
 
     /// A refused send leaves the stage as it was.

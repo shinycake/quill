@@ -79,8 +79,9 @@ impl QuillApp {
         ) {
             return;
         }
-        let result = live.driver.request_password_recovery();
-        self.screen.auth_ui.submit.sent(&result);
+        let Some(result) = self.send_auth(|driver| driver.request_password_recovery()) else {
+            return;
+        };
         match result {
             // The code step opens when the server answers `ok`
             // (`PasswordRecovery::CodeSent`); a refusal shows as the auth
@@ -117,9 +118,11 @@ impl QuillApp {
             .read(cx)
             .value()
             .to_string();
-        let result = live.driver.submit_recovery_code(&code);
-        self.screen.auth_ui.submit.sent(&result);
+        let result = self.send_auth(|driver| driver.submit_recovery_code(&code));
         code.zeroize();
+        let Some(result) = result else {
+            return;
+        };
         match result {
             // The field keeps the code until the step is done: a rejected
             // one is corrected, not retyped (`sync_auth_forms` clears it).
@@ -150,6 +153,7 @@ impl QuillApp {
     /// only appears when the server advertised a recovery email.
     pub(crate) fn auth_password_section(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let recovery_mode = self.recovery_code_step();
+        let busy = self.auth_submit_busy();
         let has_recovery_email = matches!(
             self.current_auth(),
             AuthorizationState::WaitPassword {
@@ -192,6 +196,7 @@ impl QuillApp {
                             Button::new("submit-recovery-code")
                                 .label(tr(keys::CONTINUE))
                                 .primary()
+                                .disabled(busy)
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.submit_recovery_code(window, cx);
                                 })),
@@ -200,6 +205,7 @@ impl QuillApp {
                             Button::new("resend-recovery-code")
                                 .label(tr(keys::Q_MISC_RESEND_CODE))
                                 .ghost()
+                                .disabled(busy)
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.request_password_recovery(window, cx);
                                 })),
@@ -238,6 +244,7 @@ impl QuillApp {
                         Button::new("forgot-password")
                             .label(tr(keys::Q_MISC_FORGOT_PASSWORD))
                             .ghost()
+                            .disabled(busy)
                             .w_full()
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.request_password_recovery(window, cx);
