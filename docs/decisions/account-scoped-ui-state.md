@@ -10275,7 +10275,7 @@ orders), `deep_link_routes_tests` (seek stays with its account).
 
 Guards: nothing added; `Fetch::pushed` is the named path for pushed values, so `succeed` stays counted by `check-request-match.py`.
 
-Hotspots (r4-05): no file on `scripts/hotspots.txt` carries an edit beyond its rule, and no commit carries a `Hotspot-change:` trailer (the squash check passes with no label and no trailer). `Session::settle_held` lives in `src/state/held.rs`, with one call at the top of `apply_payload_in_asking_view` for every answer, error and loss that has a pending request; `session_apply.rs` and `session_apply_error.rs` equal their base.
+Hotspots (r4-05): no file on `scripts/hotspots.txt` carries an edit beyond its rule, and the squashed bundle carries no `Hotspot-change:` trailer (5552e8907 keeps one in the bundle's history, which is not rewritten; `check-hotspots.sh` passes on the squashed bundle that integration produces). `Session::settle_held` lives in `src/state/held.rs`, with one call at the top of `apply_payload_in_asking_view` for every answer, error and loss that has a pending request; `session_apply.rs` and `session_apply_error.rs` equal their base.
 
 ### Fix rounds 2, 3 and 4 (r4-05)
 
@@ -10292,5 +10292,12 @@ Hotspots (r4-05): no file on `scripts/hotspots.txt` carries an edit beyond its r
 | 3 | The call transport moved to `src/state/call_transport.rs` (file size). |
 | 4 | Reconnect: the deadline of a silent retry comes from the driver's `now` (`pump_call_engine_reports(now)`, `apply_transport_report(state, now)`, `CallTransport::reported(state, link, now)`), and `next_deadline` includes `CallTransport::reconnect_deadline()` so the poll loop wakes for it. Tests `a_silent_retry_runs_out_at_its_deadline_and_spends_the_budget` (a fixed `t0`, no later wall-clock read) and `the_poll_loop_wakes_for_a_silent_retrys_deadline`. |
 | 4 | `FolderShare::links_note` is deleted: a refused folder-link delete reaches the box as `LinkOp::Failed` through its answer, so the note recorded the same refusal twice. The refusal arm only outdates the list. |
-| 4 | The notes of a refused change end with their screen: the blocked list's note with the Privacy page (`leave_privacy`), the sessions note with the Devices page (`leave_devices`), the websites note with the box (`close_websites`, also at the farewell), and the masks note with the manager (`set_dialog_open(false)`). The notes stay in the domain state that holds the screen's data (`SettingsState`, `MasksPanel`), where the reducer writes them. Test `a_refused_changes_line_ends_with_its_screen` reopens each. |
-| 4 | Hotspots: `settle_held` moved to `held.rs` and `NewChatState` keeps the base's `type_saves` map, so both hotspot files equal their base and the `Hotspot-change:` trailer is gone. |
+| 4 | The notes of a refused change end with their screen: the blocked list's note with the Privacy page (`leave_privacy`), the sessions note with the Devices page (`leave_devices`), the websites note with the box (`close_websites`, also at the farewell), and the masks note with the manager (`set_dialog_open(false)`). The notes stay in the domain state that holds the screen's data (`SettingsState`, `MasksPanel`), where the reducer writes them. Test `a_refused_changes_line_ends_with_its_screen` leaves each screen and checks its note is gone; it reopens only the mask manager. |
+| 4 | Hotspots: `settle_held` moved to `held.rs` and `NewChatState` keeps the base's `type_saves` map, so both hotspot files equal their base; the trailer stays on 5552e8907 in history, and the squashed bundle needs none (check passes on it). |
+
+**Round 5.**
+
+| Round | Change |
+| --- | --- |
+| 5 | A refusal that arrives after its screen was left no longer comes back on the next open. `ChangeNote` is a stage enum, `Idle` / `Waiting { request }` / `Refused { text }`: the send (`begin(request)`) makes it wait for that request, and a refusal lands only when its request is the one the note holds (a refusal with no request, a change that never left, always lands). The screen's farewell (`clear`) drops it to `Idle`, so a late refusal lands nowhere. A second change replaces the wait, so the first one's late refusal is not shown (its optimistic change is still undone). Tests, one per note and driven through the real error envelope: `a_block_refused_after_leaving_privacy_...`, `a_terminate_refused_after_leaving_devices_...`, `a_disconnect_refused_after_closing_the_websites_box_...`, `a_mask_change_refused_after_closing_the_manager_...` send the change, leave, feed the error, reopen through the UI's own entry point and assert the note is empty. |
+| 5 | `TypeSave::Sent` is bare: the request is its key in `type_saves`. |
