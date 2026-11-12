@@ -77,6 +77,21 @@ impl GiftArt {
             .collect::<Vec<_>>();
         super::super::image_budget::retire_all(images);
     }
+
+    /// Keep the tiles of one size. The others are not drawn again: they go,
+    /// the made ones through the retire sweep (a Quill-made image leaves the
+    /// atlas only that way), and any job still making one is dropped.
+    fn keep_tiles_of(&mut self, width: u32, height: u32) {
+        let (keep, gone): (HashMap<_, _>, HashMap<_, _>) = std::mem::take(&mut self.tiles)
+            .into_iter()
+            .partition(|(tile, _)| tile.width == width && tile.height == height);
+        self.tiles = keep;
+        let images = gone
+            .into_values()
+            .filter_map(|slot| ready(Some(&slot)).map(|(image, _)| image))
+            .collect::<Vec<_>>();
+        super::super::image_budget::retire_all(images);
+    }
 }
 
 /// The still to make of a sticker: its file and how to read it. A video
@@ -291,10 +306,7 @@ impl QuillApp {
         }
         // A new size is a resized layout: the tiles of the old size are not
         // drawn again, so they go (and with them any job still making them).
-        self.peer_qr
-            .gift_art
-            .tiles
-            .retain(|tile, _| tile.width == width && tile.height == height);
+        self.peer_qr.gift_art.keep_tiles_of(width, height);
         let job = self.run_off_ui_held(
             move || render(tile_pixels(center, edge, width, height)),
             move |this, image, cx| {

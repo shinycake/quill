@@ -103,7 +103,12 @@ impl VideoFullscreen {
             Self::Reentering { .. } if window_fullscreen => (self, false),
             Self::Reentering { .. } => (Self::Entering, true),
             Self::Cancelling { until } if now >= until => (Self::Off, false),
-            Self::Cancelling { .. } if window_fullscreen => (Self::Off, true),
+            Self::Cancelling { .. } if window_fullscreen => (
+                Self::Exiting {
+                    until: now + CANCEL_WAIT,
+                },
+                true,
+            ),
             Self::Cancelling { .. } => (self, false),
             Self::Entering if window_fullscreen => (Self::Active, false),
             Self::Entering => (Self::Entering, false),
@@ -173,6 +178,19 @@ mod tests {
         // Leaving again during the wait goes back to waiting out the exit.
         let (again, _) = leaving.enter(true);
         assert!(matches!(again.leave(now), VideoFullscreen::Exiting { .. }));
+        // Esc while the window enters: the window reports full screen, is
+        // toggled out, and F during that exit animation asks again once
+        // the window is windowed.
+        let cancelling = VideoFullscreen::Entering.leave(now);
+        let (exiting, toggle) = cancelling.follow_window(true, now);
+        assert!(toggle);
+        assert!(matches!(exiting, VideoFullscreen::Exiting { .. }));
+        let (mode, ask) = exiting.enter(true);
+        assert!(!ask, "the window is still leaving");
+        assert_eq!(
+            mode.follow_window(false, now),
+            (VideoFullscreen::Entering, true)
+        );
     }
 
     #[test]
@@ -205,7 +223,12 @@ mod tests {
         let later = now + Duration::from_millis(400);
         assert_eq!(
             mode.follow_window(true, later),
-            (VideoFullscreen::Off, true)
+            (
+                VideoFullscreen::Exiting {
+                    until: later + CANCEL_WAIT
+                },
+                true
+            )
         );
     }
 

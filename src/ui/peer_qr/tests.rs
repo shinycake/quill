@@ -803,8 +803,22 @@ fn a_resize_replaces_the_gift_tiles(cx: &mut TestAppContext) {
         let _ = app.qr_gift_tile_image(edge, center, 40, 50, cx);
     });
     assert_eq!(count(&app, vcx), 2, "two gifts at one size");
+    vcx.run_until_parked();
+    let old = app.update(vcx, |app, cx| {
+        app.qr_gift_tile_image(center, edge, 40, 50, cx)
+            .map(|image| image.id.0)
+    });
+    assert!(old.is_some(), "the tile was made");
     app.update(vcx, |app, cx| {
         let _ = app.qr_gift_tile_image(center, edge, 60, 70, cx);
     });
     assert_eq!(count(&app, vcx), 1, "the old size's tiles went");
+    // The old tiles leave the atlas through the retire sweep.
+    crate::ui::image_budget::begin_frame();
+    crate::ui::image_budget::begin_frame();
+    let swept: Vec<usize> = crate::ui::image_budget::take_unshowable(true, &[])
+        .iter()
+        .map(|image| image.id.0)
+        .collect();
+    assert!(old.is_some_and(|id| swept.contains(&id)), "retired: {swept:?}");
 }
