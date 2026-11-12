@@ -278,7 +278,6 @@ pub enum SettingsPurpose {
     /// The chatbot lookup: `searchPublicChat` (answer `chat`) or
     /// `searchChatsOnServer` / `searchPublicChats` (answer `chats`).
     LookupBusinessBot {
-        generation: u32,
         part: BotLookupPart,
     },
     /// `toggleHasSponsoredMessagesEnabled`. Response is `ok`; the value

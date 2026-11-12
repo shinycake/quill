@@ -512,6 +512,14 @@ impl GifPanel {
         matches!(&self.list, GifList::Search(search) if search.fetch.is_loading())
     }
 
+    /// The request (the bot's lookup or a results page) the search waits for.
+    pub fn search_request(&self) -> Option<crate::ids::RequestId> {
+        match &self.list {
+            GifList::Search(search) => search.fetch.request(),
+            GifList::Saved => None,
+        }
+    }
+
     pub fn search_failed(&self) -> bool {
         matches!(&self.list, GifList::Search(search) if search.fetch.error().is_some())
     }

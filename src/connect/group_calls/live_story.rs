@@ -90,61 +90,37 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !(want.0 || want.1 || want.2) {
             return Ok(());
         }
+        // Each ask begins its stage once it went out, so a refused send
+        // leaves the stage idle for the next ingest.
         if want.0 {
-            if let Some(live) = self.session.live_story_mut(group_call_id) {
-                live.streamer.begin();
-            }
             let sent = self
                 .live_story_request(LiveStoryPurpose::GetStreamer { group_call_id }, |extra| {
                     get_live_story_streamer(extra, group_call_id)
-                });
-            match sent {
-                Ok(request) => {
-                    self.live_story_unsent(group_call_id, |live| live.streamer.sent(request));
-                }
-                Err(err) => {
-                    self.live_story_unsent(group_call_id, |live| live.streamer.cancel());
-                    return Err(err);
-                }
-            }
+                })?;
+            self.live_story_unsent(group_call_id, |live| {
+                live.streamer.begin();
+                live.streamer.sent(sent);
+            });
         }
         if want.1 {
-            if let Some(live) = self.session.live_story_mut(group_call_id) {
-                live.donors.begin();
-            }
             let sent = self
                 .live_story_request(LiveStoryPurpose::GetTopDonors { group_call_id }, |extra| {
                     get_live_story_top_donors(extra, group_call_id)
-                });
-            match sent {
-                Ok(request) => {
-                    self.live_story_unsent(group_call_id, |live| live.donors.sent(request));
-                }
-                Err(err) => {
-                    self.live_story_unsent(group_call_id, |live| live.donors.cancel());
-                    return Err(err);
-                }
-            }
+                })?;
+            self.live_story_unsent(group_call_id, |live| {
+                live.donors.begin();
+                live.donors.sent(sent);
+            });
         }
         if want.2 {
-            if let Some(live) = self.session.live_story_mut(group_call_id) {
-                live.message_senders.begin();
-            }
             let sent = self.live_story_request(
                 LiveStoryPurpose::GetMessageSenders { group_call_id },
                 |extra| get_live_story_available_message_senders(extra, group_call_id),
-            );
-            match sent {
-                Ok(request) => {
-                    self.live_story_unsent(group_call_id, |live| {
-                        live.message_senders.sent(request);
-                    });
-                }
-                Err(err) => {
-                    self.live_story_unsent(group_call_id, |live| live.message_senders.cancel());
-                    return Err(err);
-                }
-            }
+            )?;
+            self.live_story_unsent(group_call_id, |live| {
+                live.message_senders.begin();
+                live.message_senders.sent(sent);
+            });
         }
         Ok(())
     }
@@ -518,13 +494,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         // error), so the slot is only dropped. A join on its way is
         // forgotten, so its late answer cannot land in a new slot for the
         // same story.
-        let joining = self
-            .session
-            .requests
-            .take_purpose(RequestPurpose::Calls(CallsPurpose::JoinVideoChat {
-                group_call_id,
-            }))
-            .is_some();
+        let join = stream.transport.join_request();
+        let joining = join.is_some();
+        self.drop_request(join);
         if !(stream.is_joined || stream.reconnecting() || joining) {
             return Ok(());
         }

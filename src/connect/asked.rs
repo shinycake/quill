@@ -32,6 +32,17 @@ impl Asked {
         self.out(requests, purpose).is_some()
     }
 
+    /// A request whose purpose `matches` is waiting for its answer.
+    pub(crate) fn any_out(
+        &self,
+        requests: &RequestRegistry,
+        matches: impl Fn(RequestPurpose) -> bool,
+    ) -> bool {
+        self.sent
+            .iter()
+            .any(|(purpose, request)| matches(*purpose) && requests.get(*request).is_some())
+    }
+
     /// The request recorded for `purpose`, while it is waiting for its answer.
     pub(crate) fn out(
         &self,
@@ -42,19 +53,6 @@ impl Asked {
             .iter()
             .find(|(kept, request)| *kept == purpose && requests.get(*request).is_some())
             .map(|(_, request)| *request)
-    }
-
-    /// Stop waiting for the request recorded for `purpose`: its answer, if
-    /// it still comes, finds nothing waiting. Returns the id that was out.
-    pub(crate) fn cancel(
-        &mut self,
-        requests: &mut RequestRegistry,
-        purpose: RequestPurpose,
-    ) -> Option<RequestId> {
-        let id = self.out(requests, purpose)?;
-        self.sent.retain(|(_, request)| *request != id);
-        requests.take(id);
-        Some(id)
     }
 }
 
@@ -103,17 +101,5 @@ mod tests {
         let mine = session.request(purpose, None);
         asked.sent(&session.requests, purpose, mine);
         assert_eq!(asked.out(&session.requests, purpose), Some(mine));
-    }
-
-    #[test]
-    fn cancelling_takes_only_my_request_out() {
-        let mut session = session();
-        let mut asked = Asked::default();
-        let purpose = RequestPurpose::GetMe;
-        let mine = session.request(purpose, None);
-        asked.sent(&session.requests, purpose, mine);
-        assert_eq!(asked.cancel(&mut session.requests, purpose), Some(mine));
-        assert!(session.requests.get(mine).is_none());
-        assert_eq!(asked.cancel(&mut session.requests, purpose), None);
     }
 }

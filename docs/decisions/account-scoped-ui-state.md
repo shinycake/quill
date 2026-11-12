@@ -10220,3 +10220,37 @@ add and closed link save), `composer_sends_tests` (an ack never takes a
 neighbour's clear), `chat_window::asker_tests` (gif ask settles; two
 windows keep their own link text), `forum_extras::tests` (both answer
 orders), `deep_link_routes_tests` (seek stays with its account).
+
+### Sweep fixes (r4-02)
+
+| Ids | What changed |
+| --- | --- |
+| g-181 | `ask_countries` records its request (`Fetch::sent`) and the answer and the error take it through `answered` / `failed` by `RequestId`. |
+| g-170, g-120, g-154 | `ConnectDriver::asked` (`connect/asked.rs`) holds the `RequestId` of each request the driver sent for a sender with no stage of its own, keyed by purpose. "Is my request out" is the recorded id looked up in the registry, never "some request with this purpose is in flight": another sender's request of the same purpose does not count, and a request the answer, the error, the sweep or an auth change took out of the registry is out no longer, so nothing needs clearing by hand. `login_request`, `submit_phone` and `request_qr_login` use it (`auth_submit_out` for "any sign-in submit"). |
+| g-166, g-123, g-094, g-163, g-124, g-186, g-116, g-098, g-097, g-118, g-119, g-173, g-100, g-092, g-088, g-142, g-125, g-145, g-138 | The same ledger replaces `has_purpose` in `set_pinned_chat_order`, `mark_all_chats_as_read`, `clear_recently_found_chats`, `set_archive_chat_list_settings`, `mark_folder_as_read`, `import_contacts`, the forum and Saved Messages senders (`send_purpose` records), `check_public_chats_limit`, the gift text limit (one `ask_gift_text_limit` for the marketplace and the send-gift box), `mask_request`, `parameters_sent` and the chat default statuses. Guards that repeated a stage (`media_library`, `message_menu`, the earn app config, `maybe_probe_channel_membership`) were deleted: the callee or the stage already refuses. |
+| g-132, g-131 | `ListPaging::Loading { request, after }` is the page in flight (main, archive and each folder). `begin` follows a successful send; `page_ok` and `page_failed` act only for the request the list waits for, and the failure wait keeps doubling through `after`. `folder_left` is `cancel_retry`. The senders ask `is_loading()` instead of the registry. |
+| g-185, 03-001 | `chat_lists_for_add` records its request (`begin` + `sent`) and answers and fails by `RequestId`; the in-flight check is the stage. |
+| g-191, 03-002 | `probe_self_star_stats` records its request in `self_stats` and only that request's answer or error settles it; the purpose guards beside the stage were redundant and are gone. |
+| g-167, g-168, g-093, 03-003 | `StatusChange` is `Idle` / `Setting { request, emoji }` / `Clearing { request }`; the collectible path and "clear recents" enter it too (one `send_status_change`), the stage is the busy check, and `answered` / `failed` end it by request on every path. |
+| g-099 | A custom emoji lookup is out while `custom_lookups` holds its request (`custom_emoji_lookup_in_flight`), not while the registry has the purpose. |
+| g-103, g-161, g-156, g-155, g-148, g-149, g-174, g-175 | `emoji_set_request` is busy by the list's own fetch (lists) or the ledger (the rest). Every "replace the pending one" drops the request its stage holds (`Fetch::request`, `TrendingSets::request`, `KeywordEmojis::request`, `AnimatedSuggestion::request`, `drop_request`) before the stage is replaced. |
+| g-136, g-137, g-115, g-091, g-164, g-165 | The GIF search waits on its own request (`GifPanel::search_request`, `gif_search_out`: the id still in the registry), cancels it by that id, and the save and remove of a GIF use the ledger. |
+| g-101 | `drop_in_flight` is a bulk cancel through `RequestRegistry::supersede`: the reducer outdates a list's fetch (dropping its request) before the driver runs, so no stage names the superseded request any more. Not an answer match; flagged for the reviewer. |
+| g-189 | The live story extras begin their stage once the send went out (begin and `sent` together), so a refused send leaves the stage idle for the next ingest. |
+| g-117 | Leaving a live story drops the join request its transport stage holds (`GroupTransport::join_request`). |
+| g-105, g-106, g-090 | The marketplace gift asks the purchase's own stage (`GiftPurchase::is_busy`); the buy button's purpose guard was redundant with the `Quoted` check. |
+| g-139, g-140, g-141, g-108, g-109 | See above: the callee refuses a second ask. |
+| g-180 | A bot save writes the bot ahead as `Fetch::written_ahead(bot, request)` (loading under the save's request, bot visible), and only that save's answer or refusal forgets it. `ConnectedBotSave` and `bot_save` are gone. |
+| g-194 | `CloseProgress` is a return value (what a drain found), never stored: renamed `CloseOutcome`. |
+| 03-006 | A `close` the sender refuses is held (`HoldingClose`) and sent again by the next drain (`send_close`); the client no longer waits for a Closed nothing asked for. Test `a_refused_close_is_held_and_sent_again_on_the_next_drain`. |
+| 03-011 | `CommunityCreate::{Idle, Creating { request, photo }}` replaces the one-shot photo slot; the answer takes the photo for its request only and a refusal of that request drops it. |
+| 03-009 | Both deep link lookups pass the same gate (`take_over_deep_link_stage`), so a pasted text link no longer replaces a flow in flight or an open invite preview. |
+| 03-004 | `fetch_folder_share` holds the links list back as out of date while a delete of that folder's link is out; the ingest refetch asks once the delete answered. Test `reopening_share_folder_waits_for_a_delete_in_flight`. |
+| 03-005 | `group_engine` (`group_calls/engine_sync.rs`) replaces `group_mute_state` and `group_camera_state`: per call and per setting `Unset` / `Applied(value)` / `Refused { wanted, retry_at, wait }`. A refused change waits 1 s, 2 s, 4 s, up to 5 s when the periodic poll finds it, and is asked again at once when the wanted value changes or an update arrives. |
+| 03-010 | Not a bug as described: the revoke records its first request before the second goes (`PublicLinkStage::Revoking`), the refused second moves it to `RevokingFailed`, and the first request's answer settles it with the note and a fresh list (test `a_half_sent_revoke_is_recorded_and_settles`). |
+| 03-007 | `DiskPauses` (`state/domains/media/disk_pauses.rs`) owns the paused files, the saved messages (changed together by `pause` / `resume`) and whether the saved set was written (`PauseSave`). `disk_paused_persisted`, the second copy compared by equality, is gone. |
+| 03-008 | The poll option menu begins with its request (`begin_poll_option_menu(…, request)`), answers and fails by `RequestId`, and a refused send ends in the error the page draws. Test `a_refused_poll_option_menu_request_ends_in_an_error`. |
+
+Tests: `connect/tests/sweep_r4_02.rs`, `closing_refused.rs`, `communities.rs`
+(older create), `deep_link_routing.rs` (a text link beside a flow), `asked.rs`,
+`paging.rs`, `disk_pauses.rs`, `engine_sync.rs`.

@@ -583,11 +583,11 @@ impl Session {
         // A short OK is not exhaustion; 404 is. A page that went through
         // ends the wait after an earlier failure.
         match pending.map(|p| p.purpose) {
-            Some(RequestPurpose::LoadChats) => self.chat_list.main_paging.page_ok(),
-            Some(RequestPurpose::LoadArchiveChats) => self.chat_list.archive_paging.page_ok(),
+            Some(RequestPurpose::LoadChats) => self.chat_list.main_paging.page_ok(extra),
+            Some(RequestPurpose::LoadArchiveChats) => self.chat_list.archive_paging.page_ok(extra),
             Some(RequestPurpose::LoadFolderChats) => {
                 if let Some(folder_id) = pending.and_then(|p| p.folder_id()) {
-                    self.chat_list.folder_page_ok(folder_id);
+                    self.chat_list.folder_page_ok(folder_id, extra);
                 }
             }
             _ => {}
@@ -857,7 +857,6 @@ impl Session {
             info.blocked = block;
         }
         if pending.is_some_and(|p| is_auth_submit(p.purpose)) {
-            self.auth_state.submit.settle(extra);
             self.auth_state.last_auth_error = None;
         }
         if pending

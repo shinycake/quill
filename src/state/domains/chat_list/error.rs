@@ -237,9 +237,13 @@ impl Session {
         let now = std::time::Instant::now();
         let list = &mut self.chat_list;
         match pending.map(|p| p.purpose) {
-            Some(RequestPurpose::LoadChats) => list.main_paging.page_failed(err.code, now),
+            Some(RequestPurpose::LoadChats) => {
+                list.main_paging
+                    .page_failed(err.code, now, pending.map(|p| p.id))
+            }
             Some(RequestPurpose::LoadArchiveChats) => {
-                list.archive_paging.page_failed(err.code, now)
+                list.archive_paging
+                    .page_failed(err.code, now, pending.map(|p| p.id))
             }
             _ => {}
         }
@@ -249,7 +253,8 @@ impl Session {
         if pending.map(|p| p.purpose) == Some(RequestPurpose::LoadFolderChats)
             && let Some(folder_id) = pending.and_then(|p| p.folder_id())
         {
-            self.chat_list.folder_page_failed(folder_id, err.code, now);
+            self.chat_list
+                .folder_page_failed(folder_id, err.code, now, pending.map(|p| p.id));
         }
         // Slice CL: failed preview-history fetch — mark the peek
         // preview so it shows an error instead of a spinner.

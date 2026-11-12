@@ -308,10 +308,10 @@ fn a_bot_is_saved_and_asked_for_again() {
         sent_request(&recorder, "deleteBusinessConnectedBot")["bot_user_id"],
         42
     );
-    assert_eq!(
-        driver.session.settings.business_extra.connected_bot,
-        Fetch::Ready(None)
-    );
+    // The disconnect shows at once, loading under the save's request.
+    let shown = &driver.session.settings.business_extra.connected_bot;
+    assert!(shown.is_loading());
+    assert_eq!(shown.data(), Some(&None));
 }
 
 /// Round 17 C finding 12: a refused chatbot save does not leave the bot as

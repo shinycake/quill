@@ -541,21 +541,23 @@ impl Session {
         }
     }
 
-    /// The poll option the menu opens on; its properties are asked next.
+    /// The poll option the menu opens on, with its properties asked as
+    /// `request`.
     pub fn begin_poll_option_menu(
         &mut self,
         chat_id: ChatId,
         message_id: MessageId,
         option_id: &str,
+        request: RequestId,
     ) {
+        let mut properties = crate::state::fetch::Fetch::default();
+        properties.begin();
+        properties.sent(request);
         self.messages.poll_option_menu = Some(PollOptionMenu {
             chat_id,
             message_id,
             option_id: option_id.to_string(),
-            properties: crate::state::fetch::Fetch::Loading {
-                stale: None,
-                request: None,
-            },
+            properties,
         });
     }
 

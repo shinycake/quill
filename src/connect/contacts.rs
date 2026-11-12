@@ -30,8 +30,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !(contacts.can_ask() || contacts.is_outdated()) {
             return Ok(None);
         }
-        self.session.users_state.contacts.begin();
         let extra = self.session.request(RequestPurpose::GetContacts, None);
+        let contacts = &mut self.session.users_state.contacts;
+        contacts.begin();
+        contacts.sent(extra);
         if let Err(err) = self.sender.send_json(&get_contacts(extra)) {
             self.session.requests.take(extra);
             // Nothing is in flight: the tab shows the error and its Retry,
@@ -42,7 +44,6 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .fail_dropping_data("could not send the request");
             return Err(err);
         }
-        self.session.users_state.contacts.sent(extra);
         Ok(Some(extra))
     }
 
@@ -344,10 +345,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let purpose = RequestPurpose::ImportContacts;
-        if self.session.requests.has_purpose(purpose) {
+        if self.asked.is_out(&self.session.requests, purpose) {
             return Ok(None);
         }
         let extra = self.session.request(purpose, None);
+        self.asked.sent(&self.session.requests, purpose, extra);
         if let Err(err) = self.sender.send_json(&import_contacts(extra, contacts)) {
             self.session.requests.take(extra);
             return Err(err);

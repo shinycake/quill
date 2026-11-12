@@ -379,14 +379,18 @@ impl Session {
                 self.apply_download_added(download);
                 if low {
                     held.insert(key);
-                    self.media.disk_paused.insert(id);
+                    self.media.disk_paused.hold(id);
                 } else {
                     self.media.disk_resume_due.push(id);
                 }
             }
         }
         let saved = &mut self.settings.data_storage.disk_paused;
+        let before = saved.len();
         saved.retain(|key| !asked.contains(key) || held.contains(key));
+        if saved.len() != before {
+            self.media.disk_paused.saved_changed();
+        }
     }
 
     /// The download left the list (removed here or on another device).

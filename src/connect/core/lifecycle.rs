@@ -51,8 +51,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             call_capture: Default::default(),
             call_screen: Default::default(),
             live_feeds: Arc::new(Mutex::new(HashMap::new())),
-            group_camera_state: HashMap::new(),
-            group_mute_state: HashMap::new(),
+            group_engine: HashMap::new(),
             group_seen: HashMap::new(),
             group_offers: HashMap::new(),
             group_large_tile: None,
@@ -91,9 +90,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn parameters_sent(&self) -> bool {
         !matches!(self.session.auth, AuthorizationState::WaitTdlibParameters)
             || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::SetParameters)
+                .asked
+                .is_out(&self.session.requests, RequestPurpose::SetParameters)
     }
 
     pub fn tdlib_files(&self) -> &Path {
@@ -144,7 +142,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.chat_list.main_paging.is_exhausted() {
             return Ok(None);
         }
-        if self.session.requests.has_purpose(RequestPurpose::LoadChats) {
+        if self.session.chat_list.main_paging.is_loading() {
             return Ok(None);
         }
         let extra = self.session.request(RequestPurpose::LoadChats, None);
@@ -157,6 +155,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        self.session.chat_list.main_paging.begin(extra);
         Ok(Some(extra))
     }
 
@@ -193,11 +192,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || self.session.chat_list.archive_paging.is_exhausted() {
             return Ok(None);
         }
-        if self
-            .session
-            .requests
-            .has_purpose(RequestPurpose::LoadArchiveChats)
-        {
+        if self.session.chat_list.archive_paging.is_loading() {
             return Ok(None);
         }
         let extra = self.session.request(RequestPurpose::LoadArchiveChats, None);
@@ -208,6 +203,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        self.session.chat_list.archive_paging.begin(extra);
         Ok(Some(extra))
     }
 

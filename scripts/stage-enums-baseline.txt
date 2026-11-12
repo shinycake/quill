@@ -20,7 +20,6 @@ bare:CarrierStage::Starting 1
 bare:CeremonySheet::Connecting 1
 bare:CeremonySheet::Probing 1
 bare:ClipState::Opening 1
-bare:CloseProgress::Pending 1
 bare:CodeLanguageStage::Opening 1
 bare:ConferenceStage::Running 1
 bare:Decoding::Running 1

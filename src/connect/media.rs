@@ -421,7 +421,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(0);
         }
         if state == DiskState::Healthy {
-            let paused: Vec<i32> = self.session.media.disk_paused.iter().copied().collect();
+            let paused = self.session.media.disk_paused.ids();
             let mut failed = None;
             for id in paused {
                 if self.session.media.downloads.is_paused(id)
@@ -432,8 +432,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     failed = Some(err);
                     break;
                 }
-                self.session.media.disk_paused.remove(&id);
-                self.forget_disk_pause(id);
+                self.resume_from_disk(id);
             }
             let searched = match failed {
                 Some(err) => Err(err),
@@ -465,10 +464,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                 failed = Some(err);
                 break;
             }
-            if !self.session.media.disk_paused.insert(id) {
+            if !self.pause_for_disk(id) {
                 repaused += 1;
             }
-            self.save_disk_pause(id);
         }
         self.save_disk_pauses_if_changed();
         match failed {
@@ -497,8 +495,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// disk recovering no longer resumes it. A resume leaves the disk's note
     /// in place, which says why the download stops again if it does not fit.
     pub fn pause_download(&mut self, file_id: FileId) -> Result<bool, ConnectSendError> {
-        self.session.media.disk_paused.remove(&file_id.0);
-        self.forget_disk_pause(file_id.0);
+        self.resume_from_disk(file_id.0);
         self.save_disk_pauses_if_changed();
         self.toggle_download_paused(file_id, true)
     }

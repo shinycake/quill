@@ -160,14 +160,22 @@ impl ChatListState {
     /// Opening the folder again asks for its page at once.
     pub fn folder_left(&mut self, folder_id: i32) {
         if let Some(paging) = self.folder_paging.get_mut(&folder_id) {
-            paging.page_ok();
+            paging.cancel_retry();
         }
     }
 
+    /// A folder's `loadChats` page went out as `request`.
+    pub(crate) fn folder_page_sent(&mut self, folder_id: i32, request: RequestId) {
+        self.folder_paging
+            .entry(folder_id)
+            .or_default()
+            .begin(request);
+    }
+
     /// A folder's `loadChats` page went through.
-    pub(crate) fn folder_page_ok(&mut self, folder_id: i32) {
+    pub(crate) fn folder_page_ok(&mut self, folder_id: i32, request: Option<RequestId>) {
         if let Some(paging) = self.folder_paging.get_mut(&folder_id) {
-            paging.page_ok();
+            paging.page_ok(request);
         }
     }
 
@@ -177,11 +185,12 @@ impl ChatListState {
         folder_id: i32,
         code: i32,
         now: std::time::Instant,
+        request: Option<RequestId>,
     ) {
         self.folder_paging
             .entry(folder_id)
             .or_default()
-            .page_failed(code, now);
+            .page_failed(code, now, request);
     }
 
     /// The next channel's history page arrived.

@@ -320,8 +320,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || option_id.is_empty() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session
-            .begin_poll_option_menu(chat_id, message_id, option_id);
         let extra = self.session.request(
             RequestPurpose::Messages(MessagesPurpose::GetPollOptionProperties {
                 chat_id,
@@ -330,10 +328,18 @@ impl<S: JsonSender> ConnectDriver<S> {
             }),
             Some(chat_id),
         );
-        self.send_audience(
+        self.session
+            .begin_poll_option_menu(chat_id, message_id, option_id, extra);
+        if let Err(err) = self.send_audience(
             extra,
             &get_poll_option_properties(extra, chat_id, message_id, option_id),
-        )?;
+        ) {
+            // The menu ends in the error its page draws, not in "Loading".
+            if let Some(menu) = self.session.messages.poll_option_menu.as_mut() {
+                menu.properties.failed(Some(extra), err.stage_line(), true);
+            }
+            return Err(err);
+        }
         Ok(extra)
     }
 

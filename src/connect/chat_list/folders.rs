@@ -31,8 +31,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if self
             .session
-            .requests
-            .has_purpose_for_folder(RequestPurpose::LoadFolderChats, folder_id)
+            .chat_list
+            .folder_paging_of(folder_id)
+            .is_loading()
         {
             return Ok(None);
         }
@@ -47,6 +48,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        self.session.chat_list.folder_page_sent(folder_id, extra);
         Ok(Some(extra))
     }
 

@@ -55,9 +55,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             .emoji
             .chat_default_status_ids
             .is_empty()
-            && !self.session.requests.has_purpose(purpose)
+            && !self.asked.is_out(&self.session.requests, purpose)
         {
             let extra = self.session.request(purpose, None);
+            self.asked.sent(&self.session.requests, purpose, extra);
             self.send_json_request(extra, &get_default_chat_emoji_statuses(extra))?;
         }
         Ok(())

@@ -23,32 +23,7 @@ impl AuthState {
     }
 }
 
-/// The sign-in step sent to TDLib and not yet answered: one request at a
-/// time (phone number, code, password, QR, ...). The answer or error of
-/// that request, or the authorization state moving on, ends it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum AuthSubmit {
-    #[default]
-    Idle,
-    InFlight(RequestId),
-}
-
-impl AuthSubmit {
-    pub fn is_busy(self) -> bool {
-        matches!(self, Self::InFlight(_))
-    }
-
-    /// `request` answered or failed: only the submit that waits for it ends.
-    pub fn settle(&mut self, request: Option<RequestId>) {
-        if matches!(self, Self::InFlight(sent) if Some(*sent) == request) {
-            *self = Self::Idle;
-        }
-    }
-}
-
 pub struct AuthState {
-    /// See [`AuthSubmit`].
-    pub submit: AuthSubmit,
     /// See [`PasswordRecovery`].
     pub password_recovery: PasswordRecovery,
     /// Last classified error for phone / code / password submit. Never a secret.
@@ -86,7 +61,6 @@ impl AuthState {
 
     pub(crate) fn new() -> Self {
         Self {
-            submit: AuthSubmit::Idle,
             password_recovery: PasswordRecovery::Idle,
             last_auth_error: None,
             countries: crate::state::fetch::Fetch::Idle,

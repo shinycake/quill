@@ -628,8 +628,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             let _ = engine.leave_group_call(group_call_id);
         }
         self.close_call_feeds(group_call_id);
-        self.group_camera_state.remove(&group_call_id);
-        self.group_mute_state.remove(&group_call_id);
+        self.group_engine.remove(&group_call_id);
         self.group_seen.remove(&group_call_id);
     }
 

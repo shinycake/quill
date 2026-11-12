@@ -292,6 +292,11 @@ fn qr_recovery_accepts_supported_states_and_waits_for_pending_auth() {
     ] {
         driver.session.auth = state;
         let pending = driver.session.request(RequestPurpose::SetPhoneNumber, None);
+        driver.asked.sent(
+            &driver.session.requests,
+            RequestPurpose::SetPhoneNumber,
+            pending,
+        );
         let before = recorder.snapshot().len();
         assert_eq!(
             driver.request_qr_login(),

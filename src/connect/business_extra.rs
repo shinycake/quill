@@ -235,18 +235,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// exact username, own chats and global results. An invalid query
     /// clears the lookup.
     pub fn lookup_business_bot(&mut self, text: &str) -> Result<(), ConnectSendError> {
-        let generation = self
-            .session
-            .settings
-            .business_extra
-            .lookup
-            .generation
-            .wrapping_add(1);
         let Some(query) = bots::parse_username_query(text) else {
-            self.session.settings.business_extra.lookup = BotLookup {
-                generation,
-                ..BotLookup::default()
-            };
+            self.session.settings.business_extra.lookup = BotLookup::default();
             return Ok(());
         };
         let lookup = &self.session.settings.business_extra.lookup;
@@ -254,7 +244,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         }
         self.session.settings.business_extra.lookup = BotLookup {
-            generation,
             query: query.clone(),
             exact: Fetch::Loading {
                 stale: None,
@@ -269,7 +258,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 request: None,
             },
         };
-        let part = |part| SettingsPurpose::LookupBusinessBot { generation, part };
+        let part = |part| SettingsPurpose::LookupBusinessBot { part };
         let sent = self
             .send_business_extra(part(BotLookupPart::Exact), |extra| {
                 bots::search_public_chat_request(extra, &query)
@@ -288,10 +277,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             })
             .map(|id| self.session.settings.business_extra.lookup.global.sent(id));
         if sent.is_err() {
-            self.session.settings.business_extra.lookup = BotLookup {
-                generation: generation.wrapping_add(1),
-                ..BotLookup::default()
-            };
+            self.session.settings.business_extra.lookup = BotLookup::default();
         }
         sent
     }

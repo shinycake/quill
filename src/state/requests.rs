@@ -578,6 +578,24 @@ impl RequestRegistry {
         self.remove(key)
     }
 
+    /// A change made every request of `purpose` out of date: they leave the
+    /// registry, so their answers find nothing waiting. A bulk cancel of
+    /// lists that were asked before the change, not a way to take an
+    /// answer: the stages that waited for them were outdated already (the
+    /// reducer drops a fetch's request when it marks it out of date), so no
+    /// stage names them any more.
+    pub(crate) fn supersede(&mut self, purpose: RequestPurpose) {
+        let keys: Vec<u64> = self
+            .pending
+            .iter()
+            .filter(|(_, req)| req.purpose == purpose)
+            .map(|(key, _)| *key)
+            .collect();
+        for key in keys {
+            self.remove(key);
+        }
+    }
+
     /// Drop every in-flight request with `purpose` for `community_id`, so
     /// an answer that no longer fits the state it would change is ignored
     /// (a page of add-chat requests asked before Add All reset the list).

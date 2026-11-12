@@ -160,6 +160,7 @@ mod sweep_r2_13;
 mod sweep_r2_15;
 mod sweep_r3_01;
 mod sweep_r3_03;
+mod sweep_r4_02;
 mod sweep_s3;
 mod sweep_s3_messages_1;
 mod sweep_s3_payments_1;

@@ -277,6 +277,7 @@ fn load_chats_404_marks_exhaustion() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::LoadChats, None);
+    session.chat_list.main_paging.begin(extra);
     apply_json(
         &mut session,
         &seq,
@@ -306,6 +307,11 @@ fn chat_list_paging_restarts_after_logout_and_login() {
         apply_json(&mut session, &seq, &sink, &auth("authorizationStateReady"));
         for purpose in [RequestPurpose::LoadChats, RequestPurpose::LoadArchiveChats] {
             let extra = session.request(purpose, None);
+            if purpose == RequestPurpose::LoadChats {
+                session.chat_list.main_paging.begin(extra);
+            } else {
+                session.chat_list.archive_paging.begin(extra);
+            }
             apply_json(
                 &mut session,
                 &seq,
