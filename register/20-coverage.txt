@@ -94,3 +94,9 @@ src/ui/rich_draft/paste.rs 208 read
 src/ui/round_record.rs 156 read
 src/ui/round_seek.rs 246 read
 src/ui/saved_sublists.rs 996 read
+src/ui/schedule_repeat.rs 124 read
+src/ui/scheduled_box.rs 199 read
+src/ui/scheduled.rs 927 read
+src/ui/screen_chooser_window.rs 91 read
+src/ui/screen_share_state.rs 185 read
+src/ui/screen_chooser.rs 950 read
