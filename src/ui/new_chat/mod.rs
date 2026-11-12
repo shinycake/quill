@@ -25,7 +25,7 @@ use quill::group_type::{GroupTypeData, USERNAME_MAX, plan_group_type_save};
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
 use quill::new_chat::{
-    CreateProgress, NewChatBack, NewChatInvalid, NewChatKind, NewChatStage, NewChatStep,
+    NewChatBack, NewChatInvalid, NewChatKind, NewChatStage, NewChatStep,
     NewChatView, TypeSaveStage, plan_new_chat, view,
 };
 
@@ -405,7 +405,6 @@ impl QuillApp {
                     NewChatStage::Creating {
                         request,
                         back,
-                        progress: CreateProgress::InFlight,
                     },
                     cx,
                 );

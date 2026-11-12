@@ -9,7 +9,7 @@ use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::diagnostics::DiagnosticSink;
 use quill::ids::{ChatId, RequestId};
-use quill::new_chat::{CreateProgress, CreationOutcome, NewChatBack, NewChatKind, NewChatStage};
+use quill::new_chat::{CreationOutcome, NewChatBack, NewChatKind, NewChatStage};
 use quill::state::NewChatCreation;
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::UsernameCheckResult;
@@ -181,7 +181,6 @@ impl QuillApp {
             dialog.stage = NewChatStage::Creating {
                 request: CREATE_REQUEST,
                 back: NewChatBack::Info,
-                progress: CreateProgress::InFlight,
             };
         }
         cx.notify();

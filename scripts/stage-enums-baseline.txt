@@ -26,7 +26,6 @@ bare:ClipState::Opening 1
 bare:CloseProgress::Pending 1
 bare:CodeLanguageStage::Opening 1
 bare:ConferenceStage::Running 1
-bare:CreateProgress::InFlight 1
 bare:Decoding::Running 1
 bare:DeviceLink::Opening 1
 bare:DeviceRun::Opening 1
