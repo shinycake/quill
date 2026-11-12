@@ -541,7 +541,8 @@ impl Session {
         }
     }
 
-    /// The poll option the menu opens on; its properties are asked next.
+    /// The poll option the menu opens on; its properties are asked next
+    /// (the caller begins the fetch with its request).
     pub fn begin_poll_option_menu(
         &mut self,
         chat_id: ChatId,
@@ -552,10 +553,7 @@ impl Session {
             chat_id,
             message_id,
             option_id: option_id.to_string(),
-            properties: crate::state::fetch::Fetch::Loading {
-                stale: None,
-                request: None,
-            },
+            properties: crate::state::fetch::Fetch::Idle,
         });
     }
 

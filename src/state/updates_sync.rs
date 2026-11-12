@@ -356,6 +356,7 @@ impl Session {
         let DiskSearch::Asked {
             request: asked_as,
             keys: asked,
+            ..
         } = self.media.disk_search.clone()
         else {
             return;

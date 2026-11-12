@@ -302,3 +302,31 @@ fn a_refused_properties_lookup_leaves_loading() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Sweep 08-016: reopening the same option while the first ask is out takes
+/// only the newer ask's answer.
+#[test]
+fn a_reopened_option_menu_takes_only_its_newer_answer() {
+    let (dir, mut driver, _recorder, _sink, dyn_sink, seq) = poll_driver();
+    ingest(&mut driver, &seq, &dyn_sink, POLL);
+    let (chat, message) = (ChatId(7), MessageId(120));
+    let first = driver
+        .fetch_poll_option_properties(chat, message, "a")
+        .unwrap();
+    let second = driver
+        .fetch_poll_option_properties(chat, message, "a")
+        .unwrap();
+    let answer = |extra: crate::ids::RequestId, replied: bool| {
+        format!(
+            r#"{{"@type":"pollOptionProperties","@extra":"{}","can_be_deleted":false,"can_be_replied":{replied}}}"#,
+            extra.0
+        )
+    };
+    ingest(&mut driver, &seq, &dyn_sink, &answer(first, false));
+    let menu = driver.session.messages.poll_option_menu.clone().unwrap();
+    assert!(menu.properties.is_loading(), "the older answer is dropped");
+    ingest(&mut driver, &seq, &dyn_sink, &answer(second, true));
+    let menu = driver.session.messages.poll_option_menu.clone().unwrap();
+    assert!(menu.properties.data().is_some_and(|p| p.can_be_replied));
+    let _ = std::fs::remove_dir_all(&dir);
+}

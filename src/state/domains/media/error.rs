@@ -13,12 +13,14 @@ impl Session {
         _seq: u64,
     ) {
         self.apply_profile_music_error(err, pending);
-        // The saved-pause search failed: the next healthy reading asks again.
+        // The saved-pause search failed: a healthy reading asks again once
+        // the pause (doubling per failure) is over.
         if let Some(pending) = pending
             && pending.purpose == RequestPurpose::Media(MediaPurpose::SearchDiskPausedDownloads)
-            && matches!(&self.media.disk_search, DiskSearch::Asked { request, .. } if *request == pending.id)
         {
-            self.media.disk_search = DiskSearch::NotAsked;
+            self.media
+                .disk_search
+                .failed(pending.id, std::time::Instant::now());
         }
         // A place without a tile keeps the coordinate card.
         if let Some(pending) = pending

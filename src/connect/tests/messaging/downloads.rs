@@ -894,6 +894,7 @@ fn asked_search(keys: &[(i64, i64)]) -> DiskSearch {
     DiskSearch::Asked {
         request: SEARCH_REQUEST,
         keys: keys.iter().copied().collect(),
+        wait: None,
     }
 }
 
@@ -1007,20 +1008,34 @@ fn a_failed_saved_pause_search_asks_again_and_a_stale_answer_is_ignored() {
     let asked = DiskSearch::Asked {
         request,
         keys: [(7, 99)].into_iter().collect(),
+        wait: None,
     };
     session.media.disk_search = asked.clone();
     // An answer for another request leaves the search waiting.
     session.apply_disk_paused_found(RequestId(request.0 + 1), vec![paused_found(77, 99)]);
     assert_eq!(session.media.disk_search, asked);
     assert!(session.media.disk_resume_due.is_empty());
-    // Its failure returns it to not asked, so the next reading asks again.
+    // Its failure pauses it, so the next readings do not ask at once.
     let seq = AtomicU64::new(1);
     let failed = format!(
         r#"{{"@type":"error","@extra":"{}","code":500,"message":"INTERNAL"}}"#,
         request.0
     );
     session.apply(copy_and_parse(&failed, &seq, &sink).unwrap());
-    assert_eq!(session.media.disk_search, DiskSearch::NotAsked);
+    let DiskSearch::Failed { until, wait } = session.media.disk_search else {
+        panic!("the failed search pauses: {:?}", session.media.disk_search);
+    };
+    assert!(
+        !session
+            .media
+            .disk_search
+            .due(until - std::time::Duration::from_millis(1))
+    );
+    assert!(
+        session.media.disk_search.due(until),
+        "asked again after the pause"
+    );
+    assert_eq!(session.media.disk_search.pause(), Some(wait));
 }
 
 #[test]
@@ -1041,5 +1056,35 @@ fn a_lost_saved_pause_search_asks_again() {
     session.connection = sink_conn;
     let later = std::time::Instant::now() + crate::state::PENDING_REQUEST_TTL * 2;
     assert!(session.sweep_stale_requests(later, crate::state::PENDING_REQUEST_TTL, |_| false));
-    assert_eq!(session.media.disk_search, DiskSearch::NotAsked);
+    assert!(matches!(
+        session.media.disk_search,
+        DiskSearch::Failed { .. }
+    ));
+}
+
+/// Sweep 08-006: each failure of the saved-pause search doubles the pause
+/// before the next ask, and another request's failure changes nothing.
+#[test]
+fn a_refused_saved_pause_search_backs_off() {
+    let t0 = std::time::Instant::now();
+    let mut search = asked_search(&[(7, 99)]);
+    search.failed(RequestId(SEARCH_REQUEST.0 + 1), t0);
+    assert!(matches!(search, DiskSearch::Asked { .. }), "not its ask");
+    search.failed(SEARCH_REQUEST, t0);
+    let DiskSearch::Failed { wait: first, .. } = search else {
+        panic!("failed: {search:?}");
+    };
+    assert!(!search.due(t0));
+    // Asked again after the pause, and refused again: twice the pause.
+    let again = DiskSearch::Asked {
+        request: SEARCH_REQUEST,
+        keys: [(7, 99)].into_iter().collect(),
+        wait: search.pause(),
+    };
+    let mut search = again;
+    search.failed(SEARCH_REQUEST, t0);
+    let DiskSearch::Failed { wait: second, .. } = search else {
+        panic!("failed again: {search:?}");
+    };
+    assert_eq!(second, first * 2);
 }

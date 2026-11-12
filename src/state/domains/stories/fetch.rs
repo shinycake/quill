@@ -11,7 +11,7 @@ pub const STORIES_RETRY_FIRST: Duration = Duration::from_secs(5);
 pub const STORIES_RETRY_MAX: Duration = Duration::from_secs(5 * 60);
 
 /// The retry clock after one more failure at `now`.
-pub(super) fn next_retry(
+pub(crate) fn next_retry(
     previous: Option<(Instant, Duration)>,
     now: Instant,
 ) -> (Instant, Duration) {

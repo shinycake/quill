@@ -330,10 +330,20 @@ impl<S: JsonSender> ConnectDriver<S> {
             }),
             Some(chat_id),
         );
-        self.send_audience(
+        if let Some(menu) = self.session.messages.poll_option_menu.as_mut() {
+            menu.properties.begin();
+            menu.properties.sent(extra);
+        }
+        if let Err(err) = self.send_audience(
             extra,
             &get_poll_option_properties(extra, chat_id, message_id, option_id),
-        )?;
+        ) {
+            if let Some(menu) = self.session.messages.poll_option_menu.as_mut() {
+                menu.properties
+                    .failed(Some(extra), "The options request was not sent.", true);
+            }
+            return Err(err);
+        }
         Ok(extra)
     }
 
