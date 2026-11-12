@@ -335,6 +335,7 @@ fn attached_sticker_sets_fail_the_box_and_drop_an_earlier_answer() {
     let seq = AtomicU64::new(0);
     let purpose = RequestPurpose::Stickers(StickersPurpose::GetAttachedStickerSets { file_id: 1 });
     let ask = |session: &mut Session| {
+        session.stickers.sticker_set_view = Some(StickerSetView::loading(0));
         let extra = session.request(purpose, None);
         session.stickers.stickers.attached = crate::state::AttachedSets::Asked(extra);
         extra
