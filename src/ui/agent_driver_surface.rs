@@ -165,6 +165,20 @@ pub(super) fn block_opened_by_agent(app: &QuillApp, before: &[Opened]) {
     BLOCKED.with(|blocked| blocked.set(queue));
 }
 
+/// A chat window closed: what was queued for it ends with it, so a later
+/// window for the same chat never takes the entry.
+pub(super) fn window_closed(chat: ChatId) {
+    let queue = BLOCKED.with(std::cell::Cell::take);
+    BLOCKED.with(|blocked| {
+        blocked.set(
+            queue
+                .into_iter()
+                .filter(|entry| entry.host != Some(chat))
+                .collect(),
+        );
+    });
+}
+
 /// The dialog names queued by [`block_opened_by_agent`] for the window
 /// `host` of the screen on show, taken. The layers are closed here, with
 /// their Escape close. Another window's entries stay for its shell; those

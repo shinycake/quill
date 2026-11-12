@@ -313,24 +313,10 @@ impl QuillApp {
         if demo.is_none() {
             app.start_update_checks(cx);
         }
-        // screen-scope: the minute timer re-applies the appearance for whichever account is on screen.
-        cx.spawn(async move |this, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_secs(60))
-                    .await;
-                let alive = this
-                    .update(cx, |this, cx| {
-                        if this.appearance.system_accent {
-                            this.refresh_system_accent(cx);
-                        }
-                        this.apply_appearance(cx)
-                    })
-                    .is_ok();
-                if !alive {
-                    break;
-                }
-            }
+        // The OS light/dark setting changed: auto-night "System" follows it.
+        // (The schedule has its own wake, `appearance/night_clock.rs`.)
+        cx.observe_window_appearance(window, |this, _, cx| {
+            this.apply_appearance(cx);
         })
         .detach();
         super::os_menus::install(demo.is_some(), window, cx);

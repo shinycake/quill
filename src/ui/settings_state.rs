@@ -204,6 +204,8 @@ pub(crate) struct PreferencesUi {
     /// The middle value is the applied palette's fingerprint (the accent
     /// under high contrast).
     pub(super) appearance_applied: Option<(ThemeMode, u64, bool, u16, String)>,
+    /// The wake for scheduled auto-night (`appearance/night_clock.rs`).
+    pub(super) night_clock: super::appearance::NightClock,
     /// App themes: custom theme list, the applied palette, the editor.
     pub(super) app_theme: super::app_theme::AppThemeUi,
     /// The operating system's accent color, once read
@@ -247,6 +249,7 @@ impl PreferencesUi {
             keybinding: Default::default(),
             keybinding_focus: cx.focus_handle(),
             appearance_applied: None,
+            night_clock: Default::default(),
             app_theme: Default::default(),
             system_accent: SystemAccent::Unread,
             link_handler_watch: None,

@@ -713,6 +713,7 @@ impl QuillApp {
         // One scale per window ever shown would outlive each closed window.
         self.widgets.scales.remove(&Some(chat_id));
         super::send_fly::window_closed(chat_id);
+        super::agent_driver_surface::window_closed(chat_id);
         if self.windows.last_press == Some(chat_id) {
             self.windows.last_press = None;
         }

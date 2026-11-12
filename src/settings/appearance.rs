@@ -404,6 +404,29 @@ pub fn night_active(start_minutes: u16, end_minutes: u16, now_minutes: u16) -> b
     }
 }
 
+/// Seconds until scheduled auto-night next changes between day and night
+/// (the next time of day equal to the start or the end), counted from
+/// `now_minutes` and the seconds already into that minute. `None` for the
+/// empty window (start == end), which never changes. Always at least one
+/// second, so the wake lands inside the new minute.
+pub fn secs_until_night_change(
+    start_minutes: u16,
+    end_minutes: u16,
+    now_minutes: u16,
+    secs_into_minute: u16,
+) -> Option<u64> {
+    if start_minutes == end_minutes {
+        return None;
+    }
+    let until = |at: u16| -> u64 {
+        let delta = (u64::from(at) + 1440 - u64::from(now_minutes % 1440)) % 1440;
+        if delta == 0 { 1440 } else { delta }
+    };
+    let minutes = until(start_minutes).min(until(end_minutes));
+    let secs = (minutes * 60).saturating_sub(u64::from(secs_into_minute.min(59)));
+    Some(secs.max(1))
+}
+
 /// Minutes since local midnight, for scheduled auto-night (the
 /// testable predicate is `night_active`). Uses the cross-platform
 /// `local_time` (Unix `localtime_r`, Windows time-zone API).
@@ -417,6 +440,18 @@ pub fn local_minutes_since_midnight() -> u16 {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn night_change_wakes_at_the_next_boundary() {
+        // 22:00 to 07:00, at 21:59:30 the start is 30 s away.
+        assert_eq!(secs_until_night_change(1320, 420, 1319, 30), Some(30));
+        // At 22:00:00 the next change is the end, nine hours on.
+        assert_eq!(secs_until_night_change(1320, 420, 1320, 0), Some(9 * 3600));
+        // Past midnight the end is next.
+        assert_eq!(secs_until_night_change(1320, 420, 30, 0), Some(390 * 60));
+        // An empty window never changes.
+        assert_eq!(secs_until_night_change(600, 600, 100, 0), None);
+    }
 
     #[test]
     fn interface_scale_clamps_and_snaps() {

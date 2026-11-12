@@ -169,6 +169,10 @@ impl QuillApp {
                     // Another recording is starting or running: this press
                     // would only queue a second start behind it.
                     if self.recording.starting() {
+                        self.set_note(StatusNote::silent(tr(
+                            keys::Q_MISC_FINISH_THE_RECORDING_FIRST,
+                        )));
+                        cx.notify();
                         return;
                     }
                     let call = self.active_call_id();

@@ -105,14 +105,15 @@ impl QuillApp {
     /// palette, so the accent override is re-applied after every mode
     /// change, and `Theme::update` re-derives tokens and the Base layer
     /// projection from it. Only notifies when the (mode,
-    /// accent, high-contrast) triple actually changed — the minute tick
-    /// calls this and must be free when idle.
+    /// accent, high-contrast) triple actually changed — the schedule's
+    /// wake (`night_clock`) calls this and must be free when idle.
     ///
     /// stories-high-contrast: `ThemeChoice::HighContrast` pairs the dark
     /// kit theme with the high-contrast token palette and wins over
     /// auto-night — an explicit accessibility choice is never silently
     /// reverted by the schedule.
     pub(crate) fn apply_appearance(&mut self, cx: &mut Context<Self>) {
+        self.sync_night_clock(cx);
         let hc = self.appearance.theme == ThemeChoice::HighContrast;
         // The day or night theme (tdesktop keeps one of each and switches
         // with night mode); high contrast keeps its own palette.
@@ -647,6 +648,8 @@ impl QuillApp {
     }
 }
 
+mod night_clock;
+pub(super) use night_clock::NightClock;
 mod appearance_keybindings_section;
 mod new_accent_picker;
 pub(in crate::ui) use new_accent_picker::{AccentSelect, LinkHandlerRecheck};

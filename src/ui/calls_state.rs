@@ -149,6 +149,9 @@ impl super::on_screen::Farewell for CallScreen {
     ) {
         app.close_screen_chooser(cx);
         app.screen_share.close_privacy();
+        // The ring belonged to this account's call; the next sync starts
+        // one for a call ringing on the account now on screen.
+        app.calls.sounds.keep_looping(None);
     }
 }
 
