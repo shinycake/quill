@@ -1,0 +1,13 @@
+# Re-review of r3-10 fix round (Opus, 2026-11-12). Verdict: another fix round
+
+Line numbers are on origin/claude/sweep-r3-10.
+
+Fix round: 8bb9e9e0f, 84fadafbc, 5e8445111. Resolved:
+
+- 19-002: `PaidConfirmStage::Agreed` is gone (src/ui/paid_messages_state.rs:27-40). The agreed (chat, price) goes as an argument through `submit_composer_agreed` into `paid_send_waits` (src/ui/composer/mod.rs:75-80, 175; src/ui/paid_messages_send.rs:55-71, 228-230). `pay_sends_the_composer_text_and_asks_again_next_time` drives Pay through `confirm_paid_send` (src/ui/paid_messages_tests.rs:106-123).
+- 19-011: an `Asking` probe whose thread finished without writing is due again (src/ui/notifications/linux_dbus.rs:228-230). That is safe because the thread writes `Answered` under the same lock before it ends (linux_dbus.rs:263-271).
+
+The macOS-side CI guard scripts all pass on the tip. Remaining:
+
+- 18-003 does not compile on Windows (src/ui/location_picker/geolocation/windows.rs:16, 44). The project uses `windows` 0.62 (Cargo.toml:348). In that version `IAsyncInfo` and `IAsyncOperation` live in the `windows-future` crate (0.3.2 in Cargo.lock), not in `windows::Foundation`, and `windows` does not re-export them. Generated methods return `windows_future::IAsyncOperation<..>`. `use windows::Foundation::{IAsyncInfo, IAsyncOperation};` is an unresolved import, so the Windows build breaks. No CI has run on this branch (no PR). Fix: add `windows-future = "0.3"` under the Windows target dependencies, import `windows_future::IAsyncOperation`, and call `operation.Cancel()` directly; `IAsyncOperation` has `Cancel` in windows-future 0.3.2, so the `cast::<IAsyncInfo>()` and the `Interface` import can go. Before pushing, check with `cargo check --target x86_64-pc-windows-msvc`, or a Windows CI run.
+- 19-006 is still not in-cycle (src/ui/payments/card_form.rs:419-434). The double defer now runs after the Change, but it only sends on a oneshot. The clear itself still runs in the spawned task, which wakes on a later main-loop turn through the foreground dispatcher. A key event already queued can still come first and read the stale Backspace snapshot. That is the hazard the round-1 bullet named. Fix: do the clear inside the second defer. Give `DeleteEdit::Pending` a press number (a `u64` counter on the form), and have the defer reset `delete` to `None` only if it still holds that press. Then `_expires: Task<()>` and the oneshot can go: nothing outlives the press, because a newer press or the Change replaces the number. Alternatively, keep the Task shape and show in a test that the clear lands before a key queued in the same dispatch.

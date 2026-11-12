@@ -1,0 +1,17 @@
+# Re-review of r3-08 fix round (Opus, 2026-11-12). Verdict: another fix round
+
+Line numbers are on origin/claude/sweep-r3-08.
+
+Fix round: 4a5c1daaa. Resolved:
+
+- 15-003: `Refused` is gone. The on-screen client's refusal is `ConnectStage::DiskRefused` (src/ui/connect_ui.rs:33-35, src/ui/disk_state.rs:345-356, 367-375), and each background account's refusal is `Prepare::DiskRefused` (src/ui/background_accounts/prepare.rs:17-19).
+- 16-006: `ShowingView` and `last` are gone (src/ui/fragment_password.rs:228-259). The code that returns the box to idle queues focus: `GiftEvent::PasswordReady` (src/gift_manage/state.rs:370-386) and `GramsHub::enter_withdraw` (src/premium_hub/ton.rs:580-591).
+- 14-004 for text sends: the clear is taken by `old_message_id` through the `SendMessage` answer (src/state/domains/messages/apply.rs:548-560, src/ui/composer_state.rs:48-67, src/ui/composer_sends.rs:482-523). The reply-from-main-composer case is tested (src/ui/composer_sends_tests.rs:942-978).
+- `watch` is renamed to `watch_disk_space` (src/ui/disk_state.rs:121; scripts/owned-timers-allow.txt:12).
+- closed_asks exit: src/ui/folder_share/closed.rs:31-42, tested in src/ui/folders/box_stage_tests.rs:643-665.
+
+The CI guard scripts all pass on the tip. Remaining:
+
+- 14-004 is still broken for album and media-group sends (src/state/session_apply_messages.rs:28-34). The `SendMessageAlbum` answer upserts its messages but records no `SendAnswered`. send_prep.rs then registers album requests in `DraftClear::asked`, but they never become `Made(id)`. A captioned album sent as a reply from a supergroup's main composer is acked under the replied-to topic, so it finds no clear and the main draft stays. The text path does not have this problem. Fix: in that branch, push one `SendAnswered { request: pending.id, chat_id, message_id }` per returned message (with the same 64 cap), and add a test like `a_send_answer_names_the_temporary_message_of_its_request` for an album answer.
+- A disk refusal can be lost (src/ui/background_accounts/prepare.rs:72-76, called from src/ui/background_accounts/mod.rs:452). `refuse` uses `or_insert`, so an account whose entry is still `Cancelled { workers }` keeps that stage. That happens when a cancel followed by a re-begin left two workers, and the first worker's start was refused. When the last worker ends, `finished` removes the entry. Nothing records the refusal, and a later reading with room never retries the account. Before this round, `refused_start()` always recorded the refusal. Fix: give the refusal the worker count, `DiskRefused { workers }`. `refuse` turns `Cancelled { workers }` into `DiskRefused { workers }`. `finished` counts a `DiskRefused` down and keeps it at 0. `running` stays true while workers > 0. Add a case to `a_refused_start_waits_without_blocking_deletion_and_leaves_on_a_retry`.
+- `GramsHub::ready: Vec<WithdrawReady>` is a bool under another name (src/premium_hub/ton.rs:567-591). A Vec of a unit struct, read through `take_ready() -> bool`, is a `pending: bool` that the implicit-state guard cannot see. Fix: make it a real event, the way GiftEvent is, e.g. a `GramsEvent::PasswordReady` variant in a `Vec<GramsEvent>` drained with the withdraw outcome. Or call `focus_field` directly from the UI paths that enter the idle box (src/ui/premium_ui/grams_withdraw.rs:86, 115-124) and keep an event only for the session's answer path (src/state/domains/payments/grams.rs:122).
