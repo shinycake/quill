@@ -1,6 +1,6 @@
 # Confirm pass 1 (files r2-26 does not touch)
 
-Status: in progress. No S3-or-worse finding so far.
+Status: closed for this pass. No S3-or-worse finding. Coverage is partial and is listed below as it is.
 
 ## Scope
 
@@ -27,6 +27,14 @@ Read whole, with nothing S3 or worse:
 - `src/state/domains/groups/apply.rs`
 - `src/state/domains/calls/error.rs`
 - `src/state/domains/users/apply.rs`
+- `src/state/domains/stickers/apply.rs`
+- `src/state/domains/messages/error.rs`
+- `src/state/domains/settings/error.rs`
+- `src/state/domains/bots/error.rs`
+- `src/state/domains/payments/error.rs`
+- `src/connect/core/mod.rs` (the whole `ingest`), `src/connect/core/lifecycle.rs`
+- `src/state/session_calls.rs` (the first 400 lines: 1:1 calls, group call and participant updates)
+- `src/state/domains/messages/apply.rs` (the first 330 lines)
 - `src/state/sticker_gif_types.rs` (the GIF panel and search half)
 - `src/ui/composer/mod.rs`, `src/ui/composer/bot_thread.rs`
 - `src/ui/on_screen.rs`
@@ -34,7 +42,18 @@ Read whole, with nothing S3 or worse:
 
 Read while tracing a caller, in r2-26's set (not counted): `src/state/session_apply_ok.rs`, `src/ui/chat_ui_state.rs`, `src/ui/esc_stack.rs`, `src/ui/app_render/mod.rs`, `src/ui/app_render/window_upkeep.rs`, `src/state/domains/threads/bot_thread.rs`.
 
-Everything else in scope is unread in this pass.
+Everything else in scope is unread as whole files in this pass; the mechanical scans below cover it for two defect classes.
+
+The files in r2-26's set were read with r2-26 itself once its rebase round ended (`reviews/r2-26.md`, "Fix round and rebase"): the whole diff it brings over the follow-up, 99 files.
+
+## Mechanical scans over every in-scope file
+
+Two scripts looked for the two shapes that make a spinner with no way out:
+
+- In `src/connect/**`: a function that writes an in-flight stage (`Loading`, `Saving`, `Sending`, `.begin(..)` and the like) before a send whose refusal leaves the function with `?`. One candidate (`fetch_message_public_forwards`), which is a read of the stage, not a write. The drivers write the stage after the send went out or handle the refusal.
+- In `src/ui/**`: a function that writes an in-flight stage and throws away a driver call's result (`let _ = live.driver...`). One candidate (`new_chatbot_draft`), which is a typing pause that owns its timer.
+
+Both are heuristics over single functions: a stage written in one function and a send refused in another is not seen.
 
 ## Merge checks
 
@@ -75,8 +94,11 @@ None so far.
 - Gift collections (05-031, r2-20): `CollectionsFetch` now holds the request id and only its own answer settles it, but there is still no failed stage: a failed `getGiftCollections` settles to `Idle` and the tabs are missing until the list is reopened. r2-20's `Fetch<Vec<GiftCollection>>` with a Retry button was dropped at its rebase round. Left as it is: Telegram Desktop does the same (`InnerWidget::loadCollections` marks the collections loaded in `.fail` and shows no error), and Telegram Desktop behaviour comes first.
 - `gifs.search_chat` is a field beside `GifList::Search` (r2-19's shape that put the chat inside the stage was not taken). One place writes it (the search's start in `src/connect/gifs.rs`) and one reads it (the next page), so it cannot drift; a search that ends leaves the old chat behind, which nothing reads.
 - `ViewerUi::swipe_timer` (`SwipeTimer`) sits beside `swipe` (`SwipeNav`). The timer is dropped on close and a late fire checks the swipe before acting, so the two cannot disagree in a way the user sees.
+- `src/state/domains/messages/error.rs`: a failed `getPollOptionProperties` fails the open option menu by chat, message and option, not by request, so the failure of an ask made before the menu was reopened on the same option fails the new one. A failed `GetSharingProtection` sets `private_sharing.enable = AskToRequest(chat)` with no request match.
+- `src/state/domains/payments/error.rs`: the failures of `GetStarPackOptions`, `GetWearableGifts` and `EditStarSubscription` settle their value by purpose. `src/state/domains/settings/error.rs`: `OptimizeStorage` the same. One request of each is out at a time.
+- `src/state/domains/messages/apply.rs`: the poll statistics arm checks "the request the dialog waits for" twice in a row (a merge leftover; harmless).
 - Transport (`r2-41`): a status that is both at-end and stalled while a loop seek lands stays `Playing`. Accepted at review.
 
-## Not read yet
+## Not read
 
-The rest of the 335 hand-resolved files (next: `src/state/info_types.rs`, `src/connect/core/mod.rs`, `src/state/domains/stickers/apply.rs`, the settings, messages and bots reducers, `src/connect/stickers.rs`, `src/connect/bots.rs`), then the guard-hit files, then the remainder of the 1,353.
+Of the 335 files resolved by hand at the merges, 24 were read whole or in their changed half (the list above and r2-26's). The rest, and the other in-scope files, were not read in this pass beyond the two scans and the merge checks: among them `src/state/info_types.rs`, `src/state/call_types.rs`, the settings and messages state files, `src/connect/stickers.rs`, `src/connect/bots.rs`, `src/connect/settings/*`, and the UI files with four merges each (`story_viewer/mod.rs`, `shell.rs`, `search_ui/mod.rs`, `group_call_panel.rs`, `deep_links.rs`, `chat_look_ui.rs`). A second confirm pass should start there.
