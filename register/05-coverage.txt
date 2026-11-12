@@ -42,5 +42,3 @@ src/go_to_message.rs 116 read
 src/group_info_edit.rs 129 read
 src/group_manage.rs 200 read
 src/group_type.rs 503 read
-src/icon_badge.rs 681 read
-src/ids.rs 294 read
