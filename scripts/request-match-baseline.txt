@@ -1,5 +1,14 @@
 # Answers not matched by RequestId (scripts/check-request-match.py).
 # <rule>:<Type::function> <count>. Only remove lines or lower counts.
+counter:AiComposePurpose 5
+counter:BotsPurpose 3
+counter:ChatsPurpose 5
+counter:LanguagePurpose 1
+counter:LocationPickerPurpose 1
+counter:MediaPurpose 2
+counter:RequestPurpose 1
+counter:SearchPurpose 1
+counter:SettingsPurpose 2
 purpose:ConnectDriver::ask_gift_text_limit 1
 purpose:ConnectDriver::begin_login 1
 purpose:ConnectDriver::buy_marketplace_gift 1

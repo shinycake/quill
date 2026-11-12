@@ -8,7 +8,7 @@ use crate::ui::app::QuillApp;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
 use quill::ids::ChatId;
-use quill::state::{RequestPurpose, Session, TopicHistory};
+use quill::state::{Session, TopicHistory};
 use quill::telegram::client::copy_and_parse;
 use std::sync::atomic::Ordering;
 

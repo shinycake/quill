@@ -286,10 +286,7 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStarGiftOptions) {
                     self.payments.stars_gift.answer(extra, options);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStarPackOptions) {
-                    self.payments
-                        .star_packs
-                        .options
-                        .answered(extra, options);
+                    self.payments.star_packs.options.answered(extra, options);
                 }
             }
             PaymentsPayload::GiftManage(payload) => self.apply_gift_manage(payload, pending),

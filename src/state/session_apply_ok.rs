@@ -64,7 +64,8 @@ impl Session {
         self.apply_stories_ok(pending);
         // A page of a direct messages chat's conversations answered: the
         // next one may be asked.
-        if let Some(pending) = pending.filter(|p| p.purpose == RequestPurpose::LoadDirectMessagesChatTopics)
+        if let Some(pending) =
+            pending.filter(|p| p.purpose == RequestPurpose::LoadDirectMessagesChatTopics)
             && let Some(chat_id) = pending.chat_id
         {
             self.threads

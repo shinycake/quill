@@ -210,10 +210,7 @@ impl Session {
                 self.payments.hub.received.op.failed(pending.map(|p| p.id));
                 // Only the failed sale's own confirmation closes: a failed
                 // save toggle or another gift's sale leaves it showing.
-                if matches!(
-                    pending.map(|p| p.purpose),
-                    Some(RequestPurpose::SellGift)
-                ) {
+                if matches!(pending.map(|p| p.purpose), Some(RequestPurpose::SellGift)) {
                     self.payments
                         .hub
                         .received

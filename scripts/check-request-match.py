@@ -16,6 +16,11 @@ the re-sweep of 2026-11-11), and this check counts both:
 - `unmatched`: a call to `Fetch::succeed`, which sets the answer whatever
   request it came from. An older request's late answer overwrites a newer
   one.
+- `counter`: a `generation`, `epoch` or `token` number inside a `*Purpose`
+  enum. A counter in the purpose stands in for the `RequestId`: the stage
+  has to bump it by hand to tell its own answer from an older one, and a
+  stage that forgets answers the wrong request. Hold the `RequestId` in the
+  stage instead (`LanguageSwitch` holds one per ask).
 
 Screenshot-demo and fixture files seed state this way and are not checked.
 
@@ -53,6 +58,8 @@ ADVICE = (
 OWNER = "src/state/requests.rs"
 PURPOSE = re.compile(r"\.\s*(?:has_purpose|take_purpose|has_auth_submit)\s*\(")
 SUCCEED = re.compile(r"\.\s*succeed\s*\(")
+PURPOSE_ENUM = re.compile(r"\benum\s+(\w*Purpose)\b[^{;]*\{")
+COUNTER = re.compile(r"\b(?:generation|epoch|token)\s*:\s*u(?:8|16|32|64)\b")
 
 
 def hits(root):
@@ -61,9 +68,15 @@ def hits(root):
             continue
         purpose = "_purpose" in text or "has_auth_submit" in text
         succeed = ".succeed" in text
-        if not purpose and not succeed:
+        counter = "Purpose" in text and COUNTER.search(text)
+        if not purpose and not succeed and not counter:
             continue
         scopes = shape_guard.Scopes(path, text)
+        for enum in PURPOSE_ENUM.finditer(text):
+            body = text[enum.end() : shape_guard.closing(text, enum.end() - 1)]
+            for match in COUNTER.finditer(body):
+                line = shape_guard.line_of(text, enum.end() + match.start())
+                yield f"counter:{enum.group(1)}", path, line
         if purpose:
             for match in PURPOSE.finditer(text):
                 line = shape_guard.line_of(text, match.start())

@@ -257,13 +257,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 get_sticker_set(id, set_id)
             }) {
                 Ok(Some(id)) => {
-                    let set = self
-                        .session
-                        .stickers
-                        .masks
-                        .sets
-                        .entry(set_id)
-                        .or_default();
+                    let set = self.session.stickers.masks.sets.entry(set_id).or_default();
                     set.begin();
                     set.sent(id);
                 }

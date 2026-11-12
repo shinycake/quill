@@ -46,8 +46,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             StoryListView::Main => RequestPurpose::LoadActiveStories,
             StoryListView::Archive => RequestPurpose::LoadHiddenStories,
         };
-        if !self.chats_path_active()
-            || !self.session.stories.paging(list).may_load(Instant::now())
+        if !self.chats_path_active() || !self.session.stories.paging(list).may_load(Instant::now())
         {
             return Ok(None);
         }

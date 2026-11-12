@@ -1,7 +1,7 @@
 //! Sweep r3-04: answers settle only the request that asked.
 use super::common::*;
-use crate::state::fetch::Fetch;
 use super::*;
+use crate::state::fetch::Fetch;
 
 #[test]
 fn the_accounts_own_full_info_turns_hidden_ads_back_on() {
@@ -374,4 +374,67 @@ fn only_the_direct_messages_page_in_flight_ends_the_list() {
         ),
     );
     assert!(session.threads.direct.exhausted(9));
+}
+
+#[test]
+fn a_language_switch_takes_only_the_strings_its_own_requests_bring() {
+    use crate::state::{LanguageStage, LanguageSwitch};
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let strings = RequestPurpose::Settings(SettingsPurpose::Language(LanguagePurpose::Strings));
+    let info = crate::telegram::envelope::LanguagePackInfoData {
+        id: "de".into(),
+        base_language_pack_id: "en".into(),
+        name: "German".into(),
+        native_name: "Deutsch".into(),
+        plural_code: "de".into(),
+        is_official: true,
+        is_rtl: false,
+        is_beta: false,
+        is_installed: true,
+        total_string_count: 0,
+        translated_string_count: 0,
+    };
+    // An earlier switch's two asks, then the switch that replaced it.
+    let stale = session.request(strings, None);
+    let pack = session.request(strings, None);
+    let base = session.request(strings, None);
+    let mut switch = LanguageSwitch::new(info, false);
+    switch.strings_sent(false, pack);
+    switch.strings_sent(true, base);
+    session.settings.language.stage = LanguageStage::Fetching(Box::new(switch));
+    let answer = |extra: RequestId, key: &str| {
+        format!(
+            r#"{{"@type":"languagePackStrings","@extra":"{}","strings":[{{"@type":"languagePackString","key":"{key}","value":{{"@type":"languagePackStringValueOrdinary","value":"x"}}}}]}}"#,
+            extra.0
+        )
+    };
+    apply_json(&mut session, &seq, &sink, &answer(stale, "old"));
+    apply_json(&mut session, &seq, &sink, &answer(base, "base"));
+    assert!(
+        session.settings.language.switching().is_some(),
+        "pack is out"
+    );
+    apply_json(&mut session, &seq, &sink, &answer(pack, "pack"));
+    assert!(session.settings.language.switching().is_none());
+    let ready = session.settings.language.take_install().expect("installed");
+    assert_eq!(ready.pack.len(), 1);
+    assert_eq!(ready.pack[0].0, "pack");
+    assert_eq!(ready.base[0].0, "base");
+    // A refusal of a request the switch does not wait for ends nothing.
+    let mut switch = LanguageSwitch::new(ready.info, true);
+    let own = session.request(strings, None);
+    switch.strings_sent(false, own);
+    session.settings.language.stage = LanguageStage::Fetching(Box::new(switch));
+    let error = |extra: RequestId| {
+        format!(
+            r#"{{"@type":"error","@extra":"{}","code":500,"message":"x"}}"#,
+            extra.0
+        )
+    };
+    apply_json(&mut session, &seq, &sink, &error(stale));
+    assert!(session.settings.language.switching().is_some());
+    apply_json(&mut session, &seq, &sink, &error(own));
+    assert!(session.settings.language.switching().is_none());
+    assert!(session.settings.language.failure().is_some());
 }

@@ -50,7 +50,10 @@ impl<T> AnswerBox<T> {
 
     /// The answer to `request`, once.
     pub fn take(&mut self, request: RequestId) -> Option<T> {
-        let at = self.held.iter().position(|(_, asked, _)| *asked == request)?;
+        let at = self
+            .held
+            .iter()
+            .position(|(_, asked, _)| *asked == request)?;
         Some(self.held.remove(at).2)
     }
 

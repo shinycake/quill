@@ -10,7 +10,6 @@ use crate::ui::composer_sends::SendOnce;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
 use quill::ids::ChatId;
-use quill::state::RequestPurpose;
 use quill::telegram::client::copy_and_parse;
 use std::sync::atomic::Ordering;
 

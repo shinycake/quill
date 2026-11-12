@@ -129,13 +129,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.send_json_request(extra, &add_custom_server_language_pack(extra, id))?;
             self.note_switch(|switch| switch.guards.add = Some(extra));
         }
-        let option = self.send_language_option("language_pack_id", id, LanguagePurpose::SwitchOption)?;
+        let option =
+            self.send_language_option("language_pack_id", id, LanguagePurpose::SwitchOption)?;
         self.note_switch(|switch| switch.guards.option = Some(option));
         for (pack, base) in [(id, false), (base_id, true)] {
             if pack.is_empty() {
                 continue;
             }
-            let extra = self.session.request(purpose(LanguagePurpose::Strings), None);
+            let extra = self
+                .session
+                .request(purpose(LanguagePurpose::Strings), None);
             self.send_json_request(extra, &get_language_pack_strings(extra, pack))?;
             self.note_switch(|switch| switch.strings_sent(base, extra));
         }
