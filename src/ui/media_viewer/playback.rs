@@ -513,17 +513,16 @@ impl QuillApp {
     /// widget, and the player's error once it fails. The picture and the
     /// controls redraw themselves (`video_player`), so this never redraws
     /// the window on its own.
-    pub(in crate::ui) fn spawn_viewer_session_tick(&mut self, cx: &mut Context<Self>) {
-        if self.viewer.clip.has_tick() {
-            return;
+    pub(in crate::ui) fn ensure_viewer_session_tick(&mut self, cx: &mut Context<Self>) {
+        if !self.viewer.clip.has_tick() {
+            self.spawn_viewer_session_tick(cx);
         }
-        self.arm_viewer_session_tick(cx);
     }
 
     /// One tick after 250 ms; a tick that finds the clip still playing arms
     /// the next. The clip stage holds the one task, so each tick replaces the
     /// task that ran it and leaving the stage ends the chain.
-    fn arm_viewer_session_tick(&mut self, cx: &mut Context<Self>) {
+    fn spawn_viewer_session_tick(&mut self, cx: &mut Context<Self>) {
         let tick = self.spawn_scoped(cx, async move |this, cx| {
             cx.background_executor()
                 .timer(Duration::from_millis(250))
@@ -550,7 +549,7 @@ impl QuillApp {
                     cx.notify();
                 }
                 if this.viewer.clip.player().is_some() {
-                    this.arm_viewer_session_tick(cx);
+                    this.spawn_viewer_session_tick(cx);
                 }
             });
             if updated.is_err() {

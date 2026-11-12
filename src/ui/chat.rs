@@ -77,7 +77,7 @@ impl QuillApp {
 
     /// Phase A1: keep the slow-mode countdown re-rendering while the open
     /// chat is gated. At most one task per open chat (guarded by
-    /// `slow_mode_tick`, mirroring `spawn_voice_tick`); it exits
+    /// `slow_mode_tick`, mirroring `begin_record_tick`); it exits
     /// when the gate lifts or the open chat changes. Called from
     /// `render`, which has the `&mut self` the tick needs.
     pub(super) fn ensure_slow_mode_tick(&mut self, cx: &mut Context<Self>) {

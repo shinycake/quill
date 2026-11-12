@@ -299,7 +299,7 @@ impl QuillApp {
             let mut clock = PlaybackClock::new(seconds);
             clock.resume();
             self.recording.set_preview(clock);
-            self.spawn_voice_tick(cx);
+            self.begin_record_tick(cx);
         } else {
             self.set_note(StatusNote::error(tr(
                 keys::Q_MISC_COULDNT_PLAY_THE_RECORDING,

@@ -8,6 +8,7 @@ use super::gif_clip::{GifClip, GifError};
 use super::inline_players::Demand;
 use super::inline_video::InlineTile;
 use super::message_media::MediaFrameKind;
+use super::recording_state::{RECORD_STEP, RecordTick};
 use super::play_intent::{PlayKind, PlayTarget};
 use super::playback_state::{ChatMessage, GifPlayback, GifRun, PlayingGif};
 use crate::ui::status_note::StatusNote;
@@ -19,7 +20,7 @@ use quill::telegram::envelope::MessageContent;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 /// The `image/gif` file a message loops in its row: a GIF animation, or a
 /// GIF sent as a picture file, which tdesktop plays as an animation too
@@ -401,34 +402,34 @@ impl QuillApp {
         cx.notify();
     }
 
-    pub(super) fn spawn_voice_tick(&mut self, cx: &mut Context<Self>) {
-        if self.recording.tick.is_some() {
-            return;
-        }
-        self.arm_voice_tick(cx);
+    /// A recording or its preview started: step it at once, then from the
+    /// frame clock.
+    pub(super) fn begin_record_tick(&mut self, cx: &mut Context<Self>) {
+        self.recording.tick = RecordTick::Next(cx.background_executor().now());
+        self.request_animation_tick(RECORD_FPS, cx);
     }
 
-    /// One tick after 100 ms; a tick that finds the recording still going
-    /// arms the next, so the stage holds the one task and each tick replaces
-    /// the task that ran it.
-    fn arm_voice_tick(&mut self, cx: &mut Context<Self>) {
-        // The tick is the app's; each step runs as the recording's window.
-        // window-scope: `recording_tick_in_window` enters the recording's window itself.
-        let task = self.spawn_screen(cx, async move |this, cx| {
-            cx.background_executor()
-                .timer(Duration::from_millis(100))
-                .await;
-            let _ = this.update(cx, |this, cx| {
-                if this.recording_tick_in_window(cx) {
-                    this.arm_voice_tick(cx);
-                } else {
-                    this.recording.tick = None;
-                }
-            });
-        });
-        self.recording.tick = Some(task);
+    /// Called from each window's frame: the recording steps every
+    /// [`RECORD_STEP`] while a window draws, and the frame clock is asked for
+    /// the next frame. A step that finds nothing recording ends the stage.
+    pub(in crate::ui) fn recording_frame(&mut self, cx: &mut Context<Self>) {
+        let RecordTick::Next(due) = self.recording.tick else {
+            return;
+        };
+        let now = cx.background_executor().now();
+        if now >= due {
+            self.recording.tick = RecordTick::Next(now + RECORD_STEP);
+            if !self.recording_tick_in_window(cx) {
+                self.recording.tick = RecordTick::Idle;
+                return;
+            }
+        }
+        self.request_animation_tick(RECORD_FPS, cx);
     }
 }
+
+/// The frame rate that keeps the record bar stepping every [`RECORD_STEP`].
+const RECORD_FPS: u32 = 10;
 
 #[cfg(test)]
 mod tests {

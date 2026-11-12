@@ -79,8 +79,6 @@ pub(crate) struct GlobalPtt {
     /// Forwards the running hook's key edges to the app; dropped with the
     /// hook, so no thread waits on a dead channel.
     pub(super) listener: Option<Task<()>>,
-    /// The re-check of a missing Input Monitoring permission, one tick away.
-    pub(super) permission_poll: Option<Task<()>>,
 }
 
 pub(crate) struct GroupCallUi {

@@ -119,11 +119,23 @@ pub(crate) struct RecordingUi {
     pub(super) start: CaptureStart,
     next_start: u64,
     pub(super) open_voice: Arc<dyn Fn() -> Result<VoiceCapture, String> + Send + Sync>,
-    /// The 100 ms tick that moves the record bar and the preview; it ends
-    /// itself (and clears this) when nothing needs it, and dropping the
-    /// owner stops it.
-    pub(super) tick: Option<gpui_kit::Task<()>>,
+    /// The step that moves the record bar and the preview and watches the
+    /// capture.
+    pub(super) tick: RecordTick,
 }
+
+/// The record bar's step runs from the frame clock (`recording_frame`), so
+/// it rests while no window draws the bar and ends with the recording.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum RecordTick {
+    /// Nothing records.
+    Idle,
+    /// A recording runs; its next step is due at this instant.
+    Next(std::time::Instant),
+}
+
+/// How often the record bar steps while it draws.
+pub(super) const RECORD_STEP: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// A recording still running, or a camera starting, is cancelled: its
 /// file would be the old account's message.
@@ -179,7 +191,7 @@ impl RecordingUi {
             start: CaptureStart::Idle,
             next_start: 0,
             open_voice: Arc::new(VoiceCapture::start),
-            tick: None,
+            tick: RecordTick::Idle,
         }
     }
 }

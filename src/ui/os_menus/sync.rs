@@ -77,6 +77,19 @@ impl MenuSync {
         }
     }
 
+    /// How long until the read registry is old enough to read again: the
+    /// disk is written by other processes without a signal, so this is the
+    /// one deadline the sync sleeps to when nothing pokes it. Never read
+    /// yet: now.
+    pub(super) fn registry_wait(&self, now: Instant) -> Duration {
+        match &self.registry {
+            RegistryRead::Never(_) => Duration::ZERO,
+            RegistryRead::Read { at, .. } => {
+                REGISTRY_MAX_AGE.saturating_sub(now.saturating_duration_since(*at))
+            }
+        }
+    }
+
     /// A fresh registry read at `now`, taken when the registry had been
     /// written `writes` times and `clients` were running.
     pub(super) fn set_registry(

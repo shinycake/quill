@@ -15,14 +15,13 @@ pub(super) mod state;
 use super::app::QuillApp;
 use crate::ui::shell::DialogKind;
 use crate::ui::status_note::StatusNote;
-use geolocation::Receiver;
+use geolocation::{PromptGate, Receiver};
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
 use quill::location_picker::{GeoOutcome, GeoPoint, LocationSharing, MapView, Venue, country};
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::Poll;
 use std::time::Duration;
 
@@ -40,29 +39,37 @@ async fn poll_answer<T>(
     timeout: Duration,
     cx: &mut AsyncApp,
 ) -> Option<T> {
-    match race_answer(&mut receiver, timeout, cx).await {
+    match race_answer(&mut receiver, timeout, None, cx).await {
         Raced::Answered(answer) => answer,
-        Raced::TimedOut => None,
+        Raced::TimedOut | Raced::PromptClosed => None,
     }
 }
 
-/// The wait for a lookup's answer: the answer, or the end of `timeout`.
+/// The wait for a lookup's answer: the answer, the end of `timeout`, or the
+/// permission prompt closing.
 enum Raced<T> {
     Answered(Option<T>),
     TimedOut,
+    PromptClosed,
 }
 
 /// Wait for the answer, which wakes this task when it comes, against one
-/// timer of `timeout`.
+/// timer of `timeout` and, when there is a `prompt`, its closing (which
+/// wakes this task too).
 async fn race_answer<T>(
     receiver: &mut Receiver<T>,
     timeout: Duration,
+    prompt: Option<&PromptGate>,
     cx: &mut AsyncApp,
 ) -> Raced<T> {
     let mut timer = cx.background_executor().timer(timeout);
+    let seen = prompt.map_or(0, PromptGate::closed);
     std::future::poll_fn(|task| {
         if let Poll::Ready(answer) = Pin::new(&mut *receiver).poll(task) {
             return Poll::Ready(Raced::Answered(answer.ok()));
+        }
+        if prompt.is_some_and(|gate| gate.poll_closed(seen, task).is_ready()) {
+            return Poll::Ready(Raced::PromptClosed);
         }
         if Pin::new(&mut timer).poll(task).is_ready() {
             return Poll::Ready(Raced::TimedOut);
@@ -72,19 +79,21 @@ async fn race_answer<T>(
     .await
 }
 
-/// [`poll_answer`] whose time limit does not run while `paused` is set
-/// (the system's permission prompt is open): a limit that ends while the
-/// prompt is open starts again, so the user's turn is not counted.
+/// [`poll_answer`] whose time limit does not run while the system's
+/// permission prompt is open: the limit starts in full again when the prompt
+/// closes, and one that ends while the prompt is still open starts again,
+/// so the user's turn is not counted.
 async fn poll_answer_unless<T>(
     receiver: &mut Receiver<T>,
     timeout: Duration,
-    paused: Option<&AtomicBool>,
+    prompt: &PromptGate,
     cx: &mut AsyncApp,
 ) -> Option<T> {
     loop {
-        match race_answer(receiver, timeout, cx).await {
+        match race_answer(receiver, timeout, Some(prompt), cx).await {
             Raced::Answered(answer) => return answer,
-            Raced::TimedOut if paused.is_some_and(|flag| flag.load(Ordering::SeqCst)) => {}
+            Raced::PromptClosed => {}
+            Raced::TimedOut if prompt.is_open() => {}
             Raced::TimedOut => return None,
         }
     }
@@ -92,8 +101,8 @@ async fn poll_answer_unless<T>(
 
 /// Wait for a "where am I" answer; `Unavailable` when it never comes.
 async fn locate_outcome(mut locating: geolocation::Locating, cx: &mut AsyncApp) -> GeoOutcome {
-    let paused = locating.permission_prompt.clone();
-    poll_answer_unless(&mut locating.answer, LOCATE_TIMEOUT, Some(&paused), cx)
+    let prompt = locating.permission_prompt.clone();
+    poll_answer_unless(&mut locating.answer, LOCATE_TIMEOUT, &prompt, cx)
         .await
         .unwrap_or(GeoOutcome::Unavailable)
 }
@@ -513,3 +522,7 @@ crate::ui::shell::register_dialogs! {
     )
     .close(|app, _, cx| app.close_location_picker(cx)),
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod wait_tests;

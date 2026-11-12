@@ -50,9 +50,13 @@ impl Hold {
     }
 }
 
-/// The tick that moves the windows: stopped, or the task that runs it.
-/// The tick stops itself when nothing is up; dropping the windows drops it.
+/// The tick that moves the windows: stopped, or the task that runs it and
+/// the instant it wakes at. The tick stops itself when nothing is up;
+/// dropping the windows drops it.
 pub(super) enum Clock {
     Stopped,
-    Running { _task: gpui_kit::Task<()> },
+    Running {
+        due: std::time::Instant,
+        _task: gpui_kit::Task<()>,
+    },
 }

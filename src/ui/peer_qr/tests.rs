@@ -458,6 +458,7 @@ fn the_clock_runs_only_while_a_countdown_shows(cx: &mut TestAppContext) {
                 },
             };
         }
+        app.frame.window_active.set(true);
         app.sync_qr_clock(cx);
     });
     assert!(running(&app, vcx), "a free code counts down");
@@ -466,6 +467,54 @@ fn the_clock_runs_only_while_a_countdown_shows(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     assert!(!running(&app, vcx), "the clock stops once the code ran out");
     assert_eq!(toast(&app, vcx), Some(QrToast::CodeExpired));
+}
+
+#[gpui_kit::test]
+fn the_clock_rests_in_the_background_and_runs_again_on_activation(cx: &mut TestAppContext) {
+    let (app, _, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    frames(vcx);
+    let running = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| {
+            app.peer_qr
+                .open
+                .as_ref()
+                .is_some_and(|open| open.clock.is_running())
+        })
+    };
+    app.update(vcx, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.settings.privacy_data.new_chat =
+                Some(NewChatPrivacyState::Ready(NewChatPrivacy {
+                    allow_from_unknown: true,
+                    incoming_paid_message_star_count: 50,
+                }));
+        }
+        if let Some(open) = app.peer_qr.open.as_mut() {
+            open.state.free.mode = FreeMode::Temporary {
+                code: FreeCode {
+                    link: UserLinkData {
+                        url: "https://t.me/+free".into(),
+                        expires_at: quill::local_time::now_unix() + 3_600,
+                    },
+                    can_permanent: true,
+                },
+            };
+        }
+        app.frame.window_active.set(false);
+        app.sync_qr_clock(cx);
+    });
+    assert!(!running(&app, vcx), "no clock behind another app");
+    app.update(vcx, |app, cx| {
+        app.frame.window_active.set(true);
+        app.resume_qr_clock(cx);
+    });
+    assert!(running(&app, vcx), "activation starts the countdown");
+    app.update(vcx, |app, _| app.frame.window_active.set(false));
+    vcx.executor()
+        .advance_clock(std::time::Duration::from_millis(1_100));
+    vcx.run_until_parked();
+    assert!(!running(&app, vcx), "the next tick finds the app hidden and stops");
 }
 
 /// A message price and a temporary free code, then the pill's menu.

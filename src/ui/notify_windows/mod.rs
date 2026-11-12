@@ -774,28 +774,37 @@ impl QuillApp {
         }
     }
 
+    /// An event changed what the windows need (a hover, a click, a new
+    /// notice): the clock steps at once, unless it is a frame away anyway.
     fn ensure_notify_clock(&mut self, cx: &mut Context<Self>) {
-        if matches!(self.delivery.windows.clock, Clock::Running { .. }) {
+        let soon = Instant::now() + FRAME;
+        if let Clock::Running { due, .. } = self.delivery.windows.clock
+            && due <= soon
+        {
             return;
         }
-        self.arm_notify_clock(Duration::ZERO, cx);
+        self.arm_notify_clock(Instant::now(), cx);
     }
 
-    /// Run one clock step after `delay`; the step arms the next one. The
-    /// stage holds the one task, so each step replaces the task that ran it
-    /// and a step that finds nothing left to do stops the clock.
-    fn arm_notify_clock(&mut self, delay: Duration, cx: &mut Context<Self>) {
+    /// Run one clock step at `due`; the step arms the next one. The stage
+    /// holds the one task and its due instant, so each step replaces the
+    /// task that ran it and a step that finds nothing left to do stops the
+    /// clock. The due instants are the next fade, the next frame of a slide
+    /// or fade, or the next look at the OS idle clock (`notify_check_input`),
+    /// which has no event; a hold that waits on the pointer needs none.
+    fn arm_notify_clock(&mut self, due: Instant, cx: &mut Context<Self>) {
         // screen-scope: the notification windows are the app's; the tick
         // shows whichever account's notices are queued.
         let task = cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(delay).await;
+            let wait = due.saturating_duration_since(Instant::now());
+            cx.background_executor().timer(wait).await;
             let _ = this.update(cx, |app, cx| {
                 if let Some(next) = app.notify_windows_tick(cx) {
-                    app.arm_notify_clock(next, cx);
+                    app.arm_notify_clock(Instant::now() + next, cx);
                 }
             });
         });
-        self.delivery.windows.clock = Clock::Running { _task: task };
+        self.delivery.windows.clock = Clock::Running { due, _task: task };
     }
 
     /// One clock step: timers, fades, slides. Returns when to run again,
@@ -886,11 +895,13 @@ impl QuillApp {
             (None, true) => Some(Duration::from_millis(INPUT_CHECK_MS)),
             (None, false) => None,
         };
-        let open =
-            !windows.shown.is_empty() || windows.hide_all.is_some() || !windows.samples.is_empty();
         match next {
             Some(delay) => Some(delay.max(FRAME)),
-            None if open => Some(Duration::from_millis(INPUT_CHECK_MS)),
+            // A hovered window that went sends no leave, so the pointer's
+            // hold is looked at again (`notify_settle_hiding`).
+            None if windows.hovered.is_some() => Some(Duration::from_millis(INPUT_CHECK_MS)),
+            // Held, nothing is due: the hold ends on an event, which wakes
+            // the clock (`ensure_notify_clock`).
             None => {
                 windows.clock = Clock::Stopped;
                 None

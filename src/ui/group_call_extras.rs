@@ -214,12 +214,6 @@ impl QuillApp {
             // a hook that failed to start sees no release at all.
             self.ptt_end_hold(cx);
         }
-        if matches!(
-            self.group_call.global_ptt.hook.state(),
-            HookState::NeedsPermission
-        ) {
-            self.arm_global_ptt_permission_poll(cx);
-        }
         if changed {
             cx.notify();
         }
@@ -277,32 +271,17 @@ impl QuillApp {
         }
     }
 
-    /// Input Monitoring changes need no restart to be noticed by a fresh
-    /// check, so look again every couple of seconds while it is missing.
-    fn arm_global_ptt_permission_poll(&mut self, cx: &mut Context<Self>) {
-        if self.group_call.global_ptt.permission_poll.is_some() {
-            return;
+    /// The app came to the front: Input Monitoring is granted in System
+    /// Settings, so a hook that waits for it looks again once, as the user
+    /// comes back. No timer: nothing else announces the grant.
+    pub(super) fn resume_global_ptt_permission(&mut self, cx: &mut Context<Self>) {
+        if matches!(
+            self.group_call.global_ptt.hook.state(),
+            HookState::NeedsPermission
+        ) && quill::calls::ptt_global::permission_granted()
+        {
+            self.recheck_global_ptt(cx);
         }
-        let poll = self.spawn_screen(cx, async move |this, cx| {
-            cx.background_executor().timer(Duration::from_secs(2)).await;
-            // The slot belongs to the app, so it clears even after a switch.
-            // Nothing awaits below, so dropping this task's own handle only
-            // ends the future once the tick is done.
-            let _ = this.app().update(cx, |this, _| {
-                this.group_call.global_ptt.permission_poll = None;
-            });
-            let _ = this.update(cx, |this, cx| {
-                if quill::calls::ptt_global::permission_granted() {
-                    this.recheck_global_ptt(cx);
-                } else if matches!(
-                    this.group_call.global_ptt.hook.state(),
-                    HookState::NeedsPermission
-                ) {
-                    this.arm_global_ptt_permission_poll(cx);
-                }
-            });
-        });
-        self.group_call.global_ptt.permission_poll = Some(poll);
     }
 
     /// "Check again" in Settings: allow a failed start to be retried.

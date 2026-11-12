@@ -10,7 +10,6 @@
 use quill::location_picker::{GeoOutcome, GeoPoint};
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::atomic::AtomicBool;
 
 /// The receiving end of a lookup: it resolves once with the answer, or
 /// with `Canceled` when every [`Answer`] went away without one.
@@ -65,12 +64,71 @@ use macos as platform;
 #[cfg(windows)]
 use windows as platform;
 
+/// Whether the system's "Allow location" prompt is open: the user's turn,
+/// not the lookup's. Closing it wakes the task that waits for the lookup, so
+/// the wait starts its full limit again from that moment.
+#[derive(Default)]
+pub(in crate::ui) struct PromptGate {
+    state: Mutex<PromptState>,
+}
+
+#[derive(Default)]
+struct PromptState {
+    open: bool,
+    /// How many times the prompt closed.
+    closed: u64,
+    waker: Option<std::task::Waker>,
+}
+
+impl PromptGate {
+    /// The prompt opened or closed; a close wakes the waiting task.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub(in crate::ui) fn set_open(&self, open: bool) {
+        let woken = {
+            let mut state = quill::locks::lock_or_recover(&self.state);
+            let was = std::mem::replace(&mut state.open, open);
+            if was && !open {
+                state.closed = state.closed.wrapping_add(1);
+                state.waker.take()
+            } else {
+                None
+            }
+        };
+        if let Some(waker) = woken {
+            waker.wake();
+        }
+    }
+
+    pub(in crate::ui) fn is_open(&self) -> bool {
+        quill::locks::lock_or_recover(&self.state).open
+    }
+
+    /// How many times the prompt has closed so far.
+    pub(in crate::ui) fn closed(&self) -> u64 {
+        quill::locks::lock_or_recover(&self.state).closed
+    }
+
+    /// Ready once the prompt has closed since `seen` ([`Self::closed`]).
+    pub(in crate::ui) fn poll_closed(
+        &self,
+        seen: u64,
+        task: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<()> {
+        let mut state = quill::locks::lock_or_recover(&self.state);
+        if state.closed != seen {
+            return std::task::Poll::Ready(());
+        }
+        state.waker = Some(task.waker().clone());
+        std::task::Poll::Pending
+    }
+}
+
 /// A running "where am I" lookup: its answer, and whether the system's
 /// permission prompt is open (the user's turn, not the lookup's: its time
 /// limit does not run meanwhile).
 pub(in crate::ui) struct Locating {
     pub(in crate::ui) answer: Receiver<GeoOutcome>,
-    pub(in crate::ui) permission_prompt: Arc<AtomicBool>,
+    pub(in crate::ui) permission_prompt: Arc<PromptGate>,
     /// Dropping it (with the `Locating`) ends the Linux and Windows
     /// lookup thread's wait; macOS stops its manager in `cancel`.
     _cancel: futures_channel::oneshot::Sender<()>,
@@ -87,7 +145,7 @@ impl Drop for Locating {
 /// One "where am I" lookup. Call on the UI thread (CoreLocation answers on
 /// the run loop of the thread that asked).
 pub(in crate::ui) fn locate() -> Locating {
-    let permission_prompt = Arc::new(AtomicBool::new(false));
+    let permission_prompt = Arc::new(PromptGate::default());
     let (cancel, cancelled) = futures_channel::oneshot::channel();
     let answer = platform::locate(&permission_prompt, cancelled);
     Locating {

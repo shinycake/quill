@@ -45,8 +45,14 @@ use std::time::{Duration, Instant};
 
 /// tdesktop `kToastDuration`.
 const TOAST: Duration = Duration::from_millis(2800);
-/// How often a countdown on the box moves.
-const CLOCK: Duration = Duration::from_secs(1);
+/// Time to the next whole second of the wall clock, when the `m:ss`
+/// countdown on the box moves (a deadline, never less than a frame).
+fn qr_clock_wait() -> Duration {
+    let into = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.subsec_millis());
+    Duration::from_millis(u64::from(1000u32.saturating_sub(into)).max(16))
+}
 
 /// The panel's open or close motion, for drawing only: the reducer's
 /// `panel` says what is open. A panel change replaces it whole; a close
@@ -604,10 +610,11 @@ impl QuillApp {
             )
     }
 
-    /// Start the once-a-second clock when a countdown shows; it stops
-    /// itself when none does or the box closes.
-    fn sync_qr_clock(&mut self, cx: &mut Context<Self>) {
-        if self.lock_waits() || !self.qr_counts_down() {
+    /// Start the clock when a countdown shows and a window is in front; it
+    /// stops itself when none does, the box closes or the app goes to the
+    /// background (`resume_qr_clock` starts it again).
+    pub(in crate::ui) fn sync_qr_clock(&mut self, cx: &mut Context<Self>) {
+        if self.lock_waits() || !self.frame.window_active.get() || !self.qr_counts_down() {
             return;
         }
         let Some(open) = self.peer_qr.open.as_ref() else {
@@ -619,13 +626,20 @@ impl QuillApp {
         self.arm_qr_clock(cx);
     }
 
-    /// One tick of the open box's clock after [`CLOCK`]; a tick that finds a
-    /// countdown still showing arms the next. The box holds the one task
-    /// (a box that closed or was replaced drops it with its clock), and each
-    /// tick replaces the task that ran it.
+    /// The app came to the front: a countdown that stopped in the
+    /// background runs again.
+    pub(in crate::ui) fn resume_qr_clock(&mut self, cx: &mut Context<Self>) {
+        self.sync_qr_clock(cx);
+    }
+
+    /// One tick of the open box's clock at the next countdown second
+    /// ([`qr_clock_wait`]); a tick that finds a countdown still showing
+    /// arms the next. The box holds the one task (a box that closed or was
+    /// replaced drops it with its clock), and each tick replaces the task
+    /// that ran it.
     fn arm_qr_clock(&mut self, cx: &mut Context<Self>) {
         let clock = self.spawn_screen(cx, async move |this, cx| {
-            cx.background_executor().timer(CLOCK).await;
+            cx.background_executor().timer(qr_clock_wait()).await;
             let _ = this.update(cx, |this, cx| {
                 if this.qr_clock(cx) {
                     this.arm_qr_clock(cx);
@@ -643,9 +657,10 @@ impl QuillApp {
         if self.peer_qr.open.is_none() {
             return false;
         }
-        // The box stays open under the lock, but nothing is asked or run
-        // for it; the first poll after the unlock starts the clock again.
-        if self.lock_waits() {
+        // The box stays open under the lock, or behind another app, but
+        // nothing is asked or run for it; the first poll after the unlock
+        // and the next activation start the clock again.
+        if self.lock_waits() || !self.frame.window_active.get() {
             if let Some(open) = self.peer_qr.open.as_mut() {
                 open.clock = QrClock::Stopped;
             }

@@ -543,6 +543,9 @@ impl QuillApp {
         if !self.lock_waits() && self.poll_drains(cx) {
             progressed = true;
         }
+        // Under the lock too: a locked settle shows the generic text, and a
+        // photo that landed should not wait out the deadline for it.
+        progressed |= self.settle_preview_waits(cx);
         self.finish_successful_sends(cx);
         if progressed || send_failed || self.polled_chrome() != shown_before {
             need = RedrawNeed::Now;
@@ -654,7 +657,7 @@ mod ringtone_tests;
 mod spawn_call_notification;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
-mod viewer_progress_tests;
+pub(super) mod viewer_progress_tests;
 
 #[cfg(test)]
 mod tests {

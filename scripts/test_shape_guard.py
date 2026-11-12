@@ -235,6 +235,58 @@ class Timers(unittest.TestCase):
         }
         self.assertEqual(keys(timers, files), ["poll:watch"])
 
+    def test_a_task_that_rearms_itself_at_a_fixed_period_is_a_poll(self):
+        files = {
+            "src/ui/a.rs": (
+                "impl App {\n"
+                "    fn tick(&mut self, cx: &mut Cx) {\n"
+                "        let task = cx.spawn(async move |this, cx| {\n"
+                "            cx.background_executor().timer(Duration::from_millis(250)).await;\n"
+                "            this.update(cx, |this, cx| this.tick(cx)).ok();\n"
+                "        });\n"
+                "        self.task = Some(task);\n"
+                "    }\n"
+                "    fn clock(&mut self, cx: &mut Cx) {\n"
+                "        let task = cx.spawn(async move |this, cx| {\n"
+                "            cx.background_executor().timer(TICK).await;\n"
+                "            this.update(cx, |this, cx| this.clock(cx)).ok();\n"
+                "        });\n"
+                "        self.task = Some(task);\n"
+                "    }\n"
+                # Deadline-driven: the wait comes from a stored instant.
+                "    fn wake(&mut self, due: Instant, cx: &mut Cx) {\n"
+                "        let task = cx.spawn(async move |this, cx| {\n"
+                "            let wait = due.saturating_duration_since(Instant::now());\n"
+                "            cx.background_executor().timer(wait).await;\n"
+                "            this.update(cx, |this, cx| this.wake(next_due(), cx)).ok();\n"
+                "        });\n"
+                "        self.task = Some(task);\n"
+                "    }\n"
+                # Another function's call after the wait is not a re-arm.
+                "    fn once(&mut self, cx: &mut Cx) {\n"
+                "        let task = cx.spawn(async move |this, cx| {\n"
+                "            cx.background_executor().timer(Duration::from_secs(1)).await;\n"
+                "            this.update(cx, |this, cx| this.finish(cx)).ok();\n"
+                "        });\n"
+                "        self.task = Some(task);\n"
+                "    }\n"
+                "}\n"
+                "fn menus(cx: &mut Cx) -> Task<()> {\n"
+                "    cx.spawn(async move |cx| loop {\n"
+                "        sleep_or_wake_paced(cx.background_executor(), &S, seen, TEN, ONE).await;\n"
+                "    })\n"
+                "}\n"
+                "fn menus_by_deadline(cx: &mut Cx) -> Task<()> {\n"
+                "    cx.spawn(async move |cx| loop {\n"
+                "        sleep_or_wake_paced(cx.background_executor(), &S, seen, sync.registry_wait(now), ONE).await;\n"
+                "    })\n"
+                "}\n"
+            )
+        }
+        self.assertEqual(
+            keys(timers, files), ["poll:App::clock", "poll:App::tick", "poll:menus"]
+        )
+
 
 class Requests(unittest.TestCase):
     def test_purpose_checks_and_unmatched_answers_fail(self):

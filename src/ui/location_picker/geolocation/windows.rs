@@ -93,7 +93,7 @@ fn lookup(mut cancelled: futures_channel::oneshot::Receiver<()>) -> GeoOutcome {
 }
 
 pub(super) fn locate(
-    _permission_prompt: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+    _permission_prompt: &std::sync::Arc<super::PromptGate>,
     cancelled: futures_channel::oneshot::Receiver<()>,
 ) -> Receiver<GeoOutcome> {
     let (answer, receiver) = channel();
@@ -123,4 +123,4 @@ pub(super) fn system_country() -> Option<String> {
 /// Nothing to do here: dropping the `Locating` drops the lookup's cancel
 /// sender, which `lookup` checks between its calls and while the position
 /// is pending (`position_unless_dropped` cancels the operation).
-pub(super) fn cancel(_lookup: &std::sync::Arc<std::sync::atomic::AtomicBool>) {}
+pub(super) fn cancel(_lookup: &std::sync::Arc<super::PromptGate>) {}

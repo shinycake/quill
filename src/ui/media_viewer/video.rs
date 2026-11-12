@@ -151,7 +151,7 @@ impl QuillApp {
         if !looping {
             self.create_viewer_sliders(duration, cx);
         }
-        self.spawn_viewer_session_tick(cx);
+        self.ensure_viewer_session_tick(cx);
         cx.notify();
     }
 

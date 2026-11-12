@@ -65,6 +65,28 @@ impl QuillApp {
         // `None` means the account on screen: a switch while waiting would
         // post this one under the other account.
         let on_screen = self.session().map(|session| session.account.clone());
+        self.arm_preview_wait(
+            key,
+            |deadline| PreviewWait {
+                account,
+                file,
+                on_screen,
+                locked,
+                notification,
+                photo,
+                _deadline: deadline,
+            },
+            cx,
+        );
+    }
+
+    /// Hold a wait for `key` with the task that ends it at [`PHOTO_WAIT`].
+    fn arm_preview_wait(
+        &mut self,
+        key: (AccountKey, ChatId),
+        wait: impl FnOnce(Task<()>) -> PreviewWait,
+        cx: &mut Context<Self>,
+    ) {
         // screen-scope: the wait names the notification's account and checks it
         // against the account on screen itself before showing anything.
         let deadline = Self::spawn_app(cx, {
@@ -74,18 +96,7 @@ impl QuillApp {
                 let _ = this.update(cx, |app, cx| app.settle_preview_wait(&key, cx));
             }
         });
-        self.delivery.preview_waits.insert(
-            key,
-            PreviewWait {
-                account,
-                file,
-                on_screen,
-                locked,
-                notification,
-                photo,
-                _deadline: deadline,
-            },
-        );
+        self.delivery.preview_waits.insert(key, wait(deadline));
     }
 
     /// The poll's drain: every waiting notification whose photo has landed
@@ -123,8 +134,10 @@ impl QuillApp {
             photo,
             _deadline,
         } = wait;
-        // This may be the deadline task's own turn: let it finish.
-        _deadline.detach();
+        // This may be the deadline task's own turn: dropping it only ends
+        // the future once this update returns, and keeps it from settling a
+        // newer wait for the same chat.
+        drop(_deadline);
         if account.is_none() && self.session().map(|session| session.account.clone()) != on_screen {
             return;
         }
@@ -176,3 +189,8 @@ impl QuillApp {
         live.driver.download_file(file, PHOTO_PRIORITY).is_ok()
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "photo_preview_tests.rs"]
+mod tests;

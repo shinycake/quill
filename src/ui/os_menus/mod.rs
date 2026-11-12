@@ -462,14 +462,14 @@ fn spawn_menu_sync(window: &mut Window, cx: &mut Context<QuillApp>) {
             }
             // Event-driven: applied updates, activation, lock changes,
             // notification toggles and player changes poke `CHROME`. The
-            // timeout covers what nothing announces (the account registry
-            // on disk).
+            // deadline is the age at which the registry is read again, for
+            // what nothing announces (the account registry on disk).
             // A burst of pokes rebuilds the menus at most once a second.
             super::wake_wait::sleep_or_wake_paced(
                 cx.background_executor(),
                 &quill::wake::CHROME,
                 seen,
-                Duration::from_secs(10),
+                sync.registry_wait(std::time::Instant::now()),
                 Duration::from_secs(1),
             )
             .await;
