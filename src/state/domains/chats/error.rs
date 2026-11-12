@@ -143,13 +143,9 @@ impl Session {
                 // The Premium bot's `/start` was for the link that failed
                 // (stale or not): a later link to the bot must not send it
                 // unasked. Another flow's failure leaves it alone.
-                if self
-                    .payments
-                    .hub
-                    .auto_start
-                    .as_ref()
-                    .is_some_and(|auto| Some(auto.request) == pending.map(|p| p.id))
-                {
+                if self.payments.hub.auto_start.as_ref().is_some_and(|auto| {
+                    auto.request.is_some() && auto.request == pending.map(|p| p.id)
+                }) {
                     self.payments.hub.auto_start = None;
                 }
                 if limit_box {

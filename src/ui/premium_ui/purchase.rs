@@ -55,7 +55,6 @@ impl QuillApp {
                     .session()
                     .and_then(|s| s.chats_state.deep_link_request());
                 if sent != Some(false)
-                    && let Some(request) = request
                     && let Some(hub) = self.hub_mut()
                 {
                     hub.auto_start = Some(PremiumAutoStart {

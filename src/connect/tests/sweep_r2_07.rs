@@ -66,7 +66,7 @@ fn the_ownership_box_opened_while_sends_fail_shows_failures_to_retry() {
             .session
             .groups
             .member_fetch((-100, MemberListFilter::Recent)),
-        Some(SupergroupMembersFetch::Loading { request: _, .. })
+        Some(SupergroupMembersFetch::Loading { .. })
     ));
 }
 

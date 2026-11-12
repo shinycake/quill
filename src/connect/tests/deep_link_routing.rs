@@ -173,7 +173,7 @@ fn a_failed_premium_bot_link_drops_its_auto_start() {
     driver.session.payments.hub.auto_start = Some(PremiumAutoStart {
         username: "premiumbot".into(),
         start_ref: "ref".into(),
-        request: extra,
+        request: Some(extra),
     });
     // Another flow's failure (another request) leaves it.
     let other = driver.session.request(

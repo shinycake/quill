@@ -36,17 +36,13 @@ fn a_stale_member_list_is_asked_again_while_an_older_request_is_out() {
         .fetch_supergroup_members(ChatId(-100), MemberListFilter::Recent, "")
         .unwrap()
         .expect("asked");
-    driver
-        .session
-        .groups
-        .supergroup_members
-        .get_mut(&key)
-        .map(|list| {
-            list.fetch = SupergroupMembersFetch::Loaded {
-                members: Vec::new(),
-                total_count: 0,
-            }
-        });
+    driver.session.groups.set_member_fetch(
+        key,
+        SupergroupMembersFetch::Loaded {
+            members: Vec::new(),
+            total_count: 0,
+        },
+    );
     driver.session.groups.members_changed(-100);
     assert!(driver.session.groups.member_list_is_stale(key));
     let second = driver

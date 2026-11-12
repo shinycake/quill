@@ -119,7 +119,7 @@ impl GroupsState {
     /// A first page for `key` was sent as `request` with `query`: it
     /// replaces how the list was asked, keeps the page shown meanwhile and
     /// drops a next page of the old one.
-    pub(crate) fn note_member_first(&mut self, key: Key, request: RequestId, query: &str) {
+    pub fn note_member_first(&mut self, key: Key, request: RequestId, query: &str) {
         let previous = self.supergroup_members.remove(&key);
         self.supergroup_members
             .insert(key, MemberList::asked(previous, request, query));

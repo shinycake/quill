@@ -313,6 +313,9 @@ pub(super) fn apply_ready_group_manage(
         }),
         Some(ChatId(chat_id)),
     );
+    session
+        .groups
+        .note_member_first((chat_id, MemberListFilter::Recent), members_extra, "");
     // TDLib 1.8.67 `chatAdministratorRights` field order.
     let admin_rights = |manage_tags: bool| {
         format!(

@@ -84,7 +84,7 @@ fn replay_admin_list_load_and_gate() {
             promote_extra.0
         )],
     );
-    assert!(!session.groups.admin_lists.contains_key(&13));
+    assert!(session.groups.admin_list_is_stale(13));
 }
 
 /// Phase D3b: any `updateChatMember` invalidates the cached admin list,
@@ -137,7 +137,7 @@ fn replay_admin_update_member_invalidates_and_own_gate() {
             r#"{"@type":"updateChatMember","chat_id":13,"actor_user_id":1,"date":1,"invite_link":null,"via_join_request":false,"via_chat_folder_invite_link":false,"old_chat_member":{"@type":"chatMember","member_id":{"@type":"messageSenderUser","user_id":9},"status":{"@type":"chatMemberStatusMember"}},"new_chat_member":{"@type":"chatMember","member_id":{"@type":"messageSenderUser","user_id":9},"status":{"@type":"chatMemberStatusAdministrator","can_be_edited":true,"rights":{"@type":"chatAdministratorRights","can_promote_members":false}}}}"#,
         ],
     );
-    assert!(!session.groups.admin_lists.contains_key(&13));
+    assert!(session.groups.admin_list_is_stale(13));
 
     // Own membership: gate opens with can_promote_members=true…
     let me_extra = session.request(RequestPurpose::GetMe, None);
@@ -231,7 +231,7 @@ fn replay_admin_rights_lookup_and_demote() {
             demote_extra.0
         )],
     );
-    assert!(!session.groups.admin_lists.contains_key(&13));
+    assert!(session.groups.admin_list_is_stale(13));
 }
 
 /// Phase D3b: `getSupergroupMembers` populates the promote picker's
@@ -260,6 +260,9 @@ fn replay_supergroup_members_picker_cache() {
         }),
         Some(chat_id),
     );
+    session
+        .groups
+        .note_member_first((13, MemberListFilter::Recent), members_extra, "");
     apply_all_seq(
         &mut session,
         &sink,
@@ -292,6 +295,9 @@ fn replay_supergroup_members_picker_cache() {
         }),
         Some(chat_id),
     );
+    session
+        .groups
+        .note_member_first((13, MemberListFilter::Recent), retry_extra, "");
     apply_all_seq(
         &mut session,
         &sink,

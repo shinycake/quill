@@ -756,8 +756,9 @@ pub struct PremiumAutoStart {
     pub username: String,
     pub start_ref: String,
     /// The deep-link follow-up request resolving the bot: its error drops
-    /// the `/start`.
-    pub request: crate::ids::RequestId,
+    /// the `/start`. `None` when nothing was sent (a screenshot demo), so
+    /// nothing can fail it.
+    pub request: Option<crate::ids::RequestId>,
 }
 
 /// Per-surface state of the hub dialogs. Lives in `Session` so the poll loop
