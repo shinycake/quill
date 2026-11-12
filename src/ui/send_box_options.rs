@@ -21,7 +21,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::composer::{
     AttachmentKind, ComposerAttachment, MediaSendOptions, PriceInput, can_use_high_quality,
-    cover_send_path, paid_media_fits, parse_paid_price, session_allows_paid_media,
+    cover_send_path, media_kind_for, paid_media_fits, parse_paid_price, session_allows_paid_media,
 };
 use quill::lang::{keys, tr, tr_with};
 use std::cell::Cell;
@@ -108,32 +108,45 @@ impl QuillApp {
         }
     }
 
-    /// The size of the picture the photo goes out as (its JPEG when one was
-    /// made), read from the header off the UI thread; unknown until that
-    /// read lands for that very file.
+    /// The file whose header says how large the tray picture is: the
+    /// picture a photo goes out as (its JPEG when one was made), or a
+    /// picture that goes as a file right now but could go as a photo.
+    /// `None` for anything else.
+    fn sized_picture(attachment: &ComposerAttachment) -> Option<&std::path::Path> {
+        match attachment.kind {
+            AttachmentKind::Photo => Some(attachment.photo_file()),
+            AttachmentKind::Document
+                if !attachment.extras.file_only()
+                    && media_kind_for(&attachment.path) == Some(AttachmentKind::Photo) =>
+            {
+                Some(attachment.path.as_path())
+            }
+            _ => None,
+        }
+    }
+
+    /// The size of the tray picture (`sized_picture`), read from the header
+    /// off the UI thread; unknown until that read lands for that very file.
     pub(super) fn tray_photo_size(&self, attachment: &ComposerAttachment) -> Option<(u32, u32)> {
+        let file = Self::sized_picture(attachment)?;
         self.composer_sends
             .reads
             .photo_sizes
             .done(&attachment.path)
-            .filter(|read| read.file == attachment.photo_file())
+            .filter(|read| read.file == file)
             .and_then(|read| read.size)
     }
 
-    /// Read the header of every tray photo's picture that has not been read
-    /// (or was read as another file, before its JPEG was made), in the
-    /// background. A header that cannot be read, or a read that never
+    /// Read the header of every tray picture that has not been read (or was
+    /// read as another file, before its JPEG was made), in the background. A header that cannot be read, or a read that never
     /// answers, ends as "unknown": the offer stays hidden, nothing waits.
     pub(super) fn check_tray_photo_sizes(&mut self, cx: &mut Context<Self>) {
         let wanted: Vec<(std::path::PathBuf, std::path::PathBuf)> = self
             .composer_sends
             .attachments()
-            .filter(|attachment| attachment.kind == AttachmentKind::Photo)
-            .map(|attachment| {
-                (
-                    attachment.path.clone(),
-                    attachment.photo_file().to_path_buf(),
-                )
+            .filter_map(|attachment| {
+                Self::sized_picture(attachment)
+                    .map(|file| (attachment.path.clone(), file.to_path_buf()))
             })
             .filter(|(path, file)| {
                 let reads = &self.composer_sends.reads.photo_sizes;
@@ -187,11 +200,12 @@ impl QuillApp {
         }
     }
 
-    /// tdesktop `hasSendLargePhotosOption`: a compressed photo over 1280 px.
+    /// tdesktop `hasSendLargePhotosOption`: a picture over 1280 px, whether
+    /// it goes as a photo or as a file right now (the quality choices stay
+    /// put when "File" is picked).
     pub(super) fn tray_has_large_photo(&self) -> bool {
         self.pending_attachments()
             .iter()
-            .filter(|attachment| attachment.kind == AttachmentKind::Photo)
             .filter_map(|attachment| self.tray_photo_size(attachment))
             .any(|(width, height)| can_use_high_quality(width, height))
     }

@@ -93,3 +93,4 @@ src/ui/bot_stream.rs PINNED | the stream demo's recording clock (demo-capture on
 src/ui/dialogs/poll.rs NEXT | a counter that only has to give each option slot a number no other slot has
 src/ui/profile_photo_sources/camera.rs SHOTS | a counter that only has to give each camera shot file a name no other shot has
 src/ui/notifications/linux_dbus.rs NOTIFIER | the process's one D-Bus session connection, not a window's
+src/ui/media_viewer/screen_cover.rs X11_LAST | one cached X11 work-area answer; the entry carries its WindowId and bounds, so another window's read misses and asks the server

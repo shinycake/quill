@@ -186,7 +186,12 @@ impl QuillApp {
                     }),
                 )
                 .child(button)
-                .children(self.send_menu_overlay(cx))
+                // The send box draws the menu while it holds the tray.
+                .children(
+                    (!self.send_box_shown())
+                        .then(|| self.send_menu_overlay(cx))
+                        .flatten(),
+                )
                 .into_any_element()
         } else if !kind.submits() {
             // MED2: right-click flips audio/video mode (TGX tap-to-switch,

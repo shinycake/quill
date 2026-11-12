@@ -2,13 +2,18 @@
 //! will be sent (tdesktop's album preview in the send box), with its
 //! controls on a dark pill that reads over any picture, and the files as
 //! rows with a thumbnail, name and size.
+//!
+//! A tile's controls are buttons, one click each: Edit, the spoiler toggle,
+//! the cover, Remove. Only a tile too narrow for them folds them into one
+//! menu, and a video with a cover has a menu for changing or clearing it.
 #![deny(clippy::indexing_slicing)]
 
-use super::layout::{FULL_CONTROLS_WIDTH, TrayLayout, message_tiles};
+use super::layout::{MESSAGE_GAP, MOSAIC_WIDTH, TrayLayout, message_tiles};
 use crate::ui::app::QuillApp;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenu, PopupMenuItem};
+use gpui_kit::component::scroll::ScrollableElement;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -24,22 +29,50 @@ const TILE_RADIUS: f32 = 8.;
 const INNER_RADIUS: f32 = 2.;
 /// A file row's thumbnail.
 const FILE_THUMB: f32 = 40.;
+/// The room one control takes on a tile's pill, and the room the pill
+/// keeps around them: its own padding, its inset from the tile's edge and
+/// some of the picture left in view beside it.
+const CONTROL_WIDTH: i32 = 22;
+const PILL_CHROME: i32 = 32;
 
-/// What a tile's ⋯ menu offers, decided once per render.
-#[derive(Clone, Copy)]
-struct TileMenu {
-    index: usize,
-    /// "Edit" and "Remove" are in the menu, not on the pill (a narrow tile).
-    narrow: bool,
-    edit: Option<EditKind>,
-    spoiler: Option<bool>,
-    cover: Option<bool>,
+/// One thing a tile's controls do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum TileAction {
+    Edit(EditKind),
+    /// tdesktop "Hide with spoiler", with whether it is hidden now.
+    Spoiler {
+        hidden: bool,
+    },
+    /// The cover of a video, with whether one is chosen.
+    Cover {
+        chosen: bool,
+    },
+    Remove,
 }
 
-#[derive(Clone, Copy)]
-enum EditKind {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum EditKind {
     Photo,
     Video,
+}
+
+/// How a tile `width` wide shows `actions`: each on its own button, or all
+/// in one menu when they don't fit (a menu of one is that one button).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum TileControls {
+    Buttons,
+    Menu,
+}
+
+impl TileControls {
+    pub(super) fn for_tile(width: i32, actions: usize) -> Self {
+        let needed = PILL_CHROME + CONTROL_WIDTH * i32::try_from(actions).unwrap_or(i32::MAX / 64);
+        if actions < 2 || width >= needed {
+            Self::Buttons
+        } else {
+            Self::Menu
+        }
+    }
 }
 
 impl QuillApp {
@@ -47,24 +80,28 @@ impl QuillApp {
     pub(super) fn send_card_media(
         &self,
         layout: &TrayLayout,
+        max_height: i32,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         if layout.media.is_empty() {
             return None;
         }
-        let max_height = layout.max_height();
+        let max_width = layout.max_width();
+        // Messages that do not fit beside each other wrap: the box scrolls
+        // down, never sideways.
         let mut strip = div()
-            .id("send-card-media")
             .flex()
-            .items_end()
-            .gap_2()
-            .overflow_x_scroll();
+            .flex_wrap()
+            .justify_center()
+            .items_start()
+            .gap(px(MESSAGE_GAP as f32))
+            .max_w(px(MOSAIC_WIDTH as f32));
         for message in &layout.media {
             let sizes: Vec<(i32, i32)> = message
                 .iter()
                 .map(|index| self.send_card_tile_size(*index))
                 .collect();
-            let tiles = message_tiles(&sizes, max_height);
+            let tiles = message_tiles(&sizes, max_height, max_width);
             let (width, height) = layout_bounds(&tiles);
             let mut block = div()
                 .relative()
@@ -75,7 +112,21 @@ impl QuillApp {
                 let corners = TileCorners::of(tile, (width, height));
                 block = block.child(self.send_card_tile(*index, tile, corners, cx));
             }
-            strip = strip.child(block);
+            let first = message.first().copied().unwrap_or_default();
+            // An album taller than its room scrolls (`narrowest_album`). The
+            // scroll area fills what it is given, so it is given the
+            // message's own size.
+            strip = strip.child(
+                div()
+                    .id(("send-card-message", first as u64))
+                    .debug_selector(move || format!("send-card-message-{first}"))
+                    .flex_none()
+                    .w(px(width as f32))
+                    .h(px(height.min(max_height) as f32))
+                    .rounded(px(TILE_RADIUS))
+                    .child(block)
+                    .overflow_y_scrollbar(),
+            );
         }
         Some(strip.into_any_element())
     }
@@ -227,8 +278,7 @@ impl QuillApp {
             .into_any_element()
     }
 
-    /// The tile's controls on one dark pill: Edit, ⋯ and Remove, or only ⋯
-    /// on a tile too narrow for three.
+    /// The tile's controls on one dark pill.
     #[inline(never)]
     fn send_card_tile_controls(
         &self,
@@ -237,46 +287,11 @@ impl QuillApp {
         width: i32,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let menu = self.send_card_tile_menu(index, attachment, width);
-        let rendering = attachment.extras.photo_render().is_some();
-        let more = menu.has_items().then(|| {
-            let owner = cx.entity().downgrade();
-            on_media(Button::new(("send-card-more", index as u64)), cx)
-                .icon(IconName::Ellipsis)
-                .tooltip(tr(keys::Q_CHAT_MORE))
-                .dropdown_menu(move |popup, _, _| tile_menu(popup, menu, owner.clone()))
-        });
-        let edit = menu.edit.filter(|_| !menu.narrow).map(|kind| {
-            on_media(Button::new(("send-card-edit", index as u64)), cx)
-                .map(|button| {
-                    // Its edit is still being saved.
-                    if rendering {
-                        button
-                            .icon(Spinner::new().color(white()))
-                            .debug_selector(move || format!("composer-attach-rendering-{index}"))
-                    } else {
-                        button.icon(IconName::Pencil)
-                    }
-                })
-                .tooltip(match kind {
-                    EditKind::Photo => tr(keys::Q_CHAT_EDIT),
-                    EditKind::Video => tr(keys::Q_OPS_EDIT_VIDEO),
-                })
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.edit_send_card_item(index, kind, window, cx)
-                }))
-        });
-        let remove = (!menu.narrow).then(|| {
-            on_media(Button::new(("send-card-remove", index as u64)), cx)
-                .icon(IconName::X)
-                .tooltip(tr(keys::BOX_REMOVE))
-                .accessibility_label(tr_with(
-                    keys::Q_CHAT_REMOVE_ATTACHMENT,
-                    &[("name", &attachment.file_name)],
-                ))
-                .on_click(cx.listener(move |this, _, _, cx| this.remove_attachment(index, cx)))
-        });
-        div()
+        let actions = self.send_card_tile_actions(attachment);
+        // The pill takes its own presses and hover: none reaches the tile
+        // or the box under it.
+        let pill = div()
+            .occlude()
             .absolute()
             .top_1()
             .right_1()
@@ -284,19 +299,35 @@ impl QuillApp {
             .items_center()
             .p(px(2.))
             .rounded_full()
-            .bg(black().opacity(0.55))
-            .children(edit)
-            .children(more)
-            .children(remove)
-            .into_any_element()
+            .bg(black().opacity(0.55));
+        match TileControls::for_tile(width, actions.len()) {
+            TileControls::Buttons => pill
+                .children(
+                    actions
+                        .iter()
+                        .map(|action| self.send_card_tile_button(index, attachment, *action, cx)),
+                )
+                .into_any_element(),
+            TileControls::Menu => {
+                let owner = cx.entity().downgrade();
+                pill.child(
+                    on_media(Button::new(("send-card-more", index as u64)), cx)
+                        .icon(IconName::Ellipsis)
+                        .tooltip(tr(keys::Q_CHAT_MORE))
+                        .dropdown_menu(move |popup, _, _| {
+                            tile_menu(popup, index, &actions, owner.clone())
+                        }),
+                )
+                .into_any_element()
+            }
+        }
     }
 
-    fn send_card_tile_menu(
+    /// What a tile's controls offer, in the order they show.
+    pub(super) fn send_card_tile_actions(
         &self,
-        index: usize,
         attachment: &ComposerAttachment,
-        width: i32,
-    ) -> TileMenu {
+    ) -> Vec<TileAction> {
         let edit = match attachment.kind {
             AttachmentKind::Photo => Some(EditKind::Photo),
             // A `.gif` file is an animation already: nothing to edit.
@@ -308,9 +339,9 @@ impl QuillApp {
             AttachmentKind::Photo | AttachmentKind::Video
         );
         // Paid media is blurred by Telegram itself (tdesktop `hasPrice()`).
-        let spoiler = (media && !self.tray_paid_price_set()).then_some(attachment.spoiler);
+        let spoiler = media && !self.tray_paid_price_set();
         // A video that goes out as a GIF has no cover.
-        let cover = (attachment.kind == AttachmentKind::Video
+        let cover = attachment.kind == AttachmentKind::Video
             && edit.is_some()
             && !attachment.sends_as_animation(
                 self.pending_attachments().len(),
@@ -320,14 +351,95 @@ impl QuillApp {
                 session
                     .open_chat_id()
                     .is_some_and(|chat| session_allows_cover(session, chat))
-            }))
-        .then_some(attachment.extras.cover.is_some());
-        TileMenu {
-            index,
-            narrow: width < FULL_CONTROLS_WIDTH,
-            edit,
-            spoiler,
-            cover,
+            });
+        let mut actions = Vec::with_capacity(4);
+        actions.extend(edit.map(TileAction::Edit));
+        if spoiler {
+            actions.push(TileAction::Spoiler {
+                hidden: attachment.spoiler,
+            });
+        }
+        if cover {
+            actions.push(TileAction::Cover {
+                chosen: attachment.extras.cover.is_some(),
+            });
+        }
+        actions.push(TileAction::Remove);
+        actions
+    }
+
+    fn send_card_tile_button(
+        &self,
+        index: usize,
+        attachment: &ComposerAttachment,
+        action: TileAction,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let id = index as u64;
+        match action {
+            TileAction::Edit(kind) => {
+                // Its edit is still being saved.
+                let rendering = attachment.extras.photo_render().is_some();
+                on_media(Button::new(("send-card-edit", id)), cx)
+                    .map(|button| {
+                        if rendering {
+                            button
+                                .icon(Spinner::new().color(white()))
+                                .debug_selector(move || {
+                                    format!("composer-attach-rendering-{index}")
+                                })
+                        } else {
+                            button.icon(IconName::Pencil)
+                        }
+                    })
+                    .tooltip(kind.label())
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.edit_send_card_item(index, kind, window, cx)
+                    }))
+                    .into_any_element()
+            }
+            TileAction::Spoiler { hidden } => {
+                chosen_mark(
+                    hidden,
+                    on_media_state(Button::new(("send-card-spoiler", id)), hidden, cx)
+                        .icon(IconName::EyeOff)
+                        .debug_selector(move || format!("send-card-spoiler-{index}"))
+                        .tooltip(spoiler_label(hidden))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.toggle_attachment_spoiler(index, cx)
+                        })),
+                )
+            }
+            TileAction::Cover { chosen: false } => {
+                on_media(Button::new(("send-card-cover", id)), cx)
+                    .icon(IconName::Image)
+                    .tooltip(tr(keys::Q_OPS_EDIT_COVER))
+                    .on_click(
+                        cx.listener(move |this, _, _, cx| this.pick_attachment_cover(index, cx)),
+                    )
+                    .into_any_element()
+            }
+            TileAction::Cover { chosen: true } => {
+                let owner = cx.entity().downgrade();
+                chosen_mark(
+                    true,
+                    on_media_state(Button::new(("send-card-cover", id)), true, cx)
+                        .icon(IconName::Image)
+                        .tooltip(tr(keys::Q_OPS_COVER))
+                        .dropdown_menu(move |popup, _, _| {
+                            cover_items(popup, index, true, owner.clone())
+                        }),
+                )
+            }
+            TileAction::Remove => on_media(Button::new(("send-card-remove", id)), cx)
+                .icon(IconName::X)
+                .tooltip(tr(keys::BOX_REMOVE))
+                .accessibility_label(tr_with(
+                    keys::Q_CHAT_REMOVE_ATTACHMENT,
+                    &[("name", &attachment.file_name)],
+                ))
+                .on_click(cx.listener(move |this, _, _, cx| this.remove_attachment(index, cx)))
+                .into_any_element(),
         }
     }
 
@@ -364,6 +476,7 @@ impl QuillApp {
                 .flex()
                 .flex_col()
                 .gap_1()
+                .w_full()
                 .max_h(px(4. * (FILE_THUMB + 8.)))
                 .overflow_y_scroll()
                 .children(rows)
@@ -522,12 +635,6 @@ impl TileCorners {
     }
 }
 
-impl TileMenu {
-    fn has_items(&self) -> bool {
-        self.narrow || self.spoiler.is_some() || self.cover.is_some()
-    }
-}
-
 /// A control over a picture: white on the pill, whatever the theme.
 fn on_media(button: Button, cx: &App) -> Button {
     let style = ButtonCustomVariant::new(cx)
@@ -536,6 +643,30 @@ fn on_media(button: Button, cx: &App) -> Button {
         .hover(white().opacity(0.2))
         .active(white().opacity(0.3));
     button.custom(style).xsmall().rounded_full()
+}
+
+/// A control that shows a choice: [`on_media`] while it is off, dark on
+/// the white of [`chosen_mark`] while it is on (a hidden spoiler, a chosen
+/// cover).
+fn on_media_state(button: Button, chosen: bool, cx: &App) -> Button {
+    if !chosen {
+        return on_media(button, cx);
+    }
+    let style = ButtonCustomVariant::new(cx)
+        .color(transparent_black())
+        .foreground(black())
+        .hover(black().opacity(0.15))
+        .active(black().opacity(0.25));
+    button.custom(style).xsmall().rounded_full()
+}
+
+/// The white disc under a control whose choice is on.
+fn chosen_mark(chosen: bool, control: impl IntoElement) -> AnyElement {
+    div()
+        .rounded_full()
+        .when(chosen, |mark| mark.bg(white()))
+        .child(control)
+        .into_any_element()
 }
 
 /// A hidden spoiler: darkened under tdesktop's drifting specks, the way
@@ -560,69 +691,90 @@ fn spoiler_veil(corners: TileCorners, round: bool) -> AnyElement {
         .into_any_element()
 }
 
-fn tile_menu(mut menu: PopupMenu, tile: TileMenu, owner: WeakEntity<QuillApp>) -> PopupMenu {
-    let index = tile.index;
-    if tile.narrow
-        && let Some(kind) = tile.edit
-    {
-        let owner = owner.clone();
-        menu = menu.item(
-            PopupMenuItem::new(match kind {
-                EditKind::Photo => tr(keys::Q_CHAT_EDIT),
-                EditKind::Video => tr(keys::Q_OPS_EDIT_VIDEO),
-            })
-            .icon(IconName::Pencil)
-            .on_click(move |_, window, cx| {
-                let _ = owner.update(cx, |this, cx| {
-                    this.edit_send_card_item(index, kind, window, cx)
-                });
-            }),
-        );
-    }
-    if let Some(spoiler) = tile.spoiler {
-        let owner = owner.clone();
-        menu = menu.item(
-            PopupMenuItem::new(if spoiler {
-                tr(keys::Q_CHAT_REMOVE_SPOILER)
-            } else {
-                tr(keys::Q_CHAT_HIDE_WITH_SPOILER)
-            })
-            .icon(if spoiler {
-                IconName::Eye
-            } else {
-                IconName::EyeOff
-            })
-            .on_click(move |_, _, cx| {
-                let _ = owner.update(cx, |this, cx| this.toggle_attachment_spoiler(index, cx));
-            }),
-        );
-    }
-    if let Some(has_cover) = tile.cover {
-        let edit = owner.clone();
-        menu = menu.item(
-            PopupMenuItem::new(tr(keys::Q_OPS_EDIT_COVER))
-                .icon(IconName::Image)
-                .on_click(move |_, _, cx| {
-                    let _ = edit.update(cx, |this, cx| this.pick_attachment_cover(index, cx));
-                }),
-        );
-        if has_cover {
-            let clear = owner.clone();
-            menu = menu.item(PopupMenuItem::new(tr(keys::Q_OPS_CLEAR_COVER)).on_click(
-                move |_, _, cx| {
-                    let _ = clear.update(cx, |this, cx| this.clear_attachment_cover(index, cx));
-                },
-            ));
+impl EditKind {
+    fn label(self) -> &'static str {
+        match self {
+            EditKind::Photo => tr(keys::Q_MISC_EDIT_PHOTO),
+            EditKind::Video => tr(keys::Q_OPS_EDIT_VIDEO),
         }
     }
-    if tile.narrow {
-        menu = menu.separator().item(
-            PopupMenuItem::new(tr(keys::BOX_REMOVE))
-                .icon(IconName::X)
-                .on_click(move |_, _, cx| {
-                    let _ = owner.update(cx, |this, cx| this.remove_attachment(index, cx));
-                }),
-        );
+}
+
+fn spoiler_label(hidden: bool) -> &'static str {
+    if hidden {
+        tr(keys::Q_CHAT_REMOVE_SPOILER)
+    } else {
+        tr(keys::Q_CHAT_HIDE_WITH_SPOILER)
+    }
+}
+
+/// Everything a narrow tile does, in one menu.
+fn tile_menu(
+    mut menu: PopupMenu,
+    index: usize,
+    actions: &[TileAction],
+    owner: WeakEntity<QuillApp>,
+) -> PopupMenu {
+    for action in actions {
+        let owner = owner.clone();
+        menu = match *action {
+            TileAction::Edit(kind) => menu.item(
+                PopupMenuItem::new(kind.label())
+                    .icon(IconName::Pencil)
+                    .on_click(move |_, window, cx| {
+                        let _ = owner.update(cx, |this, cx| {
+                            this.edit_send_card_item(index, kind, window, cx)
+                        });
+                    }),
+            ),
+            TileAction::Spoiler { hidden } => menu.item(
+                PopupMenuItem::new(spoiler_label(hidden))
+                    .icon(if hidden {
+                        IconName::Eye
+                    } else {
+                        IconName::EyeOff
+                    })
+                    .on_click(move |_, _, cx| {
+                        let _ =
+                            owner.update(cx, |this, cx| this.toggle_attachment_spoiler(index, cx));
+                    }),
+            ),
+            TileAction::Cover { chosen } => cover_items(menu, index, chosen, owner),
+            TileAction::Remove => menu.separator().item(
+                PopupMenuItem::new(tr(keys::BOX_REMOVE))
+                    .icon(IconName::X)
+                    .on_click(move |_, _, cx| {
+                        let _ = owner.update(cx, |this, cx| this.remove_attachment(index, cx));
+                    }),
+            ),
+        };
     }
     menu
+}
+
+/// "Edit Cover", and "Clear Cover" for a video that has one.
+fn cover_items(
+    menu: PopupMenu,
+    index: usize,
+    chosen: bool,
+    owner: WeakEntity<QuillApp>,
+) -> PopupMenu {
+    let edit = owner.clone();
+    let menu = menu.item(
+        PopupMenuItem::new(tr(keys::Q_OPS_EDIT_COVER))
+            .icon(IconName::Image)
+            .on_click(move |_, _, cx| {
+                let _ = edit.update(cx, |this, cx| this.pick_attachment_cover(index, cx));
+            }),
+    );
+    if !chosen {
+        return menu;
+    }
+    menu.item(
+        PopupMenuItem::new(tr(keys::Q_OPS_CLEAR_COVER))
+            .icon(IconName::X)
+            .on_click(move |_, _, cx| {
+                let _ = owner.update(cx, |this, cx| this.clear_attachment_cover(index, cx));
+            }),
+    )
 }

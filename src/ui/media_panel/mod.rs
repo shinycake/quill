@@ -263,11 +263,11 @@ impl QuillApp {
     }
 
     /// Whether the panel floats over the composer: open, and neither a
-    /// selector nor hosted by the story viewer or a title box.
+    /// selector nor hosted by the story viewer, a title box or the send box.
     pub(super) fn media_panel_over_composer(&self) -> bool {
         self.pickers.media_panel.panel_mode == PanelMode::Compose
             && !self.story_reply_panel_active()
-            && !self.group_title_emoji_active()
+            && !(self.group_title_emoji_active() || self.send_box_shown())
     }
 
     fn notify_panel(&self, cx: &mut Context<Self>) {

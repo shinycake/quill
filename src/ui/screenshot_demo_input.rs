@@ -254,9 +254,26 @@ async fn run_step(step: &str, demo_window: AnyWindowHandle, cx: &mut AsyncApp) {
         pause(cx, 400).await;
         return;
     }
+    // `dc:x,y` double-clicks: the second press carries click count 2.
+    let (step, clicks) = match step.strip_prefix("dc:") {
+        Some(at) => (at, 2),
+        None => (step, 1),
+    };
     let Some(position) = point_step(step) else {
         return;
     };
+    for click_count in 1..=clicks {
+        click(demo_window, cx, position, click_count).await;
+    }
+}
+
+/// One left click: press, a frame, release, then let the app settle.
+async fn click(
+    demo_window: AnyWindowHandle,
+    cx: &mut AsyncApp,
+    position: Point<Pixels>,
+    click_count: usize,
+) {
     dispatch(
         demo_window,
         cx,
@@ -270,7 +287,7 @@ async fn run_step(step: &str, demo_window: AnyWindowHandle, cx: &mut AsyncApp) {
                 button: MouseButton::Left,
                 position,
                 modifiers: Modifiers::default(),
-                click_count: 1,
+                click_count,
                 first_mouse: false,
             }),
         ],
@@ -286,7 +303,7 @@ async fn run_step(step: &str, demo_window: AnyWindowHandle, cx: &mut AsyncApp) {
             button: MouseButton::Left,
             position,
             modifiers: Modifiers::default(),
-            click_count: 1,
+            click_count,
         })],
         false,
     );

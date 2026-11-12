@@ -38,6 +38,13 @@ pub(super) struct ViewerGeometry {
     /// The media at the current zoom, and its pan inside the box.
     pub(super) zoomed: (f32, f32),
     pub(super) pan: (f32, f32),
+    /// The part of the window the Dock, taskbar or panels leave visible;
+    /// the chrome keeps to it.
+    pub(super) safe: quill::media_viewer::ViewRect,
+    /// The caption rides on top of the dragged controller.
+    pub(super) caption_docked: bool,
+    /// The video controller's home spot and the area it may be dragged in.
+    pub(super) controller: super::controller_drag::ControllerFrame,
 }
 
 /// What the video layer draws.
@@ -178,20 +185,48 @@ impl QuillApp {
     ) -> ViewerGeometry {
         let viewport = window.viewport_size();
         let viewport = (f32::from(viewport.width), f32::from(viewport.height));
+        let cover = super::screen_cover::window_cover(window, cx);
+        let safe = cover.safe_area(viewport);
         let fullscreen = self.viewer.extra.video_fullscreen.is_on();
+        let video = item.kind == MediaViewerKind::Video;
+        // A controller dragged off its spot takes the caption along, in
+        // one bar of the controller's width.
+        let caption_docked =
+            video && !fullscreen && self.viewer.controller.spot() != ControllerSpot::Home;
         let caption = if fullscreen {
             None
         } else {
-            let width = geometry::lane_width(viewport.0);
+            let width = if caption_docked {
+                crate::ui::video_player::controls::PANEL_WIDTH.as_f32()
+            } else {
+                geometry::lane_width(safe.w)
+            };
             self.viewer_caption_layout(item, width, window, cx)
         };
         let frame = geometry::ViewerFrame {
             viewport,
-            video: item.kind == MediaViewerKind::Video,
+            cover,
+            video,
             caption: caption.map_or(0.0, |caption| caption.plate_h),
             fullscreen,
-            strip: self.viewer_group_strip(viewport.0).is_some(),
+            strip: self.viewer_group_strip(safe.w).is_some(),
+            caption_docked,
         };
+        // The docked caption sits on top of the controller: keep room for
+        // it above the area the controller may be dragged in.
+        let docked_h = if caption_docked {
+            caption.map_or(0.0, |caption| {
+                self.viewer.extra.caption.docked().height(caption.plate_h)
+            })
+        } else {
+            0.0
+        };
+        let drag_area = quill::media_viewer::ViewRect::new(
+            safe.x,
+            safe.y + docked_h,
+            safe.w,
+            (safe.h - docked_h).max(0.0),
+        );
         let area = geometry::fit_area(frame);
         let fit = area.size;
         // The media's own box inside the frame: sized from its natural
@@ -224,6 +259,12 @@ impl QuillApp {
             ),
             zoomed: (media.0 * zoom.zoom, media.1 * zoom.zoom),
             pan: zoom.pan,
+            safe,
+            caption_docked,
+            controller: super::controller_drag::ControllerFrame {
+                home: geometry::controller_home(frame),
+                area: drag_area,
+            },
         }
     }
 

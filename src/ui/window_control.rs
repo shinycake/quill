@@ -109,6 +109,18 @@ pub(crate) fn set_skip_taskbar(window: &Window, skip: bool) -> bool {
     platform::set_skip_taskbar(window, skip)
 }
 
+/// X11: the window's frame on the X screen and the screen's work area
+/// (`_NET_WORKAREA` of the current desktop), both `[x, y, width, height]`
+/// in device pixels. `None` elsewhere, or when the window manager
+/// publishes no work area.
+#[cfg(target_os = "linux")]
+pub(crate) use platform::x11_frame_and_work_area;
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn x11_frame_and_work_area(_window: &Window) -> Option<([i32; 4], [i32; 4])> {
+    None
+}
+
 /// X11 `_NET_WM_STATE` client message data: `_NET_WM_STATE_REMOVE` (0) or
 /// `_NET_WM_STATE_ADD` (1), the state atom, no second atom, source 1
 /// (a normal application).
@@ -327,6 +339,40 @@ mod platform {
         sent(conn.get_window_attributes(x_window))
             .and_then(|cookie| answered(cookie.reply()))
             .is_some_and(|attributes| attributes.map_state == MapState::VIEWABLE)
+    }
+
+    pub(crate) fn x11_frame_and_work_area(window: &Window) -> Option<([i32; 4], [i32; 4])> {
+        let (x_window, shared) = x11(window)?;
+        let (conn, root) = (&shared.conn, shared.root);
+        let cardinal = |property: u32, length: u32| -> Option<Vec<u32>> {
+            let reply =
+                sent(conn.get_property(false, root, property, AtomEnum::CARDINAL, 0, length))
+                    .and_then(|cookie| answered(cookie.reply()))?;
+            Some(reply.value32()?.collect())
+        };
+        let geometry = answered(sent(conn.get_geometry(x_window))?.reply())?;
+        let origin = answered(sent(conn.translate_coordinates(x_window, root, 0, 0))?.reply())?;
+        let frame = [
+            i32::from(origin.dst_x),
+            i32::from(origin.dst_y),
+            i32::from(geometry.width),
+            i32::from(geometry.height),
+        ];
+        let desktop = atom(conn, "_NET_CURRENT_DESKTOP")
+            .and_then(|current| cardinal(current, 1))
+            .and_then(|values| values.first().copied())
+            .unwrap_or(0);
+        let areas = cardinal(atom(conn, "_NET_WORKAREA")?, 1024)?;
+        let start = usize::try_from(desktop).ok()?.checked_mul(4)?;
+        let area = start
+            .checked_add(4)
+            .and_then(|end| areas.get(start..end))
+            .or_else(|| areas.get(0..4))?;
+        let mut work = [0_i32; 4];
+        for (slot, value) in work.iter_mut().zip(area) {
+            *slot = i32::try_from(*value).ok()?;
+        }
+        Some((frame, work))
     }
 
     /// ICCCM `WM_STATE` is `IconicState` (3) once the window manager

@@ -52,6 +52,7 @@ ProxyList | - | the open flag is `auth.proxy_list_open` (the sign-in screen's ow
 ProxyLink | close_proxy_link | `settings.proxy.link` (`LinkBox`, the draft and its check in the account's session)
 ReceivedGifts | close_gifts | `payments.hub.gifts_open`
 RtmpStart | close_rtmp_start | `calls.rtmp_start`
+SendBox | - | the flag is the open chat's tray (`composer_sends`, kept per account and chat on the screen); the session only says whether that chat can be sent to, and a tray left waiting comes back with its account as it did above the composer
 SendGift | close_send_gift_dialog | `payments.gifts_manage.send.open`
 SessionDetails | - | the id is `privacy.extra.session_details` (screen)
 SharingRequest | close_sharing_request_box | `groups.private_sharing` request box

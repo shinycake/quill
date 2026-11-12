@@ -368,8 +368,10 @@ impl QuillApp {
         let tab = self.pickers.media_panel.tab;
         // A live story comment takes emoji only (tdesktop's video stream
         // field has no sticker or GIF tabs).
+        // The send box's caption too (tdesktop `SendFilesBox`).
         let emoji_only = (self.live_story_shown().is_some() && self.story_reply_panel_active())
-            || self.group_title_emoji_active();
+            || self.group_title_emoji_active()
+            || self.send_box_shown();
         let tabs = div().flex().items_center().gap_1().children(
             [
                 (PanelTab::Emoji, tr(keys::SWITCH_EMOJI)),

@@ -554,7 +554,10 @@ impl QuillApp {
         over_controls: bool,
         cx: &mut Context<Self>,
     ) {
-        self.viewer.pointer.moved(over_controls);
+        // A held controller counts as the pointer on it wherever the drag
+        // takes the pointer, so the controls never fade out from under it.
+        let held = self.viewer.controller.is_held();
+        self.viewer.pointer.moved(over_controls || held);
         self.viewer_note_activity(cx);
     }
 

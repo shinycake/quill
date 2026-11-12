@@ -654,6 +654,7 @@ impl QuillApp {
         let Some(slot) = self.send_slot() else {
             return;
         };
+        self.close_send_box_emoji();
         if let Some(sent) = self.composer_sends.finish(&slot) {
             self.forget_tray_checks(&sent.attachments);
         }
@@ -670,6 +671,7 @@ impl QuillApp {
     /// Drop the open slot's tray and the choices made for it; the schedule
     /// and link preview choice stay.
     pub(super) fn clear_pending_attachments(&mut self) {
+        self.close_send_box_emoji();
         let dropped = self
             .update_pending_send(|send| {
                 let dropped = std::mem::take(&mut send.attachments);

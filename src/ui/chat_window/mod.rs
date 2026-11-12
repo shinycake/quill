@@ -51,6 +51,8 @@ mod recording;
 mod routing;
 mod saved;
 mod scoped;
+#[cfg(test)]
+mod send_box_window_tests;
 mod slot;
 #[cfg(test)]
 mod sweep_s4_tests;

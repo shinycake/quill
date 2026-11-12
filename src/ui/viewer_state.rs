@@ -76,6 +76,9 @@ pub(crate) struct ViewerUi {
     /// The video controller's sliders, drag previews, scrubber hover and
     /// the Space-hold boost (`video_player::controls`).
     pub(super) controls: super::video_player::controls::VideoControlsState,
+    /// Where the video controller rests and the drag moving it; kept
+    /// from one open to the next, so a moved controller stays moved.
+    pub(super) controller: quill::media_viewer::ControllerPlace,
 }
 
 /// The PiP window plays the old account's video: it closes. A window
@@ -129,6 +132,7 @@ impl ViewerUi {
             last_activity: _,
             visibility: _,
             controls: _,
+            controller: _,
         } = self;
         zoom.reset();
         pointer.end_pan();
@@ -164,6 +168,7 @@ impl ViewerUi {
             last_activity: _,
             visibility: _,
             controls: _,
+            controller,
         } = self;
         // A timestamp link's start belongs to this open: a clip that never
         // played here must not start there the next time it opens.
@@ -181,6 +186,9 @@ impl ViewerUi {
         // with it, and so does the wait for a swipe's end.
         *pointer = Default::default();
         *swipe_timer = Default::default();
+        // A controller drag held when the viewer closed ends with it; where
+        // the controller rests is kept for the next open.
+        controller.release();
     }
 
     pub(super) fn new() -> Self {
@@ -205,6 +213,7 @@ impl ViewerUi {
             visibility: Default::default(),
             album_pin: Default::default(),
             controls: Default::default(),
+            controller: Default::default(),
         }
     }
 }

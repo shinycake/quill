@@ -26,6 +26,7 @@ mod files;
 mod group_thumbs;
 mod items;
 pub mod pip;
+mod placement;
 mod profile;
 mod quality;
 mod save;
@@ -54,6 +55,10 @@ pub use group_thumbs::{
 };
 pub use items::{
     collect_media_items, poll_option_viewer_item, profile_photo_items, timed_viewer_item,
+};
+pub use placement::{
+    CONTROLLER_MARGIN, ControllerPlace, ControllerSpot, ScreenCover, ViewRect, clamp_offset,
+    screen_cover,
 };
 pub use profile::{PhotoHeaderOwner, profile_photo_header};
 pub use quality::{VideoQualityOption, build_quality_options, current_quality, pick_quality};
