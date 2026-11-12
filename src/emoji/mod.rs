@@ -32,10 +32,10 @@ pub enum EmojiSetTab {
 /// One fetch per tab of the Emoji Sets box.
 #[derive(Debug, Clone, Default)]
 pub struct EmojiLists {
-    pub installed: crate::state::fetch::Fetch<()>,
+    pub installed: crate::state::fetch::Fetch<Vec<StickerSetInfo>>,
     /// The Trending tab holds its list and its paging in the one value.
     pub trending: TrendingSets,
-    pub search: crate::state::fetch::Fetch<()>,
+    pub search: crate::state::fetch::Fetch<Vec<StickerSetInfo>>,
 }
 
 impl EmojiLists {
@@ -43,7 +43,7 @@ impl EmojiLists {
     pub fn for_purpose(
         &mut self,
         purpose: crate::state::RequestPurpose,
-    ) -> Option<&mut crate::state::fetch::Fetch<()>> {
+    ) -> Option<&mut crate::state::fetch::Fetch<Vec<StickerSetInfo>>> {
         use crate::state::RequestPurpose;
         match purpose {
             RequestPurpose::GetInstalledEmojiSets => Some(&mut self.installed),
@@ -187,13 +187,8 @@ pub struct EmojiPanel {
     pub lists: EmojiLists,
     pub tab: EmojiSetTab,
     pub search_query: String,
-    /// Slice S10: installed emoji sets (`getInstalledStickerSets` with
-    /// `stickerTypeCustomEmoji`) — the "Emoji Sets" settings list.
-    pub installed_sets: Vec<StickerSetInfo>,
     /// Slice S10: archived emoji sets (`getArchivedStickerSets`, paged).
     pub archived_sets: Vec<StickerSetInfo>,
-    /// Slice S10: `searchStickerSets` results (emoji type).
-    pub found_sets: Vec<StickerSetInfo>,
     /// Slice S10: recent emoji statuses (`getRecentEmojiStatuses`).
     pub recent_statuses: crate::state::fetch::Fetch<Vec<EmojiStatusItem>>,
     /// Slice S10: picker's "trending" statuses (`getThemedEmojiStatuses`).
@@ -334,7 +329,7 @@ impl Session {
     }
 
     pub fn ordered_emoji_packs(&self) -> Vec<&StickerSetInfo> {
-        let mut sets: Vec<_> = self.stickers.emoji.installed_sets.iter().collect();
+        let mut sets: Vec<_> = self.stickers.emoji.lists.installed.items().iter().collect();
         if self.settings.media_prefs.dynamic_emoji_pack_order {
             sets.sort_by_key(|set| {
                 self.settings
@@ -360,21 +355,23 @@ impl Session {
         request: Option<crate::ids::RequestId>,
         sets: Vec<StickerSetInfo>,
     ) {
-        if !self.stickers.emoji.lists.installed.answered(request, ()) {
+        let installed: std::collections::HashSet<_> = sets.iter().map(|set| set.id).collect();
+        let covers = sets.clone();
+        if !self.stickers.emoji.lists.installed.answered(request, sets) {
             return;
         }
-        self.remember_cover_files(&sets);
-        let installed: std::collections::HashSet<_> = sets.iter().map(|set| set.id).collect();
-        for set in self
-            .stickers
-            .emoji
-            .found_sets
-            .iter_mut()
-            .chain(self.stickers.emoji.lists.trending.sets_mut().iter_mut())
+        self.remember_cover_files(&covers);
+        let emoji = &mut self.stickers.emoji;
+        for set in emoji
+            .lists
+            .search
+            .data_mut()
+            .into_iter()
+            .flatten()
+            .chain(emoji.lists.trending.sets_mut().iter_mut())
         {
             set.is_installed = installed.contains(&set.id);
         }
-        self.stickers.emoji.installed_sets = sets;
     }
 
     /// Slice S10: store an archived-emoji-sets page. First page replaces,
@@ -411,11 +408,11 @@ impl Session {
         request: Option<crate::ids::RequestId>,
         sets: Vec<StickerSetInfo>,
     ) {
-        if !self.stickers.emoji.lists.search.answered(request, ()) {
+        let covers = sets.clone();
+        if !self.stickers.emoji.lists.search.answered(request, sets) {
             return;
         }
-        self.remember_cover_files(&sets);
-        self.stickers.emoji.found_sets = sets;
+        self.remember_cover_files(&covers);
     }
 
     /// Slice S10: an emoji-set mutation (`changeStickerSet` /
@@ -423,7 +420,6 @@ impl Session {
     /// drop the installed-emoji-sets cache so the settings screen
     /// refetches the authoritative list.
     pub fn invalidate_installed_emoji_sets(&mut self) {
-        self.stickers.emoji.installed_sets.clear();
         self.stickers.emoji.lists.installed = Default::default();
     }
 

@@ -43,18 +43,26 @@ impl QuillApp {
                     premium: None,
                 })
                 .collect();
-            session.stickers.emoji.installed_sets.push(StickerSetInfo {
-                id,
-                title: title.into(),
-                name: title.into(),
-                size: 6,
-                is_installed: true,
-                is_official: false,
-                is_owned: false,
-                covers: Vec::new(),
-                cover_files: Vec::new(),
-                is_viewed: true,
-            });
+            session
+                .stickers
+                .emoji
+                .lists
+                .installed
+                .insert_data_if_missing(Vec::new);
+            if let Some(installed) = session.stickers.emoji.lists.installed.data_mut() {
+                installed.push(StickerSetInfo {
+                    id,
+                    title: title.into(),
+                    name: title.into(),
+                    size: 6,
+                    is_installed: true,
+                    is_official: false,
+                    is_owned: false,
+                    covers: Vec::new(),
+                    cover_files: Vec::new(),
+                    is_viewed: true,
+                });
+            }
             session.media.media_library.insert(id, items);
         }
         self.open_reaction_selector(chat_id, message_id, point(px(420.), px(160.)), window, cx);

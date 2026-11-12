@@ -97,15 +97,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         is_chat_hidden: bool,
         photo: Option<String>,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        // One picture waits at a time: a second create with a picture while
-        // one is out would take its place, and the first community would
-        // never get its photo.
-        if photo.is_some()
-            && matches!(
-                self.session.communities.create,
-                crate::state::CommunityCreate::Creating { .. }
-            )
-        {
+        // One picture waits at a time: any second create while one with a
+        // picture is out would take its place, and the first community
+        // would never get its photo.
+        if matches!(
+            self.session.communities.create,
+            crate::state::CommunityCreate::Creating { photo: Some(_), .. }
+        ) {
             return Ok(None);
         }
         let sent = self.create_community(chat_id, name, is_chat_hidden)?;

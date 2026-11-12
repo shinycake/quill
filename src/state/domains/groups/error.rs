@@ -56,6 +56,17 @@ impl Session {
         ) {
             self.note_premium_limit(err, pending);
         }
+        // The save that waited on a lost or refused upgrade has nothing to
+        // wait for: it ends with the failure note below, and its entry goes
+        // (an answered one was taken when the answer came).
+        if let Some(pending) = pending
+            && pending.purpose == RequestPurpose::UpgradeBasicGroup
+        {
+            self.groups
+                .group_type
+                .after_upgrade
+                .retain(|(id, _)| *id != pending.id);
+        }
         // A create whose dialog was closed and whose request was lost has no
         // answer to wait for: its row goes (an answered one was settled
         // when the answer came).

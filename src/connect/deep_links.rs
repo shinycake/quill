@@ -236,8 +236,8 @@ pub fn detect_deep_link_arg(args: &[String]) -> Option<String> {
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// `parity:platform-deep-links`: `getDeepLinkInfo` for a launch link.
-    /// Generation-guarded like `resolve_inline_bot`; a flow already in
-    /// progress wins (one launch link at a time), a finished one is replaced. The flow is the running
+    /// The flow's stage holds the request; only its answer advances it. A
+    /// flow already in progress wins (one launch link at a time), a finished one is replaced. The flow is the running
     /// handler's: an agent's step while the UI driver injects, else the
     /// user's.
     pub fn request_deep_link_info(
@@ -355,9 +355,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session.requests.take(extra);
                 self.session
                     .chats_state
-                    .enter_deep_link_stage(DeepLinkState::ShowText(
-                        "Couldn't reach Telegram.".into(),
-                    ));
+                    .enter_deep_link_stage(DeepLinkState::ShowText(err.stage_line()));
                 Err(err)
             }
         }
@@ -401,9 +399,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session.requests.take(extra);
                 self.session
                     .chats_state
-                    .enter_deep_link_stage(DeepLinkState::ShowText(
-                        "Couldn't reach Telegram.".into(),
-                    ));
+                    .enter_deep_link_stage(DeepLinkState::ShowText(err.stage_line()));
                 Err(err)
             }
         }
@@ -486,9 +482,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session.requests.take(extra);
                 self.session
                     .chats_state
-                    .enter_deep_link_stage(DeepLinkState::ShowText(
-                        "Couldn't reach Telegram.".into(),
-                    ));
+                    .enter_deep_link_stage(DeepLinkState::ShowText(err.stage_line()));
                 Err(err)
             }
         }

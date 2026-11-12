@@ -33,13 +33,18 @@ fn custom_emoji_pack_search_paging_previews_and_mutation_races() {
         &mut driver,
         json!({"@type":"stickerSets","@extra":installed.as_extra(),"sets":[set(1,true)]}),
     );
-    assert_eq!(driver.session.stickers.emoji.installed_sets.len(), 1);
+    assert_eq!(
+        driver.session.stickers.emoji.lists.installed.items().len(),
+        1
+    );
     assert!(
         driver
             .session
             .stickers
             .emoji
-            .installed_sets
+            .lists
+            .installed
+            .items()
             .iter()
             .all(|s| s.id == 1)
     );
@@ -50,12 +55,21 @@ fn custom_emoji_pack_search_paging_previews_and_mutation_races() {
         &mut driver,
         json!({"@type":"stickerSets","@extra":old.as_extra(),"sets":[set(9,false)]}),
     );
-    assert!(driver.session.stickers.emoji.found_sets.is_empty());
+    assert!(
+        driver
+            .session
+            .stickers
+            .emoji
+            .lists
+            .search
+            .items()
+            .is_empty()
+    );
     ingest(
         &mut driver,
         json!({"@type":"stickerSets","@extra":current.as_extra(),"sets":[set(2,false)]}),
     );
-    assert_eq!(driver.session.stickers.emoji.found_sets[0].id, 2);
+    assert_eq!(driver.session.stickers.emoji.lists.search.items()[0].id, 2);
     let first = driver
         .select_emoji_set_tab(EmojiSetTab::Trending)
         .unwrap()
@@ -99,14 +113,19 @@ fn custom_emoji_pack_search_paging_previews_and_mutation_races() {
         &mut driver,
         json!({"@type":"error","@extra":remove.as_extra(),"code":500,"message":"test"}),
     );
-    assert_eq!(driver.session.stickers.emoji.installed_sets.len(), 1);
+    assert_eq!(
+        driver.session.stickers.emoji.lists.installed.items().len(),
+        1
+    );
     assert!(driver.session.stickers.emoji.mutation.is_failed());
     assert!(
         driver
             .session
             .stickers
             .emoji
-            .installed_sets
+            .lists
+            .installed
+            .items()
             .iter()
             .all(|s| s.id == 1)
     );
@@ -131,12 +150,30 @@ fn custom_emoji_pack_search_paging_previews_and_mutation_races() {
         json!({"@type":"ok","@extra":remove.as_extra()}),
     );
     assert!(!driver.session.stickers.emoji.mutation.is_failed());
-    assert!(driver.session.stickers.emoji.installed_sets.is_empty());
+    assert!(
+        driver
+            .session
+            .stickers
+            .emoji
+            .lists
+            .installed
+            .items()
+            .is_empty()
+    );
     ingest(
         &mut driver,
         json!({"@type":"stickerSets","@extra":stale.as_extra(),"sets":[set(1,true)]}),
     );
-    assert!(driver.session.stickers.emoji.installed_sets.is_empty());
+    assert!(
+        driver
+            .session
+            .stickers
+            .emoji
+            .lists
+            .installed
+            .items()
+            .is_empty()
+    );
     assert!(
         driver
             .session
@@ -191,7 +228,7 @@ fn emoji_pack_covers_download_once_without_a_button() {
     driver
         .ingest(copy_and_parse(&payload.to_string(), &seq, &sink).unwrap())
         .unwrap();
-    let listed = &driver.session.stickers.emoji.installed_sets;
+    let listed = driver.session.stickers.emoji.lists.installed.items();
     assert_eq!(listed.first().map(|s| s.covers.len()), Some(2));
     assert!(driver.session.media.files.contains_key(&201));
     driver.ensure_emoji_pack_covers().unwrap();

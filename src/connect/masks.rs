@@ -37,14 +37,15 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// A mask request that never left fails what it was asking for.
-    fn note_mask_send_failed(&mut self, purpose: StickersPurpose) {
+    fn note_mask_send_failed(&mut self, purpose: StickersPurpose, err: &ConnectSendError) {
+        let line = err.stage_line();
         let masks = &mut self.session.stickers.masks;
         match purpose {
-            StickersPurpose::GetInstalledMaskSets => masks.installed.fail("not sent"),
-            StickersPurpose::GetArchivedMaskSets { .. } => masks.archived.fail("not sent"),
+            StickersPurpose::GetInstalledMaskSets => masks.installed.fail(line),
+            StickersPurpose::GetArchivedMaskSets { .. } => masks.archived.fail(line),
             _ => {
-                masks.installed.fail("not sent");
-                masks.archived.fail("not sent");
+                masks.installed.fail(line.clone());
+                masks.archived.fail(line);
             }
         }
     }
@@ -60,7 +61,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 installed.begin();
                 installed.sent(*id);
             }
-            Err(_) => self.note_mask_send_failed(StickersPurpose::GetInstalledMaskSets),
+            Err(err) => self.note_mask_send_failed(StickersPurpose::GetInstalledMaskSets, err),
             Ok(None) => {}
         }
         sent
@@ -87,7 +88,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 archived.begin();
                 archived.sent(*id);
             }
-            Err(_) => self.note_mask_send_failed(purpose),
+            Err(err) => self.note_mask_send_failed(purpose, err),
             Ok(None) => {}
         }
         sent
@@ -142,8 +143,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         let sent = self.mask_request(purpose.into(), |id| {
             change_sticker_set(id, set_id, installed, archived)
         });
-        if sent.is_err() {
-            self.note_mask_send_failed(purpose);
+        if let Err(err) = &sent {
+            self.note_mask_send_failed(purpose, err);
         }
         sent
     }
@@ -173,16 +174,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         ) else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        let busy = self.session.requests.pending.values().any(|pending| {
-            matches!(
-                pending.purpose,
-                RequestPurpose::Stickers(
-                    StickersPurpose::ChangeMaskSet { .. }
-                        | StickersPurpose::ReorderInstalledMaskSets
-                        | StickersPurpose::GetInstalledMaskSets
-                )
-            )
-        });
+        let busy = self.session.mask_change_pending()
+            || self.session.stickers.masks.installed.is_loading();
         if from == to || busy {
             return Ok(None);
         }
@@ -191,8 +184,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         let sent = self.mask_request(StickersPurpose::ReorderInstalledMaskSets.into(), |id| {
             reorder_installed_mask_sets(id, &ids)
         });
-        if sent.is_err() {
-            self.note_mask_send_failed(StickersPurpose::ReorderInstalledMaskSets);
+        if let Err(err) = &sent {
+            self.note_mask_send_failed(StickersPurpose::ReorderInstalledMaskSets, err);
         }
         sent
     }

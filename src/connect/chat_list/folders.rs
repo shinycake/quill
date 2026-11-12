@@ -185,8 +185,9 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Parity slice: `getChatFolder` for the edit dialog prefill (or the
     /// remove-from-folder chain). The full spec lands in
-    /// `Session::folder_specs`, keyed by folder id. In-flight deduped; the
-    /// response always overwrites the cache.
+    /// `Session::folder_specs`, keyed by folder id. Deduped on the
+    /// spec's `Fetch`; only the answer to the request it holds lands, and
+    /// `updateChatFolders` outdates it.
     pub fn fetch_chat_folder(
         &mut self,
         folder_id: i32,

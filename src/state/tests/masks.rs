@@ -46,7 +46,7 @@ fn installed_and_archived_masks_stay_out_of_the_regular_panel() {
     );
     assert_eq!(masks.installed.items()[0].size, 3);
     assert!(session.stickers.stickers.sets.is_empty());
-    assert!(session.stickers.emoji.installed_sets.is_empty());
+    assert!(session.stickers.emoji.lists.installed.items().is_empty());
 
     // First archived page replaces, the next appends without duplicates.
     let extra = session.request(
@@ -223,7 +223,7 @@ fn installed_order_updates_route_by_sticker_type() {
         .map(|s| s.id)
         .collect();
     assert_eq!(ids, [12, 11]);
-    assert!(session.stickers.emoji.installed_sets.is_empty());
+    assert!(session.stickers.emoji.lists.installed.items().is_empty());
 }
 
 #[test]

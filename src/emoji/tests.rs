@@ -35,7 +35,12 @@ fn pack_order_preserves_usage_when_emoji_resolve_out_of_order() {
         cover_files: Vec::new(),
         is_viewed: true,
     };
-    session.stickers.emoji.installed_sets = vec![pack(1), pack(2), pack(3)];
+    session
+        .stickers
+        .emoji
+        .lists
+        .installed
+        .succeed(vec![pack(1), pack(2), pack(3)]);
     session.remember_emoji_pack_usage(&[10]);
     session
         .stickers
@@ -392,8 +397,11 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
             extra.0
         ),
     );
-    assert_eq!(with_purpose.stickers.emoji.installed_sets.len(), 1);
-    assert_eq!(with_purpose.stickers.emoji.installed_sets[0].id, 77);
+    assert_eq!(with_purpose.stickers.emoji.lists.installed.items().len(), 1);
+    assert_eq!(
+        with_purpose.stickers.emoji.lists.installed.items()[0].id,
+        77
+    );
     assert!(with_purpose.stickers.stickers.sets.is_empty());
 
     let extra = with_purpose.request(RequestPurpose::SearchEmojiSets, None);
@@ -409,7 +417,7 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
             extra.0
         ),
     );
-    assert_eq!(with_purpose.stickers.emoji.found_sets.len(), 1);
+    assert_eq!(with_purpose.stickers.emoji.lists.search.items().len(), 1);
     assert!(with_purpose.stickers.stickers.search.sets.is_empty());
 
     let extra = with_purpose.request(
@@ -507,11 +515,24 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(with_purpose.stickers.emoji.installed_sets.is_empty());
+    assert!(
+        with_purpose
+            .stickers
+            .emoji
+            .lists
+            .installed
+            .items()
+            .is_empty()
+    );
 
     // A reorderInstalledStickerSets (emoji) `ok` does the same.
-    with_purpose.stickers.emoji.installed_sets =
-        vec![with_purpose.stickers.emoji.found_sets[0].clone()];
+    let found = with_purpose.stickers.emoji.lists.search.items()[0].clone();
+    with_purpose
+        .stickers
+        .emoji
+        .lists
+        .installed
+        .succeed(vec![found]);
     let extra = with_purpose.request(RequestPurpose::ReorderInstalledEmojiSets, None);
     apply_json(
         &mut with_purpose,
@@ -519,7 +540,15 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(with_purpose.stickers.emoji.installed_sets.is_empty());
+    assert!(
+        with_purpose
+            .stickers
+            .emoji
+            .lists
+            .installed
+            .items()
+            .is_empty()
+    );
 }
 
 /// Round 11 (area A): custom emoji of a chat shown only in its own window

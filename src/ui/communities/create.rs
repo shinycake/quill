@@ -167,6 +167,13 @@ impl QuillApp {
         {
             return;
         }
+        // A community with a picture is still being created: a second
+        // create would take its picture's place.
+        if live.driver.community_photo_create_out() {
+            self.set_note(StatusNote::error(tr(keys::Q_COMMUNITY_CREATE_BUSY)));
+            cx.notify();
+            return;
+        }
         // The box waits for the answer: it closes on `Created` and stays on
         // a refusal, as tdesktop's does. A send that did not go (the chat
         // left the model) stays too, with its note.

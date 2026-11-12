@@ -20,7 +20,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             // nothing will end.
             let contacts = &mut self.session.users_state.contacts;
             if contacts.can_ask() {
-                contacts.fail_dropping_data("could not send the request");
+                contacts.fail_dropping_data(ConnectSendError::InvalidRequest.stage_line());
             }
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -41,7 +41,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session
                 .users_state
                 .contacts
-                .fail_dropping_data("could not send the request");
+                .fail_dropping_data(err.stage_line());
             return Err(err);
         }
         Ok(Some(extra))
@@ -61,11 +61,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         // A fetch refused before it began (the chats path is not active)
         // leaves the list idle: it ends in the error line and its Retry
         // too, not in a tab that stays on "Loading contacts...".
-        if self.fetch_contacts().is_err() && self.session.users_state.contacts.is_outdated() {
+        if let Err(err) = self.fetch_contacts()
+            && self.session.users_state.contacts.is_outdated()
+        {
             self.session
                 .users_state
                 .contacts
-                .fail_dropping_data("could not send the request");
+                .fail_dropping_data(err.stage_line());
         }
     }
 
@@ -430,8 +432,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             if let Err(err) = self.sender.send_json(&remove_contacts(extra, &ids)) {
                 self.session.requests.take(extra);
                 // The clear is already running: the call did not fail as a
-                // whole. The contacts it could not remove are named in the
-                // note the Contacts tab shows.
+                // whole. The note the Contacts tab shows says the second
+                // half did not go out.
                 self.session.users_state.contacts_notice = Some(err.stage_line());
                 return Ok(sent);
             }

@@ -217,7 +217,7 @@ fn push_custom_packs(
     session: &quill::state::Session,
     matches: Option<&std::collections::HashSet<String>>,
 ) {
-    for set in &session.stickers.emoji.installed_sets {
+    for set in session.stickers.emoji.lists.installed.items() {
         let title: SharedString = if set.title.is_empty() {
             set.name.clone().into()
         } else {

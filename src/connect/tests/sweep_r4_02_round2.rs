@@ -135,6 +135,29 @@ fn a_second_community_with_a_photo_does_not_replace_the_first() {
 }
 
 #[test]
+fn a_create_without_a_photo_does_not_replace_a_waiting_photo_either() {
+    let mut t = Flaky::new();
+    for id in [5, 6] {
+        t.feed(json!({"@type":"updateNewChat","chat":{"id":id,"title":"C","type":{"@type":"chatTypePrivate","user_id":id},"unread_count":0}}));
+    }
+    assert!(!t.driver.community_photo_create_out());
+    t.driver
+        .create_community_with_photo(ChatId(5), "A", false, Some("a.png".into()))
+        .unwrap();
+    assert!(t.driver.community_photo_create_out());
+    let second = t
+        .driver
+        .create_community_with_photo(ChatId(6), "B", false, None)
+        .unwrap();
+    assert!(second.is_none());
+    assert_eq!(t.sender.count("createCommunity"), 1);
+    assert!(
+        t.driver.community_photo_create_out(),
+        "A's picture still waits"
+    );
+}
+
+#[test]
 fn topic_icons_ask_once_even_when_the_answer_is_empty_and_again_after_a_failure() {
     let mut t = Flaky::new();
     assert!(t.driver.load_forum_topic_icons().unwrap().is_some());

@@ -434,9 +434,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn ensure_emoji_pack_covers(&mut self) -> Result<(), ConnectSendError> {
         let emoji = &mut self.session.stickers.emoji;
         let listed: &[crate::telegram::envelope::StickerSetInfo] = match emoji.tab {
-            EmojiSetTab::Installed => &emoji.installed_sets,
+            EmojiSetTab::Installed => emoji.lists.installed.items(),
             EmojiSetTab::Trending => emoji.lists.trending.sets(),
-            EmojiSetTab::Search => &emoji.found_sets,
+            EmojiSetTab::Search => emoji.lists.search.items(),
         };
         let wanted: Vec<(i64, Vec<crate::ids::FileId>)> = listed
             .iter()
@@ -559,7 +559,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let installed = &self.session.stickers.emoji.lists.installed;
         if (installed.is_idle() || (retry_failed && installed.can_ask()))
-            && self.session.stickers.emoji.installed_sets.is_empty()
+            && self
+                .session
+                .stickers
+                .emoji
+                .lists
+                .installed
+                .items()
+                .is_empty()
         {
             self.emoji_set_request(
                 RequestPurpose::GetInstalledEmojiSets,
@@ -570,7 +577,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .stickers
             .emoji
-            .installed_sets
+            .lists
+            .installed
+            .items()
             .iter()
             .map(|set| set.id)
             .collect();
@@ -587,9 +596,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.select_emoji_set_tab(EmojiSetTab::Search)?;
         let asked = self.session.stickers.emoji.lists.search.request();
         self.drop_request(asked);
-        self.session.stickers.emoji.lists.search.cancel();
+        // A new query shows none of the last query's sets.
+        self.session.stickers.emoji.lists.search = Default::default();
         self.session.stickers.emoji.search_query = query.trim().to_string();
-        self.session.stickers.emoji.found_sets.clear();
         let query = self.session.stickers.emoji.search_query.clone();
         self.emoji_set_request(RequestPurpose::SearchEmojiSets, |id| {
             search_emoji_sets(id, &query)
@@ -639,7 +648,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.drop_request(asked);
         self.session.stickers.emoji.lists.installed.cancel();
         let installed_wanted = was_asking
-            || !self.session.stickers.emoji.installed_sets.is_empty()
+            || !self
+                .session
+                .stickers
+                .emoji
+                .lists
+                .installed
+                .items()
+                .is_empty()
             || self.session.stickers.emoji.open;
         let lists = &mut self.session.stickers.emoji.lists;
         let asked = [lists.search.request(), lists.trending.request()];

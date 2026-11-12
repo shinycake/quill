@@ -143,13 +143,15 @@ impl QuillApp {
             .map(|s| {
                 let emoji = &s.stickers.emoji;
                 let sets = emoji
-                    .installed_sets
+                    .lists
+                    .installed
+                    .items()
                     .iter()
                     .map(|set| (set.id, set.title.clone()))
                     .collect();
                 (
                     sets,
-                    matches!(emoji.lists.installed, quill::state::fetch::Fetch::Ready(())),
+                    matches!(emoji.lists.installed, quill::state::fetch::Fetch::Ready(_)),
                 )
             })
             .unwrap_or_default();

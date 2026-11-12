@@ -620,12 +620,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             None,
         );
         self.session.payments.gifts_manage.send.gifts_fetch = GiftListFetch::Asking(extra);
-        if self
-            .send_json_request(extra, &rq::get_available_gifts(extra))
-            .is_err()
-        {
+        if let Err(err) = self.send_json_request(extra, &rq::get_available_gifts(extra)) {
             let send = &mut self.session.payments.gifts_manage.send;
-            send.gifts_fetch = GiftListFetch::Failed("Couldn't load the gifts.".into());
+            send.gifts_fetch = GiftListFetch::Failed(err.stage_line());
         }
     }
 

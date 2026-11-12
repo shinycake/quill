@@ -299,18 +299,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return false;
         };
-        if self
-            .send_json_request(
-                extra,
-                &commit_pending_live_story_reactions(extra, group_call_id),
-            )
-            .is_err()
-        {
+        if let Err(err) = self.send_json_request(
+            extra,
+            &commit_pending_live_story_reactions(extra, group_call_id),
+        ) {
             // Nothing went out: TDLib still holds the taps as pending, so
-            // they wait here again for the next commit.
+            // they wait here again for the next commit. The note names the
+            // send's own cause, not a lack of Stars.
             if let Some(live) = self.session.live_story_mut(group_call_id) {
                 live.commit_unsent(extra, pending, now_ms);
-                live.note = Some(Refusal::NotEnough.message().to_string());
+                live.note = Some(err.stage_line());
             }
             return true;
         }

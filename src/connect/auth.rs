@@ -127,7 +127,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session
                 .auth_state
                 .countries
-                .failed(Some(extra), "not sent", false);
+                .failed(Some(extra), err.stage_line(), false);
             return Err(err);
         }
         Ok(Some(extra))
@@ -146,7 +146,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session
                 .auth_state
                 .guessed_country
-                .failed(Some(extra), "not sent", false);
+                .failed(Some(extra), err.stage_line(), false);
             return Err(err);
         }
         Ok(Some(extra))

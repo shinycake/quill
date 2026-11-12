@@ -51,10 +51,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             extra,
             &crate::telegram::requests_payments::get_marketplace_gift(extra, name),
         );
-        if result.is_err()
+        if let Err(err) = &result
             && let Some(gift) = self.session.payments.marketplace_gift.as_mut()
         {
-            gift.fail("Could not load the gift. Retry.".into());
+            gift.fail(err.stage_line());
         }
         result
     }
@@ -138,7 +138,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                         request,
                     };
                 }
-                Err(_) => gift.set_note("Could not submit the purchase. Review and retry.".into()),
+                Err(err) => gift.set_note(err.stage_line()),
             }
         }
         result

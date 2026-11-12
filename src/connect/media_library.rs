@@ -33,7 +33,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                 get_installed_sticker_sets,
             )?;
         }
-        if self.session.stickers.emoji.installed_sets.is_empty() {
+        let installed = &self.session.stickers.emoji.lists.installed;
+        if installed.can_ask() || installed.is_outdated() {
             self.emoji_set_request(
                 RequestPurpose::GetInstalledEmojiSets,
                 crate::telegram::requests_emoji::get_installed_emoji_sets,
@@ -105,14 +106,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        // Already asked: the entry waits for a request still in flight (one
-        // that was lost asks again).
+        // Already asked: the entry holds the request it waits for, and its
+        // error path (a lost request included) takes the entry out.
         if self
             .session
             .stickers
             .message_reaction_options
             .loading_request(chat_id, message_id)
-            .is_some_and(|request| self.session.requests.get(request).is_some())
+            .is_some()
         {
             return Ok(None);
         }

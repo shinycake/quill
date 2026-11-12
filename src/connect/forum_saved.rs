@@ -88,7 +88,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         let icons = &mut self.session.threads.forum_topic_icons;
         match &sent {
             Ok(Some(extra)) => icons.sent(*extra),
-            _ => icons.fail("could not send the request"),
+            Ok(None) => icons.fail(ConnectSendError::InvalidRequest.stage_line()),
+            Err(err) => icons.fail(err.stage_line()),
         }
         sent
     }
@@ -311,7 +312,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         let tags = &mut self.session.threads.saved.tags;
         match &sent {
             Ok(Some(extra)) => tags.sent(*extra),
-            _ => tags.fail_dropping_data("could not send the request"),
+            Ok(None) => tags.fail_dropping_data(ConnectSendError::InvalidRequest.stage_line()),
+            Err(err) => tags.fail_dropping_data(err.stage_line()),
         }
         sent
     }

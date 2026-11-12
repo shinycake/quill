@@ -94,7 +94,8 @@ fn s15_dynamic_set_order_applies_update() {
     );
 
     // Non-regular types route to the emoji panel's installed sets.
-    session.stickers.emoji.installed_sets = session.stickers.stickers.sets.clone();
+    let sets = session.stickers.stickers.sets.clone();
+    session.stickers.emoji.lists.installed.succeed(sets);
     apply(
         &mut session,
         &seq,
@@ -105,7 +106,9 @@ fn s15_dynamic_set_order_applies_update() {
         session
             .stickers
             .emoji
-            .installed_sets
+            .lists
+            .installed
+            .items()
             .iter()
             .map(|s| s.id)
             .collect::<Vec<_>>(),

@@ -63,7 +63,9 @@ impl QuillApp {
         let sets = session
             .stickers
             .emoji
-            .installed_sets
+            .lists
+            .installed
+            .items()
             .iter()
             .filter_map(|set| {
                 let items = session.media.media_library.get(&set.id)?;
@@ -86,7 +88,9 @@ impl QuillApp {
             .map(|s| {
                 s.stickers
                     .emoji
-                    .installed_sets
+                    .lists
+                    .installed
+                    .items()
                     .iter()
                     .map(|set| set.id)
                     .collect()

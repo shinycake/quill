@@ -10275,3 +10275,19 @@ Tests: `connect/tests/sweep_r4_02.rs`, `closing_refused.rs`, `communities.rs`
 Tests: `sweep_r4_02_round2.rs`, `chat_list/folder_removals.rs`,
 `closing_refused.rs`, `earn.rs`, `folder_followups.rs`, `camera_join.rs`, and
 the `engine_sync` and `disk_pauses` unit tests.
+
+#### Fix round 3 (review of r4-02)
+
+| What | Change |
+| --- | --- |
+| Community create | Any create is refused while one that carries a picture is out (`community_photo_create_out`), and the identity box says so (`qll_community_create_busy`) instead of doing nothing. |
+| Live story commit | A commit that could not be sent notes the send's own line, not "not enough Stars". |
+| Group type upgrade | The upgrade's error path (a lost request and logout settle through it) removes the `after_upgrade` entry that waited on it. |
+| Emoji set lists | `lists.installed` and `lists.search` are `Fetch<Vec<StickerSetInfo>>`; `installed_sets` and `found_sets` are gone. The media library and the message menu ask when the list `can_ask` or is outdated, not when it is empty (an account with no sets no longer re-asks). |
+| Mask reorder | Busy is `mask_change_pending()` or the installed `Fetch` loading. |
+| Reaction options, pack title | Busy is the stage alone; the error paths (lost requests included) take the entry out. |
+| `moderate_message` | A refusal after a step went out is a note; only a refused first step fails the call. |
+| Docs, send lines | Stale doc lines fixed; send failures show `ConnectSendError::stage_line()` instead of English literals. |
+
+Tests: `sweep_r4_02_round2.rs`, `sweep_r4_02_round3.rs`, `group_type.rs`,
+`live_story.rs`, `message_menu.rs`, `media_library.rs`, `masks.rs`.

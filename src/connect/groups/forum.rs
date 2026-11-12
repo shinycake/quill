@@ -48,7 +48,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session
                 .threads
                 .forum_topics
-                .fail(chat_id.0, "could not send the request");
+                .fail(chat_id.0, err.stage_line());
             return Err(err);
         }
         Ok(())
@@ -108,7 +108,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session
                 .threads
                 .forum_topics
-                .fail(chat_id.0, "could not send the request");
+                .fail(chat_id.0, err.stage_line());
             return Err(err);
         }
         self.session.threads.forum_topics.begin(chat_id.0);
