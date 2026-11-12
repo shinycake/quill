@@ -373,11 +373,12 @@ impl QuillApp {
         });
         let task = Rc::new(task);
         for key in &keys {
-            self.background
-                .deleting
-                .insert(key.clone(), AccountDeletion::Running {
+            self.background.deleting.insert(
+                key.clone(),
+                AccountDeletion::Running {
                     _task: task.clone(),
-                });
+                },
+            );
         }
         let waiting = keys.clone();
         self.after_closing(

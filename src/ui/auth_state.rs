@@ -379,7 +379,9 @@ mod submit_tests {
         let first = submit.send(false, screen(), || driver.reset_login_email());
         assert!(matches!(first, Some(Ok(_))), "it went out");
         assert!(busy(submit, &driver), "the submit is out");
-        let second = submit.send(busy(submit, &driver), screen(), || driver.reset_login_email());
+        let second = submit.send(busy(submit, &driver), screen(), || {
+            driver.reset_login_email()
+        });
         assert!(second.is_none(), "a second press sends nothing");
         assert_eq!(
             crate::ui::auth_state::driver_fixture::sent_types(&recorder, before).len(),

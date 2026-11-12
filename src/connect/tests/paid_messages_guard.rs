@@ -106,7 +106,11 @@ fn a_held_send_reports_how_its_hold_ended() {
     assert_eq!(f.1.paid_send_outcome(released), PaidOutcome::Held);
     f.1.release_paid_send(false).unwrap();
     assert_eq!(f.1.paid_send_outcome(released), PaidOutcome::Released);
-    assert_eq!(f.1.paid_send_outcome(released), PaidOutcome::Unknown, "read once");
+    assert_eq!(
+        f.1.paid_send_outcome(released),
+        PaidOutcome::Unknown,
+        "read once"
+    );
     let discarded = f.1.send_snapshot(&snap).unwrap();
     f.1.discard_paid_send();
     assert_eq!(f.1.paid_send_outcome(discarded), PaidOutcome::Discarded);

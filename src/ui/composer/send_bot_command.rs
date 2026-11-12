@@ -134,7 +134,6 @@ impl QuillApp {
     }
 }
 
-
 /// The `/` token a picked command replaces: where it stood and what it was,
 /// so a field that changed meanwhile is not cut at a stale place.
 #[derive(Debug, Clone, PartialEq, Eq)]

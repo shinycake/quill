@@ -37,13 +37,11 @@ impl QuillApp {
     /// A sign-in submit is out: Enter in a field must not send a second one
     /// (the buttons are disabled by the same answer).
     pub(super) fn auth_submit_busy(&self) -> bool {
-        self.live
-            .as_ref()
-            .is_some_and(|live| {
-                self.auth_ui
-                    .submit
-                    .is_out(&live.driver.session.requests, self.screen.epoch)
-            })
+        self.live.as_ref().is_some_and(|live| {
+            self.auth_ui
+                .submit
+                .is_out(&live.driver.session.requests, self.screen.epoch)
+        })
     }
 
     pub(super) fn cycle_auth(&mut self, cx: &mut Context<Self>) {
@@ -96,13 +94,10 @@ impl QuillApp {
     /// they typed.
     pub(super) fn sync_auth_forms(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let auth = self.current_auth();
-        self.screen
-            .auth_ui
-            .submit
-            .settle(
-                self.live.as_ref().map(|live| &live.driver.session.requests),
-                self.screen.epoch,
-            );
+        self.screen.auth_ui.submit.settle(
+            self.live.as_ref().map(|live| &live.driver.session.requests),
+            self.screen.epoch,
+        );
         let ui = &self.screen.auth_ui;
         if !matches!(auth, AuthorizationState::WaitEmailAddress) {
             let email = ui.email_input.clone();

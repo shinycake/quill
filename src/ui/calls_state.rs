@@ -68,15 +68,10 @@ pub(crate) enum CallEnd {
     /// The call ended; the window lingers on "call ended" until the timer
     /// fires. The stage holds the timer, so a new call or a switch of
     /// account drops it.
-    Lingering {
-        call_id: i32,
-        _timer: Task<()>,
-    },
+    Lingering { call_id: i32, _timer: Task<()> },
     /// The linger is over, or the summary was there before this screen
     /// looked.
-    Over {
-        call_id: i32,
-    },
+    Over { call_id: i32 },
 }
 
 impl CallEnd {
