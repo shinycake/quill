@@ -267,7 +267,10 @@ fn a_busy_lines_window_stays_until_it_is_dismissed(cx: &mut TestAppContext) {
         .advance_clock(std::time::Duration::from_millis(1600) * 3);
     call.run_until_parked();
     app.read_with(call, |app, _| {
-        assert!(matches!(app.call_screen.end, CallEnd::Busy { call_id: 6 }));
+        assert!(matches!(
+            app.call_screen.end,
+            CallEnd::BusyLine { call_id: 6 }
+        ));
         assert!(app.calls.window.handle().is_some(), "no timer closes it");
     });
     app.update(call, |app, cx| {

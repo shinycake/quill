@@ -463,7 +463,7 @@ thread_local! {
 
 #[cfg(test)]
 mod tests {
-    use super::{Lookup, Token, language_for, lookup, token_for, tokenize};
+    use super::{LookupView, Token, cache, key_of, language_for, lookup, token_for, tokenize};
 
     fn text_of<'a>(code: &'a str, spans: &[super::Span], token: Token) -> Vec<&'a str> {
         spans

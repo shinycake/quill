@@ -172,7 +172,7 @@ impl QuillApp {
 #[cfg(test)]
 mod tests {
     use super::SendToMenu::{self, *};
-    use gpui::Task;
+    use gpui_kit::Task;
 
     fn start(_: bool) -> Task<()> {
         Task::ready(())
