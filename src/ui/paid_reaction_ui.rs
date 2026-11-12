@@ -28,7 +28,7 @@ use quill::paid_reaction::{
 };
 use quill::premium_hub::group_digits;
 use quill::state::unix_ms_now;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 
 impl QuillApp {
@@ -492,12 +492,9 @@ impl QuillApp {
             );
             dialog
                 .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    let body = Rc::new(Cell::new(Some(body.into_any_element())));
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
                 }))

@@ -120,10 +120,9 @@ impl QuillApp {
     }
 
     fn open_group_call_window(&mut self, stream: bool, cx: &mut Context<Self>) {
-        if self.group_call.window == CallWindow::Opening {
+        if matches!(self.group_call.window, CallWindow::Opening { .. }) {
             return;
         }
-        self.group_call.window = CallWindow::Opening;
         let title: SharedString = if stream {
             self.session()
                 .and_then(|s| s.calls.active_group_call.as_ref())
@@ -142,132 +141,135 @@ impl QuillApp {
         let owner = cx.entity();
         // screen-scope: the window and its handle belong to the app, so the open must
         // finish after a switch; its handlers read the account on screen when they fire.
-        cx.defer(move |cx| {
-            let weak = owner.downgrade();
-            let render_owner = owner.clone();
-            let bounds = Bounds::centered(None, window_size, cx);
-            let result = cx.open_window(
-                WindowOptions {
-                    window_bounds: Some(WindowBounds::Windowed(bounds)),
-                    window_min_size: Some(min_size),
-                    titlebar: Some(TitlebarOptions {
-                        title: Some(title),
-                        appears_transparent: true,
-                        traffic_light_position: Some(point(px(12.), px(12.))),
-                    }),
-                    focus: true,
-                    show: true,
-                    ..Default::default()
-                },
-                move |window, cx| {
-                    window.activate_window();
-                    let gone = weak.clone();
-                    window.on_window_should_close(cx, move |_, cx| {
-                        let _ = weak.update(cx, |app, cx| {
-                            app.group_call.window = CallWindow::Closed;
-                            app.group_call_screen.window_closed_by_user = app
-                                .session()
-                                .and_then(|s| s.calls.active_group_call.as_ref())
-                                .map(|c| c.id);
-                            app.group_call_screen.clear_stream_wish();
-                            app.close_call_box();
-                            app.sync_group_call_large_tile();
-                            cx.notify();
-                        });
-                        true
-                    });
-                    let from = window.window_handle();
-                    super::window_control::when_window_goes(window, cx, move |cx| {
-                        let _ = gone.update(cx, |app, cx| {
-                            if app.group_call.window.is(from) {
+        let opening = Self::spawn_app(cx, async move |_app, cx| {
+            let _ = cx.update(|cx| {
+                let weak = owner.downgrade();
+                let render_owner = owner.clone();
+                let bounds = Bounds::centered(None, window_size, cx);
+                let result = cx.open_window(
+                    WindowOptions {
+                        window_bounds: Some(WindowBounds::Windowed(bounds)),
+                        window_min_size: Some(min_size),
+                        titlebar: Some(TitlebarOptions {
+                            title: Some(title),
+                            appears_transparent: true,
+                            traffic_light_position: Some(point(px(12.), px(12.))),
+                        }),
+                        focus: true,
+                        show: true,
+                        ..Default::default()
+                    },
+                    move |window, cx| {
+                        window.activate_window();
+                        let gone = weak.clone();
+                        window.on_window_should_close(cx, move |_, cx| {
+                            let _ = weak.update(cx, |app, cx| {
                                 app.group_call.window = CallWindow::Closed;
+                                app.group_call_screen.window_closed_by_user = app
+                                    .session()
+                                    .and_then(|s| s.calls.active_group_call.as_ref())
+                                    .map(|c| c.id);
+                                app.group_call_screen.clear_stream_wish();
+                                app.close_call_box();
                                 app.sync_group_call_large_tile();
                                 cx.notify();
+                            });
+                            true
+                        });
+                        let from = window.window_handle();
+                        super::window_control::when_window_goes(window, cx, move |cx| {
+                            let _ = gone.update(cx, |app, cx| {
+                                if app.group_call.window.is(from) {
+                                    app.group_call.window = CallWindow::Closed;
+                                    app.sync_group_call_large_tile();
+                                    cx.notify();
+                                }
+                            });
+                        });
+                        let view = cx.new(|cx| {
+                            let activation_owner = render_owner.downgrade();
+                            let visibility_owner = render_owner.downgrade();
+                            GroupCallPanel {
+                                owner: render_owner.downgrade(),
+                                _observe: follow_app(&render_owner, cx),
+                                focus: cx.focus_handle(),
+                                // A key-up can't arrive once the window is in
+                                // the background: close the push-to-talk mic.
+                                _activation: cx.observe_window_activation(
+                                    window,
+                                    move |_, window, cx| {
+                                        if !window.is_window_active() {
+                                            let _ = activation_owner.update(cx, |app, cx| {
+                                                app.group_call_ptt_release_all(cx)
+                                            });
+                                        }
+                                    },
+                                ),
+                                _visibility: cx.observe_window_visibility(
+                                    window,
+                                    move |_, visibility, window, cx| {
+                                        let from = window.window_handle();
+                                        let _ = visibility_owner.update(cx, |app, _| {
+                                            // A replaced window still reports while it goes.
+                                            if let CallWindow::Open {
+                                                handle, visible, ..
+                                            } = &mut app.group_call.window
+                                                && *handle == from
+                                            {
+                                                *visible = visibility.is_visible();
+                                            } else {
+                                                return;
+                                            }
+                                            app.sync_group_call_large_tile();
+                                        });
+                                    },
+                                ),
+                                pinned_on_top: false,
+                                title: None,
+                                members: cx.new(|cx| GroupCallMembers::new(&render_owner, cx)),
                             }
                         });
-                    });
-                    let view = cx.new(|cx| {
-                        let activation_owner = render_owner.downgrade();
-                        let visibility_owner = render_owner.downgrade();
-                        GroupCallPanel {
+                        let picture = cx.new(|cx| StreamPictureView::new(&render_owner, cx));
+                        let root = cx.new(|cx| GroupCallRoot {
                             owner: render_owner.downgrade(),
                             _observe: follow_app(&render_owner, cx),
-                            focus: cx.focus_handle(),
-                            // A key-up can't arrive once the window is in
-                            // the background: close the push-to-talk mic.
-                            _activation: cx.observe_window_activation(
-                                window,
-                                move |_, window, cx| {
-                                    if !window.is_window_active() {
-                                        let _ = activation_owner.update(cx, |app, cx| {
-                                            app.group_call_ptt_release_all(cx)
-                                        });
-                                    }
-                                },
-                            ),
-                            _visibility: cx.observe_window_visibility(
-                                window,
-                                move |_, visibility, window, cx| {
-                                    let from = window.window_handle();
-                                    let _ = visibility_owner.update(cx, |app, _| {
-                                        // A replaced window still reports while it goes.
-                                        if let CallWindow::Open {
-                                            handle, visible, ..
-                                        } = &mut app.group_call.window
-                                            && *handle == from
-                                        {
-                                            *visible = visibility.is_visible();
-                                        } else {
-                                            return;
-                                        }
-                                        app.sync_group_call_large_tile();
-                                    });
-                                },
-                            ),
-                            pinned_on_top: false,
-                            title: None,
-                            members: cx.new(|cx| GroupCallMembers::new(&render_owner, cx)),
+                            panel: view,
+                            picture,
+                        });
+                        cx.new(|cx| Root::new(root, window, cx))
+                    },
+                );
+                owner.update(cx, |app, cx| {
+                    match result {
+                        Ok(handle) => {
+                            app.group_call.window = CallWindow::Open {
+                                handle: handle.into(),
+                                visible: true,
+                                layout: CallLayout::of(stream),
+                            };
+                            app.sync_group_call_large_tile();
                         }
-                    });
-                    let picture = cx.new(|cx| StreamPictureView::new(&render_owner, cx));
-                    let root = cx.new(|cx| GroupCallRoot {
-                        owner: render_owner.downgrade(),
-                        _observe: follow_app(&render_owner, cx),
-                        panel: view,
-                        picture,
-                    });
-                    cx.new(|cx| Root::new(root, window, cx))
-                },
-            );
-            owner.update(cx, |app, cx| {
-                match result {
-                    Ok(handle) => {
-                        app.group_call.window = CallWindow::Open {
-                            handle: handle.into(),
-                            visible: true,
-                            layout: CallLayout::of(stream),
-                        };
-                        app.sync_group_call_large_tile();
-                    }
-                    Err(_) => {
-                        app.group_call.window = CallWindow::Closed;
-                        // Kept shut for this call, like a window the user
-                        // closed; Join or the call bar asks for it again.
-                        let call = app
-                            .session()
-                            .and_then(|s| s.calls.active_group_call.as_ref())
-                            .map(|call| call.id);
-                        if call.is_some() {
-                            app.group_call_screen.window_closed_by_user = call;
+                        Err(_) => {
+                            app.group_call.window = CallWindow::Closed;
+                            // Kept shut for this call, like a window the user
+                            // closed; Join or the call bar asks for it again.
+                            let call = app
+                                .session()
+                                .and_then(|s| s.calls.active_group_call.as_ref())
+                                .map(|call| call.id);
+                            if call.is_some() {
+                                app.group_call_screen.window_closed_by_user = call;
+                            }
+                            app.set_note(StatusNote::error(tr(
+                                keys::Q_AV_COULDNT_OPEN_THE_VIDEO_CHAT,
+                            )));
                         }
-                        app.set_note(StatusNote::error(tr(
-                            keys::Q_AV_COULDNT_OPEN_THE_VIDEO_CHAT,
-                        )));
                     }
-                }
-                cx.notify();
+                    cx.notify();
+                });
             });
         });
+        self.group_call.window = CallWindow::Opening { _open: opening };
     }
 
     pub(super) fn group_call_large_tile(&self) -> Option<quill::calls::tile_pin::TileKey> {

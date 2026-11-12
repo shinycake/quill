@@ -25,9 +25,11 @@ const SYMBOL_PIXELS: usize = 64;
 /// Tile backgrounds are smooth gradients, made at half size.
 const TILE_SCALE: f64 = 0.5;
 
-#[derive(Clone)]
 enum Slot {
-    Loading,
+    /// Being made off the UI thread; dropping the slot cancels the work.
+    Loading {
+        _job: Task<()>,
+    },
     Ready {
         image: Arc<RenderImage>,
         at: Instant,
@@ -60,7 +62,7 @@ pub(super) struct GiftArt {
 fn ready(slot: Option<&Slot>) -> Option<(Arc<RenderImage>, Instant)> {
     match slot? {
         Slot::Ready { image, at } => Some((image.clone(), *at)),
-        Slot::Loading | Slot::Failed => None,
+        Slot::Loading { .. } | Slot::Failed => None,
     }
 }
 
@@ -214,8 +216,7 @@ impl QuillApp {
                 missing.push(file);
                 continue;
             };
-            self.peer_qr.gift_art.stills.insert(key, Slot::Loading);
-            self.run_off_ui_then(
+            let job = self.run_off_ui_held(
                 move || {
                     let mut image = sticker_bgra(&path, format, edge)?;
                     if let Some(color) = tint {
@@ -237,6 +238,10 @@ impl QuillApp {
                 },
                 cx,
             );
+            self.peer_qr
+                .gift_art
+                .stills
+                .insert(key, Slot::Loading { _job: job });
         }
         if !missing.is_empty()
             && let Some(live) = self.live.as_mut()
@@ -284,8 +289,7 @@ impl QuillApp {
         if let Some(slot) = self.peer_qr.gift_art.tiles.get(&key) {
             return ready(Some(slot)).map(|(image, _)| image);
         }
-        self.peer_qr.gift_art.tiles.insert(key, Slot::Loading);
-        self.run_off_ui_then(
+        let job = self.run_off_ui_held(
             move || render(tile_pixels(center, edge, width, height)),
             move |this, image, cx| {
                 if let Some(slot) = this.peer_qr.gift_art.tiles.get_mut(&key) {
@@ -298,6 +302,10 @@ impl QuillApp {
             },
             cx,
         );
+        self.peer_qr
+            .gift_art
+            .tiles
+            .insert(key, Slot::Loading { _job: job });
         None
     }
 }

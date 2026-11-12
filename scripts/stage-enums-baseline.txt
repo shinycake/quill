@@ -3,7 +3,6 @@
 bare:AccessStage::Asking 1
 bare:AccountStage::Starting 1
 bare:Answer::Waiting 1
-bare:ApplyStage::Sent 1
 bare:BackgroundStatus::Connecting 1
 bare:BoxStage::Opening 1
 bare:CalendarPaging::Loading 1
@@ -11,7 +10,7 @@ bare:CallEnd::Running 1
 bare:CallLinkStep::Busy 1
 bare:CallPhase::Busy 1
 bare:CallSound::Busy 1
-bare:CallWindow::Opening 2
+bare:CallWindow::Opening 1
 bare:CandidateStatus::Loading 1
 bare:CaptureStage::Running 1
 bare:CardState::Waiting 1
@@ -50,7 +49,6 @@ bare:Opening::Pending 1
 bare:OwnLinkState::Waiting 1
 bare:PaidStage::Waiting 1
 bare:PaneMode::Connecting 1
-bare:PasscodeJob::Running 1
 bare:Phase::Downloading 1
 bare:Phase::Loading 1
 bare:Phase::Requested 1
@@ -75,7 +73,6 @@ bare:SendToMenu::Reading 1
 bare:Sent::Queued 1
 bare:SetFiles::Asked 1
 bare:ShutdownPhase::Running 1
-bare:Slot::Loading 2
 bare:SoundResolution::Pending 1
 bare:Stage::Opening 1
 bare:Stage::Queued 1

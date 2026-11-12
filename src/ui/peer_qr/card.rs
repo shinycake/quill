@@ -14,7 +14,7 @@ use std::sync::Arc;
 pub(super) const LINE: f64 = 1.2;
 
 /// `text` set bold at `size`, measured with the window's font.
-pub(super) fn bold_width(text: &str, size: f64, window: &mut Window) -> f64 {
+pub(super) fn bold_width(text: &str, size: f64, window: &Window) -> f64 {
     let mut font = window.text_style().font();
     font.weight = FontWeight::BOLD;
     let run = TextRun {
@@ -35,10 +35,8 @@ pub(super) fn bold_width(text: &str, size: f64, window: &mut Window) -> f64 {
 }
 
 /// The name's fit on a card of `card` (unscaled).
-pub(super) fn fit(label: &str, card: &CardLayout, window: &mut Window) -> Option<UsernameFit> {
-    // `fit_username` takes `Fn`; measuring needs the window mutably.
-    let window = std::cell::RefCell::new(window);
-    let measure = |text: &str, size: f64| bold_width(text, size, &mut window.borrow_mut());
+pub(super) fn fit(label: &str, card: &CardLayout, window: &Window) -> Option<UsernameFit> {
+    let measure = |text: &str, size: f64| bold_width(text, size, window);
     fit_username(
         label,
         card.width - 2. * USERNAME_SKIP,

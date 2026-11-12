@@ -13,17 +13,20 @@ pub(crate) enum StreamPhoto {
     None,
     /// `path` is blurring.
     Blurring { path: String, _task: Task<()> },
-    /// `path` blurred; `image` is `None` when the file could not be read.
+    /// `path` blurred into `image`.
     Blurred {
         path: String,
-        image: Option<Arc<RenderImage>>,
+        image: Arc<RenderImage>,
     },
+    /// `path` could not be read: not blurred again until the chat's photo
+    /// path changes or the window reopens (a frame never retries it).
+    Failed { path: String },
 }
 
 impl StreamPhoto {
     pub(in crate::ui) fn image(&self) -> Option<Arc<RenderImage>> {
         match self {
-            Self::Blurred { image, .. } => image.clone(),
+            Self::Blurred { image, .. } => Some(image.clone()),
             _ => None,
         }
     }
@@ -31,14 +34,16 @@ impl StreamPhoto {
     pub(super) fn path(&self) -> Option<&str> {
         match self {
             Self::None => None,
-            Self::Blurring { path, .. } | Self::Blurred { path, .. } => Some(path),
+            Self::Blurring { path, .. } | Self::Blurred { path, .. } | Self::Failed { path } => {
+                Some(path)
+            }
         }
     }
 
     /// Leaves the stage, giving back the image to drop from the window.
     pub(super) fn take_image(&mut self) -> Option<Arc<RenderImage>> {
         match std::mem::take(self) {
-            Self::Blurred { image, .. } => image,
+            Self::Blurred { image, .. } => Some(image),
             _ => None,
         }
     }

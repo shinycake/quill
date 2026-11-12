@@ -805,7 +805,10 @@ impl QuillApp {
                 if matches!(&app.group_call.stream.photo,
                     StreamPhoto::Blurring { path: cached, .. } if *cached == path)
                 {
-                    app.group_call.stream.photo = StreamPhoto::Blurred { path, image };
+                    app.group_call.stream.photo = match image {
+                        Some(image) => StreamPhoto::Blurred { path, image },
+                        None => StreamPhoto::Failed { path },
+                    };
                     cx.notify();
                 }
             });
@@ -835,42 +838,48 @@ impl QuillApp {
         // The fade holds the task with its deadline (one task; a move only
         // pushes the deadline), so hiding the controls or leaving full
         // screen cancels it.
-        self.group_call.stream.controls.arm_timer(|| {
-            cx.spawn(async move |this, cx| {
-                loop {
-                    let next = this.update(cx, |app, _| app.group_call.stream.controls.hide_at());
-                    let Ok(Some(at)) = next else {
-                        break;
-                    };
-                    let wait = at.saturating_duration_since(cx.background_executor().now());
-                    cx.background_executor().timer(wait).await;
-                    // Asked outside the app's update: the window's own state.
-                    let handle = this
-                        .update(cx, |app, _| app.group_call.window.handle())
+        let Some(at) = self.group_call.stream.controls.hide_at() else {
+            return;
+        };
+        self.group_call
+            .stream
+            .controls
+            .arm_timer(|| Self::stream_hide_wake(at, cx));
+    }
+
+    /// One wake-up at the hide deadline `at`. A move pushed the deadline
+    /// meanwhile: the next wake-up replaces this task (`rearm_timer`).
+    fn stream_hide_wake(at: std::time::Instant, cx: &mut Context<Self>) -> Task<()> {
+        cx.spawn(async move |this, cx| {
+            let wait = at.saturating_duration_since(cx.background_executor().now());
+            cx.background_executor().timer(wait).await;
+            // Asked outside the app's update: the window's own state.
+            let handle = this
+                .update(cx, |app, _| app.group_call.window.handle())
+                .ok()
+                .flatten();
+            let active = handle
+                .and_then(|handle| {
+                    cx.update_window(handle, |_, window, _| window.is_window_active())
                         .ok()
-                        .flatten();
-                    let active = handle
-                        .and_then(|handle| {
-                            cx.update_window(handle, |_, window, _| window.is_window_active())
-                                .ok()
-                        })
-                        .unwrap_or(false);
-                    let more = this.update(cx, |app, cx| {
-                        let controls = &mut app.group_call.stream.controls;
-                        let was = controls.shown();
-                        controls.tick(cx.background_executor().now());
-                        if was != controls.shown() {
-                            app.hide_stream_cursor(active);
-                            cx.notify();
-                        }
-                        app.group_call.stream.controls.hide_at().is_some()
-                    });
-                    if !matches!(more, Ok(true)) {
-                        break;
-                    }
+                })
+                .unwrap_or(false);
+            let _ = this.update(cx, |app, cx| {
+                let controls = &mut app.group_call.stream.controls;
+                let was = controls.shown();
+                controls.tick(cx.background_executor().now());
+                if was != controls.shown() {
+                    app.hide_stream_cursor(active);
+                    cx.notify();
                 }
-            })
-        });
+                if let Some(next) = app.group_call.stream.controls.hide_at() {
+                    app.group_call
+                        .stream
+                        .controls
+                        .rearm_timer(|| Self::stream_hide_wake(next, cx));
+                }
+            });
+        })
     }
 }
 

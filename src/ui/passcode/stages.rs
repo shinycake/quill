@@ -3,6 +3,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::PasscodeView;
+use gpui_kit::Task;
 use quill::passcode::MasterKey;
 
 /// Touch ID / system-prompt unlock: off, or on with the master key kept
@@ -73,4 +74,15 @@ impl LockState {
             (same, _) => same,
         }
     }
+}
+
+/// The auto-lock watcher (`spawn_passcode_tick`): not started, or running
+/// as the task this value holds, so the app going away drops it.
+#[derive(Default)]
+pub(crate) enum AutoLock {
+    #[default]
+    Stopped,
+    Watching {
+        _task: Task<()>,
+    },
 }

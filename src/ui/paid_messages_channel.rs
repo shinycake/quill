@@ -27,7 +27,7 @@ use quill::paid_messages::{
 use quill::premium_hub::group_digits;
 use quill::state::Session;
 use quill::telegram::envelope::ChatKind;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 
 /// What the channel has now: on or off, and the price when known.
@@ -415,12 +415,9 @@ impl QuillApp {
                     keys::PROFILE_DIRECT_MESSAGES,
                 )))
                 .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body)));
+                    let body = Rc::new(Cell::new(Some(body)));
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
                 }))

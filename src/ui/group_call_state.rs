@@ -3,20 +3,20 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::*;
-use gpui_kit::component::input::{InputEvent, TextareaState};
+use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
-use quill::lang::{keys, tr};
 use std::collections::HashMap;
 use std::time::Instant;
 
 /// Where the call window stands. A window being built is `Opening` (a second
 /// open waits for it); it leaves that stage when the window exists (`Open`)
 /// or fails to build (`Closed`), and `Open` ends when the window goes.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Debug, Default)]
 pub(crate) enum CallWindow {
     #[default]
     Closed,
-    Opening,
+    /// The open is queued; dropping the stage cancels it.
+    Opening { _open: Task<()> },
     Open {
         handle: AnyWindowHandle,
         /// The window is on screen (not minimized or hidden).
@@ -43,28 +43,28 @@ impl CallLayout {
 
 impl CallWindow {
     /// The open window, if there is one.
-    pub(crate) fn handle(self) -> Option<AnyWindowHandle> {
+    pub(crate) fn handle(&self) -> Option<AnyWindowHandle> {
         match self {
-            CallWindow::Open { handle, .. } => Some(handle),
-            CallWindow::Closed | CallWindow::Opening => None,
+            CallWindow::Open { handle, .. } => Some(*handle),
+            CallWindow::Closed | CallWindow::Opening { .. } => None,
         }
     }
 
     /// The layout of the open window, if there is one.
-    pub(crate) fn layout(self) -> Option<CallLayout> {
+    pub(crate) fn layout(&self) -> Option<CallLayout> {
         match self {
-            CallWindow::Open { layout, .. } => Some(layout),
-            CallWindow::Closed | CallWindow::Opening => None,
+            CallWindow::Open { layout, .. } => Some(*layout),
+            CallWindow::Closed | CallWindow::Opening { .. } => None,
         }
     }
 
     /// Open and on screen.
-    pub(crate) fn is_visible(self) -> bool {
+    pub(crate) fn is_visible(&self) -> bool {
         matches!(self, CallWindow::Open { visible: true, .. })
     }
 
     /// Whether `handle` is the open window.
-    pub(crate) fn is(self, handle: AnyWindowHandle) -> bool {
+    pub(crate) fn is(&self, handle: AnyWindowHandle) -> bool {
         self.handle() == Some(handle)
     }
 }
@@ -131,6 +131,10 @@ pub(super) struct CallView {
     pub(super) stage_volume: Option<super::group_call_stage_volume::StageVolume>,
     /// Locally pinned video tile of the group call (tdesktop viewport pin).
     pub(super) pin: quill::calls::tile_pin::TilePin,
+    /// The in-call chat composer (sendGroupCallMessage), made when the call
+    /// window first draws it. The unsent text is this call's: the view goes
+    /// with the call, and the text with it.
+    pub(super) composer: Option<Entity<TextareaState>>,
 }
 
 impl CallView {
@@ -142,6 +146,7 @@ impl CallView {
             row_levels: HashMap::new(),
             stage_volume: None,
             pin: Default::default(),
+            composer: None,
         }
     }
 }
@@ -190,16 +195,11 @@ impl QuillApp {
 pub(crate) struct GroupCallScreen {
     /// What the window shows of the tracked call, the box over it among it.
     pub(super) view: Option<CallView>,
-    /// Phase C2h: in-call chat composer (sendGroupCallMessage).
-    pub(super) composer: Entity<TextareaState>,
     /// The call whose window you closed: it stays closed until the call
     /// bar reopens it.
     pub(super) window_closed_by_user: Option<i32>,
     /// The stream you asked to watch and where that stands.
     pub(super) stream_watch: StreamWatch,
-    /// The call the composer's unsent text was typed for: another call
-    /// clears it where a window is at hand (`sync_group_call_composer`).
-    pub(super) composer_call: Option<i32>,
 }
 
 /// A stream join on its way: the call and the task that gives up on it
@@ -338,40 +338,11 @@ impl GroupCallScreen {
         };
     }
 
-    pub(super) fn new(
-        send_key_mode: quill::composer::SendKeyMode,
-        window: &mut Window,
-        cx: &mut Context<QuillApp>,
-    ) -> Self {
-        let submit_on_enter = send_key_mode == quill::composer::SendKeyMode::Enter;
-        let composer = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder(tr(keys::Q_AV_MESSAGE_THE_VOICE_CHAT))
-                .auto_grow(1, 3)
-                .submit_on_enter(submit_on_enter)
-        });
-        cx.subscribe_in(
-            &composer,
-            window,
-            |this, state, event: &InputEvent, window, cx| {
-                if let InputEvent::PressEnter { secondary, shift } = event {
-                    let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
-                    if quill::composer::should_send_on_enter(
-                        quill::composer::enter_event_from_kit(*shift, *secondary, marked),
-                        this.chat_prefs.send_key_mode,
-                    ) {
-                        this.send_group_call_message(window, cx);
-                    }
-                }
-            },
-        )
-        .detach();
+    pub(super) fn new() -> Self {
         Self {
             view: None,
-            composer,
             window_closed_by_user: None,
             stream_watch: StreamWatch::Idle,
-            composer_call: None,
         }
     }
 }
@@ -417,15 +388,34 @@ pub(crate) enum CallBox {
     Settings,
     /// Phase C2f: voice-chat invite picker overlay (contacts list).
     Invite,
-    /// "Share Invite Link" box: asked for (it shows once both links are
-    /// in), its "Users with this link can speak" checkbox, and whether
-    /// the link was just copied.
-    Share {
-        speaker: bool,
-        copied: bool,
-    },
+    /// "Share Invite Link" box: asked for (it shows once both links are in).
+    Share(ShareStage),
     /// A box over the live stream window (`group_call_stream_boxes.rs`).
     Stream(super::group_call_stream_boxes::StreamOverlay),
+}
+
+/// Which invite link the share box offers: its "Users with this link can
+/// speak" checkbox.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ShareLink {
+    Speaker,
+    Listener,
+}
+
+/// The share box's one stage: choosing a link, or the notice that the
+/// chosen link was just copied. Choosing another link leaves the notice.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ShareStage {
+    Choosing(ShareLink),
+    Copied(ShareLink),
+}
+
+impl ShareStage {
+    pub(crate) fn link(self) -> ShareLink {
+        match self {
+            Self::Choosing(link) | Self::Copied(link) => link,
+        }
+    }
 }
 
 impl QuillApp {
@@ -458,7 +448,7 @@ impl QuillApp {
     }
 
     pub(super) fn share_open(&self) -> bool {
-        matches!(self.call_box(), Some(CallBox::Share { .. }))
+        matches!(self.call_box(), Some(CallBox::Share(_)))
     }
 
     pub(super) fn settings_open(&self) -> bool {
@@ -494,27 +484,34 @@ impl QuillApp {
 
     /// The share box's "can speak" checkbox (the speaker link is shown).
     pub(super) fn share_speaker(&self) -> bool {
-        matches!(self.call_box(), Some(CallBox::Share { speaker: true, .. }))
+        matches!(
+            self.call_box(),
+            Some(CallBox::Share(stage)) if stage.link() == ShareLink::Speaker
+        )
     }
 
     pub(super) fn share_copied(&self) -> bool {
-        matches!(self.call_box(), Some(CallBox::Share { copied: true, .. }))
+        matches!(self.call_box(), Some(CallBox::Share(ShareStage::Copied(_))))
     }
 
     pub(super) fn set_share_speaker(&mut self, on: bool) {
         if let Some(view) = self.group_call_screen.view.as_mut()
-            && let CallBox::Share { speaker, copied } = &mut view.open
+            && let CallBox::Share(stage) = &mut view.open
         {
-            *speaker = on;
-            *copied = false;
+            let link = if on {
+                ShareLink::Speaker
+            } else {
+                ShareLink::Listener
+            };
+            *stage = ShareStage::Choosing(link);
         }
     }
 
     pub(super) fn mark_share_copied(&mut self) {
         if let Some(view) = self.group_call_screen.view.as_mut()
-            && let CallBox::Share { copied, .. } = &mut view.open
+            && let CallBox::Share(stage) = &mut view.open
         {
-            *copied = true;
+            *stage = ShareStage::Copied(stage.link());
         }
     }
 }

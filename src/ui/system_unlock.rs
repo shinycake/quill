@@ -5,8 +5,8 @@
 //! so the switch is not offered (docs/decisions/codex-local-passcode.md).
 #![deny(clippy::indexing_slicing)]
 
+use futures_channel::oneshot::{Receiver, channel};
 use quill::lang::{keys, tr};
-use std::sync::mpsc::{Receiver, channel};
 
 #[cfg(target_os = "macos")]
 mod mac {
@@ -47,14 +47,18 @@ mod mac {
         can_evaluate(1)
     }
 
-    pub fn authenticate(reason: &str, done: std::sync::mpsc::Sender<bool>) {
+    pub fn authenticate(reason: &str, done: futures_channel::oneshot::Sender<bool>) {
         let ctx = context();
         let reason = NSString::from_str(reason);
         let keep = ctx.clone();
+        // The block is called once; `Cell::take` hands the sender over.
+        let done = std::cell::Cell::new(Some(done));
         let block = block2::RcBlock::new(move |ok: Bool, _error: *mut NSError| {
             // Keeps the context alive until the reply arrives.
             let _keep = &keep;
-            let _ = done.send(ok.as_bool());
+            if let Some(done) = done.take() {
+                let _ = done.send(ok.as_bool());
+            }
         });
         // SAFETY: documented selector; LocalAuthentication copies the block
         // and calls it once on a private queue.

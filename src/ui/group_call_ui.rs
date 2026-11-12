@@ -127,10 +127,14 @@ impl QuillApp {
             }
             section = section.child(list);
         }
-        if call.are_messages_allowed && call.can_send_messages {
+        let composer = self.call_view().and_then(|view| view.composer.clone());
+        if call.are_messages_allowed
+            && call.can_send_messages
+            && let Some(composer) = composer
+        {
             section = section
                 .child(
-                    Textarea::new(&self.group_call_screen.composer)
+                    Textarea::new(&composer)
                         .aria_label(tr(keys::Q_AV_VOICE_CHAT_MESSAGE))
                         .h(px(40.)),
                 )

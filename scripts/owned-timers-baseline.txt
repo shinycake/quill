@@ -5,15 +5,12 @@ detached:QuillApp::agent_driver_start 1
 detached:QuillApp::bot_username_changed 1
 detached:QuillApp::new_chatbot_draft 1
 detached:QuillApp::show_notification_with_preview 1
-detached:QuillApp::spawn_passcode_tick 1
-detached:QuillApp::spawn_system_unlock_wait 1
 detached:QuillApp::start_update_checks 1
 detached:hide_main_window 1
 detached:run_screenshot_demo 2
 detached:spawn_menu_sync 1
 detached:watch_closed_windows 2
 detached:watch_saver 1
-poll:QuillApp::arm_stream_hide_timer 1
 poll:QuillApp::autoscroll_press 1
 poll:QuillApp::download_update 1
 poll:QuillApp::ensure_live_location_tick 1
@@ -28,7 +25,6 @@ poll:QuillApp::run_passkey_ticker 1
 poll:QuillApp::schedule_draft_commit 1
 poll:QuillApp::schedule_swipe_poll 1
 poll:QuillApp::show_notification_with_preview 1
-poll:QuillApp::spawn_system_unlock_wait 1
 poll:QuillApp::spawn_voice_tick 1
 poll:QuillApp::start_mic_test 1
 poll:QuillApp::start_update_checks 1

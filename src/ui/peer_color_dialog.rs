@@ -28,19 +28,20 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 /// What the box says about its last Apply. Editing a swatch leaves
-/// `Sent` and `Failed`; `Applying` ends only on the answers of the requests
+/// `Applied` and `Failed`; `Applying` ends only on the answers of the requests
 /// it holds (`Session::acks`), so another request's answer never lands here.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ApplyStage {
     Editing,
     /// The requests Apply sent that wait for their answer, and the first
-    /// refusal among those answered. Leaves for `Sent` when all were
+    /// refusal among those answered. Leaves for `Applied` when all were
     /// accepted, `Failed` when one was refused, `Editing` when none went out.
     Applying {
         waiting: Vec<RequestId>,
         refused: Option<String>,
     },
-    Sent,
+    /// Every request was accepted: a finished result, nothing is in flight.
+    Applied,
     Failed(String),
 }
 
@@ -79,7 +80,7 @@ impl ApplyStage {
         }
         *self = match refused.take() {
             Some(why) => Self::Failed(why),
-            None => Self::Sent,
+            None => Self::Applied,
         };
         true
     }
@@ -681,7 +682,7 @@ impl QuillApp {
                 Some((tr(keys::Q_MISC_APPLYING_STYLE).to_string(), false))
             }
             ApplyStage::Failed(error) => Some((error, true)),
-            ApplyStage::Sent => Some((tr(keys::Q_MISC_STYLE_UPDATED).to_string(), false)),
+            ApplyStage::Applied => Some((tr(keys::Q_MISC_STYLE_UPDATED).to_string(), false)),
             ApplyStage::Editing => None,
         };
 

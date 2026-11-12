@@ -20,7 +20,7 @@ use quill::lang::{keys, tr, tr_with};
 use quill::moderation::GroupFlavor;
 use quill::state::{MemberListFilter, SupergroupMembersFetch};
 use quill::telegram::envelope::{MessageSender, ParsedChatMember};
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 
 impl QuillApp {
@@ -217,12 +217,9 @@ impl QuillApp {
             };
             dialog
                 .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body)));
+                    let body = Rc::new(Cell::new(Some(body)));
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
                 }))

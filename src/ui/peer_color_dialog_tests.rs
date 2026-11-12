@@ -1,7 +1,7 @@
 #![cfg(test)]
 #![cfg(feature = "demo-capture")]
 //! The color box's Apply waits for the answers of its own requests
-//! (sweep 11-044, 11-045): it is `Sent` only when every request was
+//! (sweep 11-044, 11-045): it is `Applied` only when every request was
 //! accepted, `Failed` with the refusal when one was not, and another
 //! request's answer never lands in it.
 
@@ -32,7 +32,7 @@ fn applying_ends_sent_only_when_every_request_was_accepted() {
         "2 still waits"
     );
     assert!(stage.settle(&mut answered(2, Answer::Done)));
-    assert_eq!(stage, ApplyStage::Sent);
+    assert_eq!(stage, ApplyStage::Applied);
 }
 
 #[test]
