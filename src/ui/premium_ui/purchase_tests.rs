@@ -128,8 +128,17 @@ fn the_queued_start_does_not_outlive_the_screen(cx: &mut TestAppContext) {
             invoice_slug: String::new(),
         },
     );
-    app.update_in(vcx, |app, window, cx| app.start_premium_payment(window, cx));
-    vcx.run_until_parked();
+    // A demo sends no resolve, so the start a live resolve would queue is
+    // set here, tied to a request.
+    app.update_in(vcx, |app, _, _| {
+        if let Some(hub) = app.hub_mut() {
+            hub.auto_start = Some(quill::premium_hub::PremiumAutoStart {
+                username: "premiumbot".into(),
+                start_ref: "double_limits".into(),
+                request: quill::ids::RequestId(1),
+            });
+        }
+    });
     assert!(hub_state(&app, vcx).1.is_some());
     app.update_in(vcx, |app, window, cx| {
         crate::ui::payments_state::PaymentUi::farewell(app, window, cx)
