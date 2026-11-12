@@ -9,7 +9,7 @@ use crate::ui::app::QuillApp;
 use crate::ui::keybindings::{SIDEBAR_CHORD, bind_keys};
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
-use crate::ui::sidebar_reveal::{LEAVE_GRACE, Peek, SLIDE_DURATION};
+use crate::ui::sidebar_reveal::{LEAVE_GRACE, Peek, SLIDE_DURATION, test_clock};
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
@@ -27,11 +27,12 @@ fn frames(vcx: &mut VisualTestContext) {
 
 /// Wait for a slide to land (the motion runs on the wall clock).
 fn slide(vcx: &mut VisualTestContext) {
-    std::thread::sleep(SLIDE_DURATION + Duration::from_millis(60));
+    test_clock::advance(SLIDE_DURATION + Duration::from_millis(60));
     frames(vcx);
 }
 
 fn open(cx: &mut TestAppContext, width: f32) -> (Entity<QuillApp>, VisualTestContext) {
+    test_clock::pin();
     cx.update(gpui_kit::init);
     cx.update(bind_keys);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
@@ -125,8 +126,9 @@ fn the_left_edge_peeks_the_column_over_the_chat(cx: &mut TestAppContext) {
     app.read_with(vcx, |app, _| {
         assert!(matches!(app.frame.sidebar.pointer(), Peek::Leaving { .. }));
     });
-    std::thread::sleep(LEAVE_GRACE);
-    // The redraw after the grace is a timer on the test clock.
+    // The grace is measured on the column's clock, and the redraw after it
+    // is a timer on the executor's: both are moved by hand.
+    test_clock::advance(LEAVE_GRACE);
     vcx.executor()
         .advance_clock(LEAVE_GRACE + Duration::from_millis(20));
     slide(vcx);

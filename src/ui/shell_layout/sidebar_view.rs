@@ -12,7 +12,7 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// Motion follows the OS reduce-motion preference and the "Interface
 /// animations" power-saving switch.
@@ -39,7 +39,7 @@ impl QuillApp {
         let hidden = !self.frame.sidebar.hidden();
         self.frame
             .sidebar
-            .set_hidden(hidden, animate(), Instant::now());
+            .set_hidden(hidden, animate(), crate::ui::sidebar_reveal::now());
         if hidden {
             self.release_sidebar_focus(window, cx);
         }
@@ -55,7 +55,11 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.frame.sidebar.dismiss(animate(), Instant::now()) {
+        if self
+            .frame
+            .sidebar
+            .dismiss(animate(), crate::ui::sidebar_reveal::now())
+        {
             self.release_sidebar_focus(window, cx);
             cx.notify();
         }
@@ -90,7 +94,7 @@ impl QuillApp {
         window: &Window,
         cx: &mut Context<Self>,
     ) {
-        let now = Instant::now();
+        let now = crate::ui::sidebar_reveal::now();
         if self.sidebar_hideable(layout) {
             let held = self.sidebar_peek_held(window, cx);
             self.frame.sidebar.settle(held, animate(), now);
@@ -107,7 +111,7 @@ impl QuillApp {
         if self
             .frame
             .sidebar
-            .pointer_entered(animate(), Instant::now())
+            .pointer_entered(animate(), crate::ui::sidebar_reveal::now())
         {
             cx.notify();
         }
@@ -116,7 +120,11 @@ impl QuillApp {
     /// The pointer moved over the window outside the peeking column (which
     /// blocks the mouse from what is under it): start the grace period.
     pub(super) fn sidebar_pointer_moved_away(&mut self, cx: &mut Context<Self>) {
-        if !self.frame.sidebar.pointer_left(Instant::now()) {
+        if !self
+            .frame
+            .sidebar
+            .pointer_left(crate::ui::sidebar_reveal::now())
+        {
             return;
         }
         // The wake is held by the `Leaving` stage: dropped with it.
@@ -174,7 +182,7 @@ impl QuillApp {
         }
         let full = layout.list? + self.folder_rail_width();
         let pointer = self.frame.sidebar.pointer();
-        let shown = self.frame.sidebar.peek(Instant::now());
+        let shown = self.frame.sidebar.peek(crate::ui::sidebar_reveal::now());
         if pointer == Peek::Off && shown <= 0. {
             return Some(
                 div()
