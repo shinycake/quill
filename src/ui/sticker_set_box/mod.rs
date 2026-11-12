@@ -254,7 +254,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let still = self.panel_still(item);
-        let reordering = self.sticker_box.reordering;
+        let reordering = self.sticker_box.editing.is_reordering();
         let file_id = item.file_id;
         let cell = div()
             .id(("sticker-set-cell", index as u64))
@@ -426,7 +426,7 @@ impl QuillApp {
                     let set_id = view.set_id;
                     let kind = SetKind::of(is_emoji);
                     let count = stickers.len();
-                    let reordering = this.sticker_box.reordering;
+                    let reordering = this.sticker_box.editing.is_reordering();
                     // Add / Remove / Archive asked, answer not here yet:
                     // the button waits instead of asking twice.
                     let change_working = matches!(view.change, SetChangeStage::Working(_));
