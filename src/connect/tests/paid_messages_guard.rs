@@ -210,3 +210,25 @@ fn the_direct_messages_price_is_fetched_when_unknown() {
     assert_eq!(requests(&f, "getSupergroup").len(), 1);
     cleanup(f);
 }
+
+/// Sweep r4-04: a trusted prices file that cannot be read (here a directory,
+/// so the read fails with something other than "not found") is not "no
+/// file": nothing is written over it and it is read again only after the
+/// wait.
+#[test]
+fn an_unreadable_trust_file_is_not_written_over_and_is_read_after_the_wait() {
+    use crate::paid_messages::TRUST_RETRY_MS;
+    let mut f = fixture();
+    let file = f.1.paths.root.join("paid_trust.json");
+    std::fs::create_dir_all(&file).unwrap();
+    f.1.remember_paid_trust(ChatId(600), 10);
+    assert!(file.is_dir(), "nothing was written over it");
+    let now = crate::state::unix_ms_now();
+    let paid = &f.1.session.payments.paid_messages;
+    assert!(!paid.trust_read_due(now), "not read again before the wait");
+    assert!(paid.trust_read_due(now + TRUST_RETRY_MS));
+    assert!(paid.trust_save_error().is_none(), "no write was tried");
+    f.1.paid_trust_tick(now);
+    assert!(file.is_dir(), "a tick inside the wait changes nothing");
+    cleanup(f);
+}

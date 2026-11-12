@@ -531,7 +531,10 @@ fn a_query_typed_then_a_pan_then_the_fix_is_still_sent() {
     picker.geolocated(GeoOutcome::Found(here), true);
     let (at, query) = picker.venue_query_to_send().expect("still asking");
     assert_eq!(query, "pizza");
-    assert!(at.same_place(&here) || at.same_place(&point(10., 10.)));
+    assert!(
+        at.same_place(&point(10., 10.)),
+        "the query stays where the pan asked it, not at the fix {here:?}"
+    );
 }
 
 /// Sweep r4-04 fix 3: refused, a query typed, then a pan: the query is sent.
@@ -547,4 +550,36 @@ fn a_refusal_then_a_query_then_a_pan_sends_the_query() {
     let (at, query) = picker.venue_query_to_send().expect("sent after the pan");
     assert_eq!((at, query.as_str()), (there, "pizza"));
     assert!(!picker.places_in_area_shown());
+}
+
+/// Sweep r4-04 fix 3: "search this area" asks the settled query, and the
+/// next pan sends nothing by itself.
+#[test]
+fn search_this_area_asks_the_settled_query_and_a_later_pan_sends_nothing() {
+    let mut picker = fresh();
+    picker.geolocated(GeoOutcome::Found(point(48.85, 2.35)), true);
+    picker.venue_query_to_send().expect("nearby");
+    picker.venue_query_requested(RequestId(1));
+    picker.venues_answered(RequestId(1), vec![venue("Near")]);
+    picker.search_changed(Some("pizza".into()));
+    picker.search_debounce_fired();
+    picker.venue_query_to_send().expect("pizza at A");
+    picker.venue_query_requested(RequestId(2));
+    picker.venues_answered(RequestId(2), vec![venue("Slice")]);
+    let b = point(10., 10.);
+    picker.moved_to(crate::location_picker::MapView::new(b, 5));
+    picker.move_ended();
+    assert_eq!(picker.venue_query_to_send(), None, "a pan asks nothing");
+    picker.search_places_in_area();
+    let (at, query) = picker.venue_query_to_send().expect("the button asks");
+    assert_eq!((at, query.as_str()), (b, "pizza"));
+    picker.venue_query_requested(RequestId(3));
+    picker.venues_answered(RequestId(3), vec![venue("Slice B")]);
+    picker.moved_to(crate::location_picker::MapView::new(point(20., 20.), 5));
+    picker.move_ended();
+    assert_eq!(
+        picker.venue_query_to_send(),
+        None,
+        "a further pan sends nothing"
+    );
 }

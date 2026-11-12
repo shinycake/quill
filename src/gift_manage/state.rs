@@ -617,6 +617,13 @@ impl GiftManageState {
         self.collections_fetch.list()
     }
 
+    /// Whether the tabs row is drawn: the owner always has it (for "New"),
+    /// someone else's only when there is a collection to pick or a failed
+    /// fetch to retry.
+    pub fn shows_collection_tabs(&self, mine: bool) -> bool {
+        mine || !self.collections().is_empty() || self.collections_fetch.is_failed()
+    }
+
     pub fn collection(&self, id: i32) -> Option<&GiftCollection> {
         self.collections().iter().find(|c| c.id == id)
     }

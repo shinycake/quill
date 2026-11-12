@@ -518,7 +518,16 @@ impl LocationPicker {
         if self.pin == Pin::RestedAway {
             self.pin = Pin::Resting;
         }
-        self.request_venues(self.view.center(), "");
+        // The settled query is asked around the new center, so the list
+        // keeps matching the field and a later pan has no query to send.
+        let query = self
+            .venues
+            .input
+            .query()
+            .filter(|_| self.venues.input.is_shown())
+            .unwrap_or("")
+            .to_string();
+        self.request_venues(self.view.center(), &query);
     }
 
     /// tdesktop `venuesSearchChanged`: `None` when the search field closed.

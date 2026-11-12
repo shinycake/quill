@@ -18,7 +18,7 @@
 
 use crate::calls::proxy::{EnabledProxy, ProxyKind};
 use crate::ids::RequestId;
-pub use crate::proxy_ops::{FAILED_RETRY_AFTER, ProxyFetch, ProxyListOps};
+pub use crate::proxy_ops::{FAILED_RETRY_AFTER, FAILED_RETRY_MAX, ProxyFetch, ProxyListOps};
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

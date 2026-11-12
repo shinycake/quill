@@ -11,6 +11,17 @@ pub const UNSENT_RETRY_AFTER: Duration = Duration::from_secs(5);
 /// ingest asks again (the box's error line says it failed meanwhile).
 pub const FAILED_RETRY_AFTER: Duration = Duration::from_secs(30);
 
+/// The longest wait between two asks of a `getProxies` that keeps failing.
+pub const FAILED_RETRY_MAX: Duration = Duration::from_secs(15 * 60);
+
+/// The wait after `tries` failed asks in a row: [`FAILED_RETRY_AFTER`],
+/// doubled for each further failure, up to [`FAILED_RETRY_MAX`].
+pub fn failed_retry_after(tries: u8) -> Duration {
+    FAILED_RETRY_AFTER
+        .saturating_mul(1 << tries.saturating_sub(1).min(10))
+        .min(FAILED_RETRY_MAX)
+}
+
 /// Where the proxy list's `getProxies` is.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ProxyFetch {
@@ -23,20 +34,22 @@ pub enum ProxyFetch {
     /// succeeded, dropping any fetch out, whose answer may predate the
     /// change): the authoritative list is asked for again.
     Stale,
-    /// This request is the one whose answer replaces the list.
-    Loading(RequestId),
+    /// This request is the one whose answer replaces the list. `tries` is
+    /// how many asks failed in a row before it (0 for the first).
+    Loading { request: RequestId, tries: u8 },
     /// As `Loading`, for a list that is out of date: if it fails, the list
     /// stays out of date ([`Self::FailedStale`]).
-    LoadingStale(RequestId),
+    LoadingStale { request: RequestId, tries: u8 },
     /// The request's answer was an error at `at`: the box's error line says
-    /// so, and the next ingest after [`FAILED_RETRY_AFTER`] (or the dialog's
-    /// open / Refresh) asks again, so a first list that failed is not lost
-    /// for the session.
-    Failed { at: Instant },
+    /// so, and the next ingest after [`failed_retry_after`] `tries` (or the
+    /// dialog's open / Refresh) asks again, so a first list that failed is
+    /// not lost for the session. `tries` counts the failures in a row, and
+    /// the wait doubles with it up to [`FAILED_RETRY_MAX`].
+    Failed { at: Instant, tries: u8 },
     /// The refetch of a stale list failed at `at`. Retried like `Failed`, but
     /// the held list is still out of date, so the state stays busy and
     /// nothing plans on it.
-    FailedStale { at: Instant },
+    FailedStale { at: Instant, tries: u8 },
     /// The request could not be sent (the client is closing, a native
     /// error) at `at`: the next ingest after [`UNSENT_RETRY_AFTER`] sends
     /// it again, so a background account or a box nobody opens still
@@ -50,7 +63,7 @@ pub enum ProxyFetch {
 
 impl ProxyFetch {
     pub fn loading(self) -> bool {
-        matches!(self, Self::Loading(_) | Self::LoadingStale(_))
+        matches!(self, Self::Loading { .. } | Self::LoadingStale { .. })
     }
 
     /// The list is out of date and no request is on its way for it.
@@ -66,8 +79,8 @@ impl ProxyFetch {
             Self::NotSent { at } | Self::NotSentStale { at } => {
                 now.saturating_duration_since(at) >= UNSENT_RETRY_AFTER
             }
-            Self::Failed { at } | Self::FailedStale { at } => {
-                now.saturating_duration_since(at) >= FAILED_RETRY_AFTER
+            Self::Failed { at, tries } | Self::FailedStale { at, tries } => {
+                now.saturating_duration_since(at) >= failed_retry_after(tries)
             }
             _ => false,
         }
@@ -78,7 +91,7 @@ impl ProxyFetch {
         matches!(
             self,
             Self::Stale
-                | Self::LoadingStale(_)
+                | Self::LoadingStale { .. }
                 | Self::NotSentStale { .. }
                 | Self::FailedStale { .. }
         )
@@ -97,7 +110,22 @@ impl ProxyFetch {
 
     /// `request` is the fetch the list waits for.
     pub fn answers(self, request: RequestId) -> bool {
-        matches!(self, Self::Loading(asked) | Self::LoadingStale(asked) if asked == request)
+        matches!(
+            self,
+            Self::Loading { request: asked, .. } | Self::LoadingStale { request: asked, .. }
+                if asked == request
+        )
+    }
+
+    /// The failures in a row this state carries.
+    fn tries(self) -> u8 {
+        match self {
+            Self::Loading { tries, .. }
+            | Self::LoadingStale { tries, .. }
+            | Self::Failed { tries, .. }
+            | Self::FailedStale { tries, .. } => tries,
+            _ => 0,
+        }
     }
 }
 
@@ -152,7 +180,9 @@ impl ProxyListOps {
     /// The fetch in flight, if one is.
     pub fn fetch_out(&self) -> Option<RequestId> {
         match self.fetch {
-            ProxyFetch::Loading(request) | ProxyFetch::LoadingStale(request) => Some(request),
+            ProxyFetch::Loading { request, .. } | ProxyFetch::LoadingStale { request, .. } => {
+                Some(request)
+            }
             _ => None,
         }
     }
@@ -165,10 +195,11 @@ impl ProxyListOps {
 
     /// `getProxies` went out as `request`.
     pub fn fetch_sent(&mut self, request: RequestId) {
+        let tries = self.fetch.tries();
         self.fetch = if self.fetch.owes_fresh_list() {
-            ProxyFetch::LoadingStale(request)
+            ProxyFetch::LoadingStale { request, tries }
         } else {
-            ProxyFetch::Loading(request)
+            ProxyFetch::Loading { request, tries }
         };
     }
 
@@ -197,10 +228,11 @@ impl ProxyListOps {
     pub fn fetch_failed(&mut self, request: RequestId, now: Instant) -> bool {
         let is_it = self.fetch.answers(request);
         if is_it {
+            let tries = self.fetch.tries().saturating_add(1);
             self.fetch = if self.fetch.owes_fresh_list() {
-                ProxyFetch::FailedStale { at: now }
+                ProxyFetch::FailedStale { at: now, tries }
             } else {
-                ProxyFetch::Failed { at: now }
+                ProxyFetch::Failed { at: now, tries }
             };
         }
         is_it
@@ -259,7 +291,7 @@ mod tests {
         assert!(ops.refetch_due(now + UNSENT_RETRY_AFTER));
         ops.fetch_sent(RequestId(3));
         assert!(ops.fetch_failed(RequestId(3), now));
-        assert_eq!(ops.fetch(), ProxyFetch::FailedStale { at: now });
+        assert_eq!(ops.fetch(), ProxyFetch::FailedStale { at: now, tries: 1 });
         assert!(ops.busy(), "the held list is still out of date");
         assert!(!ops.refetch_due(now + FAILED_RETRY_AFTER / 2));
         assert!(ops.refetch_due(now + FAILED_RETRY_AFTER));
@@ -285,10 +317,38 @@ mod tests {
         let mut first = ProxyListOps::default();
         first.fetch_sent(RequestId(3));
         assert!(first.fetch_failed(RequestId(3), now));
-        assert_eq!(first.fetch(), ProxyFetch::Failed { at: now });
+        assert_eq!(first.fetch(), ProxyFetch::Failed { at: now, tries: 1 });
         assert!(!first.busy());
         assert!(!first.refetch_due(now));
         assert!(first.refetch_due(now + FAILED_RETRY_AFTER));
+    }
+
+    /// Sweep r4-04: a `getProxies` that keeps failing is asked after a
+    /// growing wait, capped, and an answer starts the count over.
+    #[test]
+    fn a_failing_fetch_waits_longer_each_time_up_to_a_cap() {
+        let mut now = Instant::now();
+        let mut ops = ProxyListOps::default();
+        let mut waits = Vec::new();
+        for n in 1..=12u64 {
+            ops.fetch_sent(RequestId(n));
+            assert!(ops.fetch_failed(RequestId(n), now));
+            let wait = failed_retry_after(u8::try_from(n).unwrap_or(u8::MAX));
+            waits.push(wait);
+            assert!(!ops.refetch_due(now + (wait / 2)), "try {n}");
+            assert!(ops.refetch_due(now + wait), "try {n}");
+            now += wait;
+        }
+        assert_eq!(waits[0], FAILED_RETRY_AFTER);
+        assert_eq!(waits[1], FAILED_RETRY_AFTER * 2);
+        assert_eq!(waits[2], FAILED_RETRY_AFTER * 4);
+        assert!(waits.windows(2).all(|pair| pair[0] <= pair[1]));
+        assert_eq!(*waits.last().unwrap_or(&Duration::ZERO), FAILED_RETRY_MAX);
+        ops.fetch_sent(RequestId(99));
+        assert!(ops.fetch_answered(RequestId(99)));
+        ops.fetch_sent(RequestId(100));
+        assert!(ops.fetch_failed(RequestId(100), now));
+        assert_eq!(ops.fetch(), ProxyFetch::Failed { at: now, tries: 1 });
     }
 
     #[test]

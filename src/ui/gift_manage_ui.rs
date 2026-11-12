@@ -276,7 +276,7 @@ pub(super) fn gift_collection_tabs(
 ) -> AnyElement {
     let manage = &session.payments.gifts_manage;
     let busy = session.payments.hub.received.op.is_mutating();
-    if manage.collections().is_empty() && !mine {
+    if !manage.shows_collection_tabs(mine) {
         return div().into_any_element();
     }
     let active = manage.active_collection;

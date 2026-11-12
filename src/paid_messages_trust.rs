@@ -12,9 +12,10 @@ pub enum TrustFile {
     NotLoaded,
     /// The file exists but could not be read (permissions, I/O): nothing is
     /// written over it until a read succeeds, which is tried again at
-    /// `retry_at_ms` (unix milliseconds). Prices agreed to meanwhile are kept
-    /// in memory and join the file's when it is read.
-    LoadFailed { retry_at_ms: u64 },
+    /// `retry_at_ms` (unix milliseconds), after the wait for `tries` failed
+    /// reads in a row. Prices agreed to meanwhile are kept in memory and
+    /// join the file's when it is read.
+    LoadFailed { retry_at_ms: u64, tries: u8 },
     /// Read, and the prices match the file.
     Clean,
     /// The prices changed and are not written yet.
@@ -86,7 +87,7 @@ impl PaidMessages {
     pub fn trust_read_due(&self, now_ms: u64) -> bool {
         match &self.trust_file {
             TrustFile::NotLoaded => true,
-            TrustFile::LoadFailed { retry_at_ms } => now_ms >= *retry_at_ms,
+            TrustFile::LoadFailed { retry_at_ms, .. } => now_ms >= *retry_at_ms,
             _ => false,
         }
     }
@@ -117,8 +118,14 @@ impl PaidMessages {
     /// is, and read again after a wait.
     pub fn trust_load_failed(&mut self, now_ms: u64) {
         if self.trust_read_due(now_ms) {
+            let failed_before = match &self.trust_file {
+                TrustFile::LoadFailed { tries, .. } => *tries,
+                _ => 0,
+            };
+            let tries = failed_before.saturating_add(1);
             self.trust_file = TrustFile::LoadFailed {
-                retry_at_ms: now_ms.saturating_add(TRUST_RETRY_MS),
+                retry_at_ms: now_ms.saturating_add(trust_retry_after(tries)),
+                tries,
             };
         }
     }
@@ -178,5 +185,30 @@ mod tests {
         fresh.trust_loaded(None);
         assert!(!fresh.trust_read_due(u64::MAX));
         assert!(fresh.trust_to_write(u64::MAX).is_none());
+    }
+
+    /// Sweep r4-04: a read that keeps failing is asked after a growing wait,
+    /// capped.
+    #[test]
+    fn a_failing_read_waits_longer_each_time_up_to_a_cap() {
+        let mut state = PaidMessages::default();
+        let mut now = 0u64;
+        let mut waits = Vec::new();
+        for _ in 0..12 {
+            assert!(state.trust_read_due(now));
+            state.trust_load_failed(now);
+            let TrustFile::LoadFailed { retry_at_ms, .. } = state.trust_file else {
+                panic!("read failed");
+            };
+            waits.push(retry_at_ms - now);
+            assert!(!state.trust_read_due(retry_at_ms - 1));
+            assert!(state.trust_read_due(retry_at_ms));
+            now = retry_at_ms;
+        }
+        assert_eq!(waits[0], TRUST_RETRY_MS);
+        assert_eq!(waits[1], TRUST_RETRY_MS * 2);
+        assert_eq!(waits[2], TRUST_RETRY_MS * 4);
+        assert!(waits.windows(2).all(|pair| pair[0] <= pair[1]));
+        assert_eq!(waits.last().copied(), Some(TRUST_RETRY_MAX_MS));
     }
 }

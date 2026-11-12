@@ -60,6 +60,12 @@ impl QuillApp {
                 && let Some(gift) = live.driver.session.payments.marketplace_gift.as_mut()
             {
                 gift.reopen();
+            } else if let Some(gift) = self
+                .demo_session
+                .as_mut()
+                .and_then(|session| session.payments.marketplace_gift.as_mut())
+            {
+                gift.reopen();
             }
         }
         self.payments.marketplace.open_for(chat, running.is_some());

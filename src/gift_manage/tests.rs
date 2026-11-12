@@ -446,3 +446,20 @@ fn a_mutation_answer_without_a_request_frees_the_lock() {
     lock.changed(None);
     assert!(lock.is_stale(), "an answer naming no request frees it too");
 }
+
+/// Sweep r4-04: someone else's gifts whose first collections fetch failed
+/// still show the tabs row, which holds the Retry.
+#[test]
+fn a_failed_first_fetch_of_someone_elses_gifts_keeps_the_retry_row() {
+    use crate::gift_manage::CollectionsFetch;
+    use crate::ids::RequestId;
+    let mut manage = crate::gift_manage::GiftManageState::default();
+    assert!(!manage.shows_collection_tabs(false), "nothing to pick");
+    assert!(manage.shows_collection_tabs(true), "the owner's New");
+    manage.collections_fetch.begin(RequestId(4));
+    manage.collections_fetch.failed(Some(RequestId(4)));
+    assert!(manage.collections_fetch.is_failed());
+    assert!(manage.shows_collection_tabs(false), "the Retry must show");
+    manage.collections_fetch = CollectionsFetch::Ready(vec![collection(1)]);
+    assert!(manage.shows_collection_tabs(false));
+}

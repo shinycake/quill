@@ -43,6 +43,7 @@ mod inline_members;
 mod join_requests;
 mod lost_requests;
 mod main_profile_tab;
+mod marketplace_notice;
 mod masks;
 mod matched_answers;
 mod message_story;
