@@ -949,7 +949,7 @@ mod tests {
                 .filter(|due| *due < arrival);
             at += due.unwrap_or(arrival);
             if next(200) == 0 {
-                active = !active;
+                active.toggle();
             }
             let need = match next(10) {
                 _ if due.is_some() => RedrawNeed::Nothing,

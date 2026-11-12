@@ -70,7 +70,7 @@ fn is_youtube(url: &str) -> bool {
         .next()
         .unwrap_or("")
         .to_ascii_lowercase();
-    let host = host.strip_prefix("www.").unwrap_or(&host);
+    let host = host.trim_prefix("www.");
     host == "youtu.be" || host == "youtube.com" || host.ends_with(".youtube.com")
 }
 

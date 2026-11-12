@@ -43,7 +43,7 @@ pub fn should_send_on_enter(event: EnterEvent, mode: SendKeyMode) -> bool {
 /// otherwise Ctrl+Enter sends a trailing blank line.
 pub fn send_text_on_enter(text: String, mode: SendKeyMode) -> String {
     match mode {
-        SendKeyMode::CtrlEnter => text.strip_suffix('\n').unwrap_or(&text).to_string(),
+        SendKeyMode::CtrlEnter => text.trim_suffix('\n').to_string(),
         SendKeyMode::Enter => text,
     }
 }

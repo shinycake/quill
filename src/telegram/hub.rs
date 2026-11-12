@@ -24,6 +24,7 @@ use crate::diagnostics::{Diagnostic, DiagnosticSink};
 use crate::telegram::client::{OwnedEnvelope, ReceiveBridge, copy_and_parse};
 use crate::telegram::ffi::{MAX_NATIVE_LOG_VERBOSITY, TdJson, TdJsonError};
 use std::collections::HashMap;
+use std::mem::DropGuard;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
@@ -385,18 +386,6 @@ impl Run {
     }
 }
 
-/// Marks the loop dead when it ends for any reason other than a requested
-/// shutdown, including a panic unwind.
-struct StopGuard {
-    run: Arc<Run>,
-}
-
-impl Drop for StopGuard {
-    fn drop(&mut self) {
-        self.run.died();
-    }
-}
-
 static SHARED: Mutex<Option<Arc<TdHub>>> = Mutex::new(None);
 
 /// What the shared slot holds, as far as [`TdHub::shared`] is concerned.
@@ -535,7 +524,9 @@ impl TdHub {
         };
         // The old loop, if any, is gone: this one reports running.
         let run = Run::begin(report);
-        let guard = StopGuard { run: run.clone() };
+        // Marks the loop dead when it ends for any reason other than a
+        // requested shutdown, including a panic unwind.
+        let guard = DropGuard::new(run.clone(), |run| run.died());
         let thread = {
             let routes = routes.clone();
             let seq = seq.clone();

@@ -347,7 +347,7 @@ impl QuillApp {
                 .outline()
                 .small()
                 .on_click(cx.listener(|this, _, _, cx| {
-                    this.spell.dict_manager.open = !this.spell.dict_manager.open;
+                    this.spell.dict_manager.open.toggle();
                     if this.spell.dict_manager.open {
                         this.refresh_installed_dictionaries();
                     }

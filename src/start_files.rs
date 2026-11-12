@@ -120,7 +120,7 @@ fn resolve_file(arg: &str, cwd: &Path) -> Option<PathBuf> {
 
 /// The path of a `file://` URL body (`/home/a%20b`, `localhost/C:/x`).
 fn file_url_path(rest: &str) -> Option<PathBuf> {
-    let rest = rest.strip_prefix("localhost").unwrap_or(rest);
+    let rest = rest.trim_prefix("localhost");
     let decoded = percent_decode(rest)?;
     // `/C:/Users/a` names `C:\Users\a` on Windows.
     let bytes = decoded.as_bytes();

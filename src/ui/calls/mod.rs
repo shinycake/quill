@@ -124,7 +124,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|session| session.calls.active_call.as_mut())
         {
-            call.muted = !call.muted;
+            call.muted.toggle();
         }
         cx.notify();
     }

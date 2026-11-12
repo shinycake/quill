@@ -343,7 +343,7 @@ impl QuillApp {
         if let Some(draft) = self.share.forward.draft_mut()
             && draft.send_copy
         {
-            draft.remove_caption = !draft.remove_caption;
+            draft.remove_caption.toggle();
         }
         cx.notify();
     }

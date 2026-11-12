@@ -50,7 +50,7 @@ impl StoryUserPause {
     }
 
     pub fn toggle(&mut self) {
-        self.toggled = !self.toggled;
+        self.toggled.toggle();
     }
 
     pub fn reset(&mut self) {

@@ -105,9 +105,17 @@ the `=` pinned crates. Updates there are deliberate and visually verified.
   `scripts/build-tgcalls.sh` to the ones tdesktop's `dev` uses, check that
   Quill's patches in `native/quill-calls/patches` still apply, and run the
   quill-calls workflow (docs/decisions/tgcalls-engine.md).
-- **Rust toolchain**: `rust-toolchain.toml`, fix new clippy lints, gate.
+- **Rust toolchain**: `rust-toolchain.toml`, the `toolchain:` lines in `.github/workflows/*.yml`,
+  `docs/build.md` and the README. The MSRV (`rust-version` in every Cargo.toml) follows the
+  pin. Read the release notes for std APIs, lints and Cargo features worth adopting, fix new
+  clippy lints, gate.
 - **GitHub Actions**: bump the `uses:` ref; for SHA-pinned actions update the SHA and
   its `# vN` comment together. Run `actionlint`.
+
+**Cooldown.** `.cargo/config.toml` sets `registry.global-min-publish-age = "3 days"`: the
+resolver skips crate versions younger than that unless they are already in `Cargo.lock`. A
+watch issue can name a version that `cargo update` will not take yet; wait, or take it on
+purpose with `CARGO_RESOLVER_INCOMPATIBLE_PUBLISH_AGE=allow cargo update -p <crate>`.
 
 Every dependency PR: gate (`GATE OK`), one decision doc line on how it was verified,
 and close the watch issue with the PR (`Closes #N`) if the watch has not already.

@@ -675,7 +675,7 @@ impl QuillApp {
                             .checked(above)
                             .on_click(cx.listener(|this, _, _, cx| {
                                 if let Some(edit) = this.chat_ui.pending_edit_mut() {
-                                    edit.caption_above = !edit.caption_above;
+                                    edit.caption_above.toggle();
                                 }
                                 cx.notify();
                             })),

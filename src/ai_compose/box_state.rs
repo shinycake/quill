@@ -221,7 +221,7 @@ impl AiComposeBox {
     }
 
     pub fn toggle_original_expanded(&mut self) {
-        self.original_expanded = !self.original_expanded;
+        self.original_expanded.toggle();
     }
 
     /// The request `AiSend` described went out as `request`: the card waits

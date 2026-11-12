@@ -3,3 +3,12 @@
 # (compiled into quill.exe by build.rs) use the static runtime too; see docs/decisions/codex-release-pipeline.md.
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-feature=+crt-static"]
+
+# Dependency cooldown (Rust 1.100): `cargo update` and new dependencies only
+# pick crate versions published at least 3 days ago, so a hijacked or broken
+# release has time to be yanked before it reaches Quill. Versions already in
+# Cargo.lock are unaffected. To take a fresh release on purpose (a security
+# fix, a same-day GPUI Kit bump), run the update with
+# CARGO_RESOLVER_INCOMPATIBLE_PUBLISH_AGE=allow. See docs/dependency-updates.md.
+[registry]
+global-min-publish-age = "3 days"

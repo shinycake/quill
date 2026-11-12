@@ -437,7 +437,7 @@ impl QuillApp {
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
                             if let Some(dialog) = this.admin.member_dialog.as_mut() {
-                                dialog.add_open = !dialog.add_open;
+                                dialog.add_open.toggle();
                                 cx.notify();
                             }
                             this.close_kit_dialog_if_done(DialogKind::Member, window, cx);

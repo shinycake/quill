@@ -129,7 +129,7 @@ pub fn user_name(user: &Value) -> String {
 
 /// `messageVoiceNote` → `voice_note`.
 fn kind_of(content_type: &str) -> String {
-    let bare = content_type.strip_prefix("message").unwrap_or(content_type);
+    let bare = content_type.trim_prefix("message");
     let mut kind = String::new();
     for (i, c) in bare.chars().enumerate() {
         if c.is_ascii_uppercase() {

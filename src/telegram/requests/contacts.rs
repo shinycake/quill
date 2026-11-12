@@ -152,7 +152,7 @@ pub fn parse_vcard(text: &str) -> (Vec<ImportedContact>, usize, usize) {
     // line (the continuation whitespace is dropped).
     let mut lines: Vec<String> = Vec::new();
     for raw in text.lines() {
-        let line = raw.strip_suffix('\r').unwrap_or(raw);
+        let line = raw.trim_suffix('\r');
         let continuation = line.starts_with(' ') || line.starts_with('\t');
         match lines.last_mut() {
             Some(prev) if continuation => {
@@ -289,7 +289,7 @@ fn parse_vcard_block(props: &[(String, Vec<String>, String)]) -> Vec<ImportedCon
                     // (`TEL;TYPE=CELL:…`); types may be comma-separated.
                     let mut types: Vec<String> = Vec::new();
                     for param in params {
-                        let param = param.strip_prefix("TYPE=").unwrap_or(param);
+                        let param = param.trim_prefix("TYPE=");
                         types.extend(param.split(',').map(str::to_string));
                     }
                     tels.push((types, phone));
