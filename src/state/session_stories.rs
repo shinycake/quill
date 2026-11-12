@@ -172,7 +172,7 @@ impl Session {
             && state.chat_id == chat_id
             && state.story_id == story_id
         {
-            state.page = PageFetch::Loading(Some(request));
+            state.page = PageFetch::Loading { request };
         }
     }
 

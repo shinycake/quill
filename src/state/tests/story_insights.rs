@@ -167,7 +167,7 @@ fn statistics_answers_of_another_request_change_nothing() {
         ),
     );
     let state = session.stories.insights.as_ref().unwrap();
-    assert_eq!(state.statistics, StoryStatsFetch::Loading(Some(current)));
+    assert_eq!(state.statistics, StoryStatsFetch::Loading { request: current });
 }
 
 #[test]
@@ -199,7 +199,6 @@ fn found_stories_fill_the_cache_and_page() {
     assert!(!search.page.is_loading());
     assert!(session.stories.stories.contains_key(&(22, 2)));
 
-    session.story_search_page_requested();
     let extra = session.request(RequestPurpose::SearchPublicStories, None);
     session.story_search_sent(extra);
     apply_json(

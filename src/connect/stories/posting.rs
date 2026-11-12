@@ -157,8 +157,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             .as_ref()
             .filter(|state| state.chat_id == chat_id.0 && state.story_id == story_id)
         {
-            Some(state) => matches!(state.page, crate::state::PageFetch::Loading(Some(id))
-                if self.session.requests.get(id).is_some()),
+            Some(state) => matches!(state.page, crate::state::PageFetch::Loading { request }
+                if self.session.requests.get(request).is_some()),
             None => self.session.requests.has_purpose_for_story(
                 RequestPurpose::GetStoryInteractions,
                 chat_id,

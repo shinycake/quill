@@ -100,7 +100,10 @@ fn async_graph_loads_once_and_lands_by_request() {
     assert_eq!(sent["token"], "tok");
     assert_eq!(sent["x"], 0);
     let stats = &rig.driver.session.groups.stats;
-    assert_eq!(stats.graph(-100, "tok", 0), Some(&GraphFetch::Loading));
+    assert!(matches!(
+        stats.graph(-100, "tok", 0),
+        Some(GraphFetch::Loading { .. })
+    ));
     // In flight: nothing new goes out.
     assert!(
         rig.driver
@@ -183,7 +186,7 @@ fn message_statistics_open_the_page_and_page_through_forwards() {
     let state = stats.message_for(-100, 42 << 20).expect("tracked");
     assert!(matches!(
         state.statistics,
-        MessageStatsFetch::Loading(Some(_))
+        MessageStatsFetch::Loading { .. }
     ));
     assert!(state.forwards.loading());
 
@@ -249,7 +252,7 @@ fn a_failed_message_statistics_load_is_shown_and_retried() {
     let state = rig.driver.session.groups.stats.message.as_ref().unwrap();
     assert!(matches!(
         state.statistics,
-        MessageStatsFetch::Loading(Some(_))
+        MessageStatsFetch::Loading { .. }
     ));
     // A late answer for another post is dropped.
     let other = rig.driver.session.request(
@@ -269,7 +272,7 @@ fn a_failed_message_statistics_load_is_shown_and_retried() {
     assert_eq!(state.message_id, 7);
     assert!(matches!(
         state.statistics,
-        MessageStatsFetch::Loading(Some(_))
+        MessageStatsFetch::Loading { .. }
     ));
 }
 
@@ -603,6 +606,58 @@ fn reopening_a_post_whose_statistics_are_out_asks_for_its_forwards_again() {
         .message_for(-100, a.0)
         .unwrap();
     assert_eq!(state.forwards.items().len(), 2);
+}
+
+/// r3-06 09-016: back on post A while A's statistics request is still out,
+/// the page waits under that request, so its answer fills the page instead
+/// of spinning until the panel is reopened.
+#[test]
+fn returning_to_a_post_adopts_its_statistics_request_in_flight() {
+    let mut rig = Rig::new();
+    let (a, b) = (MessageId(42 << 20), MessageId(43 << 20));
+    let in_flight = rig
+        .driver
+        .fetch_message_statistics(ChatId(-100), a, true)
+        .unwrap()
+        .unwrap();
+    rig.driver
+        .fetch_message_statistics(ChatId(-100), b, true)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        rig.driver
+            .fetch_message_statistics(ChatId(-100), a, true)
+            .unwrap(),
+        None,
+        "A's request is still out: nothing new is sent"
+    );
+    let state = rig
+        .driver
+        .session
+        .groups
+        .stats
+        .message_for(-100, a.0)
+        .unwrap();
+    assert_eq!(
+        state.statistics,
+        MessageStatsFetch::Loading {
+            request: in_flight
+        }
+    );
+    rig.answer(
+        in_flight,
+        &format!(
+            r#"{{"@type":"messageStatistics","message_interaction_graph":{GRAPH},"message_reaction_graph":{{"@type":"statisticalGraphAsync","token":"later"}}}}"#
+        ),
+    );
+    let state = rig
+        .driver
+        .session
+        .groups
+        .stats
+        .message_for(-100, a.0)
+        .unwrap();
+    assert!(matches!(state.statistics, MessageStatsFetch::Loaded(_)));
 }
 
 /// A chat whose statistics TDLib will not give ends in an error the panel

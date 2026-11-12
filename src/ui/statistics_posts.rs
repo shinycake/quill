@@ -448,7 +448,7 @@ impl QuillApp {
         }
         page = page.child(overview_grid(cells));
         match state.map(|s| &s.statistics) {
-            None | Some(MessageStatsFetch::Loading(_)) => {
+            None | Some(MessageStatsFetch::Idle | MessageStatsFetch::Loading { .. }) => {
                 page = page.child(loading_line(tr(keys::Q_MONEY_LOADING_STATISTICS)));
             }
             Some(MessageStatsFetch::Failed(message)) => {
@@ -647,7 +647,7 @@ impl QuillApp {
                 .into_any_element();
         };
         match &state.statistics {
-            StoryStatsFetch::Loading(_) => {
+            StoryStatsFetch::Idle | StoryStatsFetch::Loading { .. } => {
                 page = page.child(loading_line(tr(keys::Q_MONEY_LOADING_STATISTICS)))
             }
             StoryStatsFetch::Failed(message) => {

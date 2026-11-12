@@ -33,31 +33,32 @@ pub struct GraphKey {
 /// Fetch state of one `getStatisticalGraph` answer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GraphFetch {
-    Loading,
+    /// `request` is out; only its answer or error moves the graph.
+    Loading {
+        request: RequestId,
+    },
     Loaded(StatisticalGraph),
     Failed(String),
 }
 
 /// Fetch state of a `getMessageStatistics` answer. Only the answer or the
 /// error of the request it waits for moves it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum MessageStatsFetch {
-    /// The request waited for; `None` until it is sent.
-    Loading(Option<RequestId>),
+    /// No request is out: the page was just opened and the driver sends one
+    /// (or adopts the one in flight) in the same call.
+    #[default]
+    Idle,
+    /// The request waited for.
+    Loading { request: RequestId },
     Loaded(MessageStatisticsView),
     Failed(String),
-}
-
-impl Default for MessageStatsFetch {
-    fn default() -> Self {
-        Self::Loading(None)
-    }
 }
 
 impl MessageStatsFetch {
     /// Whether `request` is the one this fetch waits for.
     pub(crate) fn waits_for(&self, request: Option<RequestId>) -> bool {
-        matches!((self, request), (Self::Loading(Some(waiting)), Some(id)) if *waiting == id)
+        matches!((self, request), (Self::Loading { request: waiting }, Some(id)) if *waiting == id)
     }
 }
 
@@ -195,7 +196,6 @@ pub struct StatsState {
     /// The page the panel shows, keyed by chat.
     pages: HashMap<i64, StatsPage>,
     pub graphs: HashMap<GraphKey, GraphFetch>,
-    graph_requests: HashMap<RequestId, GraphKey>,
     /// Graphs zoomed into one day: graph token → the zoom point.
     pub zoomed: HashMap<String, i64>,
     /// The post whose statistics are open (one at a time).
@@ -256,8 +256,15 @@ impl StatsState {
 
     /// Record a sent `getStatisticalGraph`.
     pub(crate) fn graph_requested(&mut self, extra: RequestId, key: GraphKey) {
-        self.graphs.insert(key.clone(), GraphFetch::Loading);
-        self.graph_requests.insert(extra, key);
+        self.graphs
+            .insert(key, GraphFetch::Loading { request: extra });
+    }
+
+    /// The graph `request` is loading, if a later request has not replaced it.
+    fn graph_loading(&mut self, request: RequestId) -> Option<&mut GraphFetch> {
+        self.graphs
+            .values_mut()
+            .find(|fetch| matches!(fetch, GraphFetch::Loading { request: asked } if *asked == request))
     }
 
     /// A request that could not be sent: the graph shows the failure with
@@ -267,14 +274,14 @@ impl StatsState {
     }
 
     pub(crate) fn accept_graph(&mut self, extra: RequestId, graph: StatisticalGraph) {
-        if let Some(key) = self.graph_requests.remove(&extra) {
-            self.graphs.insert(key, GraphFetch::Loaded(graph));
+        if let Some(fetch) = self.graph_loading(extra) {
+            *fetch = GraphFetch::Loaded(graph);
         }
     }
 
     pub(crate) fn fail_graph(&mut self, extra: RequestId, message: String) {
-        if let Some(key) = self.graph_requests.remove(&extra) {
-            self.graphs.insert(key, GraphFetch::Failed(message));
+        if let Some(fetch) = self.graph_loading(extra) {
+            *fetch = GraphFetch::Failed(message);
         }
     }
 
@@ -390,7 +397,7 @@ impl StatsState {
         request: RequestId,
     ) {
         if let Some(state) = self.message_mut(chat_id, message_id) {
-            state.statistics = MessageStatsFetch::Loading(Some(request));
+            state.statistics = MessageStatsFetch::Loading { request };
         }
     }
 
