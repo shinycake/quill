@@ -63,12 +63,17 @@ fn a_close_friends_list_arriving_under_the_open_panel_shows_without_other_input(
     wake(vcx);
     vcx.update(|window, cx| window.draw(cx).clear(cx));
     let drawn = crate::ui::frame_clock::take_slice_renders();
-    let stage = app.read_with(vcx, |app, _| app.stories.viewer_ui().close_friends().clone());
+    let stage = app.read_with(vcx, |app, _| {
+        app.stories.viewer_ui().close_friends().clone()
+    });
     assert!(
         stage.edit().is_some_and(|edit| edit.contains(4)),
         "the next wake moved the stage"
     );
-    assert!(drawn.contains_key("story"), "and redrew the panel: {drawn:?}");
+    assert!(
+        drawn.contains_key("story"),
+        "and redrew the panel: {drawn:?}"
+    );
     wake(vcx);
     assert!(
         !running(&app, vcx),

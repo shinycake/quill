@@ -317,15 +317,15 @@ fn a_set_video_pick_goes_with_its_window(cx: &mut TestAppContext) {
         app.sticker_box.editing = crate::ui::sticker_set_box::state::SetEditing::Waiting(
             crate::ui::sticker_set_box::state::PickWait::Downloaded {
                 pending: PendingVideo {
-                pick: PickExisting {
-                    set_id: 78,
-                    kind: quill::sticker_set_box::SetKind::Stickers,
-                    adapt: false,
-                },
-                file_id: quill::ids::FileId(9_001),
-                file: PickedFile::Video,
-                emoji: None,
-                window: Some(OTHER),
+                    pick: PickExisting {
+                        set_id: 78,
+                        kind: quill::sticker_set_box::SetKind::Stickers,
+                        adapt: false,
+                    },
+                    file_id: quill::ids::FileId(9_001),
+                    file: PickedFile::Video,
+                    emoji: None,
+                    window: Some(OTHER),
                 },
                 path: String::new(),
             },

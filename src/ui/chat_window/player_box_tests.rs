@@ -209,15 +209,15 @@ fn a_closed_boxs_video_pick_opens_no_editor(cx: &mut TestAppContext) {
         app.sticker_box.editing = crate::ui::sticker_set_box::state::SetEditing::Waiting(
             crate::ui::sticker_set_box::state::PickWait::Downloaded {
                 pending: PendingVideo {
-                pick: PickExisting {
-                    set_id: 78,
-                    kind: SetKind::Stickers,
-                    adapt: false,
-                },
-                file_id: quill::ids::FileId(5),
-                file: PickedFile::Video,
-                emoji: None,
-                window: None,
+                    pick: PickExisting {
+                        set_id: 78,
+                        kind: SetKind::Stickers,
+                        adapt: false,
+                    },
+                    file_id: quill::ids::FileId(5),
+                    file: PickedFile::Video,
+                    emoji: None,
+                    window: None,
                 },
                 path: String::new(),
             },
