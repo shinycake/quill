@@ -764,7 +764,7 @@ fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
     assert!(driver.session.settings.sessions_op.is_mutating());
     assert_eq!(
         driver.session.settings.device_login,
-        crate::state::DeviceLogin::InFlight(request)
+        crate::state::DeviceLogin::Idle
     );
     driver
         .ingest(response(
@@ -780,6 +780,16 @@ fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
         }
     );
     assert!(!driver.session.settings.sessions_op.is_mutating());
+    // The screen that asked went away: nobody takes the answer.
+    driver.session.settings.device_login.discard();
+    assert_eq!(
+        driver
+            .session
+            .settings
+            .device_login
+            .take_result_for(request),
+        None
+    );
     assert!(
         recorder.snapshot()[sent..]
             .iter()
@@ -944,5 +954,65 @@ fn an_account_ttl_write_goes_out_while_the_read_is_in_flight_but_not_beside_anot
     assert_invalid(driver.set_account_ttl(365));
     assert_invalid(driver.delete_account("", ""));
     assert_eq!(recorder.snapshot().len(), sent + 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_explicit_sessions_refresh_asks_again_and_leaves_one_in_flight_alone() {
+    let (dir, mut driver, recorder, _sink, _dyn_sink, _seq) = sessions_driver();
+    driver.session.settings.sessions = crate::state::fetch::Fetch::Ready(vec![]);
+    driver
+        .refresh_active_sessions()
+        .expect("send")
+        .expect("the held list is dropped and asked for again");
+    assert!(driver.session.settings.sessions.is_loading());
+    let sent = recorder.snapshot().len();
+    assert!(driver.refresh_active_sessions().expect("dedupe").is_none());
+    assert_eq!(recorder.snapshot().len(), sent, "nothing more went out");
+    assert!(
+        driver.session.settings.sessions.is_loading(),
+        "the request in flight keeps its stage"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_exceptions_list_that_cannot_be_sent_fails_instead_of_being_asked_every_frame() {
+    use crate::telegram::envelope::NotificationSettingsScope;
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let sender = Arc::new(RefuseNetworkSender {
+        refuse: "getChatNotificationSettingsExceptions",
+        sent: Mutex::new(Vec::new()),
+    });
+    let mut driver = ConnectDriver::new(
+        Session::new(AccountKey::primary(), sink.clone()),
+        sender.clone(),
+        test_credentials(),
+        prepared,
+    );
+    let seq = AtomicU64::new(0);
+    driver
+        .ingest(
+            copy_and_parse(
+                r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let scope = NotificationSettingsScope::GroupChats;
+    let before = sender.sent.lock().expect("sent").len();
+    assert!(driver.maybe_fetch_notification_exceptions(scope).is_err());
+    let list = driver.session.settings.notification_exceptions.get(&scope);
+    assert!(
+        list.is_some_and(|list| list.error().is_some()),
+        "the list is failed, with a Retry to draw"
+    );
+    // The next look from the page asks nothing.
+    assert!(driver.maybe_fetch_notification_exceptions(scope).is_ok());
+    assert_eq!(sender.sent.lock().expect("sent").len(), before);
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -35,7 +35,9 @@ impl PollDialog {
             self.allow_adding_options = false;
             self.allows_revoting = false;
         } else {
-            self.quiz_correct_rows.clear();
+            for option in &mut self.options {
+                option.correct = false;
+            }
         }
     }
 
@@ -43,7 +45,14 @@ impl PollDialog {
     pub(crate) fn set_multiple(&mut self, on: bool) {
         self.allows_multiple_answers = on;
         if !on {
-            self.quiz_correct_rows.truncate(1);
+            // One right answer stays: the first marked row.
+            let mut kept = false;
+            for option in &mut self.options {
+                if option.correct && kept {
+                    option.correct = false;
+                }
+                kept |= option.correct;
+            }
         }
     }
 
@@ -63,31 +72,25 @@ impl PollDialog {
 
     /// Mark or unmark option `row` as a right answer.
     pub(crate) fn set_correct_row(&mut self, row: usize, on: bool) {
-        if !on {
-            self.quiz_correct_rows.retain(|marked| *marked != row);
-        } else if self.allows_multiple_answers {
-            if !self.quiz_correct_rows.contains(&row) {
-                self.quiz_correct_rows.push(row);
+        if on && !self.allows_multiple_answers {
+            for other in &mut self.options {
+                other.correct = false;
             }
-        } else {
-            self.quiz_correct_rows = vec![row];
+        }
+        if let Some(option) = self.options.get_mut(row) {
+            option.correct = on;
         }
     }
 
-    /// A row left the list: the marks after it move up with their options.
-    pub(crate) fn forget_correct_row(&mut self, removed: usize) {
-        self.quiz_correct_rows = self
-            .quiz_correct_rows
+    /// The rows marked as right answers, by index.
+    #[cfg(test)]
+    pub(crate) fn correct_rows(&self) -> Vec<usize> {
+        self.options
             .iter()
-            .filter(|marked| **marked != removed)
-            .map(|marked| {
-                if *marked > removed {
-                    marked - 1
-                } else {
-                    *marked
-                }
-            })
-            .collect();
+            .enumerate()
+            .filter(|(_, row)| row.correct)
+            .map(|(index, _)| index)
+            .collect()
     }
 }
 
@@ -223,12 +226,12 @@ impl QuillApp {
             "poll-toggle-duration",
             tr(keys::POLLS_CREATE_LIMIT_DURATION),
             tr(keys::POLLS_CREATE_LIMIT_DURATION_ABOUT),
-            dialog.limit_duration,
+            dialog.limit_duration(),
             false,
-            |dialog, on| dialog.limit_duration = on,
+            |dialog, on| dialog.set_limit_duration(on),
             cx,
         ));
-        if dialog.limit_duration {
+        if dialog.limit_duration() {
             section = section
                 .child(self.poll_ends_row(cx))
                 .child(self.poll_switch_row(
@@ -260,7 +263,7 @@ impl QuillApp {
             .chat_ui
             .poll_dialog
             .as_ref()
-            .map(|dialog| dialog.close)
+            .and_then(|dialog| dialog.close())
             .unwrap_or(PollClose::Period(quill::poll::POLL_DEFAULT_PERIOD_SECS));
         let ends = crate::ui::message_text::format_unix_date_time(
             close.ends_at(quill::local_time::now_unix()),
@@ -295,7 +298,7 @@ impl QuillApp {
                         .on_click(move |_, _, cx| {
                             let _ = owner.update(cx, |this, cx| {
                                 if let Some(dialog) = this.chat_ui.poll_dialog.as_mut() {
-                                    dialog.close = PollClose::Period(secs);
+                                    dialog.set_close(PollClose::Period(secs));
                                 }
                                 cx.notify();
                             });
@@ -321,23 +324,15 @@ impl QuillApp {
     /// forgets the chosen countries.
     fn poll_country_limit(&self, cx: &mut Context<Self>) -> AnyElement {
         let dialog = self.chat_ui.poll_dialog.as_ref();
-        let on = dialog.is_some_and(|dialog| dialog.limit_by_country);
-        let codes = dialog.map(|dialog| dialog.country_codes.clone());
+        let on = dialog.is_some_and(|dialog| dialog.limit_by_country());
+        let codes = dialog.map(|dialog| dialog.country_codes().to_vec());
         let mut block = div().flex().flex_col().gap_2().child(self.poll_switch_row(
             "poll-toggle-country",
             tr(keys::POLLS_CREATE_LIMIT_BY_COUNTRY),
             tr(keys::POLLS_CREATE_LIMIT_BY_COUNTRY_ABOUT),
             on,
             false,
-            |dialog, on| {
-                dialog.limit_by_country = on;
-                if !on {
-                    dialog.country_codes.clear();
-                    if dialog.country_box().is_some() {
-                        dialog.show_form();
-                    }
-                }
-            },
+            |dialog, on| dialog.set_limit_by_country(on),
             cx,
         ));
         if on {

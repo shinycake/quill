@@ -36,13 +36,18 @@ struct Ivars {
 impl Ivars {
     fn answer(&self, outcome: GeoOutcome) {
         self.prompt_open.store(false, Ordering::SeqCst);
-        if let Some(answer) = self.answer.borrow_mut().take() {
+        if let Some(answer) = self
+            .answer
+            .try_borrow_mut()
+            .ok()
+            .and_then(|mut slot| slot.take())
+        {
             let _ = answer.send(outcome);
         }
     }
 
     fn waiting(&self) -> bool {
-        self.answer.borrow().is_some()
+        self.answer.try_borrow().is_ok_and(|slot| slot.is_some())
     }
 }
 
@@ -185,39 +190,49 @@ pub(super) fn locate(prompt_open: &Arc<AtomicBool>) -> Receiver<GeoOutcome> {
         manager.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
     }
     delegate.authorization_changed(&manager);
-    RUNNING.with(|running| {
-        if let Some(old) = running.borrow_mut().replace(Running {
-            manager,
-            _delegate: delegate,
-            lookup: prompt_open.clone(),
-        }) {
-            // SAFETY: detach and stop the replaced lookup on its thread.
-            unsafe {
-                old.manager.setDelegate(None);
-                old.manager.stopUpdatingLocation();
-            }
-        }
+    // The replaced lookup leaves the cell first: the native calls below run
+    // with no borrow held.
+    let replaced = RUNNING.with(|running| {
+        running.try_borrow_mut().ok().and_then(|mut running| {
+            running.replace(Running {
+                manager,
+                _delegate: delegate,
+                lookup: prompt_open.clone(),
+            })
+        })
     });
+    if let Some(old) = replaced {
+        stop(old);
+    }
     receiver
 }
 
 /// The lookup identified by `lookup` was dropped: stop its manager, unless a
 /// newer lookup has replaced it. Needs the thread that made the manager.
 pub(super) fn cancel(lookup: &Arc<AtomicBool>) {
-    RUNNING.with(|running| {
-        let mut running = running.borrow_mut();
+    let current = RUNNING.with(|running| {
+        let mut running = running.try_borrow_mut().ok()?;
         if running
             .as_ref()
             .is_some_and(|current| Arc::ptr_eq(&current.lookup, lookup))
-            && let Some(old) = running.take()
         {
-            // SAFETY: detach and stop on the thread that made the manager.
-            unsafe {
-                old.manager.setDelegate(None);
-                old.manager.stopUpdatingLocation();
-            }
+            running.take()
+        } else {
+            None
         }
     });
+    if let Some(old) = current {
+        stop(old);
+    }
+}
+
+/// Detach and stop a lookup that already left `RUNNING`.
+fn stop(old: Running) {
+    // SAFETY: detach and stop on the thread that made the manager.
+    unsafe {
+        old.manager.setDelegate(None);
+        old.manager.stopUpdatingLocation();
+    }
 }
 
 /// `CLGeocoder` is deprecated for MapKit's `MKReverseGeocodingRequest`,
@@ -254,7 +269,11 @@ pub(super) fn reverse_geocode(point: GeoPoint) -> Option<Receiver<Option<String>
                         ])
                     }
                 });
-                if let Some((answer, _geocoder)) = pending.borrow_mut().take() {
+                if let Some((answer, _geocoder)) = pending
+                    .try_borrow_mut()
+                    .ok()
+                    .and_then(|mut slot| slot.take())
+                {
                     let _ = answer.send(address);
                 }
             });

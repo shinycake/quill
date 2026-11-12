@@ -339,6 +339,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         refresh: bool,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
+            // A refresh that cannot go leaves the panel failed, with Retry:
+            // left `Loaded` in the other theme, the poll would ask again
+            // every pass.
+            if refresh {
+                self.fail_chat_statistics(chat_id, keys::Q_MONEY_STATISTICS_SEND_FAILED);
+            }
             return Err(ConnectSendError::InvalidRequest);
         }
         let supergroup_id = self
@@ -384,20 +390,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         let held = self.session.groups.chat_statistics.get(&chat_id.0);
         if matches!(held, Some(ChatStatisticsFetch::Loading { .. }))
             || (!refresh && matches!(held, Some(ChatStatisticsFetch::Loaded { .. })))
-            || self
-                .session
-                .requests
-                .has_purpose_for_chat(RequestPurpose::GetChatStatistics, chat_id)
         {
             return Ok(None);
         }
-        self.session
-            .groups
-            .chat_statistics
-            .insert(chat_id.0, ChatStatisticsFetch::Loading { is_dark });
         let extra = self
             .session
             .request(RequestPurpose::GetChatStatistics, Some(chat_id));
+        self.session.groups.chat_statistics.insert(
+            chat_id.0,
+            ChatStatisticsFetch::Loading {
+                request: extra,
+                is_dark,
+            },
+        );
         if let Err(err) = self
             .sender
             .send_json(&get_chat_statistics(extra, chat_id.0, is_dark))
@@ -522,8 +527,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         if previews.len() >= 8 {
             previews.clear();
         }
-        previews.entry(chat_id).or_default().begin();
         let extra = self.session.request(purpose, Some(chat_id));
+        let preview = self
+            .session
+            .chat_list
+            .chat_preview_fetch
+            .entry(chat_id)
+            .or_default();
+        preview.begin();
+        preview.sent(extra);
         if let Err(err) = self.sender.send_json(&get_chat_history(
             extra,
             chat_id,

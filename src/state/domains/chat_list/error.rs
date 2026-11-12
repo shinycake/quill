@@ -12,6 +12,7 @@ impl Session {
         _extra: Option<RequestId>,
         _seq: u64,
     ) {
+        let pending_id = pending.map(|p| p.id);
         // Pins over the limit open the Premium limit box (tdesktop `PinsLimitBox`).
         let pins_box = matches!(
             pending.map(|p| p.purpose),
@@ -57,7 +58,7 @@ impl Session {
                     .folder_chats_to_leave
                     .entry(folder_id)
                     .or_default()
-                    .fail(error_reason(err));
+                    .failed(pending_id, error_reason(err), false);
             }
             Some((RequestPurpose::GetChatsForFolderInviteLink, Some(folder_id))) => {
                 self.chat_list
@@ -65,7 +66,7 @@ impl Session {
                     .entry(folder_id)
                     .or_default()
                     .chats
-                    .fail(error_reason(err));
+                    .failed(pending_id, error_reason(err), false);
             }
             Some((RequestPurpose::DeleteChatFolderInviteLink, Some(folder_id))) => {
                 // The link left the list at send time: what the box holds is
@@ -242,13 +243,13 @@ impl Session {
             }
             _ => {}
         }
-        // Parity slice: folder `loadChats` paging ends the same way
-        // as the main list — a 404 marks that folder exhausted.
+        // Parity slice: folder `loadChats` paging ends the same way as the
+        // main list — a 404 marks that folder exhausted, anything else
+        // waits and asks again.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::LoadFolderChats)
-            && err.code == 404
             && let Some(folder_id) = pending.and_then(|p| p.folder_id)
         {
-            self.chat_list.folder_chats_exhausted.insert(folder_id);
+            self.chat_list.folder_page_failed(folder_id, err.code, now);
         }
         // Slice CL: failed preview-history fetch — mark the peek
         // preview so it shows an error instead of a spinner.
@@ -259,7 +260,11 @@ impl Session {
                 .chat_preview_fetch
                 .entry(chat_id)
                 .or_default()
-                .fail_dropping_data(call_request_error_line(err, "Could not load preview"));
+                .failed(
+                    pending_id,
+                    call_request_error_line(err, "Could not load preview"),
+                    true,
+                );
         }
     }
 }

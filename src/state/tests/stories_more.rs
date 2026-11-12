@@ -377,7 +377,7 @@ fn story_manage_state_transitions() {
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
     assert!(!session.stories.manage.is_pending());
-    assert_eq!(session.stories.manage.error, None);
+    assert_eq!(session.stories.manage.error(), None);
 
     let extra = session.request(RequestPurpose::EditStoryCover, None);
     session.stories.manage.start(extra, ChatId(11), 5);
@@ -391,10 +391,17 @@ fn story_manage_state_transitions() {
         ),
     );
     assert!(!session.stories.manage.is_pending());
-    let error = session.stories.manage.error.clone().expect("manage error");
+    let error = session
+        .stories
+        .manage
+        .error()
+        .map(str::to_string)
+        .expect("manage error");
     assert!(error.contains("Story update failed"), "{error}");
 
     let extra = session.request(RequestPurpose::GetChatsToPostStories, None);
+    session.stories.post_as.begin();
+    session.stories.post_as.sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -409,6 +416,8 @@ fn story_manage_state_transitions() {
     // Review fix-up: a failed `getChatsToPostStories` surfaces a
     // transient error instead of silently leaving only "Myself".
     let extra = session.request(RequestPurpose::GetChatsToPostStories, None);
+    session.stories.post_as.begin();
+    session.stories.post_as.sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -526,7 +535,7 @@ fn call_history_pages_accumulate_and_track_offset() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::SearchCallMessages, None);
-    session.calls.recent_calls_stage = crate::state::RecentCalls::Loading { request: extra };
+    session.calls.recent_calls.page_sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -536,12 +545,12 @@ fn call_history_pages_accumulate_and_track_offset() {
             extra.0,
         ),
     );
-    assert_eq!(session.calls.recent_calls.len(), 1);
-    assert_eq!(session.calls.recent_calls_offset, "page2");
+    assert_eq!(session.calls.recent_calls.rows().len(), 1);
+    assert_eq!(session.calls.recent_calls.next_offset(), "page2");
     assert!(!session.calls.recent_calls_loading());
     assert!(!session.calls.recent_calls_error());
     let extra = session.request(RequestPurpose::SearchCallMessages, None);
-    session.calls.recent_calls_stage = crate::state::RecentCalls::Loading { request: extra };
+    session.calls.recent_calls.page_sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -551,10 +560,10 @@ fn call_history_pages_accumulate_and_track_offset() {
             extra.0,
         ),
     );
-    assert_eq!(session.calls.recent_calls.len(), 2);
-    assert_eq!(session.calls.recent_calls_offset, "");
-    assert_eq!(session.calls.recent_calls[0].id.0, 901);
-    assert_eq!(session.calls.recent_calls[1].id.0, 900);
+    assert_eq!(session.calls.recent_calls.rows().len(), 2);
+    assert_eq!(session.calls.recent_calls.next_offset(), "");
+    assert_eq!(session.calls.recent_calls.rows()[0].id.0, 901);
+    assert_eq!(session.calls.recent_calls.rows()[1].id.0, 900);
 }
 
 #[test]
@@ -567,6 +576,7 @@ fn set_account_ttl_ok_stores_confirmed_days() {
         RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { days: 365 }),
         None,
     );
+    session.settings.account_ttl.sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -775,7 +785,7 @@ fn a_stale_answer_does_not_settle_the_op_tracked_now() {
     let purpose = RequestPurpose::SetChatActiveStoriesList;
     let label = crate::story_page::story_page_op_label(purpose);
     let first = session.request(purpose, Some(ChatId(11)));
-    session.begin_story_page_op(label.clone(), first);
+    session.begin_story_page_op(label, first);
     let second = session.request(purpose, Some(ChatId(12)));
     session.begin_story_page_op(label, second);
     apply_json(
@@ -905,7 +915,7 @@ fn close_friends_load_failure_survives_a_later_story_page_op() {
     session.stories.close_friends.begin_load(load);
     // Another op takes the viewer's page op before the failure lands.
     let other = session.request(RequestPurpose::SetChatActiveStoriesList, None);
-    session.begin_story_page_op("hiding", other);
+    session.begin_story_page_op(crate::story_page::StoryPageOpKind::Other, other);
     apply_json(
         &mut session,
         &seq,
@@ -941,4 +951,70 @@ fn an_account_going_away_ends_the_management_calls_on_their_way() {
         session.stories.manage.outcome(RequestId(30)),
         StoryManageOutcome::Lost
     );
+}
+
+/// r2-18 06-014: a report step of another story that never left does not
+/// replace a flow that has a request out, and the first one that never left
+/// still ends in a failed flow.
+#[test]
+fn an_unsent_story_report_leaves_a_flow_with_a_request_out_alone() {
+    let (mut session, _sink) = session();
+    session.fail_story_report_send(12, 6, "no".into());
+    assert!(matches!(
+        session.stories.report.as_ref().map(|flow| &flow.stage),
+        Some(StoryReportStage::Failed(_))
+    ));
+    let extra = session.request_for_story(RequestPurpose::ReportStory, ChatId(12), 6);
+    session.begin_story_report(12, 6, extra);
+    session.fail_story_report_send(13, 7, "no".into());
+    let flow = session.stories.report.as_ref().expect("flow");
+    assert!(flow.is_for(12, 6), "story 6 keeps its flow");
+    assert!(matches!(flow.stage, StoryReportStage::Checking { .. }));
+}
+
+#[test]
+fn r2_clear_all_answers_only_by_its_own_request_and_keeps_the_list_until_ok() {
+    // Sweep r2-19 (05-019): the rows, their offset and the stage are one
+    // value; a clear keeps the calls listed until its own `ok`, a refusal
+    // shows them again, and a page asked before the clear never lands.
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let page = |extra: RequestId, id: i64, next: &str| {
+        format!(
+            r#"{{"@type":"foundMessages","@extra":"{}","total_count":1,"next_offset":"{next}","messages":[{{"@type":"message","id":{id},"chat_id":71,"is_outgoing":false,"date":1700000000,"content":{{"@type":"messageCall","unique_id":{id},"is_video":false,"discard_reason":{{"@type":"callDiscardReasonHungUp"}},"duration":3}}}}]}}"#,
+            extra.0
+        )
+    };
+    let first = session.request(RequestPurpose::SearchCallMessages, None);
+    session.calls.recent_calls.page_sent(first);
+    apply_json(&mut session, &seq, &sink, &page(first, 901, "more"));
+    let more = session.request(RequestPurpose::SearchCallMessages, None);
+    session.calls.recent_calls.page_sent(more);
+    let clear = session.request(RequestPurpose::DeleteAllCallMessages, None);
+    session.calls.recent_calls.clear_sent(clear);
+    apply_json(&mut session, &seq, &sink, &page(more, 900, ""));
+    assert_eq!(session.calls.recent_calls.rows().len(), 1, "dropped");
+    assert!(session.calls.recent_calls_clearing());
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":500,"message":"X"}}"#,
+            clear.0
+        ),
+    );
+    assert!(!session.calls.recent_calls_clearing());
+    assert_eq!(session.calls.recent_calls.rows().len(), 1);
+    assert_eq!(session.calls.recent_calls.next_offset(), "more");
+    let clear = session.request(RequestPurpose::DeleteAllCallMessages, None);
+    session.calls.recent_calls.clear_sent(clear);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, clear.0),
+    );
+    assert!(session.calls.recent_calls.rows().is_empty());
+    assert_eq!(session.calls.recent_calls.next_offset(), "");
 }

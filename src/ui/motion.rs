@@ -296,7 +296,7 @@ impl SelectionFx {
 
 /// Everything the history motion needs, held by the app in one field.
 pub(crate) struct MotionState {
-    pub(crate) reveal: RefCell<Option<Reveal>>,
+    pub(crate) reveal: Cell<Option<Reveal>>,
     /// Painted height of the rows from `Reveal::first_row` on; written by a
     /// canvas after the rows paint, `0` while unknown.
     pub(crate) reveal_measure: Rc<Cell<f32>>,
@@ -308,7 +308,7 @@ pub(crate) struct MotionState {
 impl Default for MotionState {
     fn default() -> Self {
         Self {
-            reveal: RefCell::new(None),
+            reveal: Cell::new(None),
             reveal_measure: Rc::new(Cell::new(0.)),
             list_fills: Rc::new(Cell::new(true)),
             selection: RefCell::new(SelectionFx::new(Instant::now())),
@@ -322,15 +322,14 @@ impl MotionState {
         if interface_animations_off() {
             return;
         }
-        let mut slot = self.reveal.borrow_mut();
-        let carry = slot.as_ref().map_or(0., |r| {
-            reveal_shift(elapsed_since(r.started, now), self.reveal_total(r))
+        let carry = self.reveal.get().map_or(0., |r| {
+            reveal_shift(elapsed_since(r.started, now), self.reveal_total(&r))
         });
-        *slot = Some(Reveal {
+        self.reveal.set(Some(Reveal {
             started: now,
             first_row,
             carry,
-        });
+        }));
         self.reveal_measure.set(0.);
     }
 
@@ -348,10 +347,9 @@ impl MotionState {
     /// sits `shift` px below its settled place inside a viewport made
     /// `extra` px taller. `None` when nothing is revealing.
     pub(crate) fn reveal_now(&self, now: Instant) -> Option<(f32, f32)> {
-        let mut slot = self.reveal.borrow_mut();
-        let reveal = (*slot)?;
+        let reveal = self.reveal.get()?;
         if !reveal_active(elapsed_since(reveal.started, now)) {
-            *slot = None;
+            self.reveal.set(None);
             return None;
         }
         let total = self.reveal_total(&reveal);
@@ -362,7 +360,7 @@ impl MotionState {
     }
 
     pub(crate) fn cancel_reveal(&self) {
-        *self.reveal.borrow_mut() = None;
+        self.reveal.set(None);
     }
 }
 

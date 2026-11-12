@@ -55,7 +55,6 @@ impl QuillApp {
         if self.shortcut_blocked(window, cx) || self.writable_open_chat().is_none() {
             return false;
         }
-        self.chat_ui.scheduled_selected.clear();
         self.open_scheduled_dialog(cx);
         true
     }
@@ -108,10 +107,11 @@ impl QuillApp {
         {
             return false;
         }
-        self.open_schedule_picker(super::scheduled::ScheduleTarget::Composer, window, cx);
-        if let Some(picker) = self.chat_ui.schedule_picker.as_mut() {
-            picker.send_after = true;
-        }
+        self.open_schedule_picker(
+            super::scheduled::ScheduleTarget::ComposerThenSend { effect: 0 },
+            window,
+            cx,
+        );
         true
     }
 

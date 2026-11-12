@@ -320,6 +320,7 @@
 "qll_prefs_could_not_change_story_poster_2" = "Couldn't change story poster";
 "qll_prefs_could_not_change_story_sound" = "Couldn't change story sound";
 "qll_prefs_could_not_disconnect_the_website" = "Could not disconnect the website.";
+"qll_prefs_could_not_load_notification_defaults" = "Couldn't load the notification defaults.";
 "qll_prefs_could_not_load_archive_settings" = "Could not load archive settings.";
 "qll_prefs_could_not_open_the_file" = "could not open the file";
 "qll_prefs_could_not_reset_exception" = "Couldn't reset exception";

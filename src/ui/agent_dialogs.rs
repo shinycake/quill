@@ -17,7 +17,7 @@ use gpui_kit::*;
 use quill::agent::grants::Scope;
 use quill::agent::prompts::{Ask, Prompt, Risk};
 use quill::lang::{keys, tr, tr_with};
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 
 /// A warning with readable text: the kit's amber text on its pale amber
@@ -88,16 +88,13 @@ fn dialog_with(
     body: AnyElement,
     footer: impl IntoElement,
 ) -> Dialog {
-    let body = Rc::new(RefCell::new(Some(body)));
+    let body = Rc::new(Cell::new(Some(body)));
     dialog
         .overlay(true)
         .title(div().pr_6().child(super::shell::dialog_title(title)))
         .content(super::shell::scrollable_dialog_content(
             move |content, _, _| {
-                let body = body
-                    .borrow_mut()
-                    .take()
-                    .unwrap_or_else(|| div().into_any_element());
+                let body = body.take().unwrap_or_else(|| div().into_any_element());
                 content.child(body)
             },
         ))
@@ -122,6 +119,16 @@ impl QuillApp {
     /// "Reset the agent token?" is open (never with access off).
     fn agent_reset_open(&self) -> bool {
         self.agent_ui.page.reset_confirm && quill::agent::access::enabled()
+    }
+
+    /// The master switch was turned off: the consent and the token reset
+    /// question end with it (the checks above only hide them meanwhile), so turning it on again does not bring back a question
+    /// asked before (the consent would widen grants the user saw earlier).
+    pub(in crate::ui) fn close_agent_boxes_for_access_off(&mut self, cx: &mut Context<Self>) {
+        if self.agent_ui.consent.is_some() {
+            self.cancel_all_chats(cx);
+        }
+        self.agent_ui.page.reset_confirm = false;
     }
 
     pub(super) fn build_agent_request_dialog(

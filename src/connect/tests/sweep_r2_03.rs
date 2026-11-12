@@ -21,7 +21,10 @@ fn message(chat: i64, id: i64) -> Value {
 #[test]
 fn an_installed_sets_answer_keeps_the_emoji_that_was_already_asked() {
     let mut t = Flaky::new();
-    t.driver.session.stickers.stickers.suggest_for = SuggestFor::Asked("😀".into());
+    t.driver.session.stickers.stickers.suggest_for = SuggestFor::Asked {
+        emoji: "😀".into(),
+        request: crate::ids::RequestId(1),
+    };
     t.driver.open_media_panel().unwrap();
     t.answer(
         "getInstalledStickerSets",
@@ -29,7 +32,10 @@ fn an_installed_sets_answer_keeps_the_emoji_that_was_already_asked() {
     );
     assert_eq!(
         t.driver.session.stickers.stickers.suggest_for,
-        SuggestFor::Asked("😀".into())
+        SuggestFor::Asked {
+            emoji: "😀".into(),
+            request: crate::ids::RequestId(1),
+        }
     );
 }
 
@@ -183,7 +189,8 @@ fn money_history_is_asked_when_an_earlier_money_send_is_refused() {
     t.sender.refuse(&["getApplicationConfig"]);
     assert!(t.driver.open_money_page().is_err());
     assert!(t.sender.count("getTonWalletTransactions") >= 1);
-    assert!(t.driver.session.ton_wallet.money.history.is_loading());
+    let money = t.driver.session.ton_wallet.money.as_ref();
+    assert!(money.is_some_and(|money| money.history.is_loading()));
 }
 
 #[test]
@@ -294,7 +301,7 @@ fn a_commit_that_did_not_go_out_keeps_the_stars_pending_with_a_new_window() {
 }
 
 #[test]
-fn a_failed_data_storage_save_keeps_the_dirty_mark_for_the_next_ingest() {
+fn a_failed_data_storage_write_is_tried_once_and_said() {
     let dir = std::env::temp_dir().join(format!("quill-r2-03-ds-{}", std::process::id()));
     let mut t = Flaky::new();
     let good = t.driver.paths.clone();
@@ -305,9 +312,37 @@ fn a_failed_data_storage_save_keeps_the_dirty_mark_for_the_next_ingest() {
     t.driver.paths.root = blocked;
     t.driver.session.settings.data_storage_dirty = true;
     t.feed(json!({"@type":"updateOption","name":"my_id","value":{"@type":"optionValueInteger","value":7}}));
-    assert!(t.driver.session.settings.data_storage_dirty);
+    // One attempt per mark, not one per ingest; the page says it failed.
+    assert!(!t.driver.session.settings.data_storage_dirty);
+    assert!(
+        t.driver
+            .session
+            .settings
+            .data_storage_save
+            .error_of(crate::state::StorageSaveKind::Persist)
+            .is_some()
+    );
     t.driver.paths = good;
     t.feed(json!({"@type":"updateOption","name":"my_id","value":{"@type":"optionValueInteger","value":7}}));
-    assert!(!t.driver.session.settings.data_storage_dirty);
+    assert!(
+        t.driver
+            .session
+            .settings
+            .data_storage_save
+            .error_of(crate::state::StorageSaveKind::Persist)
+            .is_some(),
+        "nothing marked the settings changed, so nothing was written again"
+    );
+    // The next change marks them again and the write goes through.
+    t.driver.session.settings.data_storage_dirty = true;
+    t.feed(json!({"@type":"updateOption","name":"my_id","value":{"@type":"optionValueInteger","value":7}}));
+    assert!(
+        t.driver
+            .session
+            .settings
+            .data_storage_save
+            .error_of(crate::state::StorageSaveKind::Persist)
+            .is_none()
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

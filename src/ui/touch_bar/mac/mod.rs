@@ -145,17 +145,32 @@ fn ns_window(window: &Window) -> Option<Retained<NSWindow>> {
 }
 
 struct SyncState {
-    /// The throttled sync: holding its task is the scheduled stage.
-    sync: RefCell<SyncStage>,
-    /// The composer entity a selection change is followed on. Every account
-    /// on screen has its own, so a sync that finds another one follows it.
-    followed_composer: Cell<Option<EntityId>>,
+    /// The throttled sync: holding its task is the scheduled stage. A
+    /// `Cell`, taken and put back, so no borrow can be held or fail.
+    sync: Cell<SyncStage>,
+    /// The composer a selection change is followed on. Every account on
+    /// screen has its own, so a sync that finds another one follows it; the
+    /// observation lives in the stage and ends with it.
+    follow: Cell<Follow>,
     /// The recent emoji the emoji list was built from, and that list.
     emoji: RefCell<(Option<Vec<String>>, Rc<Vec<super::model::PickerItem>>)>,
 }
 
+/// Which composer the touch bar follows.
+#[derive(Default)]
+enum Follow {
+    #[default]
+    Nothing,
+    Composer {
+        id: EntityId,
+        _observation: Subscription,
+    },
+}
+
 /// Whether a sync waits out its throttle.
+#[derive(Default)]
 enum SyncStage {
+    #[default]
     Idle,
     Scheduled {
         /// Dropping the state drops the task and with it the sync.
@@ -203,8 +218,8 @@ pub(super) fn install(demo: bool, window: &mut Window, cx: &mut Context<QuillApp
     });
     forget_applied();
     let state = Rc::new(SyncState {
-        sync: RefCell::new(SyncStage::Idle),
-        followed_composer: Cell::new(None),
+        sync: Cell::new(SyncStage::Idle),
+        follow: Cell::new(Follow::Nothing),
         emoji: RefCell::new((None, Rc::default())),
     });
     // Touches run on the app in its window.
@@ -238,7 +253,10 @@ pub(super) fn install(demo: bool, window: &mut Window, cx: &mut Context<QuillApp
     let schedule = {
         let state = state.clone();
         move |cx: &mut Context<QuillApp>| {
-            if matches!(*state.sync.borrow(), SyncStage::Scheduled { .. }) {
+            let stage = state.sync.take();
+            let scheduled = matches!(stage, SyncStage::Scheduled { .. });
+            state.sync.set(stage);
+            if scheduled {
                 return;
             }
             let has_host = HOST.with(|host| host.try_borrow().is_ok_and(|host| host.is_some()));
@@ -250,14 +268,12 @@ pub(super) fn install(demo: bool, window: &mut Window, cx: &mut Context<QuillApp
                 cx.background_executor().timer(SYNC_THROTTLE).await;
                 // The finished stage (this task's own handle) is dropped at
                 // the end, not while it runs.
-                let _finished = task_state.sync.replace(SyncStage::Idle);
+                let _finished = task_state.sync.take();
                 let _ = handle.update(cx, |_, window, cx| {
                     let _ = this.update(cx, |app, cx| sync(app, window, cx, &task_state));
                 });
             });
-            if let Ok(mut stage) = state.sync.try_borrow_mut() {
-                *stage = SyncStage::Scheduled { _task: task };
-            }
+            state.sync.set(SyncStage::Scheduled { _task: task });
         }
     };
     let shared: Rc<dyn Fn(&mut Context<QuillApp>)> = Rc::new(schedule.clone());
@@ -294,15 +310,19 @@ fn follow_composer(app: &mut QuillApp, cx: &mut Context<QuillApp>, state: &SyncS
     let Some(composer) = app.in_window_scope(None, cx, |app, _| app.composer.clone()) else {
         return;
     };
-    if state.followed_composer.get() == Some(composer.entity_id()) {
-        return;
-    }
-    let Some(schedule) = SYNC_SCHEDULER.with(|slot| slot.try_borrow().ok().and_then(|s| s.clone()))
-    else {
+    let followed = state.follow.take();
+    let same = matches!(&followed, Follow::Composer { id, .. } if *id == composer.entity_id());
+    let schedule = SYNC_SCHEDULER.with(|slot| slot.try_borrow().ok().and_then(|s| s.clone()));
+    let Some(schedule) = schedule.filter(|_| !same) else {
+        state.follow.set(followed);
         return;
     };
-    state.followed_composer.set(Some(composer.entity_id()));
-    cx.observe(&composer, move |_, _, cx| schedule(cx)).detach();
+    let observation = cx.observe(&composer, move |_, _, cx| schedule(cx));
+    // The old observation ends as the one that replaces it is stored.
+    state.follow.set(Follow::Composer {
+        id: composer.entity_id(),
+        _observation: observation,
+    });
 }
 
 /// Mirror the app into the Touch Bar.

@@ -37,10 +37,10 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
 fn set_op(app: &mut QuillApp, request: RequestId, state: StoryPageOpState) {
     if let Some(session) = app.demo_session.as_deref_mut() {
         session.stories.page_ops.begin(StoryPageOp {
-            label: "creating album".into(),
+            kind: quill::story_page::StoryPageOpKind::CreateAlbum,
             state,
             request,
-            chat_id: Some(CHAT.0),
+            chat_id: Some(CHAT),
         });
     }
 }
@@ -116,12 +116,16 @@ fn the_album_view_leaves_only_on_a_deleted_answer(cx: &mut TestAppContext) {
         ] {
             if let Some(page) = app.stories.page.as_mut() {
                 page.view = AlbumView::album(3);
-                page.wait = PageWait::Deleting(request);
+                page.view.delete_sent(request);
             }
             set_op(app, request, StoryPageOpState::Sending);
             app.story_page_upkeep(window, cx);
-            let open = app.stories.page.as_ref().map(|page| page.view);
-            assert_eq!(open, Some(AlbumView::album(3)), "in flight keeps the view");
+            let open = app
+                .stories
+                .page
+                .as_ref()
+                .and_then(|page| page.view.deleting());
+            assert_eq!(open, Some(request), "in flight keeps the view and its call");
             set_op(app, request, state);
             app.story_page_upkeep(window, cx);
             let open = app
@@ -134,12 +138,11 @@ fn the_album_view_leaves_only_on_a_deleted_answer(cx: &mut TestAppContext) {
         // A delete whose op is gone (the page was left) ends the wait too.
         if let Some(page) = app.stories.page.as_mut() {
             page.view = AlbumView::album(3);
-            page.wait = PageWait::Deleting(RequestId(799));
+            page.view.delete_sent(RequestId(799));
         }
         app.story_page_upkeep(window, cx);
         let page = app.stories.page.as_ref().expect("the page");
-        assert_eq!(page.wait, PageWait::Idle);
-        assert_eq!(page.view.open_album(), Some(3));
+        assert_eq!(page.view, AlbumView::album(3), "the wait ended with it");
     });
 }
 
@@ -184,5 +187,71 @@ fn a_second_mutation_waits_for_the_first(cx: &mut TestAppContext) {
         );
         assert!(sent.is_none());
         assert!(!called, "nothing is sent while the first call is in flight");
+    });
+}
+
+/// An answer acts on what asked: a delete of album 3 that is answered while
+/// album 4 is in view leaves album 4 in view.
+#[gpui_kit::test]
+fn a_deleted_answer_leaves_another_album_in_view(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        let mut page = StoryPage::new(CHAT, window, cx);
+        page.view = AlbumView::album(3);
+        page.view.delete_sent(RequestId(730));
+        // The user opens another album while the delete is on its way: the
+        // delete's stage goes with the view it was part of.
+        page.view = AlbumView::album(4);
+        app.stories.page = Some(page);
+        set_op(app, RequestId(730), StoryPageOpState::Succeeded);
+        app.story_page_upkeep(window, cx);
+        let page = app.stories.page.as_ref().expect("the page");
+        assert_eq!(page.wait, PageWait::Idle);
+        assert_eq!(page.view, AlbumView::album(4));
+    });
+}
+
+/// A create answered after the picker moved on to an album keeps that
+/// album's picker open.
+#[gpui_kit::test]
+fn a_created_answer_keeps_another_picker_open(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.stories.page = Some(StoryPage::new(CHAT, window, cx));
+        app.open_album_picker(AlbumPickerTarget::Album(3), cx);
+        if let Some(page) = app.stories.page.as_mut() {
+            page.wait = PageWait::Creating(RequestId(740));
+        }
+        set_op(app, RequestId(740), StoryPageOpState::Succeeded);
+        app.story_page_upkeep(window, cx);
+        let page = app.stories.page.as_ref().expect("the page");
+        assert!(page.picker.is_some());
+    });
+}
+
+/// The adds of a save whose removes never left are answered: the picker
+/// stays and the adds are no longer changes, so a retry does not send them
+/// again.
+#[gpui_kit::test]
+fn a_partly_sent_save_keeps_the_picker_and_drops_the_sent_adds(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.stories.page = Some(StoryPage::new(CHAT, window, cx));
+        app.open_album_picker(AlbumPickerTarget::Album(3), cx);
+        app.toggle_picker_story(11, cx);
+        if let Some(page) = app.stories.page.as_mut() {
+            page.wait = PageWait::SavingPickerPartly {
+                album_id: 3,
+                requests: vec![RequestId(750)],
+                added: vec![11],
+            };
+        }
+        set_op(app, RequestId(750), StoryPageOpState::Succeeded);
+        app.story_page_upkeep(window, cx);
+        let page = app.stories.page.as_ref().expect("the page");
+        assert_eq!(page.wait, PageWait::Idle);
+        let picker = page.picker.as_ref().expect("the picker stays");
+        assert!(picker.added().is_empty());
+        assert!(picker.is_selected(11));
     });
 }

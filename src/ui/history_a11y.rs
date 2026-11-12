@@ -203,7 +203,7 @@ impl QuillApp {
                     return;
                 };
                 self.chat_ui.focus = A11yFocus::Row(id);
-                self.chat_ui.selection_anchor = Some(id);
+                self.set_selection_anchor(id);
                 ix
             }
         };
@@ -227,6 +227,11 @@ impl QuillApp {
 
     /// Focus entered the history (`focusInEvent`).
     pub(super) fn history_a11y_focus_in(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // The call runs a frame after the focus event: focus that already
+        // left again must not leave the history armed or focused.
+        if !self.message_ui.history_focus.is_focused(window) {
+            return;
+        }
         let items = a11y_items(&self.history.rows);
         if items.is_empty() {
             self.message_ui.a11y.focus = match self.viewed_chat() {

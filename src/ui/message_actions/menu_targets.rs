@@ -22,9 +22,8 @@ impl QuillApp {
         });
         let chat_menu_gone = !self.windows.in_window()
             && self
-                .message_ui
-                .menu
-                .chat()
+                .message_ui.menu
+                .row()
                 .is_some_and(|menu| !session.chats.contains_key(&menu.chat_id.0));
         let list_elsewhere = self.history.pinned_list_open.as_ref().is_some_and(|key| {
             Some(key.chat) != session.open_chat_id() || key.account != session.account
@@ -36,7 +35,7 @@ impl QuillApp {
             self.close_message_menu();
         }
         if chat_menu_gone {
-            self.message_ui.menu.close();
+            self.message_ui.menu.close_menu();
         }
     }
 }

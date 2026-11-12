@@ -18,8 +18,6 @@ use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with, trn};
 use quill::state::Session;
 use quill::telegram::envelope::ChatFolderInviteLink;
-use std::cell::RefCell;
-use std::rc::Rc;
 
 /// Link names are 0–32 characters (`createChatFolderInviteLink`).
 const LINK_NAME_MAX: usize = 32;
@@ -64,19 +62,10 @@ pub(super) fn finish_dialog(
     footer: Option<AnyElement>,
     on_close: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Dialog {
-    let body = Rc::new(RefCell::new(Some(body)));
     let dialog = dialog
         .overlay(true)
         .title(crate::ui::shell::dialog_title(title))
-        .content(crate::ui::shell::scrollable_dialog_content(
-            move |content, _, _| {
-                let body = body
-                    .borrow_mut()
-                    .take()
-                    .unwrap_or_else(|| div().into_any_element());
-                content.child(body)
-            },
-        ));
+        .content(crate::ui::shell::one_shot_dialog_content(body));
     let dialog = match footer {
         Some(footer) => dialog.footer(footer),
         None => dialog,
@@ -107,10 +96,10 @@ impl QuillApp {
     pub(super) fn open_folder_share(
         &mut self,
         folder_id: i32,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.folders.share = Some(FolderShareDialog::new(window, cx, folder_id));
+        self.folders.share = Some(FolderShareDialog::new(folder_id));
         self.open_box(DialogKind::FolderShare);
         if let Some(live) = self.live.as_mut() {
             if live
@@ -196,27 +185,31 @@ impl QuillApp {
             // tdesktop starts a new link with every shareable chat ticked.
             None => choices.iter().copied().collect(),
         };
-        if let Some(dialog) = self.folders.share.as_mut() {
-            dialog.view = FolderShareView::edit(link.map(|l| l.invite_link));
-            dialog.selected = selected;
-            dialog
-                .name_input
-                .update(cx, |input, cx| input.set_value(name, window, cx));
+        if self.folders.share.is_some() {
+            let form = LinkForm::new(window, cx, name, selected);
+            if let Some(dialog) = self.folders.share.as_mut() {
+                dialog.view = FolderShareView::edit(link.map(|l| l.invite_link), form);
+            }
         }
         cx.notify();
     }
 
     fn save_folder_link(&mut self, cx: &mut Context<Self>) {
-        let Some((folder_id, view, mut chat_ids, name)) = self.folders.share.as_ref().map(|d| {
-            let mut ids: Vec<i64> = d.selected.iter().copied().collect();
-            ids.sort_unstable();
-            (
-                d.folder_id,
-                d.view.clone(),
-                ids,
-                d.name_input.read(cx).value().trim().to_string(),
-            )
-        }) else {
+        let Some((folder_id, link, mut chat_ids, name)) =
+            self.folders.share.as_ref().and_then(|d| match &d.view {
+                FolderShareView::Edit { link, form, .. } => {
+                    let mut ids: Vec<i64> = form.selected.iter().copied().collect();
+                    ids.sort_unstable();
+                    Some((
+                        d.folder_id,
+                        link.clone(),
+                        ids,
+                        form.name_input.read(cx).value().trim().to_string(),
+                    ))
+                }
+                FolderShareView::List { .. } => None,
+            })
+        else {
             return;
         };
         let fail = |this: &mut Self, text: &str| {
@@ -234,9 +227,6 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        let FolderShareView::Edit { link, .. } = view else {
-            return;
-        };
         chat_ids.dedup();
         let result = match self.live.as_mut() {
             Some(live) => match &link {
@@ -734,6 +724,7 @@ impl QuillApp {
                                     Button::new(format!("folder-link-delete-yes-{url}"))
                                         .label(tr(keys::BOX_DELETE))
                                         .small()
+                                        .disabled(busy)
                                         .on_click(cx.listener(move |this, _, _, cx| {
                                             this.delete_folder_link(&delete_url, cx);
                                         })),
@@ -782,8 +773,11 @@ impl QuillApp {
         let muted = cx.theme().muted_foreground;
         let choices = self.folder_link_choices(state.folder_id);
         let session = self.session();
+        let Some(form) = state.form() else {
+            return div().into_any_element();
+        };
         let all_selected =
-            !choices.is_empty() && choices.iter().all(|id| state.selected.contains(id));
+            !choices.is_empty() && choices.iter().all(|id| form.selected.contains(id));
         let mut body = div().flex().flex_col().gap_2();
         if let Some(error) = state.view.op().error().map(str::to_owned) {
             body = body.child(
@@ -796,7 +790,7 @@ impl QuillApp {
         }
         body = body
             .child(
-                Textarea::new(&state.name_input).aria_label(tr(keys::Q_CHATLIST_INVITE_LINK_NAME)),
+                Textarea::new(&form.name_input).aria_label(tr(keys::Q_CHATLIST_INVITE_LINK_NAME)),
             )
             .child(
                 div()
@@ -808,7 +802,7 @@ impl QuillApp {
                             .text_xs()
                             .font_semibold()
                             .text_color(muted)
-                            .child(chats_count_label(state.selected.len())),
+                            .child(chats_count_label(form.selected.len())),
                     )
                     .child(
                         Button::new("folder-link-select-all")
@@ -826,11 +820,13 @@ impl QuillApp {
                                     .as_ref()
                                     .map(|d| this.folder_link_choices(d.folder_id))
                                     .unwrap_or_default();
-                                if let Some(dialog) = this.folders.share.as_mut() {
-                                    if choices.iter().all(|id| dialog.selected.contains(id)) {
-                                        dialog.selected.clear();
+                                if let Some(form) =
+                                    this.folders.share.as_mut().and_then(|d| d.form_mut())
+                                {
+                                    if choices.iter().all(|id| form.selected.contains(id)) {
+                                        form.selected.clear();
                                     } else {
-                                        dialog.selected = choices.into_iter().collect();
+                                        form.selected = choices.into_iter().collect();
                                     }
                                 }
                                 cx.notify();
@@ -851,17 +847,17 @@ impl QuillApp {
             .max_h(px(260.))
             .overflow_y_scroll();
         for chat_id in choices {
-            let checked = state.selected.contains(&chat_id);
+            let checked = form.selected.contains(&chat_id);
             list = list.child(
                 Checkbox::new(("folder-link-chat", chat_id as u64))
                     .checked(checked)
                     .label(chat_title(session, chat_id))
                     .on_click(cx.listener(move |this, &on, _, cx| {
-                        if let Some(dialog) = this.folders.share.as_mut() {
+                        if let Some(form) = this.folders.share.as_mut().and_then(|d| d.form_mut()) {
                             if on {
-                                dialog.selected.insert(chat_id);
+                                form.selected.insert(chat_id);
                             } else {
-                                dialog.selected.remove(&chat_id);
+                                form.selected.remove(&chat_id);
                             }
                         }
                         cx.notify();
@@ -891,7 +887,7 @@ impl QuillApp {
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| {
                         if let Some(dialog) = this.folders.share.as_mut() {
-                            dialog.view = FolderShareView::list();
+                            dialog.view = dialog.view.cancelled_form();
                         }
                         cx.notify();
                     })),

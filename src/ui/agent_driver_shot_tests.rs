@@ -292,7 +292,10 @@ fn an_input_brings_back_a_screenshot_of_the_frame_after(cx: &mut TestAppContext)
         ["ui_screenshot", "ui_click", "ui_screenshot"],
         "{log:?}"
     );
-    assert!(log.iter().all(|a| a.chat_id == 11 && a.ok));
+    assert!(
+        log.iter()
+            .all(|a| a.chat_id == 11 && a.outcome == activity::Outcome::Done)
+    );
 }
 
 #[gpui_kit::test]
@@ -520,10 +523,8 @@ fn a_chat_menu_is_cut_with_its_row(cx: &mut TestAppContext) {
     for (chat, shown) in [(12_i64, false), (11, true)] {
         let anchor = row_anchor(vcx, chat as u64);
         app.update(vcx, |app, cx| {
-            app.message_ui.menu = crate::ui::chat_list_state::ContextMenu::Chat(ChatMenuState::at(
-                ChatId(chat),
-                anchor,
-            ));
+            app.message_ui.menu
+                .open_row(ChatMenuState::at(ChatId(chat), anchor));
             cx.notify();
         });
         settle(vcx);
@@ -541,7 +542,7 @@ fn a_chat_menu_is_cut_with_its_row(cx: &mut TestAppContext) {
             "chat {chat}'s menu in the picture"
         );
         app.update(vcx, |app, cx| {
-            app.message_ui.menu.close();
+            app.message_ui.menu.close_menu();
             cx.notify();
         });
         settle(vcx);
@@ -567,7 +568,7 @@ fn a_secret_chat_peek_is_cut_with_all_chats_on(cx: &mut TestAppContext) {
     settle(vcx);
     for (chat, shown) in [(SECRET, false), (12, true)] {
         app.update(vcx, |app, cx| {
-            app.chat_list.peek = crate::ui::chat_list_state::PeekPreview::Open(ChatPreviewState {
+            app.message_ui.menu.open_peek(ChatPreviewState {
                 chat_id: ChatId(chat),
                 anchor: gpui_kit::point(gpui_kit::px(40.), gpui_kit::px(200.)),
             });
@@ -614,7 +615,7 @@ fn a_secret_chat_peek_is_cut_with_all_chats_on(cx: &mut TestAppContext) {
             "chat {chat}'s peek in the picture"
         );
         app.update(vcx, |app, cx| {
-            app.chat_list.peek = crate::ui::chat_list_state::PeekPreview::Idle;
+            app.message_ui.menu.close_peek();
             cx.notify();
         });
         settle(vcx);

@@ -88,11 +88,22 @@ fn seed_wallet(app: &mut QuillApp) {
         is_being_created: false,
         is_backup_enabled: true,
     });
-    wallet.money.history.set_ready(
+}
+
+/// What the open Money page shows: two transfers and an NFT.
+fn seed_money_lists(app: &mut QuillApp) {
+    let Some(money) = app
+        .demo_session
+        .as_mut()
+        .and_then(|session| session.ton_wallet.money.as_mut())
+    else {
+        return;
+    };
+    money.history.set_ready(
         vec![transfer("t1", 2_000_000_000), transfer("t2", -500_000_000)],
         String::new(),
     );
-    wallet.money.nfts.set_ready(
+    money.nfts.set_ready(
         vec![WalletNft {
             address: "EQnft".into(),
             name: "Cat #7".into(),
@@ -110,9 +121,10 @@ fn money_page_shows_balance_history_and_collectibles(cx: &mut TestAppContext) {
     app.update_in(vcx, |app, _, cx| {
         // Off: opening does nothing and Settings has no Money row.
         app.open_money(cx);
-        assert!(!app.demo_session.as_ref().unwrap().ton_wallet.money.open);
+        assert!(!app.demo_session.as_ref().unwrap().ton_wallet.money_open());
         seed_wallet(app);
         app.open_money(cx);
+        seed_money_lists(app);
     });
     frames(vcx);
     assert!(find(vcx, "money-balance"));
@@ -197,8 +209,10 @@ fn a_transfer_card_opens_the_transaction_and_the_first_grams_hint(cx: &mut TestA
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     let row = 90_000_000_011;
-    app.update_in(vcx, |app, _, _| {
+    app.update_in(vcx, |app, _, cx| {
         seed_wallet(app);
+        app.open_money(cx);
+        seed_money_lists(app);
         let session = app.demo_session.as_mut().unwrap();
         session
             .chat_list
@@ -231,7 +245,10 @@ fn a_transfer_card_opens_the_transaction_and_the_first_grams_hint(cx: &mut TestA
         history.messages.insert(row, message);
     });
     frames(vcx);
-    click(vcx, "ton-transfer-card-90000000011");
+    // The Money page is up over the chat, so the card is not clicked: the
+    // card's own handler runs.
+    app.update_in(vcx, |app, _, cx| app.open_transfer_details("t1", cx));
+    frames(vcx);
     assert!(find(vcx, "money-first-grams"), "first incoming transfer");
     click(vcx, "money-hint-got-it");
     assert!(!find(vcx, "money-first-grams"));

@@ -52,15 +52,26 @@ pub enum MediaMenuItem {
 /// `forwardMessages` takes at most this many).
 pub const MAX_SELECTED_MEDIA: usize = 100;
 
+/// Where a row's file stands when its menu is built: one fact, so a file
+/// is never both downloading and on disk.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum MenuFile {
+    /// Not on disk and not being fetched (or not offered for saving).
+    #[default]
+    Remote,
+    /// Being downloaded: the menu offers Cancel download.
+    Downloading,
+    /// On disk and allowed out: the menu offers Show in folder.
+    OnDisk,
+}
+
 /// What decides which entries a row's menu offers.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct MediaMenuFacts {
     /// The row is a message (stories and gifts are not).
     pub is_message: bool,
-    /// The message's file is being downloaded.
-    pub downloading: bool,
-    /// The message's file is on disk.
-    pub local: bool,
+    /// Where the message's file stands.
+    pub file: MenuFile,
     pub can_forward: bool,
     pub can_delete: bool,
     pub selected: bool,
@@ -92,10 +103,10 @@ pub fn media_menu_items(facts: &MediaMenuFacts) -> Vec<MediaMenuItem> {
         return items;
     }
     items.push(MediaMenuItem::GoToMessage);
-    if facts.downloading {
-        items.push(MediaMenuItem::CancelDownload);
-    } else if facts.local {
-        items.push(MediaMenuItem::ShowInFolder);
+    match facts.file {
+        MenuFile::Downloading => items.push(MediaMenuItem::CancelDownload),
+        MenuFile::OnDisk => items.push(MediaMenuItem::ShowInFolder),
+        MenuFile::Remote => {}
     }
     if facts.can_forward {
         items.push(MediaMenuItem::Forward);
@@ -112,7 +123,7 @@ pub fn media_menu_items(facts: &MediaMenuFacts) -> Vec<MediaMenuItem> {
 impl SharedMediaState {
     /// Messages that were deleted leave every tab and the selection.
     pub fn remove_messages(&mut self, chat_id: crate::ids::ChatId, ids: &[MessageId]) {
-        if self.chat_id != Some(chat_id) {
+        if self.chat_id() != Some(chat_id) {
             return;
         }
         self.selection.retain(|s| !ids.contains(&s.message_id));
@@ -155,7 +166,7 @@ impl SharedMediaState {
         answer: Option<(crate::ids::ChatId, MessageId, MessageActions)>,
     ) -> bool {
         match answer {
-            Some((chat, id, actions)) if self.chat_id == Some(chat) => {
+            Some((chat, id, actions)) if self.chat_id() == Some(chat) => {
                 self.replace_selected(SelectedMedia::from_actions(id, Some(&actions)))
             }
             _ => false,
@@ -296,7 +307,7 @@ mod tests {
     fn menu_follows_tdesktop_order() {
         use MediaMenuItem::*;
         let local = MediaMenuFacts {
-            local: true,
+            file: MenuFile::OnDisk,
             ..facts()
         };
         assert_eq!(
@@ -304,8 +315,7 @@ mod tests {
             [GoToMessage, ShowInFolder, Forward, Delete, Select]
         );
         let busy = MediaMenuFacts {
-            downloading: true,
-            local: true,
+            file: MenuFile::Downloading,
             ..facts()
         };
         assert_eq!(

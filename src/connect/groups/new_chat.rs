@@ -84,21 +84,36 @@ impl<S: JsonSender> ConnectDriver<S> {
         saves.extend(sent.iter().map(|id| (*id, TypeSave::Sent)));
     }
 
+    /// The dialog no longer waits for these type Saves (it was closed, or
+    /// their answer moved the step on): their entries go, and an answer
+    /// that still arrives finds none.
+    pub fn forget_new_chat_type_save(&mut self, sent: &[RequestId]) {
+        let saves = &mut self.session.groups.new_chats.type_saves;
+        for id in sent {
+            saves.remove(id);
+        }
+    }
+
     /// The dialog no longer owns this create (it was closed, or its answer
     /// was taken into the next step). An answered create is forgotten; one
     /// still out comes anyway (TDLib cannot cancel it) but nothing opens it
     /// on top of whatever the person is doing now, and its entry goes when
-    /// its answer is applied.
+    /// its answer is applied. One whose request is gone (lost) has no
+    /// answer to wait for: its entry goes now.
     pub fn abandon_new_chat(&mut self, request: RequestId) {
+        let still_out = self.session.requests.get(request).is_some();
         let creations = &mut self.session.groups.new_chats.creations;
         let Some(creation) = creations.get_mut(&request) else {
             return;
         };
         match &mut creation.stage {
-            CreationStage::Out { photo } => {
+            CreationStage::Out { photo } if still_out => {
                 creation.stage = CreationStage::OutClosed {
                     photo: photo.take(),
                 };
+            }
+            CreationStage::Out { .. } => {
+                creations.remove(&request);
             }
             CreationStage::Made { chat, photo } => {
                 creation.stage = CreationStage::MadeClosed {

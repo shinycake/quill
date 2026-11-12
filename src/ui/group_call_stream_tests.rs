@@ -89,7 +89,8 @@ fn a_live_stream_opens_the_stream_window(cx: &mut TestAppContext) {
     let (app, _main, mut call) = open_stream(cx, StreamState::NoStream);
     let call = &mut call;
     assert!(
-        app.read_with(call, |app, _| app.group_call.stream.window_is_stream),
+        app.read_with(call, |app, _| app.group_call.window.layout())
+            == Some(crate::ui::group_call_state::CallLayout::Stream),
         "sized as a stream window"
     );
     let viewport = find(call, "group-call-stream-viewport").expect("the picture");
@@ -156,7 +157,10 @@ fn the_admin_sees_the_server_hint_and_an_ended_stream_closes(cx: &mut TestAppCon
     app.update(&mut call, |app, cx| {
         let session = app.demo_session.as_mut().expect("demo");
         if let Some(active) = session.calls.active_group_call.as_mut() {
-            active.rtmp_url = Some("rtmps://dc4-1.rtmp.t.me/s/".into());
+            active.rtmp = Some(quill::calls::rtmp_start::RtmpInfo {
+                url: "rtmps://dc4-1.rtmp.t.me/s/".into(),
+                key: String::new(),
+            });
         }
         cx.notify();
     });
@@ -167,7 +171,7 @@ fn the_admin_sees_the_server_hint_and_an_ended_stream_closes(cx: &mut TestAppCon
     app.update(&mut main, |app, cx| {
         let session = app.demo_session.as_mut().expect("demo");
         if let Some(active) = session.calls.active_group_call.as_mut() {
-            active.stream = StreamState::Ended;
+            active.media.set_stream_state(StreamState::Ended);
         }
         // Outside a draw: the test platform draws every dirty window in
         // one pass and cannot lose one in the middle of it.
@@ -190,7 +194,10 @@ fn track_unjoined(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
         let session = app.demo_session.as_mut().expect("demo");
         session.calls.active_group_call = Some(ActiveGroupCall {
             is_rtmp_stream: true,
-            stream: StreamState::Connecting,
+            media: quill::state::GroupMedia::Stream {
+                mode: quill::calls::engine::GroupCallMode::Rtmp,
+                state: StreamState::Connecting,
+            },
             ..ActiveGroupCall::fresh(CALL)
         });
         // Outside a draw, as the poll loop runs it.
@@ -285,7 +292,10 @@ fn the_settings_box_opens_and_esc_closes_it(cx: &mut TestAppContext) {
     let (app, _main, mut call) = open_stream(cx, StreamState::Live);
     let call = &mut call;
     app.update(call, |app, cx| {
-        app.open_stream_overlay(super::StreamOverlay::Settings { key_shown: false }, cx)
+        app.open_stream_overlay(
+            crate::ui::group_call_stream_boxes::StreamOverlay::Settings { key_shown: false },
+            cx,
+        )
     });
     frames(call);
     assert!(
@@ -295,7 +305,7 @@ fn the_settings_box_opens_and_esc_closes_it(cx: &mut TestAppContext) {
     call.simulate_keystrokes("escape");
     frames(call);
     assert!(
-        app.read_with(call, |app, _| app.group_call.stream.overlay.is_none()),
+        app.read_with(call, |app, _| app.stream_overlay().is_none()),
         "Esc closes the box first"
     );
 }
@@ -307,14 +317,20 @@ fn under_the_lock_only_the_leave_box_opens(cx: &mut TestAppContext) {
     app.update(call, |app, cx| {
         app.account.passcode.enabled = true;
         app.lock_by_passcode(cx);
-        app.open_stream_overlay(super::StreamOverlay::Settings { key_shown: false }, cx);
-        assert!(app.group_call.stream.overlay.is_none(), "Settings waits");
-        app.open_stream_overlay(super::StreamOverlay::Leave { end: false }, cx);
+        app.open_stream_overlay(
+            crate::ui::group_call_stream_boxes::StreamOverlay::Settings { key_shown: false },
+            cx,
+        );
+        assert!(app.stream_overlay().is_none(), "Settings waits");
+        app.open_stream_overlay(
+            crate::ui::group_call_stream_boxes::StreamOverlay::Leave { end: false },
+            cx,
+        );
     });
     frames(call);
     assert_eq!(
-        app.read_with(call, |app, _| app.group_call.stream.overlay),
-        Some(super::StreamOverlay::Leave { end: false }),
+        app.read_with(call, |app, _| app.stream_overlay()),
+        Some(crate::ui::group_call_stream_boxes::StreamOverlay::Leave { end: false }),
         "a manager can still leave or end the stream"
     );
 }
@@ -558,7 +574,7 @@ fn a_failed_share_does_not_fail_the_join(cx: &mut TestAppContext) {
     app.update(&mut call, |app, cx| {
         let session = app.demo_session.as_mut().expect("demo");
         if let Some(active) = session.calls.active_group_call.as_mut() {
-            active.screen_share_error = Some("screen share failed".into());
+            active.screen_share.fail("screen share failed".into());
         }
         // Join was pressed; TDLib has not answered yet.
         app.group_call_screen.stream_watch = crate::ui::group_call_state::StreamWatch::Joining(
@@ -891,24 +907,31 @@ fn a_switch_to_another_stream_closes_the_boxes(cx: &mut TestAppContext) {
     let (app, _main, mut call) = open_stream(cx, StreamState::Live);
     frames(&mut call);
     app.update(&mut call, |app, cx| {
-        app.open_stream_overlay(super::StreamOverlay::Settings { key_shown: true }, cx);
+        app.open_stream_overlay(
+            crate::ui::group_call_stream_boxes::StreamOverlay::Settings { key_shown: true },
+            cx,
+        );
     });
     frames(&mut call);
     assert!(app.read_with(&call, |app, _| {
-        app.group_call.stream.overlay == Some(super::StreamOverlay::Settings { key_shown: true })
+        app.stream_overlay()
+            == Some(crate::ui::group_call_stream_boxes::StreamOverlay::Settings { key_shown: true })
     }));
     app.update(&mut call, |app, cx| {
         let session = app.demo_session.as_mut().expect("demo");
         session.calls.active_group_call = Some(ActiveGroupCall {
             is_rtmp_stream: true,
-            stream: StreamState::Live,
+            media: quill::state::GroupMedia::Stream {
+                mode: quill::calls::engine::GroupCallMode::Rtmp,
+                state: StreamState::Live,
+            },
             ..ActiveGroupCall::fresh(CALL + 1)
         });
         app.sync_group_call_window(cx);
     });
     frames(&mut call);
     assert!(
-        app.read_with(&call, |app, _| { app.group_call.stream.overlay.is_none() }),
+        app.read_with(&call, |app, _| { app.stream_overlay().is_none() }),
         "the other stream starts with no box and the key hidden"
     );
 }

@@ -175,12 +175,15 @@ impl UpdatesSync {
         self.live_shares.iter().filter(move |s| s.expires_at > now)
     }
 
-    /// The server repeats or lifts the request. A repeat keeps the user's
-    /// progress; lifting it ends the check, so a later request starts over.
+    /// The server repeats, changes or lifts the request. A repeat of the
+    /// same request keeps the user's progress; a different one (or lifting
+    /// it) ends the check, so the start made for the old request does not
+    /// count for the new one.
     pub fn set_age_verification(&mut self, parameters: Option<AgeVerificationParams>) {
         let check = self
             .age_verification
             .as_ref()
+            .filter(|verification| Some(&verification.params) == parameters.as_ref())
             .map(|verification| verification.check)
             .unwrap_or_default();
         self.age_verification = parameters.map(|params| AgeVerification { params, check });

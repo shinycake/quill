@@ -6,6 +6,7 @@
 use super::app::QuillApp;
 use super::dialogs::GroupConfirmAction;
 use super::{DialogKind, QuillShell};
+use crate::ui::pickers_state::Debounce;
 use crate::ui::scroll_load::scrolled_near_end;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
@@ -19,8 +20,6 @@ use quill::emoji::EmojiSetTab;
 use quill::lang::{keys, tr, trn};
 use quill::local_path::sandboxed_display_path;
 use quill::telegram::envelope::StickerSetInfo;
-use std::cell::Cell;
-use std::rc::Rc;
 use std::time::Duration;
 
 /// How long typing pauses before the search goes out.
@@ -35,25 +34,40 @@ const TABS: [EmojiSetTab; 2] = [EmojiSetTab::Installed, EmojiSetTab::Trending];
 /// The emoji packs box's tab bar and its search pause: the tab the bar
 /// highlights (the one an emptied field goes back to, also while search
 /// results replace the list), and the typing pause being waited out. The
-/// pause's task lives in the value, so opening, closing or choosing a
-/// tab drops a search that has not gone out.
-#[derive(Debug)]
-pub(super) enum SetsView {
-    Tab(EmojiSetTab),
-    Typing { tab: EmojiSetTab, _pause: Task<()> },
-}
-
-impl Default for SetsView {
-    fn default() -> Self {
-        Self::Tab(EmojiSetTab::Installed)
-    }
+/// pause's timer lives in the value, so opening, closing or choosing a tab
+/// drops a search that has not gone out.
+#[derive(Default)]
+pub(super) struct SetsView {
+    tab: EmojiSetTab,
+    typing: Debounce,
 }
 
 impl SetsView {
-    pub(super) fn tab(&self) -> EmojiSetTab {
-        match self {
-            Self::Tab(tab) | Self::Typing { tab, .. } => *tab,
+    /// The box showing `tab`, nothing waiting.
+    pub(super) fn on(tab: EmojiSetTab) -> Self {
+        Self {
+            tab,
+            typing: Debounce::Idle,
         }
+    }
+
+    pub(super) fn tab(&self) -> EmojiSetTab {
+        self.tab
+    }
+
+    /// Typing that was waiting no longer searches.
+    pub(super) fn cancel_typing(&mut self) {
+        self.typing.cancel();
+    }
+
+    /// Wait for `timer`, then search `query` (replacing an earlier wait).
+    pub(super) fn arm(&mut self, query: String, timer: Task<()>) {
+        self.typing.arm(query, timer);
+    }
+
+    /// The timer ended: the query to search, once.
+    pub(super) fn fire(&mut self) -> Option<String> {
+        self.typing.fire()
     }
 }
 
@@ -80,7 +94,7 @@ impl QuillApp {
     }
     pub(super) fn close_emoji_sets(&mut self, cx: &mut Context<Self>) {
         // A search still waiting on its pause is for a box that is gone.
-        self.pickers.emoji_sets_view = SetsView::Tab(self.pickers.emoji_sets_view.tab());
+        self.pickers.emoji_sets_view.cancel_typing();
         if let Some(live) = self.live.as_mut() {
             live.driver.session.stickers.emoji.open = false;
         } else if let Some(session) = self.demo_session.as_mut() {
@@ -94,7 +108,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.pickers.emoji_sets_view = SetsView::Tab(tab);
+        self.pickers.emoji_sets_view = SetsView::on(tab);
         self.pickers
             .emoji_set_search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
@@ -118,6 +132,9 @@ impl QuillApp {
     /// The search field changed: once typing pauses, the packs matching it
     /// replace the list; clearing the field brings the last tab back.
     pub(super) fn emoji_sets_search_typed(&mut self, cx: &mut Context<Self>) {
+        // A search typed earlier is over with this keystroke: even when the
+        // field is now empty, its timer must not fire over the restored list.
+        self.pickers.emoji_sets_view.cancel_typing();
         let tab = self.pickers.emoji_sets_view.tab();
         let query = self
             .pickers
@@ -127,7 +144,6 @@ impl QuillApp {
             .trim()
             .to_string();
         if query.is_empty() {
-            self.pickers.emoji_sets_view = SetsView::Tab(tab);
             if self
                 .session()
                 .is_some_and(|s| s.stickers.emoji.tab == EmojiSetTab::Search)
@@ -136,15 +152,16 @@ impl QuillApp {
             }
             return;
         }
-        let pause = self.spawn_scoped(cx, async move |this, cx| {
+        let timer = self.spawn_scoped(cx, async move |this, cx| {
             cx.background_executor().timer(SEARCH_DELAY).await;
             this.update(cx, |this, cx| {
-                this.pickers.emoji_sets_view = SetsView::Tab(tab);
-                this.search_emoji_sets_for(&query, cx);
+                if let Some(query) = this.pickers.emoji_sets_view.fire() {
+                    this.search_emoji_sets_for(&query, cx);
+                }
             })
             .ok();
         });
-        self.pickers.emoji_sets_view = SetsView::Typing { tab, _pause: pause };
+        self.pickers.emoji_sets_view.arm(query, timer);
     }
     fn search_emoji_sets_for(&mut self, query: &str, cx: &mut Context<Self>) {
         self.pickers
@@ -420,15 +437,13 @@ impl QuillApp {
             if let Some(live) = this.live.as_mut() {
                 let _ = live.driver.ensure_emoji_pack_covers();
             }
-            let body = Rc::new(Cell::new(Some(this.emoji_sets_panel(cx))));
+            let body = this.emoji_sets_panel(cx);
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(tr(
                     keys::Q_MEDIA_EMOJI_PACKS,
                 )))
-                .content(move |content, _, _| {
-                    content.child(body.take().unwrap_or_else(|| div().into_any_element()))
-                })
+                .content(crate::ui::shell::one_shot_dialog_content(body))
                 .on_close(close)
         })
     }

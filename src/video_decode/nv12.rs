@@ -160,6 +160,10 @@ pub(super) fn turn_plane_into<const N: usize>(
     if !fits || packed != Some(out.len()) {
         return false;
     }
+    // An empty plane has no rows to turn (and no chunk size to split by).
+    if out.is_empty() {
+        return true;
+    }
     let (w, h) = (width, height);
     let at = |x: usize, y: usize| -> [u8; N] {
         let start = y * stride + x * N;

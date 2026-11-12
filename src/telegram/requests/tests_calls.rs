@@ -113,43 +113,6 @@ fn call_history_and_settings_shapes_match_1_8_67() {
     assert_eq!(v["log_file"]["@type"], "inputFileLocal");
     assert_eq!(v["log_file"]["path"], "/tmp/quill-call-77.log");
 
-    // Phase C2i: `getUserPrivacySettingRules
-    // setting:UserPrivacySetting = UserPrivacySettingRules` (schema
-    // 1.8.67 line 15620); `userPrivacySettingAllowCalls` (:9006).
-    let v: serde_json::Value = serde_json::from_str(&get_user_privacy_setting_rules(
-        RequestId(13),
-        CallPrivacySetting::AllowCalls,
-    ))
-    .unwrap();
-    assert_eq!(v["@type"], "getUserPrivacySettingRules");
-    assert_eq!(v["setting"]["@type"], "userPrivacySettingAllowCalls");
-    let v: serde_json::Value = serde_json::from_str(&get_user_privacy_setting_rules(
-        RequestId(14),
-        CallPrivacySetting::PeerToPeer,
-    ))
-    .unwrap();
-    assert_eq!(
-        v["setting"]["@type"],
-        "userPrivacySettingAllowPeerToPeerCalls"
-    );
-
-    // Phase C2i: `setUserPrivacySettingRules
-    // setting:UserPrivacySetting rules:userPrivacySettingRules = Ok`
-    // (schema 1.8.67 line 15617); Nobody =
-    // `[userPrivacySettingRuleRestrictAll]` (:8961).
-    let v: serde_json::Value = serde_json::from_str(&set_user_privacy_setting_rules(
-        RequestId(15),
-        CallPrivacySetting::AllowCalls,
-        PrivacyWho::Nobody,
-    ))
-    .unwrap();
-    assert_eq!(v["@type"], "setUserPrivacySettingRules");
-    assert_eq!(v["setting"]["@type"], "userPrivacySettingAllowCalls");
-    assert_eq!(v["rules"]["@type"], "userPrivacySettingRules");
-    let rules = v["rules"]["rules"].as_array().unwrap();
-    assert_eq!(rules.len(), 1);
-    assert_eq!(rules[0]["@type"], "userPrivacySettingRuleRestrictAll");
-
     // Everybody / Contacts map to AllowAll / AllowContacts; server
     // rule names map back, mixed/custom rules map to None.
     assert_eq!(

@@ -244,7 +244,14 @@ fn a_prepaid_giveaway_launches_only_on_the_explicit_call() {
     let recorder = Arc::new(RecordingSender::new());
     let seq = AtomicU64::new(0);
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
-    driver.session.groups.chat_boost_status.insert(-100, (1, 2));
+    driver.session.groups.set_boost_status(
+        -100,
+        crate::telegram::envelope::ParsedBoostStatus {
+            level: 1,
+            boost_count: 2,
+            ..Default::default()
+        },
+    );
 
     // A new giveaway (not prepaid) never launches.
     let paid = GiveawayDraft::new(-100, None, NOW);
@@ -283,7 +290,15 @@ fn a_prepaid_giveaway_launches_only_on_the_explicit_call() {
         &GiveawayLaunch::Launched
     );
     // The cached boost numbers are dropped so the page asks again.
-    assert!(!driver.session.groups.chat_boost_status.contains_key(&-100));
+    assert!(
+        driver
+            .session
+            .groups
+            .chat_boost_status
+            .get(&-100)
+            .is_some_and(|fetch| fetch.is_outdated()),
+        "the page asks again"
+    );
     for ty in ["getPaymentForm", "sendPaymentForm"] {
         assert_eq!(count_sent(&recorder, ty), 0);
     }
@@ -301,8 +316,16 @@ fn a_launch_answer_for_one_chat_does_not_land_in_another_chats_form() {
         let recorder = Arc::new(RecordingSender::new());
         let seq = AtomicU64::new(0);
         let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
-        driver.session.groups.chat_boost_status.insert(-100, (1, 2));
-        driver.session.groups.chat_boost_status.insert(-200, (3, 4));
+        for (chat, level, count) in [(-100, 1, 2), (-200, 3, 4)] {
+            driver.session.groups.set_boost_status(
+                chat,
+                crate::telegram::envelope::ParsedBoostStatus {
+                    level,
+                    boost_count: count,
+                    ..Default::default()
+                },
+            );
+        }
         let extra = driver
             .launch_prepaid_giveaway(&prepaid_draft(), NOW)
             .unwrap();
@@ -324,11 +347,23 @@ fn a_launch_answer_for_one_chat_does_not_land_in_another_chats_form() {
         assert_eq!(launch.is_done_for(-100), !fail);
         assert_eq!(launch.failure_for(-100).is_some(), fail);
         assert_eq!(
-            driver.session.groups.chat_boost_status.contains_key(&-100),
-            fail,
-            "A's boost status is dropped when its launch succeeded"
+            driver
+                .session
+                .groups
+                .chat_boost_status
+                .get(&-100)
+                .is_some_and(|fetch| fetch.is_outdated()),
+            !fail,
+            "A's boost status is out of date when its launch succeeded"
         );
-        assert!(driver.session.groups.chat_boost_status.contains_key(&-200));
+        assert!(
+            driver
+                .session
+                .groups
+                .chat_boost_status
+                .get(&-200)
+                .is_some_and(|fetch| !fetch.is_outdated())
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
@@ -395,6 +430,51 @@ fn a_failed_launch_reports_the_reason() {
         driver
             .launch_prepaid_giveaway(&prepaid_draft(), NOW)
             .is_ok()
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn an_older_stars_options_answer_or_error_does_not_touch_the_newer_fetch() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    driver.request_giveaway_options(-100).unwrap();
+    driver.request_giveaway_options(-100).unwrap();
+    let asked: Vec<serde_json::Value> = recorder
+        .snapshot()
+        .iter()
+        .filter_map(|j| serde_json::from_str::<serde_json::Value>(j).ok())
+        .filter(|v| v["@type"] == "getStarGiveawayPaymentOptions")
+        .collect();
+    let (old, new) = (asked[0]["@extra"].clone(), asked[1]["@extra"].clone());
+    let options = |extra: &serde_json::Value, stars: i64| {
+        json!({"@type":"starGiveawayPaymentOptions","@extra":extra,"options":[{
+            "currency":"USD","amount":100,"star_count":stars,"yearly_boost_count":1,
+            "winner_options":[],"is_default":true,"is_extended":false}]})
+    };
+    feed(&mut driver, &seq, &sink, options(&new, 500));
+    feed(&mut driver, &seq, &sink, options(&old, 1));
+    let held = driver.session.payments.giveaway.options.stars_options();
+    assert_eq!(held.len(), 1);
+    assert_eq!(held[0].star_count, 500);
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        json!({"@type":"error","@extra":old,"code":500,"message":"BOOM"}),
+    );
+    assert_eq!(
+        driver
+            .session
+            .payments
+            .giveaway
+            .options
+            .stars_options()
+            .len(),
+        1
     );
     std::fs::remove_dir_all(dir).unwrap();
 }

@@ -1,75 +1,53 @@
 
 # Implicit-state debt (scripts/check-implicit-state.py). Only remove lines.
 
-ActiveGroupCall::loaded_all_participants
 AppearancePrefs::ignore_battery_saving
 
 
 BackendStatus::failed
-CallSnap::connecting
-CallSummary::busy
+
+
+BackendStatus::failed
 
 
 
 CheckoutView::sending
 
-DragSelect::pending
-Drawn::leaving
-
-DragSelect::pending
-Drawn::leaving
-FooterMeta::pending
-
-GiveawaySummary::finished
+DestRow::saved
 
 
 GiveawaySummary::finished
-HeaderFacts::is_saved_messages
-
-
-LiveInput::failed
-
-LiveInput::failed
-Lookup::fade_started
-Lookup::pending
-
-MediaMenuFacts::downloading
 
 
 
 
 
-ParsedGroupCall::loaded_all_participants
+
+
+
+
+
+
 ParsedSession::is_password_pending
+PasswordBox::sending
+PasswordBox::sending+error
 
 
 PlaybackHealth::output_failed
 
 
-RowForum::loaded
-RowState::pending
-
-
-RowForum::loaded
-RowState::pending
-SettingsState::pending_attention
-
-SettingsState::pending_attention
-
-SettingsState::pending_attention
-
-SettingsState::pending_attention
 
 
 
-State::started
+
+
+
+
+
 Step::started
 
 StreamFacts::transport_failed
-Tempo::done
-Tempo::inner_done
 
-TopPerson::saved_messages
 
 
 

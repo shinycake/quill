@@ -26,17 +26,17 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
-use std::cell::RefCell;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 
 mod apply;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod apply_tests;
+mod choices;
 mod demo;
 mod stage;
 
+use choices::{Dimming, PickTask, WallpaperPick};
 use stage::{LookSend, LookStage, SendStage};
 
 /// What the dialog is for.
@@ -70,12 +70,11 @@ pub(super) struct ChatLookDialog {
     /// What the chat's own wallpaper becomes on Apply.
     pub wallpaper: WallpaperChoice,
     /// Dark-mode dimming of a photo wallpaper, 0-100
-    /// (`setChatBackground.dark_theme_dimming`).
-    pub dimming: i32,
-    /// The dimming slider (`None` in tests).
-    pub dimming_slider: Option<Entity<SliderState>>,
-    /// Also set the wallpaper for the other person (Premium only).
-    pub both: bool,
+    /// (`setChatBackground.dark_theme_dimming`); read where it is used.
+    pub dimming: Dimming,
+    /// The wallpaper file picker: while it is open its task lives here, so
+    /// closing the dialog drops it and its answer goes nowhere.
+    pub pick: WallpaperPick,
     /// Where Apply stands: the dialog stays open until every change it sent
     /// is acknowledged, and shows the error of one that failed.
     pub stage: LookStage,
@@ -107,12 +106,13 @@ pub(super) fn plan_changes(
     current_theme: Option<&str>,
     own: Option<(i64, i32)>,
     pending: &ChatLookDialog,
+    dimming: i32,
 ) -> Vec<LookChange> {
     let mut changes = Vec::new();
     if pending.theme.as_deref() != current_theme {
         changes.push(LookChange::Theme(pending.theme.clone().unwrap_or_default()));
     }
-    let dimming = pending.dimming.clamp(0, 100);
+    let dimming = dimming.clamp(0, 100);
     match (&pending.wallpaper, own) {
         (WallpaperChoice::File(path), _) => changes.push(LookChange::WallpaperFile {
             path: path.clone(),
@@ -172,10 +172,12 @@ impl QuillApp {
                 .step(1.)
                 .default_value(dimming as f32)
         });
-        cx.subscribe(&slider, |this, _, event: &SliderEvent, cx| {
-            let (SliderEvent::Change(value) | SliderEvent::Release(value)) = event;
+        // The slider is the dimming; its events only redraw the preview and
+        // clear a refusal of the earlier choices. The subscription ends with
+        // the slider entity.
+        cx.subscribe(&slider, |this, _, _: &SliderEvent, cx| {
             if let Some(d) = this.dialogs.chat_look_dialog.as_mut() {
-                d.dimming = value.end().round() as i32;
+                d.choices_changed();
             }
             cx.notify();
         })
@@ -184,14 +186,14 @@ impl QuillApp {
             target: LookTarget::Chat(chat_id),
             theme,
             wallpaper: WallpaperChoice::Keep,
-            dimming,
-            dimming_slider: Some(slider),
-            both: false,
+            dimming: Dimming::Slider(slider),
+            pick: WallpaperPick::Idle,
             stage: LookStage::Editing,
         });
         self.open_box(DialogKind::ChatLook);
         self.retry_failed_wallpapers();
-        self.ensure_wallpapers_loaded(cx);
+        self.ask_for_wallpapers(cx);
+        self.download_wallpaper_files();
         let boosted = self.is_boosted_look(chat_id);
         if let Some(live) = self.live.as_mut() {
             live.driver.download_chat_look_files(chat_id, true);
@@ -205,42 +207,46 @@ impl QuillApp {
     /// "From file…" in the chat colors dialog: the picked image previews
     /// and is uploaded for this chat on Apply.
     fn choose_chat_wallpaper_file(&mut self, cx: &mut Context<Self>) {
-        // The answer belongs to the dialog that asked, not to whichever one
-        // is open when the native picker closes.
-        let Some(asked) = self
-            .dialogs
-            .chat_look_dialog
-            .as_ref()
-            .map(|d| d.target.clone())
-        else {
+        // The picker's task lives in the dialog that asked (`pick`): closing
+        // the dialog drops it, so its answer never reaches another one.
+        if self.dialogs.chat_look_dialog.is_none() {
             return;
-        };
+        }
+        if let Some(d) = self.dialogs.chat_look_dialog.as_ref()
+            && matches!(d.pick, WallpaperPick::Choosing(_))
+        {
+            return;
+        }
         let picker = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
             multiple: false,
             prompt: Some(tr(keys::Q_MISC_CHOOSE_WALLPAPER).into()),
         });
-        self.spawn_screen(cx, async move |this, cx| {
-            if let Ok(Ok(Some(paths))) = picker.await
-                && let Some(path) = paths.into_iter().next()
-            {
-                let _ = this.update(cx, |this, cx| {
-                    if !is_wallpaper_image(&path) {
-                        this.set_note(StatusNote::silent(tr(keys::Q_MISC_CHOOSE_A_JPEG_PNG_OR)));
-                    } else if let Some(d) = this
-                        .dialogs
-                        .chat_look_dialog
-                        .as_mut()
-                        .filter(|d| d.target == asked)
-                    {
+        let task = self.spawn_screen(cx, async move |this, cx| {
+            let picked = match picker.await {
+                Ok(Ok(Some(paths))) => paths.into_iter().next(),
+                _ => None,
+            };
+            let _ = this.update(cx, |this, cx| {
+                let Some(d) = this.dialogs.chat_look_dialog.as_mut() else {
+                    return;
+                };
+                d.pick = WallpaperPick::Idle;
+                if let Some(path) = picked {
+                    if is_wallpaper_image(&path) {
                         d.wallpaper = WallpaperChoice::File(path);
+                        d.choices_changed();
+                    } else {
+                        this.set_note(StatusNote::silent(tr(keys::Q_MISC_CHOOSE_A_JPEG_PNG_OR)));
                     }
-                    cx.notify();
-                });
-            }
-        })
-        .detach();
+                }
+                cx.notify();
+            });
+        });
+        if let Some(d) = self.dialogs.chat_look_dialog.as_mut() {
+            d.pick = WallpaperPick::Choosing(PickTask::new(task));
+        }
     }
 
     pub(super) fn close_chat_look_dialog(&mut self, cx: &mut Context<Self>) {
@@ -258,8 +264,11 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Send (or, in the screenshot demo, apply) the pending changes.
-    fn apply_chat_look(&mut self, cx: &mut Context<Self>) {
+    /// Send (or, in the screenshot demo, apply) the dialog's changes;
+    /// `both` also sets a new wallpaper for the other person (Premium
+    /// only). It is the button's choice for this Apply, never kept in the
+    /// dialog.
+    fn apply_chat_look(&mut self, both: bool, cx: &mut Context<Self>) {
         let Some(dialog) = self.dialogs.chat_look_dialog.clone() else {
             return;
         };
@@ -269,11 +278,12 @@ impl QuillApp {
         };
         let current_theme = session.chats_state.chat_theme_names.get(&chat_id).cloned();
         let own = own_wallpaper(session, chat_id);
-        let changes = plan_changes(current_theme.as_deref(), own, &dialog);
+        let dimming = dialog.dimming.percent(cx);
+        let changes = plan_changes(current_theme.as_deref(), own, &dialog, dimming);
         let boosted = self.is_boosted_look(chat_id);
         let premium = self.session().is_some_and(|s| s.my_is_premium());
         // Boosted chats set the wallpaper for everyone, never for self only.
-        let only_for_self = !boosted && !(dialog.both && premium);
+        let only_for_self = !boosted && !(both && premium);
         if dialog.stage.applying() {
             cx.notify();
             return;
@@ -287,7 +297,7 @@ impl QuillApp {
             .collect();
         if boosted && let Some(why) = self.boosted_look_blocked(chat_id, &changes) {
             if let Some(d) = self.screen.dialogs.chat_look_dialog.as_mut() {
-                d.stage = LookStage::Blocked(why);
+                d.stage = LookStage::Blocked { why, done };
             }
             cx.notify();
             return;
@@ -486,6 +496,7 @@ impl QuillApp {
                 .on_click(cx.listener(|this, _, _, cx| {
                     if let Some(d) = this.dialogs.chat_look_dialog.as_mut() {
                         d.theme = None;
+                        d.choices_changed();
                     }
                     cx.notify();
                 }))
@@ -537,6 +548,7 @@ impl QuillApp {
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if let Some(d) = this.dialogs.chat_look_dialog.as_mut() {
                             d.theme = Some(name.clone());
+                            d.choices_changed();
                         }
                         cx.notify();
                     }))
@@ -623,6 +635,7 @@ impl QuillApp {
                     }
                     if let Some(d) = this.dialogs.chat_look_dialog.as_mut() {
                         d.wallpaper = WallpaperChoice::Installed(id);
+                        d.choices_changed();
                     }
                     cx.notify();
                 })),
@@ -693,7 +706,7 @@ impl QuillApp {
                     let photo =
                         matches!(wallpaper, Some(super::wallpaper::Wallpaper::Image { .. }));
                     let dimming = if dark && photo {
-                        state.dimming.clamp(0, 100) as u8
+                        state.dimming.percent(cx) as u8
                     } else {
                         0
                     };
@@ -747,7 +760,7 @@ impl QuillApp {
                         );
                     if dark
                         && photo
-                        && let Some(slider) = &state.dimming_slider
+                        && let Dimming::Slider(slider) = &state.dimming
                     {
                         wall = wall.child(
                             div()
@@ -756,7 +769,7 @@ impl QuillApp {
                                 .gap_1()
                                 .child(div().text_sm().child(tr_with(
                                     keys::Q_LEFTOVERS_WALLPAPER_DIMMING,
-                                    &[("percent", &(state.dimming.clamp(0, 100)).to_string())],
+                                    &[("percent", &state.dimming.percent(cx).to_string())],
                                 )))
                                 .child(Slider::new(slider).bg(cx.theme().primary)),
                         );
@@ -781,6 +794,7 @@ impl QuillApp {
                                     } else {
                                         WallpaperChoice::Remove
                                     };
+                                    d.choices_changed();
                                 }
                                 cx.notify();
                             })),
@@ -803,7 +817,13 @@ impl QuillApp {
                         let current_theme = this
                             .session()
                             .and_then(|s| s.chats_state.chat_theme_names.get(&chat_id).cloned());
-                        !plan_changes(current_theme.as_deref(), own, &state).is_empty()
+                        !plan_changes(
+                            current_theme.as_deref(),
+                            own,
+                            &state,
+                            state.dimming.percent(cx),
+                        )
+                        .is_empty()
                     };
                     let footer = this.chat_look_footer(
                         apply::FooterState {
@@ -821,20 +841,11 @@ impl QuillApp {
                     )
                 }
             };
-            let body = Rc::new(RefCell::new(Some(body)));
             dialog
                 .overlay(true)
                 .width(px(440.))
                 .title(super::shell::dialog_title(title))
-                .content(super::shell::scrollable_dialog_content(
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    },
-                ))
+                .content(crate::ui::shell::one_shot_dialog_content(body))
                 .footer(footer)
                 .on_close(on_close)
         })
@@ -853,8 +864,8 @@ crate::ui::shell::register_dialogs! {
 #[cfg(test)]
 mod tests {
     use super::{
-        ChatLookDialog, LookChange, LookStage, LookTarget, WallpaperChoice, chat_look_allowed,
-        is_wallpaper_image, plan_changes,
+        ChatLookDialog, Dimming, LookChange, LookSend, LookStage, LookTarget, SendStage,
+        WallpaperChoice, WallpaperPick, chat_look_allowed, is_wallpaper_image, plan_changes,
     };
     use std::path::Path;
 
@@ -863,9 +874,8 @@ mod tests {
             target: LookTarget::Chat(1),
             theme: None,
             wallpaper: WallpaperChoice::Keep,
-            dimming: 0,
-            dimming_slider: None,
-            both: false,
+            dimming: Dimming::Fixed(0),
+            pick: WallpaperPick::Idle,
             stage: LookStage::Editing,
         }
     }
@@ -879,11 +889,10 @@ mod tests {
 
     #[test]
     fn unchanged_choices_send_nothing() {
-        assert!(plan_changes(None, None, &dialog()).is_empty());
+        assert!(plan_changes(None, None, &dialog(), 0).is_empty());
         let mut same = dialog();
         same.theme = Some("🏠".into());
-        same.dimming = 30;
-        assert!(plan_changes(Some("🏠"), Some((5, 30)), &same).is_empty());
+        assert!(plan_changes(Some("🏠"), Some((5, 30)), &same, 30).is_empty());
     }
 
     #[test]
@@ -892,7 +901,7 @@ mod tests {
         pending.theme = Some("🌷".into());
         pending.wallpaper = WallpaperChoice::Installed(9);
         assert_eq!(
-            plan_changes(None, None, &pending),
+            plan_changes(None, None, &pending, 0),
             vec![
                 LookChange::Theme("🌷".into()),
                 LookChange::Wallpaper { id: 9, dimming: 0 }
@@ -902,36 +911,37 @@ mod tests {
         let mut remove = dialog();
         remove.wallpaper = WallpaperChoice::Remove;
         assert_eq!(
-            plan_changes(Some("🌷"), Some((5, 0)), &remove),
+            plan_changes(Some("🌷"), Some((5, 0)), &remove, 0),
             vec![
                 LookChange::Theme(String::new()),
                 LookChange::RemoveWallpaper
             ]
         );
         // Nothing to remove: no request.
-        assert!(plan_changes(None, None, &remove).is_empty());
+        assert!(plan_changes(None, None, &remove, 0).is_empty());
     }
 
     #[test]
     fn a_file_or_a_new_dimming_sets_the_chat_wallpaper() {
         let mut file = dialog();
         file.wallpaper = WallpaperChoice::File("/a/b.jpg".into());
-        file.dimming = 140;
         assert_eq!(
-            plan_changes(None, Some((5, 0)), &file),
+            plan_changes(None, Some((5, 0)), &file, 140),
             vec![LookChange::WallpaperFile {
                 path: "/a/b.jpg".into(),
                 dimming: 100
             }]
         );
         // Only the dimming of the chat's own wallpaper changed.
-        let mut dim = dialog();
-        dim.dimming = 40;
+        let dim = dialog();
         assert_eq!(
-            plan_changes(None, Some((5, 10)), &dim),
+            plan_changes(None, Some((5, 10)), &dim, 40),
             vec![LookChange::Wallpaper { id: 5, dimming: 40 }]
         );
-        assert!(plan_changes(None, None, &dim).is_empty(), "nothing to dim");
+        assert!(
+            plan_changes(None, None, &dim, 40).is_empty(),
+            "nothing to dim"
+        );
     }
 
     #[test]
@@ -940,5 +950,32 @@ mod tests {
         assert!(is_wallpaper_image(Path::new("c.webp")));
         assert!(!is_wallpaper_image(Path::new("c.gif")));
         assert!(!is_wallpaper_image(Path::new("noext")));
+    }
+
+    #[test]
+    fn a_changed_choice_clears_a_refusal_but_keeps_sent_changes() {
+        let mut blocked = dialog();
+        blocked.stage = LookStage::Blocked {
+            why: "Level 5 required".into(),
+            done: Vec::new(),
+        };
+        blocked.choices_changed();
+        assert_eq!(blocked.stage, LookStage::Editing);
+        // What an earlier Apply got acknowledged is kept, without the line.
+        let done = vec![LookSend {
+            change: LookChange::Theme("a".into()),
+            stage: SendStage::Done,
+        }];
+        blocked.stage = LookStage::Blocked {
+            why: "Level 5 required".into(),
+            done: done.clone(),
+        };
+        blocked.choices_changed();
+        assert_eq!(blocked.stage, LookStage::Sent(done));
+        assert_eq!(blocked.stage.error(), None);
+        let mut sent = dialog();
+        sent.stage = LookStage::Sent(Vec::new());
+        sent.choices_changed();
+        assert_eq!(sent.stage, LookStage::Sent(Vec::new()));
     }
 }

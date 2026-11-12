@@ -14,13 +14,13 @@ impl QuillApp {
     /// open, read from that chat's own ops (another chat's page or a
     /// mutation never hides it).
     fn story_page_loading(&self, purpose: RequestPurpose) -> bool {
-        let Some(chat) = self.stories.page.as_ref().map(|page| page.chat_id.0) else {
+        let Some(chat) = self.stories.page.as_ref().map(|page| page.chat_id) else {
             return false;
         };
         self.session().is_some_and(|s| {
             s.stories
                 .page_ops
-                .loading(chat, &story_page_op_label(purpose))
+                .loading(chat, story_page_op_label(purpose))
         })
     }
 

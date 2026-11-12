@@ -76,6 +76,18 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Phase 9.1: refresh one chat's active stories (`getChatActiveStories`).
     /// The response is `chatActiveStories`, handled like the update.
+    /// Asks for the active stories of every chat the reducer queued
+    /// (`StoriesState::tray_refresh`). Run by the ingest that queued them;
+    /// a chat whose send failed stays queued for the next ingest.
+    pub fn refresh_story_trays(&mut self) {
+        let chats: Vec<i64> = self.session.stories.tray_refresh.iter().copied().collect();
+        for chat_id in chats {
+            if self.get_chat_active_stories(ChatId(chat_id)).is_ok() {
+                self.session.stories.tray_refresh.remove(&chat_id);
+            }
+        }
+    }
+
     pub fn get_chat_active_stories(
         &mut self,
         chat_id: ChatId,
@@ -294,7 +306,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.stories.available_reactions.is_some()
+        if !self.session.stories.available_reactions.can_ask()
             || self
                 .session
                 .requests
@@ -305,6 +317,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetStoryAvailableReactions, None);
+        self.session.stories.available_reactions.begin();
+        self.session.stories.available_reactions.sent(extra);
         match self
             .sender
             .send_json(&get_story_available_reactions(extra, 10))
@@ -312,6 +326,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
+                self.session.stories.available_reactions.cancel();
                 Err(err)
             }
         }

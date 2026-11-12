@@ -319,7 +319,11 @@ impl Session {
     /// the "No ads" preview is asked for and nothing is sent.
     pub fn begin_sponsored_hide(&mut self, chat_id: ChatId, message_id: i64) -> Option<bool> {
         self.sponsored_message(chat_id, message_id)?;
-        self.messages.sponsored_report = SponsoredReportFlow::Idle;
+        // A report in flight keeps its place (its answer is still awaited,
+        // as in `accept_sponsored_hidden`); a finished one's note goes.
+        if self.messages.sponsored_report.target().is_none() {
+            self.messages.sponsored_report = SponsoredReportFlow::Idle;
+        }
         if self.my_is_premium() {
             return Some(true);
         }
@@ -343,7 +347,9 @@ impl Session {
         // A report in flight keeps its place: its answer is still awaited.
         if matches!(
             self.messages.sponsored_report,
-            SponsoredReportFlow::Asking(_) | SponsoredReportFlow::Picking { .. }
+            SponsoredReportFlow::Choosing(_)
+                | SponsoredReportFlow::Asking { .. }
+                | SponsoredReportFlow::Picking(_)
         ) {
             return;
         }
@@ -387,18 +393,17 @@ impl Session {
         if !reportable {
             return None;
         }
-        self.messages.sponsored_report = SponsoredReportFlow::Asking(SponsoredReportTarget {
+        self.messages.sponsored_report = SponsoredReportFlow::Choosing(SponsoredReportTarget {
             chat_id,
             message_id,
-            request: None,
         });
         Some((chat_id, message_id))
     }
 
     /// The report request went out as `request`: only its answer applies.
     pub fn note_sponsored_report_request(&mut self, request: RequestId) {
-        if let Some(target) = self.messages.sponsored_report.target_mut() {
-            target.request = Some(request);
+        if let SponsoredReportFlow::Choosing(target) = self.messages.sponsored_report {
+            self.messages.sponsored_report = SponsoredReportFlow::Asking { target, request };
         }
     }
 
@@ -413,11 +418,14 @@ impl Session {
         // Only the answer to the request the flow waits on: after Cancel (or
         // a newer report) the target is gone or waits on another request,
         // and a late answer re-arms nothing and reports no ad.
-        let Some(SponsoredReportTarget {
-            chat_id,
-            message_id,
-            request: Some(request),
-        }) = self.messages.sponsored_report.target()
+        let SponsoredReportFlow::Asking {
+            target:
+                SponsoredReportTarget {
+                    chat_id,
+                    message_id,
+                },
+            request,
+        } = self.messages.sponsored_report
         else {
             return;
         };
@@ -426,20 +434,14 @@ impl Session {
         }
         match result {
             ReportSponsoredResult::OptionRequired { title, options } => {
-                self.messages.sponsored_report = SponsoredReportFlow::Picking {
-                    flight: SponsoredReportFlight {
+                self.messages.sponsored_report =
+                    SponsoredReportFlow::Picking(SponsoredReportFlight {
                         extra: pending.id,
                         chat_id,
                         message_id,
                         title,
                         options,
-                    },
-                    target: SponsoredReportTarget {
-                        chat_id,
-                        message_id,
-                        request: Some(request),
-                    },
-                };
+                    });
             }
             result => {
                 self.messages.sponsored_report = SponsoredReportFlow::Idle;

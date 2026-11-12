@@ -200,6 +200,16 @@ fn export_builds_the_page_workbook(cx: &mut TestAppContext) {
             crate::ui::statistics_export::page_workbook(session, CHANNEL).expect("message");
         assert_eq!(sheets[1].name, "Interactions");
         assert!(name.contains("_100_"), "{name}");
+        // A post that is not looked up yet may be a poll whose votes chart
+        // is still to come: no workbook until it is known.
+        if let Some(state) = session.groups.stats.message.as_mut() {
+            state.message_id = 9;
+        }
+        session
+            .groups
+            .stats
+            .set_page(CHANNEL, quill::state::StatsPage::Message(9));
+        assert!(crate::ui::statistics_export::page_workbook(session, CHANNEL).is_none());
     });
 }
 

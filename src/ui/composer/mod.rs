@@ -859,7 +859,7 @@ impl QuillApp {
             .as_ref()
             .filter(|search| Some(search.chat_id) == session.open_chat_id())
         {
-            for user in search.user_ids.iter().filter_map(|id| session.user(*id)) {
+            for user in search.user_ids().iter().filter_map(|id| session.user(*id)) {
                 if !items.iter().any(|(id, _, _)| *id == user.id) {
                     items.push((user.id, user.display_name(), user.username.clone()));
                 }
@@ -914,7 +914,7 @@ impl QuillApp {
     pub(super) fn close_mention_menu(&mut self, cx: &mut Context<Self>) -> bool {
         let showing = !self.mention_menu_items(cx).is_empty();
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.messages.mention_search = None;
+            live.driver.end_mention_search();
         }
         if showing {
             cx.notify();
@@ -971,7 +971,7 @@ impl QuillApp {
         self.composer
             .update(cx, |input, cx| input.focus(window, cx));
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.messages.mention_search = None;
+            live.driver.end_mention_search();
         }
         let completed = self.composer.read(cx).value().to_string();
         self.sync_composer_typing(&completed);
@@ -991,9 +991,10 @@ mod field_placeholder;
 mod scheduled_load;
 mod send_bot_command;
 mod sent_text;
-pub(in crate::ui) use scheduled_load::ScheduledDialog;
+pub(in crate::ui) use scheduled_load::ScheduledDelete;
 pub(in crate::ui) use sent_text::{AiAsk, LeftSend, SentText};
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod send_options_to_tests;
 mod toggle_composer_silent;
+pub(in crate::ui) use toggle_composer_silent::option_chip;

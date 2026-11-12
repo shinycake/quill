@@ -28,8 +28,23 @@ use quill::state::{
     AdminListFetch, AdminRightsFetch, MemberListFilter, SubmitView, SupergroupMembersFetch,
 };
 use quill::telegram::envelope::{ChatAdminRights, ChatPermissions, MessageSender};
-use std::cell::RefCell;
-use std::rc::Rc;
+/// A member change that went out and waits for its answer: the note and
+/// the box that follow it say what TDLib answered, not what was queued.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::ui) struct MemberChange {
+    pub(in crate::ui) request: quill::ids::RequestId,
+    pub(in crate::ui) kind: MemberChangeKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::ui) enum MemberChangeKind {
+    /// A restriction or ban lifted from the member dialog.
+    Unban,
+    /// "Remove user" from the Add exception / Remove user picker: the
+    /// picker closes when the ban is answered.
+    Kick,
+}
+
 /// What the admin dialog's Submit sends.
 enum AdminAction {
     Promote(i64, ChatAdminRights),
@@ -306,7 +321,6 @@ impl QuillApp {
     pub(super) fn pick_restrict_until(&mut self, until: RestrictUntil, cx: &mut Context<Self>) {
         if let Some(dialog) = self.admin.restrict_dialog.as_mut() {
             dialog.until = until;
-            dialog.error = None;
             cx.notify();
         }
     }
@@ -332,8 +346,12 @@ impl QuillApp {
             {
                 Ok(unix) => RestrictUntil::Custom(unix).until_date(now),
                 Err(err) => {
+                    let picked = picked_unix(&dialog.custom, MIN_RESTRICT_SECS, cx);
                     if let Some(dialog) = self.admin.restrict_dialog.as_mut() {
-                        dialog.error = Some(err.message());
+                        dialog.error = Some(TimeRefusal {
+                            picked,
+                            reason: err.message(),
+                        });
                     }
                     cx.notify();
                     return;
@@ -367,7 +385,6 @@ impl QuillApp {
         match sent {
             Ok(id) => {
                 if let Some(dialog) = self.admin.restrict_dialog.as_mut() {
-                    dialog.error = None;
                     dialog.submit = quill::state::Submit::sent(vec![id]);
                 }
             }
@@ -438,19 +455,68 @@ impl QuillApp {
     /// `chatMemberStatusMember`).
     pub(super) fn unban_member(&mut self, chat_id: ChatId, user_id: i64, cx: &mut Context<Self>) {
         let note = match self.live.as_mut() {
-            // Slice G1 fix-up: `Ok(None)` is a driver refusal, not
-            // success — report it honestly.
+            // `Ok(None)` is a driver refusal, not success. A sent request
+            // is settled by its answer (`settle_member_changes`).
             Some(live) => match live.driver.unban_chat_member(chat_id, user_id) {
-                Ok(Some(_)) => StatusNote::silent(tr(keys::Q_PEOPLE_MEMBER_UNBANNED)),
-                Ok(None) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_UNBAN_MEMBER)),
-                Err(_) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_UNBAN_MEMBER)),
+                Ok(Some(request)) => {
+                    self.admin.member_changes.push(MemberChange {
+                        request,
+                        kind: MemberChangeKind::Unban,
+                    });
+                    cx.notify();
+                    return;
+                }
+                Ok(None) | Err(_) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_UNBAN_MEMBER)),
             },
             None => StatusNote::info(tr(keys::Q_PEOPLE_MEMBER_ACTIONS_NEED_A_LIVE)),
         };
-        // The member page is fetched again when the request answers
-        // (`member_list_stale`), not before the change applies.
         self.set_note(note);
         cx.notify();
+    }
+
+    /// Settle the member changes that were sent: a note when the request
+    /// is answered (the member page is fetched again by
+    /// `member_list_stale`), the error line when TDLib refused it. Called
+    /// from `poll_live`.
+    pub(in crate::ui) fn settle_member_changes(&mut self, cx: &mut Context<Self>) {
+        if self.admin.member_changes.is_empty() {
+            return;
+        }
+        let changes = std::mem::take(&mut self.admin.member_changes);
+        let Some(requests) = self.session().map(|session| &session.requests) else {
+            // No session answers for them any more.
+            return;
+        };
+        let mut waiting = Vec::new();
+        let mut settled = Vec::new();
+        for change in changes {
+            let view = quill::state::Submit::sent(vec![change.request]).view(Some(requests));
+            if view == SubmitView::Sending {
+                waiting.push(change);
+            } else {
+                settled.push((change.kind, view));
+            }
+        }
+        self.admin.member_changes = waiting;
+        for (kind, view) in settled {
+            let note = match (kind, view) {
+                (MemberChangeKind::Unban, SubmitView::Failed(_)) => {
+                    StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_UNBAN_MEMBER))
+                }
+                (MemberChangeKind::Kick, SubmitView::Failed(_)) => {
+                    StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_UPDATE_MEMBER_STATUS))
+                }
+                (MemberChangeKind::Unban, _) => {
+                    StatusNote::silent(tr(keys::Q_PEOPLE_MEMBER_UNBANNED))
+                }
+                (MemberChangeKind::Kick, _) => {
+                    self.admin.add_special = None;
+                    StatusNote::silent(tr(keys::Q_PEOPLE_MEMBER_BANNED))
+                }
+            };
+            self.set_note(note);
+            cx.notify();
+        }
     }
 
     /// kit Phase 2 (redo): restrict/ban hosted in a kit `Dialog` via
@@ -560,13 +626,15 @@ impl QuillApp {
                         .child(line),
                 );
             }
-            if let Some(error) = dialog_state.error {
+            if let Some(refusal) = dialog_state.error
+                && refusal.picked == picked_unix(&dialog_state.custom, MIN_RESTRICT_SECS, cx)
+            {
                 body = body.child(
                     div()
                         .id("g1-restrict-error")
                         .text_xs()
                         .text_color(cx.theme().danger)
-                        .child(error),
+                        .child(refusal.reason),
                 );
             }
             if let quill::state::Submit::Failed(reason) = &dialog_state.submit {
@@ -614,18 +682,9 @@ impl QuillApp {
             let body = body.into_any_element();
             dialog
                 .title(crate::ui::shell::dialog_title(title))
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    // `content` needs an `Fn` closure, but the body is built once
-                    // per dialog render — hand it over through a one-shot cell.
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
+                .content(crate::ui::shell::one_shot_dialog_content(
+                    body.into_any_element(),
+                ))
                 .footer(footer)
                 .on_close(on_close)
         })

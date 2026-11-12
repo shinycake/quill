@@ -50,6 +50,14 @@ fn with_known<R>(f: impl FnOnce(&mut Known) -> R) -> R {
     f(crate::locks::lock_or_recover(&KNOWN).get_or_insert_with(Known::default))
 }
 
+/// A client closed: what was learned about its account goes with it.
+pub(crate) fn forget_client(client_id: i32) {
+    with_known(|known| {
+        known.me.remove(&client_id);
+        known.classes.retain(|(client, _), _| *client != client_id);
+    });
+}
+
 pub(crate) fn my_user_id(ctx: &Ctx) -> Result<i64, ToolError> {
     if let Some(id) = with_known(|known| known.me.get(&ctx.client.id()).copied()) {
         return Ok(id);

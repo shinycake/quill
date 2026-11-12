@@ -286,7 +286,10 @@ fn driver_mutation_confirmed_refetches_dropped_cache() {
         .groups
         .welcome_messages
         .insert(13, crate::state::fetch::Fetch::Ready(vec![]));
-    driver.session.groups.chat_boost_status.insert(13, (0, 0));
+    driver
+        .session
+        .groups
+        .set_boost_status(13, crate::telegram::envelope::ParsedBoostStatus::default());
     let sent_types = || {
         recorder
             .snapshot()
@@ -391,7 +394,15 @@ fn driver_mutation_confirmed_refetches_dropped_cache() {
             boost_extra.0
         ),
     );
-    assert!(!driver.session.groups.chat_boost_status.contains_key(&13));
+    assert!(
+        driver
+            .session
+            .groups
+            .chat_boost_status
+            .get(&13)
+            .is_some_and(|fetch| fetch.is_loading()),
+        "the status is asked for again"
+    );
     assert!(
         sent_types().iter().any(|t| t == "getChatBoostStatus"),
         "boost status refetched after confirmed boost"

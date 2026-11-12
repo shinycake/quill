@@ -139,12 +139,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .calls
             .group_call(group_call_id)
             .filter(|call| !call.transport.is_connected())
-            .map(|call| {
-                (
-                    call.transport.answer().to_string(),
-                    call.is_my_video_enabled && !call.is_my_video_paused,
-                )
-            });
+            .map(|call| (call.transport.answer().to_string(), call.my_video.is_live()));
         if let Some((answer, video_enabled)) = join_answer
             && !answer.is_empty()
         {
@@ -232,7 +227,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .calls
             .group_call(group_call_id)
-            .is_some_and(|call| call.is_my_video_enabled && !call.is_my_video_paused)
+            .is_some_and(|call| call.my_video.is_live())
             .then(|| self.call_camera_device())
             .flatten();
         if self.group_camera_state.get(&group_call_id) != Some(&wanted_camera) {
@@ -279,14 +274,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
                 match result {
-                    Ok(()) => {
-                        call.screen_share.connected();
-                        call.screen_share_error = None;
-                    }
-                    Err(err) => {
-                        call.screen_share.stop();
-                        call.screen_share_error = Some(err.to_string());
-                    }
+                    Ok(()) => call.screen_share.connected(),
+                    Err(err) => call.screen_share.fail(err.to_string()),
                 }
             }
         }

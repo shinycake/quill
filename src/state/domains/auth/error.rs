@@ -20,15 +20,13 @@ impl Session {
             // `CloseRequested` with nothing to move it on. A quit asked
             // for meanwhile (`begin_close` forgets the request) stays.
             Some(RequestPurpose::LogOut)
-                if extra.is_some() && self.auth_state.logout_request == extra =>
+                if extra.is_some_and(|id| self.shutdown == ShutdownPhase::LogoutRequested(id)) =>
             {
-                self.auth_state.logout_request = None;
-                if self.shutdown == ShutdownPhase::CloseRequested
-                    && matches!(self.auth, AuthorizationState::Ready)
-                {
-                    self.shutdown = ShutdownPhase::Running;
-                    self.auth_state.logout_refused = Some(err.clone());
-                }
+                self.shutdown = if matches!(self.auth, AuthorizationState::Ready) {
+                    ShutdownPhase::LogoutRefused(err.clone())
+                } else {
+                    ShutdownPhase::CloseRequested
+                };
             }
             // Slice A2: a failed 2FA management request clears the
             // in-flight flag and parks the honest, classified
@@ -45,6 +43,14 @@ impl Session {
             // for good.
             Some(RequestPurpose::GetCountries) => {
                 self.auth_state.countries.fail(error_reason(err));
+            }
+            // The default guess stays unknown; the picker needs none.
+            Some(RequestPurpose::GetCountryCode) => {
+                self.auth_state.guessed_country.failed(
+                    pending.map(|p| p.id),
+                    error_reason(err),
+                    false,
+                );
             }
             // Slice A8: a refused change-number op (code send /
             // resend, code check) clears the in-flight flags and

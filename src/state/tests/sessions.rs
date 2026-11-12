@@ -25,12 +25,13 @@ fn password_state_response_replaces_cache_and_clears_error() {
     let state = session
         .auth_state
         .password_state
-        .clone()
+        .get()
+        .cloned()
         .expect("password state cached");
     assert!(state.has_password);
     assert_eq!(state.password_hint, "street");
     assert!(state.has_recovery_email_address);
-    assert_eq!(state.pending_email_pattern, None);
+    assert_eq!(state.pending_email, None);
     assert_eq!(
         session.auth_state.password_op,
         crate::state::PasswordFlight::Idle
@@ -48,7 +49,7 @@ fn stray_password_state_response_is_ignored() {
         &sink,
         r#"{"@type":"passwordState","has_password":true,"password_hint":"","has_recovery_email_address":false,"has_passport_data":false,"recovery_email_address_code_info":null,"login_email_address_pattern":"","pending_reset_date":0}"#,
     );
-    assert!(session.auth_state.password_state.is_none());
+    assert!(session.auth_state.password_state.get().is_none());
     assert_eq!(
         session.auth_state.password_op,
         crate::state::PasswordFlight::Idle
@@ -87,7 +88,7 @@ fn password_state_error_surfaces_honest_classified_line() {
             .to_string();
         assert!(line.contains(expect), "op {op:?} code {code}: {line}");
         assert!(!session.auth_state.password_state_loading());
-        assert!(session.auth_state.password_state.is_none());
+        assert!(session.auth_state.password_state.get().is_none());
     }
 }
 
@@ -184,6 +185,8 @@ fn sessions_answer_replaces_cache_for_matching_request() {
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetActiveSessions, None);
     session.settings.sessions.fail("stale");
+    session.settings.sessions.begin();
+    session.settings.sessions.sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -330,6 +333,8 @@ fn sessions_fetch_error_clears_loading() {
     // next ingest retries the fetch and flood state worsens.
     session.settings.sessions_op.mark_stale();
     let extra = session.request(RequestPurpose::GetActiveSessions, None);
+    session.settings.sessions.begin();
+    session.settings.sessions.sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -356,6 +361,7 @@ fn account_ttl_answer_writes_cache_for_matching_request() {
     let extra = session.request(RequestPurpose::GetAccountTtl, None);
     session.settings.account_ttl.fail("stale");
     session.settings.account_ttl.begin();
+    session.settings.account_ttl.sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -376,6 +382,7 @@ fn account_ttl_fetch_error_surfaces_honestly() {
     let seq = AtomicU64::new(0);
     session.settings.account_ttl.begin();
     let extra = session.request(RequestPurpose::GetAccountTtl, None);
+    session.settings.account_ttl.sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -500,6 +507,7 @@ fn websites_answer_replaces_cache_for_matching_request() {
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetConnectedWebsites, None);
     session.settings.connected_websites.begin();
+    session.settings.connected_websites.sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -605,6 +613,8 @@ fn websites_fetch_error_clears_loading() {
     // next ingest retries the fetch and flood state worsens.
     session.settings.websites_op.mark_stale();
     let extra = session.request(RequestPurpose::GetConnectedWebsites, None);
+    session.settings.connected_websites.begin();
+    session.settings.connected_websites.sent(extra);
     apply_json(
         &mut session,
         &seq,

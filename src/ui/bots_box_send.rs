@@ -45,9 +45,11 @@ impl BoxSend {
             return false;
         };
         match (kind, dialog) {
-            (BoxKind::AddBot, Some(ProfileDialog::AddBot { target, .. }))
-            | (BoxKind::ShareGame, Some(ProfileDialog::ShareGame { target, .. })) => {
-                *target == Some(chat.0)
+            (BoxKind::AddBot, Some(ProfileDialog::AddBot { step, .. })) => {
+                step.target() == Some(chat.0)
+            }
+            (BoxKind::ShareGame, Some(ProfileDialog::ShareGame { step, .. })) => {
+                step.target() == Some(chat.0)
             }
             _ => false,
         }

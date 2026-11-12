@@ -222,11 +222,11 @@ fn last_message_text_captures_entities_and_sender() {
         r#"{"@type":"updateChatLastMessage","chat_id":7,"last_message":{"id":44,"chat_id":7,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hello bold world","entities":[{"@type":"textEntity","offset":6,"length":4,"type":{"@type":"textEntityTypeBold"}}]}}},"positions":[{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"8","is_pinned":false}]}"#,
     );
     let chat = session.chats.get(&7).unwrap();
-    assert_eq!(chat.last_preview, "hello bold world");
-    assert_eq!(chat.last_preview_sender, "You");
-    assert_eq!(chat.last_preview_style.icon, None);
+    assert_eq!(chat.last_preview(), "hello bold world");
+    assert_eq!(chat.last_preview_sender(), "You");
+    assert_eq!(chat.last_preview_style().icon, None);
     assert_eq!(
-        chat.last_preview_style.entities,
+        chat.last_preview_style().entities,
         vec![TextEntity {
             utf8_start: 6,
             utf8_end: 10,
@@ -252,15 +252,15 @@ fn last_message_photo_captures_icon_and_signature_sender() {
         r#"{"@type":"updateChatLastMessage","chat_id":8,"last_message":{"id":3,"chat_id":8,"is_outgoing":false,"author_signature":"Admin","content":{"@type":"messagePhoto","photo":{"@type":"photo","has_stickers":false,"sizes":[{"@type":"photoSize","type":"m","photo":{"@type":"file","id":1,"size":24,"expected_size":24,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"r","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":24}},"width":320,"height":240,"progressive_sizes":[]}]},"caption":{"@type":"formattedText","text":"Nice pic","entities":[{"@type":"textEntity","offset":0,"length":4,"type":{"@type":"textEntityTypeBold"}}]},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}},"positions":[{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"8","is_pinned":false}]}"#,
     );
     let chat = session.chats.get(&8).unwrap();
-    assert_eq!(chat.last_preview, "Nice pic");
-    assert_eq!(chat.last_preview_style.icon, Some("🖼"));
+    assert_eq!(chat.last_preview(), "Nice pic");
+    assert_eq!(chat.last_preview_style().icon, Some("🖼"));
     assert_eq!(
-        chat.last_preview_style.entities,
+        chat.last_preview_style().entities,
         vec![TextEntity {
             utf8_start: 0,
             utf8_end: 4,
             kind: TextEntityKind::Bold,
         }]
     );
-    assert_eq!(chat.last_preview_sender, "Admin");
+    assert_eq!(chat.last_preview_sender(), "Admin");
 }

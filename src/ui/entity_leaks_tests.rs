@@ -178,8 +178,8 @@ impl Harness {
                 .chain(others)
                 .map(String::from)
                 .collect();
-            if app.settings.open {
-                shown.push(format!("settings {:?}", app.settings.page));
+            if app.settings.open() {
+                shown.push(format!("settings {:?}", app.settings.page()));
             }
             shown
         });
@@ -364,9 +364,8 @@ const MAIN_WINDOW: &[Surface] = &[
         open: |h| {
             h.act(|app, _, cx| {
                 let at = point(px(40.), px(80.));
-                app.message_ui.menu = crate::ui::chat_list_state::ContextMenu::Chat(
-                    crate::ui::menu_states::ChatMenuState::at(ChatId(11), at),
-                );
+                app.message_ui.menu
+                    .open_row(crate::ui::menu_states::ChatMenuState::at(ChatId(11), at));
                 cx.notify();
             })
         },
@@ -627,7 +626,7 @@ fn leaving_a_settings_page_lets_go_of_what_it_made(cx: &mut TestAppContext) {
                         app.open_settings(Some(Page::$page), cx);
                         cx.notify();
                     });
-                    let page = h.app.read_with(&h.vcx, |app, _| app.settings.page);
+                    let page = h.app.read_with(&h.vcx, |app, _| app.settings.page());
                     assert_eq!(page, Some(Page::$page), "the row opens its page");
                 },
                 close: |h| h.act(|app, _, cx| {
@@ -741,7 +740,7 @@ fn closing_the_call_window_lets_go_of_what_it_made(cx: &mut TestAppContext) {
                     if let Some(session) = app.demo_session.as_mut() {
                         session.calls.active_call = CALL.with(|slot| slot.borrow().clone());
                     }
-                    app.call_screen.window_closed_by_user = None;
+                    app.call_screen.wanted = crate::ui::calls_state::WindowWanted::Open;
                     app.sync_call_window(cx);
                 })
             },

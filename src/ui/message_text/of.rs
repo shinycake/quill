@@ -11,8 +11,7 @@ impl FooterMeta {
     ) -> Self {
         Self {
             date: message.date,
-            pending: message.pending(),
-            receipt,
+            delivery: Delivery::of(message.pending(), receipt),
             views,
             signature,
             edited: message.extras.edit_date > 0,
@@ -89,7 +88,7 @@ impl FooterMeta {
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod tests {
-    use super::{FooterMeta, OutboxReceipt, message_footer_meta};
+    use super::{Delivery, FooterMeta, message_footer_meta};
     use gpui_kit::test::TestWindowExt;
     use gpui_kit::{
         AppContext, Context, Entity, IntoElement, ParentElement, Render, TestAppContext,
@@ -130,8 +129,7 @@ mod tests {
         cx.update(gpui_kit::init);
         let meta = FooterMeta {
             date: 1_790_000_000,
-            pending: false,
-            receipt: OutboxReceipt::None,
+            delivery: Delivery::Incoming,
             views: None,
             signature: None,
             edited: true,

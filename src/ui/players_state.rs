@@ -38,13 +38,82 @@ pub(crate) struct PlayersUi {
     pub(super) userpic_videos: std::rc::Rc<super::userpic_videos::UserpicVideos>,
     /// Playback speed for voice and video messages (tdesktop's 0.5–2.5x).
     pub(super) speed: f64,
-    /// Output volume, 0.0 to 1.0.
-    pub(super) volume: f32,
-    /// The volume before mute, for the unmute click.
-    pub(super) unmuted_volume: f32,
+    /// Output volume (`Volume`).
+    pub(super) volume: Volume,
 }
 
+/// Output volume: a level, or muted with the level the unmute click brings
+/// back. One value, so the restore level cannot go stale beside the level.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Volume {
+    /// Audible, 0.01 to 1.0.
+    Level(f32),
+    /// Silent (a level below 0.01, or the mute click).
+    Muted { restore: f32 },
+}
+
+impl Volume {
+    /// The quietest audible level; anything below is mute.
+    const FLOOR: f32 = 0.01;
+
+    /// What the output plays at, 0.0 to 1.0.
+    pub(crate) fn level(self) -> f32 {
+        match self {
+            Self::Level(level) => level,
+            Self::Muted { .. } => 0.0,
+        }
+    }
+
+    pub(crate) fn is_muted(self) -> bool {
+        matches!(self, Self::Muted { .. })
+    }
+
+    /// The level before mute (or the level now): where "unmute" and a
+    /// Picture-in-Picture window opening muted start.
+    pub(crate) fn last_audible(self) -> f32 {
+        match self {
+            Self::Level(level) => level,
+            Self::Muted { restore } if restore >= Self::FLOOR => restore,
+            Self::Muted { .. } => 1.0,
+        }
+    }
+
+    /// The slider or a key set `level` (not finite: unchanged). A level
+    /// below the floor is mute, keeping the level it left.
+    pub(crate) fn set(self, level: f32) -> Self {
+        if !level.is_finite() {
+            return self;
+        }
+        let level = level.clamp(0.0, 1.0);
+        if level < Self::FLOOR {
+            Self::Muted {
+                restore: self.last_audible(),
+            }
+        } else {
+            Self::Level(level)
+        }
+    }
+
+    /// The mute button.
+    pub(crate) fn toggled(self) -> Self {
+        match self {
+            Self::Level(level) => Self::Muted { restore: level },
+            Self::Muted { .. } => Self::Level(self.last_audible()),
+        }
+    }
+}
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "players_state_tests.rs"]
+mod tests;
+
 impl PlayersUi {
+    /// What the output plays at, 0.0 to 1.0.
+    pub(super) fn volume(&self) -> f32 {
+        self.volume.level()
+    }
+
     pub(super) fn new(audio_output: &super::audio::SharedOutput) -> Self {
         Self {
             audio: super::audio::AudioEngine::new(audio_output.clone()),
@@ -54,8 +123,7 @@ impl PlayersUi {
             inline_videos: Default::default(),
             userpic_videos: Default::default(),
             speed: 1.0,
-            volume: 1.0,
-            unmuted_volume: 1.0,
+            volume: Volume::Level(1.0),
         }
     }
 }

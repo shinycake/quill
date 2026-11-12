@@ -8,8 +8,7 @@ use super::*;
 use crate::ui::shell::{DialogKind, QuillShell};
 use gpui_kit::component::dialog::Dialog;
 use quill::emoji_status_selector::{format_mute_for, picker_start_index, time_picker_values};
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::cell::Cell;
 
 /// `st::historyMessagesTTLPickerHeight` and `...ItemHeight`.
 const DRUM_HEIGHT: f32 = 200.;
@@ -182,7 +181,7 @@ impl QuillApp {
                 this.close_status_time_box(cx);
             });
         app.update(cx, |this, cx| {
-            let body = Rc::new(RefCell::new(Some(this.status_drum(cx))));
+            let body = Cell::new(Some(this.status_drum(cx)));
             let footer = div()
                 .flex()
                 .justify_end()
@@ -212,11 +211,7 @@ impl QuillApp {
                 )))
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |content, _, _| {
-                        content.child(
-                            body.borrow_mut()
-                                .take()
-                                .unwrap_or_else(|| div().into_any_element()),
-                        )
+                        content.child(body.take().unwrap_or_else(|| div().into_any_element()))
                     },
                 ))
                 .footer(footer)

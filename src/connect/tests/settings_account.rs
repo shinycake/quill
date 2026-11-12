@@ -87,10 +87,6 @@ fn call_rules_keep_their_exceptions_and_feed_the_call_fields() {
             extra_of(&request)
         ),
     );
-    assert_eq!(
-        f.1.session.calls.privacy_allow_calls,
-        Some(PrivacyWho::Contacts)
-    );
     let detail = match f
         .1
         .session
@@ -124,17 +120,12 @@ fn call_rules_keep_their_exceptions_and_feed_the_call_fields() {
         rules.contains("userPrivacySettingRuleRestrictAll"),
         "{rules}"
     );
-    assert_eq!(
-        f.1.session.calls.privacy_allow_calls,
-        Some(PrivacyWho::Nobody)
-    );
 
     // Another device changes the peer-to-peer rule.
     ingest(
         &mut f,
         r#"{"@type":"updateUserPrivacySettingRules","setting":{"@type":"userPrivacySettingAllowPeerToPeerCalls"},"rules":{"@type":"userPrivacySettingRules","rules":[{"@type":"userPrivacySettingRuleAllowAll"}]}}"#,
     );
-    assert_eq!(f.1.session.calls.privacy_p2p, Some(PrivacyWho::Everybody));
     assert!(matches!(
         f.1.session
             .settings

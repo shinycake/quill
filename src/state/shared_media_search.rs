@@ -86,7 +86,7 @@ impl Session {
             return true;
         }
         let Some(counts) = gallery
-            .chat_id
+            .chat_id()
             .and_then(|id| self.media.chat_media_counts.get(&id.0))
         else {
             return false;

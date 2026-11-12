@@ -434,18 +434,17 @@ fn saving_without_a_password_asks_to_turn_it_on(cx: &mut TestAppContext) {
     // A password set there lets the card be saved; closing comes back.
     app.update_in(&mut vcx, |app, _, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.auth_state.password_state = Some(PasswordState {
+            session.auth_state.password_state = quill::state::PasswordCache::Fresh(PasswordState {
                 has_password: true,
                 password_hint: String::new(),
                 has_recovery_email_address: false,
                 has_passport_data: false,
-                pending_email_pattern: None,
-                pending_email_code_length: 0,
+                pending_email: None,
                 login_email_address_pattern: String::new(),
                 pending_reset_date: 0,
             });
         }
-        app.twofa.close();
+        app.twofa_close();
         cx.notify();
     });
     draw(&mut vcx);

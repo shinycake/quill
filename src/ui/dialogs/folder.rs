@@ -12,9 +12,15 @@ use std::collections::HashSet;
 /// offers Retry or closing, and a Save waits for its own answer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FolderLoad {
-    Loading,
+    /// `getChatFolder` is out as this request; the form fills from its
+    /// answer, or it ends in `Failed` with Retry.
+    Loading(RequestId),
     Failed(String),
-    Ready,
+    /// The form. `error` is the line the last Save or merge left on it
+    /// (cleared by the next stage, so it never draws beside a load error).
+    Ready {
+        error: Option<String>,
+    },
     /// Save found the folder changed since the form opened: the fresh
     /// folder is being fetched so the person's edits go onto it, not over
     /// it (`FolderEditor::merged_onto`). A failed fetch is back in `Ready`
@@ -23,6 +29,32 @@ pub enum FolderLoad {
     /// Save went out: the box closes on the answer to this request and
     /// shows the error (back in `Ready`) when it fails.
     Saving(RequestId),
+}
+
+impl FolderLoad {
+    /// The form with no line under it.
+    pub(crate) fn ready() -> Self {
+        FolderLoad::Ready { error: None }
+    }
+
+    /// The form with `line` under it.
+    pub(crate) fn refused(line: impl Into<String>) -> Self {
+        FolderLoad::Ready {
+            error: Some(line.into()),
+        }
+    }
+
+    pub(crate) fn is_ready(&self) -> bool {
+        matches!(self, FolderLoad::Ready { .. })
+    }
+
+    /// The line under the form.
+    pub(crate) fn error(&self) -> Option<&str> {
+        match self {
+            FolderLoad::Ready { error } => error.as_deref(),
+            _ => None,
+        }
+    }
 }
 
 /// Parity slice: create/edit chat-folder dialog. The editable folder model
@@ -38,7 +70,6 @@ pub struct FolderEditorDialog {
     pub(crate) name_input: Entity<TextareaState>,
     /// Edit flow: `getChatFolder` before the editor prefills.
     pub(crate) load: FolderLoad,
-    pub(crate) error: Option<String>,
     /// The chat picker is showing for this list (`None` = the form).
     pub(crate) picker: Option<PickerMode>,
     pub(crate) picker_search: Entity<TextareaState>,
@@ -49,6 +80,7 @@ impl FolderEditorDialog {
         window: &mut Window,
         cx: &mut Context<QuillApp>,
         folder_id: Option<i32>,
+        load: FolderLoad,
     ) -> Self {
         let name_input = cx.new(|cx| {
             TextareaState::new(window, cx)
@@ -74,12 +106,7 @@ impl FolderEditorDialog {
             editor: FolderEditor::new(),
             base: ChatFolderSpec::default(),
             name_input,
-            load: if folder_id.is_some() {
-                FolderLoad::Loading
-            } else {
-                FolderLoad::Ready
-            },
-            error: None,
+            load,
             picker: None,
             picker_search,
         }
@@ -94,8 +121,7 @@ impl FolderEditorDialog {
     ) {
         self.editor = FolderEditor::from_spec(spec);
         self.base = spec.clone();
-        self.load = FolderLoad::Ready;
-        self.error = None;
+        self.load = FolderLoad::ready();
         let name = spec.name.clone();
         self.name_input.update(cx, |input, cx| {
             input.set_value(name, window, cx);
@@ -108,7 +134,6 @@ impl FolderEditorDialog {
 }
 
 /// What the Share Folder dialog shows.
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FolderShareView {
     /// The folder's invite links; `confirm_delete` is the link whose delete
     /// is waiting for confirmation, `copied` the link last copied to the
@@ -120,12 +145,43 @@ pub enum FolderShareView {
         /// The delete request this list waits on.
         op: LinkOp,
     },
-    /// Naming a link and choosing its chats; `None` creates a new link.
+    /// Naming a link and choosing its chats; `link: None` creates a new
+    /// link. The form's fields live and die with this view.
     Edit {
         link: Option<String>,
+        form: LinkForm,
         /// The create / edit request this form waits on.
         op: LinkOp,
     },
+}
+
+/// The create / edit form of one invite link.
+pub struct LinkForm {
+    pub(crate) name_input: Entity<TextareaState>,
+    /// Chats ticked in the form.
+    pub(crate) selected: HashSet<i64>,
+}
+
+impl LinkForm {
+    pub(crate) fn new(
+        window: &mut Window,
+        cx: &mut Context<QuillApp>,
+        name: String,
+        selected: HashSet<i64>,
+    ) -> Self {
+        let name_input = cx.new(|cx| {
+            let mut state = TextareaState::new(window, cx)
+                .placeholder(tr(keys::Q_OPS_LINK_NAME_OPTIONAL))
+                .auto_grow(1, 1)
+                .submit_on_enter(false);
+            state.set_value(name, window, cx);
+            state
+        });
+        Self {
+            name_input,
+            selected,
+        }
+    }
 }
 
 impl FolderShareView {
@@ -139,10 +195,25 @@ impl FolderShareView {
     }
 
     /// The form for `link` (`None` creates one), nothing sent yet.
-    pub(crate) fn edit(link: Option<String>) -> Self {
+    pub(crate) fn edit(link: Option<String>, form: LinkForm) -> Self {
         FolderShareView::Edit {
             link,
+            form,
             op: LinkOp::Idle,
+        }
+    }
+
+    /// The form's Cancel: back to the list. A request still out goes with
+    /// it, so the list's busy state and its answer (the error line, or the
+    /// quiet success) belong to the request that was sent.
+    pub(crate) fn cancelled_form(&self) -> Self {
+        FolderShareView::List {
+            confirm_delete: None,
+            copied: CopyMark::Idle,
+            op: match self.op() {
+                LinkOp::Saving(request) => LinkOp::Saving(*request),
+                LinkOp::Idle | LinkOp::Failed(_) => LinkOp::Idle,
+            },
         }
     }
 
@@ -193,24 +264,28 @@ impl LinkOp {
 pub struct FolderShareDialog {
     pub(crate) folder_id: i32,
     pub(crate) view: FolderShareView,
-    pub(crate) name_input: Entity<TextareaState>,
-    /// Chats ticked in the create / edit form.
-    pub(crate) selected: HashSet<i64>,
 }
 
 impl FolderShareDialog {
-    pub(crate) fn new(window: &mut Window, cx: &mut Context<QuillApp>, folder_id: i32) -> Self {
-        let name_input = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder(tr(keys::Q_OPS_LINK_NAME_OPTIONAL))
-                .auto_grow(1, 1)
-                .submit_on_enter(false)
-        });
+    pub(crate) fn new(folder_id: i32) -> Self {
         Self {
             folder_id,
             view: FolderShareView::list(),
-            name_input,
-            selected: HashSet::new(),
+        }
+    }
+
+    /// The create / edit form, while it is the view.
+    pub(crate) fn form(&self) -> Option<&LinkForm> {
+        match &self.view {
+            FolderShareView::Edit { form, .. } => Some(form),
+            FolderShareView::List { .. } => None,
+        }
+    }
+
+    pub(crate) fn form_mut(&mut self) -> Option<&mut LinkForm> {
+        match &mut self.view {
+            FolderShareView::Edit { form, .. } => Some(form),
+            FolderShareView::List { .. } => None,
         }
     }
 
@@ -222,7 +297,8 @@ impl FolderShareDialog {
         }
     }
 
-    /// Mark a link copied; the form has no copy buttons, so it keeps none.
+    /// Mark a link copied; the form has no copy buttons, so it keeps none
+    /// (and the mark's timer is dropped with it).
     pub(crate) fn mark_copied(&mut self, mark: CopyMark) {
         if let FolderShareView::List { copied, .. } = &mut self.view {
             *copied = mark;

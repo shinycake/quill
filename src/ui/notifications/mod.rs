@@ -289,7 +289,10 @@ impl QuillApp {
     fn polled_chrome(&self) -> (StatusNote, bool, Option<i32>, bool) {
         (
             self.connection.note().clone(),
-            self.auth_ui.login_prevented.is_some(),
+            matches!(
+                self.account_boxes.notice,
+                super::account_state::OpenNotice::LoginPrevented(_)
+            ),
             self.chat_list.view.folder(),
             self.connection_lost(),
         )
@@ -338,7 +341,7 @@ impl QuillApp {
         // read receipts run here, chat opens wake the window.
         self.drain_background_clicks(cx);
         self.drain_account_clicks(cx);
-        let settings_open = self.settings.open;
+        let settings_open = self.settings.open();
         self.sync_rows_on_screen();
         // Asked of the platform: a hidden or minimized main window does not
         // draw, so its last render may predate its deactivation.
@@ -455,9 +458,10 @@ impl QuillApp {
                 .iter()
                 .any(|f| f.id == folder_id)
         {
-            // (Same rule as `set_chat_list_view`; `live` is borrowed here.)
-            self.screen.chat_list.selected.clear();
-            self.screen.chat_list.view = self.screen.chat_list.view.without_folder();
+            // (`live` is borrowed here, so the view changes on the chat
+            // list itself, the same transition `set_chat_list_view` runs.)
+            let filter = self.screen.chat_list.view.filter();
+            self.screen.chat_list.show_view(filter, None);
         }
         let err = live.driver.session.auth_state.last_auth_error;
         let new_auth = live.driver.session.auth.clone();

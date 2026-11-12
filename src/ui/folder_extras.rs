@@ -6,7 +6,6 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::chat_list_state::ContextMenu;
 use super::chat_theme::{accent, peer_name_color, text_menu};
 use super::context_menu_keys::context_menu_item;
 use super::folder_share::{chat_title, finish_dialog};
@@ -103,10 +102,10 @@ impl QuillApp {
         position: Point<Pixels>,
         cx: &mut Context<Self>,
     ) {
-        self.open_context_menu(ContextMenu::FolderTab(FolderTabMenu {
+        self.message_ui.menu.open_folder_tab(FolderTabMenu {
             folder_id,
             position,
-        }));
+        });
         cx.notify();
     }
 
@@ -165,7 +164,7 @@ impl QuillApp {
             };
             context_menu_item(id, icon, label, color, true, &self.frame.menu.items, cx)
                 .on_click(cx.listener(move |this, _, window, cx| {
-                    this.message_ui.menu.close();
+                    this.message_ui.menu.close_menu();
                     on_click(this, window, cx);
                     cx.notify();
                 }))
@@ -246,7 +245,7 @@ impl QuillApp {
         DismissLayer::new(
             "folder-tab-menu-overlay",
             cx.listener(|this, _, _, cx| {
-                this.message_ui.menu.close();
+                this.message_ui.menu.close_menu();
                 cx.notify();
             }),
         )
@@ -255,7 +254,7 @@ impl QuillApp {
             backdrop.on_mouse_down(
                 MouseButton::Right,
                 cx.listener(|this, _, _, cx| {
-                    this.message_ui.menu.close();
+                    this.message_ui.menu.close_menu();
                     cx.notify();
                 }),
             )

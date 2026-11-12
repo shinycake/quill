@@ -11,6 +11,7 @@ impl QuillApp {
     pub(in crate::ui) fn conversation(
         &mut self,
         part: ConversationPart,
+        forum_on_screen: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         if part.top() {
@@ -38,7 +39,7 @@ impl QuillApp {
                 cx,
             )
             .into_any_element(),
-            PaneMode::Ready => self.session_history(cx).into_any_element(),
+            PaneMode::Ready => self.session_history(forum_on_screen, cx).into_any_element(),
         };
         let composer = self.composer_available(mode).then_some(true);
         let composer_note: Option<String> = match mode {
@@ -75,7 +76,7 @@ impl QuillApp {
                     let send_allowed = open.is_some_and(|id| {
                         self.session()
                             .and_then(|s| s.chats.get(&id.0))
-                            .is_some_and(|c| c.can_post() && c.can_send_basic_messages)
+                            .is_some_and(|c| c.can_post() && c.can_send_basic_messages())
                     });
                     if topic_closed {
                         Some(tr(keys::Q_CHAT_THIS_TOPIC_IS_CLOSED_NEW).to_string())
@@ -202,9 +203,9 @@ impl QuillApp {
                         })
                         .when(
                             show_attach && !self.pending_attachments().is_empty(),
-                            |this| this.child(self.composer_attachment_tray(cx)),
+                            |this| this.child(self.send_card(cx)),
                         )
-                        .when_some(self.share.forward_result.clone(), |this, result| {
+                        .when_some(self.chat_ui.forward_result.clone(), |this, result| {
                             this.child(self.forward_success_banner(&result, cx))
                         })
                         .when(
@@ -280,8 +281,8 @@ impl QuillApp {
                         .when_some(self.paid_messages_notice(cx), |this, row| this.child(row))
                         .when_some(self.composer_options_row(cx), |this, row| this.child(row))
                         // MED4: detected-URL chip (send-time preview
-                        // control) and caption bar ("Add a caption…",
-                        // above/below toggle, n / max counter).
+                        // control) and caption bar (above/below toggle
+                        // while editing a caption, n / max counter).
                         .when_some(self.preview_chip(cx), |this, chip| this.child(chip))
                         .when_some(self.edit_replacement_chip(cx), |this, chip| {
                             this.child(chip)
@@ -452,7 +453,11 @@ impl QuillApp {
             .children(dust.map(super::anim_layer::occluder))
     }
 
-    pub(in crate::ui) fn session_history(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(in crate::ui) fn session_history(
+        &mut self,
+        forum_on_screen: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         super::video_player::warm_decoder(cx);
         let session = self.session();
         let open = session.and_then(|s| s.open_chat_id());
@@ -477,7 +482,7 @@ impl QuillApp {
         let sender_name = title.clone();
         let chat_search_open = session.is_some_and(|s| s.search.chat_search.is_open());
         let highlight_id = session.and_then(|s| match s.search.chat_search.jump {
-            ChatSearchJump::Ready { message_id } | ChatSearchJump::Loading { message_id } => {
+            ChatSearchJump::Ready { message_id } | ChatSearchJump::Loading { message_id, .. } => {
                 Some(message_id)
             }
             ChatSearchJump::None | ChatSearchJump::Missing { .. } => None,
@@ -629,7 +634,7 @@ impl QuillApp {
                     // Phase 5.1: opening a forum supergroup shows its topics;
                     // with the topic column on screen the pane only asks for
                     // a choice.
-                    if self.history.forum_column.on_screen() {
+                    if forum_on_screen {
                         pane_placeholder(
                             tr(keys::Q_CHAT_CHOOSE_A_TOPIC),
                             tr(keys::Q_CHAT_PICK_A_TOPIC_FROM_THE),
@@ -693,24 +698,9 @@ impl QuillApp {
                     // instead of an endless skeleton or a false "No messages".
                     let history_failed =
                         open.is_some_and(|id| session.is_some_and(|s| s.history_load_failed(id)));
-                    // Nothing to show and no page on the way (an answer for
-                    // a window that was replaced, or none asked yet): ask
-                    // for the first page. The driver sends nothing for a
-                    // chat known to be empty, so this cannot loop.
-                    if open.is_some() && !history_loading && !history_failed {
-                        let weak = cx.weak_entity();
-                        let window_chat = self.windows.scope;
-                        let screen = self.screen_epoch();
-                        cx.defer(move |cx| {
-                            let _ = weak.update(cx, |this, cx| {
-                                this.in_screen_scope(screen, cx, |this, cx| {
-                                    this.in_window_scope(window_chat, cx, |this, cx| {
-                                        this.maybe_auto_load_older(cx)
-                                    })
-                                })
-                            });
-                        });
-                    }
+                    // The first page is asked when the chat opens
+                    // (`select_chat_open`, `open_chat_window`); a send that
+                    // could not go out is the Failed row. Render only draws.
                     if history_failed {
                         history_load_failed(cx)
                     } else if history_loading {

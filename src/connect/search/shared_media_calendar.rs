@@ -44,7 +44,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(SharedMediaJump::Stale);
         };
         let chat_id = calendar.chat_id;
-        if self.session.media.shared_media.chat_id != Some(chat_id) {
+        if self.session.media.shared_media.chat_id() != Some(chat_id) {
             self.session.search.history_calendar = None;
             return Ok(SharedMediaJump::Stale);
         }

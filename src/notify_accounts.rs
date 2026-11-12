@@ -259,7 +259,7 @@ pub fn ringing_incoming_call(session: &Session) -> Option<(i32, i64, bool)> {
     let call = session.calls.active_call.as_ref()?;
     (!call.is_outgoing
         && matches!(
-            call.state,
+            call.phase(),
             crate::telegram::envelope::CallState::Pending { .. }
         ))
     .then_some((call.id, call.user_id, call.is_video))

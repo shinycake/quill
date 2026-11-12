@@ -40,8 +40,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // The latest launch asked is the current one: an older one still
         // out is dropped, so its answer opens nothing (the app TDLib
         // started for it is closed) and its error is nobody's.
-        self.session.bots.web_apps.pending.clear();
-        self.session.bots.web_apps.pending.push(WebAppPending {
+        self.session.bots.web_apps.opening = Some(WebAppPending {
             request,
             bot_user_id,
             chat_id: chat_id.map(|id| id.0),
@@ -59,11 +58,10 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<RequestId, ConnectSendError> {
         let sent = self.send_json_request(extra, json);
         if sent.is_err() {
-            self.session
-                .bots
-                .web_apps
-                .pending
-                .retain(|pending| pending.request != extra);
+            let apps = &mut self.session.bots.web_apps;
+            if apps.opening.as_ref().is_some_and(|o| o.request == extra) {
+                apps.opening = None;
+            }
         }
         sent
     }
@@ -181,7 +179,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Bots(BotsPurpose::SearchWebApp { bot_user_id }),
             None,
         )?;
-        self.session.bots.web_apps.found = None;
         let json = search_web_app(extra, bot_user_id, short_name);
         self.send_json_request(extra, &json)
     }
@@ -191,7 +188,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// nothing opens later behind an unrelated action.
     pub fn forget_web_app_launches(&mut self) {
         let apps = &mut self.session.bots.web_apps;
-        apps.pending.clear();
+        apps.opening = None;
         apps.replace_open_result(None);
         self.close_dropped_web_apps();
     }
@@ -225,7 +222,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         data: &str,
     ) -> Result<RequestId, ConnectSendError> {
         let extra = self.web_app_extra(RequestPurpose::SendWebAppData, None)?;
-        self.session.bots.web_apps.data_sent = None;
         let json = send_web_app_data(extra, bot_user_id, button_text, data);
         self.send_json_request(extra, &json)
     }
@@ -324,7 +320,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Bots(BotsPurpose::GetAttachmentMenuBot { bot_user_id }),
             None,
         )?;
-        self.session.bots.web_apps.attachment_menu_bot = None;
         let json = get_attachment_menu_bot(extra, bot_user_id);
         self.send_json_request(extra, &json)
     }
@@ -340,11 +335,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Bots(BotsPurpose::ToggleBotInAttachmentMenu { bot_user_id, added }),
             None,
         )?;
-        self.session
-            .bots
-            .web_apps
-            .attachment_menu_toggled
-            .retain(|toggle| toggle.bot_user_id != bot_user_id);
         let json =
             toggle_bot_is_added_to_attachment_menu(extra, bot_user_id, added, allow_write_access);
         self.send_json_request(extra, &json)
@@ -384,8 +374,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         ));
     }
 
-    /// `sendWebAppCustomRequest` for `web_app_invoke_custom_method`;
-    /// the answer comes back under the app's `req_id`.
+    /// `sendWebAppCustomRequest` for `web_app_invoke_custom_method`; the
+    /// answer comes back under the returned request, which the window that
+    /// sent it maps to the app's `req_id`.
     pub fn send_web_app_custom_request(
         &mut self,
         bot_user_id: i64,
@@ -401,12 +392,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             .custom_requests
             .insert(extra.0, (launch_id, req_id.to_string()));
         let json = send_web_app_custom_request(extra, bot_user_id, method, parameters);
-        match self.send_json_request(extra, &json) {
-            Ok(id) => Ok(id),
-            Err(err) => {
-                self.session.bots.web_apps.custom_requests.remove(&extra.0);
-                Err(err)
-            }
-        }
+        self.send_json_request(extra, &json)
     }
 }

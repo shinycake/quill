@@ -27,20 +27,12 @@ fn platform() -> TrayPlatform {
 }
 
 impl QuillApp {
-    /// The `(tray, taskbar)` switch pair as saved.
-    fn tray_switch_pair(&self) -> work_mode::Switches {
-        (
-            self.appearance.show_tray_icon,
-            self.appearance.show_taskbar_icon,
-        )
-    }
-
     /// Which tray switches this platform and desktop offer right now.
     pub(crate) fn tray_options(&self, tray_available: bool) -> TrayOptions {
         work_mode::options(
             platform(),
             tray_available,
-            self.appearance.show_tray_icon,
+            self.appearance.work_mode.has_tray(),
             monochrome::dark_taskbar().is_some(),
         )
     }
@@ -63,14 +55,11 @@ impl QuillApp {
                         tr(keys::SETTINGS_WORKMODE_TRAY),
                         tr(keys::Q_MISC_KEEP_QUILL_IN_THE_SYSTEM),
                         Switch::new("general-show-tray-icon")
-                            .checked(self.appearance.show_tray_icon)
+                            .checked(self.appearance.work_mode.has_tray())
                             .accessibility_label(tr(keys::Q_MISC_SHOW_THE_QUILL_TRAY_ICON))
                             .on_click(cx.listener(|this, &on, window, cx| {
-                                let (tray, taskbar) =
-                                    work_mode::toggle_tray(this.tray_switch_pair(), on);
                                 this.set_appearance(cx, |a| {
-                                    a.show_tray_icon = tray;
-                                    a.show_taskbar_icon = taskbar;
+                                    a.work_mode = work_mode::toggle_tray(a.work_mode, on);
                                 });
                                 this.apply_taskbar_icon(window);
                             }))
@@ -89,14 +78,11 @@ impl QuillApp {
                         tr(keys::Q_MISC_SHOW_TASKBAR_ICON),
                         tr(keys::Q_MISC_OFF_KEEPS_QUILL_OUT_OF),
                         Switch::new("general-show-taskbar-icon")
-                            .checked(self.appearance.show_taskbar_icon)
+                            .checked(self.appearance.work_mode.has_taskbar())
                             .accessibility_label(tr(keys::Q_MISC_SHOW_QUILL_IN_THE_TASKBAR))
                             .on_click(cx.listener(|this, &on, window, cx| {
-                                let (tray, taskbar) =
-                                    work_mode::toggle_taskbar(this.tray_switch_pair(), on);
                                 this.set_appearance(cx, |a| {
-                                    a.show_tray_icon = tray;
-                                    a.show_taskbar_icon = taskbar;
+                                    a.work_mode = work_mode::toggle_taskbar(a.work_mode, on);
                                 });
                                 this.apply_taskbar_icon(window);
                             }))
@@ -139,7 +125,7 @@ impl QuillApp {
         }
         super::window_control::set_skip_taskbar(
             window,
-            work_mode::skip_taskbar(self.tray_switch_pair()),
+            work_mode::skip_taskbar(self.appearance.work_mode),
         );
     }
 }

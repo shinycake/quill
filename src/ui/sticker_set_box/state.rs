@@ -110,6 +110,8 @@ pub(crate) struct PickExisting {
 
 /// The set box's editing state (`ui/sticker_set_box/`).
 pub(crate) struct StickerSetBoxUi {
+    /// The window showing the dialog, if it is open.
+    pub(crate) host: SetBoxHost,
     /// "Edit Stickers" was pressed: cells drag to reorder, the footer is
     /// "Done" (tdesktop `setReorderState`).
     pub(crate) reordering: bool,
@@ -280,9 +282,21 @@ impl Encoding {
     }
 }
 
+/// The window that shows the sticker set dialog. The session holds one
+/// viewed set and one editing state, so the box is open in one window at a
+/// time: opening it elsewhere moves it, and closing it is one transition.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum SetBoxHost {
+    #[default]
+    Closed,
+    /// Open in this window (`None`: the main window).
+    In(Option<quill::ids::ChatId>),
+}
+
 impl StickerSetBoxUi {
     pub(crate) fn new(window: &mut Window, cx: &mut App) -> Self {
         Self {
+            host: SetBoxHost::Closed,
             reordering: false,
             confirm: SetConfirm::None,
             rename_input: cx
@@ -317,7 +331,9 @@ impl StickerSetBoxUi {
 
 /// An encode that runs stops, and the editor's files go: the account on
 /// screen is replaced whole, and nothing else would cancel the job or
-/// remove them.
+/// remove them. The set it viewed (and a change to it in flight) lives in
+/// the session, which outlives the screen: it closes too, so the account
+/// comes back with no stale set.
 impl crate::ui::on_screen::Farewell for StickerSetBoxUi {
     fn farewell(
         app: &mut crate::ui::app::QuillApp,
@@ -325,6 +341,9 @@ impl crate::ui::on_screen::Farewell for StickerSetBoxUi {
         _: &mut gpui_kit::Context<crate::ui::app::QuillApp>,
     ) {
         app.sticker_box.reset();
+        if let Some(session) = app.session_mut() {
+            session.stickers.sticker_set_view = None;
+        }
     }
 }
 

@@ -54,18 +54,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.earn_ready()?;
         if !self.session.payments.earn.limits.app_config.can_ask()
             || self.earn_in_flight(EarnPurpose::AppConfig)
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetBoostsPerGift)
+            || self.session.groups.boosts_per_gift.is_loading()
         {
             return Ok(());
         }
-        self.send_earn(
+        let request = self.send_earn(
             EarnPurpose::AppConfig,
             crate::telegram::requests::get_application_config,
         )?;
-        self.session.payments.earn.limits.app_config.begin();
+        let app_config = &mut self.session.payments.earn.limits.app_config;
+        app_config.begin();
+        app_config.sent(request);
         Ok(())
     }
 
@@ -184,12 +183,48 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.fetch_earn_star_history(peer, filter, false)?;
             }
             if !is_self {
-                self.send_earn(EarnPurpose::AdAccountUrl { peer }, |extra| {
-                    get_star_ad_account_url(extra, peer)
-                })?;
+                self.ask_earn_ad_account_url(peer)?;
             }
         }
         Ok(())
+    }
+
+    /// `getStarAdAccountUrl` for the open page; the page waits for this
+    /// request alone.
+    fn ask_earn_ad_account_url(&mut self, peer: EarnPeer) -> Result<(), ConnectSendError> {
+        self.send_earn_tracked(
+            EarnPurpose::AdAccountUrl { peer },
+            |extra| get_star_ad_account_url(extra, peer),
+            |session, extra| {
+                if let Some(page) = session.payments.earn.page.as_mut() {
+                    page.ad_account_url = Load::Loading(extra);
+                }
+            },
+        )
+        .map(|_| ())
+    }
+
+    /// The Buy Ads link was refused: ask again (the "Retry" next to the
+    /// withdraw buttons).
+    pub fn retry_earn_ad_account_url(&mut self, peer: EarnPeer) -> Result<(), ConnectSendError> {
+        self.earn_ready()?;
+        let failed = self
+            .session
+            .payments
+            .earn
+            .page
+            .as_ref()
+            .is_some_and(|p| p.peer == peer && matches!(p.ad_account_url, Load::Failed(_)));
+        if !failed {
+            return Ok(());
+        }
+        self.ask_earn_ad_account_url(peer).inspect_err(|_| {
+            if let Some(page) = self.session.payments.earn.page.as_mut() {
+                page.ad_account_url = Load::Failed(
+                    crate::lang::tr(crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_REVENUE).to_string(),
+                );
+            }
+        })
     }
 
     fn fetch_earn_star_history(
@@ -261,7 +296,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             page.ton = Load::Failed(failed.clone());
         }
         if gone(page.stars.asked()) || (want_stars && matches!(page.stars, Load::Idle)) {
-            page.stars = Load::Failed(failed);
+            page.stars = Load::Failed(failed.clone());
+        }
+        // The Buy Ads link whose send was refused says so, with its Retry.
+        if gone(page.ad_account_url.asked()) {
+            page.ad_account_url = Load::Failed(failed);
         }
         let stranded = |load: PageLoad| matches!(load, PageLoad::Loading { request, .. } if requests.get(request).is_none());
         if stranded(page.ton_history.load) {

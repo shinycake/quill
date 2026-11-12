@@ -53,7 +53,7 @@ impl Session {
         {
             self.forget_join_request(chat_id, user_id);
         }
-        self.groups.invite_link_error = Some(call_request_error_line(
+        self.groups.invite_link_error.push(call_request_error_line(
             err,
             "Could not process join request",
         ));

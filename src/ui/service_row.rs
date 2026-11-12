@@ -347,8 +347,19 @@ pub(super) fn service_message_row(
         super::ton_wallet_ui::connect_review_button(row_id, &message.content, session, cx);
     let open_code = super::premium_ui::gift_card_of(&message.content)
         .and_then(|(_, card)| super::link_info_boxes::gift_code_open_button(row_id, card, cx));
+    // Reactions sit under the notice, on the chat background
+    // (tdesktop `Service` with `Element::_reactions`).
+    let reactions = super::history::message_reactions_row(
+        message,
+        super::history::ChipPlace::Outside,
+        session,
+        files,
+        media_roots,
+        cx,
+    );
     div()
         .id(("service-row", row_id))
+        .debug_selector(move || format!("service-row-{row_id}"))
         .flex()
         .flex_col()
         .items_center()
@@ -379,5 +390,6 @@ pub(super) fn service_message_row(
         .when_some(learn_more, |this, button| this.child(button))
         .when_some(open_code, |this, button| this.child(button))
         .when_some(buttons, |this, buttons| this.child(buttons))
+        .when_some(reactions, |this, chips| this.child(chips.justify_center()))
         .into_any_element()
 }

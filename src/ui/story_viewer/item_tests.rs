@@ -125,7 +125,7 @@ fn a_release_cancels_the_story_reply_being_recorded(cx: &mut TestAppContext) {
 fn a_finished_page_op_goes_with_the_story(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_app(cx, "ready-story-viewer");
     let op = |state| StoryPageOp {
-        label: "Saving".into(),
+        kind: quill::story_page::StoryPageOpKind::Other,
         state,
         request: quill::ids::RequestId(1),
         chat_id: None,
@@ -175,10 +175,9 @@ fn a_late_story_answer_stays_with_its_story(cx: &mut TestAppContext) {
             .with_viewer_ui(|open| open.page_op = Some(request));
         if let Some(session) = app.demo_session.as_deref_mut() {
             let manage = &mut session.stories.manage;
-            manage.story = Some((LEO.0, 3));
-            manage.request = Some(request);
+            manage.start(request, LEO, 3);
             session.stories.page_ops.begin(StoryPageOp {
-                label: "hiding stories".into(),
+                kind: quill::story_page::StoryPageOpKind::Other,
                 state: StoryPageOpState::Sending,
                 request,
                 chat_id: None,
@@ -204,10 +203,12 @@ fn a_late_story_answer_stays_with_its_story(cx: &mut TestAppContext) {
         // Both answers land now, as errors.
         if let Some(session) = app.demo_session.as_deref_mut() {
             let manage = &mut session.stories.manage;
-            manage.request = None;
-            manage.error = Some("Story update failed: STORY_ID_INVALID".into());
+            manage.settle(
+                request,
+                Some("Story update failed: STORY_ID_INVALID".into()),
+            );
             session.stories.page_ops.begin(StoryPageOp {
-                label: "hiding stories".into(),
+                kind: quill::story_page::StoryPageOpKind::Other,
                 state: StoryPageOpState::Failed("PEER_ID_INVALID".into()),
                 request,
                 chat_id: None,

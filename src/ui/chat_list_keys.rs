@@ -19,6 +19,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::{ChatListFilter, QuillApp};
+use super::chat_list_pick::Pick;
 use super::chat_row::{ChatListItem, chat_row_height};
 use crate::ui::chat_list_state::SidebarTab;
 use gpui_kit::component::*;
@@ -26,7 +27,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
 use quill::top_people::StripKey;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -123,83 +124,105 @@ pub(super) enum SearchRow {
 /// The selection state (a `ChatListUi` field).
 #[derive(Default)]
 pub(crate) struct ChatListKeys {
-    /// The row the keys selected, painted until the mouse moves over the
-    /// list.
-    list: Option<ListRow>,
-    /// The result the keys selected, painted until the mouse moves over
-    /// the results.
-    search: Option<SearchRow>,
-    /// The row and result under the pointer: the mouse's selection, which
+    /// The chat list's selection: the row the keys selected (painted until
+    /// the mouse moves over the list) and the row under the pointer, which
     /// the keys move from and Enter opens.
-    list_mouse: Option<ListRow>,
-    search_mouse: Option<SearchRow>,
-    /// The results in the order the last frame drew them.
-    search_order: RefCell<Vec<SearchRow>>,
+    list: Pick<ListRow>,
+    /// The same for the search results.
+    search: Pick<SearchRow>,
+    /// The item indexes the chat list's last frame laid out (start, end).
+    rendered_items: Cell<(usize, usize)>,
+    /// The results in the order the last frame drew them. A `Cell` that is
+    /// taken and put back, so there is no borrow to clash with the render
+    /// that fills it.
+    search_order: Cell<Vec<SearchRow>>,
     /// Where the last frame laid each result out (window coordinates; the
     /// first result of a section includes its heading).
-    search_bounds: Rc<RefCell<HashMap<SearchRow, Bounds<Pixels>>>>,
+    search_bounds: Rc<Cell<HashMap<SearchRow, Bounds<Pixels>>>>,
 }
 
 impl ChatListKeys {
+    /// The list laid out the items in `range` this frame.
+    pub(super) fn note_rendered_items(&self, range: &std::ops::Range<usize>) {
+        self.rendered_items.set((range.start, range.end));
+    }
+
     /// The keys put the selection on `row`.
     pub(super) fn list_highlighted(&self, row: ListRow) -> bool {
-        self.list == Some(row)
+        self.list.keys() == Some(row)
     }
 
     /// Whether the keys have selected a chat row.
     #[cfg(test)]
     #[cfg(feature = "demo-capture")]
     pub(super) fn has_list_selection(&self) -> bool {
-        self.list.is_some()
+        self.list.keys().is_some()
     }
 
     pub(super) fn search_highlighted(&self, row: SearchRow) -> bool {
-        self.search == Some(row)
+        self.search.keys() == Some(row)
     }
 
     /// The selection Enter opens: the keys', else the pointer's, while it
     /// is still among the results.
     pub(super) fn search_selection(&self) -> Option<SearchRow> {
-        self.search
-            .or(self.search_mouse)
-            .filter(|row| self.search_order.borrow().contains(row))
+        let order = self.search_order.take();
+        let selection = self.search.current().filter(|row| order.contains(row));
+        self.search_order.set(order);
+        selection
     }
 
     /// The result the keys (not the pointer) selected.
     pub(in crate::ui) fn search_keyboard(&self) -> Option<SearchRow> {
-        self.search
+        self.search.keys()
     }
 
     pub(in crate::ui) fn set_search_keyboard(&mut self, row: Option<SearchRow>) {
-        self.search = row;
+        match row {
+            Some(row) => self.search.select_by_keys(row),
+            None => self.search.drop_keys(),
+        }
     }
 
     /// The results in the order the last frame drew them.
     pub(in crate::ui) fn search_order(&self) -> Vec<SearchRow> {
-        self.search_order.borrow().clone()
+        let order = self.search_order.take();
+        let copy = order.clone();
+        self.search_order.set(order);
+        copy
     }
 
     #[cfg(test)]
     #[cfg(feature = "demo-capture")]
     pub(super) fn search_highlight(&self) -> Option<SearchRow> {
-        self.search
+        self.search.keys()
     }
 
     #[cfg(test)]
     #[cfg(feature = "demo-capture")]
     pub(super) fn search_rows(&self) -> Vec<SearchRow> {
-        self.search_order.borrow().clone()
+        self.search_order()
     }
 
     /// The search results are about to be drawn: start their order and
     /// bounds afresh.
     pub(super) fn begin_search_rows(&self) {
-        self.search_order.borrow_mut().clear();
-        self.search_bounds.borrow_mut().clear();
+        self.search_order.set(Vec::new());
+        self.search_bounds.set(HashMap::new());
     }
 
     pub(super) fn push_search_row(&self, row: SearchRow) {
-        self.search_order.borrow_mut().push(row);
+        let mut order = self.search_order.take();
+        order.push(row);
+        self.search_order.set(order);
+    }
+
+    /// The laid-out bounds of one result, if the last frame drew it.
+    fn search_bounds_of(&self, row: &SearchRow) -> Option<Bounds<Pixels>> {
+        let bounds = self.search_bounds.take();
+        let found = bounds.get(row).copied();
+        self.search_bounds.set(bounds);
+        found
     }
 
     /// A prepaint listener for a container whose children are exactly
@@ -210,12 +233,11 @@ impl ChatListKeys {
     ) -> impl Fn(Vec<Bounds<Pixels>>, &mut Window, &mut App) + 'static {
         let store = self.search_bounds.clone();
         move |bounds, _, _| {
-            let Ok(mut store) = store.try_borrow_mut() else {
-                return;
-            };
+            let mut map = store.take();
             for (row, row_bounds) in rows.iter().zip(bounds.iter()) {
-                store.insert(*row, *row_bounds);
+                map.insert(*row, *row_bounds);
             }
+            store.set(map);
         }
     }
 
@@ -228,9 +250,7 @@ impl ChatListKeys {
         let store = self.search_bounds.clone();
         move |bounds, _, _| {
             let heading = bounds.first().copied();
-            let Ok(mut store) = store.try_borrow_mut() else {
-                return;
-            };
+            let mut map = store.take();
             for (index, (row, row_bounds)) in rows.iter().zip(bounds.iter().skip(1)).enumerate() {
                 // tdesktop reveals a section's heading with its first row
                 // (`scrollToFilteredSelected`, `searchedBarHeight`).
@@ -238,8 +258,9 @@ impl ChatListKeys {
                     Some(heading) if index == 0 => heading.union(row_bounds),
                     _ => *row_bounds,
                 };
-                store.insert(*row, reveal);
+                map.insert(*row, reveal);
             }
+            store.set(map);
         }
     }
 }
@@ -388,12 +409,24 @@ impl QuillApp {
         }
     }
 
+    /// The row Enter opens and the arrows move from: the keys' row, else
+    /// the pointer's while that row is still laid out. A virtual list unmounts
+    /// a row that scrolls away without a hover-out, so the pointer's row is
+    /// trusted only inside the window of items the last frame drew.
+    fn list_current(&self, rows: &[(usize, ListRow)]) -> Option<ListRow> {
+        let pick = self.chat_list.keys.list;
+        pick.keys().or_else(|| {
+            let row = pick.pointer()?;
+            let (item, _) = rows.iter().find(|(_, candidate)| *candidate == row)?;
+            let (start, end) = self.chat_list.keys.rendered_items.get();
+            (start..end).contains(item).then_some(row)
+        })
+    }
+
     fn step_list_selection(&mut self, key: NavKey, cx: &mut Context<Self>) {
         let rows = list_rows(&self.chat_list.items);
-        let keys = &self.chat_list.keys;
-        let current = keys
-            .list
-            .or(keys.list_mouse)
+        let current = self
+            .list_current(&rows)
             .and_then(|row| rows.iter().position(|(_, candidate)| *candidate == row));
         let page = rows_per_page(
             self.chat_list.scroll.bounds().size.height,
@@ -404,7 +437,7 @@ impl QuillApp {
         else {
             return;
         };
-        self.chat_list.keys.list = Some(row);
+        self.chat_list.keys.list.select_by_keys(row);
         // tdesktop `scrollToDefaultSelected`: the least scroll that shows
         // the row.
         self.chat_list
@@ -416,7 +449,7 @@ impl QuillApp {
     /// Put the keyboard selection on `row` and scroll it into view when the
     /// list shows it.
     fn select_list_row(&mut self, row: ListRow) {
-        self.chat_list.keys.list = Some(row);
+        self.chat_list.keys.list.select_by_keys(row);
         if let Some((item, _)) = list_rows(&self.chat_list.items)
             .into_iter()
             .find(|(_, candidate)| *candidate == row)
@@ -429,10 +462,8 @@ impl QuillApp {
 
     fn open_list_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let rows = list_rows(&self.chat_list.items);
-        let keys = &self.chat_list.keys;
-        let selected = keys
-            .list
-            .or(keys.list_mouse)
+        let selected = self
+            .list_current(&rows)
             .filter(|row| rows.iter().any(|(_, candidate)| candidate == row));
         let row = match selected {
             Some(row) => row,
@@ -441,7 +472,7 @@ impl QuillApp {
                 let Some(&(item, first)) = rows.first() else {
                     return;
                 };
-                self.chat_list.keys.list = Some(first);
+                self.chat_list.keys.list.select_by_keys(first);
                 self.chat_list
                     .scroll
                     .scroll_to_item(item, ScrollStrategy::Nearest);
@@ -495,20 +526,18 @@ impl QuillApp {
         let order: Vec<SearchRow> = self
             .chat_list
             .keys
-            .search_order
-            .borrow()
-            .iter()
-            .copied()
+            .search_order()
+            .into_iter()
             .filter(|row| !matches!(row, SearchRow::Top(_)))
             .collect();
         let keys = &self.chat_list.keys;
         let current = keys
             .search
-            .or(keys.search_mouse)
+            .current()
             .and_then(|row| order.iter().position(|candidate| *candidate == row));
         let row_height = order
             .first()
-            .and_then(|row| keys.search_bounds.borrow().get(row).map(|b| b.size.height))
+            .and_then(|row| keys.search_bounds_of(row).map(|b| b.size.height))
             .unwrap_or_else(|| chat_row_height(&[], self.appearance.preview_lines));
         let page = rows_per_page(
             self.search_ui.results_scroll.bounds().size.height,
@@ -519,7 +548,7 @@ impl QuillApp {
         else {
             return;
         };
-        self.chat_list.keys.search = Some(row);
+        self.chat_list.keys.search.select_by_keys(row);
         self.reveal_search_row(row);
         self.notify_sidebar(cx);
     }
@@ -527,14 +556,7 @@ impl QuillApp {
     /// Scroll the results the least that shows `row` (tdesktop
     /// `scrollToFilteredSelected`).
     pub(in crate::ui) fn reveal_search_row(&self, row: SearchRow) {
-        let Some(bounds) = self
-            .chat_list
-            .keys
-            .search_bounds
-            .borrow()
-            .get(&row)
-            .copied()
-        else {
+        let Some(bounds) = self.chat_list.keys.search_bounds_of(&row) else {
             return;
         };
         let handle = &self.search_ui.results_scroll;
@@ -563,8 +585,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.chat_list.keys.search = None;
-        self.chat_list.keys.search_mouse = None;
+        self.chat_list.keys.search.clear();
         match row {
             SearchRow::Chat(id) | SearchRow::PublicChat(id) | SearchRow::Top(id) => {
                 self.select_search_chat(id, window, cx)
@@ -632,12 +653,7 @@ impl QuillApp {
         row.when(highlighted, |row| row.bg(nav_fill(open, cx.theme())))
             .hover_listener_mode(HoverListenerMode::InputModalityIndependent)
             .on_hover(cx.listener(move |this, hovered: &bool, _, _| {
-                let keys = &mut this.chat_list.keys;
-                if *hovered {
-                    keys.list_mouse = Some(key);
-                } else if keys.list_mouse == Some(key) {
-                    keys.list_mouse = None;
-                }
+                this.chat_list.keys.list.hover(key, *hovered);
             }))
     }
 
@@ -653,12 +669,7 @@ impl QuillApp {
         row.when(highlighted, |row| row.bg(nav_fill(false, cx.theme())))
             .hover_listener_mode(HoverListenerMode::InputModalityIndependent)
             .on_hover(cx.listener(move |this, hovered: &bool, _, _| {
-                let keys = &mut this.chat_list.keys;
-                if *hovered {
-                    keys.search_mouse = Some(key);
-                } else if keys.search_mouse == Some(key) {
-                    keys.search_mouse = None;
-                }
+                this.chat_list.keys.search.hover(key, *hovered);
             }))
     }
 
@@ -666,9 +677,9 @@ impl QuillApp {
     /// to the pointer (tdesktop `mouseMoveEvent` → `selectByMouse`).
     pub(super) fn chat_list_mouse_moved(&mut self, cx: &mut Context<Self>) {
         let keys = &mut self.chat_list.keys;
-        if keys.list.is_some() || keys.search.is_some() {
-            keys.list = None;
-            keys.search = None;
+        let list = keys.list.mouse_moved();
+        let search = keys.search.mouse_moved();
+        if list || search {
             self.notify_sidebar(cx);
         }
     }

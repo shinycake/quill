@@ -307,9 +307,9 @@ fn a_dropped_chat_forgets_its_translations() {
     assert!(!session.histories.contains_key(&1), "the oldest went");
     assert!(!translated(&session, 1, 5));
     assert!(!translated(&session, 1, 80));
-    assert!(translated(&session, 2, 5), "a kept tail keeps them");
-    assert!(translated(&session, 2, 80));
-    session.finish_translation(late, Translation::Failed("late".into()));
+    assert!(!translated(&session, 2, 5), "row 5 left with the tail trim");
+    assert!(translated(&session, 2, 80), "a kept tail keeps its rows");
+    session.finish_translation(late, Translation::failed("late"));
     assert!(!translated(&session, 1, 7), "a late answer finds no job");
     assert_eq!(
         session.chat_translated_to(ChatId(1)),
@@ -559,17 +559,29 @@ fn an_older_page_for_an_evicted_topic_does_not_start_it_again() {
     let (mut session, _sink) = session();
     session.topic_history_entry(ChatId(7), 1).mark_complete();
     let extra = session.request_for_topic(RequestPurpose::GetTopicHistory, Some(ChatId(7)), 1);
-    let pending = session.requests.get(extra).cloned().expect("in flight");
+    assert!(session.requests.get(extra).is_some(), "in flight");
     for topic in 2..=(CLOSED_TOPICS_MAX as i32 + 6) {
         session.topic_history_entry(ChatId(7), topic);
     }
     assert!(!session.threads.topic_histories.contains_key(&(7, 1)));
-    session.apply_topic_page(vec![live(7, 5)], 1, MessageId(0), &pending);
+    assert!(
+        session.requests.get(extra).is_none(),
+        "the request goes with the entry"
+    );
+    let seq = AtomicU64::new(0);
+    apply_json(
+        &mut session,
+        &seq,
+        &_sink,
+        &format!(
+            r#"{{"@type":"foundChatMessages","@extra":"{}","total_count":1,"next_from_message_id":0,"messages":[]}}"#,
+            extra.0
+        ),
+    );
     assert!(
         !session.threads.topic_histories.contains_key(&(7, 1)),
         "an older page is not the topic's newest content"
     );
-    assert!(session.history_pruning.gone_topic_pages.is_empty());
 }
 
 #[test]
@@ -966,7 +978,7 @@ fn a_translation_job_whose_request_is_gone_fails_and_frees_its_place() {
     );
     assert!(matches!(
         session.message_translation(ChatId(1), MessageId(5), "en"),
-        Some(Translation::Failed(_))
+        Some(Translation::Failed { .. })
     ));
     assert!(
         session
@@ -975,5 +987,49 @@ fn a_translation_job_whose_request_is_gone_fails_and_frees_its_place() {
             .pending_jobs()
             .any(|job| job == live),
         "a job still asking keeps its place"
+    );
+}
+
+#[test]
+fn a_failed_translation_is_asked_again_by_the_pump_a_bounded_number_of_times() {
+    use crate::state::{TRANSLATE_PUMP_ATTEMPTS, TranslateTarget, Translation};
+    let (mut session, _sink) = session();
+    let (chat, message) = (ChatId(5), MessageId(9));
+    assert!(session.needs_translation(chat, message, "en"));
+    for round in 1..=TRANSLATE_PUMP_ATTEMPTS {
+        let (job, _) = session.begin_translation(
+            TranslateTarget::Message {
+                chat_id: chat.0,
+                message_id: message.0,
+            },
+            "en",
+            Some(chat),
+        );
+        assert!(!session.needs_translation(chat, message, "en"), "pending");
+        session.finish_translation(job, Translation::failed("send"));
+        assert_eq!(
+            session.needs_translation(chat, message, "en"),
+            round < TRANSLATE_PUMP_ATTEMPTS,
+            "after failure {round}"
+        );
+    }
+}
+
+/// r2-18 06-004: choosing "Hide ads" while a report is out leaves the
+/// report flow alone, so its answer still lands.
+#[test]
+fn hiding_ads_does_not_drop_a_report_in_flight() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    switch(&mut session, 1);
+    sponsored_answer(&mut session, &seq, &sink, 1);
+    assert!(session.begin_sponsored_report(ChatId(1), 9001).is_some());
+    let report = session.request(RequestPurpose::ReportChatSponsoredMessage, Some(ChatId(1)));
+    session.note_sponsored_report_request(report);
+    assert!(session.begin_sponsored_hide(ChatId(1), 9001).is_some());
+    assert_eq!(
+        session.messages.sponsored_report.awaited(),
+        Some(report),
+        "the report still waits for its answer"
     );
 }

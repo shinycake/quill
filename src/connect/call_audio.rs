@@ -116,6 +116,18 @@ impl CallAudio {
         Some(READ_EVERY.saturating_sub(since))
     }
 
+    /// How long until a failed tap may open again, so the poll loop wakes
+    /// for the retry. None once the wait is over (the next pump reopens).
+    pub(crate) fn until_reopen(&self, now: Instant) -> Option<Duration> {
+        let Tap::Failed { at, .. } = &self.tap else {
+            return None;
+        };
+        let waited = now.saturating_duration_since(*at);
+        REOPEN_AFTER
+            .checked_sub(waited)
+            .filter(|left| !left.is_zero())
+    }
+
     /// The latest level and whether you count as speaking.
     pub fn self_level(&self) -> (f32, bool) {
         (self.tracker.level(), self.tracker.speaking())
@@ -183,7 +195,7 @@ impl CallAudio {
             return;
         }
         match &self.tap {
-            Tap::Failed { at, .. } if at.elapsed() < REOPEN_AFTER => {}
+            Tap::Failed { .. } if self.until_reopen(Instant::now()).is_some() => {}
             Tap::Opening { answer, .. } => {
                 let opened = match answer.try_recv() {
                     Ok(opened) => opened,
@@ -468,6 +480,10 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub(crate) fn call_audio_deadline(&self, now: Instant) -> Option<Duration> {
         let measuring = !self.call_capture.enabled() || self.call_capture.target().is_some();
         self.call_audio.deadline(now, measuring)
+    }
+
+    pub(crate) fn call_audio_reopen_deadline(&self, now: Instant) -> Option<Duration> {
+        self.call_audio.until_reopen(now)
     }
 
     /// Your own level and speaking state, for the call window.

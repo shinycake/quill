@@ -113,7 +113,16 @@ impl QuillApp {
             return;
         };
         match live.driver.delete_scheduled_message(chat_id, message_id) {
-            Ok(_) => {
+            Ok(request) => {
+                // The row leaves as the delete goes out, as in tdesktop;
+                // a refusal brings the list back (`settle_scheduled_deletes`).
+                live.driver.session.acks.expect(request);
+                self.chat_ui
+                    .scheduled_deletes
+                    .push(ScheduledDelete { request, chat_id });
+                let Some(live) = self.live.as_mut() else {
+                    return;
+                };
                 live.driver
                     .session
                     .messages
@@ -366,7 +375,7 @@ impl QuillApp {
             option_chip("chip-schedule", label, cx)
                 .cursor_pointer()
                 .on_click(cx.listener(|this, _, window, cx| {
-                    if this.chat_ui.schedule_picker.is_some() {
+                    if this.chat_ui.schedule_picker.as_ref().is_some() {
                         this.chat_ui.hide_schedule_popup();
                         cx.notify();
                     } else {
@@ -737,7 +746,11 @@ impl QuillApp {
 }
 
 /// A send-option chip of the composer's option row.
-fn option_chip(id: &'static str, label: String, cx: &mut Context<QuillApp>) -> Stateful<Div> {
+pub(in crate::ui) fn option_chip(
+    id: &'static str,
+    label: String,
+    cx: &mut Context<QuillApp>,
+) -> Stateful<Div> {
     div()
         .id(id)
         .flex()

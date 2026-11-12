@@ -143,7 +143,7 @@ impl Session {
                 }
             }
             PaymentsPayload::GiftPurchaseResult(result) if self.is_gift_market_buy(pending) => {
-                self.apply_gift_market_purchase(result, pending.map_or(0, |p| p.id.0));
+                self.apply_gift_market_purchase(result, pending.map(|p| p.id));
             }
             PaymentsPayload::GiftPurchaseResult(result) => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::SendMarketplaceGift)

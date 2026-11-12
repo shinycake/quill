@@ -1,7 +1,7 @@
 //! Bot "Verify accounts": each pick's description starts from the bot's
 //! default, so text typed for one chat is never sent for the next (needs
 //! the `demo-capture` feature for gpui-kit's test support).
-use super::Step;
+use super::{Act, Step};
 use crate::ui::app::QuillApp;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
@@ -55,4 +55,19 @@ fn a_description_typed_for_one_chat_does_not_carry_to_the_next(cx: &mut TestAppC
         app.set_bot_verify_step(Step::Add(2), window, cx);
     });
     assert_eq!(description(&app, vcx), "", "the next pick starts afresh");
+}
+
+#[test]
+fn the_answer_to_a_verification_returns_to_the_list_and_a_refusal_keeps_the_box() {
+    use quill::state::Answer;
+    assert!(Step::answered(7, Act::Verify, Answer::Done) == Step::Pick);
+    let refused = Step::answered(7, Act::Remove, Answer::Failed("BOT_INVALID".into()));
+    assert!(
+        refused
+            == Step::Refused {
+                chat: 7,
+                act: Act::Remove,
+                reason: "BOT_INVALID".into()
+            }
+    );
 }

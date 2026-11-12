@@ -110,8 +110,9 @@ impl QuillApp {
             name,
             photo,
             phase: CallPhase::ConferenceInvite,
-            status: tr(keys::CALL_STATUS_GROUP_INVITE).into(),
-            connecting: false,
+            status: super::call_panel::CallStatusLine::Steady(
+                tr(keys::CALL_STATUS_GROUP_INVITE).into(),
+            ),
             muted: false,
             camera_on: false,
             screen_sharing: false,

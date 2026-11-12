@@ -242,6 +242,25 @@ fn choosing_a_shortcut_sends_it_to_the_chat() {
 }
 
 #[test]
+fn a_send_whose_request_was_lost_does_not_block_the_next_tap() {
+    let (mut driver, recorder, _sink, _seq) = driver_parts();
+    driver.send_quick_reply(ChatId(31), 2).unwrap();
+    // The request was lost (a logout sweep dropped it): nothing mirrors it.
+    let lost = driver
+        .session
+        .requests
+        .take_purpose(crate::state::RequestPurpose::SendMessageAlbum);
+    assert!(lost.is_some());
+    driver.send_quick_reply(ChatId(31), 2).unwrap();
+    let sent = recorder
+        .snapshot()
+        .iter()
+        .filter(|json| json.contains("sendQuickReplyShortcutMessages"))
+        .count();
+    assert_eq!(sent, 2);
+}
+
+#[test]
 fn a_double_click_on_add_creates_the_message_once() {
     let (mut driver, recorder, _sink, _seq) = driver_parts();
     driver.add_quick_reply_text("hours", "Hi").unwrap();
@@ -393,4 +412,21 @@ fn a_change_is_answered_by_its_own_request() {
     // Accepted, though the delete's refusal is still showing.
     assert!(driver.session.settings.quick_replies.error.is_some());
     assert_eq!(driver.session.acks.take(add), Some(Answer::Done));
+}
+
+#[test]
+fn a_message_load_answered_without_an_update_stops_waiting() {
+    let (mut driver, recorder, sink, seq) = driver_parts();
+    seed_shortcuts(&mut driver, &seq, &sink);
+    driver.ensure_quick_reply_messages(1).unwrap();
+    assert!(!driver.session.settings.quick_replies.messages_settled(1));
+    let request = sent_request(&recorder, "loadQuickReplyShortcutMessages");
+    let extra = request["@extra"].as_str().unwrap().to_string();
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{extra}"}}"#),
+    );
+    assert!(driver.session.settings.quick_replies.messages_settled(1));
 }

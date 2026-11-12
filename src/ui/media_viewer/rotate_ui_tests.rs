@@ -81,10 +81,10 @@ fn a_decode_the_viewer_moved_on_from_changes_nothing(cx: &mut TestAppContext) {
         };
         app.viewer.reorient.begin(target, gpui_kit::Task::ready(()));
         // A step or close resets the stage, which drops the decode.
-        app.viewer.reorient.reset();
+        app.viewer.reorient.reset(Default::default());
         app.finish_viewer_reorient(PathBuf::from("late.jpg"), target, Some(turned), cx);
         assert!(
-            app.viewer.orientation.is_identity(),
+            app.viewer.reorient.orientation().is_identity(),
             "the late result is dropped"
         );
         assert!(app.viewer.reorient.shown().is_none());

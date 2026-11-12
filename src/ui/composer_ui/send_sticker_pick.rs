@@ -71,6 +71,9 @@ impl QuillApp {
         if sent {
             self.consume_sent_reply(chat_id, cx);
             self.arm_send_fly(chat_id, file_id, cx);
+        } else {
+            // The chosen cell is not left for a later send.
+            super::send_fly::forget_source();
         }
         cx.notify();
         sent
@@ -450,7 +453,7 @@ impl QuillApp {
                     Some(tr(keys::Q_CHAT_COULDNT_LOAD_LINK_PREVIEW).to_string())
                 }
                 // Request in flight.
-                quill::state::LinkPreviewFetch::Asked => {
+                quill::state::LinkPreviewFetch::Asked(_) => {
                     Some(tr(keys::Q_CHAT_GETTING_LINK_INFO).to_string())
                 }
             },
@@ -619,11 +622,12 @@ impl QuillApp {
         )
     }
 
-    /// caption…" affordance, the caption-above-media toggle
-    /// (`show_caption_above_media`, schema 1.8.67 lines 6117/6128, only
-    /// for photo/video), and the `n / max` counter from the runtime
-    /// `message_caption_length_max` option. Shown while attachments are
-    /// pending or a caption is being edited.
+    /// The caption bar under a caption being edited or the send card: the
+    /// caption-above-media toggle while editing a caption
+    /// (`show_caption_above_media`, schema 1.8.67 lines 6117/6128, only for
+    /// photo/video; the send card has it in its menu), and the `n / max`
+    /// counter from the runtime `message_caption_length_max` option once the
+    /// caption nears it (tdesktop shows what is left near the limit).
     pub(in crate::ui) fn caption_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let editing_caption = self
             .chat_ui
@@ -633,75 +637,59 @@ impl QuillApp {
             return None;
         }
         // Documents and music have no caption position; photos, videos and
-        // GIFs do (`show_caption_above_media`), also after a replacement.
-        let captionable = self
+        // GIFs do, also after a replacement.
+        let toggle = editing_caption
+            && !self.open_chat_is_secret()
+            && self
+                .chat_ui
+                .pending_edit()
+                .is_some_and(|edit| edit.caption_position_applies());
+        let above = self
             .chat_ui
             .pending_edit()
-            .is_some_and(|edit| editing_caption && edit.caption_position_applies())
-            || self.pending_attachments().iter().any(|att| {
-                matches!(
-                    att.kind,
-                    quill::composer::AttachmentKind::Photo | quill::composer::AttachmentKind::Video
-                )
-            });
-        let above = if editing_caption {
-            self.chat_ui
-                .pending_edit()
-                .is_some_and(|edit| edit.caption_above)
-        } else {
-            self.pending_send().caption_above
-        };
+            .is_some_and(|edit| edit.caption_above);
         let text_len = self.composer.read(cx).value().chars().count();
         let limit = self
             .live
             .as_ref()
             .map(|live| live.driver.session.messages.message_caption_length_max)
             .unwrap_or(1024);
-        let over = text_len as i64 > i64::from(limit.max(0));
+        let limit = usize::try_from(limit.max(0)).unwrap_or(0);
+        let over = text_len > limit;
+        let counter = text_len + CAPTION_LIMIT_NEAR >= limit;
+        if !toggle && !counter {
+            return None;
+        }
         Some(
             div()
                 .id("composer-caption-bar")
                 .flex()
                 .items_center()
-                .justify_between()
                 .gap_2()
                 .px_3()
                 .py_1()
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(text_muted())
-                                .child(tr(keys::Q_CHAT_ADD_A_CAPTION)),
-                        )
-                        .when(captionable && !self.open_chat_is_secret(), |this| {
-                            this.child(
-                                Checkbox::new("composer-caption-above")
-                                    .label(tr(keys::Q_CHAT_CAPTION_ABOVE_MEDIA))
-                                    .checked(above)
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        if let Some(edit) = this.chat_ui.pending_edit_mut() {
-                                            edit.caption_above = !edit.caption_above;
-                                        } else {
-                                            this.update_pending_send(|send| {
-                                                send.caption_above = !send.caption_above
-                                            });
-                                        }
-                                        cx.notify();
-                                    })),
-                            )
-                        }),
-                )
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(if over { danger_bright() } else { text_muted() })
-                        .child(format!("{text_len} / {limit}")),
-                )
+                .when(toggle, |this| {
+                    this.child(
+                        Checkbox::new("composer-caption-above")
+                            .label(tr(keys::Q_CHAT_CAPTION_ABOVE_MEDIA))
+                            .checked(above)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                if let Some(edit) = this.chat_ui.pending_edit_mut() {
+                                    edit.caption_above = !edit.caption_above;
+                                }
+                                cx.notify();
+                            })),
+                    )
+                })
+                .child(div().flex_1())
+                .when(counter, |this| {
+                    this.child(
+                        div()
+                            .text_xs()
+                            .text_color(if over { danger_bright() } else { text_muted() })
+                            .child(format!("{text_len} / {limit}")),
+                    )
+                })
                 .into_any_element(),
         )
     }
@@ -842,6 +830,9 @@ impl QuillApp {
 fn preview_timer_needed(waiting: Option<&(String, gpui_kit::Task<()>)>, url: &str) -> bool {
     waiting.is_none_or(|(waited, _)| waited != url)
 }
+
+/// The caption counter shows once this few characters are left.
+const CAPTION_LIMIT_NEAR: usize = 100;
 
 #[cfg(test)]
 mod preview_timer_tests {

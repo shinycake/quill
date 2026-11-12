@@ -275,8 +275,7 @@ fn a_private_calls_media_note_follows_the_devices() {
         11,
         true,
         false,
-        crate::telegram::envelope::CallState::Ready,
-        None,
+        crate::telegram::envelope::CallState::Ready(Default::default()),
     ));
     let note = |driver: &ConnectDriver<Arc<RecordingSender>>| {
         driver

@@ -65,7 +65,7 @@ fn shown(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> (bool, bool, u6
 fn a_ui_test_never_reads_the_real_disk(cx: &mut TestAppContext) {
     let (app, vcx) = new_app(cx);
     vcx.run_until_parked();
-    app.read_with(&vcx, |app, _| assert_eq!(app.disk.free, None));
+    app.read_with(&vcx, |app, _| assert_eq!(app.disk.seen.free, None));
 }
 
 #[gpui_kit::test]
@@ -120,8 +120,8 @@ fn the_low_bar_opens_the_storage_usage_list(cx: &mut TestAppContext) {
         vcx.update(|window, cx| window.simulate_next_frame(cx));
     }
     app.read_with(&vcx, |app, _| {
-        assert!(app.settings.open);
-        assert_eq!(app.settings.page, Some(Page::DataStorage));
+        assert!(app.settings.open());
+        assert_eq!(app.settings.page(), Some(Page::DataStorage));
         assert!(
             app.settings.storage_scroll.page.offset().y < px(0.),
             "the storage usage list is below the fold at this height"

@@ -184,12 +184,23 @@ pub struct PaymentResultData {
 pub struct PaymentReceiptData {
     pub product_title: String,
     pub date: i32,
-    pub currency: String,
-    pub total_amount: i64,
-    pub credentials_title: String,
-    pub tip_amount: i64,
-    pub is_stars: bool,
-    pub star_count: i64,
+    pub kind: PaymentReceiptKind,
+}
+
+/// `paymentReceiptType*`: a card payment or a Stars payment, each with only
+/// its own fields.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PaymentReceiptKind {
+    Regular {
+        currency: String,
+        /// What was charged: goods, shipping and tip.
+        total_amount: i64,
+        credentials_title: String,
+        tip_amount: i64,
+    },
+    Stars {
+        star_count: i64,
+    },
 }
 
 /// Slice P1: `messageInvoice` (TDLib 1.8.67, `schema/td_api.tl:5270`).
@@ -447,37 +458,29 @@ pub(crate) fn parse_payment_form(value: &Value) -> Option<PaymentFormData> {
 /// Slice P1: `paymentReceipt` (TDLib 1.8.67, `schema/td_api.tl:4765`).
 pub(crate) fn parse_payment_receipt(value: &Value) -> Option<PaymentReceiptData> {
     let receipt_type = value.get("type")?;
-    let (currency, total_amount, credentials_title, tip_amount, is_stars, star_count) =
-        match receipt_type.get("@type").and_then(Value::as_str)? {
-            "paymentReceiptTypeRegular" => {
-                let invoice = receipt_type.get("invoice")?;
-                let tip_amount = int53(receipt_type.get("tip_amount")).unwrap_or(0);
-                // What was charged: the goods, the chosen shipping option and
-                // the tip (the form's total, which the receipt does not carry).
-                let shipping = receipt_type
-                    .get("shipping_option")
-                    .map(|option| price_parts_total(&parse_shipping_option(option).price_parts))
-                    .unwrap_or(0);
-                let goods = price_parts_total(&parse_price_parts(invoice.get("price_parts")));
-                (
-                    json_field_str(invoice, "currency"),
-                    goods.saturating_add(shipping).saturating_add(tip_amount),
-                    json_field_str(receipt_type, "credentials_title"),
-                    tip_amount,
-                    false,
-                    0,
-                )
+    let kind = match receipt_type.get("@type").and_then(Value::as_str)? {
+        "paymentReceiptTypeRegular" => {
+            let invoice = receipt_type.get("invoice")?;
+            let tip_amount = int53(receipt_type.get("tip_amount")).unwrap_or(0);
+            // What was charged: the goods, the chosen shipping option and
+            // the tip (the form's total, which the receipt does not carry).
+            let shipping = receipt_type
+                .get("shipping_option")
+                .map(|option| price_parts_total(&parse_shipping_option(option).price_parts))
+                .unwrap_or(0);
+            let goods = price_parts_total(&parse_price_parts(invoice.get("price_parts")));
+            PaymentReceiptKind::Regular {
+                currency: json_field_str(invoice, "currency"),
+                total_amount: goods.saturating_add(shipping).saturating_add(tip_amount),
+                credentials_title: json_field_str(receipt_type, "credentials_title"),
+                tip_amount,
             }
-            "paymentReceiptTypeStars" => (
-                String::new(),
-                0,
-                String::new(),
-                0,
-                true,
-                int53(receipt_type.get("star_count")).unwrap_or(0),
-            ),
-            _ => return None,
-        };
+        }
+        "paymentReceiptTypeStars" => PaymentReceiptKind::Stars {
+            star_count: int53(receipt_type.get("star_count")).unwrap_or(0),
+        },
+        _ => return None,
+    };
     let product_info = value.get("product_info")?;
     Some(PaymentReceiptData {
         product_title: product_info
@@ -490,12 +493,7 @@ pub(crate) fn parse_payment_receipt(value: &Value) -> Option<PaymentReceiptData>
             .and_then(Value::as_i64)
             .unwrap_or(0)
             .sat_i32(),
-        currency,
-        total_amount,
-        credentials_title,
-        tip_amount,
-        is_stars,
-        star_count,
+        kind,
     })
 }
 

@@ -43,14 +43,8 @@ fn the_revoked_links_row_is_a_disclosure_that_toggles(cx: &mut TestAppContext) {
         })
     });
     vcx.run_until_parked();
-    let open = |vcx: &VisualTestContext| {
-        app.read_with(vcx, |app, _| {
-            app.admin
-                .group_settings_dialog
-                .as_ref()
-                .is_some_and(|d| d.chat_id == ChatId(61) && d.revoked_open)
-        })
-    };
+    let open =
+        |vcx: &VisualTestContext| app.read_with(vcx, |app, _| app.revoked_links_open(ChatId(61)));
     assert!(!open(&vcx));
     vcx.update(|window, cx| {
         window.render_frame(cx);

@@ -15,7 +15,7 @@ use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with};
 use quill::local_time::{now_unix, weekday_name};
 use quill::search_filters::{SearchMediaKind, YearMonth, day_number, local_day_number};
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 
 /// Telegram launched on 2013-08-14; nothing is older.
@@ -91,17 +91,14 @@ impl QuillApp {
             });
         app.update(cx, |this, cx| {
             let body = this.jump_date_body(cx);
-            let body = Rc::new(RefCell::new(Some(body)));
+            let body = Rc::new(Cell::new(Some(body)));
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(tr(
                     keys::Q_MISC_JUMP_TO_DATE,
                 )))
                 .content(move |content, _, _| {
-                    let body = body
-                        .borrow_mut()
-                        .take()
-                        .unwrap_or_else(|| div().into_any_element());
+                    let body = body.take().unwrap_or_else(|| div().into_any_element());
                     content.child(body)
                 })
                 .on_close(on_close)

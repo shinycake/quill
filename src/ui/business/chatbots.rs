@@ -3,7 +3,7 @@
 //! chats it reaches and its rights, or remove it. Saved when the screen is
 //! left. Rules and requests: `quill::business_bots`.
 
-use super::{BotLink, BotNotice, ChatbotDraft, Leave, Recipients};
+use super::{BotLink, BotNotice, ChatbotDraft, Leave, LookupDebounce, Recipients};
 use crate::ui::app::QuillApp;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
@@ -36,6 +36,16 @@ enum Found {
     Failed(String),
 }
 
+/// Take what TDLib reported into a draft that waits for it.
+fn apply_server_bot(draft: &mut ChatbotDraft, server: Option<ConnectedBot>) {
+    draft.bot = BotLink::Empty;
+    if let Some(bot) = server {
+        draft.bot = BotLink::Connected(bot.bot_user_id);
+        draft.recipients = bot.recipients.make_valid();
+        draft.rights = bot.rights;
+    }
+}
+
 impl QuillApp {
     pub(super) fn new_chatbot_draft(
         &mut self,
@@ -56,7 +66,7 @@ impl QuillApp {
                 }
                 let text = input.read(cx).value().to_string();
                 let input = input.clone();
-                this.spawn_screen_in(window, cx, async move |this, cx| {
+                let timer = this.spawn_screen_in(window, cx, async move |this, cx| {
                     cx.background_executor()
                         .timer(Duration::from_millis(400))
                         .await;
@@ -67,11 +77,17 @@ impl QuillApp {
                         if let Some(live) = this.live.as_mut() {
                             let _ = live.driver.lookup_business_bot(&text);
                         }
+                        if let Some(bot) = this.business_mut().and_then(|d| d.screen.chatbot_mut())
+                        {
+                            bot.debounce = LookupDebounce::Idle;
+                        }
                         cx.notify();
                     });
-                })
-                .detach();
-                let _ = this;
+                });
+                // The newest keystroke owns the timer; the old one is dropped.
+                if let Some(bot) = this.business_mut().and_then(|d| d.screen.chatbot_mut()) {
+                    bot.debounce = LookupDebounce::Waiting { _timer: timer };
+                }
                 cx.notify();
             },
         )
@@ -82,6 +98,7 @@ impl QuillApp {
         }
         let mut draft = ChatbotDraft {
             username,
+            debounce: LookupDebounce::Idle,
             bot: BotLink::Loading,
             recipients: BusinessRecipients::everyone(),
             rights: BotRights::default(),
@@ -109,59 +126,42 @@ impl QuillApp {
 
     /// Take the connected bot into the draft once TDLib reported it.
     fn fill_chatbot_draft(&self, draft: &mut ChatbotDraft) {
-        let Some(server) = self
-            .server_bot()
-            .or_else(|| self.live.is_none().then_some(None))
-        else {
+        let Some(server) = self.reported_bot() else {
             return;
         };
-        draft.bot = BotLink::Empty;
-        if let Some(bot) = server {
-            draft.bot = BotLink::Connected(bot.bot_user_id);
-            draft.recipients = bot.recipients.make_valid();
-            draft.rights = bot.rights;
+        apply_server_bot(draft, server);
+    }
+
+    /// What TDLib reported for the connected bot (`Some(None)`: none), or
+    /// `None` while it has not.
+    fn reported_bot(&self) -> Option<Option<ConnectedBot>> {
+        self.server_bot()
+            .or_else(|| self.live.is_none().then_some(None))
+    }
+
+    /// Frame upkeep of the open Chatbots screen: while its draft waits for
+    /// the connected bot it is filled from the fetch the moment that
+    /// answers (a pure function of the fetch, so an answer that comes late,
+    /// or after a save, still lands). A fetch that is idle is asked for
+    /// once; a failed one shows its Retry and is asked only by it.
+    pub(super) fn business_bot_upkeep(&mut self, cx: &mut Context<Self>) {
+        let waiting = self
+            .business_mut()
+            .and_then(|d| d.screen.chatbot_mut())
+            .is_some_and(|draft| !draft.bot.is_loaded());
+        if !waiting {
+            return;
         }
-    }
-
-    /// Wait for `getBusinessConnectedBot` until it answers or the screen
-    /// goes: a cap would leave "Loading…" up after a late answer.
-    pub(super) fn business_bot_watch(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.spawn_screen_in(window, cx, async move |this, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(200))
-                    .await;
-                let Ok(done) = this.update(cx, |this, cx| this.business_bot_pump(cx)) else {
-                    break;
-                };
-                if done {
-                    break;
-                }
-            }
-        })
-        .detach();
-    }
-
-    /// Take the connected bot into the open Chatbots screen. `true` when
-    /// nothing is left to wait for: the screen is gone, the bot arrived,
-    /// or the request failed (its error line shows).
-    pub(super) fn business_bot_pump(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(mut draft) = self.business_mut().and_then(|d| d.screen.take_chatbot()) else {
-            return true;
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.ensure_connected_bot();
+        }
+        let Some(server) = self.reported_bot() else {
+            return;
         };
-        if !draft.bot.is_loaded() {
-            self.fill_chatbot_draft(&mut draft);
+        if let Some(draft) = self.business_mut().and_then(|d| d.screen.chatbot_mut()) {
+            apply_server_bot(draft, server);
+            cx.notify();
         }
-        let failed = self.session().is_none_or(|s| {
-            !s.settings.business_extra.connected_bot.is_loading()
-                && s.settings.business_extra.connected_bot.data().is_none()
-        });
-        let done = draft.bot.is_loaded() || failed;
-        if let Some(d) = self.business_mut() {
-            d.screen.put_chatbot(draft);
-        }
-        cx.notify();
-        done
     }
 
     fn business_bot_usable(&self, user_id: i64) -> bool {
@@ -413,11 +413,10 @@ impl QuillApp {
                             Button::new("business-bot-retry")
                                 .label(tr(keys::Q_CHAT_RETRY))
                                 .small()
-                                .on_click(cx.listener(|this, _, window, cx| {
+                                .on_click(cx.listener(|this, _, _, cx| {
                                     if let Some(live) = this.live.as_mut() {
                                         let _ = live.driver.retry_connected_bot();
                                     }
-                                    this.business_bot_watch(window, cx);
                                     cx.notify();
                                 })),
                         ),

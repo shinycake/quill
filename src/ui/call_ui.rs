@@ -41,7 +41,21 @@ impl QuillApp {
     /// one that pressed Call, while it is open. A chat window's call that
     /// fails to start says so there, not as a scrim over a main window the
     /// user may not look at for hours.
+    /// A call that came in reached no chat window that pressed Call: its
+    /// card is the main window's, whatever window pressed Call before.
     pub(super) fn call_card_window(&self) -> Option<quill::ids::ChatId> {
+        let calls = self.session().map(|session| &session.calls);
+        let incoming = calls.is_some_and(|calls| {
+            calls
+                .active_call
+                .as_ref()
+                .map(|call| !call.is_outgoing)
+                .or_else(|| calls.summary.as_ref().map(|summary| !summary.is_outgoing))
+                == Some(true)
+        });
+        if incoming {
+            return None;
+        }
         self.call_boxes
             .card_window
             .filter(|chat| self.windows.has(*chat))
@@ -143,7 +157,7 @@ impl QuillApp {
         } else {
             tr(keys::Q_OPS_VOICE_CALL)
         };
-        let (status, clock): (String, Option<String>) = match &call.state {
+        let (status, clock): (String, Option<String>) = match &call.phase() {
             CallState::Pending { .. } => {
                 let elapsed = call.started_at.elapsed().as_secs();
                 if call.is_outgoing {
@@ -159,7 +173,7 @@ impl QuillApp {
                 }
             }
             CallState::ExchangingKeys => (tr(keys::GROUP_CALL_CONNECTING).to_string(), None),
-            CallState::Ready => {
+            CallState::Ready(_) => {
                 use quill::calls::engine::TransportState;
                 let status = match call.transport.state() {
                     Some(TransportState::Connected) if call.muted => {
@@ -247,8 +261,8 @@ impl QuillApp {
         // repeats the note below; accepting/placing starts no media in
         // this build.
         let no_transport_note = matches!(
-            call.state,
-            CallState::Ready | CallState::ExchangingKeys | CallState::Pending { .. }
+            call.phase(),
+            CallState::Ready(_) | CallState::ExchangingKeys | CallState::Pending { .. }
         );
         if no_transport_note {
             // Phase C2e: video is real once the driver is ready (engine
@@ -280,7 +294,7 @@ impl QuillApp {
         // Phase C1b: local-only mute state. Tracked on the call but a
         // no-op without media transport — labeled honestly.
         let show_mute_note =
-            call.muted && matches!(call.state, CallState::Ready | CallState::Unknown(_));
+            call.muted && matches!(call.phase(), CallState::Ready(_) | CallState::Unknown(_));
         if show_mute_note {
             card = card.child(
                 div()
@@ -292,8 +306,8 @@ impl QuillApp {
         // Phase C2i: local screen-share send state — the engine sends
         // the screen instead of the camera (one video track); the flag
         // is the tracked toggle intent.
-        let show_screen_share_note =
-            call.screen_sharing() && matches!(call.state, CallState::Ready | CallState::Unknown(_));
+        let show_screen_share_note = call.screen_sharing()
+            && matches!(call.phase(), CallState::Ready(_) | CallState::Unknown(_));
         if show_screen_share_note {
             card = card.child(
                 div()
@@ -318,7 +332,7 @@ impl QuillApp {
                     .child(error.to_string()),
             );
         }
-        if matches!(call.state, CallState::Ready) {
+        if matches!(call.phase(), CallState::Ready(_)) {
             // Phase C2c: microphone/speaker pickers. Live state comes
             // from the driver; the screenshot demo injects demo devices
             // only (no live Telegram, no real hardware). Empty means the
@@ -456,7 +470,7 @@ impl QuillApp {
             }
         }
         let mut buttons = div().flex().gap_2();
-        match &call.state {
+        match &call.phase() {
             CallState::Pending { .. } if !call.is_outgoing => {
                 buttons = buttons
                     .child(
@@ -486,7 +500,7 @@ impl QuillApp {
                         })),
                 );
             }
-            CallState::Ready | CallState::Unknown(_) => {
+            CallState::Ready(_) | CallState::Unknown(_) => {
                 // Phase C1b: mute toggle — local-only state, no-op
                 // without media transport (the card says so above).
                 buttons = buttons.child(
@@ -670,7 +684,7 @@ impl QuillApp {
             );
         }
         if summary.rating.is_open() {
-            if let CallRating::Failed(error) = &summary.rating {
+            if let CallRating::Failed { error, .. } = &summary.rating {
                 card = card.child(
                     div()
                         .text_xs()
@@ -683,12 +697,7 @@ impl QuillApp {
                     .text_sm()
                     .child(tr(keys::Q_OPS_HOW_WAS_THE_CALL_QUALITY)),
             );
-            let draft = self
-                .dialogs
-                .rating_detail
-                .as_ref()
-                .filter(|detail| detail.call_id == summary.call_id);
-            match draft {
+            match summary.rating.draft() {
                 // Phase C2i: star tap opens the detail editor (problems
                 // + comment) — nothing is sent until Submit.
                 None => {
@@ -745,7 +754,7 @@ impl QuillApp {
     /// an optional comment. Nothing leaves the machine until Submit.
     pub(super) fn rating_detail_editor(
         &self,
-        detail: &RatingDetail,
+        detail: &quill::state::RatingDraft,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let mut stars = div().flex().gap_2();
@@ -754,10 +763,7 @@ impl QuillApp {
                 Button::new(format!("call-rate-pick-{star}"))
                     .label(format!("{star} ★"))
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        if let Some(detail) = this.dialogs.rating_detail.as_mut() {
-                            detail.stars = star;
-                        }
-                        cx.notify();
+                        this.set_rating_stars(star, cx);
                     })),
             );
         }

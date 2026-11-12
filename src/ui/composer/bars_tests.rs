@@ -278,6 +278,68 @@ fn clear_jump(app: &Entity<QuillApp>, cx: &mut VisualTestContext) {
     });
 }
 
+/// Sweep 12-C014: the quote picker and the chat chooser are never open
+/// together, whichever opens first, and closing leaves neither.
+#[gpui_kit::test]
+fn the_quote_picker_and_the_reply_chooser_are_never_open_together(cx: &mut TestAppContext) {
+    use crate::ui::reply_options_ui::ReplyPanel;
+    use quill::reply_options::ReplyOption;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    reply_to_ada(&app, vcx);
+    let panel = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| app.chat_ui.reply_panel())
+    };
+    app.update_in(vcx, |app, window, cx| {
+        app.apply_reply_option(ReplyOption::UpdateQuote, window, cx);
+    });
+    assert_eq!(panel(&app, vcx), ReplyPanel::QuotePicker);
+    app.update_in(vcx, |app, window, cx| {
+        app.apply_reply_option(ReplyOption::ReplyInAnotherChat, window, cx);
+    });
+    assert!(
+        matches!(panel(&app, vcx), ReplyPanel::Chooser(_)),
+        "the chooser is open"
+    );
+    assert!(app.read_with(vcx, |app, _| !app.reply_quote_open()));
+    app.update_in(vcx, |app, window, cx| {
+        app.apply_reply_option(ReplyOption::UpdateQuote, window, cx);
+    });
+    assert_eq!(panel(&app, vcx), ReplyPanel::QuotePicker);
+    assert!(app.read_with(vcx, |app, _| !app.reply_chooser_open()));
+    app.update_in(vcx, |app, window, cx| app.close_reply_panels(window, cx));
+    assert_eq!(panel(&app, vcx), ReplyPanel::None);
+}
+
+/// Sweep 12-C014: the chooser draws the forward box's destinations, so
+/// opening either ends the other.
+#[gpui_kit::test]
+fn the_forward_box_and_the_reply_chooser_are_never_open_together(cx: &mut TestAppContext) {
+    use crate::ui::forward_stage::ForwardStage;
+    use crate::ui::reply_options_ui::ReplyPanel;
+    use quill::composer::ForwardDraft;
+    use quill::ids::TopicId;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    reply_to_ada(&app, vcx);
+    app.update_in(vcx, |app, window, cx| {
+        let draft = ForwardDraft::from_message(GROUP, TopicId::None, MessageId(10), false)
+            .expect("a sent message");
+        app.share.forward = ForwardStage::Selecting(draft);
+        app.show_reply_panel(ReplyPanel::chooser(), window, cx);
+        assert!(app.reply_chooser_open() && !app.share.forward.picker_open());
+        app.open_forward_picker(window, cx);
+        assert!(app.share.forward.picker_open(), "the forward box opened");
+        assert!(!app.reply_chooser_open(), "and ended the chooser");
+        app.show_reply_panel(ReplyPanel::chooser(), window, cx);
+        assert!(app.reply_chooser_open());
+        assert!(
+            !app.share.forward.picker_open(),
+            "the chooser ended the box"
+        );
+    });
+}
+
 #[gpui_kit::test]
 fn clicking_the_reply_bar_opens_the_quote_picker(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
@@ -337,7 +399,7 @@ fn the_bar_handler_for_a_media_reply_offers_another_chat(cx: &mut TestAppContext
     reply_to_ada(&app, vcx);
     let clicks = app.update(vcx, |app, cx| app.bar_clicks(BarKind::Edit, None, cx));
     vcx.update(|window, cx| (clicks.run)(BarAction::ReplyElsewhere, window, cx));
-    assert!(app.read_with(vcx, |app, _| app.share.forward.reply_chooser_open()));
+    assert!(app.read_with(vcx, |app, _| app.reply_chooser_open()));
 }
 
 fn supergroup_status(app: &Entity<QuillApp>, cx: &mut VisualTestContext, status: &str) {
@@ -399,11 +461,13 @@ fn an_inline_bots_hint_follows_the_typed_name(cx: &mut TestAppContext) {
     assert_eq!(hint(&app, vcx), None);
     app.update(vcx, |app, _| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.bots.inline_bot_resolve = Some(quill::state::InlineBotResolve::Resolved {
-                username: "gifbot".into(),
-                user_id: 61,
-                is_inline: Some(true),
-            });
+            session
+                .bots
+                .set_inline_bot(quill::state::InlineBotResolve::Resolved {
+                    username: "gifbot".into(),
+                    user_id: 61,
+                    is_inline: Some(true),
+                });
         }
     });
     set_field(&app, vcx, "@gifbot ");
@@ -722,6 +786,29 @@ fn an_edit_leaves_edit_mode_only_on_its_answer(cx: &mut TestAppContext) {
     assert_ne!(field(&app, vcx), "the edited text", "the draft is back");
 }
 
+/// Sweep r2-24 (08-089, 08-090): an edit already sent cannot be cancelled
+/// (it would land anyway); sending closes an open "Cancel editing?" box.
+#[gpui_kit::test]
+fn a_sent_edit_cannot_be_cancelled(cx: &mut TestAppContext) {
+    use quill::ids::RequestId;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    begin_edit(&app, vcx);
+    set_field(&app, vcx, "something else entirely");
+    escape(&app, vcx);
+    assert!(confirm_open(&app, vcx));
+    app.update(vcx, |app, _| app.chat_ui.mark_edit_sending(RequestId(7)));
+    assert!(!confirm_open(&app, vcx), "sending ends the question");
+    escape(&app, vcx);
+    assert!(!confirm_open(&app, vcx), "no box over a sent edit");
+    assert!(editing(&app, vcx), "the answer decides, not Esc");
+    app.update(vcx, |app, _| {
+        app.chat_ui.set_cancel_edit_confirm(true);
+        assert!(!app.chat_ui.cancel_edit_confirm_open());
+        assert_eq!(app.chat_ui.edit_sending(), Some(RequestId(7)));
+    });
+}
+
 /// Sweep 08-135: a rich send that TDLib refuses gives its text back.
 #[gpui_kit::test]
 fn a_refused_rich_send_gives_the_text_back(cx: &mut TestAppContext) {
@@ -887,69 +974,39 @@ fn an_ai_answer_applies_only_to_the_draft_it_was_asked_about(cx: &mut TestAppCon
     assert_eq!(field(&app, vcx), "the draft");
 }
 
-/// Sweep 10-115: a window reads its own bot, not the one another window's
-/// trigger put in the session's single slot.
+/// Sweep 10-115 and 10-093: each username has its own entry, so a window
+/// reads its own bot and another window's lookup does not replace it.
 #[gpui_kit::test]
-fn a_window_reads_its_own_inline_bot(cx: &mut TestAppContext) {
+fn each_username_keeps_its_own_inline_bot(cx: &mut TestAppContext) {
     use quill::state::InlineBotResolve;
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     app.update(vcx, |app, _| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.bots.inline_bot_resolve = Some(InlineBotResolve::Resolved {
+            session.bots.set_inline_bot(InlineBotResolve::Resolving {
+                username: "bota".into(),
+                request: quill::ids::RequestId(1),
+            });
+            session.bots.set_inline_bot(InlineBotResolve::Resolved {
                 username: "botb".into(),
                 user_id: 2,
                 is_inline: Some(true),
             });
         }
-        app.chat_ui.inline_bot = Some(InlineBotResolve::Resolved {
-            username: "bota".into(),
-            user_id: 1,
-            is_inline: Some(true),
-        });
     });
     app.read_with(vcx, |app, _| {
         assert!(matches!(
             app.inline_bot_for("bota"),
-            Some(InlineBotResolve::Resolved { user_id: 1, .. })
+            Some(InlineBotResolve::Resolving { .. })
         ));
         assert!(matches!(
-            app.inline_bot_for("botb"),
+            app.inline_bot_for("BotB"),
             Some(InlineBotResolve::Resolved { user_id: 2, .. })
         ));
         assert!(
             app.inline_bot_for("botc").is_none(),
             "unknown: not resolved"
         );
-    });
-}
-
-/// Sweep 10-115: window A copies the session slot while it is still
-/// `Resolving`, then window B's lookup replaces the slot. A must not keep
-/// the stale `Resolving` (it would wait for an answer that never comes): it
-/// reads nothing for its bot, so it asks again.
-#[gpui_kit::test]
-fn a_resolving_slot_replaced_by_another_window_is_not_kept(cx: &mut TestAppContext) {
-    use quill::state::InlineBotResolve;
-    let (app, mut vcx) = new_app(cx);
-    let vcx = &mut vcx;
-    app.update(vcx, |app, _| {
-        if let Some(session) = app.demo_session.as_mut() {
-            session.bots.inline_bot_resolve = Some(InlineBotResolve::Resolving {
-                username: "bota".into(),
-                generation: 1,
-            });
-        }
-        app.capture_inline_bot("bota");
-        if let Some(session) = app.demo_session.as_mut() {
-            session.bots.inline_bot_resolve = Some(InlineBotResolve::Resolved {
-                username: "botb".into(),
-                user_id: 2,
-                is_inline: Some(true),
-            });
-        }
-        assert!(app.chat_ui.inline_bot.is_none());
-        assert!(app.inline_bot_for("bota").is_none());
     });
 }
 
@@ -1108,28 +1165,13 @@ fn a_forced_reply_waits_while_the_composer_replies(cx: &mut TestAppContext) {
     assert_eq!(reply, Some((KEYBOARD_BOT, MessageId(88))));
 }
 
-/// Sweep 10-092 and 10-096: a failed bot lookup goes with the trigger, and
-/// a pick with no connection leaves the typed query in the field.
+/// Sweep 10-096: a pick with no connection leaves the typed query in the
+/// field.
 #[gpui_kit::test]
-fn inline_mode_forgets_a_failed_lookup_and_keeps_the_query_without_a_connection(
-    cx: &mut TestAppContext,
-) {
-    use quill::state::InlineBotResolve;
+fn inline_mode_keeps_the_query_without_a_connection(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     open_chat(&app, vcx, GROUP);
-    app.update(vcx, |app, _| {
-        app.chat_ui.inline_bot = Some(InlineBotResolve::Failed {
-            username: "somebot".into(),
-            reason: "could not look up the bot".into(),
-        });
-    });
-    set_field(&app, vcx, "hello");
-    app.update(vcx, |app, cx| app.sync_inline_mode(cx));
-    assert!(
-        app.read_with(vcx, |app, _| app.chat_ui.inline_bot.is_none()),
-        "the trigger went away, the failure with it"
-    );
     set_field(&app, vcx, "@somebot hi");
     vcx.update(|window, cx| {
         app.update(cx, |app, cx| {

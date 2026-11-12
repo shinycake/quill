@@ -101,11 +101,21 @@ fn seed_wallet(app: &mut QuillApp, with_wallet: bool) {
         is_being_created: false,
         is_backup_enabled: true,
     });
-    wallet
-        .money
+}
+
+/// What the open Money page shows: a transfer and an NFT.
+fn seed_money_lists(app: &mut QuillApp) {
+    let Some(money) = app
+        .demo_session
+        .as_mut()
+        .and_then(|session| session.ton_wallet.money.as_mut())
+    else {
+        return;
+    };
+    money
         .history
         .set_ready(vec![transfer("t1", true)], String::new());
-    wallet.money.nfts.set_ready(
+    money.nfts.set_ready(
         vec![WalletNft {
             address: "EQnft".into(),
             name: "Cat #7".into(),
@@ -178,6 +188,7 @@ fn the_money_page_actions_open_the_notice_and_the_page_returns(cx: &mut TestAppC
     app.update_in(vcx, |app, _, cx| {
         seed_wallet(app, true);
         app.open_money(cx);
+        seed_money_lists(app);
     });
     frames(vcx);
     assert_eq!(dialog(&shell, vcx), Some(DialogKind::Money));
@@ -206,6 +217,7 @@ fn a_missing_wallet_offers_create_which_opens_the_notice(cx: &mut TestAppContext
     app.update_in(vcx, |app, _, cx| {
         seed_wallet(app, false);
         app.open_money(cx);
+        seed_money_lists(app);
     });
     frames(vcx);
     assert!(!find(vcx, "money-send"), "no wallet, nothing to send from");
@@ -220,6 +232,7 @@ fn details_open_the_notice_for_send_and_encrypted_comments(cx: &mut TestAppConte
     app.update_in(vcx, |app, _, cx| {
         seed_wallet(app, true);
         app.open_money(cx);
+        seed_money_lists(app);
         app.set_money_tab(quill::ton_wallet::MoneyTab::Transactions, cx);
         app.select_wallet_tx(transfer("t1", true), cx);
     });
@@ -245,8 +258,9 @@ fn the_first_grams_hint_send_opens_the_notice(cx: &mut TestAppContext) {
     app.update_in(vcx, |app, _, cx| {
         seed_wallet(app, true);
         app.open_money(cx);
+        seed_money_lists(app);
         if let Some(wallet) = app.ton_wallet_mut() {
-            wallet.money.detail = quill::ton_wallet::MoneyDetail::Tx {
+            wallet.money.get_or_insert_default().detail = quill::ton_wallet::MoneyDetail::Tx {
                 tx: Box::new(transfer("t1", true)),
                 hint: true,
             };

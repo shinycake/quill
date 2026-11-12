@@ -110,9 +110,25 @@ fn page_sheets(
                 public_shares: Some(public),
                 private_shares: forwards.map(|f| private_share_count(f, public)),
             };
+            // A poll's votes chart is on its way while it was never asked or
+            // is loading: the file waits for it, as for any async graph. A
+            // post not looked up yet may be a poll too. A failed one is
+            // exported without it.
+            let is_poll = match session.stats_post(chat_id, message_id) {
+                PostLookup::Ready(post) => post.is_poll,
+                PostLookup::Missing => false,
+                PostLookup::Loading(_) | PostLookup::Unknown => {
+                    unsettled.set(true);
+                    false
+                }
+            };
             let poll = match session.messages.poll_stats.get(&(chat_id, message_id)) {
                 Some(PollStatsFetch::Loaded(graph)) => resolve(session, chat_id, graph, unsettled),
-                _ => None,
+                Some(PollStatsFetch::Failed(_)) => None,
+                None | Some(PollStatsFetch::Loading(_)) => {
+                    unsettled.set(is_poll || unsettled.get());
+                    None
+                }
             };
             let sheets = post_statistics_sheets(
                 counters,

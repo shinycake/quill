@@ -87,12 +87,14 @@ impl RequestPurpose {
             self,
             RequestPurpose::CreateChatFolder
                 | RequestPurpose::EditChatFolder
+                | RequestPurpose::DeleteChatFolder
                 | RequestPurpose::CreateChatFolderInviteLink
                 | RequestPurpose::EditChatFolderInviteLink
                 | RequestPurpose::DeleteChatFolderInviteLink
                 | RequestPurpose::CheckChatFolderInviteLink
                 | RequestPurpose::AddChatFolderByInviteLink
                 | RequestPurpose::AddContact
+                | RequestPurpose::Settings(SettingsPurpose::SetAutoDownloadSettings { .. })
         )
     }
 }

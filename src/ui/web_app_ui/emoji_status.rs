@@ -45,6 +45,14 @@ enum AccessStage {
 }
 
 impl EmojiStatusFlow {
+    /// A suggested emoji is being looked up: nothing pokes when the lookup
+    /// lands, so the poll looks again on a short tick.
+    pub(super) fn is_active(&self) -> bool {
+        self.set
+            .as_ref()
+            .is_some_and(|request| matches!(request.stage, SetStage::Resolving { .. }))
+    }
+
     #[cfg(test)]
     #[cfg(all(feature = "demo-capture", unix))]
     fn set_is_idle(&self) -> bool {
@@ -269,11 +277,12 @@ impl QuillApp {
             .live
             .as_mut()
             .and_then(|live| live.driver.session.bots.web_apps.emoji_access.take());
-        if let Some((bot_id, done)) = access {
-            let waiting = self.mini_apps.window.as_ref().is_some_and(|window| {
-                window.launch.bot_user_id == bot_id
-                    && matches!(window.emoji.access, AccessStage::Granting(_))
-            });
+        if let Some(answer) = access {
+            let done = answer.result == quill::state::EmojiAccessResult::Granted;
+            let waiting =
+                self.mini_apps.window.as_ref().is_some_and(|window| {
+                    window.emoji.access == AccessStage::Granting(answer.request)
+                });
             if waiting {
                 self.with_window(|window| {
                     window.emoji.access = AccessStage::Idle;

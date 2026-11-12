@@ -98,13 +98,13 @@ impl QuillApp {
                     let now = cx.background_executor().now();
                     let pill = &mut this.stories.live.volume_pill;
                     let was = pill.open(now);
-                    if let Some(delay) = pill.hover(part, inside, now) {
+                    // The pill owns its close timer: coming back drops it.
+                    pill.hover(part, inside, now, |delay| {
                         cx.spawn(async move |this, cx| {
                             cx.background_executor().timer(delay).await;
                             let _ = this.update(cx, |_, cx| cx.notify());
                         })
-                        .detach();
-                    }
+                    });
                     if pill.open(now) != was {
                         cx.notify();
                     }
@@ -157,10 +157,10 @@ impl QuillApp {
             .session()
             .and_then(|s| s.calls.story_stream.as_ref())
             .is_some_and(ActiveGroupCall::join_failed);
-        let input = LiveInput {
-            state: player.map(VideoPlayer::state),
-            idle: false,
-            failed,
+        let input = if failed {
+            LiveInput::HostFailed
+        } else {
+            LiveInput::Expected(player.map(VideoPlayer::state))
         };
         let now = cx.background_executor().now();
         let (overlay, due) = self.stories.live.overlay.observe(input, now);

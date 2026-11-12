@@ -55,6 +55,18 @@ impl CloseFriendsList {
         *self = Self::Loading { request, stale };
     }
 
+    /// The answer of `request`: only the load in flight under that id
+    /// takes it (a list saved since, or a newer load, is left alone).
+    pub fn answered(&mut self, request: Option<RequestId>, ids: Vec<i64>) -> bool {
+        if request.is_some()
+            && matches!(self, Self::Loading { request: r, .. } if Some(*r) == request)
+        {
+            *self = Self::Ready(ids);
+            return true;
+        }
+        false
+    }
+
     /// The send of the load failed, or TDLib's error for `request`
     /// arrived: only the load in flight under that id fails.
     pub fn fail_load(&mut self, request: RequestId) {
@@ -177,7 +189,7 @@ pub struct StoriesState {
     /// Phase 9.2+: custom-emoji reactions the story picker can offer —
     /// `getStoryAvailableReactions` response (`availableReactions`,
     /// `schema/td_api.tl:13802`). Emoji, custom-emoji, and paid rows.
-    pub available_reactions: Option<Vec<StoryAvailableReactionView>>,
+    pub available_reactions: Fetch<Vec<StoryAvailableReactionView>>,
     /// Phase 9.2+: sticker visuals for the picker's custom-emoji
     /// reactions — the `getCustomEmojiStickers` response, keyed by
     /// sticker id (= custom emoji id).
@@ -281,7 +293,7 @@ impl StoriesState {
         Self {
             tray: HashMap::new(),
             stories: HashMap::new(),
-            available_reactions: None,
+            available_reactions: Fetch::Idle,
             custom_emoji_stickers: HashMap::new(),
             tray_refresh: HashSet::new(),
             post: StoryPostState::default(),

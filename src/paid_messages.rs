@@ -580,6 +580,9 @@ pub enum PaidTarget {
 pub enum TargetSave {
     /// `request` is out: only its answer settles the save.
     Saving(crate::ids::RequestId),
+    /// A channel's save went through: its box closes on it and clears it.
+    /// (A user's save is idle again once it went through.)
+    Saved,
     Failed(String),
 }
 
@@ -616,10 +619,13 @@ impl PaidSave {
         }
     }
 
-    /// A box for `target` opens: an earlier refusal is not this box's, a
-    /// save still out stays.
-    pub fn forget_failure(&mut self, target: PaidTarget) {
-        if matches!(self.by_target.get(&target), Some(TargetSave::Failed(_))) {
+    /// A box for `target` opens: an earlier outcome (a refusal, a save
+    /// that went through) is not this box's, a save still out stays.
+    pub fn forget_finished(&mut self, target: PaidTarget) {
+        if matches!(
+            self.by_target.get(&target),
+            Some(TargetSave::Failed(_) | TargetSave::Saved)
+        ) {
             self.by_target.remove(&target);
         }
     }
@@ -636,10 +642,19 @@ impl PaidSave {
         matches!(self.by_target.get(&target), Some(TargetSave::Saving(_)))
     }
 
-    /// The `ok` of `request`: the target it was for is idle.
+    /// The `ok` of `request`: a user's target is idle, a channel's is
+    /// `Saved` until its box takes the outcome.
     pub fn settle(&mut self, request: crate::ids::RequestId) {
-        self.by_target
-            .retain(|_, save| !matches!(save, TargetSave::Saving(held) if *held == request));
+        self.by_target.retain(|target, save| {
+            if !matches!(save, TargetSave::Saving(held) if *held == request) {
+                return true;
+            }
+            if matches!(target, PaidTarget::Channel(_)) {
+                *save = TargetSave::Saved;
+                return true;
+            }
+            false
+        });
     }
 
     /// The error of `request`: the target it was for failed with `line`. An
@@ -949,6 +964,27 @@ mod tests {
             answer,
             ..GateFacts::default()
         }
+    }
+
+    /// A channel's save that went through waits for its box to take it; a
+    /// user's is idle again, and a new box forgets a finished outcome.
+    #[test]
+    fn a_channel_save_that_went_through_waits_for_its_box() {
+        use crate::ids::RequestId;
+        let mut save = PaidSave::default();
+        save.begin(PaidTarget::Channel(5), RequestId(1));
+        save.begin(PaidTarget::User(7), RequestId(2));
+        save.settle(RequestId(1));
+        save.settle(RequestId(2));
+        assert_eq!(save.of(PaidTarget::Channel(5)), Some(&TargetSave::Saved));
+        assert_eq!(save.of(PaidTarget::User(7)), None);
+        assert!(!save.is_saving_for(PaidTarget::Channel(5)));
+        save.forget_finished(PaidTarget::Channel(5));
+        assert_eq!(save.of(PaidTarget::Channel(5)), None);
+        // A save still out is not forgotten by a box opening.
+        save.begin(PaidTarget::Channel(5), RequestId(3));
+        save.forget_finished(PaidTarget::Channel(5));
+        assert!(save.is_saving_for(PaidTarget::Channel(5)));
     }
 
     #[test]

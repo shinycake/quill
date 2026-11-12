@@ -43,6 +43,17 @@ fn without_a_fix_it_starts_at_the_country_and_waits() {
 }
 
 #[test]
+fn my_location_after_a_refusal_is_locating_until_it_answers() {
+    let mut picker = fresh();
+    picker.geolocated(GeoOutcome::Denied, false);
+    assert_eq!(picker.here(), HereState::Denied);
+    picker.locate_started();
+    assert_eq!(picker.here(), HereState::Locating);
+    picker.geolocated(GeoOutcome::Unavailable, false);
+    assert_eq!(picker.here(), HereState::Unavailable);
+}
+
+#[test]
 fn a_previous_fix_starts_there_with_venues_and_address() {
     let here = point(40.7, -74.);
     let mut picker = LocationPicker::open(ChatId(7), Some(here), point(31., 35.), 0);
@@ -181,12 +192,29 @@ fn stale_venue_answers_are_dropped_and_results_cached() {
     picker.venues_answered(second, vec![venue("New")]);
     assert_eq!(picker.venues(), &VenueList::Found(vec![venue("New")]));
     picker.venues_failed(second);
-    assert_eq!(
-        picker.venues(),
-        &VenueList::NothingFound {
-            query: String::new()
-        }
-    );
+    assert_eq!(picker.venues(), &VenueList::Failed);
+}
+
+/// Sweep r2-06b 03-C011: a failed lookup is drawn as a failure, and
+/// Retry asks for the same place and text again.
+#[test]
+fn a_failed_lookup_is_a_failure_and_retry_asks_again() {
+    let mut picker = fresh();
+    picker.geolocated(GeoOutcome::Found(point(48.85, 2.35)), true);
+    let (first, ..) = picker.venue_query_to_send().expect("nearby");
+    picker.venue_query_sent(first);
+    picker.venues_failed(first);
+    assert_eq!(picker.venues(), &VenueList::Failed);
+    assert_eq!(picker.venue_query_to_send(), None, "not re-asked by itself");
+    picker.retry_venues();
+    assert_eq!(picker.venues(), &VenueList::Loading);
+    let (again, _, query) = picker.venue_query_to_send().expect("asked again");
+    assert_ne!(again, first);
+    assert_eq!(query, "");
+    picker.venues_answered(again, vec![venue("Near")]);
+    assert_eq!(picker.venues(), &VenueList::Found(vec![venue("Near")]));
+    picker.retry_venues();
+    assert_eq!(picker.venue_query_to_send(), None, "nothing to retry");
 }
 
 #[test]

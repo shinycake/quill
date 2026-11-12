@@ -252,7 +252,7 @@ impl QuillApp {
         let me = self.session().and_then(|s| s.my_user_id).unwrap_or(0);
         self.stories
             .composer
-            .as_chat_id
+            .post_as()
             .map(ChatId)
             .unwrap_or(ChatId(me))
     }
@@ -314,16 +314,24 @@ impl QuillApp {
         match answer {
             Err(error) => self.stories.composer.set_error(error),
             Ok(result) => {
+                // The inputs stay live while the check runs: what they hold
+                // now is what is checked and posted.
+                let (link_url, reactions) = self.story_area_text(cx);
                 if !result.can_post() {
                     self.stories.composer.set_error(result.user_message());
                     if let Some(kind) = result.premium_limit() {
                         self.show_premium_limit(kind, 0, cx);
                     }
+                } else if let Some(error) = StoryComposer::link_url_error(&link_url) {
+                    // The inputs stay live while the check runs, and the
+                    // areas are read from them below: a link edited since
+                    // the press is checked again, as at the press, so a
+                    // typo shows here instead of failing the post.
+                    self.stories.composer.set_error(error);
                 } else {
                     // Phase 9.5: `target` is the chat the check was asked for,
                     // so the post goes where the eligibility was computed.
                     let from_story = self.stories.composer.repost_source();
-                    let (link_url, reactions) = self.story_area_text(cx);
                     let media = self.stories.composer.media.clone();
                     if let (Some(live), Some(media)) = (self.live.as_mut(), media) {
                         let caption = self
@@ -459,7 +467,7 @@ impl QuillApp {
             ComposerStage::Posted => Some(tr(keys::Q_MEDIA_POSTED_IT_WILL_APPEAR_IN).into()),
             // A "Post as" list that failed to load says so under the
             // picker (`post_as`), not here.
-            ComposerStage::Editing | ComposerStage::Failed(_) => None,
+            ComposerStage::Closed | ComposerStage::Editing | ComposerStage::Failed(_) => None,
         }
     }
 
@@ -482,7 +490,7 @@ impl QuillApp {
         // replaced (schema: areas can't change unless content does).
         let is_edit = self.stories.composer.is_edit();
         let is_repost = self.stories.composer.repost_source().is_some();
-        let show_privacy = !is_edit && self.stories.composer.as_chat_id.is_none();
+        let show_privacy = !is_edit && self.stories.composer.post_as().is_none();
         let areas_editable = !is_edit || media.is_some();
         let title = if is_edit {
             tr(keys::Q_MEDIA_EDIT_STORY)
@@ -731,7 +739,7 @@ impl QuillApp {
             // Phase 6: kit RadioGroup (was: buttons with a ☑/☐ prefix).
             // Controlled: the chosen index writes the value. Index 0 is
             // "Myself", the rest are the eligible chats.
-            let as_selected: Option<usize> = match self.stories.composer.as_chat_id {
+            let as_selected: Option<usize> = match self.stories.composer.post_as() {
                 None => Some(0),
                 Some(chat_id) => as_chats
                     .iter()
@@ -758,7 +766,7 @@ impl QuillApp {
                             .map(|chat| Some(chat.0))
                     };
                     if let Some(chosen) = chosen {
-                        this.stories.composer.as_chat_id = chosen;
+                        this.stories.composer.set_post_as(chosen);
                     }
                     this.stories.composer.clear_error();
                     cx.notify();

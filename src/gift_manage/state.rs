@@ -17,46 +17,23 @@ pub enum FlowAsk {
     Sent(crate::ids::RequestId),
 }
 
-/// The inline form or confirmation that is open for the selected gift.
+/// The form or dialog the gifts box has open apart from a gift's panel. The
+/// Upgrade and resale forms name a gift and live in that gift's panel
+/// (`GiftView::Form`), so only flows that name no shown gift are here: the
+/// collection forms, and the transfer picker, which is its own box with a
+/// request of its own.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GiftFlow {
-    /// Confirm `upgradeGift` (costs Stars unless prepaid).
-    Upgrade {
-        id: String,
-        keep_details: bool,
-        ask: FlowAsk,
-    },
     /// The transfer picker: a contact, or the export through Fragment.
     Transfer(TransferPicker),
-    /// Edit the resale price.
-    Resale {
-        id: String,
-        ask: FlowAsk,
-    },
     NewCollection(FlowAsk),
     RenameCollection(i32, FlowAsk),
     DeleteCollection(i32, FlowAsk),
 }
 
 impl GiftFlow {
-    pub fn upgrade(id: String, keep_details: bool) -> Self {
-        Self::Upgrade {
-            id,
-            keep_details,
-            ask: FlowAsk::Editing,
-        }
-    }
-
-    pub fn resale(id: String) -> Self {
-        Self::Resale {
-            id,
-            ask: FlowAsk::Editing,
-        }
-    }
-
     fn ask_mut(&mut self) -> Option<&mut FlowAsk> {
         match self {
-            Self::Upgrade { ask, .. } | Self::Resale { ask, .. } => Some(ask),
             Self::NewCollection(ask)
             | Self::RenameCollection(_, ask)
             | Self::DeleteCollection(_, ask) => Some(ask),
@@ -66,7 +43,6 @@ impl GiftFlow {
 
     fn ask(&self) -> Option<FlowAsk> {
         match self {
-            Self::Upgrade { ask, .. } | Self::Resale { ask, .. } => Some(*ask),
             Self::NewCollection(ask)
             | Self::RenameCollection(_, ask)
             | Self::DeleteCollection(_, ask) => Some(*ask),
@@ -79,13 +55,10 @@ impl GiftFlow {
         use crate::state::PaymentsPurpose as P;
         matches!(
             (self, purpose),
-            (Self::Upgrade { .. }, P::UpgradeGift)
-                | (Self::Resale { .. }, P::SetGiftResalePrice)
-                | (
-                    Self::NewCollection(_) | Self::RenameCollection(..),
-                    P::ChangeGiftCollection
-                )
-                | (Self::DeleteCollection(..), P::DeleteGiftCollection)
+            (
+                Self::NewCollection(_) | Self::RenameCollection(..),
+                P::ChangeGiftCollection
+            ) | (Self::DeleteCollection(..), P::DeleteGiftCollection)
                 | (Self::DeleteCollection(..), P::ChangeGiftCollection)
         )
     }
@@ -210,12 +183,20 @@ impl SendGiftState {
         }
     }
 
-    /// The line after a failed send or gift list.
+    /// The line after a failed send, gift list or Premium options list.
     pub fn error_line(&self) -> Option<&str> {
-        match (&self.stage, &self.gifts_fetch) {
-            (SendStage::Failed(line), _) | (_, GiftListFetch::Failed(line)) => Some(line),
+        match (&self.stage, &self.gifts_fetch, &self.premium_fetch) {
+            (SendStage::Failed(line), _, _)
+            | (_, GiftListFetch::Failed(line), _)
+            | (_, _, GiftListFetch::Failed(line)) => Some(line),
             _ => None,
         }
+    }
+
+    /// A list the box shows failed: Retry asks it again.
+    pub fn lists_failed(&self) -> bool {
+        matches!(self.gifts_fetch, GiftListFetch::Failed(_))
+            || matches!(self.premium_fetch, GiftListFetch::Failed(_))
     }
 
     /// Whether `pending` is the gift list request of this dialog.

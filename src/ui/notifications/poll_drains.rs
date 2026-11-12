@@ -12,6 +12,7 @@ use super::super::app::QuillApp;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 
 impl QuillApp {
     /// Drain what the last ingest left for the UI. Returns whether anything
@@ -67,22 +68,6 @@ impl QuillApp {
             .unwrap_or_default()
         {
             self.set_note(StatusNote::error(err));
-            progressed = true;
-        }
-        // A profile change that failed after Save closed its dialog has
-        // no box to show the error in: it surfaces as a note, so the user
-        // does not believe the profile changed.
-        if self.dialogs.edit_profile_dialog.is_none()
-            && let Some(err) = self
-                .live
-                .as_mut()
-                .and_then(|live| live.driver.session.users_state.profile_edit_error.take())
-        {
-            self.set_note(StatusNote::error(err));
-            progressed = true;
-        }
-        // The same for a color change after the box closed.
-        if self.dialogs.peer_color_dialog.is_none() && self.take_peer_color_error() {
             progressed = true;
         }
         // Message widgets: their bots' answers and public data polls.
@@ -159,10 +144,11 @@ impl QuillApp {
         }
         // TDLib 1.8.68 community management (rename / photo /
         // permissions / delete) refused.
-        if let Some(err) = self
+        for err in self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.groups.community_error.take())
+            .map(|live| live.driver.session.groups.community_error.take_all())
+            .unwrap_or_default()
         {
             self.set_note(StatusNote::error(err));
             progressed = true;
@@ -170,10 +156,11 @@ impl QuillApp {
         // Slice G1 fix-up: an invite-link mutation (create/edit/revoke/
         // replace-primary) failed — the loaded list is kept, so the
         // error surfaces here instead of wiping the panel.
-        if let Some(err) = self
+        for err in self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.groups.invite_link_error.take())
+            .map(|live| live.driver.session.groups.invite_link_error.take_all())
+            .unwrap_or_default()
         {
             self.set_note(StatusNote::error(err));
             progressed = true;
@@ -268,6 +255,18 @@ impl QuillApp {
             });
             progressed = true;
         }
+        // A saved sticker-set change that did not go through: said once.
+        if self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.session.stickers.manager.take_failure())
+            .is_some()
+        {
+            self.set_note(StatusNote::error(tr(
+                keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN,
+            )));
+            progressed = true;
+        }
         // Slice P1: a `paymentResult` verification URL — the provider's
         // page the buyer must complete (schema:4740).
         if let Some(step) = self
@@ -337,7 +336,7 @@ impl QuillApp {
         if let Some(err) = self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.auth_state.logout_refused.take())
+            .and_then(|live| live.driver.session.take_logout_refusal())
         {
             self.set_note(StatusNote::error(crate::ui::user_error::user_error_for(
                 quill::lang::keys::Q_NOTES_FAILED_LOG_OUT,
@@ -349,11 +348,14 @@ impl QuillApp {
         self.prune_drop_topic();
         if self.settle_folder_share(cx)
             | self.settle_recommended_adds(cx)
+            | self.settle_folder_deletes(cx)
             | self.settle_add_contact(cx)
             | self.settle_edit_contact(cx)
             | self.drive_folder_invite(cx)
             | self.drain_folder_limit(cx)
             | self.drain_chat_look(cx)
+            | self.drain_peer_color(cx)
+            | self.drain_wanted_reactor_tab(cx)
             | self.drain_wallpaper_preview(cx)
             | self.drain_chat_appearance(cx)
             | self.drain_earn(cx)

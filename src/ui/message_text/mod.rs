@@ -240,31 +240,24 @@ pub(super) fn caption_above_media(content: &MessageContent) -> bool {
 /// the footer hides instead of inventing a time.
 pub(super) fn message_footer(
     date: i32,
-    pending: bool,
-    receipt: OutboxReceipt,
+    delivery: Delivery,
     drag: Option<quill::forward_drag::ForwardDrag>,
 ) -> Option<AnyElement> {
     use gpui_kit::assets::IconName;
     let time = message_time_hhmm(date)?;
-    let mark = if pending {
-        Some(IconName::Clock)
-    } else {
-        match receipt {
-            OutboxReceipt::Read => Some(IconName::CheckCheck),
-            OutboxReceipt::Sent => Some(IconName::Check),
-            OutboxReceipt::None => None,
-        }
+    let mark = match delivery {
+        Delivery::Sending => Some(IconName::Clock),
+        Delivery::Read => Some(IconName::CheckCheck),
+        Delivery::Sent => Some(IconName::Check),
+        Delivery::Incoming => None,
     };
-    let status = if pending {
-        "sending"
-    } else {
-        match receipt {
-            OutboxReceipt::Read => "read",
-            OutboxReceipt::Sent => "sent",
-            OutboxReceipt::None => "",
-        }
+    let status = match delivery {
+        Delivery::Sending => "sending",
+        Delivery::Read => "read",
+        Delivery::Sent => "sent",
+        Delivery::Incoming => "",
     };
-    let outgoing = pending || receipt != OutboxReceipt::None;
+    let outgoing = delivery.is_outgoing();
     let accessible = format!("{time} {status}");
     let footer = div()
         .id("message-time")
@@ -283,12 +276,43 @@ pub(super) fn message_footer(
     Some(crate::ui::forward_drag_source::draggable(footer, drag).into_any_element())
 }
 
+/// Where an outgoing message stands, as the footer draws it: one value for
+/// what was a `pending` flag beside the server's receipt.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Delivery {
+    /// Incoming, or an outgoing message with no receipt yet.
+    Incoming,
+    /// Not yet accepted by the server.
+    Sending,
+    /// Reached the server.
+    Sent,
+    /// The peer has read it.
+    Read,
+}
+
+impl Delivery {
+    /// A message still pending is sending whatever its receipt says.
+    pub(super) fn of(pending: bool, receipt: OutboxReceipt) -> Self {
+        if pending {
+            return Self::Sending;
+        }
+        match receipt {
+            OutboxReceipt::Read => Self::Read,
+            OutboxReceipt::Sent => Self::Sent,
+            OutboxReceipt::None => Self::Incoming,
+        }
+    }
+
+    pub(super) fn is_outgoing(self) -> bool {
+        self != Self::Incoming
+    }
+}
+
 /// What the in-bubble footer shows besides the time and the receipt.
 #[derive(Clone)]
 pub(super) struct FooterMeta {
     pub(super) date: i32,
-    pub(super) pending: bool,
-    pub(super) receipt: OutboxReceipt,
+    pub(super) delivery: Delivery,
     pub(super) views: Option<i32>,
     pub(super) signature: Option<String>,
     /// "edited" before the time (`lng_edited`).
@@ -308,17 +332,12 @@ pub(super) struct FooterMeta {
 /// The time footer of a message: author signature, pin, view count (eye
 /// icon), "edited" / "imported" and the time/receipt, on one row.
 pub(super) fn message_footer_meta(meta: &FooterMeta) -> Option<AnyElement> {
-    let time = message_footer(
-        meta.date,
-        meta.pending,
-        meta.receipt,
-        meta.forward_drag.clone(),
-    );
+    let time = message_footer(meta.date, meta.delivery, meta.forward_drag.clone());
     if meta.plain() {
         return time;
     }
     let tooltip = meta.tooltip.clone();
-    let alpha = footer_alpha(meta.pending || meta.receipt != OutboxReceipt::None);
+    let alpha = footer_alpha(meta.delivery.is_outgoing());
     let label = if meta.imported {
         Some("imported")
     } else if meta.edited {
@@ -485,7 +504,7 @@ pub(super) fn message_chrome(
                 )
             }
         }),
-        footer: message_footer(date, pending, receipt, None),
+        footer: message_footer(date, Delivery::of(pending, receipt), None),
         footer_inline: false,
         footer_overlay: false,
         footer_rebuild: None,

@@ -62,6 +62,7 @@ impl Session {
         self.apply_group_type_ok(pending);
         self.apply_ai_compose_ok(pending);
         self.apply_hang_up_ok(pending);
+        self.settle_group_paging(pending, false);
         self.apply_communities_ok(pending);
         self.settle_permissions_save(pending);
         self.apply_backgrounds_ok(pending);
@@ -74,10 +75,11 @@ impl Session {
                 self.finish_scheduling_edit(pending.and_then(|p| p.chat_id), message_id, scheduling)
             }
             Some(RequestPurpose::DeleteAllCallMessages) => {
-                self.calls.recent_calls.clear();
-                self.calls.recent_calls_offset.clear();
-                // A page in flight still lists the calls just deleted.
-                self.calls.recent_calls_stage = RecentCalls::Idle;
+                // The list starts over, a page in flight with it: it still
+                // lists the calls just deleted.
+                if let Some(pending) = pending {
+                    self.calls.recent_calls.clear_done(pending.id);
+                }
             }
             Some(RequestPurpose::DeleteChatMessagesBySender) => {
                 self.messages
@@ -122,6 +124,7 @@ impl Session {
             }
             Some(RequestPurpose::Groups(GroupsPurpose::TransferChatOwnership { user_id })) => {
                 self.finish_ownership_transfer(
+                    pending.map(|p| p.id),
                     user_id,
                     pending.and_then(|p| p.chat_id).map(|c| c.0),
                 );
@@ -162,7 +165,9 @@ impl Session {
         if let Some(RequestPurpose::Settings(SettingsPurpose::SetDefaultAutoDelete { seconds })) =
             pending.map(|p| p.purpose)
         {
-            self.settings.default_auto_delete.succeed(seconds);
+            self.settings
+                .default_auto_delete
+                .answered(pending.map(|p| p.id), seconds);
         }
         // Slice A7: a `setAccountTtl` succeeded — the server
         // confirmed the write of exactly the sent value, so it
@@ -175,7 +180,9 @@ impl Session {
         if let Some(RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { days })) =
             pending.map(|p| p.purpose)
         {
-            self.settings.account_ttl.succeed(days);
+            self.settings
+                .account_ttl
+                .answered(pending.map(|p| p.id), days);
         }
         if matches!(
             pending.map(|p| p.purpose),
@@ -216,7 +223,7 @@ impl Session {
         // Slice S4: a `setAutoDownloadSettings` succeeded — apply
         // the confirmed sent settings (the `ok` carries none, so
         // they ride the purpose); the error clears and the driver
-        // persists on this ingest via `data_storage_dirty`.
+        // persists on this ingest (`data_storage_dirty`).
         if let Some(RequestPurpose::Settings(SettingsPurpose::SetAutoDownloadSettings {
             network,
             settings,
@@ -234,11 +241,10 @@ impl Session {
         // Batch 4: a `confirmSession` / `terminateSession` for the
         // new-login alert succeeded.
         if let Some(RequestPurpose::Settings(SettingsPurpose::ReviewUnconfirmedSession {
-            session_id,
             ..
         })) = pending.map(|p| p.purpose)
         {
-            self.finish_login_review(session_id, None);
+            self.finish_login_review(pending.map(|p| p.id), None);
         }
         // Batch 4: terms accepted.
         if matches!(
@@ -326,11 +332,13 @@ impl Session {
             archived,
         })) = pending.map(|p| p.purpose)
         {
-            self.finish_sticker_batch_item(set_id, true);
+            if let Some(request) = pending.map(|p| p.id) {
+                self.finish_sticker_batch_item(request, true);
+            }
             self.finish_set_change(set_id, SetChange::of(installed, archived), true);
             for sets in [
                 &mut self.stickers.stickers.trending,
-                &mut self.stickers.stickers.found_sets,
+                &mut self.stickers.stickers.search.sets,
             ] {
                 for set in sets.iter_mut().filter(|set| set.id == set_id) {
                     set.is_installed = installed;
@@ -342,9 +350,7 @@ impl Session {
             self.stickers.stickers.archived_has_more = false;
             self.stickers.stickers.archived_next_offset = 0;
             if self.stickers.stickers.tab == StickerTab::Archived {
-                self.stickers.stickers.selected_set_id = None;
-                self.stickers.stickers.set = StickerSetStage::Idle;
-                self.stickers.stickers.stickers.clear();
+                self.stickers.stickers.selection = StickerSelection::default();
             }
         }
         self.finish_mask_mutation(pending.map(|p| p.purpose));
@@ -540,17 +546,9 @@ impl Session {
         if let Some(RequestPurpose::SendCallRating) = pending.map(|p| p.purpose)
             && let Some(summary) = self.calls.summary.as_mut()
             && let Some(pending) = pending
-            && summary.rating == CallRating::Sending(pending.id)
+            && summary.rating.sends(pending.id)
         {
             summary.rating = CallRating::Sent;
-        }
-        // Phase C2i: `setUserPrivacySettingRules` confirmed (the
-        // new value was applied optimistically at send time).
-        if let Some(pending) = pending
-            && let RequestPurpose::Calls(CallsPurpose::SetCallPrivacyRules { setting }) =
-                pending.purpose
-        {
-            self.calls.privacy_asks.answered(setting, pending.id);
         }
         // Slice S3: `setReadDatePrivacySettings` confirmed — clear
         // the optimistic spinner (the value itself was set at
@@ -573,6 +571,11 @@ impl Session {
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::LoadChats) => self.chat_list.main_paging.page_ok(),
             Some(RequestPurpose::LoadArchiveChats) => self.chat_list.archive_paging.page_ok(),
+            Some(RequestPurpose::LoadFolderChats) => {
+                if let Some(folder_id) = pending.and_then(|p| p.folder_id) {
+                    self.chat_list.folder_page_ok(folder_id);
+                }
+            }
             _ => {}
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::DeleteChatFolder)
@@ -583,7 +586,7 @@ impl Session {
             // source of truth and will confirm.
             self.chat_list.chat_folders.retain(|f| f.id != folder_id);
             self.chat_list.folder_specs.remove(&folder_id);
-            self.chat_list.folder_chats_exhausted.remove(&folder_id);
+            self.chat_list.folder_paging.remove(&folder_id);
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::ProcessChatFolderNewChats)
             && let Some(folder_id) = pending.and_then(|p| p.folder_id)
@@ -769,13 +772,13 @@ impl Session {
                 self.groups.invite_link_counts.remove(&chat_id.0);
             }
             Some((RequestPurpose::DeleteAllRevokedChatInviteLinks, _, Some(chat_id))) => {
-                self.groups.revoked_invite_links.insert(
-                    chat_id.0,
-                    InviteLinkFetch::Loaded(InviteLinkList {
+                // Only a list that is shown empties; a closed one stays closed.
+                if let Some(slot) = self.groups.revoked_invite_links.get_mut(&chat_id.0) {
+                    *slot = InviteLinkFetch::Loaded(InviteLinkList {
                         total_count: 0,
                         links: Vec::new(),
-                    }),
-                );
+                    });
+                }
             }
             _ => {}
         }
@@ -791,14 +794,14 @@ impl Session {
             // Phase 6: the new contact arrives via `updateUser`
             // (`is_contact` flips); invalidate the list so the
             // contacts tab refetches it.
-            self.users_state.contacts = crate::state::fetch::Fetch::Idle;
+            self.users_state.contacts.outdate();
         }
         // Slice A6: a contacts mutation landed — never optimistic:
         // the new list arrives via the `getContacts` refetch the
         // tab triggers.
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::RemoveContact) => {
-                self.users_state.contacts = crate::state::fetch::Fetch::Idle;
+                self.users_state.contacts.outdate();
                 // The delete-synced-contacts batch remove shares
                 // this purpose but carries no user_id — its notice
                 // must not read as a single delete (or overwrite
@@ -832,11 +835,11 @@ impl Session {
                 }
             }
             Some(RequestPurpose::ImportContacts) => {
-                self.users_state.contacts = crate::state::fetch::Fetch::Idle;
+                self.users_state.contacts.outdate();
                 self.users_state.contacts_notice = Some("Contacts imported.".to_string());
             }
             Some(RequestPurpose::ClearImportedContacts) => {
-                self.users_state.contacts = crate::state::fetch::Fetch::Idle;
+                self.users_state.contacts.outdate();
                 self.users_state.contacts_notice =
                     Some("Synced contacts deleted from the servers.".to_string());
             }
@@ -887,14 +890,8 @@ impl Session {
         for later in self.requests.pending.values_mut().filter(|p| {
             p.purpose == RequestPurpose::SetChatPermissions && p.chat_id == Some(chat_id)
         }) {
-            if let Some(RequestRollback::ChatPermissions {
-                previous,
-                previous_can_send,
-                ..
-            }) = &mut later.rollback
-            {
+            if let Some(RequestRollback::ChatPermissions { previous, .. }) = &mut later.rollback {
                 *previous = Some(sent);
-                *previous_can_send = sent.can_send_basic_messages;
             }
         }
     }

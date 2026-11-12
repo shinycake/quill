@@ -9,7 +9,7 @@ use super::inline_players::Demand;
 use super::inline_video::InlineTile;
 use super::message_media::MediaFrameKind;
 use super::play_intent::{PlayKind, PlayTarget};
-use super::playback_state::{ChatMessage, GifDecode, GifPlayback, PlayingGif};
+use super::playback_state::{ChatMessage, GifPlayback, GifRun, PlayingGif};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::ids::{ChatId, FileId, MessageId};
@@ -18,7 +18,7 @@ use quill::local_path::sandboxed_display_path;
 use quill::telegram::envelope::MessageContent;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
 /// The `image/gif` file a message loops in its row: a GIF animation, or a
@@ -139,11 +139,8 @@ impl QuillApp {
     }
 
     pub(super) fn stop_animation_playback(&mut self) {
-        // A decode still running stops before its next frame.
-        for decode in self.playback.gif_decodes.values() {
-            decode.cancel.store(true, Ordering::Relaxed);
-        }
-        // The clip hands its pictures to the atlas sweeper when it drops.
+        // The stage owns its decode: leaving it stops the decode before its
+        // next frame, and the clip hands its pictures to the atlas sweeper.
         self.playback.animation = GifPlayback::Idle;
         self.drop_play_intent(PlayKind::Gif);
     }
@@ -225,18 +222,21 @@ impl QuillApp {
         self.stop_voice_playback();
         self.stop_audio_playback();
         self.stop_viewer_video();
-        self.playback.animation = GifPlayback::Waiting(PlayingGif {
-            window: self.windows.scope,
-            message: ChatMessage::new(chat_id, message_id),
-        });
+        let run = self.spawn_gif_decode(chat_id, message_id, file_id, safe, cx);
+        self.playback.animation = GifPlayback::Waiting {
+            playing: PlayingGif {
+                window: self.windows.scope,
+                message: ChatMessage::new(chat_id, message_id),
+            },
+            run,
+        };
         self.set_note(StatusNote::silent(tr(keys::Q_AV_LOADING_GIF_PLAYBACK)));
-        self.spawn_gif_decode(chat_id, message_id, file_id, safe, cx);
         cx.notify();
     }
 
-    /// Decode the GIF off the UI thread. One decode per GIF: one still
-    /// running (stopped, then started again before it saw the stop) is
-    /// taken back instead of starting a second.
+    /// Decode the GIF off the UI thread. The run goes into the playback
+    /// stage (`GifPlayback`), which owns it: stopping drops it, and with it
+    /// the landing of a decode nobody waits for any more.
     pub(super) fn spawn_gif_decode(
         &mut self,
         chat_id: ChatId,
@@ -244,40 +244,23 @@ impl QuillApp {
         file_id: FileId,
         path: PathBuf,
         cx: &mut Context<Self>,
-    ) {
+    ) -> GifRun {
         let key = ChatMessage::new(chat_id, message_id);
-        if let Some(decode) = self.playback.gif_decodes.get(&key) {
-            decode.cancel.store(false, Ordering::Relaxed);
-            // Its first picture already came: play from it again now.
-            if let Some(clip) = decode.first.clone() {
-                self.gif_started(chat_id, message_id, clip, cx);
-            }
-            return;
-        }
         let cancel = Arc::new(AtomicBool::new(false));
-        self.playback.gif_decodes.insert(
-            key,
-            GifDecode {
-                cancel: cancel.clone(),
-                first: None,
-            },
-        );
         let max_edge = self.gif_decode_edge(message_id, cx);
+        let decoding = cancel.clone();
         // The decode lands in the window that started it: its open chat is
         // the row's chat, in a chat window too.
-        self.spawn_scoped(cx, async move |this, cx| {
+        let task = self.spawn_scoped(cx, async move |this, cx| {
             let (first, first_in) = futures_channel::oneshot::channel();
             let decode = cx.background_executor().spawn(async move {
-                GifClip::decode(&path, max_edge, &cancel, |clip| {
+                GifClip::decode(&path, max_edge, &decoding, |clip| {
                     let _ = first.send(clip);
                 })
             });
             // The first picture plays while the rest decode.
             if let Ok(clip) = first_in.await {
                 let _ = this.update(cx, |this, cx| {
-                    if let Some(decode) = this.playback.gif_decodes.get_mut(&key) {
-                        decode.first = Some(clip.clone());
-                    }
                     if this.session().and_then(|session| session.open_chat_id()) == Some(chat_id) {
                         this.gif_started(chat_id, message_id, clip, cx);
                     }
@@ -289,7 +272,6 @@ impl QuillApp {
             // so the decode ends and nothing stays marked as playing.
             if landed.is_err() {
                 let _ = this.main().update(cx, |this, cx| {
-                    this.playback.gif_decodes.remove(&key);
                     if this
                         .playback
                         .animation
@@ -301,8 +283,8 @@ impl QuillApp {
                     }
                 });
             }
-        })
-        .detach();
+        });
+        GifRun::new(cancel, task)
     }
 
     fn open_chat_animation(&self, message_id: MessageId) -> bool {
@@ -371,13 +353,12 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let message_id = key.message;
-        self.playback.gif_decodes.remove(&key);
         // Playing is the open chat's: the same id in another chat is not
         // this decode's row.
         let in_open_chat =
             self.session().and_then(|session| session.open_chat_id()) == Some(key.chat);
         if !in_open_chat || !self.gif_playing(key.chat, message_id) {
-            // Stopped or replaced meanwhile.
+            // Another chat is open: this decode's row is not on screen.
             return;
         }
         match decoded {
@@ -388,13 +369,16 @@ impl QuillApp {
                     .animation
                     .clip()
                     .is_some_and(|playing| Arc::ptr_eq(playing, &clip)) => {}
-            // Another clip of the same GIF is playing.
-            _ if self.playback.animation.clip().is_some() => return,
+            // The first picture plays: a failure in the rest leaves it be.
+            Err(_) if self.playback.animation.clip().is_some() => {
+                self.playback.animation.decode_ended();
+                return;
+            }
             Ok(clip) => self.gif_started(key.chat, message_id, clip, cx),
-            // Started again after this decode saw the stop: decode anew.
+            // Only a stop cancels the decode, and a stop drops this task
+            // with its stage: nothing lands from it.
             Err(GifError::Cancelled) => {
-                self.playback.animation = GifPlayback::Idle;
-                self.play_gif_file(message_id, file_id, cx);
+                self.stop_animation_playback();
                 return;
             }
             // Labelled `image/gif`, but a video: the inline player takes an
@@ -411,6 +395,8 @@ impl QuillApp {
                 self.set_note(StatusNote::error(tr(keys::Q_AV_COULD_NOT_PLAY_GIF)));
             }
         }
+        // The pictures that came are all there is.
+        self.playback.animation.decode_ended();
         self.notify_conversation(cx);
         cx.notify();
     }

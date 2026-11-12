@@ -41,6 +41,7 @@ impl Session {
                 RequestPurpose::Bots(BotsPurpose::GetWidgetPublicData),
             ) => WidgetAnswer::PublicData {
                 key,
+                request: pending.id,
                 data: Some((data, poll_period(period))),
             },
             _ => return,
@@ -65,7 +66,11 @@ impl Session {
                 })
             }
             RequestPurpose::Bots(BotsPurpose::GetWidgetPublicData) => {
-                widget_key(pending).map(|key| WidgetAnswer::PublicData { key, data: None })
+                widget_key(pending).map(|key| WidgetAnswer::PublicData {
+                    key,
+                    request: pending.id,
+                    data: None,
+                })
             }
             _ => return false,
         };

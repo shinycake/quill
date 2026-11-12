@@ -627,7 +627,20 @@ impl QuillApp {
         session.chat_list.chat_folders.retain(|f| f.id != folder_id);
         session.chat_list.folder_specs.remove(&folder_id);
         session.chat_list.folder_chats_to_leave.remove(&folder_id);
-        session.chat_list.folder_chats_exhausted.remove(&folder_id);
+        session.chat_list.folder_paging.remove(&folder_id);
+    }
+
+    /// Screenshot demo: there is no server to ask which chats could leave
+    /// with the folder, so the answer is none.
+    pub(in crate::ui) fn apply_demo_no_chats_to_leave(&mut self, folder_id: i32) {
+        if let Some(session) = self.demo_session.as_mut() {
+            session
+                .chat_list
+                .folder_chats_to_leave
+                .entry(folder_id)
+                .or_default()
+                .succeed(Vec::new());
+        }
     }
 
     /// Parity slice: screenshot-demo folder reorder.

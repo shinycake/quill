@@ -10,13 +10,9 @@ use gpui_kit::*;
 /// The settings window of the account on screen: its pages, search,
 /// scrolls and the boxes they open. A field of `OnScreen`.
 pub(crate) struct SettingsUi {
-    /// The settings window covers the chat list and the chat.
-    pub(super) open: bool,
-    /// The page on screen. `None`: none chosen yet, so a wide window shows
-    /// Account and a narrow one the page list.
-    pub(super) page: Option<quill::settings_catalog::Page>,
-    /// A page reached from a row of `page`, with a back arrow.
-    pub(super) sub: Option<super::settings_window::SubPage>,
+    /// Whether the settings window covers the chat list and the chat, and
+    /// on which page or subpage.
+    pub(super) nav: super::settings_window::SettingsNav,
     /// The box the settings window has open, if any: one value, since
     /// kit dialogs never stack.
     pub(super) boxes: SettingsBox,
@@ -54,22 +50,30 @@ pub(crate) struct SettingsUi {
 }
 
 /// What the operating system's accent color is known to be.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(Default)]
 pub(crate) enum SystemAccent {
     /// Not read yet.
     #[default]
     Unread,
+    /// Linux reads it on a background thread: the color known so far, and
+    /// the task waiting for the read to land (dropping it ends the wait; a
+    /// second refresh while it runs does not start another).
+    Reading { color: Option<u32>, _wait: Task<()> },
     /// Read: the color (0xRRGGBB) when the system reports one.
     Read(Option<u32>),
 }
 
 impl SystemAccent {
     /// The color, when read and reported.
-    pub(super) fn color(self) -> Option<u32> {
+    pub(super) fn color(&self) -> Option<u32> {
         match self {
-            Self::Read(color) => color,
+            Self::Read(color) | Self::Reading { color, .. } => *color,
             Self::Unread => None,
         }
+    }
+
+    pub(super) fn is_unread(&self) -> bool {
+        matches!(self, Self::Unread)
     }
 }
 
@@ -97,6 +101,22 @@ impl SettingsBox {
 }
 
 impl SettingsUi {
+    /// The settings window covers the chat list and the chat.
+    pub(super) fn open(&self) -> bool {
+        self.nav.is_open()
+    }
+
+    /// The page on screen. `None`: none chosen yet, so a wide window shows
+    /// Account and a narrow one the page list.
+    pub(super) fn page(&self) -> Option<quill::settings_catalog::Page> {
+        self.nav.page()
+    }
+
+    /// A page reached from a row of `page`, with a back arrow.
+    pub(super) fn sub(&self) -> Option<super::settings_window::SubPage> {
+        self.nav.sub()
+    }
+
     pub(super) fn box_open(&self, which: SettingsBox) -> bool {
         self.boxes == which
     }
@@ -109,9 +129,7 @@ impl SettingsUi {
 
     pub(super) fn new(cx: &mut Context<QuillApp>) -> Self {
         Self {
-            open: false,
-            page: None,
-            sub: None,
+            nav: Default::default(),
             boxes: SettingsBox::None,
             search: Default::default(),
             arrival: None,
@@ -144,6 +162,8 @@ impl super::on_screen::Farewell for SettingsUi {
         if app.settings.box_open(SettingsBox::Stickers) {
             app.close_stickers_manager(cx);
         }
+        // The proxy-link box (its draft and check) is the session's.
+        app.close_proxy_link(cx);
         // These boxes keep their open flags in the session, which goes to
         // the background with the account.
         let (masks, emoji, archive) = app.session().map_or((false, false, false), |session| {
@@ -162,7 +182,7 @@ impl super::on_screen::Farewell for SettingsUi {
         if archive {
             app.set_archive_settings_open(false);
         }
-        if let Some(page) = app.settings.page {
+        if let Some(page) = app.settings.page() {
             app.leave_settings_page(page);
         }
     }
@@ -189,12 +209,12 @@ pub(crate) struct PreferencesUi {
     /// The operating system's accent color, once read
     /// (`refresh_system_accent`).
     pub(super) system_accent: SystemAccent,
-    /// The one task waiting for a Linux accent read to land; a second
-    /// refresh while it runs does not start another.
-    pub(super) system_accent_poll: Option<Task<()>>,
     /// The wait for the link handler's background read to land; dropping
     /// it ends the wait.
     pub(super) link_handler_watch: Option<Task<()>>,
+    /// "Make Quill the default": the re-reads that follow while the
+    /// system confirmation is awaited (`LinkHandlerRecheck`).
+    pub(super) link_handler_recheck: super::appearance::LinkHandlerRecheck,
     /// Settings → Appearance: the searchable font family list.
     pub(super) font_picker: super::appearance_power::FontPicker,
     /// Settings → Appearance: the custom accent color field (kit
@@ -229,8 +249,8 @@ impl PreferencesUi {
             appearance_applied: None,
             app_theme: Default::default(),
             system_accent: SystemAccent::Unread,
-            system_accent_poll: None,
             link_handler_watch: None,
+            link_handler_recheck: Default::default(),
             font_picker,
             accent_picker,
             translate: super::translate_ui::TranslateUi::load(),

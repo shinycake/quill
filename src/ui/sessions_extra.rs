@@ -20,7 +20,8 @@ impl QuillApp {
                 )));
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
-            demo.settings.privacy_data.inactive_session_ttl_days = Some(days);
+            demo.settings.privacy_data.inactive_session_ttl =
+                quill::state::saves::Optimistic::Ready(days);
         }
         cx.notify();
     }

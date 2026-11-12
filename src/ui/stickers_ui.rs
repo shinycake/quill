@@ -585,13 +585,14 @@ impl QuillApp {
             .ghost()
             .small()
             .on_click(cx.listener(|this, _, _, cx| this.clear_recent_stickers(cx)));
-        let query = panel.searched.typed().to_lowercase();
+        let query = panel.search.query.typed().to_lowercase();
         let mut seen = std::collections::HashSet::new();
         let visible_sets: Vec<_> = match panel.tab {
             StickerTab::Installed => panel.sets.iter().collect(),
             StickerTab::Trending => panel.trending.iter().collect(),
             StickerTab::Search => panel
-                .found_sets
+                .search
+                .sets
                 .iter()
                 .chain(panel.sets.iter().filter(|set| {
                     !query.is_empty()
@@ -604,7 +605,7 @@ impl QuillApp {
         };
         for set in &visible_sets {
             let set_id = set.id;
-            let selected = panel.selected_set_id == Some(set_id);
+            let selected = panel.selection.set_id == Some(set_id);
             let title = if set.title.is_empty() {
                 set.name.clone()
             } else {
@@ -675,8 +676,8 @@ impl QuillApp {
             );
         }
         if panel.tab == StickerTab::Search
-            && panel.search_has_more
-            && panel.selected_set_id.is_none()
+            && panel.search.has_more
+            && panel.selection.set_id.is_none()
         {
             grid = grid.child(
                 Button::new("sticker-search-more")
@@ -688,7 +689,7 @@ impl QuillApp {
         let mut preview = div().flex().items_center().justify_between().gap_2();
         if let Some(set) = visible_sets
             .iter()
-            .find(|set| Some(set.id) == panel.selected_set_id)
+            .find(|set| Some(set.id) == panel.selection.set_id)
         {
             preview = preview
                 .child(div().font_semibold().child(tr_with(
@@ -714,9 +715,9 @@ impl QuillApp {
         }
         let loading_tab = panel.lists.tab_loading(panel.tab);
         // Only states worth reading: loading, failure, and empty views.
-        let status: Option<String> = if loading_tab || panel.set.is_loading() {
+        let status: Option<String> = if loading_tab || panel.selection.stage.is_loading() {
             Some(tr(keys::Q_MEDIA_LOADING_STICKERS).into())
-        } else if panel.lists.tab_error(panel.tab).is_some() || panel.set.is_failed() {
+        } else if panel.lists.tab_error(panel.tab).is_some() || panel.selection.stage.is_failed() {
             Some(tr(keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN).into())
         } else {
             match panel.tab {
@@ -735,11 +736,11 @@ impl QuillApp {
                 StickerTab::Trending if panel.trending.is_empty() => {
                     Some(tr(keys::Q_MEDIA_NO_TRENDING_STICKER_SETS).into())
                 }
-                StickerTab::Search if panel.searched.typed().is_empty() => {
+                StickerTab::Search if panel.search.query.typed().is_empty() => {
                     Some(tr(keys::Q_MEDIA_SEARCH_BY_EMOJI_TITLE_OR).into())
                 }
                 StickerTab::Search
-                    if panel.found_stickers.is_empty() && visible_sets.is_empty() =>
+                    if panel.search.stickers.is_empty() && visible_sets.is_empty() =>
                 {
                     Some(tr(keys::Q_MEDIA_NO_STICKERS_FOUND).into())
                 }

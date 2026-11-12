@@ -3,7 +3,7 @@
 //! in a message.
 #![deny(clippy::indexing_slicing)]
 
-use super::with_selected;
+use super::selection_record::with_selected;
 use gpui_kit::*;
 
 /// The text before the selection's start in the first painted text it

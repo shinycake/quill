@@ -182,6 +182,20 @@ fn a_failed_request_marks_the_process_and_leaves_the_call_error_alone() {
     assert!(driver.session.calls.group_call_error.is_none());
 }
 
+/// r2-14, 02-069: a process whose first request failed does not block the
+/// next start for the chat while the UI has not dropped it yet.
+#[test]
+fn a_start_after_a_failed_fetch_asks_again_without_waiting_for_the_ui() {
+    let (recorder, mut driver) = driver_with_channel(true);
+    driver.begin_rtmp_start(ChatId(CHAT)).expect("sends");
+    let request = last(&recorder);
+    reply(&mut driver, error_answer(&request));
+    driver.begin_rtmp_start(ChatId(CHAT)).expect("sends again");
+    let start = driver.session.calls.rtmp_start.as_ref().expect("process");
+    assert!(matches!(start.stage, RtmpStage::Fetching { .. }));
+    assert_ne!(last(&recorder)["@extra"], request["@extra"]);
+}
+
 #[test]
 fn a_late_failure_of_an_earlier_process_is_ignored() {
     let (recorder, mut driver) = driver_with_channel(true);
@@ -257,9 +271,12 @@ fn creating_while_a_one_to_one_call_hangs_up_is_allowed() {
         user_id: 11,
         is_outgoing: true,
         is_video: false,
-        state: CallState::Ready,
+        progress: crate::state::CallProgress::first(
+            CallState::Ready(Default::default()),
+            std::time::Instant::now(),
+        ),
+        action: crate::state::CallAction::Idle,
         started_at: std::time::Instant::now(),
-        ready: None,
         transport: Default::default(),
         signaling_queue: Vec::new(),
         signaling_dropped: 0,
@@ -277,7 +294,8 @@ fn creating_while_a_one_to_one_call_hangs_up_is_allowed() {
         "not while the call is on"
     );
     if let Some(call) = driver.session.calls.active_call.as_mut() {
-        call.state = CallState::HangingUp;
+        call.progress
+            .update(CallState::HangingUp, std::time::Instant::now());
     }
     driver
         .start_video_chat(CHAT, String::new(), 0)

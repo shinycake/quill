@@ -413,10 +413,13 @@ impl QuillApp {
             .session()
             .is_some_and(|session| session.settings.media_prefs.hq_round_videos);
         let choice = self.capture_choice();
-        let start = self.begin_capture_start(true, purpose);
-        let starting = cx.background_spawn(async move { VideoNoteCapture::start(hq, &choice) });
-        self.spawn_scoped(cx, async move |this, cx| {
-            let result = starting.await;
+        let start = self.recording.next_start_id();
+        // The camera is opened from inside the task the stage holds: a
+        // start cancelled before the task first runs opens nothing.
+        let opening = self.spawn_scoped(cx, async move |this, cx| {
+            let result = cx
+                .background_spawn(async move { VideoNoteCapture::start(hq, &choice) })
+                .await;
             let held = this.update(cx, |this, cx| {
                 this.hold_started_video(result, start, purpose, lock, cx);
             });
@@ -425,8 +428,8 @@ impl QuillApp {
                     this.recording.finish_start(start);
                 });
             }
-        })
-        .detach();
+        });
+        self.begin_capture_start(start, true, purpose, opening);
     }
 
     fn hold_started_video(
@@ -467,11 +470,12 @@ impl QuillApp {
         if self.recording_busy() || self.refused_while_locked() {
             return;
         }
-        let start = self.begin_capture_start(false, purpose);
+        let start = self.recording.next_start_id();
         let open = self.recording.open_voice.clone();
-        let opening = cx.background_spawn(async move { open() });
-        self.spawn_scoped(cx, async move |this, cx| {
-            let mut result = Some(opening.await);
+        // The microphone is opened from inside the task the stage holds: a
+        // start cancelled before the task first runs opens nothing.
+        let task = self.spawn_scoped(cx, async move |this, cx| {
+            let mut result = Some(cx.background_spawn(async move { open() }).await);
             let held = this.update(cx, |this, cx| {
                 if let Some(result) = result.take() {
                     this.hold_started_voice(result, start, purpose, cx);
@@ -486,8 +490,8 @@ impl QuillApp {
                         .detach();
                 }
             }
-        })
-        .detach();
+        });
+        self.begin_capture_start(start, false, purpose, task);
     }
 
     fn hold_started_voice(

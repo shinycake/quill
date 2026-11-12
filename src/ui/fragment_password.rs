@@ -78,7 +78,7 @@ impl PasswordBox<'_> {
             PasswordView::Idle | PasswordView::Sending => None,
         };
         let muted = cx.theme().muted_foreground;
-        let state = session.auth_state.password_state.as_ref();
+        let state = session.auth_state.password_state.get();
         let hint = state
             .map(|state| state.password_hint.clone())
             .filter(|hint| !hint.is_empty());
@@ -213,6 +213,7 @@ pub(super) fn export_error_text(error: &ExportError) -> SharedString {
         ExportError::WrongPassword => tr(keys::CLOUD_PASSWORD_WRONG).into(),
         ExportError::Flood => tr(keys::FLOOD_ERROR).into(),
         ExportError::ServerError => tr(keys::Q_MONEY_SERVER_ERROR).into(),
+        ExportError::NotSent => tr(keys::Q_MONEY_COULDNT_OPEN_FRAGMENT).into(),
         ExportError::Other(reason) if reason.is_empty() => {
             tr(keys::Q_MONEY_COULDNT_OPEN_FRAGMENT).into()
         }
@@ -292,7 +293,7 @@ impl QuillApp {
     pub(super) fn recover_cloud_password(&mut self, cx: &mut Context<Self>) {
         let has_email = self
             .session()
-            .and_then(|s| s.auth_state.password_state.as_ref())
+            .and_then(|s| s.auth_state.password_state.get())
             .is_some_and(|state| state.has_recovery_email_address);
         self.open_twofa(cx);
         self.goto_twofa_view(crate::ui::dialogs::callback_password::TwofaView::Recover);

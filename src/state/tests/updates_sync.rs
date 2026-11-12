@@ -296,4 +296,11 @@ fn the_age_check_ends_with_the_request() {
         !session.sync.age_check_started(),
         "a new request starts the check over"
     );
+    // A start made for one request does not count for a different one.
+    session.sync.start_age_check();
+    apply(
+        &mut session,
+        r#"{"@type":"updateAgeVerificationParameters","parameters":{"@type":"ageVerificationParameters","min_age":18,"verification_bot_username":"@VerifyAgeBot","country":"AU"}}"#,
+    );
+    assert!(!session.sync.age_check_started());
 }

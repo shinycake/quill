@@ -78,7 +78,7 @@ fn the_replay_from_settings_plays_over_the_signed_in_app(cx: &mut TestAppContext
     vcx.read(|cx| {
         let app = app.read(cx);
         assert!(app.first_run.in_welcome());
-        assert!(!app.settings.open, "the settings dialog closes");
+        assert!(!app.settings.open(), "the settings dialog closes");
     });
     // Without its clip the notice shows at once; then the highlights.
     vcx.update(|_, cx| {

@@ -56,7 +56,7 @@ fn a_linked_story_the_server_no_longer_has_shows_the_broken_link_toast(cx: &mut 
         app.open_story_viewer(ChatId(POSTER), 99, StoryOpenScope::Link, cx)
     });
     frames(vcx);
-    let waiting = app.read_with(vcx, |app, _| app.chat_list.pending_story_open);
+    let waiting = app.read_with(vcx, |app, _| app.stories.viewer.waiting());
     assert_eq!(
         waiting,
         Some(PendingStoryOpen {
@@ -75,10 +75,7 @@ fn a_linked_story_the_server_no_longer_has_shows_the_broken_link_toast(cx: &mut 
     });
     frames(vcx);
     app.read_with(vcx, |app, _| {
-        assert_eq!(
-            app.chat_list.pending_story_open, None,
-            "the open is dropped"
-        );
+        assert_eq!(app.stories.viewer.waiting(), None, "the open is dropped");
         assert!(!app.stories.viewer.is_open());
         let note = app.connection.note();
         assert_eq!(note.text(), tr(keys::STORIES_LINK_INVALID));
@@ -98,7 +95,7 @@ fn a_linked_story_known_to_be_gone_toasts_on_the_next_frame(cx: &mut TestAppCont
     });
     frames(vcx);
     app.read_with(vcx, |app, _| {
-        assert_eq!(app.chat_list.pending_story_open, None);
+        assert_eq!(app.stories.viewer.waiting(), None);
         assert_eq!(app.connection.note().text(), tr(keys::STORIES_LINK_INVALID));
     });
 }
@@ -118,7 +115,7 @@ fn a_gone_story_opened_from_a_card_or_the_tray_drops_the_open_quietly(cx: &mut T
         });
         frames(vcx);
         app.read_with(vcx, |app, _| {
-            assert_eq!(app.chat_list.pending_story_open, None, "{scope:?}");
+            assert_eq!(app.stories.viewer.waiting(), None, "{scope:?}");
             assert!(!app.stories.viewer.is_open());
             assert_ne!(
                 app.connection.note().text(),
@@ -194,7 +191,7 @@ fn open_then_fail(
     frames(vcx);
     app.read_with(vcx, |app, _| {
         (
-            app.chat_list.pending_story_open,
+            app.stories.viewer.waiting(),
             app.connection.note().text().to_string(),
         )
     })
@@ -227,7 +224,7 @@ fn opening_a_story_again_after_a_failure_waits_for_the_new_answer(cx: &mut TestA
     frames(vcx);
     app.read_with(vcx, |app, _| {
         assert_eq!(
-            app.chat_list.pending_story_open,
+            app.stories.viewer.waiting(),
             Some(PendingStoryOpen {
                 chat_id: POSTER,
                 story_id: 92,

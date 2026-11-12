@@ -86,7 +86,7 @@ fn a_chat_windows_message_menu_takes_and_gives_back_its_focus(cx: &mut TestAppCo
     assert_eq!(again, rows, "a frame claims each row once");
 
     scoped(&h, cx, |app, cx| {
-        app.message_ui.menu.close();
+        app.message_ui.menu.close_message();
         cx.notify();
     });
     render(chat_window, cx);
@@ -96,4 +96,29 @@ fn a_chat_windows_message_menu_takes_and_gives_back_its_focus(cx: &mut TestAppCo
         on_composer,
         "closing the menu gives the composer its focus back"
     );
+}
+
+#[gpui_kit::test]
+fn a_menu_opened_in_one_window_closes_the_others(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    let _chat_window = h.open_in_new_window(OTHER, cx);
+    h.settle(cx);
+    h.app.update(cx, |app, _| {
+        app.message_ui.menu.open_at(MessageMenuState {
+            chat_id: OTHER,
+            message_id: OTHER_LAST,
+            position: point(px(100.), px(100.)),
+        });
+    });
+    scoped(&h, cx, |app, cx| {
+        app.message_ui.menu.open_at(MessageMenuState {
+            chat_id: OTHER,
+            message_id: OTHER_LAST,
+            position: point(px(200.), px(200.)),
+        });
+        app.close_message_menus_of_other_windows(cx);
+        assert!(app.message_ui.menu.is_open(), "this window's menu stays");
+    });
+    let main_open = h.app.update(cx, |app, _| app.message_ui.menu.is_open());
+    assert!(!main_open, "the main window's menu closed");
 }

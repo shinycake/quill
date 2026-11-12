@@ -22,11 +22,10 @@ mod tests;
 mod withdraw;
 
 pub(in crate::ui) use icons::*;
-pub(crate) use layer::LayerFade;
+pub(crate) use layer::EarnLayer;
 
 use super::app::QuillApp;
 use super::chat_theme::text_muted;
-use super::earn_state::EarnLayer;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -251,14 +250,7 @@ impl QuillApp {
         }) {
             return;
         }
-        let current = self.session().and_then(|s| s.users_state.open_info_panel);
-        match current {
-            Some(InfoPanelTarget::Earn(open)) if open != panel => {
-                self.earn.layer.push_back(InfoPanelTarget::Earn(open));
-            }
-            Some(InfoPanelTarget::Earn(_)) => {}
-            other => self.earn.layer = EarnLayer::opened_over(other),
-        }
+        self.enter_earn_layer(panel);
         if self.live.is_some()
             && let Some(earn) = self.earn_mut()
         {
@@ -277,16 +269,53 @@ impl QuillApp {
             // what was typed before.
             self.earn.prefilled = None;
         }
-        self.show_earn_layer();
         self.open_info_panel_target(InfoPanelTarget::Earn(panel), window, cx);
     }
 
     /// The back arrow of an earn page.
     pub(super) fn earn_back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        match self.earn.layer.pop_back() {
+        match self.earn.layer.back_pop() {
             Some(target) => self.open_info_panel_target(target, window, cx),
             None => self.close_earn_layer(cx),
         }
+    }
+
+    /// What a page draws while its data is missing: `waiting` while the
+    /// load runs, or the error with a Retry when the client refused to
+    /// send it.
+    pub(super) fn earn_unloaded(
+        &self,
+        panel: EarnPanel,
+        waiting: AnyElement,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        if !self.earn.layer.refused(panel) {
+            return waiting;
+        }
+        div()
+            .id("earn-refused")
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap_2()
+            .py_6()
+            .child(
+                div()
+                    .text_sm()
+                    .font_semibold()
+                    .child(tr(keys::Q_MONEY_COULDNT_LOAD_THE_PAGE)),
+            )
+            .child(
+                Button::new("earn-refused-retry")
+                    .label(tr(keys::Q_CHAT_RETRY))
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.earn.layer.retry();
+                        this.load_earn_panel(panel, super::chat_theme::is_dark_palette());
+                        cx.notify();
+                    })),
+            )
+            .into_any_element()
     }
 
     /// Load an earn page on the live path; the info panel's open calls it.
@@ -320,6 +349,8 @@ impl QuillApp {
             let _ = live.driver.fetch_chat_boost_features(chat_id);
         }
         if live.driver.open_earn_panel(panel, is_dark).is_err() {
+            // The page draws the error with a Retry, not a spinner.
+            self.earn.layer.refuse(panel);
             self.set_note(StatusNote::error(tr(keys::Q_MONEY_COULDNT_LOAD_THE_PAGE)));
         }
     }
@@ -354,7 +385,7 @@ impl QuillApp {
             )
         {
             // tdesktop `showBackFromStack` after saving or ending.
-            match self.earn.layer.pop_back() {
+            match self.earn.layer.back_pop() {
                 Some(target) => {
                     if let Some(live) = self.live.as_mut() {
                         live.driver.set_info_panel(Some(target));

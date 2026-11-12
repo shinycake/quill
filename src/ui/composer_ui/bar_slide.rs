@@ -33,11 +33,14 @@ impl QuillApp {
     ) -> Option<surface_reveal::Drawn<T>> {
         let now = surface_reveal::now();
         let animate = surface_reveal::animate(cx);
-        let (drawn, moving) = {
-            let mut presence = presence.borrow_mut();
-            let drawn = presence.follow(state, self.bar_scope(), animate, now);
-            (drawn, presence.moving(now))
+        // A presence in use (a re-entrant render) draws no bar this frame
+        // and the next one follows.
+        let Ok(mut presence) = presence.try_borrow_mut() else {
+            return None;
         };
+        let drawn = presence.follow(state, self.bar_scope(), animate, now);
+        let moving = presence.moving(now);
+        drop(presence);
         if moving {
             self.request_animation_tick(60, cx);
         }

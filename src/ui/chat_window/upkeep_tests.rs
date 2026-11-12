@@ -280,11 +280,11 @@ fn a_forward_from_a_chat_window_answers_there(cx: &mut TestAppContext) {
     let main = read(&h, None, cx, |app, _| {
         (
             app.share.forward.draft().is_some(),
-            app.share.forward_result.is_some(),
+            app.chat_ui.forward_result.is_some(),
         )
     });
     let window = read(&h, Some(OTHER), cx, |app, _| {
-        app.share.forward_result.is_some()
+        app.chat_ui.forward_result.is_some()
     });
     assert_eq!(main, (true, false), "the main window's selection stays");
     assert!(window, "the result shows in the window it came from");
@@ -295,13 +295,11 @@ fn a_chat_windows_frame_leaves_the_main_windows_peek(cx: &mut TestAppContext) {
     let h = new_app(cx);
     let chat_window = h.open_in_new_window(OTHER, cx);
     read(&h, None, cx, |app, _| {
-        app.history.forum_column = crate::ui::history_state::ForumColumnUi::Peek
+        app.history.forum_peek = crate::ui::history_state::ForumPeek::Chats { forum: OTHER }
     });
     draw(chat_window, cx);
-    assert!(read(&h, None, cx, |app, _| app
-        .history
-        .forum_column
-        .peeking()));
+    assert!(read(&h, None, cx, |app, _| app.history.forum_peek
+        == crate::ui::history_state::ForumPeek::Chats { forum: OTHER }));
 }
 
 #[gpui_kit::test]

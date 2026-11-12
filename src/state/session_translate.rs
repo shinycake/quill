@@ -14,18 +14,34 @@ pub enum TranslateTarget {
     Text,
 }
 
+/// How many times the translated chat's pump asks for a message again
+/// after failures (a send refused while offline, a restart, a TDLib
+/// refusal); then the message keeps its original text until the person asks.
+pub const TRANSLATE_PUMP_ATTEMPTS: u8 = 3;
+
 /// A translation: asked for (by job number), finished, or failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Translation {
     /// The request of job `job` is out; its answer finds this entry.
-    Pending {
-        job: u64,
-    },
+    /// `attempts` are the failures before it.
+    Pending { job: u64, attempts: u8 },
     Done {
         text: String,
         entities: Vec<TextEntity>,
     },
-    Failed(String),
+    /// The request failed; `attempts` counts failures so far.
+    Failed { reason: String, attempts: u8 },
+}
+
+impl Translation {
+    /// A failed translation with no count yet; `finish_translation` adds
+    /// the failures that came before it.
+    pub fn failed(reason: impl Into<String>) -> Self {
+        Self::Failed {
+            reason: reason.into(),
+            attempts: 0,
+        }
+    }
 }
 
 /// `(chat id, message id, language)`.
@@ -55,7 +71,7 @@ impl TranslateState {
             .values()
             .chain(self.texts.values())
             .filter_map(|translation| match translation {
-                Translation::Pending { job } => Some(*job),
+                Translation::Pending { job, .. } => Some(*job),
                 _ => None,
             })
     }
@@ -128,16 +144,21 @@ impl Session {
                 chat_id,
                 message_id,
             } => {
-                self.messages.translate.messages.insert(
-                    (*chat_id, *message_id, to_language.to_string()),
-                    Translation::Pending { job },
-                );
+                let key = (*chat_id, *message_id, to_language.to_string());
+                let attempts = match self.messages.translate.messages.get(&key) {
+                    Some(Translation::Failed { attempts, .. }) => *attempts,
+                    _ => 0,
+                };
+                self.messages
+                    .translate
+                    .messages
+                    .insert(key, Translation::Pending { job, attempts });
             }
             TranslateTarget::Text => {
                 self.messages
                     .translate
                     .texts
-                    .insert(job, Translation::Pending { job });
+                    .insert(job, Translation::Pending { job, attempts: 0 });
             }
         }
         self.messages.translate.revision += 1;
@@ -151,7 +172,7 @@ impl Session {
     /// Roll back a job whose request could not be sent.
     pub fn abandon_translation(&mut self, job: u64, extra: RequestId) {
         self.requests.take(extra);
-        self.finish_translation(job, Translation::Failed("send".into()));
+        self.finish_translation(job, Translation::failed("send"));
     }
 
     /// "Load full message" of this message is out.
@@ -178,24 +199,33 @@ impl Session {
             })
             .collect();
         for job in orphans {
-            self.finish_translation(job, Translation::Failed("lost".into()));
+            self.finish_translation(job, Translation::failed("lost"));
         }
     }
 
     /// Record the answer (or failure) of a job.
     pub(crate) fn finish_translation(&mut self, job: u64, result: Translation) {
         let translate = &mut self.messages.translate;
+        let is_job =
+            |slot: &Translation| matches!(slot, Translation::Pending { job: j, .. } if *j == job);
         let slot = match translate.texts.get_mut(&job) {
-            Some(slot) if *slot == (Translation::Pending { job }) => Some(slot),
-            _ => translate
-                .messages
-                .values_mut()
-                .find(|slot| **slot == (Translation::Pending { job })),
+            Some(slot) if is_job(slot) => Some(slot),
+            _ => translate.messages.values_mut().find(|slot| is_job(slot)),
         };
         let Some(slot) = slot else {
             return;
         };
-        *slot = result;
+        let before = match slot {
+            Translation::Pending { attempts, .. } => *attempts,
+            _ => 0,
+        };
+        *slot = match result {
+            Translation::Failed { reason, .. } => Translation::Failed {
+                reason,
+                attempts: before.saturating_add(1),
+            },
+            done => done,
+        };
         translate.revision += 1;
     }
 
@@ -219,7 +249,7 @@ impl Session {
         let translate = &mut self.messages.translate;
         let before = translate.messages.len();
         translate.messages.retain(|(chat, _, _), translation| {
-            *chat != chat_id.0 || !matches!(translation, Translation::Failed(_))
+            *chat != chat_id.0 || !matches!(translation, Translation::Failed { .. })
         });
         let dropped = translate.messages.len() != before;
         if dropped {
@@ -280,8 +310,58 @@ impl Session {
         }
     }
 
-    /// Whether `message_id` still needs a translation into `to`.
+    /// A chat's history shrank to a tail: the finished translations (and
+    /// failures) of messages it no longer holds go with them. A request
+    /// still out keeps its entry, which its answer finds.
+    pub(crate) fn prune_message_translations(&mut self, chat_id: ChatId) {
+        let held = |session: &Session, message: i64| {
+            session
+                .histories
+                .get(&chat_id.0)
+                .is_some_and(|history| history.messages.contains_key(&message))
+                || session
+                    .threads
+                    .topic_histories
+                    .iter()
+                    .any(|((chat, _), topic)| {
+                        *chat == chat_id.0 && topic.messages.contains_key(&message)
+                    })
+                || session.views_shown().any(|view| {
+                    view.thread.is_some_and(|thread| {
+                        thread.chat_id == chat_id && thread.history.messages.contains_key(&message)
+                    })
+                })
+        };
+        let gone: Vec<MessageTranslationKey> = self
+            .messages
+            .translate
+            .messages
+            .iter()
+            .filter(|((chat, message, _), translation)| {
+                *chat == chat_id.0
+                    && !matches!(translation, Translation::Pending { .. })
+                    && !held(self, *message)
+            })
+            .map(|(key, _)| key.clone())
+            .collect();
+        if gone.is_empty() {
+            return;
+        }
+        for key in gone {
+            self.messages.translate.messages.remove(&key);
+        }
+        self.messages.translate.revision += 1;
+    }
+
+    /// Whether the translated chat's pump should ask for `message_id` into
+    /// `to`: nothing was asked yet, or the asks failed fewer than
+    /// `TRANSLATE_PUMP_ATTEMPTS` times (`ConnectDriver::translate_message`
+    /// asks a failed one again).
     pub fn needs_translation(&self, chat_id: ChatId, message_id: MessageId, to: &str) -> bool {
-        self.message_translation(chat_id, message_id, to).is_none()
+        match self.message_translation(chat_id, message_id, to) {
+            None => true,
+            Some(Translation::Failed { attempts, .. }) => *attempts < TRANSLATE_PUMP_ATTEMPTS,
+            Some(Translation::Pending { .. } | Translation::Done { .. }) => false,
+        }
     }
 }

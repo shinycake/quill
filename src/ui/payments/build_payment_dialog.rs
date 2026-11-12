@@ -4,6 +4,7 @@ use super::*;
 use crate::ui::scroll_load::{load_due, loading_row, scrolled_near_end, watch};
 use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with};
+use quill::telegram::envelope::PaymentReceiptKind;
 
 impl QuillApp {
     /// kit Phase 2 (redo): payment checkout hosted in a kit `Dialog` via
@@ -143,13 +144,16 @@ impl QuillApp {
             let Some(receipt) = receipt else {
                 return dialog.on_close(on_close);
             };
-            let total = if receipt.is_stars {
-                tr_with(
+            let total = match &receipt.kind {
+                PaymentReceiptKind::Stars { star_count } => tr_with(
                     keys::Q_MONEY_STARS_3,
-                    &[("star_count", &receipt.star_count.to_string())],
-                )
-            } else {
-                format_payment_price(&receipt.currency, receipt.total_amount)
+                    &[("star_count", &star_count.to_string())],
+                ),
+                PaymentReceiptKind::Regular {
+                    currency,
+                    total_amount,
+                    ..
+                } => format_payment_price(currency, *total_amount),
             };
             let mut body = div()
                 .flex()
@@ -175,28 +179,33 @@ impl QuillApp {
                         .child(div().child(tr(keys::PAYMENTS_TOTAL_LABEL)))
                         .child(div().font_semibold().child(total)),
                 );
-            if !receipt.credentials_title.is_empty() {
-                body = body.child(
-                    div()
-                        .flex()
-                        .justify_between()
-                        .text_sm()
-                        .child(div().child(tr(keys::Q_MONEY_PAID_WITH)))
-                        .child(div().child(receipt.credentials_title.clone())),
-                );
-            }
-            if receipt.tip_amount > 0 {
-                body = body.child(
-                    div()
-                        .flex()
-                        .justify_between()
-                        .text_sm()
-                        .child(div().child(tr(keys::Q_MONEY_TIP)))
-                        .child(
-                            div()
-                                .child(format_payment_price(&receipt.currency, receipt.tip_amount)),
-                        ),
-                );
+            if let PaymentReceiptKind::Regular {
+                currency,
+                credentials_title,
+                tip_amount,
+                ..
+            } = &receipt.kind
+            {
+                if !credentials_title.is_empty() {
+                    body = body.child(
+                        div()
+                            .flex()
+                            .justify_between()
+                            .text_sm()
+                            .child(div().child(tr(keys::Q_MONEY_PAID_WITH)))
+                            .child(div().child(credentials_title.clone())),
+                    );
+                }
+                if *tip_amount > 0 {
+                    body = body.child(
+                        div()
+                            .flex()
+                            .justify_between()
+                            .text_sm()
+                            .child(div().child(tr(keys::Q_MONEY_TIP)))
+                            .child(div().child(format_payment_price(currency, *tip_amount))),
+                    );
+                }
             }
             let body = body.into_any_element();
             dialog
@@ -335,6 +344,8 @@ impl QuillApp {
             live.driver.session.payments.subscriptions.open();
             live.driver.maybe_fetch_star_subscriptions()
         });
+        // A reopened list asks its first look again, whatever length it had.
+        self.payments.subs_asked.reset();
         self.open_box(DialogKind::Subscriptions);
         if !matches!(sent, Some(Ok(_))) {
             self.set_note(StatusNote::error(tr(

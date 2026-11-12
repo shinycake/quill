@@ -4,18 +4,33 @@
 use super::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
-use quill::ids::MessageId;
+
+/// What a right-press was over, for the message menu that opens in the same
+/// event. The press owns its end: the task that drops it is held here, so a
+/// press where no menu opened cannot hand its link or item to a later menu
+/// at the same point.
+#[derive(Default)]
+pub(crate) enum RightPress {
+    #[default]
+    None,
+    Pressed {
+        position: Point<Pixels>,
+        link: Option<quill::text::LinkTarget>,
+        item: Option<quill::composer::ReplyItem>,
+        _end: Task<()>,
+    },
+}
 
 pub(crate) struct MessageUi {
-    /// The window's open context menu: a message's (target, window position
-    /// and what it was opened over, `message_menu_state`) or the chat list's.
-    pub(super) menu: super::chat_list_state::ContextMenu,
+    /// What floats over the window: the open context menu (a message's, a
+    /// chat row's, the archive row's or a folder tab's) or the peek preview of
+    /// a chat row. One value, so opening one closes the others.
+    pub(super) menu: super::chat_list_state::ChatOverlay,
     /// Page, report and sticker-set dialogs of the message menu's extras.
     pub(super) menu_ui: super::message_menu_ui::MessageMenuUi,
-    /// The link under the latest right-press, and where it was pressed.
-    pub(super) right_clicked_link: Option<super::entity_links::RightClickedLink>,
-    /// The task or option under the latest right-press, and where.
-    pub(super) right_clicked_item: Option<(Point<Pixels>, quill::composer::ReplyItem)>,
+    /// What the latest right-press was over (a link, a task or a poll
+    /// option), until the press ends.
+    pub(super) right_press: RightPress,
     /// The "Open this link?" box (`DialogKind::OpenLink`).
     pub(super) open_link_confirm: Option<super::entity_links::OpenLinkConfirm>,
     /// A clicked message entity (mention, hashtag, link…) waiting for
@@ -30,8 +45,6 @@ pub(crate) struct MessageUi {
     pub(super) history_focus: FocusHandle,
     /// Screen-reader focus among the history's messages (`history_a11y`).
     pub(super) a11y: super::history_a11y::HistoryA11y,
-    /// M1: swipe-to-reply press origin (chat, message, press x).
-    pub(super) swipe_reply_start: Option<(ChatId, MessageId, Pixels)>,
     /// Phase 4.1: revealed text-entity spoilers, keyed by
     /// (chat id, message id, run index, is-caption block). Message ids are
     /// only unique within a chat, so the chat id is part of the key.
@@ -51,8 +64,8 @@ pub(crate) struct MessageUi {
     pub(super) rendered_sponsored: std::rc::Rc<std::cell::RefCell<Vec<(ChatId, i64)>>>,
     /// The custom emoji card of this window: tapped, asked for, shown (it
     /// times itself out; a new tap of the same emoji starts the timer over).
-    /// It shows here, over the window of the tap (the session keeps one
-    /// preview, as the answer).
+    /// It shows here, over the window of the tap; the session keeps the
+    /// answer under the request that asked until this window takes it.
     pub(super) custom_emoji: super::custom_emoji_card::CustomEmojiCard,
     /// B4: poll voter-list viewer.
     pub(super) poll_voters_dialog: Option<PollVotersDialog>,
@@ -70,14 +83,12 @@ impl MessageUi {
         Self {
             menu: Default::default(),
             menu_ui: super::message_menu_ui::MessageMenuUi::new(window, cx),
-            right_clicked_link: None,
-            right_clicked_item: None,
+            right_press: RightPress::None,
             open_link_confirm: None,
             pending_link: None,
             selection_drag: Default::default(),
             history_focus: cx.focus_handle(),
             a11y: Default::default(),
-            swipe_reply_start: None,
             revealed: Default::default(),
             dismissed_keyboards: std::collections::HashSet::new(),
             collapsed_keyboards: std::collections::HashSet::new(),

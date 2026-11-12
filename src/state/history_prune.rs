@@ -117,8 +117,6 @@ pub struct HistoryPruning {
     /// The UI's claim on chats, replaced whole at every update: an input,
     /// not a stage of a history.
     holds: BTreeSet<ChatId>,
-    /// Topic pages still in flight when their entry was dropped.
-    pub(super) gone_topic_pages: BTreeSet<u64>,
     dropped: DroppedMemos,
     /// The histories are the only copy of the rows ([`Session::keep_all_histories`]).
     keep_all: bool,
@@ -376,6 +374,7 @@ impl Session {
         if let Some(history) = self.histories.get_mut(&chat_id.0) {
             history.trim_to_tail(CLOSED_TAIL_KEEP);
             self.prune_reply_targets(chat_id);
+            self.prune_message_translations(chat_id);
             self.history_pruning.chats.touch(chat_id.0);
         }
         // Sorted, so the LRU order (and with it the eviction victim) does

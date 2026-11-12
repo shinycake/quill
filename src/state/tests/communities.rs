@@ -423,3 +423,31 @@ fn a_late_answer_of_a_replaced_ask_does_not_land_on_the_newer_one() {
     );
     assert_eq!(session.communities.owned_bots.data(), Some(&vec![6]));
 }
+
+#[test]
+fn r2_an_older_requests_page_never_lands_on_the_list_that_replaced_it() {
+    // Sweep r2-19 (05-021): only the page the list waits for lands.
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let purpose = |first_page| {
+        RequestPurpose::Communities(CommunitiesPurpose::GetAddChatRequests { first_page })
+    };
+    let older = session.request_for_community(purpose(false), 42);
+    let newer = session.request_for_community(purpose(true), 42);
+    let fetch = session.communities.add_chat_requests.entry(42).or_default();
+    fetch.begin();
+    fetch.sent(newer);
+    let page = |extra: RequestId, chat_id: i64, offset: &str| {
+        format!(
+            r#"{{"@type":"communityAddChatRequests","@extra":"{}","total_count":1,"requests":[{{"@type":"communityAddChatRequest","chat_id":{chat_id},"is_hidden":false,"sender_user_id":5,"date":1}}],"next_offset":"{offset}"}}"#,
+            extra.0
+        )
+    };
+    apply_json(&mut session, &seq, &sink, &page(older, 7, "old-cursor"));
+    assert!(session.communities.add_chat_requests(42).is_loading());
+    apply_json(&mut session, &seq, &sink, &page(newer, 8, ""));
+    let list = session.communities.add_chat_requests(42).data().cloned();
+    let list = list.expect("loaded");
+    assert_eq!(list.requests.len(), 1);
+    assert_eq!(list.next_offset, None);
+}

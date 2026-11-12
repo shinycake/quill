@@ -170,7 +170,7 @@ fn a_stream_that_really_ends_still_closes_the_pip(cx: &mut TestAppContext) {
             .as_mut()
             .and_then(|s| s.calls.active_group_call.as_mut())
         {
-            call.stream = StreamState::Ended;
+            call.media.set_stream_state(StreamState::Ended);
         }
         if let Some(feed) = app.group_call.stream.demo_feed.as_ref() {
             feed.source.end(LiveEnd::Over);

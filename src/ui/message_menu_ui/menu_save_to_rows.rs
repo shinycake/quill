@@ -347,9 +347,8 @@ impl QuillApp {
         self.message_ui.menu.show_page(MessageMenuPage::Audience {
             tab: several.then(|| reaction.clone()),
         });
-        if several && let Some(live) = self.live.as_mut() {
-            live.driver.session.messages.wanted_reactor_tab =
-                Some((menu.chat_id, menu.message_id, reaction));
+        if several && let Some(open) = self.message_ui.menu.open_mut() {
+            open.first_tab = Some(reaction);
         }
         cx.notify();
     }
@@ -676,16 +675,7 @@ impl QuillApp {
             }
             dialog
                 .title(shell::dialog_title(report_title))
-                .content(shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
+                .content(shell::one_shot_dialog_content(body.into_any_element()))
                 .footer(footer)
                 .on_close(on_close)
         })

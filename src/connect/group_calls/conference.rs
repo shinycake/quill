@@ -21,10 +21,10 @@ pub(crate) const PENDING_CONFERENCE_KEY: i32 = -1;
 /// The engine key a conference call's instance is under.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum ConferenceKey {
-    /// The join is out and unanswered: the instance waits under
-    /// [`PENDING_CONFERENCE_KEY`], with its offer, until the answer names
-    /// the call.
-    Joining,
+    /// The join is out as this request and unanswered: the instance waits
+    /// under [`PENDING_CONFERENCE_KEY`], with its offer, until the answer
+    /// (or error) of that very request names the call or ends the join.
+    Joining(RequestId),
     /// The call's own id.
     Call(i32),
 }
@@ -33,7 +33,7 @@ impl ConferenceKey {
     /// The key the engine knows the instance by.
     pub(crate) fn engine_key(self) -> i32 {
         match self {
-            Self::Joining => PENDING_CONFERENCE_KEY,
+            Self::Joining(_) => PENDING_CONFERENCE_KEY,
             Self::Call(id) => id,
         }
     }
@@ -94,7 +94,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<RequestId, ConnectSendError> {
         let upgrade = match &self.session.calls.active_call {
             Some(call)
-                if matches!(call.state, CallState::Ready)
+                if matches!(call.state(), CallState::Ready(_))
                     && call
                         .ready_params()
                         .is_some_and(|ready| ready.is_group_call_supported) =>
@@ -165,7 +165,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         let in_call = self.session.calls.active_call.as_ref().is_some_and(|call| {
             !matches!(
-                call.state,
+                call.state(),
                 CallState::HangingUp | CallState::Discarded { .. } | CallState::Error { .. }
             )
         });
@@ -209,7 +209,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let crypto = Arc::new(GroupCallCrypto::new(link));
         let extra = self.session.request(RequestPurpose::JoinConference, None);
         self.conference_crypto = Some(ConferenceCrypto {
-            key: ConferenceKey::Joining,
+            key: ConferenceKey::Joining(extra),
             crypto: crypto.clone(),
         });
         self.session.begin_conference(extra, origin, muted);
@@ -273,12 +273,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(extra) = envelope.extra else {
             return;
         };
+        // The join the driver's own stage waits for: an answer of another
+        // request (an earlier join, a rejoin) leaves it alone.
         let ours = self
-            .session
-            .calls
-            .pending_conference
+            .conference_crypto
             .as_ref()
-            .is_some_and(|pending| pending.request == extra);
+            .is_some_and(|known| known.key == ConferenceKey::Joining(extra));
         if !ours {
             return;
         }
@@ -291,7 +291,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     eprintln!("quill: conference call instance not renamed: {err}");
                 }
                 if let Some(known) = self.conference_crypto.as_mut()
-                    && known.key == ConferenceKey::Joining
+                    && known.key == ConferenceKey::Joining(extra)
                 {
                     known.key = ConferenceKey::Call(group_call_id);
                     known.crypto.bind(group_call_id);
@@ -332,7 +332,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub(super) fn forget_conference_crypto(&mut self) {
         if let Some(known) = self.conference_crypto.take() {
             known.crypto.unbind();
-            if known.key == ConferenceKey::Joining {
+            if matches!(known.key, ConferenceKey::Joining(_)) {
                 let engine_key = known.key.engine_key();
                 self.drop_group_offers(engine_key);
                 if let Some(engine) = self.call_engine.as_deref_mut() {

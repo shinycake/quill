@@ -3,6 +3,8 @@
 
 use super::early_connect::First;
 use crate::ui::status_note::StatusNote;
+use futures_channel::oneshot;
+use gpui_kit::Task;
 use quill::auth::{StartupFailure, view_for};
 use quill::connect::{
     ConnectBlocker, ConnectGate, LiveConnect, evaluate_gate, start_prepared_live_connect,
@@ -18,10 +20,14 @@ use std::sync::Arc;
 /// Where the startup connection stands while there is no client to ask
 /// (no secrets): one value, so the pane and the authorization card it draws
 /// cannot disagree.
-#[derive(Clone, Debug, PartialEq)]
 pub enum ConnectStage {
-    /// The client is being prepared and opened.
-    Connecting,
+    /// Nothing is being connected: a client was opened (or refused for a
+    /// reason with no card of its own), or a start waits for the unlock.
+    Idle,
+    /// The client is being prepared and opened by this task. It belongs to
+    /// the stage: a restart, an adopted client or a wipe replaces the stage
+    /// and the task ends with it.
+    Connecting { _task: Task<()> },
     /// No API credentials: the synthetic pane.
     NeedCredentials,
     /// The client could not start: the card says why, with Retry.
@@ -36,11 +42,83 @@ impl ConnectStage {
     /// session answers for it.
     pub fn auth(&self) -> AuthorizationState {
         match self {
-            Self::Connecting => AuthorizationState::WaitTdlibParameters,
+            Self::Idle | Self::Connecting { .. } => AuthorizationState::WaitTdlibParameters,
             Self::NeedCredentials => AuthorizationState::WaitPhoneNumber,
             Self::Blocked(failure) => AuthorizationState::StartupFailed(failure.clone()),
             Self::Shown(auth) => auth.clone(),
         }
+    }
+
+    /// A connection being prepared must not open: its task ends. Any other
+    /// stage stays as it is.
+    pub(super) fn cancel_connecting(&mut self) {
+        if matches!(self, Self::Connecting { .. }) {
+            *self = Self::Idle;
+        }
+    }
+}
+
+/// The workers preparing the screen's connection (`prepare_startup` creates
+/// the account's folders), each holding a claim while it runs: nothing
+/// deletes a folder until they are all done, also when the connection that
+/// asked for one was replaced meanwhile.
+#[derive(Default)]
+pub(super) struct ScreenWorkers {
+    workers: Vec<std::sync::Weak<()>>,
+    /// One per worker: it wakes the work that waits for the folders when
+    /// its worker ends, however the worker ends.
+    watches: Vec<Task<()>>,
+}
+
+/// A screen worker's hold on the account folders. It goes when the worker
+/// ends or is dropped with its connection.
+pub(super) struct ScreenClaim {
+    // The claim is released before the end is told (fields drop in this
+    // order), so whoever is woken finds the worker gone.
+    _claim: Arc<()>,
+    _ended: oneshot::Sender<()>,
+}
+
+impl ScreenWorkers {
+    /// A worker starts: it holds the returned claim until it ends, and the
+    /// receiver resolves once the claim is gone.
+    pub(super) fn begin(&mut self) -> (ScreenClaim, oneshot::Receiver<()>) {
+        self.workers.retain(|worker| worker.strong_count() > 0);
+        if self.workers.is_empty() {
+            self.watches.clear();
+        }
+        let claim = Arc::new(());
+        self.workers.push(Arc::downgrade(&claim));
+        let (ended, end) = oneshot::channel();
+        (
+            ScreenClaim {
+                _claim: claim,
+                _ended: ended,
+            },
+            end,
+        )
+    }
+
+    pub(super) fn running(&self) -> bool {
+        self.workers.iter().any(|worker| worker.strong_count() > 0)
+    }
+}
+
+impl super::app::QuillApp {
+    /// A worker preparing the screen's connection starts. The work that
+    /// waits for the account folders (`after_closing`) is looked at again
+    /// when the claim is released, also when the connection that asked for
+    /// the worker was replaced and no longer hears of its end.
+    pub(super) fn begin_screen_worker(&mut self, cx: &mut gpui_kit::Context<Self>) -> ScreenClaim {
+        let (claim, end) = self.background.screen_workers.begin();
+        // screen-scope: the waiters it settles cover every account's folders, whichever account is on screen.
+        let watch = Self::spawn_app(cx, async move |this, cx| {
+            // Resolves when the claim is dropped, with or without a send.
+            let _ = end.await;
+            let _ = this.update(cx, |this, cx| this.settle_close_waiters(cx));
+        });
+        self.background.screen_workers.watches.push(watch);
+        claim
     }
 }
 
@@ -140,9 +218,9 @@ impl super::app::QuillApp {
         }
         quill::startup_trace::mark("connect_start");
         self.connect.generation += 1;
-        let generation = self.connect.generation;
         let credentials = self.credentials.clone();
-        self.auth_demo.stage = ConnectStage::Connecting;
+        // A connection already being made ends with its stage.
+        self.auth_demo.stage = ConnectStage::Idle;
         self.set_note(StatusNote::silent(tr(keys::Q_MISC_CONNECTING_TO_TELEGRAM)));
         // The first connection of the run first deletes folders an earlier
         // run left for deletion (it quit before their clients had closed).
@@ -166,8 +244,9 @@ impl super::app::QuillApp {
         let secrets = self.secrets();
         // Nothing deletes a folder while this preparation (which creates
         // the account's folders) still runs.
-        self.background.screen_preparing += 1;
+        let claim = self.begin_screen_worker(cx);
         let connect = cx.background_executor().spawn(async move {
+            let _claim = claim;
             if let Some(early) = early
                 && let Ok(Some(prepared)) = early.await
             {
@@ -178,13 +257,13 @@ impl super::app::QuillApp {
             let prepared = prepare_startup(credentials, root, secrets().as_ref(), done);
             (swept, prepared)
         });
-        // screen-scope: connecting puts the prepared client on the screen, replacing what is there; its connection generation guard ends it on a restart.
-        Self::spawn_app(cx, async move |this, cx| {
+        // screen-scope: connecting puts the prepared client on the screen, replacing what is there; the stage holds the task, so a restart or an adopted client ends it.
+        let task = Self::spawn_app(cx, async move |this, cx| {
             let (swept, prepared) = connect.await;
             quill::startup_trace::mark("prepare_done");
+            // A deletion that waits for this preparation is woken by the
+            // worker's claim (`begin_screen_worker`).
             let _ = this.update(cx, |this, _| {
-                this.background.screen_preparing =
-                    this.background.screen_preparing.saturating_sub(1);
                 if let Some((root, deleted)) = &swept {
                     this.finish_sweep(root, deleted);
                 }
@@ -201,9 +280,6 @@ impl super::app::QuillApp {
                 };
                 let again = this
                     .update(cx, |this, cx| {
-                        if generation != this.connect.generation {
-                            return false;
-                        }
                         if !safe {
                             // Its old client's close can't be confirmed in
                             // this run: never open the database again, and
@@ -241,8 +317,8 @@ impl super::app::QuillApp {
                     break;
                 }
             }
-        })
-        .detach();
+        });
+        self.auth_demo.stage = ConnectStage::Connecting { _task: task };
         cx.notify();
     }
 
@@ -268,10 +344,13 @@ impl super::app::QuillApp {
         result: Result<LiveConnect, ConnectBlocker>,
         cx: &mut gpui_kit::Context<Self>,
     ) {
+        // Whatever is left of the connection that asked ends here: the
+        // arms below set the card for a refusal.
+        self.auth_demo.stage = ConnectStage::Idle;
         match result {
             Ok(mut live) => {
                 quill::startup_trace::mark("client_open");
-                live.driver.set_stream_volume(self.players.volume);
+                live.driver.set_stream_volume(self.players.volume());
                 self.disk.seed(&mut live.driver);
                 self.put_on_screen(live);
             }
@@ -295,6 +374,7 @@ impl super::app::QuillApp {
             },
         }
         self.reload_account_keybindings(cx);
+        self.reload_account_wallpapers(cx);
         if self.live.is_some() {
             self.spawn_poll_loop(cx);
             // `parity:notify-all-accounts`: the other accounts
@@ -307,7 +387,35 @@ impl super::app::QuillApp {
 
 #[cfg(test)]
 mod tests {
+    use super::{ConnectStage, ScreenWorkers};
+    use gpui_kit::Task;
     use quill::platform::MemorySecretStore;
+
+    #[test]
+    fn a_worker_holds_the_claim_until_it_ends() {
+        let mut workers = ScreenWorkers::default();
+        assert!(!workers.running());
+        let (first, mut first_end) = workers.begin();
+        let (second, _second_end) = workers.begin();
+        assert_eq!(first_end.try_recv(), Ok(None), "the first still runs");
+        drop(first);
+        assert!(first_end.try_recv().is_err(), "its end is told");
+        assert!(workers.running(), "the second still runs");
+        drop(second);
+        assert!(!workers.running());
+    }
+
+    #[test]
+    fn cancelling_ends_only_a_connection_in_flight() {
+        let mut stage = ConnectStage::Connecting {
+            _task: Task::ready(()),
+        };
+        stage.cancel_connecting();
+        assert!(matches!(stage, ConnectStage::Idle));
+        let mut stage = ConnectStage::NeedCredentials;
+        stage.cancel_connecting();
+        assert!(matches!(stage, ConnectStage::NeedCredentials));
+    }
 
     #[test]
     fn preparation_without_credentials_does_not_open_keychain_or_a_client() {

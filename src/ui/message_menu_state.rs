@@ -5,7 +5,7 @@
 //! of one menu reaches the next.
 #![deny(clippy::indexing_slicing)]
 
-use super::chat_list_state::ContextMenu;
+use super::chat_list_state::ChatOverlay;
 use super::menu_states::MessageMenuState;
 use quill::composer::ReplyItem;
 use quill::telegram::envelope::ReactionType;
@@ -51,9 +51,14 @@ pub(super) struct OpenMenu {
     pub(super) page: MessageMenuPage,
     /// The reaction strip is expanded to every reaction.
     pub(super) reactions_expanded: bool,
+    /// A right-clicked reaction chip asked for its own "who reacted" tab:
+    /// it loads once the message's audience has begun
+    /// (`drain_wanted_reactor_tab`), and goes with the menu if that never
+    /// happens.
+    pub(super) first_tab: Option<ReactionType>,
 }
 
-impl ContextMenu {
+impl ChatOverlay {
     /// Where and for which message the menu is open.
     pub(super) fn at(&self) -> Option<MessageMenuState> {
         self.open().map(|open| open.at)
@@ -88,6 +93,7 @@ impl ContextMenu {
             item: ReplyItem::Message,
             page: MessageMenuPage::Main,
             reactions_expanded: false,
+            first_tab: None,
         });
     }
 
@@ -109,6 +115,11 @@ impl ContextMenu {
         if let Some(open) = self.open_mut() {
             open.page = page;
         }
+    }
+
+    /// Hand over the reaction whose tab a chip asked for, once.
+    pub(super) fn take_first_tab(&mut self) -> Option<ReactionType> {
+        self.open_mut()?.first_tab.take()
     }
 
     /// The "who reacted" tab on the audience page.
@@ -166,7 +177,7 @@ mod tests {
 
     #[test]
     fn closing_drops_the_page_selection_and_strip_together() {
-        let mut menu = ContextMenu::default();
+        let mut menu = ChatOverlay::default();
         menu.open_at(at());
         menu.show_page(MessageMenuPage::Audience {
             tab: Some(ReactionType::Paid),
@@ -180,7 +191,7 @@ mod tests {
         }
         assert_eq!(menu.selection_nth(), 2);
         assert!(menu.audience_tab().is_some() && menu.reactions_expanded());
-        menu.close();
+        menu.close_message();
         assert!(!menu.is_open());
         assert_eq!(menu.page(), MessageMenuPage::Main);
         assert_eq!(menu.selection_text(), None);

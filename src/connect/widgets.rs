@@ -36,27 +36,28 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Poll an on-screen widget's public data (`getWidgetPublicData`); one
-    /// poll per widget at a time.
+    /// poll per widget at a time: while one is out, this names it instead
+    /// of sending another. The answer carries the id.
     pub fn poll_widget_public_data(
         &mut self,
         key: WidgetKey,
-    ) -> Result<Option<RequestId>, ConnectSendError> {
+    ) -> Result<RequestId, ConnectSendError> {
         if !self.widget_request_allowed(key) {
             return Err(ConnectSendError::InvalidRequest);
         }
         let purpose = RequestPurpose::Bots(BotsPurpose::GetWidgetPublicData);
-        if self
-            .session
-            .requests
-            .has_purpose_for_message(purpose, key.chat_id, key.message_id)
+        if let Some(out) =
+            self.session
+                .requests
+                .find_for_message(purpose, key.chat_id, key.message_id)
         {
-            return Ok(None);
+            return Ok(out);
         }
         let extra = self
             .session
             .request_for_message(purpose, key.chat_id, key.message_id);
         let json = get_widget_public_data(extra, key.chat_id, key.message_id);
-        self.send_json_request(extra, &json).map(Some)
+        self.send_json_request(extra, &json)
     }
 
     /// The widget answers TDLib gave since the last call, oldest first.

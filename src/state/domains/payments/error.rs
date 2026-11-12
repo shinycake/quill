@@ -273,16 +273,22 @@ impl Session {
                 self.apply_suggested_post_error(err, purpose, pending.map(|p| p.id))
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::GiftMarket(purpose))) => {
-                self.apply_gift_market_error(err, purpose, pending.map_or(0, |p| p.id.0))
+                self.apply_gift_market_error(err, purpose, pending.map(|p| p.id))
             }
             // The explorer stays the default; the next wallet or address
             // menu asks again.
             Some(RequestPurpose::GetTonExplorerUrl) => {
-                self.ton_wallet.explorer.fail(error_reason(err));
+                self.ton_wallet
+                    .explorer
+                    .failed(pending.map(|p| p.id), error_reason(err), false);
             }
             // The next look at the sticker preview asks again.
             Some(RequestPurpose::GetPremiumStickerExamples) => {
-                self.payments.hub.premium_stickers.fail(error_reason(err));
+                self.payments.hub.premium_stickers.failed(
+                    pending.map(|p| p.id),
+                    error_reason(err),
+                    false,
+                );
             }
             _ => {}
         }

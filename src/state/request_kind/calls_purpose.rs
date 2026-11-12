@@ -7,7 +7,6 @@ impl CallsPurpose {
     pub(crate) fn kind(&self) -> RequestKind {
         match self {
             Self::SearchCallMessages
-            | Self::GetCallPrivacyRules { .. }
             | Self::GetGroupCall { .. }
             | Self::LoadGroupCallParticipants { .. }
             | Self::GetVideoChatAvailableParticipants { .. }
@@ -22,7 +21,6 @@ impl CallsPurpose {
             | Self::SendCallRating
             | Self::SendCallDebugInformation
             | Self::DeleteAllCallMessages
-            | Self::SetCallPrivacyRules { .. }
             | Self::SendCallLog
             | Self::CreateVideoChat { .. }
             | Self::JoinVideoChat { .. }

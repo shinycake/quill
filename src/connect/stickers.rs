@@ -3,7 +3,7 @@ use super::*;
 use crate::ids::FileId;
 use crate::ids::RequestId;
 use crate::state::StickersPurpose;
-use crate::state::{RequestPurpose, StickerSearch, StickerTab};
+use crate::state::{RequestPurpose, StickerTab};
 use crate::sticker_suggest::{SUGGEST_LIMIT, StickerSuggestMode, suggest_emoji_for};
 use crate::telegram::requests::{
     add_favorite_sticker, change_sticker_set, clear_recent_stickers, get_archived_sticker_sets,
@@ -38,7 +38,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || file_id.0 <= 0 {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.stickers.stickers.attached_answer = None;
         self.session.stickers.sticker_set_view = Some(crate::state::StickerSetView::loading(0));
         let extra = self.session.request(
             RequestPurpose::Stickers(StickersPurpose::GetAttachedStickerSets {
@@ -46,7 +45,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             }),
             None,
         );
-        self.session.stickers.stickers.attached_request = Some(extra);
+        self.session.stickers.stickers.attached = crate::state::AttachedSets::Asked(extra);
         match self
             .sender
             .send_json(&crate::telegram::requests::get_attached_sticker_sets(
@@ -55,7 +54,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.stickers.stickers.attached_request = None;
+                self.session.stickers.stickers.attached = crate::state::AttachedSets::Idle;
                 self.session.stickers.sticker_set_view = None;
                 Err(err)
             }
@@ -66,7 +65,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Only into the box still waiting for them (set 0, loading): one
     /// closed meanwhile stays closed, and another set's box is left alone.
     pub(crate) fn open_attached_sticker_set(&mut self) -> Result<(), ConnectSendError> {
-        let answer = self.session.stickers.stickers.attached_answer.take();
+        let answer = self.session.stickers.stickers.attached.take_answer();
         let waiting = self
             .session
             .stickers
@@ -106,7 +105,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         // The answer or the error leaves `Loading`; a request that never
         // went out leaves it here.
         match sent {
-            Ok(Some(_)) => self.session.stickers.stickers.greeting.begin(),
+            Ok(Some(request)) => {
+                let greeting = &mut self.session.stickers.stickers.greeting;
+                greeting.begin();
+                greeting.sent(request);
+            }
             _ => self
                 .session
                 .stickers
@@ -142,8 +145,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Opening the panel again tries a failed list and set again.
         let panel = &mut self.session.stickers.stickers;
         panel.lists.installed.clear_error();
-        if panel.set.is_failed() {
-            panel.set = crate::state::StickerSetStage::Idle;
+        if panel.selection.stage.is_failed() {
+            panel.selection.stage = crate::state::StickerSetStage::Idle;
         }
         if self
             .session
@@ -160,7 +163,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             .request(RequestPurpose::GetInstalledStickerSets, None);
         match self.sender.send_json(&get_installed_sticker_sets(extra)) {
             Ok(()) => {
-                self.session.stickers.stickers.lists.installed.begin();
+                let installed = &mut self.session.stickers.stickers.lists.installed;
+                installed.begin();
+                installed.sent(extra);
                 Ok(Some(extra))
             }
             Err(err) => {
@@ -199,8 +204,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self.session.request(purpose, None);
         if let Err(err) = self.sender.send_json(&build(extra)) {
             self.session.requests.take(extra);
+            // A list marked out of date stays marked: its refetch is owed.
             if let Some(list) = self.session.stickers.stickers.lists.for_purpose(purpose) {
-                list.fail(crate::lang::tr(
+                list.answer_failed(crate::lang::tr(
                     crate::lang::keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN,
                 ));
             }
@@ -208,6 +214,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if let Some(list) = self.session.stickers.stickers.lists.for_purpose(purpose) {
             list.begin();
+            list.sent(extra);
         }
         Ok(Some(extra))
     }
@@ -228,9 +235,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .requests
                     .take_purpose(RequestPurpose::GetStickerSet),
             );
-            self.session.stickers.stickers.set = crate::state::StickerSetStage::Idle;
-            self.session.stickers.stickers.selected_set_id = None;
-            self.session.stickers.stickers.stickers.clear();
+            self.session.stickers.stickers.selection = crate::state::StickerSelection::default();
         }
         if tab == StickerTab::Installed {
             let id = self
@@ -247,7 +252,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .stickers
                     .sets
                     .iter()
-                    .any(|set| Some(set.id) == self.session.stickers.stickers.selected_set_id)
+                    .any(|set| Some(set.id) == self.session.stickers.stickers.selection.set_id)
             {
                 self.session.select_sticker_set(id);
             }
@@ -286,15 +291,17 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .requests
                 .take_purpose(RequestPurpose::GetStickerSet),
         );
-        self.session.stickers.stickers.selected_set_id = None;
-        self.session.stickers.stickers.set = crate::state::StickerSetStage::Idle;
+        self.session.stickers.stickers.selection = crate::state::StickerSelection::default();
         self.session.stickers.stickers.lists.reset_search();
-        self.session.stickers.stickers.search_offset = 0;
-        self.session.stickers.stickers.search_has_more = false;
-        self.session.stickers.stickers.searched = StickerSearch::Typed(query.trim().to_string());
-        self.session.stickers.stickers.found_sets.clear();
-        self.session.stickers.stickers.found_stickers.clear();
-        let query = self.session.stickers.stickers.searched.typed().to_string();
+        self.session.stickers.stickers.search = crate::state::StickerSearchResults::typed(query);
+        let query = self
+            .session
+            .stickers
+            .stickers
+            .search
+            .query
+            .typed()
+            .to_string();
         if query.is_empty() {
             return Ok(());
         }
@@ -308,9 +315,16 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     pub fn more_sticker_search_results(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        let query = self.session.stickers.stickers.searched.typed().to_string();
-        let offset = self.session.stickers.stickers.search_offset;
-        if query.is_empty() || !self.session.stickers.stickers.search_has_more {
+        let query = self
+            .session
+            .stickers
+            .stickers
+            .search
+            .query
+            .typed()
+            .to_string();
+        let offset = self.session.stickers.stickers.search.offset;
+        if query.is_empty() || !self.session.stickers.stickers.search.has_more {
             return Ok(None);
         }
         self.sticker_request(RequestPurpose::SearchStickers, |id| {
@@ -342,22 +356,18 @@ impl<S: JsonSender> ConnectDriver<S> {
             .copied()
             .filter(|id| seen.insert(*id))
             .collect();
-        self.session.stickers.stickers.batch_total = ids.len();
-        self.session.stickers.stickers.batch_completed = 0;
-        self.session.stickers.stickers.batch_failed = 0;
-        self.session.stickers.stickers.batch_pending = ids.clone();
-        let mut sent = 0;
+        // The batch holds the request of every change that went out; a set
+        // whose change could not be sent counts as failed from the start.
+        let total = ids.len();
+        let mut sent = Vec::new();
         for id in ids {
-            if self
-                .manage_sticker_set(id, installed, false)
-                .is_ok_and(|request| request.is_some())
-            {
-                sent += 1;
-            } else {
-                self.session.finish_sticker_batch_item(id, false);
+            if let Ok(Some(request)) = self.manage_sticker_set(id, installed, false) {
+                sent.push((id, request));
             }
         }
-        Ok(sent)
+        let count = sent.len();
+        self.session.stickers.stickers.batch = crate::state::StickerBatch::begin(total, sent);
+        Ok(count)
     }
 
     pub fn manage_sticker_set(
@@ -659,9 +669,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .requests
                 .take_purpose(RequestPurpose::SuggestStickers),
         );
-        self.session.stickers.stickers.suggest_for =
-            crate::state::SuggestFor::Asked(emoji.to_string());
         let extra = self.session.request(RequestPurpose::SuggestStickers, None);
+        self.session.stickers.stickers.suggest_for = crate::state::SuggestFor::Asked {
+            emoji: emoji.to_string(),
+            request: extra,
+        };
         match self
             .sender
             .send_json(&search_stickers(extra, emoji, "", 0, SUGGEST_LIMIT))
@@ -719,7 +731,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.stickers.stickers.set =
+                self.session.stickers.stickers.selection.stage =
                     crate::state::StickerSetStage::Failed { set_id };
                 Err(err)
             }
@@ -751,25 +763,42 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// reopening. Lists nobody has loaded yet are fetched on first open
     /// anyway, so a stale flag on an empty, closed list is just dropped.
     pub(crate) fn refresh_stale_panels(&mut self) -> Result<(), ConnectSendError> {
-        // A flag leaves only when its refetch went out: while the path is
-        // inactive, or when an earlier send fails, the rest stay set.
+        // A list stays `Outdated` until its refetch goes out (`begin`):
+        // while the path is inactive, or when an earlier send fails, the
+        // rest stay marked.
         let stickers = &mut self.session.stickers.stickers;
         let open = stickers.open;
         // A list nobody shows and nobody loaded is fetched on first open.
-        stickers.recent_stale &= open || !stickers.recent.is_empty();
-        stickers.favorites_stale &= open || !stickers.favorites.is_empty();
-        stickers.trending_stale &= open && stickers.tab == StickerTab::Trending;
+        let shown = [
+            (
+                open || !stickers.recent.is_empty(),
+                &mut stickers.lists.recent,
+            ),
+            (
+                open || !stickers.favorites.is_empty(),
+                &mut stickers.lists.favorites,
+            ),
+        ];
+        for (wanted, list) in shown {
+            if !wanted && list.is_outdated() {
+                *list = crate::state::fetch::Fetch::Idle;
+            }
+        }
+        if !(open && stickers.tab == StickerTab::Trending) && stickers.lists.trending.is_outdated()
+        {
+            stickers.lists.trending = crate::state::fetch::Fetch::Idle;
+        }
         let (recent, favorites, trending) = (
-            stickers.recent_stale,
-            stickers.favorites_stale,
-            stickers.trending_stale,
+            stickers.lists.recent.is_outdated(),
+            stickers.lists.favorites.is_outdated(),
+            stickers.lists.trending.is_outdated(),
         );
         let emoji = &mut self.session.stickers.emoji;
         // An update of the shown trending tab left its list `Idle`.
         let emoji_trending = emoji.open
             && emoji.tab == crate::emoji::EmojiSetTab::Trending
             && emoji.lists.trending.wants_fetch();
-        let reactions = self.session.stickers.reaction_options_stale;
+        let reactions = self.session.stickers.message_reaction_options.is_stale();
         if !self.chats_path_active() {
             return Ok(());
         }
@@ -781,8 +810,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             );
             self.sticker_request(RequestPurpose::GetRecentStickers, |id| {
                 get_recent_stickers(id, false)
-            })?;
-            self.session.stickers.stickers.recent_stale = false;
+            })
+            .inspect_err(|_| self.session.stickers.stickers.lists.recent.outdate())?;
         }
         if favorites {
             drop(
@@ -790,8 +819,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .requests
                     .take_purpose(RequestPurpose::GetFavoriteStickers),
             );
-            self.sticker_request_favorites()?;
-            self.session.stickers.stickers.favorites_stale = false;
+            self.sticker_request_favorites()
+                .inspect_err(|_| self.session.stickers.stickers.lists.favorites.outdate())?;
         }
         if trending {
             drop(
@@ -799,8 +828,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .requests
                     .take_purpose(RequestPurpose::GetTrendingStickerSets),
             );
-            self.fetch_trending_stickers(false)?;
-            self.session.stickers.stickers.trending_stale = false;
+            self.fetch_trending_stickers(false)
+                .inspect_err(|_| self.session.stickers.stickers.lists.trending.outdate())?;
         }
         if emoji_trending {
             self.select_emoji_set_tab(crate::emoji::EmojiSetTab::Trending)?;
@@ -814,7 +843,6 @@ impl<S: JsonSender> ConnectDriver<S> {
                     crate::state::MessageReactionsState::Idle;
                 self.fetch_message_reactions(chat_id, message_id)?;
             }
-            self.session.stickers.reaction_options_stale = false;
         }
         Ok(())
     }
@@ -836,12 +864,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        let needs = !self.session.stickers.gifs.loaded() || self.session.stickers.gifs.stale;
+        let needs =
+            !self.session.stickers.gifs.loaded() || self.session.stickers.gifs.saved_is_outdated();
         if !needs {
             return Ok(None);
         }
+        let owed = self.session.stickers.gifs.saved_is_outdated();
         self.session.stickers.gifs.saved_asked();
-        self.session.stickers.gifs.stale = false;
         let extra = self
             .session
             .request(RequestPurpose::GetSavedAnimations, None);
@@ -852,7 +881,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.stickers.gifs.saved_failed();
+                // A refetch owed after an update stays owed.
+                if owed {
+                    self.session.stickers.gifs.saved_outdated();
+                } else {
+                    self.session.stickers.gifs.saved_failed();
+                }
                 Err(err)
             }
         }

@@ -77,9 +77,10 @@ impl QuillApp {
         stickers.masks.installed = quill::state::fetch::Fetch::Ready(
             stickers.stickers.sets.iter().take(3).cloned().collect(),
         );
-        stickers.masks.archived = quill::state::fetch::Fetch::Ready(
-            stickers.stickers.archived.iter().take(1).cloned().collect(),
-        );
+        stickers.masks.archived = quill::state::fetch::Fetch::Ready(quill::state::ArchivedMasks {
+            sets: stickers.stickers.archived.iter().take(1).cloned().collect(),
+            next_offset: None,
+        });
         stickers.masks.set_dialog_open(true);
         self.settings
             .set_box(crate::ui::settings_state::SettingsBox::Stickers, false);
@@ -95,7 +96,14 @@ impl QuillApp {
             &self.demo_ui.sink,
             &self.demo_ui.seq,
         );
-        let Some(template) = session.stickers.stickers.stickers.first().cloned() else {
+        let Some(template) = session
+            .stickers
+            .stickers
+            .selection
+            .stickers
+            .first()
+            .cloned()
+        else {
             return;
         };
         let sink: Arc<dyn quill::diagnostics::DiagnosticSink> = self.demo_ui.sink.clone();

@@ -23,8 +23,9 @@ pub const PROFILE_PHOTOS_LIMIT: i32 = 100;
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Send a profile-list request unless that list is loading or loaded
-    /// (a `Failed` list is retried). The `Loading` marker is dropped again
-    /// when the send fails.
+    /// (a `Failed` list is retried). A send that is refused leaves the list
+    /// `Failed`, which the UI draws with Retry and never asks again from a
+    /// frame.
     pub(super) fn fetch_profile_chats(
         &mut self,
         kind: ProfileChatsKind,
@@ -68,7 +69,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session
                     .users_state
                     .profile_chat_lists
-                    .remove(&(kind, id));
+                    .insert((kind, id), ProfileChatsFetch::Failed("not sent".into()));
                 Err(err)
             }
         }

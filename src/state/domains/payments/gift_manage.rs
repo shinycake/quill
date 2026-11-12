@@ -74,7 +74,6 @@ impl Session {
                 hub.received.view.select(None);
                 hub.stars.page.invalidate();
                 let manage = &mut self.payments.gifts_manage;
-                manage.close_flow_answered_by(pending.map(|p| p.id));
                 manage.note = Some(if summary.title.is_empty() {
                     "Gift upgraded.".to_string()
                 } else {
@@ -149,7 +148,9 @@ impl Session {
             PaymentsPurpose::SetGiftResalePrice => {
                 hub.received.op.changed(pending.map(|p| p.id));
                 hub.received.notice = None;
-                manage.close_flow_answered_by(pending.map(|p| p.id));
+                hub.received
+                    .view
+                    .close_form_answered_by(pending.map(|p| p.id));
                 manage.note = Some("Resale price updated.".into());
             }
             PaymentsPurpose::DeleteGiftCollection => {
@@ -297,12 +298,7 @@ impl Session {
         // Only a state that is not being reloaded counts; the reload sent
         // with the probe routes when it lands.
         let has_password = (!self.auth_state.password_state_loading())
-            .then(|| {
-                self.auth_state
-                    .password_state
-                    .as_ref()
-                    .map(|s| s.has_password)
-            })
+            .then(|| self.auth_state.password_state.get().map(|s| s.has_password))
             .flatten();
         if let Some(picker) = self.payments.gifts_manage.transfer_mut() {
             picker.probe_failed(request, outcome, has_password);
@@ -349,6 +345,11 @@ impl Session {
         let reason = error_reason(err);
         let manage = &mut self.payments.gifts_manage;
         manage.flow_refused(pending.map(|p| p.id));
+        self.payments
+            .hub
+            .received
+            .view
+            .form_refused(pending.map(|p| p.id));
         match purpose {
             PaymentsPurpose::GetGiftOption(_) => manage.limits_ask.fail(pending.map(|p| p.id)),
             PaymentsPurpose::GetGiftCollections { owner } => {
@@ -363,7 +364,8 @@ impl Session {
                     GiftListFetch::Failed(format!("Couldn't load the gifts: {reason}"));
             }
             PaymentsPurpose::GetPremiumGiftOptions => {
-                manage.send.premium_fetch = GiftListFetch::Failed(String::new());
+                manage.send.premium_fetch =
+                    GiftListFetch::Failed(format!("Couldn't load the Premium options: {reason}"));
             }
             PaymentsPurpose::TransferGift => {
                 if let (Some(picker), Some(request)) =

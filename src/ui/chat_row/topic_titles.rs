@@ -10,7 +10,7 @@ use super::topic_fit::{FittedTitles, Picture, Title};
 use super::*;
 use crate::ui::app::QuillApp;
 use crate::ui::sticker_player::PreviewEmoji;
-use quill::state::{RowForum, RowTopic};
+use quill::state::{RowForum, RowTopic, RowTopicsView};
 
 /// A forum row's data: the state's view of it and the images of the topic
 /// icons (custom emoji).
@@ -91,13 +91,20 @@ pub(super) fn forum_topics_line(
         .gap_2()
         .text_xs()
         .text_color(muted_fg)
-        .when(forum.topics.is_empty(), |this| {
-            let key = if forum.loaded {
-                keys::FILTERS_NO_CHATS
-            } else {
-                keys::CONTACTS_LOADING
-            };
-            this.child(div().truncate().child(tr(key)))
+        .when(forum.topics.is_empty(), |this| match forum.topics {
+            RowTopicsView::Failed => this
+                .child(
+                    div()
+                        .truncate()
+                        .child(tr(keys::Q_CHATLIST_TOPICS_COULD_NOT_LOAD)),
+                )
+                .child(retry_chip(chat_id, selecting, muted_fg, cx)),
+            RowTopicsView::Loading => {
+                this.child(div().truncate().child(tr(keys::CONTACTS_LOADING)))
+            }
+            RowTopicsView::Listed(_) => {
+                this.child(div().truncate().child(tr(keys::FILTERS_NO_CHATS)))
+            }
         })
         .when_some(jump, |this, topic| {
             this.child(title_chip(
@@ -129,7 +136,7 @@ fn on_jump(
 ) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
     cx.listener(move |this, event: &ClickEvent, window, cx| {
         cx.stop_propagation();
-        this.chat_list.peek.cancel_press();
+        this.message_ui.menu.cancel_press();
         if event.modifiers().secondary(cx) {
             this.open_chat_in_new_window(chat_id, window, cx);
         } else {
@@ -140,6 +147,44 @@ fn on_jump(
             }
         }
     })
+}
+
+/// The retry of a topic list that failed to load: asks again and the line
+/// reads "Loading…" until it answers or fails. The press is not swallowed,
+/// like the jump chip's.
+fn retry_chip(
+    chat_id: ChatId,
+    selecting: bool,
+    muted_fg: Hsla,
+    cx: &mut Context<QuillApp>,
+) -> impl IntoElement + use<> {
+    div()
+        .id(("forum-retry", chat_id.0 as u64))
+        .test_support()
+        .flex_none()
+        .px_2()
+        .rounded(px(11.))
+        .bg(chip_fill(muted_fg))
+        .child(tr(keys::Q_MEDIA_RETRY))
+        // While selecting the chip is plain: the row toggles the check.
+        .when(!selecting, |this| {
+            this.cursor_pointer()
+                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    cx.stop_propagation();
+                    this.message_ui.menu.cancel_press();
+                    this.retry_forum_topics(chat_id, cx);
+                }))
+        })
+}
+
+impl QuillApp {
+    /// The row's topic list is asked for again after it failed.
+    fn retry_forum_topics(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.load_forum_topics(chat_id);
+        }
+        cx.notify();
+    }
 }
 
 /// The first part of the chip: the unread topic's title.

@@ -96,7 +96,7 @@ fn fact_row(label: &str, value: String, cx: &App) -> Div {
 }
 
 impl QuillApp {
-    fn hub_mut(&mut self) -> Option<&mut PremiumHub> {
+    pub(in crate::ui) fn hub_mut(&mut self) -> Option<&mut PremiumHub> {
         if let Some(live) = self.live.as_mut() {
             Some(&mut live.driver.session.payments.hub)
         } else {
@@ -119,6 +119,8 @@ impl QuillApp {
             let _ = live.driver.ensure_earn_app_config();
             live.driver.maybe_fetch_star_transactions()
         });
+        // A reopened list asks its first look again, whatever length it had.
+        self.payments.stars_asked.reset();
         self.open_box(DialogKind::Stars);
         if let Some(Err(_)) = sent {
             self.set_note(StatusNote::error(tr(keys::Q_MONEY_COULD_NOT_LOAD_STARS)));
@@ -276,6 +278,8 @@ impl QuillApp {
         if let Some(Err(_)) = sent {
             self.set_note(StatusNote::error(tr(keys::Q_MONEY_COULD_NOT_LOAD_GIFTS)));
         }
+        // A reopened list asks its first look again, whatever length it had.
+        self.payments.gifts_asked.reset();
         self.open_box(crate::ui::shell::DialogKind::ReceivedGifts);
         cx.notify();
     }
@@ -295,18 +299,8 @@ impl QuillApp {
     }
 
     pub(in crate::ui) fn select_gift(&mut self, id: Option<String>, cx: &mut Context<Self>) {
-        // An Upgrade or resale price confirmation left open on another
-        // gift belongs to that gift: it goes, or this gift's buttons would
-        // stay hidden behind it.
-        if let Some(manage) = self.gift_manage_mut() {
-            manage.flow.take_if(|flow| match flow {
-                quill::gift_manage::GiftFlow::Upgrade { id: open, .. }
-                | quill::gift_manage::GiftFlow::Resale { id: open, .. } => {
-                    id.as_deref() != Some(open.as_str())
-                }
-                _ => false,
-            });
-        }
+        // The panel's convert confirmation and Upgrade or resale form are
+        // part of the view: another gift's go with the selection.
         if let Some(hub) = self.hub_mut() {
             hub.received.view.select(id);
             hub.received.view.confirm_convert(None);

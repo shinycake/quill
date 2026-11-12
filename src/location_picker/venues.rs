@@ -75,6 +75,8 @@ pub enum VenueList {
     },
     /// No place to search around yet ("Choose location to see places nearby.").
     WaitingForLocation,
+    /// The lookup failed; the list offers a retry.
+    Failed,
     Found(Vec<Venue>),
 }
 

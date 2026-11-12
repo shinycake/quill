@@ -35,11 +35,17 @@ pub(super) struct AddPeopleBox {
     /// People checked from a search result, latest first: they stay at
     /// the top of the list (tdesktop `prependRowFromSearchResult`).
     pub(super) promoted: Vec<i64>,
-    /// The search field, made in the call window when the box first
-    /// shows there.
-    search: Option<Entity<InputState>>,
-    /// The text the field starts with.
-    initial_query: String,
+    field: SearchField,
+}
+
+/// The box's search field: made in the call window when the box first
+/// shows there (the field needs that window), so the box starts without it.
+enum SearchField {
+    /// Not built yet; it starts with this text.
+    Opening {
+        initial: String,
+    },
+    Open(Entity<InputState>),
 }
 
 impl AddPeopleBox {
@@ -49,8 +55,9 @@ impl AddPeopleBox {
             call_id,
             picked: Vec::new(),
             promoted: Vec::new(),
-            search: None,
-            initial_query: String::new(),
+            field: SearchField::Opening {
+                initial: String::new(),
+            },
         }
     }
 
@@ -58,7 +65,7 @@ impl AddPeopleBox {
     #[cfg(feature = "demo-capture")]
     pub(super) fn with_query(call_id: i32, query: String) -> Self {
         Self {
-            initial_query: query,
+            field: SearchField::Opening { initial: query },
             ..Self::new(call_id)
         }
     }
@@ -75,7 +82,7 @@ impl QuillApp {
         let established = self
             .session()
             .and_then(|session| session.calls.active_call.as_ref())
-            .filter(|call| matches!(call.state, CallState::Ready))
+            .filter(|call| matches!(call.phase(), CallState::Ready(_)))
             .map(|call| call.id);
         let Some(call_id) = established else {
             self.set_note(StatusNote::info(tr(keys::CALL_ERROR_ADD_NOT_STARTED)));
@@ -89,6 +96,19 @@ impl QuillApp {
             let _ = live.driver.fetch_contacts();
         }
         cx.notify();
+    }
+
+    /// The box ends, whichever way: closed, finished, its call over, the
+    /// lock, the account going away. The one place that takes it and
+    /// clears the session's search with it.
+    pub(in crate::ui) fn end_call_add_people(&mut self) -> Option<AddPeopleBox> {
+        let open = self.call_boxes.add_people.take();
+        if open.is_some()
+            && let Some(live) = self.live.as_mut()
+        {
+            let _ = live.driver.search_add_people("");
+        }
+        open
     }
 
     /// The box's call ended (or was replaced): the box goes with it, its
@@ -105,18 +125,12 @@ impl QuillApp {
             .as_ref()
             .is_some_and(|open| Some(open.call_id) != current);
         if stale {
-            self.call_boxes.add_people = None;
-            if let Some(live) = self.live.as_mut() {
-                let _ = live.driver.search_add_people("");
-            }
+            self.end_call_add_people();
         }
     }
 
     fn close_call_add_people(&mut self, cx: &mut Context<Self>) {
-        self.call_boxes.add_people = None;
-        if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.search_add_people("");
-        }
+        self.end_call_add_people();
         cx.notify();
     }
 
@@ -125,7 +139,10 @@ impl QuillApp {
         self.call_boxes
             .add_people
             .as_ref()
-            .and_then(|open| open.search.as_ref())
+            .and_then(|open| match &open.field {
+                SearchField::Open(input) => Some(input),
+                SearchField::Opening { .. } => None,
+            })
             .map(|input| input.read(cx).value().to_string())
             .unwrap_or_default()
     }
@@ -178,12 +195,11 @@ impl QuillApp {
     /// The box's Invite, or "Create Call Link" with nobody picked: the
     /// call moves into a new conference call.
     fn finish_call_add_people(&mut self, share_link: bool, cx: &mut Context<Self>) {
-        let Some(open) = self.call_boxes.add_people.take() else {
+        let Some(open) = self.end_call_add_people() else {
             return;
         };
         let invite = if share_link { Vec::new() } else { open.picked };
         if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.search_add_people("");
             if live
                 .driver
                 .upgrade_call_to_conference(invite, share_link)
@@ -207,11 +223,11 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<Entity<InputState>> {
-        let open = self.call_boxes.add_people.as_mut()?;
-        if let Some(input) = open.search.clone() {
-            return Some(input);
-        }
-        let initial = std::mem::take(&mut open.initial_query);
+        let open = self.call_boxes.add_people.as_ref()?;
+        let initial = match &open.field {
+            SearchField::Open(input) => return Some(input.clone()),
+            SearchField::Opening { initial } => initial.clone(),
+        };
         let input = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder(tr(keys::PARTICIPANT_FILTER))
@@ -240,7 +256,7 @@ impl QuillApp {
             let _ = live.driver.search_add_people(&initial);
         }
         if let Some(open) = self.call_boxes.add_people.as_mut() {
-            open.search = Some(input.clone());
+            open.field = SearchField::Open(input.clone());
         }
         Some(input)
     }

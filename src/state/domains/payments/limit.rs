@@ -39,7 +39,7 @@ impl Session {
         // earlier answer or failure is not reused.
         if kind == PremiumLimitKind::PublicLinks {
             let fetch = &mut self.groups.group_type.public_chats;
-            if *fetch != crate::state::PublicChatsFetch::Loading {
+            if !matches!(fetch, crate::state::PublicChatsFetch::Loading(_)) {
                 *fetch = crate::state::PublicChatsFetch::None;
             }
         }

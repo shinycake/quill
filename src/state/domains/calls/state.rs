@@ -3,24 +3,6 @@
 //! with `new`.
 use crate::state::*;
 
-/// The stage of the recent-calls list (`searchCallMessages` pages and
-/// `deleteAllCallMessages`). Only the answer or error of the request in the
-/// stage lands: a reopen asks for the first page again at once, and
-/// "Clear all" forgets the page in flight, so an older page never fills
-/// the list.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum RecentCalls {
-    #[default]
-    Idle,
-    /// A page waits for its answer; its error is `Failed`.
-    Loading { request: RequestId },
-    /// The last page failed; asking again shows it as loading.
-    Failed,
-    /// "Clear all" waits for TDLib; the list empties on `ok`, and its
-    /// error is `Idle` again.
-    Clearing { request: RequestId },
-}
-
 pub struct CallsState {
     /// Phase C1: the tracked live call, if any. **Signaling only** —
     /// TDLib transports no audio/video (official clients use
@@ -38,6 +20,11 @@ pub struct CallsState {
     /// `joinVideoChat` rejected), shown on the group-call overlay and
     /// cleared when dismissed. Never a secret.
     pub group_call_error: Option<String>,
+    /// Calls whose `getGroupCall` failed, by call id. The one who asked
+    /// for such a call (a stream wish) takes its entry
+    /// ([`CallsState::take_group_call_fetch_failure`]), so a failure ends
+    /// the wish of that call and no other.
+    pub group_call_fetch_failures: Vec<i32>,
     /// Phase C1: incoming calls that arrived while another call was
     /// active — the driver discards them (busy) via `discardCall`.
     /// Entries are `(call_id, user_id, is_video)` so the decline
@@ -60,20 +47,6 @@ pub struct CallsState {
     /// active: its swap prompt, or the accept queued behind the current
     /// call's hang-up. Further incoming calls go to `busy_decline_queue`.
     pub second_call: SecondCall,
-    /// What this side did to the active call: answered it, or hung it up
-    /// (the `discardCall` in flight owns the `HangingUp` phase).
-    pub progress: CallProgress,
-    /// Phase C2i: "who can call me"
-    /// (`userPrivacySettingAllowCalls`, schema 1.8.67 :9006).
-    pub privacy_allow_calls: Option<PrivacyWho>,
-    /// Phase C2i: peer-to-peer calls
-    /// (`userPrivacySettingAllowPeerToPeerCalls`, schema 1.8.67 :9009).
-    pub privacy_p2p: Option<PrivacyWho>,
-    /// Where each call-privacy rule's last get or set stands. The fetch
-    /// sends two gets, so loading (see [`CallsState::privacy_loading`])
-    /// ends only when both answered, and a failed send or answer marks
-    /// only its own rule.
-    pub privacy_asks: CallPrivacyAsks,
     /// Phase C2i: local call preferences (confirm-before-calling,
     /// less-data), persisted via `settings::CallPrefs`. The driver
     /// loads them at startup; the UI saves on toggle.
@@ -81,13 +54,7 @@ pub struct CallsState {
     /// Phase C2i: recent calls from `searchCallMessages` (server-side
     /// history, schema 1.8.67 :11903) for the Recent-calls tab, newest
     /// first.
-    pub recent_calls: Vec<ParsedMessage>,
-    /// `next_offset` from the last `foundMessages` page; empty starts
-    /// (or restarts) the list.
-    pub recent_calls_offset: String,
-    /// Where the recent-calls list stands: its page or its "Clear all" in
-    /// flight, or the last page's failure.
-    pub recent_calls_stage: RecentCalls,
+    pub recent_calls: RecentCalls,
     /// Phase C3a: the tracked group call / voice chat, if any.
     /// **Signaling only** — TDLib transports no audio/video; the
     /// `joinVideoChat` response payload is stored (`join_payload`) and
@@ -118,11 +85,9 @@ pub struct CallsState {
     /// group call; the driver issues `join_video_chat` once the
     /// `getGroupCall` answer has created the unjoined tracker.
     pub pending_live_story_join: Option<LiveStoryJoinIntent>,
-    /// A voice chat, video chat or live stream link offered this call;
-    /// its invite hash goes out with the join (`crate::call_link`).
-    pub call_link: Option<crate::call_link::PendingCallLink>,
-    /// A call link that arrived while a call is on: the question to leave
-    /// it, the wait for it to end, then what the offer found.
+    /// A voice chat, video chat or live stream link: the question to leave
+    /// a running call, the wait for it to end, what the offer found, then
+    /// the invite hash that goes out with the join (`crate::call_link`).
     pub call_link_stage: crate::call_link::CallLinkStage,
     /// A conference call being joined or created, until its answer names
     /// the call (`crate::state::conference`).
@@ -147,39 +112,19 @@ pub struct CallsState {
 }
 
 impl CallsState {
-    /// A privacy get/set round-trip is in flight.
-    pub fn privacy_loading(&self) -> bool {
-        self.privacy_asks.loading()
-    }
-
-    /// The last privacy get/set of some rule failed.
-    pub fn privacy_error(&self) -> bool {
-        self.privacy_asks.failed()
-    }
-
     /// A recent-calls page is in flight.
     pub fn recent_calls_loading(&self) -> bool {
-        matches!(self.recent_calls_stage, RecentCalls::Loading { .. })
+        self.recent_calls.loading()
     }
 
     /// The last `searchCallMessages` request failed.
     pub fn recent_calls_error(&self) -> bool {
-        self.recent_calls_stage == RecentCalls::Failed
+        self.recent_calls.failed()
     }
 
     /// A `deleteAllCallMessages` request is in flight.
     pub fn recent_calls_clearing(&self) -> bool {
-        matches!(self.recent_calls_stage, RecentCalls::Clearing { .. })
-    }
-
-    /// Whether `request` is the recent-calls page the list waits for; if
-    /// so the list stops waiting for it.
-    pub(crate) fn take_recent_calls_request(&mut self, request: RequestId) -> bool {
-        if self.recent_calls_stage != (RecentCalls::Loading { request }) {
-            return false;
-        }
-        self.recent_calls_stage = RecentCalls::Idle;
-        true
+        self.recent_calls.clearing()
     }
 
     /// The tracked group call `id`: the current one or the story stream.
@@ -220,25 +165,36 @@ impl CallsState {
             .is_some_and(|call| call.id == group_call_id)
     }
 
+    /// A `getGroupCall` for `group_call_id` failed.
+    pub fn note_group_call_fetch_failed(&mut self, group_call_id: i32) {
+        if !self.group_call_fetch_failures.contains(&group_call_id) {
+            self.group_call_fetch_failures.push(group_call_id);
+        }
+    }
+
+    /// Whether the fetch of `group_call_id` failed since it was last taken
+    /// or asked again; taking it clears the mark.
+    pub fn take_group_call_fetch_failure(&mut self, group_call_id: i32) -> bool {
+        let before = self.group_call_fetch_failures.len();
+        self.group_call_fetch_failures
+            .retain(|id| *id != group_call_id);
+        self.group_call_fetch_failures.len() != before
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             active_call: None,
             summary: None,
             error: None,
             group_call_error: None,
+            group_call_fetch_failures: Vec::new(),
             busy_decline_queue: Vec::new(),
             created_call_discards: Vec::new(),
             busy_declined_calls: std::collections::VecDeque::new(),
             busy_declined: Vec::new(),
             second_call: SecondCall::None,
-            progress: CallProgress::Idle,
-            privacy_allow_calls: None,
-            privacy_p2p: None,
-            privacy_asks: CallPrivacyAsks::default(),
             prefs: CallPrefs::default(),
-            recent_calls: Vec::new(),
-            recent_calls_offset: String::new(),
-            recent_calls_stage: RecentCalls::Idle,
+            recent_calls: RecentCalls::default(),
             active_group_call: None,
             story_stream: None,
             rtmp_start: None,
@@ -247,7 +203,6 @@ impl CallsState {
             answered_creates: Vec::new(),
             group_call_fetch_queue: Vec::new(),
             pending_live_story_join: None,
-            call_link: None,
             call_link_stage: crate::call_link::CallLinkStage::Idle,
             pending_conference: None,
             call_upgrade: None,
@@ -256,75 +211,5 @@ impl CallsState {
             add_people_search: ShareSearch::default(),
             invite_results: None,
         }
-    }
-}
-
-/// Where one call-privacy rule's last request stands.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum PrivacyAsk {
-    #[default]
-    Idle,
-    /// Asked as this request; only its answer settles the rule.
-    Asking(RequestId),
-    Failed,
-}
-
-/// The two rules the calls UI reads (`userPrivacySettingAllowCalls` and
-/// `userPrivacySettingAllowPeerToPeerCalls`), each with its own stage.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct CallPrivacyAsks {
-    allow_calls: PrivacyAsk,
-    peer_to_peer: PrivacyAsk,
-}
-
-impl CallPrivacyAsks {
-    fn slot(&mut self, setting: CallPrivacySetting) -> &mut PrivacyAsk {
-        match setting {
-            CallPrivacySetting::AllowCalls => &mut self.allow_calls,
-            CallPrivacySetting::PeerToPeer => &mut self.peer_to_peer,
-        }
-    }
-
-    pub fn of(self, setting: CallPrivacySetting) -> PrivacyAsk {
-        match setting {
-            CallPrivacySetting::AllowCalls => self.allow_calls,
-            CallPrivacySetting::PeerToPeer => self.peer_to_peer,
-        }
-    }
-
-    pub fn set(&mut self, setting: CallPrivacySetting, ask: PrivacyAsk) {
-        *self.slot(setting) = ask;
-    }
-
-    /// `request` answered for `setting`: whether it is the one the rule
-    /// waits for (a stale answer changes nothing).
-    pub fn answered(&mut self, setting: CallPrivacySetting, request: RequestId) -> bool {
-        let slot = self.slot(setting);
-        let waits = *slot == PrivacyAsk::Asking(request);
-        if waits {
-            *slot = PrivacyAsk::Idle;
-        }
-        waits
-    }
-
-    /// `request` failed for `setting`: whether it is the one the rule
-    /// waits for.
-    pub fn failed_by(&mut self, setting: CallPrivacySetting, request: RequestId) -> bool {
-        let slot = self.slot(setting);
-        let waits = *slot == PrivacyAsk::Asking(request);
-        if waits {
-            *slot = PrivacyAsk::Failed;
-        }
-        waits
-    }
-
-    pub fn loading(self) -> bool {
-        [self.allow_calls, self.peer_to_peer]
-            .iter()
-            .any(|ask| matches!(ask, PrivacyAsk::Asking(_)))
-    }
-
-    pub fn failed(self) -> bool {
-        [self.allow_calls, self.peer_to_peer].contains(&PrivacyAsk::Failed)
     }
 }

@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::ui::status_note::StatusNote;
+use quill::connect::ConnectSendError;
 use quill::lang::{keys, tr};
 
 impl QuillApp {
@@ -224,7 +225,6 @@ impl QuillApp {
                 // M1: `cx.listener` closures must be `'static`, so the
                 // row's ids are copied out of the message first.
                 let (row_chat, row_msg) = (message.chat_id, message.id);
-                let message_pending = message.pending();
                 let wide_right = look.wide.then(|| {
                     let limit = crate::ui::history::bubble_width::message_width_limit(
                         cx,
@@ -240,8 +240,7 @@ impl QuillApp {
                         .map_or(f32::MAX, |view| f32::from(view.size.width));
                     quill::chat_wide::selection_right(limit, width)
                 });
-                let selection =
-                    self.selection_row(row_chat, row_msg, message.pending(), wide_right, cx);
+                let selection = self.selection_row(row_chat, row_msg, wide_right, cx);
                 let (selection_overlay, selection_tint, selection_slide) =
                     (selection.overlay, selection.tint, selection.slide);
                 // The side the bubble sits on (`hasRightLayout`): the wide
@@ -297,42 +296,28 @@ impl QuillApp {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                            this.message_ui.swipe_reply_start =
-                                Some((row_chat, row_msg, event.position.x));
+                            this.chat_ui
+                                .swipe_reply
+                                .press(row_chat, row_msg, event.position.x);
                             // A press that starts on text selects text; any
                             // other press may become a message drag
                             // (`selection_drag`). In selection mode the
                             // row's overlay takes the press instead.
                             if !this.selecting_in(row_chat) {
-                                this.selection_press_row(
-                                    row_chat,
-                                    row_msg,
-                                    message_pending,
-                                    event,
-                                    window,
-                                    cx,
-                                );
+                                this.selection_press_row(row_chat, row_msg, event, window, cx);
                             }
                             cx.notify();
-                        }),
-                    )
-                    // A press that ends outside its row is not a swipe.
-                    .on_mouse_up_out(
-                        MouseButton::Left,
-                        cx.listener(|this, _: &MouseUpEvent, _, _| {
-                            this.message_ui.swipe_reply_start = None;
                         }),
                     )
                     .on_mouse_up(
                         MouseButton::Left,
                         cx.listener(move |this, event: &MouseUpEvent, window, cx| {
-                            if let Some((chat_id, message_id, start_x)) =
-                                this.message_ui.swipe_reply_start.take()
-                                && chat_id == row_chat
-                                && message_id == row_msg
-                                && start_x - event.position.x > px(24.)
-                            {
-                                this.begin_reply_from_message(chat_id, message_id, window, cx);
+                            if this.chat_ui.swipe_reply.release_on(
+                                row_chat,
+                                row_msg,
+                                event.position.x,
+                            ) {
+                                this.begin_reply_from_message(row_chat, row_msg, window, cx);
                             }
                             // Double-click runs the quick action setting
                             // (tdesktop `chatQuickAction`); on selected
@@ -576,7 +561,7 @@ impl QuillApp {
     pub(in crate::ui) fn maybe_auto_load_older(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             // Phase 5.1: a topic view pages its own history.
-            let sent = if live.driver.session.threads.saved.tag_search.is_some() {
+            let result = if live.driver.session.threads.saved.tag_search.is_some() {
                 live.driver.fetch_saved_tag_page()
             } else if live.driver.session.threads.saved.sublist.is_some() {
                 live.driver.fetch_saved_sublist_history()
@@ -586,11 +571,10 @@ impl QuillApp {
                 live.driver.fetch_topic_history()
             } else {
                 live.driver.fetch_history()
-            }
-            .ok()
-            .flatten()
-            .is_some();
-            if sent {
+            };
+            // A first page that could not be sent ends in the Failed row
+            // (`ConnectDriver::fetch_history_for`).
+            if matches!(result, Ok(Some(_)) | Err(ConnectSendError::Native)) {
                 cx.notify();
             }
         }

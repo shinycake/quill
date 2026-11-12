@@ -89,13 +89,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let state = &mut self.session.groups.group_type;
-        if state.public_chats == PublicChatsFetch::Loading {
+        if matches!(state.public_chats, PublicChatsFetch::Loading(_)) {
             return Ok(None);
         }
-        state.public_chats = PublicChatsFetch::Loading;
         let extra = self
             .session
             .request(purpose(GroupTypePurpose::GetCreatedPublicChats), None);
+        self.session.groups.group_type.public_chats = PublicChatsFetch::Loading(extra);
         self.send_json_request(extra, &crate::earn::get_created_public_chats(extra))
             .map(Some)
             .inspect_err(|_| {

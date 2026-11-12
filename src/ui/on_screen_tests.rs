@@ -62,7 +62,7 @@ fn surfaces(app: &QuillApp) -> Surfaces {
         rich_editor: app.chat_ui.rich.editor_open(),
         context_menu: app.message_ui.menu.archive().is_some(),
         selection: app.chat_list.selected.len(),
-        player_chat: app.playback.player.chat,
+        player_chat: app.playback.active.chat(),
     }
 }
 
@@ -92,11 +92,11 @@ fn open_everything(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
     frames(vcx);
     app.update(vcx, |app, cx| {
         app.chat_ui.rich.set_editor(true);
-        app.message_ui.menu =
-            crate::ui::chat_list_state::ContextMenu::Archive(point(px(10.), px(10.)));
+        app.message_ui.menu.open_archive(point(px(10.), px(10.)));
         app.chat_list.selected.insert(CHAT.0);
-        app.playback.active = crate::ui::playback_state::ActiveTrack::Audio(MessageId(1));
-        app.playback.player.chat = Some(CHAT);
+        app.playback.active = crate::ui::playback_state::ActiveTrack::Audio(
+            crate::ui::playback_state::Track::new(MessageId(1)).in_chat(CHAT),
+        );
         cx.notify();
     });
     frames(vcx);
@@ -214,12 +214,12 @@ fn a_field_no_list_named_goes_too(cx: &mut TestAppContext) {
     frames(&mut vcx);
     app.update(&mut vcx, |app, _| {
         app.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
-        app.message_ui.menu = crate::ui::chat_list_state::ContextMenu::FolderTab(
-            crate::ui::folder_extras::FolderTabMenu {
+        app.message_ui
+            .menu
+            .open_folder_tab(crate::ui::folder_extras::FolderTabMenu {
                 folder_id: Some(2),
                 position: point(px(10.), px(10.)),
-            },
-        );
+            });
     });
     switch(&app, &mut vcx, "other");
     app.read_with(&vcx, |app, _| {
@@ -256,12 +256,12 @@ fn a_switch_ends_the_link_flow_the_account_was_running(cx: &mut TestAppContext) 
     app.read_with(&vcx, |app, _| {
         let session = app.session().expect("a session");
         assert!(session.chats_state.deep_link.is_none(), "the flow ended");
-        assert!(app.links.flow.invite().is_none());
+        assert!(!app.links.invite_box.is_open());
     });
     switch(&app, &mut vcx, &AccountKey::primary().0);
     frames(&mut vcx);
     app.read_with(&vcx, |app, _| {
-        assert!(app.links.flow.invite().is_none(), "no Join box came back");
+        assert!(!app.links.invite_box.is_open(), "no Join box came back");
         assert!(app.links.resolved.is_none());
     });
 }

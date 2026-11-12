@@ -65,6 +65,10 @@ enum Decode {
     Sdr(DecodeKey),
     /// HDR data that this display (or platform) does not show.
     StandardRange(DecodeKey),
+    /// The decode failed (file mid-write, out of memory, too large): the
+    /// SDR picture shows and nothing is asked again for this key until the
+    /// viewer steps or reopens (`reset`), never from render.
+    Failed(DecodeKey),
     Hdr {
         key: DecodeKey,
         shown: Shown,
@@ -75,6 +79,7 @@ enum Decode {
 enum Outcome {
     Sdr,
     StandardRange,
+    Failed,
     Hdr(HdrPixels),
 }
 
@@ -125,6 +130,7 @@ impl Decode {
             Self::Decoding { key, .. }
             | Self::Sdr(key)
             | Self::StandardRange(key)
+            | Self::Failed(key)
             | Self::Hdr { key, .. } => Some(key),
         }
     }
@@ -161,7 +167,7 @@ impl HdrViewer {
             Decode::Hdr { .. } if self.edr.is_lost() => Some(HdrBadge::StandardRange),
             Decode::Hdr { .. } => Some(HdrBadge::Shown),
             Decode::StandardRange(_) => Some(HdrBadge::StandardRange),
-            Decode::Idle | Decode::Decoding { .. } | Decode::Sdr(_) => None,
+            Decode::Idle | Decode::Decoding { .. } | Decode::Sdr(_) | Decode::Failed(_) => None,
         }
     }
 
@@ -246,9 +252,10 @@ fn run(path: &Path, long_edge: u32, can_show: bool) -> Outcome {
     }
     match super::decode(path, long_edge) {
         Ok(Some(pixels)) => Outcome::Hdr(pixels),
-        // Nothing above SDR white after all, or a failed decode: the SDR
-        // picture is the whole story, so no tag.
-        Ok(None) | Err(_) => Outcome::Sdr,
+        // Nothing above SDR white after all: the SDR picture is the whole
+        // story, so no tag.
+        Ok(None) => Outcome::Sdr,
+        Err(_) => Outcome::Failed,
     }
 }
 
@@ -297,7 +304,7 @@ impl QuillApp {
     /// picture draws the SDR image, so it reads as standard range.
     pub(crate) fn viewer_hdr_badge(&self) -> Option<HdrBadge> {
         match self.viewer.hdr.badge()? {
-            HdrBadge::Shown if !self.viewer.orientation.is_identity() => {
+            HdrBadge::Shown if !self.viewer.reorient.orientation().is_identity() => {
                 Some(HdrBadge::StandardRange)
             }
             badge => Some(badge),
@@ -335,6 +342,7 @@ impl QuillApp {
                 let decode = match outcome {
                     Outcome::Sdr => Decode::Sdr(key),
                     Outcome::StandardRange => Decode::StandardRange(key),
+                    Outcome::Failed => Decode::Failed(key),
                     Outcome::Hdr(pixels) => Decode::Hdr {
                         key,
                         shown: Shown {
@@ -380,7 +388,7 @@ impl QuillApp {
                     // EDR (drawn at SDR) does not read as changed forever.
                     let drawn = hdr.decode.frame().map_or(0.0, |shown| shown.headroom);
                     if left_edr
-                        || app.screen.viewer.orientation.is_identity()
+                        || app.screen.viewer.reorient.orientation().is_identity()
                             && hdr.display_headroom(super::headroom(window)) != drawn
                     {
                         cx.notify();
@@ -411,7 +419,7 @@ impl QuillApp {
     /// picture draws the SDR image).
     pub(crate) fn sync_viewer_hdr(&mut self, window: &Window) {
         let want = self.viewer.state.current().is_some()
-            && self.viewer.orientation.is_identity()
+            && self.viewer.reorient.orientation().is_identity()
             && self.viewer.hdr.has_frame();
         let hdr = &mut self.viewer.hdr;
         if hdr.edr == Edr::On && super::renderer_left_edr(window) {
@@ -494,7 +502,24 @@ fn frame_element(frame: &super::Frame, _fit: (f32, f32)) -> Option<AnyElement> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Edr, bucket};
+    use super::{Decode, Edr, HdrViewer, bucket};
+    use std::path::PathBuf;
+
+    /// Sweep r2-06b 10-083: a failed decode is its own stage: no tag, no
+    /// frame, and the key stays so render does not ask again.
+    #[test]
+    fn a_failed_decode_is_not_a_loaded_picture() {
+        let key = (PathBuf::from("a.heic"), 512, true);
+        let hdr = HdrViewer {
+            decode: Decode::Failed(key.clone()),
+            edr: Edr::Off,
+        };
+        assert_eq!(hdr.decode.key(), Some(&key));
+        assert!(!hdr.has_frame() && hdr.badge().is_none());
+        let mut hdr = hdr;
+        hdr.reset();
+        assert_eq!(hdr.decode.key(), None, "reopening asks again");
+    }
 
     #[test]
     fn a_lost_layer_stays_lost_off_windows_once_switched_off() {

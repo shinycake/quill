@@ -53,7 +53,7 @@ impl QuillApp {
     /// (`lock_layer`), the agent socket pauses or resumes, and the links
     /// held for the unlock are taken again.
     pub(in crate::ui) fn set_locked(&mut self, locked: bool, cx: &mut Context<Self>) {
-        self.account.passcode.set_lock_flag(locked);
+        let changed = self.account.passcode.set_lock_flag(locked);
         // The GIF gate follows what is drawn: shut under the lock, open
         // again for a panel left on its GIFs tab.
         self.sync_gif_downloads();
@@ -68,7 +68,9 @@ impl QuillApp {
                 .toasts
                 .pointer_gone(std::time::Instant::now());
         }
-        super::lock_layer::publish(locked, cx);
+        if changed {
+            super::lock_layer::refresh(cx);
+        }
         // The demo apps share the process with the tests: only a real
         // lock pauses the agent socket.
         if !self.account.passcode.demo {
@@ -117,6 +119,8 @@ impl QuillApp {
     /// Close or stop what the lock screen does not cover or must not keep
     /// running. Every surface the lock reaches is called from here.
     pub(super) fn close_for_lock(&mut self, cx: &mut Context<Self>) {
+        // A sticker in flight lands nowhere: the lock screen draws no overlay.
+        crate::ui::send_fly::end_flight();
         // A swipe the finger left or released does not run behind the lock.
         self.chat_list.swipe.drop_gestures();
         // The microphone or camera stops, and nothing is sent: a round
@@ -147,6 +151,11 @@ impl QuillApp {
         // parked for its download plays on, as tdesktop's player does.
         self.drop_play_intents_for_lock();
         self.release_story_viewer(cx);
+        // The main window draws only the lock screen: its cover player and
+        // userpic clips stop with it.
+        self.main_window_media_left();
+        // The stealth box and its once-a-second redraw tick end with it.
+        self.close_stealth_box();
         // The mini app is a helper window the lock screen does not cover;
         // tdesktop closes such windows on lock (`closeAdditionalWindows`).
         self.close_mini_app_window(cx);
@@ -178,7 +187,6 @@ impl QuillApp {
         // A key capture would take the first key of the passcode as a
         // binding: Settings > Shortcuts and the push-to-talk key.
         self.preferences.keybinding.end();
-        self.group_call.ptt_capture = false;
         // Now Playing names the sender or the song: the OS controls go off.
         self.publish_now_playing();
         // A locked window is not looked at: every chat window's chat

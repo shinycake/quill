@@ -35,10 +35,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetNewChatPrivacy, None);
-        let showing = matches!(
-            self.session.settings.privacy_data.new_chat,
-            Some(NewChatPrivacyState::Ready(_))
-        );
+        let showing = self
+            .session
+            .settings
+            .privacy_data
+            .new_chat
+            .as_ref()
+            .is_some_and(|state| state.value().is_some());
         if !showing {
             self.session.settings.privacy_data.new_chat = Some(NewChatPrivacyState::Loading(extra));
         }
@@ -52,6 +55,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(())
     }
 
+    /// The value the "Who can message me" row shows, once it is known.
+    fn new_chat_value(&self) -> Option<NewChatPrivacy> {
+        self.session
+            .settings
+            .privacy_data
+            .new_chat
+            .as_ref()
+            .and_then(NewChatPrivacyState::value)
+    }
+
     /// `setNewChatPrivacySettings`: Everyone (`true`) or Contacts and
     /// Premium users (`false`). The paid-message price is sent back
     /// unchanged. Applied optimistically.
@@ -59,8 +72,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         allow_from_unknown: bool,
     ) -> Result<RequestId, ConnectSendError> {
-        let Some(NewChatPrivacyState::Ready(current)) = self.session.settings.privacy_data.new_chat
-        else {
+        let Some(current) = self.new_chat_value() else {
             // Not loaded: writing would reset the paid-message price.
             return Err(ConnectSendError::InvalidRequest);
         };
@@ -80,15 +92,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let Some(NewChatPrivacyState::Ready(current)) = self.session.settings.privacy_data.new_chat
-        else {
+        if self.new_chat_value().is_none() {
             return Err(ConnectSendError::InvalidRequest);
-        };
+        }
         let extra = self.session.request(
-            RequestPurpose::Settings(SettingsPurpose::SetNewChatPrivacy {
-                previous_allow: current.allow_from_unknown,
-                previous_stars: current.incoming_paid_message_star_count,
-            }),
+            RequestPurpose::Settings(SettingsPurpose::SetNewChatPrivacy),
             None,
         );
         if let Err(err) = self.sender.send_json(&set_new_chat_privacy_settings(
@@ -99,8 +107,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.set_new_chat_privacy_local(next);
-        self.session.settings.privacy_data.new_chat_saved_at = Some(extra);
+        if let Some(state) = self.session.settings.privacy_data.new_chat.as_mut() {
+            state.save(extra, next);
+        }
         Ok(extra)
     }
 
@@ -129,9 +138,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || !(1..=MAX_INACTIVE_SESSION_DAYS).contains(&days) {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let previous = self.session.settings.privacy_data.inactive_session_ttl_days;
+        // The value the server holds is the one to fall back to: without
+        // it nothing goes out.
+        if self
+            .session
+            .settings
+            .privacy_data
+            .inactive_session_ttl
+            .value()
+            .is_none()
+        {
+            return Err(ConnectSendError::InvalidRequest);
+        }
         let extra = self.session.request(
-            RequestPurpose::Settings(SettingsPurpose::SetInactiveSessionTtl { previous }),
+            RequestPurpose::Settings(SettingsPurpose::SetInactiveSessionTtl),
             None,
         );
         if let Err(err) = self
@@ -141,7 +161,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.settings.privacy_data.inactive_session_ttl_days = Some(days);
+        self.session
+            .settings
+            .privacy_data
+            .inactive_session_ttl
+            .save(extra, days);
         self.session
             .settings
             .privacy_data
@@ -242,7 +266,12 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// "Do you still remember your password?": `getRecoveryEmailAddress`
     /// accepts only the right password. The caller zeroizes `password`.
     pub fn check_remembered_password(&mut self, password: &str) -> Result<(), ConnectSendError> {
-        if !self.chats_path_active() || password.is_empty() {
+        if password.is_empty() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !self.chats_path_active() {
+            // The card says the check failed, rather than staying as it was.
+            self.session.settings.privacy_data.password_check = crate::state::PasswordCheck::Failed;
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self
@@ -296,9 +325,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         // server can be told (a closing connection), so a box that offers it
         // does not open again and again.
         self.session.chat_list.suggestions.remove_action(action);
-        if action == crate::chatlist_suggestions::ACTION_PASSWORD {
-            self.session.settings.privacy_data.check_password_suggested = false;
-        }
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -328,7 +354,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.settings.privacy_data.check_password_suggested = false;
+        // The card goes only once the request left: a refused send keeps
+        // it (and a check in flight), so the caller can say so.
+        self.session
+            .chat_list
+            .suggestions
+            .remove_action(crate::chatlist_suggestions::ACTION_PASSWORD);
+        self.session.settings.privacy_data.password_check = crate::state::PasswordCheck::Idle;
         Ok(extra)
     }
 }

@@ -26,6 +26,7 @@ impl Session {
         pending: Option<&PendingRequest>,
     ) {
         let purpose = pending.map(|p| p.purpose);
+        crate::wake::MINI_APPS.poke();
         match payload {
             BotsPayload::WebAppInfo { launch_id, url } => {
                 if let Some(RequestPurpose::Bots(BotsPurpose::OpenWebApp { bot_user_id })) = purpose
@@ -50,19 +51,25 @@ impl Session {
                 }
             }
             BotsPayload::FoundWebApp(app) => {
-                if let Some(RequestPurpose::Bots(BotsPurpose::SearchWebApp { bot_user_id })) =
-                    purpose
+                if let (
+                    Some(pending),
+                    Some(RequestPurpose::Bots(BotsPurpose::SearchWebApp { .. })),
+                ) = (pending, purpose)
                 {
-                    self.bots.web_apps.found = Some((bot_user_id, Ok(app)));
+                    self.bots.web_apps.found.push((pending.id, Ok(app)));
                 }
             }
             BotsPayload::AttachmentMenuBot(bot) => {
                 self.keep_attach_bot_icons(std::slice::from_ref(&bot));
-                if let Some(RequestPurpose::Bots(BotsPurpose::GetAttachmentMenuBot {
-                    bot_user_id,
-                })) = purpose
+                if let (
+                    Some(pending),
+                    Some(RequestPurpose::Bots(BotsPurpose::GetAttachmentMenuBot { .. })),
+                ) = (pending, purpose)
                 {
-                    self.bots.web_apps.attachment_menu_bot = Some((bot_user_id, Ok(bot)));
+                    self.bots
+                        .web_apps
+                        .attachment_menu_bot
+                        .push((pending.id, Ok(bot)));
                 }
             }
             BotsPayload::UpdateAttachmentMenuBots(bots) => {
@@ -127,9 +134,13 @@ impl Session {
     /// The context of the open call that `request` answers.
     fn take_web_app_pending(&mut self, request: Option<&PendingRequest>) -> Option<WebAppPending> {
         let id = request?.id;
-        let pending = &mut self.bots.web_apps.pending;
-        let index = pending.iter().position(|p| p.request == id)?;
-        Some(pending.remove(index))
+        match self.bots.web_apps.opening.take() {
+            Some(opening) if opening.request == id => Some(opening),
+            other => {
+                self.bots.web_apps.opening = other;
+                None
+            }
+        }
     }
 
     /// `getGrossingWebAppBots` returns `foundUsers`, which the envelope
@@ -140,6 +151,7 @@ impl Session {
         pending: Option<&PendingRequest>,
     ) -> bool {
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetGrossingWebAppBots) {
+            crate::wake::MINI_APPS.poke();
             // Only the request the list waits for fills it.
             self.bots
                 .web_apps
@@ -151,6 +163,7 @@ impl Session {
     }
 
     pub(crate) fn apply_web_app_ok(&mut self, pending: Option<&PendingRequest>) {
+        crate::wake::MINI_APPS.poke();
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::Bots(BotsPurpose::CanBotSendMessages { bot_user_id })) => {
                 self.bots.web_apps.write_access = pending
@@ -160,26 +173,34 @@ impl Session {
                 self.bots.web_apps.write_access = pending
                     .map(|p| WriteAnswer::new(p.id, bot_user_id, WriteAccessResult::Granted));
             }
-            Some(RequestPurpose::Bots(BotsPurpose::ToggleBotEmojiStatusAccess {
-                bot_user_id,
-                ..
-            })) => {
-                self.bots.web_apps.emoji_access = Some((bot_user_id, true));
+            Some(RequestPurpose::Bots(BotsPurpose::ToggleBotEmojiStatusAccess { .. })) => {
+                self.bots.web_apps.emoji_access = pending.map(|p| EmojiAccessAnswer {
+                    request: p.id,
+                    result: EmojiAccessResult::Granted,
+                });
             }
             Some(RequestPurpose::Bots(BotsPurpose::ToggleBotInAttachmentMenu {
                 bot_user_id,
                 added,
             })) => {
-                self.bots
-                    .web_apps
-                    .attachment_menu_toggled
-                    .push(AttachmentToggle {
-                        bot_user_id,
-                        result: Ok(added),
-                    });
+                if let Some(p) = pending {
+                    self.bots
+                        .web_apps
+                        .attachment_menu_toggled
+                        .push(AttachmentToggle {
+                            request: p.id,
+                            bot_user_id,
+                            result: Ok(added),
+                        });
+                }
             }
             Some(RequestPurpose::SendWebAppData) => {
-                self.bots.web_apps.data_sent = Some(Ok(()));
+                if let Some(pending) = pending {
+                    self.bots.web_apps.data_sent.push(DataSent {
+                        request: pending.id,
+                        result: Ok(()),
+                    });
+                }
             }
             _ => {}
         }
@@ -187,6 +208,7 @@ impl Session {
 
     pub(crate) fn apply_web_app_error(&mut self, pending: Option<&PendingRequest>, err: &TdError) {
         let Some(p) = pending else { return };
+        crate::wake::MINI_APPS.poke();
         match p.purpose {
             RequestPurpose::Bots(BotsPurpose::OpenWebApp { bot_user_id })
             | RequestPurpose::Bots(BotsPurpose::GetWebAppUrl { bot_user_id })
@@ -202,13 +224,13 @@ impl Session {
                         }));
                 }
             }
-            RequestPurpose::Bots(BotsPurpose::SearchWebApp { bot_user_id }) => {
+            RequestPurpose::Bots(BotsPurpose::SearchWebApp { .. }) => {
                 let message = if err.code == 404 {
                     "This bot has no app with that name.".into()
                 } else {
                     web_app_error_text(err)
                 };
-                self.bots.web_apps.found = Some((bot_user_id, Err(message)));
+                self.bots.web_apps.found.push((p.id, Err(message)));
             }
             RequestPurpose::Bots(BotsPurpose::CanBotSendMessages { bot_user_id }) => {
                 self.bots.web_apps.write_access = Some(WriteAnswer::new(
@@ -239,11 +261,16 @@ impl Session {
                 if let Some(Some(info)) = self.bots.bot_info.get_mut(&bot_user_id) {
                     info.can_manage_emoji_status = !allowed;
                 }
-                self.bots.web_apps.emoji_access = Some((bot_user_id, false));
+                self.bots.web_apps.emoji_access = Some(EmojiAccessAnswer {
+                    request: p.id,
+                    result: EmojiAccessResult::Refused,
+                });
             }
-            RequestPurpose::Bots(BotsPurpose::GetAttachmentMenuBot { bot_user_id }) => {
-                self.bots.web_apps.attachment_menu_bot =
-                    Some((bot_user_id, Err(web_app_error_text(err))));
+            RequestPurpose::Bots(BotsPurpose::GetAttachmentMenuBot { .. }) => {
+                self.bots
+                    .web_apps
+                    .attachment_menu_bot
+                    .push((p.id, Err(web_app_error_text(err))));
             }
             RequestPurpose::Bots(BotsPurpose::ToggleBotInAttachmentMenu {
                 bot_user_id, ..
@@ -252,6 +279,7 @@ impl Session {
                     .web_apps
                     .attachment_menu_toggled
                     .push(AttachmentToggle {
+                        request: p.id,
                         bot_user_id,
                         result: Err(web_app_error_text(err)),
                     });
@@ -279,7 +307,10 @@ impl Session {
                 }
             }
             RequestPurpose::SendWebAppData => {
-                self.bots.web_apps.data_sent = Some(Err(web_app_error_text(err)));
+                self.bots.web_apps.data_sent.push(DataSent {
+                    request: p.id,
+                    result: Err(web_app_error_text(err)),
+                });
             }
             _ => {}
         }

@@ -186,16 +186,14 @@ impl QuillApp {
 
     /// A click on a transfer card opens that transaction on the Money page
     /// (the iOS card opens the wallet's transaction screen).
-    fn open_transfer_details(&mut self, transaction_id: &str, cx: &mut Context<Self>) {
+    pub(super) fn open_transfer_details(&mut self, transaction_id: &str, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.open_wallet_transaction(transaction_id);
         } else if let Some(session) = self.demo_session.as_mut()
             && session.ton_wallet.can_use
         {
-            session.ton_wallet.money.open = true;
-            let known = session
-                .ton_wallet
-                .money
+            let money = session.ton_wallet.money.get_or_insert_default();
+            let known = money
                 .history
                 .items()
                 .iter()

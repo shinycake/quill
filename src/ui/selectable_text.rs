@@ -20,46 +20,16 @@ thread_local! {
     /// Bounds of the scrolling region whose paint is in progress; see
     /// [`SelectionViewport`].
     static VIEWPORT: Cell<Option<Bounds<Pixels>>> = const { Cell::new(None) };
-    /// What each window's selection covers, as that window last painted
-    /// it. Every window has its own selection, so a copy reads the entry
-    /// of the window it runs in; see [`selected_message_text`].
-    static SELECTED: std::cell::RefCell<std::collections::HashMap<WindowId, WindowSelected>> =
-        std::cell::RefCell::new(std::collections::HashMap::new());
     /// The message each painted text participant belongs to, by the
     /// participant's entity id; see [`SelectableRichText::message`].
-    static OWNERS: std::cell::RefCell<std::collections::HashMap<EntityId, (i64, u64)>> =
-        std::cell::RefCell::new(std::collections::HashMap::new());
+    static OWNERS: Cell<std::collections::HashMap<EntityId, (i64, u64)>> =
+        Cell::new(std::collections::HashMap::new());
 }
 
+mod selection_record;
 mod selection_start;
+use selection_record::{WindowSelected, with_selected, with_taken};
 pub(super) use selection_start::selected_occurrence;
-
-/// One window's selection, as its last paint saw it.
-#[derive(Default)]
-struct WindowSelected {
-    /// The message whose text the selection covers.
-    message: Option<(i64, u64)>,
-    /// Custom emoji inside the selection, by (document order, byte
-    /// offset): their fallback text replaces the placeholders in the
-    /// copied string.
-    emoji: std::collections::BTreeMap<(u64, usize), String>,
-    /// Where the selection starts (`selection_start`).
-    start: selection_start::SelectionStart,
-}
-
-/// Runs `f` on the selection record of `window`, dropping the records of
-/// windows that have closed once a few have piled up.
-fn with_selected<R>(window: &Window, cx: &App, f: impl FnOnce(&mut WindowSelected) -> R) -> R {
-    let id = window.window_handle().window_id();
-    SELECTED.with(|selected| {
-        let mut selected = selected.borrow_mut();
-        if selected.len() > 8 && !selected.contains_key(&id) {
-            let open: Vec<WindowId> = cx.windows().iter().map(|w| w.window_id()).collect();
-            selected.retain(|window, _| open.contains(window));
-        }
-        f(selected.entry(id).or_default())
-    })
-}
 
 /// Called with the index of the clicked range.
 type ClickHandler = Rc<dyn Fn(usize, &mut Window, &mut App)>;
@@ -630,8 +600,7 @@ impl Element for SelectableRichText {
         handle.register(registration, window, cx);
         let layout = self.laid(bounds);
         if let Some(message) = self.message {
-            OWNERS.with(|owners| {
-                let mut owners = owners.borrow_mut();
+            with_taken(&OWNERS, |owners| {
                 // Entries are tiny; drop them all now and then rather than
                 // track every participant's lifetime. Painted text re-adds
                 // itself the same frame.
@@ -644,7 +613,7 @@ impl Element for SelectableRichText {
         let anchor_message = handle
             .snapshot(cx)
             .and_then(|snapshot| snapshot.anchor().entity_id())
-            .and_then(|anchor| OWNERS.with(|owners| owners.borrow().get(&anchor).copied()));
+            .and_then(|anchor| with_taken(&OWNERS, |owners| owners.get(&anchor).copied()));
         let foreign =
             self.message.is_some() && anchor_message.is_some() && anchor_message != self.message;
         let runs = if foreign {
@@ -656,17 +625,22 @@ impl Element for SelectableRichText {
             ]
         };
         let projection = handle.update_runs(&runs, cx);
-        if !foreign
-            && let Some(message) = self.message
+        let order = self.document_order;
+        let held = !foreign
             && projection
                 .ranges()
                 .iter()
                 .flatten()
-                .any(|range| !range.is_empty())
-        {
-            with_selected(window, cx, |selected| selected.message = Some(message));
-        }
-        let order = self.document_order;
+                .any(|range| !range.is_empty());
+        let message = self.message;
+        with_selected(window, cx, |selected| match message {
+            Some(message) if held => {
+                selected.messages.insert(order, message);
+            }
+            _ => {
+                selected.messages.remove(&order);
+            }
+        });
         let before = (!foreign)
             .then(|| {
                 selection_start::text_before(&self.text, self.source.as_ref(), projection.ranges())
@@ -899,11 +873,14 @@ pub(super) fn selected_message_text(
     cx: &mut App,
 ) -> Option<((i64, u64), String)> {
     if !TextSelection::has_selection(window, cx) {
+        // Nothing is selected: what the last selection left is dropped, so
+        // texts that are no longer painted do not hold it.
+        with_selected(window, cx, |selected| *selected = WindowSelected::default());
         return None;
     }
     let selected = TextSelection::selected_text(window, cx);
     let (message, fallbacks) = with_selected(window, cx, |selected| {
-        let message = selected.message?;
+        let message = selected.messages.values().next().copied()?;
         let fallbacks: Vec<String> = selected
             .emoji
             .iter()

@@ -118,7 +118,7 @@ pub(crate) struct BackgroundAccounts {
     /// are done).
     prepare: prepare::PrepareSet,
     /// `start_connection` preparations still running on a worker.
-    pub(super) screen_preparing: u32,
+    pub(super) screen_workers: crate::ui::connect_ui::ScreenWorkers,
     /// Bumped by `stop_background_accounts`: starts in flight and the poll
     /// loop of an older generation end.
     generation: u64,
@@ -135,6 +135,8 @@ pub(crate) struct BackgroundAccounts {
     /// Clients sent `close` and drained a little per poll (`closing`):
     /// switching, signing out or logging out never waits on TDLib.
     pub(super) closing: ClosingSet,
+    /// The work waiting on those closes (`closing::after_closing`).
+    close_waiters: closing::CloseWaiters,
     /// When a client that died or failed to start starts again.
     restarts: restart::Restarts,
     /// The quit observer that closes every client together.
@@ -155,7 +157,7 @@ impl BackgroundAccounts {
         Self {
             clients: Vec::new(),
             prepare: prepare::PrepareSet::default(),
-            screen_preparing: 0,
+            screen_workers: Default::default(),
             generation: 0,
             poll: None,
             clicks: Arc::new(Mutex::new(Vec::new())),
@@ -164,6 +166,7 @@ impl BackgroundAccounts {
             attention: false,
             ringing: None,
             closing: ClosingSet::new(),
+            close_waiters: Default::default(),
             restarts: restart::Restarts::default(),
             quit_close: None,
             deleting: HashSet::new(),
@@ -515,6 +518,8 @@ impl QuillApp {
                             return None;
                         }
                         let work_left = this.poll_background(cx);
+                        // A close, a start or a preparation may have ended.
+                        this.settle_close_waiters(cx);
                         if this.background.has_work() {
                             Some(PassEnd {
                                 work_left,

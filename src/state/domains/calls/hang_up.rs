@@ -1,21 +1,15 @@
 //! A 1:1 call's hang-up while its `discardCall` is in flight.
 use crate::ids::RequestId;
-use crate::state::{PendingRequest, RequestPurpose, Session};
-use crate::telegram::envelope::CallState;
+use crate::state::{CallsState, PendingRequest, RequestPurpose, Session};
 
 /// The `discardCall` that put the active call into `HangingUp`. The
 /// request owns the phase: TDLib's terminal update ends the call, and an
-/// error for `request` puts the call back in `resume`. The call engine
-/// keeps the call until TDLib took the hang-up, so a failed one goes on
-/// with its sound.
+/// error for `request` ends the hang-up. The call engine keeps the call
+/// until TDLib took the hang-up, so a failed one goes on with its sound.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HangUp {
     pub request: RequestId,
     pub call_id: i32,
-    /// The phase to go back to if the hang-up fails. Non-terminal
-    /// updates that land meanwhile are stored here, so the panel keeps
-    /// showing "Hanging up".
-    pub resume: CallState,
     /// TDLib answered `ok`: the call cannot come back, and the engine
     /// has not been told yet (`ConnectDriver::pump_call_engine` tells it).
     pub engine_hang_up_due: bool,
@@ -24,36 +18,43 @@ pub struct HangUp {
     from: HangUpFrom,
 }
 
-/// The `CallProgress` a hang-up replaced.
+/// The [`CallAction`] a hang-up replaced.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HangUpFrom {
     Unanswered,
-    /// `CallProgress::Answered`.
-    Answered,
+    /// [`CallAction::Answered`], by this `acceptCall`.
+    Answered(RequestId),
 }
 
-/// How far the active 1:1 call got on this side, one value: ringing (or
-/// not ours yet), answered here, or being hung up. TDLib's `updateCall`
-/// stays the source of truth for the call's own phase
-/// (`ActiveCall::state`); this is what *we* did to it. Leaves: the call's
-/// terminal update (`Idle`), a failed `acceptCall` (back to `Idle`), a failed
-/// `discardCall` (back to `Answered` or `Idle`).
+/// What this side did to the active 1:1 call, one value inside the call it
+/// belongs to (so it ends with it): nothing yet (ringing, or not ours),
+/// answered here, or being hung up. TDLib's `updateCall` stays the source of
+/// truth for the call's own phase (`ActiveCall::state`); the call shows
+/// `HangingUp` while this says so ([`ActiveCall::phase`]). Leaves: the
+/// call's terminal update (the call goes), a failed `acceptCall` (back to
+/// `Idle`), a failed `discardCall` (back to `Answered` or `Idle`).
 #[derive(Debug, Clone, PartialEq, Default)]
-pub enum CallProgress {
+pub enum CallAction {
     #[default]
     Idle,
     /// `acceptCall` went out for this incoming call. Its state stays
     /// `Pending` until TDLib's `updateCall`, but it no longer rings: a
-    /// close hangs it up.
-    Answered { call_id: i32 },
+    /// close hangs it up. It holds the accept's request, so only that
+    /// request's error puts the call back to ringing.
+    Answered(RequestId),
     /// The `discardCall` in flight, which owns the `HangingUp` phase.
     HangingUp(HangUp),
 }
 
-impl CallProgress {
-    pub fn answered_call(&self) -> Option<i32> {
+impl CallAction {
+    pub fn is_answered(&self) -> bool {
+        matches!(self, Self::Answered(_))
+    }
+
+    /// The `acceptCall` already out: a second click answers nothing new.
+    pub fn accept_request(&self) -> Option<RequestId> {
         match self {
-            Self::Answered { call_id } => Some(*call_id),
+            Self::Answered(accept) => Some(*accept),
             _ => None,
         }
     }
@@ -72,31 +73,32 @@ impl CallProgress {
         }
     }
 
-    /// `acceptCall` went out for `call_id`.
-    pub fn answer(&mut self, call_id: i32) {
+    /// `acceptCall` went out as `accept`.
+    pub fn answer(&mut self, accept: RequestId) {
         if !matches!(self, Self::HangingUp(_)) {
-            *self = Self::Answered { call_id };
+            *self = Self::Answered(accept);
         }
     }
 
-    /// A failed `acceptCall`: the call keeps ringing.
-    pub fn answer_failed(&mut self, call_id: i32) {
-        if self.answered_call() == Some(call_id) {
+    /// A failed `acceptCall`: the call keeps ringing. Only the accept the
+    /// action holds clears it, so a late error of an earlier one does not.
+    pub fn answer_failed(&mut self, accept: RequestId) {
+        if self.accept_request() == Some(accept) {
             *self = Self::Idle;
         }
     }
 
-    /// The `discardCall` for `hang_up.call_id` went out.
+    /// The `discardCall` went out.
     pub fn hang_up_sent(&mut self, mut hang_up: HangUp) {
-        hang_up.from = if self.answered_call() == Some(hang_up.call_id) {
-            HangUpFrom::Answered
+        hang_up.from = if let Some(accept) = self.accept_request() {
+            HangUpFrom::Answered(accept)
         } else {
             HangUpFrom::Unanswered
         };
         *self = Self::HangingUp(hang_up);
     }
 
-    /// The hang-up `request` failed: its record, with the progress back to
+    /// The hang-up `request` failed: its record, with the action back to
     /// what it was before.
     pub fn hang_up_failed(&mut self, request: Option<RequestId>) -> Option<HangUp> {
         let Self::HangingUp(hang_up) = self else {
@@ -107,36 +109,82 @@ impl CallProgress {
         }
         let hang_up = hang_up.clone();
         *self = match hang_up.from {
-            HangUpFrom::Answered => Self::Answered {
-                call_id: hang_up.call_id,
-            },
+            HangUpFrom::Answered(accept) => Self::Answered(accept),
             HangUpFrom::Unanswered => Self::Idle,
         };
         Some(hang_up)
     }
+}
 
-    /// The terminal update of `call_id` ended whatever we did to it.
-    pub fn call_ended(&mut self, call_id: i32) {
-        let ours = match self {
-            Self::Idle => false,
-            Self::Answered { call_id: id } => *id == call_id,
-            Self::HangingUp(hang_up) => hang_up.call_id == call_id,
-        };
-        if ours {
-            *self = Self::Idle;
+impl HangUp {
+    pub fn new(request: RequestId, call_id: i32) -> Self {
+        Self {
+            request,
+            call_id,
+            engine_hang_up_due: false,
+            from: HangUpFrom::Unanswered,
         }
     }
 }
 
-impl HangUp {
-    pub fn new(request: RequestId, call_id: i32, resume: CallState) -> Self {
-        Self {
-            request,
-            call_id,
-            resume,
-            engine_hang_up_due: false,
-            from: HangUpFrom::Unanswered,
+impl CallsState {
+    /// The active call's action, when `call_id` is the active call.
+    fn action_of_mut(&mut self, call_id: i32) -> Option<&mut CallAction> {
+        self.active_call
+            .as_mut()
+            .filter(|call| call.id == call_id)
+            .map(|call| &mut call.action)
+    }
+
+    /// `acceptCall` went out for `call_id` as `accept`.
+    pub fn answer_call(&mut self, call_id: i32, accept: RequestId) {
+        if let Some(action) = self.action_of_mut(call_id) {
+            action.answer(accept);
         }
+    }
+
+    /// The `acceptCall` `accept` for `call_id` failed.
+    pub fn answer_call_failed(&mut self, call_id: i32, accept: RequestId) {
+        if let Some(action) = self.action_of_mut(call_id) {
+            action.answer_failed(accept);
+        }
+    }
+
+    /// The `acceptCall` already out for `call_id`, the active call.
+    pub fn accept_request(&self, call_id: i32) -> Option<RequestId> {
+        self.active_call
+            .as_ref()
+            .filter(|call| call.id == call_id)
+            .and_then(|call| call.action.accept_request())
+    }
+
+    /// `call_id` is the active call and was answered here.
+    pub fn answered(&self, call_id: i32) -> bool {
+        self.active_call
+            .as_ref()
+            .is_some_and(|call| call.id == call_id && call.action.is_answered())
+    }
+
+    /// The active call's hang-up in flight.
+    pub fn hang_up(&self) -> Option<&HangUp> {
+        self.active_call.as_ref()?.action.hang_up()
+    }
+
+    pub fn hang_up_mut(&mut self) -> Option<&mut HangUp> {
+        self.active_call.as_mut()?.action.hang_up_mut()
+    }
+
+    /// The `discardCall` for the active call went out.
+    pub fn hang_up_sent(&mut self, hang_up: HangUp) {
+        if let Some(action) = self.action_of_mut(hang_up.call_id) {
+            action.hang_up_sent(hang_up);
+        }
+    }
+
+    /// The hang-up `request` failed: its record, the call back in what it
+    /// was.
+    pub fn hang_up_failed(&mut self, request: Option<RequestId>) -> Option<HangUp> {
+        self.active_call.as_mut()?.action.hang_up_failed(request)
     }
 }
 
@@ -148,7 +196,6 @@ impl Session {
         };
         if let Some(hang_up) = self
             .calls
-            .progress
             .hang_up_mut()
             .filter(|hang_up| hang_up.request == pending.id)
         {

@@ -56,22 +56,25 @@ fn the_ownership_box_opened_while_sends_fail_shows_failures_to_retry() {
     assert!(driver.check_can_transfer_ownership().is_ok());
     assert!(driver.fetch_chat_owner_after_leaving(ChatId(-100)).is_ok());
     assert!(driver.session.groups.ownership.check.is_loading());
-    assert_eq!(
+    assert!(matches!(
         driver
             .session
             .groups
             .ownership
             .owner_after_leaving
             .get(&-100),
-        Some(&OwnerLookup::Loading)
-    );
+        Some(OwnerLookup::Loading(_))
+    ));
     assert!(matches!(
         driver
             .session
             .groups
             .supergroup_members
             .get(&(-100, MemberListFilter::Recent)),
-        Some(SupergroupMembersFetch::Loading)
+        Some(SupergroupMembersFetch::Loading {
+            request: Some(_),
+            ..
+        })
     ));
 }
 

@@ -197,49 +197,61 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let extra = self.session.request(purpose, None);
-        if let Err(err) = self.sender.send_json(&get_sticker_set(extra, set_id)) {
+        let sent = self.sender.send_json(&get_sticker_set(extra, set_id));
+        if sent.is_err() {
             self.session.requests.take(extra);
-            return Err(err);
+            // The refresh is over either way: a refused one is not asked
+            // again from every poll; the box keeps what it shows and says so.
+            self.session.stickers.creator_notes.push_back(
+                crate::lang::tr(crate::lang::keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN)
+                    .to_string(),
+            );
         }
         if let Some(view) = self.session.stickers.sticker_set_view.as_mut() {
             view.edits.refreshed();
         }
-        Ok(Some(extra))
+        sent.map(|()| Some(extra))
     }
 
     /// An edit renamed, changed or deleted a set: fetch both installed
     /// lists again so the "Add to … Set" menus and the panel's "edit" badge
     /// follow the server (tdesktop `notifyUpdated` after `feedSetFull`).
-    fn refetch_installed_sets_after_edit(&mut self) -> Result<(), ConnectSendError> {
-        if !self.session.stickers.creator_refetch_sets || !self.chats_path_active() {
+    pub(crate) fn refetch_installed_sets_after_edit(&mut self) -> Result<(), ConnectSendError> {
+        let stickers_due = self.session.stickers.stickers.lists.installed.is_outdated();
+        let emoji_due = self.session.stickers.emoji.lists.installed.is_outdated();
+        if !(stickers_due || emoji_due) || !self.chats_path_active() {
             return Ok(());
         }
-        self.session.take_sticker_set_refetch();
-        if !self
-            .session
-            .requests
-            .has_purpose(RequestPurpose::GetInstalledStickerSets)
-        {
+        // Each list stays `Outdated` until its refetch goes out, also when
+        // the other one's send fails; a request out from before the edit is
+        // dropped.
+        let stickers_sent = if stickers_due {
+            drop(
+                self.session
+                    .requests
+                    .take_purpose(RequestPurpose::GetInstalledStickerSets),
+            );
             self.sticker_request(
                 RequestPurpose::GetInstalledStickerSets,
                 crate::telegram::requests::get_installed_sticker_sets,
             )
-            .inspect_err(|_| {
-                // Try again on the next poll.
-                self.session.stickers.creator_refetch_sets = true;
-            })?;
-        }
-        if !self
-            .session
-            .requests
-            .has_purpose(RequestPurpose::GetInstalledEmojiSets)
-        {
+            .inspect_err(|_| self.session.stickers.stickers.lists.installed.outdate())
+            .map(|_| ())
+        } else {
+            Ok(())
+        };
+        if emoji_due {
+            drop(
+                self.session
+                    .requests
+                    .take_purpose(RequestPurpose::GetInstalledEmojiSets),
+            );
             self.emoji_set_request(
                 RequestPurpose::GetInstalledEmojiSets,
                 crate::telegram::requests_emoji::get_installed_emoji_sets,
             )
-            .inspect_err(|_| self.session.stickers.creator_refetch_sets = true)?;
+            .inspect_err(|_| self.session.stickers.emoji.lists.installed.outdate())?;
         }
-        Ok(())
+        stickers_sent
     }
 }

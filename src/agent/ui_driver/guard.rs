@@ -219,11 +219,9 @@ fn log_deferred(refusals: Vec<String>) {
             chat_id: 0,
             chat_title: String::new(),
             summary,
-            ok: false,
-            declined: true,
+            outcome: crate::agent::activity::Outcome::Declined,
             id: 0,
             message_ids: Vec::new(),
-            undone: false,
         });
     }
 }
@@ -556,7 +554,7 @@ mod tests {
             .unwrap_or_else(|| panic!("logged"));
         assert_eq!(logged.agent, "Guard test agent");
         assert_eq!(logged.tool, "ui_click");
-        assert!(logged.declined && !logged.ok);
+        assert_eq!(logged.outcome, crate::agent::activity::Outcome::Declined);
     }
     use serde_json::json;
 

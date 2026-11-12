@@ -105,8 +105,9 @@ impl QuillApp {
         };
         let country = geolocation::system_country()
             .or_else(|| {
-                self.session()
-                    .and_then(|session| session.auth_state.guessed_country_iso.clone())
+                self.session().and_then(|session| {
+                    session.auth_state.guessed_country_iso().map(str::to_string)
+                })
             })
             .and_then(|iso| country::country_center(&iso));
         // One picker per account: opened from another window, it moves
@@ -159,6 +160,9 @@ impl QuillApp {
 
     fn locate_for_picker(&mut self, cx: &mut Context<Self>) {
         let locating = geolocation::locate();
+        if let Some(sharing) = self.location_sharing_mut() {
+            sharing.locate_started();
+        }
         self.location_ui.locate =
             state::Locate::locating(self.spawn_scoped(cx, async move |this, cx| {
                 let outcome = locate_outcome(locating, cx).await;
@@ -342,16 +346,36 @@ impl QuillApp {
         self.sync_location_picker(cx);
     }
 
-    pub(in crate::ui) fn location_search_changed(
-        &mut self,
-        query: Option<String>,
-        cx: &mut Context<Self>,
-    ) {
-        // The field is open exactly while the picker holds a query: the one
-        // place that changes the picker's query also closes the field.
-        if query.is_none() {
-            self.location_ui.search = state::Search::Closed;
+    pub(in crate::ui) fn location_retry_venues(&mut self, cx: &mut Context<Self>) {
+        if let Some(sharing) = self.location_sharing_mut() {
+            sharing.retry_venues();
         }
+        self.sync_location_picker(cx);
+    }
+
+    fn location_search_changed(&mut self, edit: state::SearchEdit, cx: &mut Context<Self>) {
+        // The field is open exactly while the picker holds a query: this
+        // one transition opens, edits and closes both, and an edit with no
+        // field open reaches neither.
+        let query = match edit {
+            state::SearchEdit::Open(input) => {
+                self.location_ui.search = state::Search::Open {
+                    input,
+                    debounce: state::Wait::Idle,
+                };
+                Some(String::new())
+            }
+            state::SearchEdit::Text(text) => {
+                if self.location_ui.search.input().is_none() {
+                    return;
+                }
+                Some(text)
+            }
+            state::SearchEdit::Close => {
+                self.location_ui.search = state::Search::Closed;
+                None
+            }
+        };
         let pending = self
             .location_sharing_mut()
             .and_then(|sharing| sharing.picker_mut())

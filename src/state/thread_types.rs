@@ -2,6 +2,26 @@
 use super::*;
 use crate::telegram::envelope::ServiceAction;
 
+/// The window that asked for a thread: only its frame takes the resolved
+/// thread on, not whichever window draws first. It lives on the thread, so
+/// it ends with it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThreadAsker {
+    /// Nobody asked (a link): the first frame takes the thread.
+    Nobody,
+    /// The main window.
+    Main,
+    /// The window of this chat.
+    ChatWindow(ChatId),
+}
+
+impl ThreadAsker {
+    /// The asker for the window `scope` (`None`: the main one).
+    pub fn of(scope: Option<ChatId>) -> Self {
+        scope.map_or(Self::Main, Self::ChatWindow)
+    }
+}
+
 /// Where the open thread view is in its load sequence.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ThreadStatus {
@@ -49,6 +69,18 @@ impl ThreadStatus {
         )
     }
 
+    /// A history page answered by `request` may be applied. While the
+    /// first page is out (`LoadingHistory`) only that request's answer
+    /// counts; any other page is from a view that is gone. (The driver
+    /// enters `LoadingHistory` in the same step that sends the page, so
+    /// nothing answers during `Starting`.)
+    pub fn takes_page_of(&self, request: RequestId) -> bool {
+        match self {
+            Self::LoadingHistory(waiting) => *waiting == request,
+            _ => true,
+        }
+    }
+
     /// The first page landed: the thread shows rows (or the reload of its
     /// window is due).
     pub fn is_loaded(&self) -> bool {
@@ -69,6 +101,8 @@ pub struct ThreadView {
     /// `messageThreadInfo.message_thread_id`; 0 until resolved.
     pub thread_id: i64,
     pub status: ThreadStatus,
+    /// The window whose frame takes the thread on once it resolved.
+    pub asker: ThreadAsker,
     pub reply_count: i32,
     /// Unread replies, as tdesktop's `RepliesList` keeps it: TDLib's
     /// `unread_message_count` at open, then counted locally as rows are
@@ -107,6 +141,7 @@ impl ThreadView {
             chat_id: origin_chat_id,
             thread_id: 0,
             status: ThreadStatus::Resolving,
+            asker: ThreadAsker::Nobody,
             reply_count: 0,
             unread_count: 0,
             last_read_inbox_message_id: 0,

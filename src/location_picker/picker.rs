@@ -43,16 +43,9 @@ enum AddressStage {
     Wanted(GeoPoint),
     /// The UI is looking this place up.
     Resolving(GeoPoint),
-    Shown {
-        point: GeoPoint,
-        text: String,
-    },
-    /// The pin is lifted: the address is kept for a return to the same
-    /// place.
-    HiddenWhileMoving {
-        point: GeoPoint,
-        text: String,
-    },
+    /// The address for `point`. While the pin is lifted ([`Pin::Moving`])
+    /// it is kept but not drawn, for a return to the same place.
+    Shown { point: GeoPoint, text: String },
 }
 
 impl AddressStage {
@@ -61,7 +54,7 @@ impl AddressStage {
         match self {
             Self::Idle | Self::Postponed(_) => None,
             Self::Wanted(point) | Self::Resolving(point) => Some(*point),
-            Self::Shown { point, .. } | Self::HiddenWhileMoving { point, .. } => Some(*point),
+            Self::Shown { point, .. } => Some(*point),
         }
     }
 }
@@ -259,7 +252,9 @@ impl LocationPicker {
     }
 
     pub fn address_line(&self) -> AddressLine<'_> {
-        if let AddressStage::Shown { text, .. } = &self.address.stage {
+        if let AddressStage::Shown { text, .. } = &self.address.stage
+            && self.pin != Pin::Moving
+        {
             AddressLine::Text(text)
         } else if self.address.ever_shown {
             AddressLine::Loading
@@ -293,12 +288,11 @@ impl LocationPicker {
             return;
         }
         self.pin = Pin::Moving;
-        self.address.stage = match std::mem::take(&mut self.address.stage) {
-            AddressStage::Shown { point, text } => AddressStage::HiddenWhileMoving { point, text },
-            // A lookup not started is dropped; one under way goes on.
-            AddressStage::Postponed(_) => AddressStage::Idle,
-            other => other,
-        };
+        // A lookup not started is dropped; one under way goes on, and a
+        // shown address is kept (not drawn while the pin is lifted).
+        if matches!(self.address.stage, AddressStage::Postponed(_)) {
+            self.address.stage = AddressStage::Idle;
+        }
     }
 
     /// The map moved to `view` (a drag or a zoom step); no request yet.
@@ -318,17 +312,13 @@ impl LocationPicker {
             .retain(|(_, state)| !matches!(state, TileState::Failed(_)));
         let location = self.view.center();
         self.address.stage = match std::mem::take(&mut self.address.stage) {
-            // Back at the place the address is for.
-            AddressStage::HiddenWhileMoving { point, text }
-                if same_place(Some(point), Some(location)) =>
+            // The address, or a lookup already out, is for this place.
+            kept @ (AddressStage::Shown { .. }
+            | AddressStage::Wanted(_)
+            | AddressStage::Resolving(_))
+                if same_place(kept.point(), Some(location)) =>
             {
-                AddressStage::Shown { point, text }
-            }
-            // A lookup for this place is already out.
-            pending @ (AddressStage::Wanted(_) | AddressStage::Resolving(_))
-                if same_place(pending.point(), Some(location)) =>
-            {
-                pending
+                kept
             }
             _ => AddressStage::Postponed(location),
         };
@@ -379,13 +369,15 @@ impl LocationPicker {
             .map(|name| name.trim().to_string())
             .filter(|name| !name.is_empty())
             .unwrap_or_else(|| point.coordinates_label());
-        // An answer that lands while the pin is lifted waits for its return.
-        self.address.stage = if self.pin == Pin::Moving {
-            AddressStage::HiddenWhileMoving { point, text }
-        } else {
-            AddressStage::Shown { point, text }
-        };
+        // An answer that lands while the pin is lifted is drawn on its return.
+        self.address.stage = AddressStage::Shown { point, text };
         self.address.ever_shown = true;
+    }
+
+    /// A new "where am I" lookup began: the picker is locating again until
+    /// [`Self::geolocated`] answers it.
+    pub(super) fn locate_started(&mut self) {
+        self.here = HereState::Locating;
     }
 
     /// tdesktop `resolveCurrentLocation`'s callback. A new exact fix flies
@@ -551,13 +543,36 @@ impl LocationPicker {
         self.apply_venues(venues);
     }
 
+    /// The lookup failed: the list says so and offers a retry.
     pub(super) fn venues_failed(&mut self, generation: u64) {
         if generation == self.venues.generation {
             if let Some(ask) = self.venues.request.as_mut() {
                 ask.stage = AskStage::Failed;
             }
+            self.venues.list = VenueList::Failed;
+        }
+    }
+
+    /// There is no venue bot to ask: nothing to find, and nothing to retry.
+    pub(super) fn venues_unavailable(&mut self, generation: u64) {
+        if generation == self.venues.generation {
+            if let Some(ask) = self.venues.request.as_mut() {
+                ask.stage = AskStage::Answered;
+            }
             self.apply_venues(Vec::new());
         }
+    }
+
+    /// The Retry under a failed list: ask for the same place and text again.
+    pub fn retry_venues(&mut self) {
+        if self.venues.list != VenueList::Failed {
+            return;
+        }
+        let Some(point) = self.venues.request.as_ref().map(|ask| ask.point) else {
+            return;
+        };
+        let query = self.venues.initial_query.clone();
+        self.request_venues(point, &query);
     }
 
     fn apply_venues(&mut self, venues: Vec<Venue>) {

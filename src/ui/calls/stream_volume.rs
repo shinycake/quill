@@ -22,65 +22,111 @@ pub(crate) enum VolumeHost {
     LiveStory,
 }
 
-/// The live story header's volume pill: open while the pointer is on the
-/// sound toggle or the pill, while the slider is dragged (tdesktop's
-/// slider grabs the mouse, so a drag may leave the pill), and while the
-/// toggle has keyboard focus. Leaving closes it after tdesktop's delays,
-/// so a diagonal move from the toggle into the pill keeps it open.
+/// What holds the pill open: independent inputs, each set by its own
+/// event.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct VolumePill {
+pub(crate) struct Holds {
     toggle: bool,
     pill: bool,
     dragging: bool,
     keyboard: bool,
-    closes_at: Option<Instant>,
+}
+
+impl Holds {
+    fn any(self) -> bool {
+        self.toggle || self.pill || self.dragging || self.keyboard
+    }
+}
+
+/// The live story header's volume pill: open while the pointer is on the
+/// sound toggle or the pill, while the slider is dragged (tdesktop's
+/// slider grabs the mouse, so a drag may leave the pill), and while the
+/// toggle has keyboard focus. Leaving closes it after tdesktop's delays,
+/// so a diagonal move from the toggle into the pill keeps it open. The
+/// close timer is owned by the stage that waits for it: coming back (or
+/// `release`) drops it.
+#[derive(Default)]
+pub(crate) enum VolumePill {
+    #[default]
+    Closed,
+    Held(Holds),
+    /// Nothing holds it: it closes at `at`, when the timer redraws.
+    Closing {
+        at: Instant,
+        _timer: Task<()>,
+    },
 }
 
 impl VolumePill {
-    pub(crate) fn open(self, now: Instant) -> bool {
-        self.held() || self.closes_at.is_some_and(|at| now < at)
+    pub(crate) fn open(&self, now: Instant) -> bool {
+        match self {
+            Self::Held(_) => true,
+            Self::Closing { at, .. } => now < *at,
+            Self::Closed => false,
+        }
     }
 
-    fn held(self) -> bool {
-        self.toggle || self.pill || self.dragging || self.keyboard
+    fn holds(&self) -> Holds {
+        match self {
+            Self::Held(holds) => *holds,
+            Self::Closing { .. } | Self::Closed => Holds::default(),
+        }
     }
 
-    /// Returns the delay after which the pill closes, when this leave
-    /// starts one.
+    /// An input changed. Any hold keeps it open (dropping a close timer);
+    /// with none, an open pill closes at once and a closing one goes on.
+    fn set_hold(&mut self, change: impl FnOnce(&mut Holds)) {
+        let mut holds = self.holds();
+        change(&mut holds);
+        if holds.any() {
+            *self = Self::Held(holds);
+        } else if matches!(self, Self::Held(_)) {
+            *self = Self::Closed;
+        }
+    }
+
+    /// The pointer entered or left `part`. A leave that leaves nothing
+    /// holding it starts the close: `start_timer` gives the task that
+    /// redraws after the returned delay, which this stage then owns.
     pub(crate) fn hover(
         &mut self,
         part: VolumePart,
         inside: bool,
         now: Instant,
+        start_timer: impl FnOnce(Duration) -> Task<()>,
     ) -> Option<Duration> {
+        let mut holds = self.holds();
         match part {
-            VolumePart::Toggle => self.toggle = inside,
-            VolumePart::Pill => self.pill = inside,
+            VolumePart::Toggle => holds.toggle = inside,
+            VolumePart::Pill => holds.pill = inside,
         }
-        if inside || self.held() {
-            self.closes_at = None;
+        if inside || holds.any() {
+            *self = Self::Held(holds);
             return None;
         }
         let delay = match part {
             VolumePart::Toggle => LEAVE_TOGGLE,
             VolumePart::Pill => LEAVE_PILL,
         };
-        self.closes_at = Some(now + delay);
+        *self = Self::Closing {
+            at: now + delay,
+            _timer: start_timer(delay),
+        };
         Some(delay)
     }
 
     pub(crate) fn focus(&mut self, keyboard: bool) {
-        self.keyboard = keyboard;
+        self.set_hold(|holds| holds.keyboard = keyboard);
     }
 
     fn drag(&mut self, dragging: bool) {
-        self.dragging = dragging;
+        self.set_hold(|holds| holds.dragging = dragging);
     }
 
     /// The slider or the viewer it belonged to is gone: no leave, release
     /// or blur will come for what was held.
     pub(crate) fn release(&mut self) {
-        *self = Self::default();
+        *self = Self::Closed;
     }
 }
 
@@ -114,7 +160,7 @@ pub(crate) fn intercept_live_story_volume_keys(cx: &mut Context<QuillApp>) {
 
 impl QuillApp {
     fn stream_volume_percent(&self) -> f32 {
-        (self.players.volume * 100.0).round()
+        (self.players.volume() * 100.0).round()
     }
 
     pub(crate) fn stream_volume_shown(&self, call_id: Option<i32>) -> bool {
@@ -188,7 +234,7 @@ impl QuillApp {
         if !self.stream_volume_shown(call_id) {
             return false;
         }
-        let next = ((self.players.volume + step) / KEY_STEP).round() * KEY_STEP;
+        let next = ((self.players.volume() + step) / KEY_STEP).round() * KEY_STEP;
         self.set_playback_volume(next.clamp(0.0, 1.0), cx);
         true
     }
@@ -217,19 +263,24 @@ impl QuillApp {
 mod tests {
     use super::{LEAVE_PILL, LEAVE_TOGGLE, VolumePill};
     use crate::ui::video_player::controls::VolumePart;
+    use gpui_kit::Task;
     use std::time::{Duration, Instant};
+
+    fn timer(_: Duration) -> Task<()> {
+        Task::ready(())
+    }
 
     #[test]
     fn the_pill_stays_open_across_toggle_pill_and_drag() {
         let now = Instant::now();
         let mut pill = VolumePill::default();
-        pill.hover(VolumePart::Toggle, true, now);
+        pill.hover(VolumePart::Toggle, true, now, timer);
         assert!(pill.open(now), "opens on the toggle");
-        pill.hover(VolumePart::Pill, true, now);
-        pill.hover(VolumePart::Toggle, false, now);
+        pill.hover(VolumePart::Pill, true, now, timer);
+        pill.hover(VolumePart::Toggle, false, now, timer);
         assert!(pill.open(now), "into the pill");
         pill.drag(true);
-        assert_eq!(pill.hover(VolumePart::Pill, false, now), None);
+        assert_eq!(pill.hover(VolumePart::Pill, false, now, timer), None);
         assert!(pill.open(now), "a drag holds it");
         pill.drag(false);
         assert!(!pill.open(now));
@@ -239,17 +290,25 @@ mod tests {
     fn leaving_closes_after_tdesktops_delays() {
         let now = Instant::now();
         let mut pill = VolumePill::default();
-        pill.hover(VolumePart::Toggle, true, now);
+        pill.hover(VolumePart::Toggle, true, now, timer);
         assert_eq!(
-            pill.hover(VolumePart::Toggle, false, now),
+            pill.hover(VolumePart::Toggle, false, now, timer),
             Some(LEAVE_TOGGLE)
         );
         assert!(pill.open(now), "a diagonal move does not flicker it");
         assert!(!pill.open(now + LEAVE_TOGGLE));
-        pill.hover(VolumePart::Pill, true, now);
-        assert_eq!(pill.hover(VolumePart::Pill, false, now), Some(LEAVE_PILL));
+        pill.hover(VolumePart::Pill, true, now, timer);
+        assert_eq!(
+            pill.hover(VolumePart::Pill, false, now, timer),
+            Some(LEAVE_PILL)
+        );
         assert!(pill.open(now + Duration::from_millis(199)));
-        pill.hover(VolumePart::Toggle, true, now + Duration::from_millis(100));
+        pill.hover(
+            VolumePart::Toggle,
+            true,
+            now + Duration::from_millis(100),
+            timer,
+        );
         assert!(pill.open(now + LEAVE_PILL), "coming back keeps it");
     }
 
@@ -257,11 +316,30 @@ mod tests {
     fn a_released_pill_forgets_what_it_held() {
         let now = Instant::now();
         let mut pill = VolumePill::default();
-        pill.hover(VolumePart::Pill, true, now);
+        pill.hover(VolumePart::Pill, true, now, timer);
         pill.drag(true);
         pill.focus(true);
         pill.release();
         assert!(!pill.open(now));
+    }
+
+    #[test]
+    fn the_close_timer_belongs_to_the_closing_stage() {
+        let now = Instant::now();
+        let mut pill = VolumePill::default();
+        pill.hover(VolumePart::Toggle, true, now, timer);
+        pill.hover(VolumePart::Toggle, false, now, timer);
+        assert!(matches!(pill, VolumePill::Closing { .. }));
+        // Coming back ends the closing and its timer.
+        pill.hover(VolumePart::Pill, true, now, timer);
+        assert!(matches!(pill, VolumePill::Held(_)));
+        pill.hover(VolumePart::Pill, false, now, timer);
+        assert!(matches!(pill, VolumePill::Closing { .. }));
+        // A blur while it closes leaves it closing; a release ends it.
+        pill.focus(false);
+        assert!(matches!(pill, VolumePill::Closing { .. }));
+        pill.release();
+        assert!(matches!(pill, VolumePill::Closed));
     }
 
     #[test]

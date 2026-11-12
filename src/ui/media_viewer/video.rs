@@ -140,7 +140,7 @@ impl QuillApp {
             player.set_looping(true);
             player.set_volume(0.0);
         } else {
-            player.set_volume(self.players.volume);
+            player.set_volume(self.players.volume());
             player.set_rate(self.players.speed);
         }
         if start > 0.0 {
@@ -163,7 +163,7 @@ impl QuillApp {
             SliderState::new()
                 .min(0.0)
                 .max(100.0)
-                .default_value((self.players.volume * 100.0).round())
+                .default_value((self.players.volume() * 100.0).round())
                 .label(tr(keys::Q_AV_VOLUME_2))
         });
         // The sliders are this viewer's: their events act on this window's.

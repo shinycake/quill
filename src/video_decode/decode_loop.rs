@@ -136,10 +136,7 @@ impl Decoder {
             }
             return Turn::Worked;
         }
-        let audio = state
-            .audio
-            .clone()
-            .filter(|audio| !audio.detached.load(Ordering::Relaxed));
+        let audio = state.audio.clone().filter(|audio| !audio.is_detached());
         let sound = audio
             .as_ref()
             .filter(|audio| !audio.starved.load(Ordering::Acquire))

@@ -63,7 +63,7 @@ pub(super) fn pinned_here(chat: &ChatSummary, archived: bool) -> bool {
 /// Trailing title-line stamp: `(status mark for an outgoing last
 /// message, local time/day label)`, or `None` for an empty chat.
 pub(super) fn row_stamp(chat: &ChatSummary) -> Option<(RowStatus, String)> {
-    let last = chat.last_message.filter(|last| last.date > 0)?;
+    let last = chat.last_message().filter(|last| last.date > 0)?;
     let now = quill::local_time::civil_local(quill::local_time::now_unix());
     let date = quill::local_time::civil_local(i64::from(last.date));
     Some((

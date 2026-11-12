@@ -264,6 +264,10 @@ fn admin_list_fetch_caches() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetChatAdministrators, Some(ChatId(13)));
+    session
+        .groups
+        .admin_lists
+        .insert(13, AdminListFetch::Loading(extra));
 
     apply_json(
         &mut session,
@@ -336,10 +340,13 @@ fn set_chat_member_status_ok_invalidates_admin_list() {
 fn adding_members_marks_the_member_list_stale() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session
-        .groups
-        .basic_group_members
-        .insert(13, crate::state::SupergroupMembersFetch::Loading);
+    session.groups.basic_group_members.insert(
+        13,
+        crate::state::SupergroupMembersFetch::Loading {
+            request: None,
+            last: None,
+        },
+    );
     let extra = session.request(RequestPurpose::AddChatMember, Some(ChatId(13)));
     apply_json(
         &mut session,
@@ -359,8 +366,9 @@ fn adding_members_marks_the_member_list_stale() {
 #[test]
 fn an_ownership_transfer_marks_the_member_list_stale() {
     let (mut session, _sink) = session();
-    session.begin_ownership_transfer(13, 888, false);
-    session.finish_ownership_transfer(888, Some(13));
+    let request = session.request(RequestPurpose::Other, None);
+    session.begin_ownership_transfer(request, 13, 888, false);
+    session.finish_ownership_transfer(Some(request), 888, Some(13));
     assert_eq!(session.groups.member_list_stale, vec![13]);
 }
 
@@ -431,7 +439,7 @@ fn an_admin_list_asked_before_a_membership_change_is_dropped() {
     session
         .groups
         .admin_lists
-        .insert(13, AdminListFetch::Loading);
+        .insert(13, AdminListFetch::Loading(asked));
     apply_json(
         &mut session,
         &seq,
@@ -460,6 +468,10 @@ fn get_admin_rights_response_caches_rights() {
         RequestPurpose::Groups(GroupsPurpose::GetAdminRights { user_id: 888 }),
         Some(ChatId(13)),
     );
+    session
+        .groups
+        .admin_rights
+        .insert((13, 888), AdminRightsFetch::Loading(extra));
     apply_json(
         &mut session,
         &seq,
@@ -489,6 +501,9 @@ fn supergroup_members_fetch_caches() {
         }),
         Some(ChatId(13)),
     );
+    session
+        .groups
+        .note_member_first((13, MemberListFilter::Recent), extra, "");
     apply_json(
         &mut session,
         &seq,
@@ -522,6 +537,13 @@ fn basic_group_full_info_caches_members() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetBasicGroupFullInfo, Some(ChatId(13)));
+    session.groups.basic_group_members.insert(
+        13,
+        SupergroupMembersFetch::Loading {
+            request: Some(extra),
+            last: None,
+        },
+    );
     apply_json(
         &mut session,
         &seq,
@@ -741,6 +763,9 @@ fn g2_chat_boost_status_cached() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetChatBoostStatus, Some(ChatId(13)));
+    let fetch = session.groups.chat_boost_status.entry(13).or_default();
+    fetch.begin();
+    fetch.sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -750,7 +775,7 @@ fn g2_chat_boost_status_cached() {
             extra.0
         ),
     );
-    assert_eq!(session.groups.chat_boost_status.get(&13), Some(&(3, 42)));
+    assert_eq!(session.groups.boost_level_and_count(13), Some((3, 42)));
 }
 
 #[test]
@@ -784,6 +809,32 @@ fn g2_boost_slots_stashed_for_chain() {
     };
     let ids: Vec<i32> = slots.iter().map(|slot| slot.slot_id).collect();
     assert_eq!(ids, vec![3, 7]);
+}
+
+/// r2-14, 02-071: a boost answer or error counts for the request its box
+/// waits for: an older one (the box closed and reopened) leaves the new
+/// box's stage alone.
+#[test]
+fn an_older_boost_answer_does_not_end_the_new_boxes_wait() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let old = session.request(RequestPurpose::BoostChat, Some(ChatId(13)));
+    let asked = session.request(RequestPurpose::GetBoostSlotsForBoost, Some(ChatId(13)));
+    let mut open = crate::boost_box::BoostBoxState::new(13, false);
+    open.reading_slots(asked);
+    session.groups.boost_box = Some(open);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"BOOST_NOT_MODIFIED"}}"#,
+            old.0
+        ),
+    );
+    let state = session.groups.boost_box.as_ref().expect("the box");
+    assert!(state.waits_for(asked), "the new press still waits");
+    assert!(state.note().is_none());
 }
 
 #[test]
@@ -1176,4 +1227,56 @@ fn the_own_restriction_is_unknown_then_one_of_two_answers() {
     assert_eq!(chat.restriction(), None);
     chat.set_my_restriction(None);
     assert_eq!(chat.my_restriction, OwnRestriction::NotRestricted);
+}
+
+/// Sweep r2-17 (05-066): ownership answers and errors land only on the stage
+/// that waits for their request.
+#[test]
+fn ownership_answers_are_matched_to_their_request() {
+    use crate::state::TransferStage;
+    let (mut session, _sink) = session();
+    let first = session.request(RequestPurpose::Other, None);
+    let second = session.request(RequestPurpose::Other, None);
+    let err = TdError::from_code(400);
+    // The dialog was reopened and Submit pressed again: the first try's late
+    // error neither fails nor ends the second.
+    session.begin_ownership_transfer(first, 13, 888, false);
+    session.begin_ownership_transfer(second, 13, 888, false);
+    session.fail_ownership_transfer(Some(first), &err);
+    assert!(session.groups.ownership.transfer.waits_for(Some(second)));
+    session.finish_ownership_transfer(Some(first), 888, Some(13));
+    assert!(
+        session.groups.ownership.transfer.waits_for(Some(second)),
+        "the other transfer in flight stays"
+    );
+    // An error with nothing waiting changes nothing (it used to overwrite
+    // Idle and Done).
+    session.finish_ownership_transfer(Some(second), 888, Some(13));
+    assert!(matches!(
+        session.groups.ownership.transfer,
+        TransferStage::Done(_)
+    ));
+    session.fail_ownership_transfer(Some(second), &err);
+    assert!(matches!(
+        session.groups.ownership.transfer,
+        TransferStage::Done(_)
+    ));
+    // The owner lookup is matched the same way.
+    session.begin_owner_lookup(13, first);
+    session.begin_owner_lookup(13, second);
+    session.accept_owner_after_leaving(13, Some(first), 5);
+    assert_eq!(
+        session.groups.ownership.owner_after_leaving.get(&13),
+        Some(&crate::state::OwnerLookup::Loading(second))
+    );
+    session.fail_owner_lookup(13, Some(first), &err);
+    assert_eq!(
+        session.groups.ownership.owner_after_leaving.get(&13),
+        Some(&crate::state::OwnerLookup::Loading(second))
+    );
+    session.accept_owner_after_leaving(13, Some(second), 5);
+    assert_eq!(
+        session.groups.ownership.owner_after_leaving.get(&13),
+        Some(&crate::state::OwnerLookup::Loaded(5))
+    );
 }

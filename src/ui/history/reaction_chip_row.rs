@@ -22,12 +22,21 @@ pub(super) fn album_reactions_owner<'a>(
         .find(|message| has_reactions(message))
 }
 
+/// Where a reaction row stands.
+#[derive(Clone, Copy)]
+pub(in crate::ui) enum ChipPlace<'a> {
+    /// Inside the bubble, closing it: the time rides on the row's line.
+    InBubble(&'a super::super::message_text::FooterMeta),
+    /// On the chat background, under bubble-less media or a service
+    /// message: the chips take the service pill colors and the time stays
+    /// elsewhere (tdesktop reactions without `Flag::InBubble`).
+    Outside,
+}
+
 /// The reaction row under `message`, `None` when it has no reactions.
-/// `outside`: under bubble-less media (see [`reaction_chip_row`]).
-pub(super) fn message_reactions_row(
+pub(in crate::ui) fn message_reactions_row(
     message: &HistoryMessage,
-    footer_meta: &super::super::message_text::FooterMeta,
-    outside: bool,
+    place: ChipPlace,
     session: Option<&Session>,
     files: &quill::state::FileMap,
     media_roots: &[PathBuf],
@@ -67,8 +76,7 @@ pub(super) fn message_reactions_row(
         session,
         files,
         media_roots,
-        footer_meta,
-        outside,
+        place,
         cx,
     ))
 }
@@ -83,13 +91,10 @@ fn reaction_chip_row(
     session: Option<&Session>,
     files: &quill::state::FileMap,
     media_roots: &[PathBuf],
-    footer_meta: &super::super::message_text::FooterMeta,
-    // Under bubble-less media (`quill::media_bubble`): the chips stand on
-    // the chat background in the service pill colors and leave the time to
-    // the picture (tdesktop reactions without `Flag::InBubble`).
-    outside: bool,
+    place: ChipPlace,
     cx: &mut Context<QuillApp>,
 ) -> Stateful<Div> {
+    let outside = matches!(place, ChipPlace::Outside);
     let outside_bg = super::super::chat_palette::service_bg(cx.theme().secondary.opacity(0.85));
     let unchosen_bg = if outside {
         outside_bg
@@ -274,7 +279,9 @@ fn reaction_chip_row(
         });
     }
     // Telegram Desktop keeps the time on the reactions' line.
-    if !outside && let Some(footer) = message_footer_meta(footer_meta) {
+    if let ChipPlace::InBubble(footer_meta) = place
+        && let Some(footer) = message_footer_meta(footer_meta)
+    {
         row = row.child(div().ml_auto().pl_2().child(footer));
     }
     row

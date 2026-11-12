@@ -8,7 +8,7 @@
 
 use super::super::app::QuillApp;
 use super::super::composer_field::emoji_token;
-use super::super::dialogs::{AttachMode, OptionAttach, OptionMediaSlot};
+use super::super::dialogs::{AttachMode, OptionAttach, OptionMediaSlot, PollPick, Preparing};
 use super::super::media_panel::PanelTab;
 use crate::ui::status_note::StatusNote;
 use gpui_base::input::InputContent;
@@ -45,7 +45,13 @@ impl AttachTarget {
 impl QuillApp {
     fn attach_ref(&self, target: AttachTarget) -> Option<&OptionAttach> {
         match target {
-            AttachTarget::Row(index) => self.chat_ui.poll_dialog.as_ref()?.attach.get(index),
+            AttachTarget::Row(index) => self
+                .chat_ui
+                .poll_dialog
+                .as_ref()?
+                .options
+                .get(index)
+                .map(|row| &row.attach),
             AttachTarget::Added => self
                 .message_ui
                 .poll_add_option
@@ -56,7 +62,13 @@ impl QuillApp {
 
     fn attach_mut(&mut self, target: AttachTarget) -> Option<&mut OptionAttach> {
         match target {
-            AttachTarget::Row(index) => self.chat_ui.poll_dialog.as_mut()?.attach.get_mut(index),
+            AttachTarget::Row(index) => self
+                .chat_ui
+                .poll_dialog
+                .as_mut()?
+                .options
+                .get_mut(index)
+                .map(|row| &mut row.attach),
             AttachTarget::Added => self
                 .message_ui
                 .poll_add_option
@@ -71,7 +83,7 @@ impl QuillApp {
             .chat_ui
             .poll_dialog
             .as_ref()
-            .and_then(|dialog| dialog.attach.iter().position(|attach| attach.id == id));
+            .and_then(|dialog| dialog.options.iter().position(|row| row.attach.id == id));
         match row {
             Some(index) => Some(AttachTarget::Row(index)),
             None => self
@@ -83,18 +95,6 @@ impl QuillApp {
         }
     }
 
-    /// Every media slot being written, rows first.
-    fn attach_slots(&mut self) -> Vec<&mut OptionAttach> {
-        let mut slots: Vec<&mut OptionAttach> = Vec::new();
-        if let Some(dialog) = self.screen.chat_ui.poll_dialog.as_mut() {
-            slots.extend(dialog.attach.iter_mut());
-        }
-        if let Some(panel) = self.screen.message_ui.poll_add_option.as_mut() {
-            slots.push(&mut panel.attach);
-        }
-        slots
-    }
-
     /// The field of an option being written.
     fn option_input(&self, target: AttachTarget) -> Option<Entity<TextareaState>> {
         match target {
@@ -102,9 +102,9 @@ impl QuillApp {
                 .chat_ui
                 .poll_dialog
                 .as_ref()?
-                .option_inputs
+                .options
                 .get(index)
-                .cloned(),
+                .map(|row| row.input.clone()),
             AttachTarget::Added => self
                 .message_ui
                 .poll_add_option
@@ -139,11 +139,12 @@ impl QuillApp {
             .ghost()
             .tooltip(tr(keys::Q_MEDIA_ATTACH_A_PICTURE_STICKER_OR))
             .on_click(cx.listener(move |this, _, _, cx| {
+                let picking = this.picking_for(target);
                 if let Some(attach) = this.attach_mut(target) {
                     attach.mode = match attach.mode {
-                        AttachMode::Idle => AttachMode::Menu,
+                        AttachMode::Idle if !picking => AttachMode::Menu,
                         AttachMode::Menu => AttachMode::Idle,
-                        // The link field and the panel waits own the area.
+                        // The link field and a panel pick own the area.
                         _ => return,
                     };
                 }
@@ -160,6 +161,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let attach = self.attach_ref(target)?;
+        let pick = self.pickers.poll_pick;
         let key = target.key();
         let muted = cx.theme().muted_foreground;
         let mut area = div()
@@ -197,7 +199,7 @@ impl QuillApp {
                             cx.notify();
                         })),
                 );
-        } else if attach.awaiting_emoji() {
+        } else if pick == PollPick::Emoji(attach.id) {
             shown = true;
             area = area
                 .child(
@@ -211,13 +213,11 @@ impl QuillApp {
                         .label(tr(keys::BOX_DONE))
                         .ghost()
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            if let Some(attach) = this.attach_mut(target) {
-                                attach.leave(|mode| matches!(mode, AttachMode::AwaitEmoji));
-                            }
+                            this.forget_poll_pick(target);
                             this.close_media_panel(cx);
                         })),
                 );
-        } else if attach.awaiting_sticker() {
+        } else if pick == PollPick::Sticker(attach.id) {
             shown = true;
             area = area
                 .child(
@@ -231,9 +231,7 @@ impl QuillApp {
                         .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            if let Some(attach) = this.attach_mut(target) {
-                                attach.leave(|mode| matches!(mode, AttachMode::AwaitSticker));
-                            }
+                            this.forget_poll_pick(target);
                             cx.notify();
                         })),
                 );
@@ -259,10 +257,10 @@ impl QuillApp {
                     )),
                 );
         }
-        if attach.media != OptionMediaSlot::None {
+        if !attach.media.is_none() {
             shown = true;
             let (label, thumb): (String, Option<PathBuf>) = match &attach.media {
-                OptionMediaSlot::Preparing(path) => (
+                OptionMediaSlot::Preparing(Preparing { path, .. }) => (
                     tr_with(
                         keys::Q_MEDIA_PREPARING,
                         &[("file_name", &(file_name(path)).to_string())],
@@ -384,9 +382,10 @@ impl QuillApp {
             cx.notify();
             return;
         };
+        let Some(slot) = self.attach_ref(target).map(|attach| attach.id) else {
+            return;
+        };
         let shown = path.to_string_lossy().into_owned();
-        self.set_poll_option_media(target, OptionMediaSlot::Preparing(shown.clone()));
-        cx.notify();
         let read = cx.background_executor().spawn({
             let path = path.clone();
             async move {
@@ -420,45 +419,74 @@ impl QuillApp {
                 }
             }
         });
-        self.spawn_scoped(cx, async move |this, cx| {
+        // The slot owns the task: the answer is applied only while the slot
+        // still waits for it.
+        let task = self.spawn_scoped(cx, async move |this, cx| {
             let result = read.await;
             let _ = this.update(cx, |this, cx| {
-                this.finish_poll_option_file(&shown, result, cx)
+                this.finish_poll_option_file(slot, result, cx)
             });
-        })
-        .detach();
+        });
+        self.set_poll_option_media(
+            target,
+            OptionMediaSlot::Preparing(Preparing::new(shown, task)),
+        );
+        cx.notify();
     }
 
-    /// The file for the option preparing `shown` was read.
+    /// The file for the option in slot `slot` was read.
     fn finish_poll_option_file(
         &mut self,
-        shown: &str,
+        slot: u64,
         result: Result<(PollOptionInput, Option<PathBuf>), String>,
         cx: &mut Context<Self>,
     ) {
-        let waiting = OptionMediaSlot::Preparing(shown.to_string());
+        let Some(target) = self.target_of_attach(slot) else {
+            return;
+        };
         let mut note = None;
-        for attach in self.attach_slots() {
-            if attach.media != waiting {
-                continue;
-            }
-            match &result {
+        if let Some(attach) = self.attach_mut(target)
+            && matches!(attach.media, OptionMediaSlot::Preparing(_))
+        {
+            match result {
                 Ok((media, frame)) => {
-                    attach.media = OptionMediaSlot::Ready(media.clone());
-                    attach.preview = frame.clone();
+                    attach.media = OptionMediaSlot::Ready(media);
+                    attach.preview = frame;
                 }
                 Err(why) => {
                     attach.media = OptionMediaSlot::None;
-                    note = Some(why.clone());
+                    note = Some(why);
                 }
             }
-            break;
         }
-        // Nothing waiting: the option was removed or its media replaced.
         if let Some(note) = note {
             self.set_note(StatusNote::error(note));
         }
         cx.notify();
+    }
+
+    /// The option `target` is the panel's recipient now.
+    fn picking_for(&self, target: AttachTarget) -> bool {
+        self.attach_ref(target).is_some_and(|attach| {
+            matches!(
+                self.pickers.poll_pick,
+                PollPick::Sticker(id) | PollPick::Emoji(id) if id == attach.id
+            )
+        })
+    }
+
+    /// The media panel closed or left the compose mode: no option waits
+    /// for its next sticker or emoji (the prompt and its Cancel go), so a
+    /// panel opened later sends to the chat again.
+    pub(in crate::ui) fn end_poll_option_waits(&mut self) {
+        self.pickers.poll_pick = PollPick::None;
+    }
+
+    /// Drop the panel's recipient when it is `target`'s.
+    fn forget_poll_pick(&mut self, target: AttachTarget) {
+        if self.picking_for(target) {
+            self.pickers.poll_pick = PollPick::None;
+        }
     }
 
     /// "Sticker": open the sticker panel; the next sticker clicked in it goes
@@ -468,12 +496,12 @@ impl QuillApp {
         target: AttachTarget,
         cx: &mut Context<Self>,
     ) {
-        for attach in self.attach_slots() {
-            attach.leave(|mode| matches!(mode, AttachMode::AwaitSticker));
-        }
-        if let Some(attach) = self.attach_mut(target) {
-            attach.mode = AttachMode::AwaitSticker;
-        }
+        let Some(attach) = self.attach_mut(target) else {
+            return;
+        };
+        attach.mode = AttachMode::Idle;
+        let id = attach.id;
+        self.pickers.poll_pick = PollPick::Sticker(id);
         self.open_media_panel(PanelTab::Stickers, cx);
     }
 
@@ -484,30 +512,29 @@ impl QuillApp {
         target: AttachTarget,
         cx: &mut Context<Self>,
     ) {
-        for attach in self.attach_slots() {
-            attach.leave(|mode| matches!(mode, AttachMode::AwaitEmoji));
-        }
-        if let Some(attach) = self.attach_mut(target) {
-            attach.mode = AttachMode::AwaitEmoji;
-        }
+        let Some(attach) = self.attach_mut(target) else {
+            return;
+        };
+        attach.mode = AttachMode::Idle;
+        let id = attach.id;
+        self.pickers.poll_pick = PollPick::Emoji(id);
         self.open_media_panel(PanelTab::Emoji, cx);
     }
 
     /// The field an emoji pick goes to, while the panel is open for one.
-    fn poll_emoji_field(&self) -> Option<Entity<TextareaState>> {
+    fn poll_emoji_field(&mut self) -> Option<Entity<TextareaState>> {
+        let PollPick::Emoji(slot) = self.pickers.poll_pick else {
+            return None;
+        };
         if !self.pickers.media_panel.is_open() {
             return None;
         }
-        let rows = self
-            .chat_ui
-            .poll_dialog
-            .as_ref()
-            .map_or(0, |dialog| dialog.attach.len());
-        (0..rows)
-            .map(AttachTarget::Row)
-            .chain([AttachTarget::Added])
-            .find(|target| self.attach_ref(*target).is_some_and(|a| a.awaiting_emoji()))
-            .and_then(|target| self.option_input(target))
+        let Some(target) = self.target_of_attach(slot) else {
+            // The option the panel was opened for is gone.
+            self.pickers.poll_pick = PollPick::None;
+            return None;
+        };
+        self.option_input(target)
     }
 
     /// An emoji picked in the panel. `true` when it went to an option.
@@ -573,22 +600,15 @@ impl QuillApp {
         size: (i32, i32),
         cx: &mut Context<Self>,
     ) -> bool {
+        let PollPick::Sticker(slot) = self.pickers.poll_pick else {
+            return false;
+        };
         if !self.pickers.media_panel.is_open() {
             return false;
         }
-        let rows = self
-            .chat_ui
-            .poll_dialog
-            .as_ref()
-            .map_or(0, |dialog| dialog.attach.len());
-        let target = (0..rows)
-            .map(AttachTarget::Row)
-            .chain([AttachTarget::Added])
-            .find(|target| {
-                self.attach_ref(*target)
-                    .is_some_and(|a| a.awaiting_sticker())
-            });
-        let Some(target) = target else {
+        // One sticker is waited for, and the pick ends with it.
+        self.pickers.poll_pick = PollPick::None;
+        let Some(target) = self.target_of_attach(slot) else {
             return false;
         };
         self.set_poll_option_media(
@@ -600,9 +620,6 @@ impl QuillApp {
                 emoji: emoji.to_string(),
             }),
         );
-        if let Some(attach) = self.attach_mut(target) {
-            attach.leave(|mode| matches!(mode, AttachMode::AwaitSticker));
-        }
         cx.notify();
         true
     }

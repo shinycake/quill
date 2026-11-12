@@ -92,8 +92,8 @@ pub fn top_promotion<'a>(session: &'a Session, chat: &ChatSummary) -> Option<&'a
         ),
         ChatKind::Private { user_id } => {
             session.user(user_id.0).is_some_and(|user| user.is_bot)
-                && chat.last_message.is_none()
-                && chat.last_preview.is_empty()
+                && chat.last.is_none()
+                && chat.last_preview().is_empty()
         }
         _ => false,
     };
@@ -474,7 +474,16 @@ mod tests {
         }
         assert!(applies(&s, 3), "a bot with an empty history");
         if let Some(chat) = s.chats.get_mut(&3) {
-            chat.last_preview = "hello".into();
+            chat.last = Some(crate::state::LastPreview::plain(
+                "hello",
+                crate::state::ChatLastMessage {
+                    id: crate::ids::MessageId(1),
+                    date: 1,
+                    is_outgoing: false,
+                    sender: None,
+                    send_state: Default::default(),
+                },
+            ));
         }
         assert!(!applies(&s, 3), "a bot with messages");
     }

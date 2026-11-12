@@ -51,7 +51,7 @@ impl QuillApp {
         if !matches!(participant.participant_id, MessageSender::User { .. }) {
             return div().child(initials_avatar(name, 56.)).into_any_element();
         }
-        if !call.is_my_video_enabled {
+        if !call.my_video.is_enabled() {
             return div().child(initials_avatar(name, 56.)).into_any_element();
         }
         let key = quill::calls::live_video::LiveKey::Local { call_id: call.id };
@@ -200,7 +200,7 @@ impl QuillApp {
                             .accessibility_label(tr(keys::GROUP_CALL_CLOSE))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.group_call_boxes.close_call_box();
+                                this.close_call_box();
                                 this.close_conference_link();
                                 cx.notify();
                             })),

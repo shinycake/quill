@@ -132,25 +132,31 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let (chat, message) = info_target(&summary, chat_id, message_id);
-        match self.live.as_mut() {
+        // The box opens once the ask went out: a refused one leaves only
+        // its note, no box host for a box that cannot show.
+        let asked = match self.live.as_mut() {
             Some(live) => {
-                if live
+                let sent = live
                     .driver
                     .request_giveaway_info(chat, message, summary)
-                    .is_err()
-                {
+                    .is_ok();
+                if !sent {
                     self.set_note(StatusNote::error(tr(
                         keys::Q_MONEY_COULD_NOT_LOAD_THE_GIVEAWAY,
                     )));
                 }
+                sent
             }
             None => {
                 self.set_note(StatusNote::info(tr(
                     keys::Q_MONEY_GIVEAWAY_DETAILS_NEED_A_SIGNED,
                 )));
+                false
             }
+        };
+        if asked {
+            self.open_box(crate::ui::shell::DialogKind::GiveawayInfo);
         }
-        self.open_box(crate::ui::shell::DialogKind::GiveawayInfo);
         cx.notify();
     }
 

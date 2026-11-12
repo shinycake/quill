@@ -387,6 +387,12 @@ impl QuillApp {
         let loaded = self
             .session()
             .is_some_and(|s| s.settings.scope_notification_settings.contains_key(&scope));
+        let refused = self.session().is_some_and(|s| {
+            s.settings
+                .scope_notification_settings
+                .error(&scope)
+                .is_some()
+        });
         let muted = settings.mute_for > 0;
         // The three sections repeat each setting: search lands on the first.
         let first = NotificationSettingsScope::ALL.first() == Some(&scope);
@@ -463,6 +469,24 @@ impl QuillApp {
             .rounded_md()
             .border_1()
             .border_color(cx.theme().border)
+            .children(refused.then(|| {
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .text_sm()
+                    .child(tr(keys::Q_PREFS_COULD_NOT_LOAD_NOTIFICATION_DEFAULTS))
+                    .child(
+                        Button::new(format!("scope-retry-{scope:?}"))
+                            .label(tr(keys::Q_CHAT_RETRY))
+                            .small()
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.fetch_notification_settings();
+                                cx.notify();
+                            })),
+                    )
+            }))
             .child(
                 self.setting_spot(
                     spot(&["notifications.mute"]),

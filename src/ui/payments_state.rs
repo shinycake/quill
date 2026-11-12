@@ -70,6 +70,13 @@ pub(crate) struct PaymentUi {
     /// The 2-step verification password of the Gram withdrawal
     /// (`premium_ui::grams_withdraw`); emptied when it is sent and when the
     /// box closes.
+    /// A Premium limit toast claimed by the window it shows in (the one
+    /// last pressed when it appeared). It lives with the account on
+    /// screen, so a switch drops it.
+    pub(super) limit_toast: Option<(
+        quill::premium_limits::PremiumLimitKind,
+        Option<quill::ids::ChatId>,
+    )>,
     pub(super) grams_withdraw_password: super::fragment_password::PasswordField,
     /// The transfer picker's people for the current search
     /// (`gift_transfer_view`).
@@ -121,15 +128,12 @@ impl PaymentUi {
                 .placeholder(tr(keys::Q_MONEY_SEARCH))
                 .submit_on_enter(false)
         });
-        cx.subscribe_in(
-            &pick_search,
-            window,
-            |this, _, event: &InputEvent, _, cx| {
-                if matches!(event, InputEvent::Change) {
-                    this.pick_search_changed(cx);
-                }
-            },
-        )
+        cx.subscribe_in(&pick_search, window, |_, _, event: &InputEvent, _, cx| {
+            // The pickers read the query when they draw.
+            if matches!(event, InputEvent::Change) {
+                cx.notify();
+            }
+        })
         .detach();
         let gift_recipient_search = cx.new(|cx| {
             InputState::new(window, cx)
@@ -222,6 +226,7 @@ impl PaymentUi {
             gift_export_password: super::fragment_password::PasswordField::new(
                 gift_export_password,
             ),
+            limit_toast: None,
             grams_withdraw_password: super::fragment_password::PasswordField::new(
                 grams_withdraw_password,
             ),

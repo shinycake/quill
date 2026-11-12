@@ -19,12 +19,20 @@ use quill::telegram::envelope::ChatKind;
 /// account on screen drops it.
 #[derive(Debug)]
 enum InlineStage {
-    /// The bot's chat is being looked up; its start waits to be sent.
-    Opening { parameter: String },
+    /// The bot's chat is being looked up; its start waits to be sent. A
+    /// lookup nobody answered ends the trip at `until`
+    /// ([`QuillApp::flush_inline_return`]).
+    Opening {
+        parameter: String,
+        until: std::time::Instant,
+    },
     /// The start went out; only messages after `baseline` can bring the
     /// user back.
     Started { baseline: Baseline },
 }
+
+/// How long the bot's chat may take to open before the trip is given up.
+const OPENING_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Where "after the start" begins in the bot's chat.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,6 +60,12 @@ impl InlineReturn {
     /// Whether the round trip waits to send `bot_id`'s start.
     pub(in crate::ui) fn waits_for_start(&self, bot_id: i64) -> bool {
         self.bot_id == bot_id && matches!(self.stage, InlineStage::Opening { .. })
+    }
+
+    /// Whether the round trip was begun on `account`: a trip a chat window
+    /// kept across an account switch belongs to the account it began on.
+    pub(in crate::ui) fn is_of(&self, account: &AccountKey) -> bool {
+        &self.account == account
     }
 
     fn started(&self) -> bool {
@@ -89,7 +103,8 @@ impl QuillApp {
         if here {
             return self.composer_ui.inline_return.take();
         }
-        self.windows.take_slot_inline_return(bot_id)
+        let account = self.session().map(|session| session.account.clone())?;
+        self.windows.take_slot_inline_return(bot_id, &account)
     }
 
     /// Remember the chat to return to and have the bot's start sent once
@@ -111,6 +126,7 @@ impl QuillApp {
             username: username.to_string(),
             stage: InlineStage::Opening {
                 parameter: parameter.to_string(),
+                until: std::time::Instant::now() + OPENING_WAIT,
             },
         });
     }
@@ -199,15 +215,28 @@ impl QuillApp {
             Some(newest) => Baseline::At(newest),
             None => Baseline::OwnStart,
         };
-        let Some(ret) = self.composer_ui.inline_return.as_mut() else {
-            return false;
-        };
-        let InlineStage::Opening { parameter } =
-            std::mem::replace(&mut ret.stage, InlineStage::Started { baseline })
+        let Some(parameter) =
+            self.composer_ui
+                .inline_return
+                .as_ref()
+                .and_then(|ret| match &ret.stage {
+                    InlineStage::Opening { parameter, .. } => Some(parameter.clone()),
+                    InlineStage::Started { .. } => None,
+                })
         else {
             return false;
         };
-        self.press_bot_start(chat_id, bot_id, parameter, cx);
+        // The trip starts once the start is on its way; a start that could
+        // not be sent ends it, so it does not wait for an own message that
+        // never comes.
+        let sent = self.press_bot_start(chat_id, bot_id, parameter, cx);
+        if sent {
+            if let Some(ret) = self.composer_ui.inline_return.as_mut() {
+                ret.stage = InlineStage::Started { baseline };
+            }
+        } else {
+            self.composer_ui.inline_return = None;
+        }
         true
     }
 
@@ -218,8 +247,15 @@ impl QuillApp {
         let Some(ret) = self.composer_ui.inline_return.as_ref() else {
             return;
         };
-        let InlineStage::Started { baseline } = ret.stage else {
-            return;
+        let baseline = match ret.stage {
+            InlineStage::Started { baseline } => baseline,
+            // A lookup that nobody answered gives the trip up.
+            InlineStage::Opening { until, .. } => {
+                if std::time::Instant::now() >= until {
+                    self.composer_ui.inline_return = None;
+                }
+                return;
+            }
         };
         // The trip lives while the user stays in the bot's chat: leaving it
         // (another chat, the origin by hand, no chat) ends it, so a message

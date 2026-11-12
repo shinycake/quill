@@ -75,7 +75,7 @@ impl Session {
         use crate::telegram::envelope::CallState;
         let one_to_one = self.calls.active_call.as_ref().is_some_and(|call| {
             !matches!(
-                call.state,
+                call.phase(),
                 CallState::HangingUp | CallState::Discarded { .. } | CallState::Error { .. }
             )
         });

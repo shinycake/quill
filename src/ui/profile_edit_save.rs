@@ -111,7 +111,6 @@ impl QuillApp {
             cx.notify();
             return;
         };
-        live.driver.session.users_state.profile_edit_error = None;
         let mut sent = Vec::new();
         for edit in edits {
             let result = match &edit {

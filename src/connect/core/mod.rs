@@ -4,10 +4,8 @@ use super::*;
 use crate::credentials::TelegramCredentials;
 use crate::ids::{ChatId, ChatMessage, MessageId, RequestId};
 use crate::state::{AiAnswer, AiResult};
-use crate::state::{
-    ComposerLinkPreview, InstantViewPage, LinkPreviewFetch, RequestPurpose, Session, ShutdownPhase,
-};
 use crate::state::{GroupsPurpose, MessagesPurpose, StickersPurpose, ThreadsPurpose};
+use crate::state::{InstantViewPage, RequestPurpose, Session};
 use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::StoryListView;
 use crate::telegram::envelope::{
@@ -27,6 +25,7 @@ mod answer_captures;
 pub(crate) mod batch;
 mod lifecycle;
 mod pumps;
+mod stale_fetches;
 
 use std::sync::{Arc, Mutex};
 
@@ -371,31 +370,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         // no Instant View) falls back to the browser like TGX — the URL
         // is stashed for the UI drain, never rendered as a reader.
         let instant_view_fallback = self.take_instant_view_fallback(&owned.envelope);
-        // MED4b: capture the `getLinkPreview` answer before `apply` takes
-        // the pending request; the composer chip reads
-        // `Session::composer_previews`. A late answer for a URL no longer
-        // kept is dropped.
-        let link_preview_answer = self.take_link_preview_answer(&owned.envelope);
-        // MED4b: a 404/400 or an empty answer is "no link info" (TGX
-        // `isNotFound`); any other error is `Failed`, asked again when the URL
-        // is typed again. Every answer ends "Getting link info".
-        let link_preview_failed: Option<(String, LinkPreviewFetch)> = match &owned.envelope.payload
-        {
-            EnvelopePayload::Messages(MessagesPayload::LinkPreview { .. }) => None,
-            payload => owned.envelope.extra.and_then(|id| {
-                let miss = match payload {
-                    EnvelopePayload::Error(err) if err.code == 404 || err.code == 400 => {
-                        LinkPreviewFetch::NotFound
-                    }
-                    EnvelopePayload::Error(_) => LinkPreviewFetch::Failed,
-                    _ => LinkPreviewFetch::NotFound,
-                };
-                (self.session.requests.purpose(id) == Some(RequestPurpose::GetLinkPreview))
-                    .then_some(id)
-                    .and_then(|id| self.session.messages.composer_preview_urls.remove(&id))
-                    .map(|url| (url, miss))
-            }),
-        };
         // Slice CL2: our `createPrivateChat` answer — the bare `chat`
         // parses as `UpdateNewChat`; the `@extra` tells it apart from a
         // genuine `updateNewChat`. Captured before `apply` takes the
@@ -529,6 +503,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let send_outcome = Self::send_outcome(&owned.envelope.payload);
         let answer_extra = owned.envelope.extra;
         self.session.apply(owned);
+        self.session.stickers.manager.step_answered(answer_extra);
         self.run_deferred_caption(send_outcome);
         // The answers captured above are stashed before any step that can
         // fail: a send error later in this ingest returns early with `?`,
@@ -589,18 +564,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some(fallback) = instant_view_fallback {
             self.session.messages.instant_view_fallbacks.push(fallback);
         }
-        // MED4b: stash the `getLinkPreview` answer for the composer
-        // chip; a 404 becomes "no link info" (`Some(None)`); answers for
-        // superseded URLs are dropped.
-        if let Some(answer) = link_preview_answer {
-            self.session
-                .messages
-                .composer_previews
-                .answered(&answer.url, answer.fetch);
-        }
-        if let Some((url, miss)) = link_preview_failed {
-            self.session.messages.composer_previews.answered(&url, miss);
-        }
         if paid_prices_change {
             self.sync_paid_guard();
             self.resume_waiting_statistics();
@@ -629,28 +592,25 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             self.save_media_prefs();
         }
-        // Slice S4: persist per-network settings seeded from
-        // `getAutoDownloadSettingsPresets` (the reducer cannot touch the
-        // filesystem, so it marks them dirty instead).
-        if self.session.settings.data_storage_dirty && self.save_data_storage_prefs().is_ok() {
-            // Kept while the save fails: the next ingest writes again.
-            self.session.settings.data_storage_dirty = false;
-        }
+        self.persist_data_storage_if_dirty();
         if cleared_download_cache {
             let _ = self.maybe_fetch_storage_statistics();
         }
-        // Batch 6: a finished reset / cancel / login-email step left the
-        // cached password state out of date.
-        if std::mem::take(&mut self.session.auth_state.twofa_flow.refetch) {
-            let _ = self.refresh_password_state();
+        // Batch 6: a reset / cancel / login-email step left the cached
+        // password state out of date; a refused send keeps it so.
+        if self.session.auth_state.password_state.is_outdated()
+            && let Ok(request) = self.refresh_password_state()
+        {
+            self.session.auth_state.password_state.refetching(request);
         }
+        // Phase 9.2: `updateStoryPostSucceeded` queued poster chats whose
+        // active stories should be refreshed (an own story posted from
+        // another client appears in the tray this way). Asked as the update
+        // lands; a refused send stays queued for the next ingest, never
+        // for every frame.
+        self.refresh_story_trays();
         if let Some(chat_id) = unpinned_all {
-            self.session
-                .messages
-                .pinned_messages
-                .entry(chat_id.0)
-                .or_default()
-                .succeed(Vec::new());
+            self.session.messages.pins_cleared(chat_id.0);
         }
         if let Some(chat_id) = pins_changed.filter(|chat| self.session.chat_is_shown(*chat)) {
             let _ = self.fetch_pinned_messages(chat_id);
@@ -689,13 +649,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 {
                     let _ = self.load_chat_welcome_messages(chat_id);
                 }
-                RequestPurpose::BoostChat
-                    if !self
-                        .session
-                        .groups
-                        .chat_boost_status
-                        .contains_key(&chat_id.0) =>
-                {
+                RequestPurpose::BoostChat if self.session.groups.boost_status_wanted(chat_id.0) => {
                     let _ = self.fetch_chat_boost_status(chat_id);
                 }
                 _ => {}
@@ -849,11 +803,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.maybe_search_gifs(false)?;
         }
         if gif_mutation_ok || gif_saved_changed {
-            drop(
-                self.session
-                    .requests
-                    .take_purpose(RequestPurpose::GetSavedAnimations),
-            );
+            self.drop_in_flight(RequestPurpose::GetSavedAnimations);
         }
         if installed_stickers_answer
             && let crate::state::SuggestFor::WaitingForSets(emoji) =
@@ -905,50 +855,31 @@ impl<S: JsonSender> ConnectDriver<S> {
         // and invites the people picked; the other side follows the link.
         let _ = self.maybe_continue_conference();
         if archive_catalog_changed {
-            drop(
-                self.session
-                    .requests
-                    .take_purpose(RequestPurpose::GetArchivedStickerSets),
-            );
+            self.drop_in_flight(RequestPurpose::GetArchivedStickerSets);
             if self.session.stickers.stickers.open
                 && self.session.stickers.stickers.tab == crate::state::StickerTab::Archived
             {
-                drop(
-                    self.session
-                        .requests
-                        .take_purpose(RequestPurpose::GetStickerSet),
-                );
-                self.session.stickers.stickers.set = crate::state::StickerSetStage::Idle;
+                self.drop_in_flight(RequestPurpose::GetStickerSet);
+                self.session.stickers.stickers.selection.stage =
+                    crate::state::StickerSetStage::Idle;
                 self.fetch_archived_stickers(false)?;
             }
         }
         if sticker_set_changed {
-            drop(
-                self.session
-                    .requests
-                    .take_purpose(RequestPurpose::GetInstalledStickerSets),
-            );
+            self.drop_in_flight(RequestPurpose::GetInstalledStickerSets);
             if self.session.stickers.stickers.open {
                 self.refresh_installed_sticker_sets()?;
             }
         }
         if sticker_mutation_ok {
             // An older fetch can answer after the mutation with stale contents.
-            drop(
-                self.session
-                    .requests
-                    .take_purpose(RequestPurpose::GetFavoriteStickers),
-            );
+            self.drop_in_flight(RequestPurpose::GetFavoriteStickers);
             if self.session.stickers.stickers.open {
                 self.sticker_request_favorites()?;
             }
         }
         if recent_cleared {
-            drop(
-                self.session
-                    .requests
-                    .take_purpose(RequestPurpose::GetRecentStickers),
-            );
+            self.drop_in_flight(RequestPurpose::GetRecentStickers);
         }
         if trending_answer {
             self.mark_trending_stickers_viewed()?;

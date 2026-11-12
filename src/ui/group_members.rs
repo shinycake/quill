@@ -38,13 +38,27 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.open_member_dialog_on(chat_id, MemberTab::All, window, cx);
+    }
+
+    /// Open the member dialog on `tab`, so its first ask is that tab's
+    /// page and not the All tab's.
+    pub(super) fn open_member_dialog_on(
+        &mut self,
+        chat_id: ChatId,
+        tab: MemberTab,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let is_basic_group = self.session().is_some_and(|session| {
             session
                 .chats
                 .get(&chat_id.0)
                 .is_some_and(|chat| matches!(chat.kind, ChatKind::BasicGroup { .. }))
         });
-        self.admin.member_dialog = Some(MemberDialog::new(window, cx, chat_id, is_basic_group));
+        let mut dialog = MemberDialog::new(window, cx, chat_id, is_basic_group);
+        dialog.tab = tab;
+        self.admin.member_dialog = Some(dialog);
         self.open_box(DialogKind::Member);
         // Slice G1: a fresh dialog open clears the last action error —
         // stale failures from a previous open must not linger.
@@ -85,9 +99,11 @@ impl QuillApp {
             return;
         };
         let query = dialog.search_input.read(cx).value().trim().to_string();
-        dialog.searched = query.clone();
         let (chat_id, is_basic_group, tab) = (dialog.chat_id, dialog.is_basic_group, dialog.tab);
         let Some(live) = self.live.as_mut() else {
+            if let Some(dialog) = self.admin.member_dialog.as_mut() {
+                dialog.searched = query;
+            }
             return;
         };
         let result = if is_basic_group {
@@ -102,8 +118,15 @@ impl QuillApp {
                 .refresh_supergroup_members(chat_id, filter, &query)
                 .map(|_| ())
         };
-        if result.is_err() {
-            self.set_note(StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_LOAD_MEMBERS)));
+        // The list follows the query once it was asked for; a send that
+        // failed leaves the last asked query's list on screen.
+        match result {
+            Ok(()) => {
+                if let Some(dialog) = self.admin.member_dialog.as_mut() {
+                    dialog.searched = query;
+                }
+            }
+            Err(_) => self.set_note(StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_LOAD_MEMBERS))),
         }
         cx.notify();
     }
@@ -323,7 +346,7 @@ impl QuillApp {
                 .track_scroll(&dialog_state.scroll)
                 .on_scroll(cx.listener(|this, _, _, _| this.member_dialog_load_more()));
             match fetch {
-                None | Some(SupergroupMembersFetch::Loading) => {
+                None | Some(SupergroupMembersFetch::Loading { .. }) => {
                     list = list.child(
                         div()
                             .text_sm()

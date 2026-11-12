@@ -539,7 +539,8 @@ pub(super) fn corner_mask(
     // Device pixels: the radius square, cut at the middle of the tile.
     let size = corner_mask_size(radius, tile);
     let key = (corner, radius, size, bgra);
-    if let Some(hit) = MASKS.with(|masks| masks.borrow_mut().get(&key)) {
+    // A re-entrant draw builds its mask without the cache.
+    if let Some(hit) = MASKS.with(|masks| masks.try_borrow_mut().ok()?.get(&key)) {
         return hit;
     }
     let (w, h) = size;
@@ -566,11 +567,17 @@ pub(super) fn corner_mask(
     let image = Arc::new(RenderImage::new(smallvec::SmallVec::from_buf([
         image::Frame::new(image),
     ])));
-    MASKS.with(|masks| {
-        if let Some(old) = masks.borrow_mut().insert(key, image.clone()) {
-            super::image_budget::retire_all([old]);
-        }
+    // The evicted mask is retired after the cache is let go: retiring runs
+    // code that may draw a mask again.
+    let evicted = MASKS.with(|masks| {
+        masks
+            .try_borrow_mut()
+            .ok()
+            .and_then(|mut masks| masks.insert(key, image.clone()))
     });
+    if let Some(old) = evicted {
+        super::image_budget::retire_all([old]);
+    }
     image
 }
 

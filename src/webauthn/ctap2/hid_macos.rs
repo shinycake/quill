@@ -245,7 +245,12 @@ impl HidDevice for IoKitDevice {
     }
 
     fn read_report(&mut self, timeout: Duration) -> Result<Option<Vec<u8>>, HidError> {
-        let until = Instant::now() + timeout;
+        // A timeout too long to add to the clock reads as no deadline.
+        let now = Instant::now();
+        let until = now
+            .checked_add(timeout)
+            .or_else(|| now.checked_add(Duration::from_secs(86_400 * 365)))
+            .unwrap_or(now);
         loop {
             if let Some(mut report) = self.inbox.reports.pop_front() {
                 report.resize(self.report_len, 0);

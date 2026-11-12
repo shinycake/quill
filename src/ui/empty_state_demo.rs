@@ -4,7 +4,7 @@
 //! `archive` or `community` (still loading).
 #![deny(clippy::indexing_slicing)]
 
-use crate::ui::app::QuillApp;
+use crate::ui::app::{ChatListFilter, QuillApp};
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 
 register_demos![
@@ -28,22 +28,21 @@ impl QuillApp {
                     is_shareable: false,
                     has_my_invite_links: false,
                 }];
-                self.chat_list.view = crate::ui::chat_list_state::ChatListView::Folder(9);
+                self.set_chat_list_view(ChatListFilter::All, Some(9));
             }
             "unread" => {
                 for chat in session.chats.values_mut() {
                     chat.unread_count = 0;
                     chat.is_marked_as_unread = false;
                 }
-                self.chat_list.view =
-                    crate::ui::chat_list_state::ChatListView::Unread { folder: None };
+                self.set_chat_list_view(ChatListFilter::Unread, None);
             }
             "archive" => {
                 session.archive_order.clear();
-                self.chat_list.view = crate::ui::chat_list_state::ChatListView::Archived;
+                self.set_chat_list_view(ChatListFilter::Archived, None);
             }
             "community" => {
-                self.chat_list.view = crate::ui::chat_list_state::ChatListView::Community(77);
+                self.set_chat_list_view(ChatListFilter::Community(77), None);
             }
             _ => {
                 session.main_order.clear();

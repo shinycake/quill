@@ -353,7 +353,6 @@ mod tests {
             "Maya removed from Work folder"
         );
     }
-    use crate::chatlist_style::ChatPreviewStyle;
     use crate::ids::{ChatId, MessageId, UserId};
     use crate::state::ChatSummary;
     use crate::telegram::envelope::{ChatNotificationSettings, UserStatusKind};
@@ -377,18 +376,13 @@ mod tests {
             archive_is_pinned: false,
             folder_positions: BTreeMap::new(),
             notification_settings: ChatNotificationSettings::default(),
-            last_preview: String::new(),
-            last_preview_style: ChatPreviewStyle::default(),
-            last_preview_sender: String::new(),
-            last_preview_thumb: None,
-            last_message: None,
+            last: None,
             sender_actions: Vec::new(),
             draft: None,
             my_member: Default::default(),
             my_restriction: Default::default(),
             is_forum: None,
             photo_file_id: None,
-            can_send_basic_messages: true,
             permissions: None,
             can_be_deleted_for_all_users: false,
             can_be_deleted_only_for_self: false,

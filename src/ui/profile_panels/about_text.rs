@@ -95,11 +95,7 @@ pub(super) fn about_text_menu(
     // it cannot leak into a later menu.
     let (link, plan) = owner
         .update(cx, |this, _| {
-            let link = this
-                .message_ui
-                .right_clicked_link
-                .take()
-                .map(|noted| noted.link);
+            let link = this.take_right_press_link();
             (
                 link,
                 this.about_menu_plan(chat_id, text, selection.as_deref()),

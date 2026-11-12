@@ -59,18 +59,27 @@ impl<S: JsonSender> ConnectDriver<S> {
             && !refresh
             && (matches!(
                 self.session.groups.supergroup_members.get(&key),
-                Some(SupergroupMembersFetch::Loading | SupergroupMembersFetch::Loaded { .. })
-            ) || self.session.requests.has_purpose_for_chat(purpose, chat_id))
+                Some(SupergroupMembersFetch::Loaded { .. })
+            ) || self
+                .session
+                .groups
+                .supergroup_members
+                .get(&key)
+                .is_some_and(SupergroupMembersFetch::in_flight)
+                || self.session.requests.has_purpose_for_chat(purpose, chat_id))
         {
             return Ok(None);
         }
-        let previous = self
-            .session
-            .groups
-            .supergroup_members
-            .insert(key, SupergroupMembersFetch::Loading);
+        // The page shown (or kept after a membership change) stays drawn
+        // while this one is out; a send that is refused puts back what was
+        // there, with how it was asked.
+        let previous = self.session.groups.supergroup_members.get(&key).cloned();
         let previous_ask = self.session.groups.member_asks.get(&key).cloned();
         let extra = self.session.request(purpose, Some(chat_id));
+        self.session
+            .groups
+            .supergroup_members
+            .insert(key, SupergroupMembersFetch::asked(previous.clone(), extra));
         self.session.groups.note_member_first(key, extra, query);
         let filter_json = match filter {
             MemberListFilter::Recent => supergroup_members_filter_recent_json(),
@@ -147,18 +156,26 @@ impl<S: JsonSender> ConnectDriver<S> {
             None => return Ok(None),
         };
         let purpose = RequestPurpose::GetBasicGroupFullInfo;
-        if matches!(
-            self.session.groups.basic_group_members.get(&chat_id.0),
-            Some(SupergroupMembersFetch::Loading | SupergroupMembersFetch::Loaded { .. })
-        ) || self.session.requests.has_purpose_for_chat(purpose, chat_id)
+        if self
+            .session
+            .groups
+            .basic_group_members
+            .get(&chat_id.0)
+            .is_some_and(|fetch| {
+                matches!(fetch, SupergroupMembersFetch::Loaded { .. }) || fetch.in_flight()
+            })
+            || self.session.requests.has_purpose_for_chat(purpose, chat_id)
         {
             return Ok(None);
         }
+        let extra = self.session.request(purpose, Some(chat_id));
+        // The page shown (or kept after a membership change) stays drawn
+        // while this one is out.
+        let previous = self.session.groups.basic_group_members.remove(&chat_id.0);
         self.session
             .groups
             .basic_group_members
-            .insert(chat_id.0, SupergroupMembersFetch::Loading);
-        let extra = self.session.request(purpose, Some(chat_id));
+            .insert(chat_id.0, SupergroupMembersFetch::asked(previous, extra));
         if let Err(err) = self
             .sender
             .send_json(&get_basic_group_full_info(extra, basic_group_id))

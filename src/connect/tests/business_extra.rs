@@ -6,7 +6,7 @@ use crate::business_bots::{BotRights, ConnectedBot};
 use crate::business_settings::BusinessRecipients;
 use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::platform::MemorySecretStore;
-use crate::state::ChatLinkSave;
+use crate::state::ChatLinkAnswer;
 use crate::state::fetch::Fetch;
 use crate::telegram::client::copy_and_parse;
 use std::sync::Arc;
@@ -103,10 +103,10 @@ fn chat_links_load_create_edit_and_delete() {
         .cloned()
         .unwrap();
     assert_eq!(links[0].link, "https://t.me/m/New");
-    assert_eq!(
-        driver.session.settings.business_extra.chat_link_save,
-        ChatLinkSave::Saved
-    );
+    assert!(matches!(
+        driver.session.settings.business_extra.chat_link_answer,
+        ChatLinkAnswer::Saved(_)
+    ));
 
     driver
         .edit_chat_link("https://t.me/m/Ab", "Hey", "Promo 2")
@@ -441,15 +441,17 @@ fn start_page_and_ads_requests() {
 }
 
 #[test]
-fn a_refused_link_save_goes_back_to_idle_and_only_its_own_answer_counts() {
+fn a_link_save_answer_names_the_request_it_answers() {
     let (mut driver, recorder, sink, seq) = driver_parts();
-    let save = |driver: &ConnectDriver<_>| driver.session.settings.business_extra.chat_link_save;
-    driver.create_chat_link("Hello", "").unwrap();
-    assert!(matches!(save(&driver), ChatLinkSave::Saving(_)));
+    let answer =
+        |driver: &ConnectDriver<_>| driver.session.settings.business_extra.chat_link_answer;
+    let first_id = driver.create_chat_link("Hello", "").unwrap();
+    assert_eq!(
+        answer(&driver),
+        ChatLinkAnswer::None,
+        "nothing answered yet"
+    );
     let first = extra_of(&recorder, "createBusinessChatLink");
-    // The box was closed and a new one opened: the old save no longer drives it.
-    driver.session.settings.business_extra.chat_link_save = ChatLinkSave::Idle;
-    assert_eq!(save(&driver), ChatLinkSave::Idle);
     feed(
         &mut driver,
         &seq,
@@ -458,9 +460,10 @@ fn a_refused_link_save_goes_back_to_idle_and_only_its_own_answer_counts() {
             r#"{{"@type":"businessChatLink","@extra":"{first}","link":"https://t.me/m/Old","text":{{"@type":"formattedText","text":"Hello","entities":[]}},"title":"","view_count":0}}"#
         ),
     );
-    assert_eq!(save(&driver), ChatLinkSave::Idle);
+    assert_eq!(answer(&driver), ChatLinkAnswer::Saved(first_id));
 
-    driver.create_chat_link("Again", "").unwrap();
+    let second_id = driver.create_chat_link("Again", "").unwrap();
+    assert_ne!(first_id, second_id);
     let second = recorder
         .snapshot()
         .iter()
@@ -475,7 +478,7 @@ fn a_refused_link_save_goes_back_to_idle_and_only_its_own_answer_counts() {
         &sink,
         &format!(r#"{{"@type":"error","@extra":"{second}","code":400,"message":"X"}}"#),
     );
-    assert_eq!(save(&driver), ChatLinkSave::Idle);
+    assert_eq!(answer(&driver), ChatLinkAnswer::Refused(second_id));
     assert!(driver.session.settings.business.error.is_some());
 }
 

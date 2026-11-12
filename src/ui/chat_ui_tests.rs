@@ -305,8 +305,12 @@ fn another_chat_drops_the_reschedule_picker_and_the_scheduled_list(cx: &mut Test
     let other = other_chat(&app, &mut vcx);
     open(&app, &mut vcx, CHAT);
     app.update_in(&mut vcx, |app, window, cx| {
-        app.chat_ui.scheduled_dialog = crate::ui::composer::ScheduledDialog::Ready;
+        app.chat_ui.scheduled_box.open_fresh();
         app.open_schedule_picker(ScheduleTarget::Reschedule(MessageId(5)), window, cx);
+        assert!(
+            !app.chat_ui.scheduled_box.is_open(),
+            "the picker replaced the list: one box at a time"
+        );
     });
     frames(&mut vcx);
     app.read_with(&vcx, |app, _| {
@@ -315,12 +319,12 @@ fn another_chat_drops_the_reschedule_picker_and_the_scheduled_list(cx: &mut Test
     open(&app, &mut vcx, other);
     app.read_with(&vcx, |app, _| {
         assert!(
-            app.chat_ui.schedule_picker.is_none(),
+            app.chat_ui.schedule_picker.as_ref().is_none(),
             "the picker was the last chat's"
         );
         assert!(!app.chat_ui.schedule_popup_shown());
         assert!(
-            !app.chat_ui.scheduled_dialog.is_open(),
+            !app.chat_ui.scheduled_box.is_open(),
             "the list was the last chat's"
         );
     });
@@ -561,7 +565,10 @@ fn a_forward_answer_keeps_a_newer_selection(cx: &mut TestAppContext) {
             app.selecting_in(FORUM_CHAT),
             "a late answer from the same topic does not end the newer selection"
         );
-        assert!(app.share.forward_result.is_some(), "the answer still shows");
+        assert!(
+            app.chat_ui.forward_result.is_some(),
+            "the answer still shows"
+        );
     });
 }
 
@@ -580,6 +587,39 @@ fn another_chat_drops_the_secret_inline_bot_alert(cx: &mut TestAppContext) {
     assert!(
         app.read_with(&vcx, |app, _| !app.chat_ui.bot_alert.is_pending()),
         "the alert stayed with the chat it was raised in"
+    );
+}
+
+/// The forward result banner is the source chat's: a window showing another
+/// chat draws none, and leaving the chat takes it along.
+#[gpui_kit::test]
+fn the_forward_result_banner_stays_with_its_source_chat(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let other = other_chat(&app, &mut vcx);
+    let answer = |from: ChatId| quill::state::ForwardResult {
+        dest_chat_id: other,
+        dest_title: "B".into(),
+        from_chat_id: from,
+        from_topic: quill::ids::TopicId::None,
+        requested: 1,
+        forwarded_ids: vec![MessageId(1)],
+    };
+    open(&app, &mut vcx, CHAT);
+    app.update(&mut vcx, |app, cx| {
+        app.present_forward_result(answer(other), cx);
+    });
+    assert!(
+        app.read_with(&vcx, |app, _| app.chat_ui.forward_result.is_none()),
+        "a result for another chat is not drawn here"
+    );
+    app.update(&mut vcx, |app, cx| {
+        app.present_forward_result(answer(CHAT), cx);
+    });
+    assert!(app.read_with(&vcx, |app, _| app.chat_ui.forward_result.is_some()));
+    open(&app, &mut vcx, other);
+    assert!(
+        app.read_with(&vcx, |app, _| app.chat_ui.forward_result.is_none()),
+        "the banner went with its chat"
     );
 }
 

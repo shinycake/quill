@@ -103,22 +103,30 @@ impl<S: JsonSender> ConnectDriver<S> {
         let mut sent = false;
         for user_id in wanted {
             if self.session.users.contains_key(&user_id)
-                || !self.session.bots.asked_bot_users.insert(user_id)
+                || !self
+                    .session
+                    .bots
+                    .bot_users
+                    .get(&user_id)
+                    .is_none_or(crate::state::fetch::Fetch::can_ask)
             {
                 continue;
             }
             let extra = self
                 .session
-                .request(RequestPurpose::Bots(BotsPurpose::GroupBotUser), None);
+                .request_for_user(RequestPurpose::Bots(BotsPurpose::GroupBotUser), user_id);
             if self
                 .sender
                 .send_json(&crate::premium_hub::ton::get_user(extra, user_id))
                 .is_err()
             {
                 self.session.requests.take(extra);
-                self.session.bots.asked_bot_users.remove(&user_id);
                 continue;
             }
+            let mut fetch = crate::state::fetch::Fetch::default();
+            fetch.begin();
+            fetch.sent(extra);
+            self.session.bots.bot_users.insert(user_id, fetch);
             sent = true;
         }
         sent
@@ -199,7 +207,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.bots.similar_bots.contains_key(&bot_user_id) {
+        // Asked once: an answer or a request in flight is not asked again,
+        // a refused one is.
+        if self
+            .session
+            .bots
+            .similar_bots
+            .get(&bot_user_id)
+            .is_some_and(|fetch| !fetch.can_ask())
+        {
             return Ok(None);
         }
         let purpose = RequestPurpose::GetBotSimilarBots;
@@ -213,10 +229,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         // The section is loading from the moment the request is out; its
         // answer or its refusal ends the stage.
-        self.session
+        let fetch = self
+            .session
             .bots
             .similar_bots
-            .insert(bot_user_id, crate::state::SimilarBotsFetch::Loading);
+            .entry(bot_user_id)
+            .or_default();
+        fetch.begin();
+        fetch.sent(extra);
         Ok(Some(extra))
     }
 
@@ -542,28 +562,33 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// `getRecentInlineBots`, once per session, when the user types "@".
     pub fn maybe_fetch_recent_inline_bots(&mut self) -> Result<(), ConnectSendError> {
+        // Asked once: a request out or an answer waits, a failed ask goes
+        // out again with the next "@".
         if !self.chats_path_active()
-            || self
+            || !self
                 .session
                 .bots
                 .reply_keyboards
                 .recent_inline_bots
-                .is_some()
-        {
-            return Ok(());
-        }
-        if self
-            .session
-            .requests
-            .has_purpose(RequestPurpose::GetRecentInlineBots)
+                .can_ask()
         {
             return Ok(());
         }
         let extra = self
             .session
             .request(RequestPurpose::GetRecentInlineBots, None);
-        self.send_json_request(extra, &get_recent_inline_bots(extra))
-            .map(|_| ())
+        let recent = &mut self.session.bots.reply_keyboards.recent_inline_bots;
+        recent.begin();
+        recent.sent(extra);
+        let sent = self.send_json_request(extra, &get_recent_inline_bots(extra));
+        if sent.is_err() {
+            self.session.bots.reply_keyboards.recent_inline_bots.failed(
+                Some(extra),
+                "not sent",
+                false,
+            );
+        }
+        sent.map(|_| ())
     }
 
     /// `shareUsersWithBot` after the user confirmed the picked users.
@@ -734,9 +759,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Bots slice: resolve `@botname` → bot user id via `searchPublicChat`
-    /// (schema 1.8.67, line 11603). Sets the resolve slot to `Resolving`
-    /// with a fresh generation; the answer (or error) resolves it in
-    /// `Session::apply` (stale generations are ignored). A local
+    /// (schema 1.8.67, line 11603). Sets the username's entry to `Resolving`
+    /// under this request; the answer (or error) resolves it in
+    /// `Session::apply`, and only that request does. A local
     /// user-cache hit short-circuits: the caller should check
     /// `session.users` first and skip this when the username is known.
     pub fn resolve_inline_bot(
@@ -746,23 +771,21 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.bots.inline_bot_resolve_seq =
-            self.session.bots.inline_bot_resolve_seq.wrapping_add(1);
-        let generation = self.session.bots.inline_bot_resolve_seq;
-        self.session.bots.inline_bot_resolve = Some(InlineBotResolve::Resolving {
-            username: username.to_string(),
-            generation,
-        });
-        let extra = self.session.request(
-            RequestPurpose::Bots(BotsPurpose::ResolveInlineBot { generation }),
-            None,
-        );
+        let extra = self
+            .session
+            .request(RequestPurpose::Bots(BotsPurpose::ResolveInlineBot), None);
+        self.session
+            .bots
+            .set_inline_bot(InlineBotResolve::Resolving {
+                username: username.to_string(),
+                request: extra,
+            });
         let json = search_public_chat(extra, username);
         match self.sender.send_json(&json) {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.bots.inline_bot_resolve = Some(InlineBotResolve::Failed {
+                self.session.bots.set_inline_bot(InlineBotResolve::Failed {
                     username: username.to_string(),
                     reason: "could not look up the bot".to_string(),
                 });
@@ -821,7 +844,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         else {
             return Ok(None);
         };
-        if draft.draft_id != draft_id || !draft.can_stop {
+        if draft.draft_id != draft_id || !draft.can_stop() {
             return Ok(None);
         }
         let purpose = RequestPurpose::Bots(BotsPurpose::StopPendingMessage { topic_id, draft_id });
@@ -850,7 +873,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .filter(|draft| {
                 matches!(
                     draft.stop,
-                    crate::state::BotStopStage::Running | crate::state::BotStopStage::Failed
+                    crate::state::BotStopStage::Running { .. } | crate::state::BotStopStage::Failed
                 )
             })
         {

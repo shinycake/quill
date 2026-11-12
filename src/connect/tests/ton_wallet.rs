@@ -80,7 +80,7 @@ fn explorer_prefix_is_asked_once_and_applied() {
         "https://tonscan.org/EQabc"
     );
     // The boosts value is left alone: it was not what was asked.
-    assert_eq!(rig.driver.session.groups.boosts_per_gift, None);
+    assert!(rig.driver.session.groups.boosts_per_gift.is_idle());
 }
 
 #[test]
@@ -111,17 +111,17 @@ fn wallet_messages_preview_in_the_chat_list_and_send_nothing() {
         r#"{"@type":"updateChatLastMessage","chat_id":1,"last_message":{"id":10,"chat_id":1,"date":1,"is_outgoing":false,"sender_id":{"@type":"messageSenderUser","user_id":1},"content":{"@type":"messageTonWalletTransfer","sender_user_id":1,"transaction_id":"t","peer_address":"EQabc","amount":2500000000,"comment":"hi","is_comment_encrypted":false}},"positions":[]}"#,
     );
     let chat = rig.driver.session.chats.get(&1).expect("chat");
-    assert_eq!(chat.last_preview, "sent you 2.5 Grams");
+    assert_eq!(chat.last_preview(), "sent you 2.5 Grams");
     rig.ingest(
         r#"{"@type":"updateChatLastMessage","chat_id":1,"last_message":{"id":11,"chat_id":1,"date":2,"is_outgoing":true,"sender_id":{"@type":"messageSenderUser","user_id":9},"content":{"@type":"messageTonWalletTransfer","sender_user_id":9,"transaction_id":"t2","peer_address":"EQabc","amount":-1000000000,"comment":"","is_comment_encrypted":false}},"positions":[]}"#,
     );
     let chat = rig.driver.session.chats.get(&1).expect("chat");
-    assert_eq!(chat.last_preview, "You sent Dana 1 Gram");
+    assert_eq!(chat.last_preview(), "You sent Dana 1 Gram");
     rig.ingest(
         r#"{"@type":"updateChatLastMessage","chat_id":1,"last_message":{"id":12,"chat_id":1,"date":3,"is_outgoing":false,"sender_id":{"@type":"messageSenderUser","user_id":1},"content":{"@type":"messageTonConnectRequest","session_id":"5","state":{"@type":"tonConnectRequestStatePending","expiration_date":4000000000},"dapp_name":"Fragment","topic":"","trace_id":""}},"positions":[]}"#,
     );
     let chat = rig.driver.session.chats.get(&1).expect("chat");
-    assert_eq!(chat.last_preview, "Wallet request from Fragment");
+    assert_eq!(chat.last_preview(), "Wallet request from Fragment");
     assert_eq!(
         rig.recorder.snapshot().len(),
         before,

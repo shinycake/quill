@@ -93,6 +93,7 @@ fn group_rejoin_answer_reconnects_native_transport() {
         .as_mut()
         .expect("tracked call")
         .screen_share = crate::state::GroupScreenShare::Starting {
+        request: crate::ids::RequestId(1),
         answer: "old-answer".into(),
     };
     // `need_rejoin` auto-rejoins with a fresh offer and a reset
@@ -497,7 +498,7 @@ fn a_presentation_that_cannot_connect_is_ended_on_telegram() {
         .as_ref()
         .expect("call");
     assert!(!call.screen_share.is_sharing());
-    assert!(call.screen_share_error.is_some());
+    assert!(call.screen_share.error().is_some());
     let _ = std::fs::remove_dir_all(&dir);
 }
 

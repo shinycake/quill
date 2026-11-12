@@ -421,7 +421,9 @@ thread_local! {
 pub(crate) fn note_playing(display: u64, source: Source, now: Instant, next: Instant) {
     let until = next.max(now).checked_add(PLAYING_SLACK).unwrap_or(now);
     PLAYING.with(|playing| {
-        let mut playing = playing.borrow_mut();
+        let Ok(mut playing) = playing.try_borrow_mut() else {
+            return;
+        };
         playing.retain(|(id, other, until)| *until >= now && (*id, *other) != (display, source));
         playing.push((display, source, until));
     });
@@ -431,10 +433,11 @@ pub(crate) fn note_playing(display: u64, source: Source, now: Instant, next: Ins
 /// then does `source` draw on the grid, sharing window frames with it.
 pub(crate) fn shared(display: u64, source: Source, now: Instant) -> bool {
     PLAYING.with(|playing| {
-        playing
-            .borrow()
-            .iter()
-            .any(|(id, other, until)| *id == display && *other != source && *until >= now)
+        playing.try_borrow().is_ok_and(|playing| {
+            playing
+                .iter()
+                .any(|(id, other, until)| *id == display && *other != source && *until >= now)
+        })
     })
 }
 
@@ -445,7 +448,7 @@ pub(crate) fn display_grid(display: u64, vsync: Vsync, now: Instant) -> Option<C
         return None;
     }
     GRIDS.with(|grids| {
-        let mut grids = grids.borrow_mut();
+        let mut grids = grids.try_borrow_mut().ok()?;
         let known = grids.iter().position(|(id, _)| *id == display);
         let grid = match known.and_then(|index| grids.get(index)) {
             Some((_, grid)) => grid.follow(vsync),

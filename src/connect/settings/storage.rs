@@ -12,9 +12,6 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn maybe_fetch_storage_statistics(
         &mut self,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        if !self.chats_path_active() {
-            return Err(ConnectSendError::InvalidRequest);
-        }
         if !self.session.settings.storage_stats.can_ask()
             || self
                 .session
@@ -23,16 +20,30 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
+        // A refused ask ends in the failure the usage list draws with its
+        // Retry, never in a list that waits for good.
+        if !self.chats_path_active() {
+            self.session
+                .settings
+                .storage_stats
+                .fail("Couldn't load storage usage.");
+            return Err(ConnectSendError::InvalidRequest);
+        }
         let extra = self
             .session
             .request(RequestPurpose::GetStorageStatistics, None);
         match self.sender.send_json(&get_storage_statistics(extra, 50)) {
             Ok(()) => {
                 self.session.settings.storage_stats.begin();
+                self.session.settings.storage_stats.sent(extra);
                 Ok(Some(extra))
             }
             Err(err) => {
                 self.session.requests.take(extra);
+                self.session
+                    .settings
+                    .storage_stats
+                    .fail("Couldn't load storage usage.");
                 Err(err)
             }
         }
@@ -57,11 +68,13 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// per-network settings from the answer; TDLib has no getter for
     /// the *current* values, so this is the only server read.
     pub fn fetch_auto_download_presets(&mut self) -> Result<(), ConnectSendError> {
-        if !self.chats_path_active() {
-            return Err(ConnectSendError::InvalidRequest);
-        }
         if !self.session.settings.data_storage.seeded.askable() {
             return Ok(());
+        }
+        if !self.chats_path_active() {
+            self.session.settings.data_storage.seeded =
+                PresetsSeed::Failed("Couldn't load auto-download settings.".to_owned());
+            return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self
             .session
@@ -107,6 +120,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         settings: AutoDownloadNetSettings,
     ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
+            self.session.settings.data_storage_save.fail(
+                StorageSaveKind::AutoDownload,
+                "Couldn't save auto-download settings.",
+            );
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(
@@ -139,9 +156,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.session.settings.data_storage.seeded.is_seeded() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if !self.chats_path_active() {
-            return Err(ConnectSendError::InvalidRequest);
-        }
         // Every network is sent even if one send fails, so a failure never
         // leaves the later networks out of a toggle that covers all three.
         let mut first_error = None;
@@ -171,7 +185,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         file_types: &[&str],
         chat_ids: &[i64],
     ) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || self.session.settings.storage_clear.is_clearing() {
+        if self.session.settings.storage_clear.is_clearing() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !self.chats_path_active() {
+            self.session.settings.storage_clear =
+                StorageClear::Failed("Couldn't clear the cache.".to_string());
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(RequestPurpose::OptimizeStorage, None);
@@ -198,13 +217,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         size: Option<i64>,
         keep: Option<i64>,
-    ) -> Result<(), ConnectSendError> {
+    ) -> Result<Vec<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
+            self.session
+                .settings
+                .data_storage_save
+                .fail(StorageSaveKind::Limits, "Couldn't save the storage limits.");
             return Err(ConnectSendError::InvalidRequest);
         }
         // All four options go out even if one send fails; the first error
-        // is the outcome.
+        // is the outcome. The requests that went out are the ones the
+        // caller waits for.
         let mut first_error = None;
+        let mut sent = Vec::new();
         self.session
             .settings
             .data_storage_save
@@ -226,9 +251,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .data_storage_save
                     .fail(StorageSaveKind::Limits, "Couldn't save the storage limits.");
                 first_error.get_or_insert(err);
+            } else {
+                sent.push(extra);
             }
         }
-        first_error.map_or(Ok(()), Err)
+        first_error.map_or(Ok(sent), Err)
     }
 
     /// TDLib keeps every cached file until the optimizer runs, and it only
@@ -247,7 +274,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.set_storage_limits(
                 Some(crate::storage_limits::DEFAULT_SIZE),
                 Some(crate::storage_limits::DEFAULT_KEEP),
-            )?;
+            )
+            .map(|_| ())?;
         }
         self.note_storage_limits_seeded();
         Ok(())
@@ -265,6 +293,27 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.session.settings.data_storage.storage_limits_seeded = Seed::Seeded;
         let _ = self.save_data_storage_prefs();
+    }
+
+    /// Slice S4: persist per-network settings seeded from
+    /// `getAutoDownloadSettingsPresets` or saved (the reducer cannot touch
+    /// the filesystem, so it marks them dirty instead). One write attempt
+    /// per mark: a write that fails (a read-only folder, a full disk) is
+    /// said on the Data & Storage page and tried again when the settings
+    /// change next, not on every ingest.
+    pub(crate) fn persist_data_storage_if_dirty(&mut self) {
+        if !std::mem::take(&mut self.session.settings.data_storage_dirty) {
+            return;
+        }
+        let written = self.save_data_storage_prefs();
+        let save = &mut self.session.settings.data_storage_save;
+        match written {
+            Ok(()) => save.begin(StorageSaveKind::Persist),
+            Err(_) => save.fail(
+                StorageSaveKind::Persist,
+                "Couldn't save the Data and Storage settings.",
+            ),
+        }
     }
 
     /// Slice S4: persist the per-network auto-download settings

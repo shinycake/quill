@@ -131,17 +131,18 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Fetch the IP-based default country once.
     pub fn fetch_country_code(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        if self.session.auth_state.guessed_country_iso.is_some()
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetCountryCode)
-        {
+        if !self.session.auth_state.guessed_country.is_idle() {
             return Ok(None);
         }
         let extra = self.session.request(RequestPurpose::GetCountryCode, None);
+        self.session.auth_state.guessed_country.begin();
+        self.session.auth_state.guessed_country.sent(extra);
         if let Err(err) = self.sender.send_json(&get_country_code(extra)) {
             self.session.requests.take(extra);
+            self.session
+                .auth_state
+                .guessed_country
+                .failed(Some(extra), "not sent", false);
             return Err(err);
         }
         Ok(Some(extra))
@@ -338,7 +339,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// duplicated; `password_op_send` enforces the connection gate.
     /// `Ok(None)` = no request needed.
     pub fn fetch_password_state(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        if self.session.auth_state.password_state.is_some()
+        if self.session.auth_state.password_state.get().is_some()
             || self.session.auth_state.password_state_loading()
         {
             return Ok(None);
@@ -399,8 +400,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .auth_state
             .password_state
-            .as_ref()
-            .is_some_and(|s| s.pending_email_pattern.is_some())
+            .get()
+            .is_some_and(|s| s.pending_email.is_some())
         {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -415,8 +416,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .auth_state
             .password_state
-            .as_ref()
-            .is_some_and(|s| s.pending_email_pattern.is_some())
+            .get()
+            .is_some_and(|s| s.pending_email.is_some())
         {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -441,8 +442,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .session
                 .auth_state
                 .password_state
-                .as_ref()
-                .is_some_and(|s| s.pending_email_pattern.is_some())
+                .get()
+                .is_some_and(|s| s.pending_email.is_some())
         {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -458,7 +459,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .auth_state
             .password_state
-            .as_ref()
+            .get()
             .is_some_and(|s| s.has_password && s.has_recovery_email_address)
         {
             return Err(ConnectSendError::InvalidRequest);
@@ -467,7 +468,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.password_op_send(PasswordOp::RequestRecoveryCode, request_password_recovery)?;
         // Only a request that went out drops the "code sent to" step: a
         // refused one leaves the emailed code's dialog where it was.
-        self.session.auth_state.twofa_flow.code_wait.end_recovery();
+        self.session.auth_state.twofa_flow.end_recovery();
         Ok(sent)
     }
 
@@ -495,7 +496,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .auth_state
             .password_state
-            .as_ref()
+            .get()
             .is_some_and(|s| s.has_password)
         {
             return Err(ConnectSendError::InvalidRequest);
@@ -510,7 +511,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .auth_state
             .password_state
-            .as_ref()
+            .get()
             .is_some_and(|s| s.pending_reset_date > 0)
         {
             return Err(ConnectSendError::InvalidRequest);
@@ -528,24 +529,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         let sent = self.password_op_send(PasswordOp::SetLoginEmail, |extra| {
             set_login_email_address(extra, email.trim())
         })?;
-        self.session
-            .auth_state
-            .twofa_flow
-            .code_wait
-            .end_login_email();
+        self.session.auth_state.twofa_flow.end_login_email();
         Ok(sent)
     }
 
     /// Batch 6: `resendLoginEmailAddressCode` (schema 1.8.67, line 11446).
     pub fn resend_login_email_code(&mut self) -> Result<RequestId, ConnectSendError> {
-        if self
-            .session
-            .auth_state
-            .twofa_flow
-            .code_wait
-            .login_email()
-            .is_none()
-        {
+        if self.session.auth_state.twofa_flow.login_email().is_none() {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.password_op_send(PasswordOp::SetLoginEmail, resend_login_email_address_code)
@@ -553,15 +543,7 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Batch 6: `checkLoginEmailAddressCode` (schema 1.8.67, line 11449).
     pub fn check_login_email_code(&mut self, code: &str) -> Result<RequestId, ConnectSendError> {
-        if code.is_empty()
-            || self
-                .session
-                .auth_state
-                .twofa_flow
-                .code_wait
-                .login_email()
-                .is_none()
-        {
+        if code.is_empty() || self.session.auth_state.twofa_flow.login_email().is_none() {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.password_op_send(PasswordOp::CheckLoginEmailCode, |extra| {

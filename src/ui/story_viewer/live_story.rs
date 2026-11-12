@@ -146,7 +146,7 @@ impl QuillApp {
             return;
         }
         match session.live_call() {
-            Some(call) if call.stream == StreamState::Ended => {
+            Some(call) if call.media.stream_state() == StreamState::Ended => {
                 self.close_story_viewer(cx);
             }
             Some(_) => self.stories.live.mark_call_seen(),

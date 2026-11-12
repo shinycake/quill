@@ -119,6 +119,8 @@ struct ActiveScreen {
     sender: Arc<dyn ExternalFrameSender>,
     preview: Arc<PreviewSlot>,
     last_preview: u64,
+    /// The shared window is hidden: frames stop. What a group call told
+    /// Telegram is `GroupScreenShare::Sharing { paused }`.
     paused: bool,
     /// The system audio shared with it, while running.
     audio: Option<SharedAudio>,
@@ -581,7 +583,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.call_screen.share = Share::Idle;
             }
             if let Some(call) = self.session.calls.active_group_call.as_mut() {
-                call.screen_share_paused = false;
+                call.screen_share.set_paused(false);
             }
             return;
         };
@@ -663,8 +665,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         else {
             return;
         };
-        let was = call.screen_share_paused;
-        call.screen_share_paused = paused;
+        let was = call.screen_share.set_paused(paused);
         // A fresh share starts unpaused on the server: only edges go out.
         if !changed && was == paused {
             return;
@@ -696,7 +697,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .as_mut()
                 .filter(|call| call.id == group_call_id)
             {
-                call.screen_share_paused = was;
+                call.screen_share.set_paused(was);
             }
         }
     }
@@ -720,7 +721,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             let _ = self.toggle_group_call_screen_share();
         }
         if let Some(call) = self.session.calls.active_group_call.as_mut() {
-            call.screen_share_paused = false;
+            call.screen_share.set_paused(false);
         }
     }
 

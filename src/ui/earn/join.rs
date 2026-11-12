@@ -290,8 +290,9 @@ impl QuillApp {
             .as_ref()
             .filter(|j| j.peer == peer)
         else {
+            let waiting = div().flex().justify_center().py_4().child(Spinner::new());
             return page
-                .child(div().flex().justify_center().py_4().child(Spinner::new()))
+                .child(self.earn_unloaded(EarnPanel::Join { peer }, waiting.into_any_element(), cx))
                 .into_any_element();
         };
         if !join.mine.programs.is_empty() {

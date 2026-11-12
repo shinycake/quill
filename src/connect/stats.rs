@@ -50,7 +50,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.groups.stats.graph_unsent(extra);
+                self.session.groups.stats.graph_unsent(
+                    extra,
+                    crate::lang::tr(crate::lang::keys::Q_MONEY_STATISTICS_SEND_FAILED).into(),
+                );
                 Err(err)
             }
         }
@@ -116,10 +119,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             return Ok(None);
         }
-        if let Some(state) = self.session.groups.stats.message.as_mut() {
-            state.statistics = MessageStatsFetch::Loading;
-        }
         let extra = self.session.request(purpose, Some(chat_id));
+        self.session
+            .groups
+            .stats
+            .message_statistics_requested(chat_id.0, message_id.0, extra);
         if let Err(err) = self.send_json_request(
             extra,
             &get_message_statistics(extra, chat_id, message_id, is_dark),
@@ -248,13 +252,22 @@ impl<S: JsonSender> ConnectDriver<S> {
             .stats
             .posts
             .contains_key(&(chat_id.0, message_id.0))
-            || self.session.requests.has_purpose(purpose)
         {
             return Ok(None);
         }
         let extra = self.session.request(purpose, Some(chat_id));
-        self.send_json_request(extra, &get_message(extra, chat_id, message_id))
-            .map(Some)
+        self.session
+            .groups
+            .stats
+            .post_requested(chat_id.0, message_id.0, extra);
+        let sent = self.send_json_request(extra, &get_message(extra, chat_id, message_id));
+        if sent.is_err() {
+            self.session
+                .groups
+                .stats
+                .post_unsent(chat_id.0, message_id.0, extra);
+        }
+        sent.map(Some)
     }
 
     /// `getPollVoteStatistics` for a poll's message statistics (tdesktop
@@ -273,10 +286,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.messages.poll_stats.contains_key(&key) {
             return Ok(None);
         }
-        self.session
-            .messages
-            .poll_stats
-            .insert(key, crate::state::PollStatsFetch::Loading);
         let purpose =
             RequestPurpose::Messages(crate::state::MessagesPurpose::GetPollVoteStatistics {
                 chat_id,
@@ -291,14 +300,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         );
         // A send that did not go out is a failed load the page draws with
         // Retry, not an empty slot the next render asks for again.
-        if sent.is_err() {
-            self.session.messages.poll_stats.insert(
-                key,
-                crate::state::PollStatsFetch::Failed(
+        self.session.messages.poll_stats.insert(
+            key,
+            match &sent {
+                Ok(_) => crate::state::PollStatsFetch::Loading(extra),
+                Err(_) => crate::state::PollStatsFetch::Failed(
                     crate::lang::tr(crate::lang::keys::Q_MONEY_STATISTICS_SEND_FAILED).into(),
                 ),
-            );
-        }
+            },
+        );
         sent.map(Some)
     }
 

@@ -122,7 +122,7 @@ impl Harness {
             .calls
             .active_call
             .as_ref()
-            .map(|call| (call.id, call.state.clone()))
+            .map(|call| (call.id, call.phase()))
     }
 }
 
@@ -164,7 +164,7 @@ fn a_swap_accept_that_cannot_be_sent_leaves_the_call_ringing() {
         Some((78, 42, false))
     );
     assert!(h.driver.session.calls.error.is_some(), "the failure shows");
-    assert_eq!(h.driver.session.calls.progress.answered_call(), None);
+    assert!(!h.driver.session.calls.answered(78));
     // Answering again works once sending does.
     h.sender.fail(None);
     h.driver.accept_call().expect("answer again");
@@ -183,7 +183,6 @@ fn a_failed_hang_up_puts_the_call_and_the_swap_prompt_back() {
         .driver
         .session
         .calls
-        .progress
         .hang_up()
         .map(|hang_up| hang_up.request)
         .expect("hang-up in flight");

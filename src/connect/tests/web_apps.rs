@@ -94,8 +94,8 @@ fn open_web_app_sends_theme_and_keeps_the_launch_context() {
             .session
             .bots
             .web_apps
-            .pending
-            .first()
+            .opening
+            .as_ref()
             .map(|p| p.bot_user_id),
         Some(42)
     );
@@ -114,7 +114,7 @@ fn open_web_app_sends_theme_and_keeps_the_launch_context() {
             url: "https://bot.example/app?tgWebAppData=x".into(),
         })
     );
-    assert!(h.driver.session.bots.web_apps.pending.is_empty());
+    assert!(h.driver.session.bots.web_apps.opening.is_none());
 }
 
 #[test]
@@ -137,7 +137,7 @@ fn a_refused_open_reports_a_failure_and_clears_the_context() {
             ..
         })
     ));
-    assert!(h.driver.session.bots.web_apps.pending.is_empty());
+    assert!(h.driver.session.bots.web_apps.opening.is_none());
 }
 
 /// Two keyboard-button launches before either answers (a double click):
@@ -161,7 +161,16 @@ fn only_the_latest_launch_asked_opens() {
         .driver
         .get_web_app_url(ChatId(5), 43, "https://bot.example/b", "Open", &theme)
         .expect("sent");
-    assert_eq!(h.driver.session.bots.web_apps.pending.len(), 1);
+    assert_eq!(
+        h.driver
+            .session
+            .bots
+            .web_apps
+            .opening
+            .as_ref()
+            .map(|o| o.request),
+        Some(second)
+    );
     h.ingest(&format!(
         r#"{{"@type":"webAppInfo","@extra":"{}","launch_id":"801","url":{{"@type":"webAppUrl","url":"https://bot.example/a?x","require_same_origin":false}}}}"#,
         first.as_extra()
@@ -183,7 +192,7 @@ fn only_the_latest_launch_asked_opens() {
     };
     assert!(source.allows_data_send(), "still the keyboard button");
     assert_eq!((chat_id, bot_user_id), (Some(5), 43));
-    assert!(h.driver.session.bots.web_apps.pending.is_empty());
+    assert!(h.driver.session.bots.web_apps.opening.is_none());
 }
 
 #[test]
@@ -217,7 +226,13 @@ fn keyboard_button_apps_use_get_web_app_url_and_may_send_data() {
         r#"{{"@type":"ok","@extra":"{}"}}"#,
         extra.as_extra()
     ));
-    assert_eq!(h.driver.session.bots.web_apps.data_sent, Some(Ok(())));
+    assert_eq!(
+        h.driver.session.bots.web_apps.data_sent,
+        vec![crate::state::DataSent {
+            request: extra,
+            result: Ok(())
+        }]
+    );
 }
 
 #[test]
@@ -296,7 +311,10 @@ fn emoji_status_access_follows_the_switch_and_comes_back_on_failure() {
     assert_eq!(emoji_access(&h), Some(true), "put back");
     assert_eq!(
         h.driver.session.bots.web_apps.emoji_access,
-        Some((42, false))
+        Some(crate::state::EmojiAccessAnswer {
+            request: extra,
+            result: crate::state::EmojiAccessResult::Refused
+        })
     );
 
     let extra = h
@@ -310,7 +328,10 @@ fn emoji_status_access_follows_the_switch_and_comes_back_on_failure() {
     assert_eq!(emoji_access(&h), Some(false));
     assert_eq!(
         h.driver.session.bots.web_apps.emoji_access,
-        Some((42, true))
+        Some(crate::state::EmojiAccessAnswer {
+            request: extra,
+            result: crate::state::EmojiAccessResult::Granted
+        })
     );
 }
 
@@ -361,16 +382,9 @@ fn attachment_menu_bots_and_custom_requests_round_trip() {
         r#"{{"@type":"attachmentMenuBot","@extra":"{}","bot_user_id":43,"name":"Maps","supports_group_chats":true,"request_write_access":false,"is_added":false,"show_in_attachment_menu":true,"show_in_side_menu":false}}"#,
         extra.as_extra()
     ));
-    let bot = h
-        .driver
-        .session
-        .bots
-        .web_apps
-        .attachment_menu_bot
-        .clone()
-        .unwrap()
-        .1
-        .unwrap();
+    let (asked, bot) = h.driver.session.bots.web_apps.attachment_menu_bot[0].clone();
+    assert_eq!(asked, extra, "the answer names its request");
+    let bot = bot.unwrap();
     assert_eq!(bot.bot_user_id, 43);
     assert!(!bot.is_added);
     let extra = h
@@ -387,6 +401,7 @@ fn attachment_menu_bots_and_custom_requests_round_trip() {
     assert_eq!(
         h.driver.session.bots.web_apps.attachment_menu_toggled,
         [crate::state::AttachmentToggle {
+            request: extra,
             bot_user_id: 43,
             result: Ok(true)
         }]
@@ -409,7 +424,6 @@ fn attachment_menu_bots_and_custom_requests_round_trip() {
     assert_eq!(replies[0].req_id, "r9");
     assert_eq!(replies[0].launch_id, 77, "the answer names the launch");
     assert_eq!(replies[0].result, Ok("{\"ok\":true}".into()));
-    assert!(h.driver.session.bots.web_apps.custom_requests.is_empty());
 }
 
 /// Round 17 C finding 15: a refused search names the bot it was for, so a
@@ -423,9 +437,31 @@ fn a_search_answer_names_its_bot_even_when_refused() {
         r#"{{"@type":"error","@extra":"{}","code":404,"message":"Not Found"}}"#,
         extra.as_extra()
     ));
-    let (bot_id, app) = h.driver.session.bots.web_apps.found.clone().unwrap();
-    assert_eq!(bot_id, 42);
+    let (asked, app) = h.driver.session.bots.web_apps.found[0].clone();
+    assert_eq!(asked, extra);
     assert!(app.is_err());
+}
+
+/// Two searches of one bot's apps answer in either order: each answer
+/// names the request it is for, so the newer wait is never given the older
+/// app's answer.
+#[test]
+fn two_searches_of_one_bot_keep_their_own_answers() {
+    let mut h = Harness::ready();
+    let first = h.driver.search_web_app(42, "shop").expect("sent");
+    let second = h.driver.search_web_app(42, "maps").expect("sent");
+    for (extra, name, skip) in [(second, "maps", true), (first, "shop", false)] {
+        h.ingest(&format!(
+            r#"{{"@type":"foundWebApp","@extra":"{}","web_app":{{"@type":"webApp","short_name":"{name}","title":"{name}","description":""}},"request_write_access":false,"skip_confirmation":{skip}}}"#,
+            extra.as_extra()
+        ));
+    }
+    let found = &h.driver.session.bots.web_apps.found;
+    assert_eq!(found.len(), 2, "neither answer overwrote the other");
+    assert_eq!(found[0].0, second);
+    assert_eq!(found[1].0, first);
+    assert!(found[0].1.as_ref().is_ok_and(|app| app.skip_confirmation));
+    assert!(found[1].1.as_ref().is_ok_and(|app| !app.skip_confirmation));
 }
 
 /// Round 17 C finding 19: a data send keeps the mini-app poll alive until
@@ -441,7 +477,54 @@ fn a_data_send_is_due_until_it_answers() {
         extra.as_extra()
     ));
     assert!(!h.driver.session.web_app_answer_due());
-    assert_eq!(h.driver.session.bots.web_apps.data_sent, Some(Ok(())));
+    assert_eq!(
+        h.driver.session.bots.web_apps.data_sent,
+        vec![crate::state::DataSent {
+            request: extra,
+            result: Ok(())
+        }]
+    );
+}
+
+/// Two data sends close together: each outcome names its own request, so
+/// the flow that sent the second never reports the first's answer.
+#[test]
+fn data_send_outcomes_are_kept_per_request() {
+    let mut h = Harness::ready();
+    let first = h.driver.send_web_app_data(42, "Go", "{}").expect("sent");
+    let second = h.driver.send_web_app_data(43, "Go", "{}").expect("sent");
+    h.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":400,"message":"X"}}"#,
+        first.as_extra()
+    ));
+    h.ingest(&format!(
+        r#"{{"@type":"ok","@extra":"{}"}}"#,
+        second.as_extra()
+    ));
+    let sent = &h.driver.session.bots.web_apps.data_sent;
+    assert_eq!(sent.len(), 2);
+    assert_eq!((sent[0].request, sent[0].result.is_err()), (first, true));
+    assert_eq!((sent[1].request, sent[1].result.is_ok()), (second, true));
+}
+
+/// A custom-method failure names its request too, so the window that sent
+/// it (and no other) turns it into the app's reply.
+#[test]
+fn a_custom_request_error_names_its_request() {
+    let mut h = Harness::ready();
+    let extra = h
+        .driver
+        .send_web_app_custom_request(42, 77, "r9", "getRequestedContact", "{}")
+        .expect("sent");
+    h.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":400,"message":"X"}}"#,
+        extra.as_extra()
+    ));
+    let replies = &h.driver.session.bots.web_apps.custom_replies;
+    assert_eq!(replies.len(), 1);
+    assert_eq!(replies[0].req_id, "r9");
+    assert_eq!(replies[0].launch_id, 77);
+    assert_eq!(replies[0].result, Err("BAD_REQUEST".into()));
 }
 
 #[test]
@@ -453,9 +536,9 @@ fn named_app_links_search_first() {
         r#"{{"@type":"foundWebApp","@extra":"{}","web_app":{{"@type":"webApp","short_name":"shop","title":"Shop","description":""}},"request_write_access":true,"skip_confirmation":false}}"#,
         extra.as_extra()
     ));
-    let (bot_id, app) = h.driver.session.bots.web_apps.found.clone().unwrap();
+    let (asked, app) = h.driver.session.bots.web_apps.found[0].clone();
     let app = app.unwrap();
-    assert_eq!(bot_id, 42);
+    assert_eq!(asked, extra);
     assert_eq!(app.title, "Shop");
     assert!(app.request_write_access);
     let theme = ThemeParams::light_default();
@@ -470,8 +553,8 @@ fn named_app_links_search_first() {
             .session
             .bots
             .web_apps
-            .pending
-            .first()
+            .opening
+            .as_ref()
             .map(|p| p.source.clone()),
         Some(LaunchSource::Link {
             short_name: "shop".into()

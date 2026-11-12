@@ -8,16 +8,25 @@
 //! box over nothing, or a forward bar into the selection's own chat that
 //! kept selection mode on in every topic of it.
 //!
-//! The share box also opens as "Reply in Another Chat"'s chat chooser.
-//! That was a bool next to `Picking` (round 18): the two boxes share the
-//! box's selection and search field, and opening one never closed the
-//! other. Now the chooser is a stage too, over the forward that was there.
+//! "Reply in Another Chat"'s chat chooser draws the same box but is the
+//! reply bar's panel (`ReplyPanel`, held by `ChatUi`): it goes with the
+//! reply, which this stage knows nothing about. Opening one ends the other
+//! (`QuillApp::open_forward_picker`, `QuillApp::show_reply_panel`).
 #![deny(clippy::indexing_slicing)]
 
 use quill::composer::ForwardDraft;
 use quill::ids::{ChatId, MessageId};
+use quill::share_box::ShareSelection;
 
 use super::mount::Mount;
+
+/// A viewer video's message and second the share box was opened at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ShareAt {
+    pub(crate) chat_id: ChatId,
+    pub(crate) message_id: MessageId,
+    pub(crate) secs: i32,
+}
 
 /// The forward being built in one window.
 #[derive(Debug, Default)]
@@ -34,60 +43,29 @@ pub(crate) enum ForwardStage {
     /// selection, which leaving it returns to.
     ///
     /// `mount` is the box's own opening stage: its search field takes focus
-    /// on the first draw after the dialog has mounted.
+    /// on the first draw after the dialog has mounted. `share_at` is the
+    /// viewer position ("Share at 1:23") the box was opened at, which
+    /// lasts as long as the box. `ticks` are the destinations ticked in
+    /// the box: they go with the box, on every exit.
     Picking {
         draft: ForwardDraft,
         bar: Option<ChatId>,
         mount: Mount,
-        /// "Share at 1:23" from the media viewer: the video second the
-        /// box was opened at. It lasts as long as the box, whichever way
-        /// the box ends.
-        at_time: Option<ShareAt>,
+        share_at: Option<ShareAt>,
+        ticks: ShareSelection,
     },
     /// One destination chosen: the forward bar waits above `dest`'s
     /// composer, and Send forwards (the typed comment first). No selection
     /// mode anywhere: the bar is the forward now.
     Bar { draft: ForwardDraft, dest: ChatId },
-    /// The share box chooses the chat the composer's reply goes to, over
-    /// the forward that was there (never `Picking` or another chooser:
-    /// [`Self::open_reply_chooser`] builds it). Opening the forward box
-    /// ends it; closing it returns to what is under it.
-    /// The `Mount` is the chooser's opening stage, as in `Picking`.
-    ReplyChooser(Box<ForwardStage>, Mount),
-}
-
-/// The message and video second a viewer's "Share at" opened the box at.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct ShareAt {
-    pub(crate) chat_id: ChatId,
-    pub(crate) message_id: MessageId,
-    pub(crate) secs: i32,
 }
 
 impl ForwardStage {
-    /// The box is open: remember the second it was opened at.
-    pub(crate) fn set_share_at(&mut self, at: ShareAt) {
-        if let Self::Picking { at_time, .. } = self {
-            *at_time = Some(at);
-        }
-    }
-
-    /// Take the second the box was opened at for this message, once.
-    pub(crate) fn take_share_at(&mut self, chat_id: ChatId, message_id: MessageId) -> Option<i32> {
-        match self {
-            Self::Picking { at_time, .. } => at_time
-                .take_if(|at| at.chat_id == chat_id && at.message_id == message_id)
-                .map(|at| at.secs),
-            _ => None,
-        }
-    }
-
     /// The stored draft, whatever the stage (deleted ids included; read
     /// `QuillApp::forward_draft` for anything shown or done).
     pub(crate) fn draft(&self) -> Option<&ForwardDraft> {
         match self {
             Self::None => None,
-            Self::ReplyChooser(under, _) => under.draft(),
             Self::Selecting(draft) | Self::Picking { draft, .. } | Self::Bar { draft, .. } => {
                 Some(draft)
             }
@@ -99,7 +77,6 @@ impl ForwardStage {
     pub(crate) fn draft_mut(&mut self) -> Option<&mut ForwardDraft> {
         match self {
             Self::None => None,
-            Self::ReplyChooser(under, _) => under.draft_mut(),
             Self::Selecting(draft) | Self::Picking { draft, .. } | Self::Bar { draft, .. } => {
                 Some(draft)
             }
@@ -111,58 +88,43 @@ impl ForwardStage {
     pub(crate) fn selection_mut(&mut self) -> Option<&mut ForwardDraft> {
         *self = match std::mem::take(self) {
             Self::Bar { draft, .. } => Self::Selecting(draft),
-            Self::ReplyChooser(mut under, mount) => {
-                under.selection_mut();
-                Self::ReplyChooser(under, mount)
-            }
             other => other,
         };
         self.draft_mut()
     }
 
-    /// A forward is being built (a reply chooser over nothing is none).
+    /// A forward is being built.
     pub(crate) fn is_some(&self) -> bool {
         self.draft().is_some()
     }
 
-    /// "Reply in Another Chat"'s chooser is open.
-    pub(crate) fn reply_chooser_open(&self) -> bool {
-        matches!(self, Self::ReplyChooser(..))
-    }
-
-    /// Open the reply chooser: a forward box open now closes first (back to
-    /// its selection or bar), and the forward stays under the chooser.
-    pub(crate) fn open_reply_chooser(&mut self) {
-        self.close_picker();
-        *self = match std::mem::take(self) {
-            chooser @ Self::ReplyChooser(..) => chooser,
-            under => Self::ReplyChooser(Box::new(under), Mount::Mounting),
-        };
-    }
-
-    /// Close the reply chooser, back to the forward under it. True when it
-    /// was open.
-    pub(crate) fn close_reply_chooser(&mut self) -> bool {
-        match std::mem::take(self) {
-            Self::ReplyChooser(under, _) => {
-                *self = *under;
-                true
-            }
-            other => {
-                *self = other;
-                false
-            }
-        }
-    }
-
-    /// The first draw of an opened box (or reply chooser) asks: true once
+    /// The first draw of an opened box asks: true once
     /// per opening, so its search field takes focus after the dialog has
     /// mounted. The opening stage is the box's own; nothing sets it by hand.
     pub(crate) fn take_first_draw(&mut self) -> bool {
         match self {
-            Self::Picking { mount, .. } | Self::ReplyChooser(_, mount) => mount.take_first_draw(),
+            Self::Picking { mount, .. } => mount.take_first_draw(),
             _ => false,
         }
+    }
+
+    /// Record the viewer position the open box was opened at (nothing
+    /// when no box is open).
+    pub(crate) fn set_share_at(&mut self, at: ShareAt) {
+        if let Self::Picking { share_at, .. } = self {
+            *share_at = Some(at);
+        }
+    }
+
+    /// The position the open box was opened at for this message, taken:
+    /// the link carries it once.
+    pub(crate) fn take_share_at(&mut self, chat_id: ChatId, message_id: MessageId) -> Option<i32> {
+        let Self::Picking { share_at, .. } = self else {
+            return None;
+        };
+        share_at
+            .take_if(|at| at.chat_id == chat_id && at.message_id == message_id)
+            .map(|at| at.secs)
     }
 
     /// The share box is open.
@@ -170,12 +132,26 @@ impl ForwardStage {
         matches!(self, Self::Picking { .. })
     }
 
+    /// The destinations ticked in the open share box.
+    pub(crate) fn ticks(&self) -> Option<&ShareSelection> {
+        match self {
+            Self::Picking { ticks, .. } => Some(ticks),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn ticks_mut(&mut self) -> Option<&mut ShareSelection> {
+        match self {
+            Self::Picking { ticks, .. } => Some(ticks),
+            _ => None,
+        }
+    }
+
     /// The chat the forward bar is for, shown or under the box.
     pub(crate) fn bar_dest(&self) -> Option<ChatId> {
         match self {
             Self::Bar { dest, .. } => Some(*dest),
             Self::Picking { bar, .. } => *bar,
-            Self::ReplyChooser(under, _) => under.bar_dest(),
             Self::None | Self::Selecting(_) => None,
         }
     }
@@ -184,7 +160,6 @@ impl ForwardStage {
     pub(crate) fn bar_shown(&self) -> Option<ChatId> {
         match self {
             Self::Bar { dest, .. } => Some(*dest),
-            Self::ReplyChooser(under, _) => under.bar_shown(),
             _ => None,
         }
     }
@@ -197,21 +172,14 @@ impl ForwardStage {
             | Self::Picking {
                 draft, bar: None, ..
             } => Some(draft),
-            Self::ReplyChooser(under, _) => under.selection(),
             _ => None,
         }
     }
 
-    /// The forward goes (a reply chooser over it stays, over nothing);
-    /// the draft that was there is handed back.
+    /// The forward goes; the draft that was there is handed back.
     pub(crate) fn take_draft(&mut self) -> Option<ForwardDraft> {
         match std::mem::take(self) {
             Self::None => None,
-            Self::ReplyChooser(mut under, mount) => {
-                let draft = under.take_draft();
-                *self = Self::ReplyChooser(under, mount);
-                draft
-            }
             Self::Selecting(draft) | Self::Picking { draft, .. } | Self::Bar { draft, .. } => {
                 Some(draft)
             }
@@ -219,30 +187,36 @@ impl ForwardStage {
     }
 
     /// Open the box over what is there. `false` with nothing to forward.
-    /// A reply chooser open now closes: one box at a time.
     pub(crate) fn open_picker(&mut self) -> bool {
         if !self.is_some() {
             return false;
         }
-        self.close_reply_chooser();
         *self = match std::mem::take(self) {
             Self::None => return false,
-            chooser @ Self::ReplyChooser(..) => chooser,
             Self::Selecting(draft) => Self::Picking {
                 draft,
                 bar: None,
                 mount: Mount::Mounting,
-                at_time: None,
+                share_at: None,
+                ticks: ShareSelection::default(),
             },
             Self::Bar { draft, dest } => Self::Picking {
                 draft,
                 bar: Some(dest),
                 mount: Mount::Mounting,
-                at_time: None,
+                share_at: None,
+                ticks: ShareSelection::default(),
             },
             picking @ Self::Picking { .. } => picking,
         };
         true
+    }
+
+    /// A selection made elsewhere (the shared-media gallery) becomes the
+    /// forward. A box open for an earlier forward goes with that forward,
+    /// its ticks included; the caller opens the box for the new one.
+    pub(crate) fn begin_selection(&mut self, draft: ForwardDraft) {
+        *self = Self::Selecting(draft);
     }
 
     /// Leave the box: back to the selection or the bar it was opened over.
@@ -268,18 +242,16 @@ impl ForwardStage {
             Self::Picking {
                 draft,
                 mount,
-                at_time,
+                share_at,
+                ticks,
                 ..
             } => Self::Picking {
                 draft,
                 bar: None,
                 mount,
-                at_time,
+                share_at,
+                ticks,
             },
-            Self::ReplyChooser(mut under, mount) => {
-                under.drop_bar();
-                Self::ReplyChooser(under, mount)
-            }
             other => other,
         };
     }
@@ -289,10 +261,7 @@ impl ForwardStage {
         if !self.draft().is_some_and(ForwardDraft::is_empty) {
             return;
         }
-        *self = match std::mem::take(self) {
-            Self::ReplyChooser(_, mount) => Self::ReplyChooser(Box::new(Self::None), mount),
-            _ => Self::None,
-        };
+        *self = Self::None;
     }
 }
 
@@ -373,27 +342,66 @@ mod tests {
         assert_eq!(stage.bar_dest(), None);
     }
 
-    /// The reply chooser and the forward box are one stage: opening either
-    /// closes the other, and the forward under them stays.
+    /// The ticked destinations belong to the box: every way out of it
+    /// takes them along, and the next box starts with none.
     #[test]
-    fn the_reply_chooser_and_the_forward_box_never_both_open() {
+    fn ticks_live_and_die_with_the_box() {
         let mut stage = ForwardStage::Selecting(draft());
+        assert!(stage.ticks().is_none());
         assert!(stage.open_picker());
-        stage.open_reply_chooser();
-        assert!(stage.reply_chooser_open() && !stage.picker_open());
-        assert!(stage.selection().is_some(), "the selection stays under it");
+        if let Some(ticks) = stage.ticks_mut() {
+            ticks.toggle(ChatId(7));
+        }
+        assert_eq!(stage.ticks().map(ShareSelection::len), Some(1));
+        stage.drop_bar();
+        assert_eq!(
+            stage.ticks().map(ShareSelection::len),
+            Some(1),
+            "leaving the bar's chat keeps the box"
+        );
+        stage.close_picker();
+        assert!(stage.ticks().is_none());
         assert!(stage.open_picker());
-        assert!(stage.picker_open() && !stage.reply_chooser_open());
-        stage.open_reply_chooser();
-        assert!(stage.close_reply_chooser());
-        assert!(matches!(stage, ForwardStage::Selecting(_)));
-        assert!(!stage.close_reply_chooser());
+        assert_eq!(stage.ticks().map(ShareSelection::len), Some(0));
+        if let Some(ticks) = stage.ticks_mut() {
+            ticks.toggle(ChatId(7));
+        }
+        // A gallery selection replaces the forward the box was open for.
+        stage.begin_selection(draft());
+        assert!(stage.ticks().is_none());
+        assert!(stage.open_picker());
+        assert_eq!(stage.ticks().map(ShareSelection::len), Some(0));
+        let _ = stage.take_draft();
+        assert!(stage.ticks().is_none());
+    }
 
-        let mut nothing = ForwardStage::None;
-        nothing.open_reply_chooser();
-        assert!(nothing.reply_chooser_open() && !nothing.is_some());
-        assert!(!nothing.open_picker(), "nothing to forward");
-        assert!(nothing.reply_chooser_open());
+    #[test]
+    fn share_at_lasts_as_long_as_the_box_and_is_taken_once() {
+        let at = ShareAt {
+            chat_id: ChatId(1),
+            message_id: MessageId(7),
+            secs: 83,
+        };
+        let mut stage = ForwardStage::Selecting(draft());
+        stage.set_share_at(at);
+        assert_eq!(
+            stage.take_share_at(ChatId(1), MessageId(7)),
+            None,
+            "no box is open"
+        );
+        assert!(stage.open_picker());
+        stage.set_share_at(at);
+        assert_eq!(stage.take_share_at(ChatId(1), MessageId(8)), None);
+        assert_eq!(stage.take_share_at(ChatId(1), MessageId(7)), Some(83));
+        assert_eq!(stage.take_share_at(ChatId(1), MessageId(7)), None, "once");
+        stage.set_share_at(at);
+        stage.close_picker();
+        assert!(stage.open_picker());
+        assert_eq!(
+            stage.take_share_at(ChatId(1), MessageId(7)),
+            None,
+            "closing the box dropped it"
+        );
     }
 
     #[test]
@@ -402,7 +410,8 @@ mod tests {
             draft: draft(),
             bar: Some(ChatId(2)),
             mount: Mount::Shown,
-            at_time: None,
+            share_at: None,
+            ticks: ShareSelection::default(),
         };
         stage.drop_bar();
         assert!(stage.picker_open());

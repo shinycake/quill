@@ -25,7 +25,7 @@ use quill::gift_market::{auction_tile, resale_tile_price};
 use quill::lang::{keys, tr, tr_with};
 use quill::local_time::now_unix;
 use quill::state::Session;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 
 const TILE_W: f32 = 132.0;
@@ -166,6 +166,15 @@ impl QuillApp {
         cx.notify();
     }
 
+    fn retry_send_gift_lists(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut()
+            && live.driver.retry_send_gift_lists().is_err()
+        {
+            self.set_note(StatusNote::error(tr(keys::Q_MONEY_COULDNT_OPEN_THE_GIFTS)));
+        }
+        cx.notify();
+    }
+
     fn submit_send_gift(&mut self, gift_id: i64, cx: &mut Context<Self>) {
         let text = self
             .payments
@@ -225,12 +234,23 @@ impl QuillApp {
                 );
             }
             if let Some(error) = send.error_line() {
-                body = body.child(
+                let mut row = div().flex().items_center().justify_between().gap_2().child(
                     div()
                         .text_sm()
                         .text_color(cx.theme().danger)
                         .child(error.to_string()),
                 );
+                if send.lists_failed() {
+                    // A failed list is asked again from here, never from a draw.
+                    row = row.child(
+                        Button::new("gift-lists-retry")
+                            .label(tr(keys::Q_CHAT_RETRY))
+                            .ghost()
+                            .small()
+                            .on_click(cx.listener(|this, _, _, cx| this.retry_send_gift_lists(cx))),
+                    );
+                }
+                body = body.child(row);
             }
             if let Some(selected) = send.selected_gift() {
                 body = body.child(selected_gift_panel(this, session, selected, &roots, cx));
@@ -286,12 +306,9 @@ impl QuillApp {
             }
             dialog
                 .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    let body = Rc::new(Cell::new(Some(body.into_any_element())));
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
                 }))

@@ -11,8 +11,7 @@ use crate::telegram::requests::{
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Phase 6: `getContacts` for the contacts tab. Fires once per list
-    /// (deduped by a settled `Session::contacts` + in-flight purpose); a
-    /// failed attempt clears its error flag on retry. The `users` response
+    /// (the list's own stage dedupes it); a failed attempt clears its error flag on retry. The `users` response
     /// lands the id list; user objects arrive via `updateUser`.
     pub fn fetch_contacts(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
@@ -25,12 +24,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             return Err(ConnectSendError::InvalidRequest);
         }
-        if !self.session.users_state.contacts.can_ask()
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetContacts)
-        {
+        let contacts = &self.session.users_state.contacts;
+        // The list's own stage says whether a fetch is out: an older request
+        // an `Outdated` list no longer waits for is ignored when it lands.
+        if !(contacts.can_ask() || contacts.is_outdated()) {
             return Ok(None);
         }
         self.session.users_state.contacts.begin();
@@ -54,13 +51,16 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// failed waits for Retry; a send that fails ends the loading with
     /// Retry instead of leaving "Loading contacts..." up.
     pub fn refetch_invalidated_contacts(&mut self) {
-        if !self.session.users_state.contacts.is_idle() {
+        if !self.session.users_state.contacts.is_outdated() {
             return;
         }
+        // A fetch out from before the change is no longer waited for
+        // (`outdate` dropped its request), so the refetch below goes out
+        // and the old answer lands nowhere.
         // A fetch refused before it began (the chats path is not active)
         // leaves the list idle: it ends in the error line and its Retry
         // too, not in a tab that stays on "Loading contacts...".
-        if self.fetch_contacts().is_err() && self.session.users_state.contacts.is_idle() {
+        if self.fetch_contacts().is_err() && self.session.users_state.contacts.is_outdated() {
             self.session
                 .users_state
                 .contacts
@@ -172,25 +172,27 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// The info panel's media counts for `chat_id`: one
-    /// `getChatMessageCount` per `MEDIA_COUNT_FILTERS` entry, once per
-    /// chat per session (counts change little while the panel is open).
+    /// `getChatMessageCount` per `MEDIA_COUNT_FILTERS` entry, on every
+    /// open. Counts already known stay shown while the new ones are out and
+    /// each answer replaces its own; a count still out is not asked twice.
     pub fn fetch_chat_media_counts(
         &mut self,
         chat_id: crate::ids::ChatId,
     ) -> Result<(), ConnectSendError> {
-        if !self.chats_path_active()
-            || self
-                .session
-                .media
-                .chat_media_counts
-                .contains_key(&chat_id.0)
-        {
+        if !self.chats_path_active() {
             return Ok(());
         }
-        self.session
+        let first = !self
+            .session
             .media
             .chat_media_counts
-            .insert(chat_id.0, Default::default());
+            .contains_key(&chat_id.0);
+        if first {
+            self.session
+                .media
+                .chat_media_counts
+                .insert(chat_id.0, Default::default());
+        }
         for (index, (filter, _, _)) in crate::telegram::requests::MEDIA_COUNT_FILTERS
             .iter()
             .enumerate()
@@ -198,6 +200,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             let purpose = RequestPurpose::Users(UsersPurpose::GetChatMessageCount {
                 filter: index as u8,
             });
+            if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+                continue;
+            }
             let extra = self.session.request(purpose, Some(chat_id));
             if let Err(err) =
                 self.sender
@@ -206,7 +211,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                     ))
             {
                 self.session.requests.take(extra);
-                self.session.media.chat_media_counts.remove(&chat_id.0);
+                if first {
+                    self.session.media.chat_media_counts.remove(&chat_id.0);
+                }
                 return Err(err);
             }
         }

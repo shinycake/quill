@@ -334,7 +334,13 @@ impl Session {
     /// worker is done: a chat opened meanwhile gets its box now.
     pub fn poll_psa_about(&mut self, now: Instant) {
         let psa = &mut self.chat_list.psa_about;
-        let arrived = psa.start_load().or_else(|| psa.poll_load());
+        // The poll that starts the read does not also look for its answer:
+        // whether the worker is done by then is up to the scheduler.
+        let arrived = if matches!(psa.stage, Stage::Unread { .. }) {
+            psa.start_load()
+        } else {
+            psa.poll_load()
+        };
         self.show_waiting_about(arrived, now);
     }
 

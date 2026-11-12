@@ -34,10 +34,8 @@ impl Session {
             // answer (schema 1.8.67, line 7716). A first page replaces the
             // slot; a later page appends, deduped by result id, keeping
             // the new page's id/offset.
-            // ponytail: rapid re-queries can let an older response land on
-            // a newer slot — the response never echoes the query text, so
-            // the slot keys on (chat, bot) only; the UI slice debounces
-            // queries anyway.
+            // The first page is matched to the slot by the `RequestId` its
+            // `Loading` stage holds, so an older query's answer is dropped.
             BotsPayload::InlineQueryResults(page) => {
                 self.apply_inline_query_results(page, pending, extra, seq)
             }

@@ -3,6 +3,7 @@
 //! `playbackControlsRotate`, `shareAtTime` and `playbackControlsQualities`).
 
 use super::*;
+use crate::ui::forward_stage::ShareAt;
 use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr};
 use quill::media_viewer::{VideoQualityOption, current_quality};
@@ -40,12 +41,14 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        self.viewer.orientation.rotate_cw();
+        let mut orientation = self.viewer.reorient.orientation();
+        orientation.rotate_cw();
+        self.viewer.reorient.reset(orientation);
         if let Some(item) = self.screen.viewer.state.current() {
             store_turns(
                 &mut self.screen.viewer.extra.rotations,
                 (item.chat_id.0, item.message_id.0),
-                self.screen.viewer.orientation.turns,
+                orientation.turns,
             );
         }
         cx.notify();
@@ -106,13 +109,11 @@ impl QuillApp {
                     draft.from_chat_id == chat_id && draft.contains(message_id)
                 });
         if picking {
-            self.share
-                .forward
-                .set_share_at(super::super::forward_stage::ShareAt {
-                    chat_id,
-                    message_id,
-                    secs,
-                });
+            self.share.forward.set_share_at(ShareAt {
+                chat_id,
+                message_id,
+                secs,
+            });
         }
     }
 
@@ -166,10 +167,10 @@ impl QuillApp {
             let key = quill::ids::ChatMessage::new(item.chat_id, item.message_id);
             self.viewer.pending_seek = Some((key, elapsed));
         }
-        let orientation = self.viewer.orientation;
+        let orientation = self.viewer.reorient.orientation();
         let fullscreen = self.viewer.extra.video_fullscreen;
         self.reset_viewer_item_state(cx);
-        self.viewer.orientation = orientation;
+        self.viewer.reorient.reset(orientation);
         self.viewer.extra.video_fullscreen = fullscreen;
         cx.notify();
     }

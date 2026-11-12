@@ -276,6 +276,16 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The passkey the delete confirmation asks about, while it is still in
+    /// the list: a confirmation whose passkey left (removed here or from
+    /// another device) is over, with nothing to reset from a render.
+    pub(in crate::ui) fn passkey_confirm(&self) -> Option<&str> {
+        let id = self.privacy.passkeys.confirm()?;
+        self.session()
+            .is_some_and(|s| s.settings.passkeys.find(id).is_some())
+            .then_some(id)
+    }
+
     pub(in crate::ui) fn ask_delete_passkey(&mut self, passkey_id: String, cx: &mut Context<Self>) {
         if let Some(session) = self.live_or_demo_session_mut() {
             session.settings.passkeys.dismiss_remove_error();
@@ -304,7 +314,7 @@ impl QuillApp {
     /// The confirmation's Delete: `removeLoginPasskey`. The confirmation
     /// closes once the server confirmed (the passkey left the list).
     pub(in crate::ui) fn confirm_delete_passkey(&mut self, cx: &mut Context<Self>) {
-        let Some(id) = self.privacy.passkeys.confirm().map(str::to_string) else {
+        let Some(id) = self.passkey_confirm().map(str::to_string) else {
             return;
         };
         if let Some(live) = self.live.as_mut() {
@@ -539,9 +549,7 @@ impl QuillApp {
         app.update(cx, |this, cx| {
             let state = this.passkeys_state().cloned().unwrap_or_default();
             let passkey = this
-                .privacy
-                .passkeys
-                .confirm()
+                .passkey_confirm()
                 .and_then(|id| state.find(id))
                 .cloned();
             let busy = state.is_removing();
@@ -715,12 +723,9 @@ impl QuillApp {
 pub(super) fn once(
     body: AnyElement,
 ) -> impl Fn(DialogContent, &mut Window, &mut App) -> DialogContent + 'static {
-    let body = std::rc::Rc::new(std::cell::RefCell::new(Some(body)));
+    let body = std::rc::Rc::new(std::cell::Cell::new(Some(body)));
     move |content, _, _| {
-        let body = body
-            .borrow_mut()
-            .take()
-            .unwrap_or_else(|| div().into_any_element());
+        let body = body.take().unwrap_or_else(|| div().into_any_element());
         content.child(body)
     }
 }
@@ -787,11 +792,8 @@ crate::ui::shell::register_dialogs! {
     PasskeyDelete => DialogSpec::new(
         // Before the list, so it shows instead of it and closes back to it.
         610,
-        |app| app.privacy.passkeys.confirm().is_some_and(|id| {
-            // Closes once the server confirmed the removal.
-            app.session()
-                .is_some_and(|s| s.settings.passkeys.find(id).is_some())
-        }),
+        // Closes once the server confirmed the removal.
+        |app| app.passkey_confirm().is_some(),
         QuillApp::build_passkey_delete_dialog,
     )
     .close(|app, _, cx| app.dismiss_delete_passkey(cx)),

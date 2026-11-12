@@ -344,16 +344,13 @@ impl QuillApp {
                 .child(chosen_row)
                 .child(grid)
                 .into_any_element();
-            let body = Rc::new(RefCell::new(Some(body)));
+            let body = Rc::new(Cell::new(Some(body)));
             dialog
                 .overlay(true)
                 .w(px(420.))
                 .title(shell::dialog_title(kind.create_title()))
                 .content(shell::scrollable_dialog_content(move |content, _, _| {
-                    let body = body
-                        .borrow_mut()
-                        .take()
-                        .unwrap_or_else(|| div().into_any_element());
+                    let body = body.take().unwrap_or_else(|| div().into_any_element());
                     content.child(body)
                 }))
                 .footer(
@@ -493,13 +490,13 @@ impl QuillApp {
                 })
                 .collect();
             let empty = cells.is_empty() && gifs.is_empty();
-            let body = Rc::new(RefCell::new(Some((cells, gifs))));
+            let body = Rc::new(Cell::new(Some((cells, gifs))));
             dialog
                 .overlay(true)
                 .w(px(400.))
                 .title(shell::dialog_title(title))
                 .content(shell::scrollable_dialog_content(move |content, _, _| {
-                    let (cells, gifs) = body.borrow_mut().take().unwrap_or_default();
+                    let (cells, gifs) = body.take().unwrap_or_default();
                     content.child(if empty {
                         div()
                             .text_sm()

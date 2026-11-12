@@ -201,7 +201,7 @@ fn delete_for_everyone_asks_then_closes_the_box(cx: &mut TestAppContext) {
     frames(vcx);
     vcx.update(|window, cx| window.click("sticker-set-delete-confirm", cx));
     frames(vcx);
-    assert!(!app.read_with(vcx, |app, _| app.message_ui.menu_ui.sticker_set_open()));
+    assert!(!app.read_with(vcx, |app, _| app.sticker_set_open()));
     assert!(shell.read_with(vcx, |shell, _| shell.open_dialog.is_none()));
 }
 
@@ -307,7 +307,7 @@ fn the_photo_editor_takes_the_box_aside_until_it_closes(cx: &mut TestAppContext)
     });
     frames(vcx);
     assert!(shell.read_with(vcx, |shell, _| shell.open_dialog.is_none()));
-    assert!(app.read_with(vcx, |app, _| app.message_ui.menu_ui.sticker_set_open()));
+    assert!(app.read_with(vcx, |app, _| app.sticker_set_open()));
     // Done in the editor hands the image to the "New Sticker" box.
     app.update(vcx, |app, cx| {
         let job = app
@@ -412,7 +412,7 @@ fn a_video_sticker_adapts_through_the_video_editor(cx: &mut TestAppContext) {
             .video_editor
             .as_ref()
             .expect("editor");
-        (editor.edits, editor.set_emoji.clone())
+        (editor.edits(), editor.set_emoji.clone())
     });
     assert_eq!((edits.from_ms, edits.till_ms), (0, 3000));
     assert_eq!(edits.crop.map(|crop| (crop.w, crop.h)), Some((750, 1000)));
@@ -720,11 +720,8 @@ fn the_chooser_lists_saved_gifs_except_when_adapting(cx: &mut TestAppContext) {
                 file_name: "dance.mp4".into(),
                 mime_type: "video/mp4".into(),
                 file_id: FileId(9_001),
-                thumb_file_id: None,
-                thumb_width: 0,
-                thumb_height: 0,
+                thumb: quill::telegram::envelope::Thumb::of(None, 0, 0, true),
                 minithumbnail: None,
-                thumb_still: true,
             }]);
         }
         app.sticker_box.pick = Some(PickExisting {

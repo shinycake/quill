@@ -315,8 +315,14 @@ impl QuillShell {
     /// Close what an agent's step opened that agents never use
     /// (`agent_driver_surface::block_opened_by_agent`), each dialog with its
     /// own close, before the winner is picked: it never shows.
-    fn close_blocked_dialogs(app: &Entity<QuillApp>, window: &mut Window, cx: &mut App) {
-        let blocked = super::agent_driver_surface::take_blocked_closing_layers(app, window, cx);
+    fn close_blocked_dialogs(
+        app: &Entity<QuillApp>,
+        host: Option<ChatId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let blocked =
+            super::agent_driver_surface::take_blocked_closing_layers(app, host, window, cx);
         for name in blocked {
             let Some(spec) = registry().iter().find(|spec| spec.kind.0 == name) else {
                 continue;
@@ -434,7 +440,7 @@ impl QuillShell {
             return;
         }
         let shell = cx.entity();
-        Self::close_blocked_dialogs(&app, window, cx);
+        Self::close_blocked_dialogs(&app, host, window, cx);
         // A closed window's leftovers are session-wide: the main window's
         // own state is in place for their close.
         if host.is_none() {
@@ -444,12 +450,7 @@ impl QuillShell {
         // switch, or the action that finished it): closing again would
         // take whichever dialog is on top now.
         let window_id = window.window_handle().window_id();
-        if app.update(cx, |app, _| {
-            app.main_window
-                .dialogs_closed
-                .borrow_mut()
-                .remove(&window_id)
-        }) {
+        if app.update(cx, |app, _| app.main_window.dialogs_closed.take(window_id)) {
             self.open_dialog = None;
         }
         // A session-wide box this window showed whose flag is clear (its own
@@ -620,8 +621,7 @@ impl QuillApp {
             window.close_dialog(cx);
             self.main_window
                 .dialogs_closed
-                .borrow_mut()
-                .insert(window.window_handle().window_id());
+                .mark(window.window_handle().window_id());
         }
     }
 

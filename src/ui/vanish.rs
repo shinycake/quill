@@ -480,6 +480,13 @@ impl QuillApp {
             let Some(message) = history.messages.get(&id.0) else {
                 continue;
             };
+            // A second request for a message already waiting or crumbling
+            // would draw a second ghost over the first.
+            if vanishing.iter().any(|ghost| {
+                ghost.message.chat_id == message.chat_id && ghost.message.id == message.id
+            }) {
+                continue;
+            }
             let (row, bubble) = painted_now(ChatMessage::new(chat_id, *id))
                 .map_or((None, None), |(row, bubble)| {
                     ((row.size.height > px(0.)).then_some(row), bubble)

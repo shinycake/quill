@@ -94,8 +94,8 @@ impl StorageScroll {
 impl QuillApp {
     pub(crate) fn open_local_storage(&mut self, cx: &mut Context<Self>) {
         self.open_data_storage(cx);
-        if self.settings.open
-            && self.settings.page == Some(quill::settings_catalog::Page::DataStorage)
+        if self.settings.open()
+            && self.settings.page() == Some(quill::settings_catalog::Page::DataStorage)
         {
             self.settings.storage_scroll.stage = StorageScrollStage::Requested;
         }
@@ -176,6 +176,7 @@ impl QuillApp {
     /// The Data & Storage settings page: the per-network editor when one
     /// is open, otherwise the overview with a refresh button.
     pub(crate) fn data_storage_page(&mut self, cx: &mut Context<Self>) -> Div {
+        self.settle_storage_sliders(cx);
         self.ensure_storage_sliders(cx);
         let Some((network, draft)) = self.settings.data_storage_editor.shown() else {
             return div()

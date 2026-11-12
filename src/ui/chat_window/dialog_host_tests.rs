@@ -268,7 +268,6 @@ fn a_chat_windows_video_chat_start_goes_on_in_its_own_frames(cx: &mut TestAppCon
             chat_id: OTHER,
             kind: CreateKind::Now,
             step: CreateStep::Waiting(request),
-            join_as: None,
         });
         app.windows.open_box_in(
             DialogKind::GroupCallStart,

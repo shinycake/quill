@@ -47,7 +47,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 // The hash is kept only once the fetch went out; a failed
                 // send leaves no hash behind for a later join of that call.
                 self.fetch_group_call(group_call_id)?;
-                self.session.calls.call_link = Some(PendingCallLink {
+                self.session.calls.call_link_stage = CallLinkStage::Joinable(PendingCallLink {
                     group_call_id,
                     invite_hash: invite_hash.to_string(),
                 });
@@ -161,11 +161,17 @@ impl<S: JsonSender> ConnectDriver<S> {
     fn offer_confirmed_link(&mut self, link: CallLinkConfirm) -> Result<(), ConnectSendError> {
         let step =
             self.offer_call_link(ChatId(link.chat_id), &link.invite_hash, link.live_stream)?;
-        if let CallLinkStep::Offer { group_call_id } = step {
-            self.session.calls.call_link_stage = CallLinkStage::Offered(OfferedCallLink {
-                group_call_id,
-                live_stream: link.live_stream,
-            });
+        if let CallLinkStep::Offer { group_call_id } = step
+            && let CallLinkStage::Joinable(pending) =
+                std::mem::take(&mut self.session.calls.call_link_stage)
+        {
+            self.session.calls.call_link_stage = CallLinkStage::Offered {
+                offered: OfferedCallLink {
+                    group_call_id,
+                    live_stream: link.live_stream,
+                },
+                link: pending,
+            };
         }
         Ok(())
     }

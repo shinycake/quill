@@ -67,6 +67,14 @@ fn leaving_the_password_step_drops_the_recovery_stage() {
 }
 
 #[test]
+fn back_from_recovery_code_entry_is_a_session_transition() {
+    let (mut session, _sink) = session();
+    session.auth_state.password_recovery = PasswordRecovery::CodeSent;
+    session.cancel_password_recovery();
+    assert_eq!(session.auth_state.password_recovery, PasswordRecovery::Idle);
+}
+
+#[test]
 fn an_auto_download_save_is_answered_by_the_request_that_asked() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
@@ -84,6 +92,13 @@ fn an_auto_download_save_is_answered_by_the_request_that_asked() {
             r#"{{"@type":"error","@extra":"{}","code":400,"message":"BAD"}}"#,
             first.0
         ),
+    );
+    assert!(
+        matches!(
+            session.chat_list.dialog_answers.take(first),
+            Some(DialogAnswer::Failed(_))
+        ),
+        "the refusal is the first request's"
     );
     assert_eq!(
         session.settings.auto_download_answers.peek(first),

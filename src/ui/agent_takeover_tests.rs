@@ -417,3 +417,31 @@ fn hiding_a_window_redraws_it_for_the_takeover_only_where_agents_show(cx: &mut T
     assert!(draws_as_it_hides(vcx) > 0, "the takeover shows here");
     takeover::reset_for_test();
 }
+
+/// The wake-up timer is the stage's own: a nearer change replaces the
+/// pending one (which stops with it), and a later one under it keeps it.
+#[gpui_kit::test]
+fn the_wake_up_timer_is_held_by_the_takeover_stage(cx: &mut TestAppContext) {
+    use crate::ui::agent_takeover_state::Wake;
+    let _guard = quill::locks::lock_or_recover(&TEST_LOCK);
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let at = |app: &mut QuillApp| match app.takeover.wake.take() {
+        Wake::At { at, _task } => {
+            app.takeover.wake.set(Wake::At { at, _task });
+            Some(at)
+        }
+        Wake::None => None,
+    };
+    app.update(vcx, |app, cx| {
+        app.wake_takeover_at(1_000, 0, cx);
+        assert_eq!(at(app), Some(1_000));
+        // Later than the pending one: it covers this change too.
+        app.wake_takeover_at(2_000, 0, cx);
+        assert_eq!(at(app), Some(1_000));
+        // Sooner: replaces it.
+        app.wake_takeover_at(500, 0, cx);
+        assert_eq!(at(app), Some(500));
+        app.takeover.wake.set(Wake::None);
+    });
+}

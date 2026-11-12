@@ -335,8 +335,10 @@ pub enum ChatStatisticsFetch {
     WaitingForInfo {
         is_dark: bool,
     },
-    /// Asked for graphs in this theme.
+    /// Asked for graphs in this theme, as this request: only its answer or
+    /// error counts.
     Loading {
+        request: RequestId,
         is_dark: bool,
     },
     /// The graphs' colors are the theme they were asked for
@@ -354,7 +356,8 @@ pub enum ChatStatisticsFetch {
 /// is the in-flight guard.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PollStatsFetch {
-    Loading,
+    /// Asked as this request: only its answer or error acts on the slot.
+    Loading(RequestId),
     Loaded(crate::telegram::envelope::StatisticalGraph),
     Failed(String),
 }
@@ -436,7 +439,8 @@ pub struct JoinRequestList {
 /// B8: `getChatInviteLinkCounts` fetch state (owner only), keyed by chat.
 #[derive(Debug, Clone, PartialEq)]
 pub enum InviteLinkCountsFetch {
-    Loading,
+    /// In flight as this request: only its answer or error counts.
+    Loading(RequestId),
     Loaded(Vec<crate::telegram::envelope::ParsedChatInviteLinkCount>),
     Failed(String),
 }
@@ -477,58 +481,21 @@ pub const INVITE_ADMIN_PAGE_SIZE: i32 = 50;
 /// Drives the edit-rights dialog's loading / error states.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AdminRightsFetch {
-    Loading,
+    /// Asked as this request: only its answer or error acts on the slot.
+    Loading(RequestId),
     Loaded(ChatAdminRights),
     Failed(String),
 }
 
 /// Phase D3b: fetch state for one chat's `getChatAdministrators` result
-/// (schema 1.8.67, line 13632). Keyed by chat id. `Loading` is the
-/// in-flight guard — the driver never sends a second request while one
-/// is outstanding.
+/// (schema 1.8.67, line 13632). Keyed by chat id. `Loading` names the
+/// request the list waits for: a refresh asks again under a new id, and
+/// only that request's answer or error lands.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AdminListFetch {
-    Loading,
+    Loading(RequestId),
     Loaded(Vec<ChatAdministratorEntry>),
     Failed(String),
-}
-
-/// Phase D3b: fetch state for one chat's `getSupergroupMembers` result
-/// (schema 1.8.67, line 15238) backing the promote member picker. Same
-/// Loading-guard convention.
-#[derive(Debug, Clone, PartialEq)]
-pub enum SupergroupMembersFetch {
-    Loading,
-    Loaded {
-        members: Vec<ParsedChatMember>,
-        total_count: i32,
-    },
-    /// TDLib refused the request.
-    Failed(String),
-    /// The request never left: the path was inactive or the sender closed.
-    /// Drawn like `Failed` with Retry, but it says nothing about whether the
-    /// viewer may see the members (so no administrators fallback).
-    NotSent(String),
-}
-
-/// Where the next page of a member list stands.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum MoreMembers {
-    #[default]
-    Idle,
-    /// A next page is out as this request.
-    Asking(RequestId),
-    /// The last next page failed; the panel asks again at its next scroll.
-    Failed,
-}
-
-/// How one member list was asked: the first-page request (`None` when the
-/// list was filled without one), the query, and the next page.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct MemberAsk {
-    pub first: Option<RequestId>,
-    pub query: String,
-    pub more: MoreMembers,
 }
 
 /// B4: one `getPollVoters` page (schema 1.8.67, line 12941) backing the
@@ -536,12 +503,27 @@ pub struct MemberAsk {
 /// lands in `Failed`, a failed "load more" keeps the loaded page.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PollVotersFetch {
-    Loading,
+    /// The first page is out as this request; only its answer or error
+    /// leaves the stage (an update of the poll drops the entry, and the
+    /// late answer with it).
+    Loading(RequestId),
     Loaded {
         voters: Vec<MessageSender>,
         total_count: i32,
+        more: VotersMore,
     },
     Failed(String),
+}
+
+/// The next page of a loaded voters list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VotersMore {
+    /// The next page can be asked.
+    Ready,
+    /// The next page is out as this request; an answer to any other, or
+    /// after the list was dropped, is dropped. Its error leaves the loaded
+    /// page retryable.
+    Asking(RequestId),
 }
 
 /// Bots slice: fetch state for the single active inline query
@@ -621,18 +603,28 @@ impl InlineQuerySlot {
     }
 }
 
+impl InlineBotResolve {
+    /// The username this is for.
+    pub fn username(&self) -> &str {
+        match self {
+            Self::Resolving { username, .. }
+            | Self::Resolved { username, .. }
+            | Self::Failed { username, .. } => username,
+        }
+    }
+}
+
 /// Bots slice: `@botname` → bot user id resolution for inline mode.
 /// `is_inline` is `Some` when the bot was found in the local user cache
 /// (`ParsedUser.is_inline`); `None` when it came from `searchPublicChat`
 /// (the chat answer carries no user object — the query attempt itself is
-/// the capability check, and its error surfaces honestly). `generation`
-/// correlates the in-flight request with its answer (see
-/// `RequestPurpose::ResolveInlineBot`).
+/// the capability check, and its error surfaces honestly). `request` is
+/// the lookup the answer must come from.
 #[derive(Debug, Clone, PartialEq)]
 pub enum InlineBotResolve {
     Resolving {
         username: String,
-        generation: u64,
+        request: crate::ids::RequestId,
     },
     Resolved {
         username: String,
@@ -938,6 +930,10 @@ pub enum DeepLinkState {
 pub struct DeepLinkFlow {
     pub stage: DeepLinkState,
     pub from_agent: bool,
+    /// The chat window the link was clicked in, whose boxes and chat open
+    /// it takes (`None`: the main window). It lives and dies with the flow:
+    /// every terminal state consumes the flow with it.
+    pub window: Option<crate::ids::ChatId>,
 }
 
 impl DeepLinkState {

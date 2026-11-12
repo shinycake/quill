@@ -108,6 +108,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .entry(folder_id)
                 .or_default();
             share.chats.begin();
+            share.chats.sent(extra);
             if let Err(err) = self.send_folder_request(
                 extra,
                 get_chats_for_chat_folder_invite_link(extra, folder_id),

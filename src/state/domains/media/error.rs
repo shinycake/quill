@@ -69,7 +69,7 @@ impl Session {
                 self.fail_profile_tab(
                     chat_id,
                     tab,
-                    Some(generation),
+                    generation,
                     call_request_error_line(err, "Could not load this tab"),
                 );
             }

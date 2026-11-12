@@ -131,7 +131,7 @@ impl QuillApp {
                                 StatsPage::Message(message_id),
                                 post.thumbs,
                             ),
-                            PostLookup::Missing => continue,
+                            PostLookup::Missing | PostLookup::Loading(_) => continue,
                             PostLookup::Unknown => {
                                 request_post(self, chat_id, message_id, cx);
                                 continue;
@@ -370,7 +370,7 @@ impl QuillApp {
                 request_post(self, chat_id, message_id, cx);
                 None
             }
-            PostLookup::Missing => None,
+            PostLookup::Missing | PostLookup::Loading(_) => None,
         };
         // The numbers come from the chat's recent interactions when the
         // post is among them, else from the post itself.
@@ -448,7 +448,7 @@ impl QuillApp {
         }
         page = page.child(overview_grid(cells));
         match state.map(|s| &s.statistics) {
-            None | Some(MessageStatsFetch::Loading) => {
+            None | Some(MessageStatsFetch::Loading(_)) => {
                 page = page.child(loading_line(tr(keys::Q_MONEY_LOADING_STATISTICS)));
             }
             Some(MessageStatsFetch::Failed(message)) => {
@@ -519,7 +519,7 @@ impl QuillApp {
                         page = page.child(divider(cx)).child(section);
                     }
                 }
-                Some(PollStatsFetch::Loading) => {}
+                Some(PollStatsFetch::Loading(_)) => {}
                 Some(PollStatsFetch::Failed(message)) => {
                     page = page
                         .child(divider(cx))
@@ -647,7 +647,7 @@ impl QuillApp {
                 .into_any_element();
         };
         match &state.statistics {
-            StoryStatsFetch::Loading => {
+            StoryStatsFetch::Loading(_) => {
                 page = page.child(loading_line(tr(keys::Q_MONEY_LOADING_STATISTICS)))
             }
             StoryStatsFetch::Failed(message) => {

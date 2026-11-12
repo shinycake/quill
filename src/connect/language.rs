@@ -24,10 +24,14 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// so the interface matches TDLib's latest copy.
     pub(crate) fn send_language_options(&mut self) -> Result<(), ConnectSendError> {
         let root = crate::settings::app_root_of(&self.paths).map(std::path::Path::to_path_buf);
-        self.send_language_option("localization_target", LOCALIZATION_TARGET)?;
+        self.send_language_option("localization_target", LOCALIZATION_TARGET, None)?;
         if let Some(root) = &root {
             let path = database_path(root);
-            self.send_language_option("language_pack_database_path", &path.to_string_lossy())?;
+            self.send_language_option(
+                "language_pack_database_path",
+                &path.to_string_lossy(),
+                None,
+            )?;
         }
         let choice = root.as_deref().map(load_choice).unwrap_or_default();
         if choice.is_builtin() {
@@ -36,10 +40,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.switch_language(info_of(&choice))
     }
 
-    fn send_language_option(&mut self, name: &str, value: &str) -> Result<(), ConnectSendError> {
+    fn send_language_option(
+        &mut self,
+        name: &str,
+        value: &str,
+        generation: Option<u32>,
+    ) -> Result<(), ConnectSendError> {
         let extra = self
             .session
-            .request(purpose(LanguagePurpose::SetOption), None);
+            .request(purpose(LanguagePurpose::SetOption { generation }), None);
         self.send_json_request(extra, &set_option_string(extra, name, value))
             .map(|_| ())
     }
@@ -84,7 +93,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 pack: Vec::new(),
                 base: Vec::new(),
             });
-            return self.send_language_option("language_pack_id", &id);
+            return self.send_language_option("language_pack_id", &id, None);
         }
         let base_id = info.base_language_pack_id.clone();
         let custom = !info.is_official && !info.is_installed;
@@ -114,10 +123,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if custom {
             let extra = self
                 .session
-                .request(purpose(LanguagePurpose::Synchronize), None);
+                .request(purpose(LanguagePurpose::Synchronize { generation }), None);
             self.send_json_request(extra, &add_custom_server_language_pack(extra, id))?;
         }
-        self.send_language_option("language_pack_id", id)?;
+        self.send_language_option("language_pack_id", id, Some(generation))?;
         for (pack, base) in [(id, false), (base_id, true)] {
             if pack.is_empty() {
                 continue;
@@ -129,7 +138,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let extra = self
             .session
-            .request(purpose(LanguagePurpose::Synchronize), None);
+            .request(purpose(LanguagePurpose::Synchronize { generation }), None);
         self.send_json_request(extra, &synchronize_language_pack(extra, id))
             .map(|_| ())
     }
@@ -166,7 +175,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .current
             .as_ref()
             .map_or_else(|| "en".to_string(), |info| info.id.clone());
-        self.send_language_option("language_pack_id", &id)
+        self.send_language_option("language_pack_id", &id, None)
     }
 }
 

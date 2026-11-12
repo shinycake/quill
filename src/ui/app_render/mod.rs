@@ -70,8 +70,11 @@ impl Render for QuillApp {
         self.sync_capture_block(window);
         self.sync_viewer_hdr(window);
         self.sync_window_title(window);
-        self.sync_proxy_list_box();
-        self.sync_premium_preview_files();
+        // Locked, a preview left open fetches nothing: its files wait for
+        // the unlock (what runs while locked is ingest and teardown).
+        if !self.lock_waits() {
+            self.sync_premium_preview_files();
+        }
         super::window_frame::sync(window, cx, self.appearance.native_window_frame);
         // Rows the history list painted last frame are what the user saw.
         self.passcode_frame(window, cx);
@@ -105,7 +108,7 @@ impl Render for QuillApp {
         self.sync_video_avatar(active, window.scale_factor(), cx);
         self.sync_userpic_videos(active, window.scale_factor(), history_drawn);
         self.viewer_follow_window_fullscreen(window);
-        self.frame.media_roots_frame.borrow_mut().take();
+        self.frame.media_roots_frame.set(None);
         let opening = self.viewer.state.is_open().then_some(self.viewer.open_gen);
         let cover = self.frame.viewer_cover.get();
         self.frame
@@ -415,7 +418,9 @@ impl Render for QuillApp {
                     match self.first_run_view(cx) {
                         Some(first_run) => this.child(div().flex_1().min_h_0().child(first_run)),
                         // Settings covers the chat list and the chat.
-                        None if self.settings.open => this.child(self.settings_window(window, cx)),
+                        None if self.settings.open() => {
+                            this.child(self.settings_window(window, cx))
+                        }
                         None => this.child(self.shell_columns(
                             &auth,
                             show_phone,
@@ -557,7 +562,7 @@ impl Render for QuillApp {
                 },
             )
             // Slice CL1: right-click chat-row context menu.
-            .when_some(self.message_ui.menu.chat(), |this, menu| {
+            .when_some(self.message_ui.menu.row_copy(), |this, menu| {
                 this.child(self.chat_menu_overlay(menu, cx))
             })
             .when_some(
@@ -582,7 +587,7 @@ impl Render for QuillApp {
             // messages beside the pressed chat-list row. Rendered above
             // the row menu; any click or the long-press release closes
             // it.
-            .when_some(self.chat_list.peek.open(), |this, preview| {
+            .when_some(self.message_ui.menu.peek(), |this, preview| {
                 this.child(self.chat_preview_overlay(preview, cx))
             })
             // MED4: Instant View reader overlay (above the menu).
@@ -611,7 +616,7 @@ impl Render for QuillApp {
             Some(cache) => super::image_budget::CacheScope::new(cache, root).into_any_element(),
             None => root.into_any_element(),
         };
-        self.frame.menu.items.apply_pending_focus(window, cx);
+        self.menu_frame_end(window, cx);
         // Back to the scope this draw interrupted; the layout and paint of
         // the root run as the main window's again.
         self.set_window_scope(outer_scope);

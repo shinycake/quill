@@ -560,7 +560,7 @@ fn the_start_page_takes_a_sticker_from_the_panel(cx: &mut TestAppContext) {
     };
     app.update(vcx, |app, _| {
         let panel = &mut app.demo_session.as_mut().unwrap().stickers.stickers;
-        panel.stickers.push(sticker.clone());
+        panel.selection.stickers.push(sticker.clone());
     });
     open(&app, vcx);
     // Outside the picker a click is not taken.
@@ -895,23 +895,34 @@ fn a_save_refused_after_the_box_closed_goes_to_the_status_line(cx: &mut TestAppC
     assert!(app.read_with(vcx, |app, _| app.dialogs.business_dialog.is_none()));
     app.update(vcx, |app, _| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.settings.business.error = Some("Couldn't save the greeting".into());
+            session.settings.business.error = Some(quill::state::BusinessRefusal {
+                area: quill::state::BusinessArea::Save(
+                    quill::business_settings::BusinessSettingKind::Greeting,
+                ),
+                line: "Couldn't save the greeting".into(),
+            });
         }
         app.business_closed_error_upkeep();
     });
     assert_eq!(status_note(&app, vcx), "Couldn't save the greeting");
     // Said once.
     let left = app.read_with(vcx, |app, _| {
-        app.demo_session
-            .as_ref()
-            .and_then(|s| s.settings.business.error.clone())
+        app.demo_session.as_ref().and_then(|s| {
+            s.settings
+                .business
+                .error
+                .clone()
+                .map(|refusal| refusal.line)
+        })
     });
     assert_eq!(left, None);
 }
 
 #[gpui_kit::test]
-fn a_refused_link_save_keeps_the_box_and_its_draft(cx: &mut TestAppContext) {
-    use quill::state::ChatLinkSave;
+fn a_link_save_answers_only_the_box_that_sent_it(cx: &mut TestAppContext) {
+    use super::LinkSave;
+    use quill::ids::RequestId;
+    use quill::state::ChatLinkAnswer;
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     seed(&app, vcx, true);
@@ -921,12 +932,41 @@ fn a_refused_link_save_keeps_the_box_and_its_draft(cx: &mut TestAppContext) {
         app.open_business_link_edit(None, window, cx)
     });
     assert_eq!(view(&app, vcx), View::LinkEdit);
-    // TDLib answered: the box goes back to the list with its note.
-    app.update(vcx, |app, _| {
-        if let Some(session) = app.demo_session.as_mut() {
-            session.settings.business_extra.chat_link_save = ChatLinkSave::Saved;
-        }
+    let sent = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext, id: u64| {
+        app.update(vcx, |app, _| {
+            if let Some(edit) = app.business_mut().and_then(|d| d.screen.link_edit_mut()) {
+                edit.save = LinkSave::Saving(RequestId(id));
+            }
+        });
+    };
+    let answer = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext, answer| {
+        app.update(vcx, |app, _| {
+            if let Some(session) = app.demo_session.as_mut() {
+                session.settings.business_extra.chat_link_answer = answer;
+            }
+        });
+    };
+    let saving = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| app.business_link_saving())
+    };
+    // Sent as request 1; the answer to another request leaves it waiting.
+    sent(&app, vcx, 1);
+    answer(&app, vcx, ChatLinkAnswer::Saved(RequestId(2)));
+    act(&app, vcx, |app, window, cx| {
+        app.business_link_save_upkeep(window, cx)
     });
+    assert_eq!(view(&app, vcx), View::LinkEdit);
+    assert!(saving(&app, vcx), "still waiting for its own answer");
+    // Its refusal puts the draft back to editing, ready to send again.
+    answer(&app, vcx, ChatLinkAnswer::Refused(RequestId(1)));
+    act(&app, vcx, |app, window, cx| {
+        app.business_link_save_upkeep(window, cx)
+    });
+    assert_eq!(view(&app, vcx), View::LinkEdit);
+    assert!(!saving(&app, vcx));
+    // Sent again as request 3; its acceptance goes back to the list.
+    sent(&app, vcx, 3);
+    answer(&app, vcx, ChatLinkAnswer::Saved(RequestId(3)));
     act(&app, vcx, |app, window, cx| {
         app.business_link_save_upkeep(window, cx)
     });
@@ -935,7 +975,7 @@ fn a_refused_link_save_keeps_the_box_and_its_draft(cx: &mut TestAppContext) {
         note(&app, vcx).as_deref(),
         Some(quill::lang::tr(quill::lang::keys::CHAT_LINK_SAVED))
     );
-    // Idle (a refusal) leaves the edit box where it is.
+    // A new box is not driven by that old answer.
     act(&app, vcx, |app, window, cx| {
         app.open_business_link_edit(None, window, cx)
     });
@@ -983,4 +1023,81 @@ fn a_failed_chatbot_load_shows_its_error_with_a_retry(cx: &mut TestAppContext) {
     });
     let shown = app.read_with(vcx, |app, _| app.business_bot_error());
     assert_eq!(shown.as_deref(), Some("Couldn't load the chatbot: offline"));
+}
+
+#[gpui_kit::test]
+fn a_chatbot_draft_waiting_for_the_server_is_filled_when_the_answer_lands(cx: &mut TestAppContext) {
+    use quill::business_bots::{BotRights, ConnectedBot};
+    use quill::business_settings::BusinessRecipients;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    seed(&app, vcx, true);
+    open(&app, vcx);
+    go(&app, vcx, View::Chatbots);
+    // The draft waits: the connected bot has not been reported.
+    app.update(vcx, |app, _| {
+        if let Some(bot) = app.business_mut().and_then(|d| d.screen.chatbot_mut()) {
+            bot.bot = super::BotLink::Loading;
+        }
+    });
+    act(&app, vcx, |app, window, cx| {
+        app.business_info_upkeep(window, cx)
+    });
+    let linked = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| {
+            app.dialogs
+                .business_dialog
+                .as_ref()
+                .and_then(|d| d.screen.chatbot())
+                .map(|b| b.bot)
+        })
+    };
+    // No live client in the demo: nothing left to wait for, no bot.
+    assert_eq!(linked(&app, vcx), Some(super::BotLink::Empty));
+    // The answer lands after the draft went back to waiting (a late one).
+    app.update(vcx, |app, _| {
+        if let Some(bot) = app.business_mut().and_then(|d| d.screen.chatbot_mut()) {
+            bot.bot = super::BotLink::Loading;
+        }
+        if let Some(session) = app.demo_session.as_mut() {
+            session.settings.business_extra.connected_bot =
+                quill::state::fetch::Fetch::Ready(Some(ConnectedBot {
+                    bot_user_id: 77,
+                    recipients: BusinessRecipients::everyone(),
+                    rights: BotRights::default(),
+                }));
+        }
+    });
+    act(&app, vcx, |app, window, cx| {
+        app.business_info_upkeep(window, cx)
+    });
+    assert_eq!(linked(&app, vcx), Some(super::BotLink::Connected(77)));
+}
+
+#[gpui_kit::test]
+fn the_time_zone_screen_draws_a_failed_list_without_loading(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    seed(&app, vcx, true);
+    open(&app, vcx);
+    app.update(vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session
+                .settings
+                .business
+                .time_zones
+                .fail("Couldn't load the time zones: offline");
+        }
+    });
+    go(&app, vcx, View::Hours);
+    go(&app, vcx, View::TimeZone);
+    assert_eq!(view(&app, vcx), View::TimeZone);
+    let shown = app.read_with(vcx, |app, _| {
+        app.session()
+            .and_then(|s| s.settings.business.time_zones.error().map(str::to_string))
+    });
+    assert_eq!(
+        shown.as_deref(),
+        Some("Couldn't load the time zones: offline")
+    );
 }

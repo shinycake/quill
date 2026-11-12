@@ -55,8 +55,7 @@ fn tab_reaches_the_archive_menu_items(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     app.update_in(vcx, |app, _, cx| {
-        app.message_ui.menu =
-            crate::ui::chat_list_state::ContextMenu::Archive(point(px(40.), px(80.)));
+        app.message_ui.menu.open_archive(point(px(40.), px(80.)));
         cx.notify();
     });
     tab_lands_on_an_item(&app, vcx);
@@ -107,8 +106,7 @@ fn archive_items(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> usize {
 
 fn open_archive_menu(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
     app.update_in(vcx, |app, _, cx| {
-        app.message_ui.menu =
-            crate::ui::chat_list_state::ContextMenu::Archive(point(px(40.), px(80.)));
+        app.message_ui.menu.open_archive(point(px(40.), px(80.)));
         cx.notify();
     });
     vcx.run_until_parked();
@@ -195,12 +193,11 @@ fn arrows_enter_the_menu_instead_of_reaching_the_chat_list(cx: &mut TestAppConte
 
 pub(super) fn open_chat_menu(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
     app.update_in(vcx, |app, _, cx| {
-        app.message_ui.menu = crate::ui::chat_list_state::ContextMenu::Chat(
-            crate::ui::menu_states::ChatMenuState::at(
+        app.message_ui.menu
+            .open_row(crate::ui::menu_states::ChatMenuState::at(
                 quill::ids::ChatId(11),
                 point(px(40.), px(80.)),
-            ),
-        );
+            ));
         cx.notify();
     });
     vcx.run_until_parked();
@@ -463,12 +460,11 @@ fn a_menu_whose_target_is_gone_closes_instead_of_swallowing_the_arrows(cx: &mut 
                         position: point(px(500.), px(200.)),
                     });
             } else {
-                app.message_ui.menu = crate::ui::chat_list_state::ContextMenu::Chat(
-                    crate::ui::menu_states::ChatMenuState::at(
+                app.message_ui.menu
+                    .open_row(crate::ui::menu_states::ChatMenuState::at(
                         quill::ids::ChatId(987_654),
                         point(px(40.), px(80.)),
-                    ),
-                );
+                    ));
             }
             cx.notify();
         });
@@ -619,8 +615,7 @@ fn escape_closes_the_menu_and_restores_focus(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     let before = focused(vcx).expect("the app has focus");
     app.update_in(vcx, |app, _, cx| {
-        app.message_ui.menu =
-            crate::ui::chat_list_state::ContextMenu::Archive(point(px(40.), px(80.)));
+        app.message_ui.menu.open_archive(point(px(40.), px(80.)));
         cx.notify();
     });
     vcx.run_until_parked();
@@ -644,23 +639,22 @@ fn escape_closes_the_menu_and_restores_focus(cx: &mut TestAppContext) {
 /// so opening one in place of the other leaves exactly one open.
 #[gpui_kit::test]
 fn opening_a_menu_replaces_the_one_open(cx: &mut TestAppContext) {
-    use crate::ui::chat_list_state::ContextMenu;
     let (app, mut vcx) = new_app(cx);
     open_message_menu(&app, &mut vcx);
     app.update_in(&mut vcx, |app, _, _| {
         assert!(app.message_ui.menu.is_open());
-        app.open_context_menu(ContextMenu::Archive(point(px(10.), px(10.))));
+        app.message_ui.menu.open_archive(point(px(10.), px(10.)));
         assert!(!app.message_ui.menu.is_open());
         assert!(app.message_ui.menu.archive().is_some());
         // Closing a message menu leaves another menu alone.
         app.close_message_menu();
         assert!(app.message_ui.menu.archive().is_some());
-        app.open_context_menu(ContextMenu::FolderTab(
-            crate::ui::folder_extras::FolderTabMenu {
+        app.message_ui
+            .menu
+            .open_folder_tab(crate::ui::folder_extras::FolderTabMenu {
                 folder_id: None,
                 position: point(px(5.), px(5.)),
-            },
-        ));
+            });
         assert!(app.message_ui.menu.archive().is_none());
         assert!(app.message_ui.menu.folder_tab().is_some());
     });

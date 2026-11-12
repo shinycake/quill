@@ -60,8 +60,37 @@ struct Seen {
 }
 
 thread_local! {
-    static SEEN: RefCell<HashMap<Key, Seen>> = RefCell::new(HashMap::new());
-    static PLAYED: RefCell<Played> = RefCell::new(Played::default());
+    static NOTES: RefCell<Notes> = RefCell::new(Notes::default());
+}
+
+/// Run `f` on the notes, unless they are borrowed already (a paint that
+/// lands inside another borrower skips its note rather than panic).
+fn with_notes<R>(f: impl FnOnce(&mut Notes) -> R) -> Option<R> {
+    NOTES.with(|notes| notes.try_borrow_mut().ok().map(|mut notes| f(&mut notes)))
+}
+
+/// Where each Premium sticker was painted, and which of them played, for
+/// one account at a time: chat and message ids are the same ones in another
+/// account's view of a shared group, so everything goes when the account
+/// changes (`keep_shown`).
+#[derive(Default)]
+struct Notes {
+    account: Option<AccountKey>,
+    seen: HashMap<Key, Seen>,
+    played: Played,
+}
+
+impl Notes {
+    /// Keep only what belongs to `account` and the chats a window shows.
+    fn keep_shown(&mut self, account: Option<&AccountKey>, shown: &[i64]) {
+        if self.account.as_ref() != account {
+            self.seen.clear();
+            self.played.chats.clear();
+            self.account = account.cloned();
+        }
+        self.seen.retain(|key, _| shown.contains(&key.0));
+        self.played.chats.retain(|chat, _| shown.contains(chat));
+    }
 }
 
 /// Which messages already played their effect, for each chat a window
@@ -70,9 +99,6 @@ thread_local! {
 /// own `_animatedStickersPlayed`).
 #[derive(Default)]
 struct Played {
-    /// The account the sets belong to: chat ids are the same ones in
-    /// another account's view of a shared group.
-    account: Option<AccountKey>,
     chats: HashMap<i64, HashSet<i64>>,
 }
 
@@ -90,16 +116,6 @@ impl Played {
             played.clear();
         }
         played.insert(key.1);
-    }
-
-    /// Forget the chats no window shows, and everything of another
-    /// account.
-    fn keep_shown(&mut self, account: Option<&AccountKey>, shown: &[i64]) {
-        if self.account.as_ref() != account {
-            self.chats.clear();
-            self.account = account.cloned();
-        }
-        self.chats.retain(|chat, _| shown.contains(chat));
     }
 }
 
@@ -157,12 +173,16 @@ pub(super) fn tracker(
             // paint, needs another frame: the overlay already ran this one.
             // A fresh note does not ask again, so waiting on the download
             // does not spin.
-            let kick = SEEN.with(|seen| {
-                let mut seen = seen.borrow_mut();
-                seen.retain(|_, s| s.at.elapsed() < Duration::from_secs(5));
-                let stale = seen.get(&key).is_none_or(|s| s.at.elapsed() >= SEEN_FRESH);
-                let pending = PLAYED.with(|played| played.borrow().pending(key));
-                seen.insert(
+            let kick = with_notes(|notes| {
+                notes
+                    .seen
+                    .retain(|_, s| s.at.elapsed() < Duration::from_secs(5));
+                let stale = notes
+                    .seen
+                    .get(&key)
+                    .is_none_or(|s| s.at.elapsed() >= SEEN_FRESH);
+                let pending = notes.played.pending(key);
+                notes.seen.insert(
                     key,
                     Seen {
                         bounds,
@@ -172,7 +192,8 @@ pub(super) fn tracker(
                     },
                 );
                 pending && stale
-            });
+            })
+            .unwrap_or(false);
             if kick {
                 window.request_animation_frame();
             }
@@ -236,8 +257,11 @@ pub(super) fn wrap(
 
 /// Where the sticker of `key` is, if it was painted just now.
 pub(super) fn anchor(key: Key) -> Option<(f32, f32, f32, f32)> {
-    SEEN.with(|seen| {
-        seen.borrow()
+    NOTES.with(|notes| {
+        notes
+            .try_borrow()
+            .ok()?
+            .seen
             .get(&key)
             .filter(|s| s.at.elapsed() < SEEN_FRESH)
             .map(|s| {
@@ -312,22 +336,25 @@ impl QuillApp {
     /// `loadVideoThumbnail`).
     pub(super) fn premium_autoplay(&mut self, cx: &mut Context<Self>) {
         let paused = power_saving::on(power_saving::Flag::StickersChat);
+        // The notes follow the account and the chats on screen even while
+        // no chat is viewed, so a left account's notes never wait there.
+        let shown = self.chats_on_screen();
+        let account = self.current_account();
+        with_notes(|notes| notes.keep_shown(account.as_ref(), &shown));
         let Some(chat) = self.viewed_chat() else {
             return;
         };
-        let shown = self.chats_on_screen();
-        SEEN.with(|seen| seen.borrow_mut().retain(|key, _| shown.contains(&key.0)));
-        let account = self.current_account();
-        PLAYED.with(|played| played.borrow_mut().keep_shown(account.as_ref(), &shown));
-        let due: Vec<(Key, Seen)> = SEEN.with(|seen| {
-            seen.borrow()
+        let due: Vec<(Key, Seen, bool)> = with_notes(|notes| {
+            notes
+                .seen
                 .iter()
                 .filter(|(key, s)| key.0 == chat.0 && s.at.elapsed() < SEEN_FRESH)
-                .map(|(key, s)| (*key, *s))
+                .map(|(key, s)| (*key, *s, notes.played.pending(*key)))
                 .collect()
-        });
-        for (key, seen) in due {
-            if !PLAYED.with(|played| played.borrow().pending(key)) {
+        })
+        .unwrap_or_default();
+        for (key, seen, pending) in due {
+            if !pending {
                 continue;
             }
             // Ready once the view the overlay will draw (same size and
@@ -341,7 +368,7 @@ impl QuillApp {
                 seen.outgoing,
             );
             if self.sticker_view(ask, cx).is_some() && !paused {
-                PLAYED.with(|played| played.borrow_mut().mark(key));
+                with_notes(|notes| notes.played.mark(key));
                 super::emoji_effect::push_premium(
                     effect_for(key, seen.animation),
                     seen.outgoing,
@@ -354,35 +381,59 @@ impl QuillApp {
 
 #[cfg(test)]
 mod tests {
-    use super::{AccountKey, Click, Played, SIZE_FACTOR, click_action, effect_rect};
+    use super::{AccountKey, Click, Notes, SIZE_FACTOR, click_action, effect_rect};
 
     #[test]
     fn each_message_autoplays_once_per_chat_visit() {
-        let mut played = Played::default();
+        let mut notes = Notes::default();
         let account = AccountKey::primary();
-        played.keep_shown(Some(&account), &[1, 2]);
-        assert!(played.pending((1, 10)));
-        played.mark((1, 10));
-        assert!(!played.pending((1, 10)));
-        assert!(played.pending((1, 11)));
-        assert!(played.pending((2, 10)));
-        played.mark((2, 10));
-        assert!(!played.pending((1, 10)));
-        played.keep_shown(Some(&account), &[2]);
-        assert!(played.pending((1, 10)));
-        assert!(!played.pending((2, 10)));
+        notes.keep_shown(Some(&account), &[1, 2]);
+        assert!(notes.played.pending((1, 10)));
+        notes.played.mark((1, 10));
+        assert!(!notes.played.pending((1, 10)));
+        assert!(notes.played.pending((1, 11)));
+        assert!(notes.played.pending((2, 10)));
+        notes.played.mark((2, 10));
+        assert!(!notes.played.pending((1, 10)));
+        notes.keep_shown(Some(&account), &[2]);
+        assert!(notes.played.pending((1, 10)));
+        assert!(!notes.played.pending((2, 10)));
     }
 
     #[test]
     fn another_account_starts_over_in_the_same_chat() {
         let (first, second) = (AccountKey::primary(), AccountKey("second".to_string()));
-        let mut played = Played::default();
-        played.keep_shown(Some(&first), &[7]);
-        played.mark((7, 10));
-        played.keep_shown(Some(&first), &[7]);
-        assert!(!played.pending((7, 10)));
-        played.keep_shown(Some(&second), &[7]);
-        assert!(played.pending((7, 10)));
+        let mut notes = Notes::default();
+        notes.keep_shown(Some(&first), &[7]);
+        notes.played.mark((7, 10));
+        notes.keep_shown(Some(&first), &[7]);
+        assert!(!notes.played.pending((7, 10)));
+        notes.keep_shown(Some(&second), &[7]);
+        assert!(notes.played.pending((7, 10)));
+    }
+
+    /// A paint note of the account left is gone with it, so the account
+    /// switched to never autoplays at the other's bounds.
+    #[test]
+    fn another_accounts_paint_notes_go_with_the_account() {
+        use super::Seen;
+        use gpui_kit::{Bounds, point, px, size};
+        let (first, second) = (AccountKey::primary(), AccountKey("second".to_string()));
+        let mut notes = Notes::default();
+        notes.keep_shown(Some(&first), &[7]);
+        notes.seen.insert(
+            (7, 10),
+            Seen {
+                bounds: Bounds::new(point(px(0.), px(0.)), size(px(10.), px(10.))),
+                outgoing: false,
+                animation: quill::ids::FileId(1),
+                at: std::time::Instant::now(),
+            },
+        );
+        notes.keep_shown(Some(&first), &[7]);
+        assert!(notes.seen.contains_key(&(7, 10)));
+        notes.keep_shown(Some(&second), &[7]);
+        assert!(notes.seen.is_empty());
     }
 
     #[test]

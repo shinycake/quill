@@ -65,8 +65,9 @@ fn the_ringed_avatar_opens_the_first_unread_story(cx: &mut TestAppContext) {
     assert!(find(&mut vcx, "profile-rating"));
     click(&mut vcx, "profile-cover-avatar");
     let opened = app.read_with(&vcx, |app, _| {
-        app.chat_list
-            .pending_story_open
+        app.stories
+            .viewer
+            .waiting()
             .map(|open| (open.chat_id, open.story_id))
             .or_else(|| app.stories.viewer.is_open().then_some((COVER_STORIES, 0)))
     });

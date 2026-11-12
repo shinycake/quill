@@ -9,8 +9,7 @@ use std::collections::HashMap;
 /// `getWebAppLinkUrl`): what the answer is for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WebAppPending {
-    /// The open call this is for: a second launch before the first
-    /// answers keeps its own context.
+    /// The open call this is for: only its answer opens the launch.
     pub request: crate::ids::RequestId,
     pub bot_user_id: i64,
     pub chat_id: Option<i64>,
@@ -70,6 +69,21 @@ pub enum WriteAccessResult {
     Denied,
 }
 
+/// The answer of one `toggleBotCanManageEmojiStatus`, by the request that
+/// asked: only the flow waiting for that request takes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EmojiAccessAnswer {
+    pub request: crate::ids::RequestId,
+    pub result: EmojiAccessResult,
+}
+
+/// What `toggleBotCanManageEmojiStatus` came to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EmojiAccessResult {
+    Granted,
+    Refused,
+}
+
 /// The outcome of one contact-card send for a mini app's phone request.
 /// It names the `sendMessage` request it answers: only the flow that sent
 /// that request takes it, so a late answer never finishes a later one.
@@ -91,9 +105,12 @@ impl PhoneShare {
     }
 }
 
-/// The outcome of one `toggleBotIsAddedToAttachmentMenu`.
+/// The outcome of one `toggleBotIsAddedToAttachmentMenu`, by the request
+/// that sent it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AttachmentToggle {
+    /// The `toggleBotIsAddedToAttachmentMenu` call this answers.
+    pub request: crate::ids::RequestId,
     pub bot_user_id: i64,
     /// Whether the bot is in the menu now, or why the change failed.
     pub result: Result<bool, String>,
@@ -132,11 +149,21 @@ impl WebApps {
     }
 }
 
+/// The outcome of one `sendWebAppData`, by the request that sent it: only
+/// the flow that sent that request reports it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DataSent {
+    pub request: crate::ids::RequestId,
+    /// `Ok` or a failure message.
+    pub result: Result<(), String>,
+}
+
 /// Everything mini-app related on the session.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WebApps {
-    /// The open calls in flight, each with what its answer is for.
-    pub pending: Vec<WebAppPending>,
+    /// The open call in flight and what its answer is for. A newer launch
+    /// replaces it: the older answer opens nothing.
+    pub opening: Option<WebAppPending>,
     /// One-shot: the open call's answer.
     pub open_result: Option<WebAppOpenResult>,
     /// Launches TDLib started for an open call that was dropped before
@@ -144,23 +171,23 @@ pub struct WebApps {
     pub dropped_launches: Vec<i64>,
     /// `updateAttachmentMenuBots`: the bots in the attachment menu.
     pub attachment_menu_bots: Vec<AttachmentMenuBot>,
-    /// One-shot: `getAttachmentMenuBot` answer (for adding a bot), or a
-    /// failure message, with the bot it was asked for: the flow waiting
-    /// takes only its own bot's answer.
-    pub attachment_menu_bot: Option<(i64, Result<AttachmentMenuBot, String>)>,
+    /// One-shot: `getAttachmentMenuBot` answers (for adding a bot), or a
+    /// failure message, oldest first, each with the request it answers: the
+    /// flow waiting takes only the answer of its own request.
+    pub attachment_menu_bot: Vec<(crate::ids::RequestId, Result<AttachmentMenuBot, String>)>,
     /// One-shot: `toggleBotIsAddedToAttachmentMenu` outcomes, oldest
-    /// first, each with the bot it answers: the flow waiting takes only its
-    /// own bot's.
+    /// first, each with the request it answers: the flow waiting takes only
+    /// its own request's.
     pub attachment_menu_toggled: Vec<AttachmentToggle>,
     /// One-shot: the write-access answer, with the request it answers.
     pub write_access: Option<WriteAnswer>,
-    /// One-shot: `toggleBotCanManageEmojiStatus` outcome,
-    /// `(bot_user_id, done)`.
-    pub emoji_access: Option<(i64, bool)>,
-    /// One-shot: `searchWebApp` answer for a `t.me/bot/app` link, the app
-    /// or a failure message, with the bot it was asked for: a second link
-    /// clicked before the first answered takes only its own answer.
-    pub found: Option<(i64, Result<FoundWebApp, String>)>,
+    /// One-shot: `toggleBotCanManageEmojiStatus` outcome, by its request.
+    pub emoji_access: Option<EmojiAccessAnswer>,
+    /// One-shot: `searchWebApp` answers for `t.me/bot/app` links, the app
+    /// or a failure message, oldest first, each with the request it
+    /// answers: a second link of the same bot clicked before the first
+    /// answered takes only its own answer.
+    pub found: Vec<(crate::ids::RequestId, Result<FoundWebApp, String>)>,
     /// `(launch_id, req_id)` of custom requests in flight, by `RequestId`.
     pub custom_requests: HashMap<u64, (i64, String)>,
     /// One-shot: custom request answers.
@@ -169,8 +196,9 @@ pub struct WebApps {
     /// so its answer and its error need no key; a failure is drawn with
     /// the tab's reopen as the retry.
     pub grossing: crate::state::fetch::Fetch<Vec<i64>>,
-    /// One-shot: `sendWebAppData` outcome (`Ok` or a failure message).
-    pub data_sent: Option<Result<(), String>>,
+    /// One-shot: `sendWebAppData` outcomes, oldest first, each by its
+    /// request.
+    pub data_sent: Vec<DataSent>,
     /// One-shot: the contact card sent for `web_app_request_phone` was
     /// taken by TDLib or refused, with the request it answers.
     pub phone_share: Option<PhoneShare>,

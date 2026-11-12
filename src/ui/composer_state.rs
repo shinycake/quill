@@ -134,6 +134,10 @@ impl SlowModeTick {
 pub(crate) struct ComposerUi {
     /// Highlighted row of the composer's `@` suggestions.
     pub(super) mention_selected: usize,
+    /// When this window's AI button last appeared (its sparkle blinks from
+    /// there); `None` while it is not drawn. Set and cleared as the button
+    /// draws, so each window follows its own composer.
+    pub(super) ai_button_since: std::cell::Cell<Option<std::time::Instant>>,
     /// Composer `#hashtag` / `:emoji` autocomplete popup.
     pub(super) suggest: super::composer_suggest::SuggestUi,
     pub(super) emoji_words: super::emoji_words_ui::EmojiWordsUi,
@@ -166,10 +170,6 @@ pub(crate) struct ComposerUi {
     /// What the compose field's placeholder was last built from
     /// (`sync_composer_placeholder`): the facts and the language.
     pub(super) placeholder_shown: Option<(quill::composer::PlaceholderFacts, usize)>,
-    /// Phase S2: the inline-bot warning has been confirmed once this
-    /// session (TGX `TUTORIAL_INLINE_SEARCH_SECRECY`, which persists;
-    /// Quill keeps it per session — documented divergence).
-    pub(super) inline_bot_alert_shown: bool,
     /// Files being dragged over the conversation, and what they hold
     /// (`drop_zones`), or a demo's fixed drop-zone state (no real drag in
     /// a screenshot).
@@ -190,6 +190,7 @@ impl ComposerUi {
     pub(super) fn new() -> Self {
         Self {
             mention_selected: 0,
+            ai_button_since: std::cell::Cell::new(None),
             suggest: super::composer_suggest::SuggestUi::default(),
             emoji_words: Default::default(),
             inline_scroll: gpui_kit::ScrollHandle::new(),
@@ -201,7 +202,6 @@ impl ComposerUi {
             remote_draft_seen: 0,
             draft_load: DraftLoad::Unshown,
             placeholder_shown: None,
-            inline_bot_alert_shown: false,
             file_drag: super::drop_zones::FileDrag::Idle,
             archive: Default::default(),
             slow_mode_tick: SlowModeTick::Idle,

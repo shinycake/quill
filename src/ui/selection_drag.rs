@@ -74,10 +74,9 @@ impl SelectionDrag {
 #[derive(Debug, Clone)]
 pub(crate) struct DragSelect {
     chat: ChatId,
-    /// The row pressed, and whether it is still being sent (not
-    /// selectable).
+    /// The row pressed. Whether it is still being sent (not selectable) is
+    /// read when the button is released, not when it went down.
     press: MessageId,
-    pending: bool,
     origin: Point<Pixels>,
     /// Selection mode: a release without a drag toggles the press row
     /// (`needItemSelectionToggle`). Outside it a click does nothing.
@@ -105,7 +104,6 @@ impl QuillApp {
         &mut self,
         chat: ChatId,
         message_id: MessageId,
-        pending: bool,
         event: &MouseDownEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -117,7 +115,7 @@ impl QuillApp {
             window.focus(&self.message_ui.history_focus, cx);
             self.chat_ui.focus = A11yFocus::Row(message_id);
             if event.modifiers.shift
-                && let Some(anchor) = self.chat_ui.selection_anchor
+                && let Some(anchor) = self.selection_anchor()
             {
                 let ids = self.loaded_selectable_ids(chat);
                 let range = quill::selection_pin::range_between(&ids, anchor, message_id);
@@ -143,7 +141,6 @@ impl QuillApp {
         let drag = DragSelect {
             chat,
             press: message_id,
-            pending,
             origin: event.position,
             click_toggles,
             forward,
@@ -167,7 +164,7 @@ impl QuillApp {
         // range selects, and no swipe replies.
         if super::forward_drag_source::forward_lift_live(cx) {
             self.message_ui.selection_drag.clear();
-            self.message_ui.swipe_reply_start = None;
+            self.chat_ui.swipe_reply.clear();
             return None;
         }
         if drag.forward {
@@ -243,7 +240,7 @@ impl QuillApp {
     /// dropped without applying its range.
     pub(super) fn selection_drag_lost(&mut self, cx: &mut Context<Self>) {
         if self.message_ui.selection_drag.take().is_some() {
-            self.message_ui.swipe_reply_start = None;
+            self.chat_ui.swipe_reply.clear();
             cx.notify();
         }
     }
@@ -285,13 +282,14 @@ impl QuillApp {
                 let next = apply_drag(&ids, &selected, &range, LIMIT);
                 self.set_selection(drag.chat, next, cx);
                 // The release ends the drag, not a swipe to reply.
-                self.message_ui.swipe_reply_start = None;
-                self.chat_ui.selection_anchor = Some(range.to);
+                self.chat_ui.swipe_reply.clear();
+                self.set_selection_anchor(range.to);
                 self.chat_ui.focus = A11yFocus::Row(range.to);
             }
             None if drag.click_toggles => {
-                self.toggle_forward_select(drag.chat, drag.press, drag.pending, cx);
-                self.chat_ui.selection_anchor = Some(drag.press);
+                let pending = self.message_still_sending(drag.chat, drag.press);
+                self.toggle_forward_select(drag.chat, drag.press, pending, cx);
+                self.set_selection_anchor(drag.press);
                 self.chat_ui.focus = A11yFocus::Row(drag.press);
             }
             None => {}
@@ -389,12 +387,21 @@ impl QuillApp {
         }
     }
 
+    /// Whether the message is not on the server yet (or is gone), as it
+    /// stands now.
+    fn message_still_sending(&self, chat: ChatId, id: MessageId) -> bool {
+        self.session()
+            .and_then(|session| session.histories.get(&chat.0))
+            .and_then(|history| history.messages.get(&id.0))
+            .is_none_or(|message| message.pending())
+    }
+
     /// Where the history rows were painted last, in window pixels.
     fn history_row_bands(&self) -> Vec<RowBand> {
-        self.history
-            .hit_rows
-            .borrow()
-            .iter()
+        let Ok(rows) = self.history.hit_rows.try_borrow() else {
+            return Vec::new();
+        };
+        rows.iter()
             .map(|(index, bounds)| RowBand {
                 index: *index,
                 top: f32::from(bounds.top()),
@@ -677,7 +684,7 @@ mod tests {
         vcx.simulate_click(blank_point(a), Modifiers::default());
         assert_eq!(selected(&app, vcx), vec![b.id], "a click toggles a off");
         assert_eq!(
-            app.read_with(vcx, |app, _| app.chat_ui.selection_anchor),
+            app.read_with(vcx, |app, _| app.selection_anchor()),
             Some(a.id),
             "the last clicked row anchors the next Shift+click"
         );
