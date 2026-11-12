@@ -65,6 +65,19 @@ pub(in crate::ui) enum AiAsk {
     Asked { request: RequestId, markup: String },
 }
 
+/// A send's request can still answer: it is in the session's table, or its
+/// answer is queued for the poll pass that notes it (`finish_successful_sends`;
+/// a background account's stay queued until it is back on screen). A queued
+/// answer is not a lost request: its ack still has to find the clear.
+pub(in crate::ui) fn request_waits(session: &quill::state::Session, request: RequestId) -> bool {
+    session.requests.get(request).is_some()
+        || session
+            .messages
+            .sent_answers
+            .iter()
+            .any(|answer| answer.request == request)
+}
+
 impl QuillApp {
     /// The rich send `request` took `markup` out of the field. A newer
     /// send replaces an older one (its answer no longer restores anything).
@@ -152,7 +165,7 @@ impl QuillApp {
                     .get(&chat.0)
                     .is_some_and(|history| history.messages.contains_key(&message.0))
             },
-            |request| session.requests.get(request).is_some(),
+            |request| request_waits(session, request),
         );
         let answered = self
             .composer_sends

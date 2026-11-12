@@ -1169,3 +1169,57 @@ fn album_failures_from_one_slot_never_drop_the_texts_clear() {
             .is_some()
     );
 }
+
+/// Sweep r4-07 round 4 (item 5): a send answered in a background account
+/// has its answer queued until the account is back on screen. The first
+/// frame's upkeep prunes clears whose request is gone; a queued answer is
+/// not gone, so the clear stays for the ack that follows.
+#[test]
+fn an_armed_clear_whose_answer_is_queued_is_not_pruned() {
+    use crate::ui::composer_state::DraftClear;
+    let chat = ChatId(7);
+    let slot = forum_slot(1);
+    let account = slot.account.clone();
+    let mut sends = crate::ui::composer_sends::ComposerSends::default();
+    let request = RequestId(11);
+    sends.set_draft_clear(
+        &slot,
+        Some(DraftClear::of_text(chat, "hello").asked([request])),
+    );
+    let mut session = quill::state::Session::new(
+        account.clone(),
+        std::sync::Arc::new(quill::diagnostics::MemorySink::new()),
+    );
+    // The answer was ingested: the request left the table, the answer waits.
+    session.messages.sent_answers.push(quill::state::SendAnswered {
+        request,
+        chat_id: chat,
+        message_id: MessageId(-5),
+    });
+    let prune = |sends: &mut crate::ui::composer_sends::ComposerSends, session: &quill::state::Session| {
+        sends.forget_lost_clears(
+            &account,
+            |_, _| true,
+            |request| crate::ui::composer::request_waits(session, request),
+        )
+    };
+    prune(&mut sends, &session);
+    assert!(sends.has_draft_clear(&slot), "a queued answer still waits");
+    // The poll pass notes the answer, and the ack finds the clear.
+    for sent in std::mem::take(&mut session.messages.sent_answers) {
+        sends.note_send_answer(&account, sent.request, sent.message_id);
+    }
+    let taken = sends.take_draft_clear(&account, MessageId(-5), slot.draft);
+    assert_eq!(
+        taken.map(|(_, clear)| clear.sent),
+        Some(Some("hello".to_string())),
+        "the ack clears the draft"
+    );
+    // Without the queued answer the request is lost, and the clear goes.
+    sends.set_draft_clear(
+        &slot,
+        Some(DraftClear::of_text(chat, "again").asked([RequestId(12)])),
+    );
+    prune(&mut sends, &session);
+    assert!(!sends.has_draft_clear(&slot), "a lost request settles it");
+}
