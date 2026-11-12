@@ -440,10 +440,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                 }
             }
         }
-        if !upgrade.invite.is_empty() {
-            if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
-                call.invite_results = Some(invites.for_call(group_call_id));
-            }
+        if !upgrade.invite.is_empty()
+            && let Some(call) = self.session.calls.group_call_mut(group_call_id)
+        {
+            call.invite_results = Some(invites.for_call(group_call_id));
         }
         let still_in_call = self
             .session

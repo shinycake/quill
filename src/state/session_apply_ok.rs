@@ -289,13 +289,13 @@ impl Session {
         // `editStarSubscription` / `reuseStarSubscription` succeeded —
         // same stale pattern: the old cache stays visible until the
         // server-confirmed refetch replaces it (never optimistic).
-        if matches!(
-            pending.map(|p| p.purpose),
-            Some(RequestPurpose::EditStarSubscription | RequestPurpose::ReuseStarSubscription)
-        ) {
-            if let Some(pending) = pending {
-                self.payments.star_subscriptions.edit_done(pending.id);
-            }
+        if let Some(pending) = pending
+            && matches!(
+                pending.purpose,
+                RequestPurpose::EditStarSubscription | RequestPurpose::ReuseStarSubscription
+            )
+        {
+            self.payments.star_subscriptions.edit_done(pending.id);
         }
         // `toggleGiftIsSaved` / `sellGift` succeeded: refetch the list from
         // the server (the connect driver does it on the same ingest) and,
