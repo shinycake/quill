@@ -74,18 +74,21 @@ impl QuillApp {
         if self.preferences.update_state == UpdateState::Idle {
             self.check_for_updates(cx);
         }
-        cx.spawn(async move |this, cx| {
-            loop {
-                cx.background_executor().timer(RECHECK_EVERY).await;
-                if this
-                    .update(cx, |this, cx| this.recheck_for_updates(cx))
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
+        self.arm_update_recheck(cx);
+    }
+
+    /// The next recheck, one timer at a time: the app holds its task, so
+    /// replacing it (each recheck arms the next) or dropping the app ends
+    /// it.
+    fn arm_update_recheck(&mut self, cx: &mut Context<Self>) {
+        let timer = cx.background_executor().timer(RECHECK_EVERY);
+        self.preferences.update_recheck = Some(cx.spawn(async move |this, cx| {
+            timer.await;
+            let _ = this.update(cx, |this, cx| {
+                this.recheck_for_updates(cx);
+                this.arm_update_recheck(cx);
+            });
+        }));
     }
 
     /// The answer of a release check: shown, and a newer release this copy
@@ -169,7 +172,7 @@ impl QuillApp {
             UpdateControl::OpenRelease(url) => self.open_link(&url, cx),
             UpdateControl::Check { busy: true }
             | UpdateControl::ChangelogPending
-            | UpdateControl::Downloading { .. }
+            | UpdateControl::Progress { .. }
             | UpdateControl::Restarting => {}
         }
     }
@@ -198,20 +201,8 @@ impl QuillApp {
                 this.finish_update_download(release, &held, result, cx);
             });
         });
-        // The progress lives in the download; redraw while it runs. The
-        // stage holds both tasks, so leaving the stage ends the redraw.
-        let redraw = cx.spawn(async move |this, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(250))
-                    .await;
-                if this.update(cx, |_, cx| cx.notify()).is_err() {
-                    break;
-                }
-            }
-        });
         self.preferences.update_state =
-            UpdateState::Downloading(stage_release, progress, Job::hold((finish, redraw)));
+            UpdateState::Downloading(stage_release, progress, Job::hold(finish));
         cx.notify();
     }
 
@@ -258,7 +249,7 @@ impl QuillApp {
                 tr(keys::Q_OPS_CHECK_FOR_UPDATES).into()
             }
             UpdateControl::Install(_) => tr(keys::Q_OPS_UPDATE_QUILL).into(),
-            UpdateControl::Downloading { progress, total } => tr_with(
+            UpdateControl::Progress { progress, total } => tr_with(
                 keys::Q_OPS_DOWNLOADING_UPDATE,
                 &[(
                     "progress",
@@ -287,7 +278,7 @@ impl QuillApp {
                 control,
                 UpdateControl::Check { busy: true }
                     | UpdateControl::ChangelogPending
-                    | UpdateControl::Downloading { .. }
+                    | UpdateControl::Progress { .. }
                     | UpdateControl::Restarting
             ))
             .on_click(cx.listener(|this, _, window, cx| {
@@ -350,7 +341,7 @@ impl QuillApp {
                             .when(
                                 !matches!(
                                     control,
-                                    UpdateControl::Downloading { .. } | UpdateControl::Restarting
+                                    UpdateControl::Progress { .. } | UpdateControl::Restarting
                                 ),
                                 |row| {
                                     row.child(self.update_control_button(

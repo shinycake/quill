@@ -28,7 +28,6 @@ bare:DeviceLink::Opening 1
 bare:DeviceRun::Opening 1
 bare:DownloadStatus::Downloading 1
 bare:Draft::Waiting 1
-bare:Echo::Waiting 1
 bare:EngineState::Loading 1
 bare:Entry::Pending 1
 bare:ExtractionStage::Starting 1
@@ -36,7 +35,6 @@ bare:FeederState::Syncing 1
 bare:GiftsLayout::Loading 1
 bare:GoalNow::Waiting 1
 bare:Health::Running 1
-bare:Kind::Applying 1
 bare:LinkHandlerState::Checking 1
 bare:LinkStatus::Pending 1
 bare:ListStatus::Loading 1
@@ -51,7 +49,6 @@ bare:OwnLinkState::Waiting 1
 bare:PaidStage::Waiting 1
 bare:PaneMode::Connecting 1
 bare:PasscodeJob::Running 1
-bare:Phase::Downloading 1
 bare:Phase::Loading 1
 bare:Phase::Requested 1
 bare:Phase::Waiting 1
@@ -92,7 +89,6 @@ bare:ThreadStatus::Starting 1
 bare:ToldStage::Loading 1
 bare:TransportState::Connecting 1
 bare:TypeSave::Sent 1
-bare:Unavailable::Checking 1
 bare:VenueList::Loading 1
 bare:VideoFullscreen::Leaving 1
 bare:ViewState::Opening 1
@@ -137,7 +133,6 @@ unkeyed:ListEdit::InFlight 1
 unkeyed:Neighbour::Asking 1
 unkeyed:P2pStage::Waiting 1
 unkeyed:PickWait::Downloading 1
-unkeyed:PickerFill::Waiting 1
 unkeyed:PictureState::Downloading 1
 unkeyed:RegistrationStep::Asking 1
 unkeyed:Restore::Opening 1
@@ -152,7 +147,6 @@ unkeyed:Stage::Running 1
 unkeyed:StoryFetch::Asked 1
 unkeyed:TitleCheck::Sent 1
 unkeyed:TonConnectRequestState::Pending 1
-unkeyed:UpdateControl::Downloading 1
 unkeyed:VcardImport::Reading 1
 unkeyed:WaitingCheck::Pending 1
 unkeyed:Watch::Running 1

@@ -135,8 +135,9 @@ pub enum Unavailable {
     /// Another user owns the install, or the update folder beside it, so
     /// this user could not clear a backup or trust the update files.
     OwnedByAnother,
-    /// The startup thread has not answered yet; the switch waits.
-    Checking,
+    /// The startup thread has not answered yet; the switch waits. The
+    /// answer is read from a process-wide cell, so nothing is held here.
+    Undecided,
 }
 
 impl Unavailable {
@@ -149,7 +150,7 @@ impl Unavailable {
             Self::PackageManager => keys::Q_OPS_SELF_UPDATE_PACKAGE_MANAGER,
             Self::NotWritable => keys::Q_OPS_SELF_UPDATE_NOT_WRITABLE,
             Self::OwnedByAnother => keys::Q_OPS_SELF_UPDATE_OWNED_BY_ANOTHER,
-            Self::Checking => keys::Q_OPS_SELF_UPDATE_CHECKING,
+            Self::Undecided => keys::Q_OPS_SELF_UPDATE_CHECKING,
         }
     }
 
@@ -164,7 +165,7 @@ impl Unavailable {
             "package-manager" => Self::PackageManager,
             "not-writable" => Self::NotWritable,
             "owned-by-another" => Self::OwnedByAnother,
-            "checking" => Self::Checking,
+            "checking" => Self::Undecided,
             _ => return None,
         })
     }
@@ -424,14 +425,14 @@ pub fn can_install_here() -> bool {
 }
 
 /// Whether "Install updates automatically" can work here, or the reason it
-/// cannot (the hint under the switch), `Unavailable::Checking` until the
+/// cannot (the hint under the switch), `Unavailable::Undecided` until the
 /// startup thread has answered.
 pub fn self_update_availability() -> Result<(), Unavailable> {
     #[cfg(any(test, feature = "demo-capture"))]
     if let Some(forced) = FORCED_AVAILABLE.lock().ok().and_then(|guard| *guard) {
         return forced;
     }
-    availability_now().unwrap_or(Err(Unavailable::Checking))
+    availability_now().unwrap_or(Err(Unavailable::Undecided))
 }
 
 pub fn self_update_available() -> bool {

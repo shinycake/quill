@@ -18,8 +18,10 @@ pub enum UpdateControl {
     Check { busy: bool },
     /// A newer release this installation can download and install.
     Install(ReleaseInfo),
-    /// The package is downloading and being verified.
-    Downloading {
+    /// The package is downloading and being verified: a view of
+    /// [`UpdateState::Downloading`], which owns the download's task. This
+    /// value is derived on every render and holds only what is drawn.
+    Progress {
         progress: DownloadProgress,
         total: u64,
     },
@@ -49,10 +51,10 @@ impl UpdateControl {
                 // A package manager updates it, a source build is updated
                 // by hand, and the startup answer is still coming.
                 Err(Unavailable::PackageManager | Unavailable::NotPackaged)
-                | Err(Unavailable::Checking) => Self::Check { busy: false },
+                | Err(Unavailable::Undecided) => Self::Check { busy: false },
                 Err(_) => Self::OpenRelease(release.url.clone()),
             },
-            UpdateState::Downloading(release, progress, _) => Self::Downloading {
+            UpdateState::Downloading(release, progress, _) => Self::Progress {
                 progress: progress.clone(),
                 total: release_size(release),
             },
@@ -88,7 +90,7 @@ impl UpdateControl {
 
     /// The share of the package downloaded, 0 to 1.
     pub fn fraction(&self) -> Option<f32> {
-        let Self::Downloading { progress, total } = self else {
+        let Self::Progress { progress, total } = self else {
             return None;
         };
         Some(if *total == 0 {
@@ -188,7 +190,7 @@ mod tests {
         for quiet in [
             Unavailable::PackageManager,
             Unavailable::NotPackaged,
-            Unavailable::Checking,
+            Unavailable::Undecided,
         ] {
             let control = UpdateControl::of(&found, Err(quiet));
             assert!(!control.in_title_bar(), "{quiet:?}");

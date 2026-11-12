@@ -53,7 +53,7 @@ pub(super) enum Kind {
     /// `<stamp>.claim`: a launch is handing it to the helper.
     Claimed,
     /// `<stamp>.applying`: a helper is installing it.
-    Applying,
+    HelperHolds,
 }
 
 pub(super) fn kind_of(path: &Path) -> Option<Kind> {
@@ -64,7 +64,7 @@ pub(super) fn kind_of(path: &Path) -> Option<Kind> {
     match path.extension()?.to_str()? {
         READY_EXT => Some(Kind::Ready),
         CLAIM_EXT => Some(Kind::Claimed),
-        APPLYING_EXT => Some(Kind::Applying),
+        APPLYING_EXT => Some(Kind::HelperHolds),
         _ => None,
     }
 }
@@ -213,7 +213,7 @@ pub(super) fn take_over_with(
     path: &Path,
     rename: impl Fn(&Path, &Path) -> io::Result<()>,
 ) -> Result<(Claim, InstallPlan), Refused> {
-    if kind_of(path) == Some(Kind::Applying) {
+    if kind_of(path) == Some(Kind::HelperHolds) {
         return Err(Refused::Taken(io::Error::other(
             "This update is already being applied",
         )));
@@ -360,7 +360,7 @@ mod tests {
         let claim_path = held.path().to_path_buf();
         let (taken, read) = take_over(&claim_path).ok().unwrap();
         assert_eq!(read.release.version, "999.0.0");
-        assert_eq!(kind_of(taken.path()), Some(Kind::Applying));
+        assert_eq!(kind_of(taken.path()), Some(Kind::HelperHolds));
         assert!(matches!(take_over(&claim_path), Err(Refused::Taken(_))));
         assert!(matches!(take_over(taken.path()), Err(Refused::Taken(_))));
         drop(held);
@@ -381,7 +381,7 @@ mod tests {
         assert_eq!(taken.poll_launch(), Launch::Gone);
         // The helper's lock is back: the claim still reads as live.
         assert!(matches!(
-            liveness(taken.path(), Kind::Applying, SystemTime::now()),
+            liveness(taken.path(), Kind::HelperHolds, SystemTime::now()),
             Liveness::Live
         ));
         taken.release();
@@ -423,11 +423,11 @@ mod tests {
         drop(held);
         let path = taken.path().to_path_buf();
         assert!(matches!(
-            liveness(&path, Kind::Applying, SystemTime::now()),
+            liveness(&path, Kind::HelperHolds, SystemTime::now()),
             Liveness::Live
         ));
         drop(taken);
-        let Liveness::Stale(stale) = liveness(&path, Kind::Applying, SystemTime::now()) else {
+        let Liveness::Stale(stale) = liveness(&path, Kind::HelperHolds, SystemTime::now()) else {
             panic!("a fresh .applying nobody holds is stale");
         };
         stale.release();

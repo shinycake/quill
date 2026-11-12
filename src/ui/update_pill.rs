@@ -44,7 +44,8 @@ impl Default for Fill {
 enum Phase {
     #[default]
     Other,
-    Downloading,
+    /// The last control showed the download's percentage.
+    Percent,
     /// The update is ready. `Some(since)` when the swap began; `None` for
     /// an update that was ready without a download to watch (shown at once).
     Ready(Option<Instant>),
@@ -66,9 +67,9 @@ impl UpdatePill {
     /// Any other change shows at once.
     pub(super) fn follow(&mut self, control: &UpdateControl, now: Instant) {
         let target = control.fraction().unwrap_or(1.0);
-        let downloading = matches!(control, UpdateControl::Downloading { .. });
+        let downloading = matches!(control, UpdateControl::Progress { .. });
         let ready = matches!(control, UpdateControl::Restart | UpdateControl::Restarting);
-        let was_downloading = matches!(self.phase, Phase::Downloading);
+        let was_downloading = matches!(self.phase, Phase::Percent);
         let eases = was_downloading && (downloading || ready);
         let to = match self.fill {
             Fill::Settled(to) | Fill::Easing { to, .. } => to,
@@ -85,7 +86,7 @@ impl UpdatePill {
         self.phase = match (ready, self.phase) {
             (true, Phase::Ready(started)) => Phase::Ready(started),
             (true, _) => Phase::Ready(was_downloading.then_some(now)),
-            (false, _) if downloading => Phase::Downloading,
+            (false, _) if downloading => Phase::Percent,
             (false, _) => Phase::Other,
         };
     }
@@ -104,7 +105,7 @@ impl UpdatePill {
     /// How far the percentage has faded into the restart label, 0 to 1.
     pub(super) fn ready_mix(&self, now: Instant) -> f32 {
         match self.phase {
-            Phase::Other | Phase::Downloading => 0.0,
+            Phase::Other | Phase::Percent => 0.0,
             Phase::Ready(None) => 1.0,
             Phase::Ready(Some(since)) => progress(now.saturating_duration_since(since), SWAP),
         }
@@ -211,6 +212,12 @@ impl QuillApp {
             return None;
         }
         let now = Instant::now();
+        // The share downloaded lives in the download thread's counter and
+        // sends no signal, so a drawn pill asks for a few frames a second
+        // while the download runs: nothing ticks once it is not drawn.
+        if matches!(control, UpdateControl::Progress { .. }) {
+            self.request_app_tick(4, cx);
+        }
         let (fill, mix) = if cx.reduce_motion() {
             (
                 self.update_pill.fill(now.checked_add(FILL).unwrap_or(now)),
@@ -223,7 +230,7 @@ impl QuillApp {
             }
             (self.update_pill.fill(now), self.update_pill.ready_mix(now))
         };
-        let downloading = matches!(control, UpdateControl::Downloading { .. });
+        let downloading = matches!(control, UpdateControl::Progress { .. });
         let ready = matches!(control, UpdateControl::Restart | UpdateControl::Restarting);
         let label = Self::update_control_label(&control);
         // A release page this copy cannot install over itself still reads
@@ -360,7 +367,7 @@ mod tests {
     fn downloading(bytes: u64) -> UpdateControl {
         let progress = DownloadProgress::default();
         progress.add(bytes);
-        UpdateControl::Downloading {
+        UpdateControl::Progress {
             progress,
             total: 100,
         }

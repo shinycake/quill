@@ -225,6 +225,8 @@ pub(crate) struct PreferencesUi {
     /// bar's toast are the screen's (`OnScreen::translate`).
     pub(super) translate: super::translate_ui::TranslateUi,
     pub(super) update_state: quill::updater::UpdateState,
+    /// The timer of the next release recheck (`updates.rs`).
+    pub(super) update_recheck: Option<Task<()>>,
     /// The What's New window and the release notes it shows.
     pub(super) whats_new: super::whats_new::WhatsNewUi,
     /// Advanced and experimental settings, the secret codes, the test
@@ -260,6 +262,7 @@ impl PreferencesUi {
             } else {
                 quill::updater::UpdateState::Idle
             },
+            update_recheck: None,
             whats_new: Default::default(),
             advanced: super::advanced_state::AdvancedUi::new(cx, demo.is_none()),
             emoji_style: Default::default(),
