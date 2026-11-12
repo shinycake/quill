@@ -231,10 +231,6 @@ pub(crate) struct ChatUi {
     /// chat and topic: another chat's strip with the same index, count and
     /// width starts at the old scroll offset until it is revealed.
     pub(super) tabs_revealed: std::cell::Cell<Option<super::folder_tabs_fit::RevealKey>>,
-    /// The 1 s tick task of this chat's self-destruct countdown badges
-    /// (phase B3). Held by the chat's value, so the chat changing drops it
-    /// and a return to the chat starts one task, not two.
-    pub(super) self_destruct_tick: Option<(ChatId, gpui_kit::Task<()>)>,
     /// Cross-fade timeline of the round Send / Record / Save button. A
     /// chat starts with none, so its button begins settled instead of
     /// fading from the chat before.

@@ -9,7 +9,6 @@ use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
 use quill::state::{Session, unix_ms_now};
 use quill::telegram::envelope::{ChatKind, SecretChatState, format_ttl_setting};
-use std::time::Duration;
 
 impl QuillApp {
     /// Phase S1: the open secret chat's peer name + `secretChat.layer`
@@ -107,74 +106,22 @@ impl QuillApp {
     }
 
     /// Phase B3: keep the self-destruct countdown badges re-rendering
-    /// while the open chat has a live `self_destruct_in` timer. At most
-    /// one task per open chat (held in `self_destruct_tick`,
-    /// mirroring the Phase A1 slow-mode tick); it exits when no timer is
-    /// live, the open chat changes or Quill locks. Called from `render`, which has the
-    /// `&mut self` the tick needs.
+    /// while the open chat has a live `self_destruct_in` timer. The frame
+    /// clock carries it (one tick a second, app-gated): there is no task of
+    /// our own, so nothing wakes while the window is hidden, minimized or
+    /// behind another app, and a locked Quill asks for nothing. Called from
+    /// `render`; the next render asks again while a timer is live.
     pub(super) fn ensure_self_destruct_tick(&mut self, cx: &mut Context<Self>) {
-        let now_ms = unix_ms_now();
-        // A locked Quill draws no history: no tick starts, and a running one
-        // ends at its next beat (the first render after the unlock asks again).
         if self.refused_while_locked() {
             return;
         }
-        let Some(chat_id) = self.session().and_then(|session| session.open_chat_id()) else {
-            return;
-        };
-        // A running tick keeps itself alive: no need to scan the history
-        // again every frame.
+        let now_ms = unix_ms_now();
         if self
-            .chat_ui
-            .self_destruct_tick
-            .as_ref()
-            .is_some_and(|(chat, _)| *chat == chat_id)
-        {
-            return;
-        }
-        if !self
             .session()
             .is_some_and(|session| session.open_chat_has_live_self_destruct(now_ms))
         {
-            return;
+            self.request_animation_tick_for(None, 1, cx);
         }
-        let task = self.spawn_scoped(cx, async move |this, cx| {
-            loop {
-                cx.background_executor().timer(Duration::from_secs(1)).await;
-                let cont = this
-                    .update(cx, |this, cx| {
-                        let now_ms = unix_ms_now();
-                        let still_open =
-                            this.session().and_then(|s| s.open_chat_id()) == Some(chat_id);
-                        let still_live = this.session().is_some_and(|session| {
-                            session.open_chat_has_live_self_destruct(now_ms)
-                        });
-                        if still_open && still_live && !this.refused_while_locked() {
-                            // The badges are in the history rows.
-                            this.notify_conversations(cx);
-                            true
-                        } else {
-                            // This task ends: let go of it without
-                            // cancelling the update it is inside.
-                            if this
-                                .chat_ui
-                                .self_destruct_tick
-                                .as_ref()
-                                .is_some_and(|(chat, _)| *chat == chat_id)
-                                && let Some((_, task)) = this.chat_ui.self_destruct_tick.take()
-                            {
-                                task.detach();
-                            }
-                            false
-                        }
-                    })
-                    .unwrap_or(false);
-                if !cont {
-                    break;
-                }
-            }
-        });
-        self.chat_ui.self_destruct_tick = Some((chat_id, task));
     }
 
     /// Phase B4: apply a chat TTL choice (`setChatMessageAutoDeleteTime`,

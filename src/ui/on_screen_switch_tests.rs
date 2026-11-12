@@ -513,33 +513,17 @@ fn the_story_viewer_blocks_shortcuts_in_the_main_window_only(cx: &mut TestAppCon
 /// selected tab) and the self-destruct tick (so a return starts one task,
 /// not a second beside the first).
 #[gpui_kit::test]
-fn a_chat_change_ends_the_tick_task_and_the_strip_reveal(cx: &mut TestAppContext) {
+fn a_chat_change_ends_the_strip_reveal(cx: &mut TestAppContext) {
     use crate::ui::folder_tabs_fit::RevealKey;
-    struct Alive(std::rc::Rc<std::cell::Cell<bool>>);
-    impl Drop for Alive {
-        fn drop(&mut self) {
-            self.0.set(true);
-        }
-    }
     let (app, mut vcx) = new_app(cx, "ready-chats");
-    let dropped = std::rc::Rc::new(std::cell::Cell::new(false));
     app.update(&mut vcx, |app, cx| {
         app.enter_chat_ui(CHAT, cx);
-        let alive = Alive(dropped.clone());
-        let task = cx.spawn(async move |_, _| {
-            let _alive = alive;
-            std::future::pending::<()>().await;
-        });
-        app.chat_ui.self_destruct_tick = Some((CHAT, task));
         app.chat_ui.tabs_revealed.set(Some(RevealKey {
             selected: 1,
             tab_count: 4,
             strip_width: 300,
         }));
         app.enter_chat_ui(ChatId(CHAT.0 + 1), cx);
-        assert!(app.chat_ui.self_destruct_tick.is_none());
         assert!(app.chat_ui.tabs_revealed.get().is_none());
     });
-    vcx.run_until_parked();
-    assert!(dropped.get(), "the old chat's task was dropped, not kept");
 }
