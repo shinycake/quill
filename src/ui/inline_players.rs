@@ -50,7 +50,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
-use windows::{List, Seen, Sweep, Windows, note_sweep};
+use windows::{List, Seen, Sweep, Unopenable, Windows, note_sweep};
 
 /// `(chat id, message id)`.
 pub(super) type Key = (i64, i64);
@@ -323,9 +323,9 @@ impl Slot {
 #[derive(Default)]
 struct State {
     players: HashMap<Key, Slot>,
-    /// Clips whose file did not open, with that path: asked again only
-    /// when the path changes. Emptied with the players.
-    unopenable: HashMap<Key, PathBuf>,
+    /// Clips whose file did not open: asked again only when the path
+    /// changes. Each leaves with its row, like a player.
+    unopenable: HashMap<Key, Unopenable>,
     /// Each window's pass counts, of its history and of each panel
     /// (`None`: the main window's).
     passes: HashMap<(Option<ChatId>, List), u64>,
@@ -887,12 +887,12 @@ impl InlineVideos {
             return None;
         }
         let path = path()?;
-        if self.with(|state| state.refused(key, &path)) == Some(true) {
+        if self.with(|state| state.note_unopenable(key, &path, window, pass)) == Some(true) {
             return None;
         }
         let Ok(player) = VideoPlayer::open(&path, Purpose::Inline { max_edge }, duration, cx)
         else {
-            self.with(|state| state.unopenable.insert(key, path));
+            self.with(|state| state.unopenable_at(key, path, window, pass));
             return None;
         };
         self.with(|state| state.unopenable.remove(&key));

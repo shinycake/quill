@@ -300,14 +300,26 @@ impl QuillApp {
         let mut files = self.market_sticker_files();
         files.sort_unstable_by_key(|file| file.0);
         files.dedup();
-        // The session's own file state decides what is asked: a file that is
-        // downloading, downloaded or already refused is skipped there, and a
-        // send that failed is simply asked again on the next upkeep.
+        // The session's own file state skips a file that is downloading or
+        // downloaded; a send the driver refuses is remembered until the set
+        // of shown files changes, so it is never re-sent at every upkeep.
+        self.gift_market.refused_files.settle(&files);
+        let asks: Vec<_> = files
+            .iter()
+            .copied()
+            .filter(|file| !self.gift_market.refused_files.is_refused(*file))
+            .collect();
+        let mut refused = Vec::new();
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.follow_gift_auction(follow);
-            for file in &files {
-                let _ = live.driver.download_file(*file, 8);
+            for file in asks {
+                if live.driver.download_file(file, 8).is_err() {
+                    refused.push(file);
+                }
             }
+        }
+        for file in refused {
+            self.gift_market.refused_files.refuse(file);
         }
     }
 

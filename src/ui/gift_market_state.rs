@@ -209,10 +209,44 @@ impl MarketFlow {
     }
 }
 
+/// The sticker files whose download the driver refused. A refused file is
+/// not asked for again while the same files are shown: the entry is settled
+/// (emptied) when the set of shown files changes or the boxes close, so a
+/// refusal never turns into a send at every frame.
+#[derive(Debug, Default)]
+pub(crate) struct RefusedFiles {
+    /// The files shown when the refusals were recorded.
+    shown: Vec<quill::ids::FileId>,
+    refused: Vec<quill::ids::FileId>,
+}
+
+impl RefusedFiles {
+    /// Settles against the files shown now (sorted, deduplicated): a
+    /// different set forgets every refusal.
+    pub(super) fn settle(&mut self, shown: &[quill::ids::FileId]) {
+        if self.shown != shown {
+            self.shown = shown.to_vec();
+            self.refused.clear();
+        }
+    }
+
+    pub(super) fn is_refused(&self, file: quill::ids::FileId) -> bool {
+        self.refused.contains(&file)
+    }
+
+    pub(super) fn refuse(&mut self, file: quill::ids::FileId) {
+        if !self.refused.contains(&file) {
+            self.refused.push(file);
+        }
+    }
+}
+
 pub(crate) struct GiftMarketUi {
     pub(super) stack: Vec<MarketBox>,
     /// Who a bid is for, "Hide My Name", and an auction waiting to open.
     pub(super) flow: MarketFlow,
+    /// Sticker downloads the driver refused for the files shown now.
+    pub(super) refused_files: RefusedFiles,
     /// How often the chat-list bar opened its box (one tap, one open).
     #[cfg(test)]
     pub(super) bar_opens: usize,
@@ -316,6 +350,7 @@ impl GiftMarketUi {
         Self {
             stack: Vec::new(),
             flow: MarketFlow::default(),
+            refused_files: RefusedFiles::default(),
             #[cfg(test)]
             bar_opens: 0,
             craft: CraftStage::Idle,
@@ -342,12 +377,14 @@ impl GiftMarketUi {
     }
 
     /// What only the open boxes owned goes with the last of them, however
-    /// it left (back, replace, clear): the recipient and a pending open. "Hide My Name" belongs to the send, change and bid
+    /// it left (back, replace, clear): the recipient, a pending open and the
+    /// refused file asks. "Hide My Name" belongs to the send, change and bid
     /// boxes of one bid: when the last of those leaves, it goes, so the
     /// next auction starts clean.
     fn drop_orphans(&mut self) {
         if self.stack.is_empty() {
             self.flow = MarketFlow::default();
+            self.refused_files = RefusedFiles::default();
         }
         let naming = self.stack.iter().any(|entry| {
             matches!(
@@ -403,5 +440,27 @@ impl GiftMarketUi {
         if self.stack.last() != Some(&next) {
             self.stack.push(next);
         }
+    }
+}
+
+#[cfg(test)]
+mod refused_files_tests {
+    use super::RefusedFiles;
+    use quill::ids::FileId;
+
+    #[test]
+    fn a_refused_file_waits_until_the_shown_files_change() {
+        let (a, b) = (FileId(1), FileId(2));
+        let mut refused = RefusedFiles::default();
+        refused.settle(&[a, b]);
+        refused.refuse(a);
+        refused.settle(&[a, b]);
+        assert!(
+            refused.is_refused(a),
+            "same files next frame: not asked again"
+        );
+        assert!(!refused.is_refused(b));
+        refused.settle(&[a]);
+        assert!(!refused.is_refused(a), "a different set asks again");
     }
 }

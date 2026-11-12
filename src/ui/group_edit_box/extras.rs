@@ -42,6 +42,19 @@ impl PackChanges {
             .any(|ask| matches!(ask, PackAsk::Out(id) if in_flight(id)))
     }
 
+    /// A change whose request is no longer pending (answered or failed)
+    /// leaves; returns whether any did.
+    pub(super) fn settle(&mut self, in_flight: impl Fn(RequestId) -> bool) -> bool {
+        let mut changed = false;
+        for ask in [&mut self.sticker, &mut self.emoji] {
+            if matches!(*ask, PackAsk::Out(id) if !in_flight(id)) {
+                *ask = PackAsk::Idle;
+                changed = true;
+            }
+        }
+        changed
+    }
+
     fn sent(&mut self, custom: bool, request: RequestId) {
         let ask = PackAsk::Out(request);
         if custom {
@@ -437,6 +450,12 @@ mod tests {
             !packs.busy(|_| false),
             "answered or refused: the buttons are free"
         );
+        assert!(packs.settle(|_| false), "the gone request leaves");
+        assert!(
+            !packs.busy(|_| true),
+            "and a later request of the chat does not bring it back"
+        );
+        assert!(!packs.settle(|_| false), "nothing left to settle");
         packs.sent(true, RequestId(6));
         assert!(packs.busy(|id| id == RequestId(6)));
     }
