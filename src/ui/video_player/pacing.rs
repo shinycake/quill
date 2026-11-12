@@ -48,8 +48,6 @@ pub(crate) struct PresentEstimator {
     shared: bool,
     /// How the clip's pictures are spaced.
     cadence: Cadence,
-    /// The picture asked for last draws on the grid.
-    on_grid: bool,
 }
 
 impl PresentEstimator {
@@ -121,7 +119,6 @@ impl PresentEstimator {
     pub(crate) fn on_grid(&mut self, due: Instant) -> Instant {
         self.cadence.note(due, self.grid.as_ref());
         let grid = self.grid.as_ref().filter(|_| self.shared);
-        self.on_grid = grid.is_some() && self.cadence.even();
         self.cadence.on_grid(due, grid)
     }
 
@@ -139,7 +136,10 @@ impl PresentEstimator {
     /// it started: the lead is measured from the draw's start, after the
     /// display link's call.
     pub(crate) fn request_lead(&self) -> Duration {
-        if self.on_grid {
+        // On the grid while something shares the display and the pictures
+        // come a whole number of vsyncs apart: read from the same values
+        // `on_grid` decides by, so a grid or display change shows at once.
+        if self.grid.is_some() && self.shared && self.cadence.even() {
             self.lead() + self.interval() / 4
         } else {
             self.lead()

@@ -289,3 +289,31 @@ fn a_grant_whose_request_was_dropped_answers_no_and_frees_the_stage(cx: &mut Tes
         );
     });
 }
+
+/// Sweep 14-018: the bot permissions switch answers through the same
+/// mailbox; only the answer to the grant this window sent answers the app.
+#[gpui_kit::test]
+fn another_switchs_answer_does_not_answer_the_grant(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, _, cx| {
+        let received = open_window(app, false, cx);
+        let grant = quill::ids::RequestId(7);
+        app.mini_apps.window.as_mut().unwrap().emoji.access = AccessStage::Granting(grant);
+        app.answer_emoji_access(vec![quill::state::EmojiAccessAnswer {
+            request: quill::ids::RequestId(8),
+            result: quill::state::EmojiAccessResult::Granted,
+        }]);
+        assert_eq!(
+            app.mini_apps.window.as_ref().unwrap().emoji.access,
+            AccessStage::Granting(grant),
+            "the other answer is not the grant's"
+        );
+        app.answer_emoji_access(vec![quill::state::EmojiAccessAnswer {
+            request: grant,
+            result: quill::state::EmojiAccessResult::Granted,
+        }]);
+        let (event, data) = reply(&received);
+        assert_eq!(event, "emoji_status_access_requested");
+        assert_eq!(data["status"], "allowed");
+    });
+}

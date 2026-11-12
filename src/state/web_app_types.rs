@@ -181,8 +181,10 @@ pub struct WebApps {
     pub attachment_menu_toggled: Vec<AttachmentToggle>,
     /// One-shot: the write-access answer, with the request it answers.
     pub write_access: Option<WriteAnswer>,
-    /// One-shot: `toggleBotCanManageEmojiStatus` outcome, by its request.
-    pub emoji_access: Option<EmojiAccessAnswer>,
+    /// One-shot: `toggleBotCanManageEmojiStatus` outcomes, oldest first,
+    /// each with its request: the mini app waiting for a grant takes only
+    /// its own request's, not the bot permissions panel's.
+    pub emoji_access: Vec<EmojiAccessAnswer>,
     /// One-shot: `searchWebApp` answers for `t.me/bot/app` links, the app
     /// or a failure message, oldest first, each with the request it
     /// answers: a second link of the same bot clicked before the first

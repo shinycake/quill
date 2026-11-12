@@ -36,7 +36,6 @@ QuillApp::build_suggest_price_dialog::body.borrow_mut 1
 QuillApp::build_suggest_time_dialog::body.borrow_mut 1
 QuillApp::build_text_box::body.borrow_mut 1
 QuillApp::build_wallet_notice_dialog::body.borrow_mut 1
-QuillApp::build_web_app_confirm_dialog::body.borrow_mut 1
 QuillApp::emoji_effect_overlay::active.borrow 3
 QuillApp::emoji_effect_overlay::active.borrow_mut 1
 QuillApp::media_panel_reveal::media_panel.borrow_mut 1
@@ -74,8 +73,6 @@ last_target::last.borrow 1
 mark_revealed::reveals.borrow_mut 1
 note_target::last.borrow_mut 1
 once::body.borrow_mut 1
-open_pip_window::slot.borrow_mut 1
-open_pip_window::slot_in.borrow_mut 1
 paint_text_specks::painted.borrow_mut 1
 parsed_chart::charts.borrow_mut 1
 premium_playing::active.borrow 1

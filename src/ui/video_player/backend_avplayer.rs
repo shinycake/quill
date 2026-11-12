@@ -11,7 +11,9 @@
 //! player only calls its backend from the UI thread).
 #![deny(clippy::indexing_slicing)]
 
-use super::transport::{BackendStatus, Correction, Engine, RATE_TOLERANCE, Want, reconcile};
+use super::transport::{
+    BackendStatus, Correction, Engine, EngineHealth, RATE_TOLERANCE, Want, reconcile,
+};
 use super::{Backend, ErrorKind, Picture, PlayerError, Present, Pulled};
 #[cfg(feature = "demo-capture")]
 use gpui_kit::RenderImage;
@@ -267,12 +269,14 @@ impl Backend for AvPlayerBackend {
         let (status, rate) = self.engine_state();
         let playing = self.want.playing;
         BackendStatus {
-            ready: status == AVPlayerItemStatus::ReadyToPlay,
-            failed: status == AVPlayerItemStatus::Failed,
+            health: EngineHealth::read(
+                status == AVPlayerItemStatus::ReadyToPlay,
+                status == AVPlayerItemStatus::Failed,
+                playing && self.buffer.empty && !self.buffer.keeps_up,
+                playing && rate == 0.0 && self.at_end_position(),
+            ),
             position: self.position(),
             duration: self.duration(),
-            stalled: playing && self.buffer.empty && !self.buffer.keeps_up,
-            at_end: playing && rate == 0.0 && self.at_end_position(),
             buffered: self.buffer.ranges.clone(),
             // AVPlayer mixes the soundtrack itself; a silent clip just
             // plays nothing.

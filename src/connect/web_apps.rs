@@ -189,6 +189,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn forget_web_app_launches(&mut self) {
         let apps = &mut self.session.bots.web_apps;
         apps.opening = None;
+        apps.found.clear();
+        apps.attachment_menu_bot.clear();
+        apps.attachment_menu_toggled.clear();
         apps.replace_open_result(None);
         self.close_dropped_web_apps();
     }
@@ -290,7 +293,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             }),
             None,
         )?;
-        self.session.bots.web_apps.emoji_access = None;
         let before = match self.session.bots.bot_info.get_mut(&bot_user_id) {
             Some(Some(info)) => Some(std::mem::replace(
                 &mut info.can_manage_emoji_status,

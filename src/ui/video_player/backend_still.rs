@@ -6,7 +6,7 @@
 //! on a seek.
 #![deny(clippy::indexing_slicing)]
 
-use super::transport::{BackendStatus, Want};
+use super::transport::{BackendStatus, EngineHealth, Flow, Want};
 use super::{Backend, ErrorKind, Picture, PlayerError, Present, Pulled};
 use gpui_kit::RenderImage;
 use quill::lang::{keys, tr};
@@ -71,7 +71,7 @@ impl Drop for StillBackend {
 impl Backend for StillBackend {
     fn status(&mut self) -> BackendStatus {
         BackendStatus {
-            ready: true,
+            health: EngineHealth::Open(Flow::Steady),
             position: self.position,
             duration: self.duration,
             buffered: self.duration.map(|end| vec![0.0..end]).unwrap_or_default(),

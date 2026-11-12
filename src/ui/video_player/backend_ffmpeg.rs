@@ -21,7 +21,9 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::surface;
-use super::transport::{BackendStatus, Correction, Engine, RATE_TOLERANCE, Want, reconcile};
+use super::transport::{
+    BackendStatus, Correction, Engine, EngineHealth, RATE_TOLERANCE, Want, reconcile,
+};
 use super::{Backend, ErrorKind, Picture, PictureStats, PlayerError, Present, Pulled, Purpose};
 use quill::video_decode::{BgraPool, OpenOptions, PixelOutput, Pixels, Player, VideoFrame};
 use std::path::{Path, PathBuf};
@@ -266,12 +268,14 @@ impl Backend for FfmpegBackend {
         let info = self.player.info();
         let duration = self.player.duration();
         BackendStatus {
-            ready: info.is_some(),
-            failed: self.player.error().is_some(),
+            health: EngineHealth::read(
+                info.is_some(),
+                self.player.error().is_some(),
+                self.player.starved(),
+                self.want.playing && self.player.ended(),
+            ),
             position: self.player.position(),
             duration,
-            stalled: self.player.starved(),
-            at_end: self.want.playing && self.player.ended(),
             // A local file: everything is there once it is open.
             buffered: duration.map(|end| vec![0.0..end]).unwrap_or_default(),
             has_sound: self.sound.is_some(),

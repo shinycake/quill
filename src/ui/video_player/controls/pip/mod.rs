@@ -161,23 +161,43 @@ impl Gesture {
         matches!(self, Self::Dragging(_))
     }
 
-    /// The last press (or the one in progress) moved the window.
+    /// The press in progress, or the last one, moved the window; a last
+    /// one is read once (the click that ends it) and then forgotten.
+    fn take_dragged(&mut self) -> bool {
+        match self {
+            Self::Dragging(_) => true,
+            Self::Idle { dragged } => std::mem::take(dragged),
+            Self::Pressed(_) => false,
+        }
+    }
+
+    /// The press in progress, or the last one, moved the window.
     fn dragged(&self) -> bool {
         matches!(self, Self::Dragging(_) | Self::Idle { dragged: true })
     }
 }
 
-/// The progress or volume line being dragged.
+/// The progress line: following the clip, or being dragged. `synced` is
+/// the value the window last gave the slider (anything else came from the
+/// keyboard or a screen reader).
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum LineDrag {
-    None,
-    /// The progress line: the time previewed, and whether the drag paused
-    /// a playing clip (the release resumes it).
-    Seek {
+enum SeekLine {
+    Following {
+        synced: f32,
+    },
+    /// The time previewed, and whether the drag paused a playing clip (the
+    /// release resumes it).
+    Dragging {
         preview: f64,
         paused_by_seek: bool,
     },
-    Volume,
+}
+
+/// The volume line, like [`SeekLine`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum VolumeLine {
+    Following { synced: f32 },
+    Dragging,
 }
 
 /// The window sliding to a snap position (`moveAnimated`).
@@ -210,13 +230,11 @@ pub(crate) struct VideoPip {
     slide: Option<Slide>,
     /// The progress line, 0–1 of the clip.
     seek: Entity<SliderState>,
-    /// The value the window last gave the line (anything else came from
-    /// the keyboard or a screen reader).
-    seek_synced: f32,
-    line_drag: LineDrag,
+    /// The progress line's own value, or its drag.
+    seek_line: SeekLine,
     /// The volume line, 0–1.
     volume: Entity<SliderState>,
-    volume_synced: f32,
+    volume_line: VolumeLine,
     last_volume: f32,
     waiting: WaitingGate,
     live: Option<LivePip>,
@@ -230,14 +248,14 @@ pub(crate) struct VideoPip {
 impl VideoPip {
     /// The time the progress line previews while it is dragged.
     fn seek_preview(&self) -> Option<f64> {
-        match self.line_drag {
-            LineDrag::Seek { preview, .. } => Some(preview),
-            LineDrag::None | LineDrag::Volume => None,
+        match self.seek_line {
+            SeekLine::Dragging { preview, .. } => Some(preview),
+            SeekLine::Following { .. } => None,
         }
     }
 
     fn volume_dragging(&self) -> bool {
-        self.line_drag == LineDrag::Volume
+        self.volume_line == VolumeLine::Dragging
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -319,10 +337,11 @@ impl VideoPip {
             gesture: Gesture::Idle { dragged: false },
             slide: None,
             seek,
-            seek_synced: seek_value,
-            line_drag: LineDrag::None,
+            seek_line: SeekLine::Following { synced: seek_value },
             volume,
-            volume_synced: volume_value,
+            volume_line: VolumeLine::Following {
+                synced: volume_value,
+            },
             last_volume: if last_volume > 0.0 { last_volume } else { 1.0 },
             waiting: WaitingGate::default(),
             live,
@@ -446,9 +465,17 @@ impl VideoPip {
     }
 
     /// A button's press went down and up on it; a press that moved the
-    /// window does nothing (`handleMouseRelease` with `dragging()`).
-    fn button(&mut self, action: PressAction, window: &mut Window, cx: &mut Context<Self>) {
-        if self.gesture.dragged() {
+    /// window does nothing (`handleMouseRelease` with `dragging()`). A key
+    /// activation has no press: the last drag says nothing about it.
+    fn button(
+        &mut self,
+        action: PressAction,
+        keyboard: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let dragged = self.gesture.take_dragged();
+        if dragged && !keyboard {
             return;
         }
         self.run(action, window, cx);
@@ -493,30 +520,30 @@ impl VideoPip {
         };
         match event {
             SliderEvent::Change(value) => {
-                let mut paused_by_seek = match self.line_drag {
-                    LineDrag::Seek { paused_by_seek, .. } => paused_by_seek,
-                    LineDrag::None | LineDrag::Volume => false,
+                let mut paused_by_seek = match self.seek_line {
+                    SeekLine::Dragging { paused_by_seek, .. } => paused_by_seek,
+                    SeekLine::Following { .. } => false,
                 };
                 if self.seek_preview().is_none() && player.wants_play() {
                     paused_by_seek = true;
                     player.pause();
                 }
-                self.line_drag = LineDrag::Seek {
+                self.seek_line = SeekLine::Dragging {
                     preview: f64::from(value.end()),
                     paused_by_seek,
                 };
             }
             SliderEvent::Release(value) => {
-                let mut paused_by_seek = false;
-                if let LineDrag::Seek {
-                    paused_by_seek: paused,
-                    ..
-                } = self.line_drag
-                {
-                    paused_by_seek = paused;
-                    self.line_drag = LineDrag::None;
-                }
-                self.seek_synced = value.end();
+                let paused_by_seek = matches!(
+                    self.seek_line,
+                    SeekLine::Dragging {
+                        paused_by_seek: true,
+                        ..
+                    }
+                );
+                self.seek_line = SeekLine::Following {
+                    synced: value.end(),
+                };
                 let resume = paused_by_seek || player.state() == PlayState::Ended;
                 self.seek_to(&player, value.end());
                 if resume {
@@ -534,10 +561,13 @@ impl VideoPip {
 
     /// The line was stepped from the keyboard or a screen reader.
     fn on_seek_adjusted(&mut self, value: f32, cx: &mut Context<Self>) {
-        if self.seek_preview().is_some() || (value - self.seek_synced).abs() < f32::EPSILON {
+        let SeekLine::Following { synced } = self.seek_line else {
+            return;
+        };
+        if (value - synced).abs() < f32::EPSILON {
             return;
         }
-        self.seek_synced = value;
+        self.seek_line = SeekLine::Following { synced: value };
         if let Some(player) = self.player.clone() {
             self.seek_to(&player, value);
         }
@@ -550,20 +580,22 @@ impl VideoPip {
             SliderEvent::Change(value) => (value.end(), true),
             SliderEvent::Release(value) => (value.end(), false),
         };
-        if dragging {
-            self.line_drag = LineDrag::Volume;
-        } else if self.line_drag == LineDrag::Volume {
-            self.line_drag = LineDrag::None;
-        }
-        self.volume_synced = value;
+        self.volume_line = if dragging {
+            VolumeLine::Dragging
+        } else {
+            VolumeLine::Following { synced: value }
+        };
         self.set_volume(value, cx);
     }
 
     fn on_volume_adjusted(&mut self, value: f32, cx: &mut Context<Self>) {
-        if self.volume_dragging() || (value - self.volume_synced).abs() < f32::EPSILON {
+        let VolumeLine::Following { synced } = self.volume_line else {
+            return;
+        };
+        if (value - synced).abs() < f32::EPSILON {
             return;
         }
-        self.volume_synced = value;
+        self.volume_line = VolumeLine::Following { synced: value };
         self.set_volume(value, cx);
     }
 
@@ -588,7 +620,7 @@ impl VideoPip {
             let value = position_fraction(transport.position, transport.total());
             let current = self.seek.read(cx).value().end();
             if (current - value).abs() >= SEEK_SYNC_STEP || (value == 0.0 && current != 0.0) {
-                self.seek_synced = value;
+                self.seek_line = SeekLine::Following { synced: value };
                 self.seek
                     .update(cx, |state, cx| state.set_value(value, window, cx));
             }
@@ -596,7 +628,7 @@ impl VideoPip {
         if !self.volume_dragging() {
             let value = transport.volume.clamp(0.0, 1.0);
             if self.volume.read(cx).value() != SliderValue::Single(value) {
-                self.volume_synced = value;
+                self.volume_line = VolumeLine::Following { synced: value };
                 self.volume
                     .update(cx, |state, cx| state.set_value(value, window, cx));
             }
@@ -633,4 +665,20 @@ fn initial_over() -> OverState {
         return OverState::Other;
     }
     OverState::None
+}
+
+#[cfg(test)]
+mod gesture_tests {
+    use super::Gesture;
+
+    /// A drag's "the window moved" answer is read once, by the click that
+    /// ends the press: a key activation afterwards is not swallowed by it.
+    #[test]
+    fn the_last_drag_is_read_once() {
+        let mut gesture = Gesture::Idle { dragged: true };
+        assert!(gesture.dragged());
+        assert!(gesture.take_dragged(), "the click right after the drag");
+        assert!(!gesture.take_dragged(), "a later key activation");
+        assert!(!gesture.dragged());
+    }
 }

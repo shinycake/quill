@@ -153,9 +153,8 @@ impl QuillApp {
             .translate
             .toast
             .toast()
-            .filter(|toast| toast.chat_id == chat_id)?
-            .clone();
-        let action = toast.action;
+            .filter(|toast| toast.chat_id == chat_id)?;
+        let (text, label, action) = (toast.text.clone(), toast.label, toast.action);
         Some(
             div()
                 .id("translate-toast")
@@ -169,10 +168,10 @@ impl QuillApp {
                 .border_b_1()
                 .border_color(cx.theme().border)
                 .bg(bg_canvas())
-                .child(div().flex_1().min_w_0().text_sm().child(toast.text.clone()))
+                .child(div().flex_1().min_w_0().text_sm().child(text))
                 .child(
                     Button::new("translate-toast-action")
-                        .label(toast.label)
+                        .label(label)
                         .ghost()
                         .small()
                         .text_color(accent())

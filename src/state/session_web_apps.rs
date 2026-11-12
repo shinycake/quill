@@ -174,10 +174,12 @@ impl Session {
                     .map(|p| WriteAnswer::new(p.id, bot_user_id, WriteAccessResult::Granted));
             }
             Some(RequestPurpose::Bots(BotsPurpose::ToggleBotEmojiStatusAccess { .. })) => {
-                self.bots.web_apps.emoji_access = pending.map(|p| EmojiAccessAnswer {
-                    request: p.id,
-                    result: EmojiAccessResult::Granted,
-                });
+                if let Some(p) = pending {
+                    self.bots.web_apps.emoji_access.push(EmojiAccessAnswer {
+                        request: p.id,
+                        result: EmojiAccessResult::Granted,
+                    });
+                }
             }
             Some(RequestPurpose::Bots(BotsPurpose::ToggleBotInAttachmentMenu {
                 bot_user_id,
@@ -261,7 +263,7 @@ impl Session {
                 if let Some(Some(info)) = self.bots.bot_info.get_mut(&bot_user_id) {
                     info.can_manage_emoji_status = !allowed;
                 }
-                self.bots.web_apps.emoji_access = Some(EmojiAccessAnswer {
+                self.bots.web_apps.emoji_access.push(EmojiAccessAnswer {
                     request: p.id,
                     result: EmojiAccessResult::Refused,
                 });
