@@ -406,8 +406,7 @@ impl QuillApp {
     /// own; the others only the main window draws, so a chat window's keys
     /// and Escape never reach them.
     pub(super) fn context_menu_open(&self) -> bool {
-        self.message_ui.menu.menu_open()
-            || (!self.windows.in_window() && self.main_menu_open())
+        self.message_ui.menu.menu_open() || (!self.windows.in_window() && self.main_menu_open())
     }
 
     /// The menus only the main window draws, beside the window's own

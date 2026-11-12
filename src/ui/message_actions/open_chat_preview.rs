@@ -36,7 +36,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         // The panel replaces a menu that was open: one thing floats.
-        self.message_ui.menu
+        self.message_ui
+            .menu
             .open_peek(ChatPreviewState { chat_id, anchor });
         // Live fetch for unopened chats; already-loaded history renders
         // immediately. Demo/no-driver sessions skip the network.

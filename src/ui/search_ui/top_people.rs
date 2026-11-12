@@ -181,7 +181,8 @@ impl QuillApp {
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                    this.message_ui.menu
+                    this.message_ui
+                        .menu
                         .open_row(ChatMenuState::top_person(id, event.position));
                     cx.notify();
                 }),
@@ -234,7 +235,8 @@ impl QuillApp {
         let height = model::TILE_HEIGHT * (1. + (grid_rows as f32 - 1.) * progress);
         let single = model::TILE_WIDTH + (width / columns as f32 - model::TILE_WIDTH) * progress;
         let menu_target = self
-            .message_ui.menu
+            .message_ui
+            .menu
             .row_copy()
             .filter(|menu| menu.kind == crate::ui::menu_states::ChatMenuKind::TopPerson)
             .map(|menu| menu.chat_id);

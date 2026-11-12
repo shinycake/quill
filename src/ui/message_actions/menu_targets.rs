@@ -22,7 +22,8 @@ impl QuillApp {
         });
         let chat_menu_gone = !self.windows.in_window()
             && self
-                .message_ui.menu
+                .message_ui
+                .menu
                 .row()
                 .is_some_and(|menu| !session.chats.contains_key(&menu.chat_id.0));
         let list_elsewhere = self.history.pinned_list_open.as_ref().is_some_and(|key| {

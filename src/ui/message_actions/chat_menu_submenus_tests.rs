@@ -56,7 +56,8 @@ fn open(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext, ChatId
 
 fn show_menu(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, chat_id: ChatId) {
     app.update(vcx, |app, cx| {
-        app.message_ui.menu
+        app.message_ui
+            .menu
             .open_row(ChatMenuState::at(chat_id, point(px(120.), px(200.))));
         cx.notify();
     });
@@ -210,9 +211,7 @@ fn add_to_folder_needs_a_folder_and_lists_them(cx: &mut TestAppContext) {
     assert!(present(vcx, "chat-menu-folder"));
     click(vcx, "chat-menu-folder");
     let open = app.update(vcx, |app, _| {
-        app.message_ui.menu
-            .row_copy()
-            .and_then(|menu| menu.submenu)
+        app.message_ui.menu.row_copy().and_then(|menu| menu.submenu)
     });
     assert_eq!(open, Some(ChatMenuSubmenu::Folders));
     assert!(present(vcx, "chat-menu-folder-7"));
@@ -397,7 +396,8 @@ fn menu_and_submenu_at(
     let (app, mut vcx, chat_id) = open(cx);
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
-        app.message_ui.menu
+        app.message_ui
+            .menu
             .open_row(ChatMenuState::at(chat_id, point(px(x), px(200.))));
         cx.notify();
     });

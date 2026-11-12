@@ -193,7 +193,8 @@ fn arrows_enter_the_menu_instead_of_reaching_the_chat_list(cx: &mut TestAppConte
 
 pub(super) fn open_chat_menu(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
     app.update_in(vcx, |app, _, cx| {
-        app.message_ui.menu
+        app.message_ui
+            .menu
             .open_row(crate::ui::menu_states::ChatMenuState::at(
                 quill::ids::ChatId(11),
                 point(px(40.), px(80.)),
@@ -460,7 +461,8 @@ fn a_menu_whose_target_is_gone_closes_instead_of_swallowing_the_arrows(cx: &mut 
                         position: point(px(500.), px(200.)),
                     });
             } else {
-                app.message_ui.menu
+                app.message_ui
+                    .menu
                     .open_row(crate::ui::menu_states::ChatMenuState::at(
                         quill::ids::ChatId(987_654),
                         point(px(40.), px(80.)),
