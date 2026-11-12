@@ -22,7 +22,7 @@ use gpui_kit::*;
 use quill::gift_manage::ExportError;
 use quill::lang::{keys, tr};
 use quill::premium_hub::ton::{GramWithdraw, GramsEvent, WithdrawOutcome};
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 
 crate::ui::shell::register_dialogs! {
@@ -245,15 +245,12 @@ impl QuillApp {
                     .render(cx),
                 ),
             };
-            let body = Rc::new(RefCell::new(Some(body)));
+            let body = Rc::new(Cell::new(Some(body)));
             dialog
                 .title(crate::ui::shell::dialog_title(title))
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     },
                 ))

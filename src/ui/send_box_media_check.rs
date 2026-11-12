@@ -101,6 +101,14 @@ impl QuillApp {
     ) {
         let send_box = &mut self.composer_sends.reads;
         if !send_box.media.finish(path, job, check.clone()) {
+            // A late answer (the read was given up on, or restarted): the
+            // JPEG it made is nobody's, so it goes.
+            if let MediaCheck::Jpeg(jpeg) = check {
+                cx.background_spawn(async move {
+                    let _ = std::fs::remove_file(jpeg);
+                })
+                .detach();
+            }
             return;
         }
         self.apply_media_check(path, &check);

@@ -2,7 +2,7 @@
 //! how they close (needs the `demo-capture` feature for gpui-kit's test
 //! support). No security key is touched: the sheets are shown without a
 //! worker, and worker events are fed by hand.
-use super::CeremonySheet;
+use super::{CeremonySheet, CeremonyView};
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
@@ -49,7 +49,7 @@ pub(super) fn shown_dialog(
     shell.read_with(vcx, |shell, _| shell.open_dialog.kind())
 }
 
-pub(super) fn sheet(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<CeremonySheet> {
+pub(super) fn sheet(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<CeremonyView> {
     app.read_with(vcx, |app, _| {
         app.privacy
             .passkeys
@@ -92,7 +92,7 @@ fn the_pin_sheet_wants_a_pin_and_says_when_it_was_wrong(cx: &mut TestAppContext)
     });
     assert_eq!(
         sheet(&app, vcx),
-        Some(CeremonySheet::Pin { invalid: false })
+        Some(CeremonyView::Sheet(CeremonySheet::Pin { invalid: false }))
     );
     app.update_in(vcx, |app, _, cx| {
         app.feed_ceremony_event(CeremonyEvent::NeedPin { invalid: true }, cx);
@@ -112,7 +112,10 @@ fn the_pin_sheet_wants_a_pin_and_says_when_it_was_wrong(cx: &mut TestAppContext)
         }
         app.submit_passkey_pin(window, cx);
     });
-    assert_eq!(sheet(&app, vcx), Some(CeremonySheet::Key));
+    assert_eq!(
+        sheet(&app, vcx),
+        Some(CeremonyView::Sheet(CeremonySheet::Key))
+    );
     app.read_with(vcx, |app, cx| {
         let value = app
             .privacy
@@ -134,7 +137,9 @@ fn a_failure_shows_the_error_sheet_and_close_ends_it(cx: &mut TestAppContext) {
     });
     assert_eq!(
         sheet(&app, vcx),
-        Some(CeremonySheet::Error(keys::PASSKEY_PIN_BLOCKED))
+        Some(CeremonyView::Sheet(CeremonySheet::Error(
+            keys::PASSKEY_PIN_BLOCKED
+        )))
     );
     shown_dialog(&shell, vcx);
     vcx.update(|window, cx| {

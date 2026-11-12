@@ -94,8 +94,7 @@ impl QuillApp {
         self.message_ui.poll_voters_dialog = Some(PollVotersDialog {
             chat_id,
             message_id,
-            selected_option: None,
-            show_stats: false,
+            view: PollView::Voters { option: None },
         });
         self.select_poll_voters_option(0, cx);
     }
@@ -132,8 +131,7 @@ impl QuillApp {
         self.message_ui.poll_voters_dialog = Some(PollVotersDialog {
             chat_id,
             message_id,
-            selected_option: None,
-            show_stats: true,
+            view: PollView::Stats { option: None },
         });
         let can_get_voters = self
             .session()
@@ -163,7 +161,7 @@ impl QuillApp {
         let Some(dialog) = self.message_ui.poll_voters_dialog.as_mut() else {
             return;
         };
-        dialog.selected_option = Some(option_index);
+        dialog.select(option_index);
         let (chat_id, message_id) = (dialog.chat_id, dialog.message_id);
         if let Some(live) = self.live.as_mut()
             && live
@@ -182,7 +180,7 @@ impl QuillApp {
             return;
         };
         let (chat_id, message_id) = (dialog.chat_id, dialog.message_id);
-        let option_index = dialog.selected_option.unwrap_or(0);
+        let option_index = dialog.view.option().unwrap_or(0);
         if let Some(live) = self.live.as_mut()
             && live
                 .driver
@@ -225,7 +223,7 @@ impl QuillApp {
             return div().into_any_element();
         };
         let (chat_id, message_id) = (dialog.chat_id, dialog.message_id);
-        let selected = dialog.selected_option;
+        let selected = dialog.view.option();
         let poll = self
             .session()
             .and_then(|session| session.histories.get(&chat_id.0))
@@ -235,7 +233,7 @@ impl QuillApp {
                 _ => None,
             });
         let mut body = div().flex().flex_col().gap_1();
-        if dialog.show_stats {
+        if dialog.view.shows_stats() {
             body = body.child(self.poll_stats_section(chat_id, message_id, cx));
         }
         if let Some(poll) = poll.as_ref().filter(|poll| poll.can_get_voters) {
@@ -297,7 +295,7 @@ impl QuillApp {
                                 .message_ui
                                 .poll_voters_dialog
                                 .as_ref()
-                                .and_then(|dialog| dialog.selected_option)
+                                .and_then(|dialog| dialog.view.option())
                                 .unwrap_or(0);
                             this.select_poll_voters_option(index, cx);
                         })),
@@ -551,7 +549,7 @@ impl QuillApp {
                         .message_ui
                         .poll_voters_dialog
                         .as_ref()
-                        .is_some_and(|dialog| dialog.show_stats)
+                        .is_some_and(|dialog| dialog.view.shows_stats())
                     {
                         tr(keys::POLLS_STATS_TITLE)
                     } else {

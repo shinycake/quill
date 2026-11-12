@@ -13,7 +13,6 @@ src/ui/agent_driver_shot.rs CAPTURING | set around the agent's filtered draw onl
 src/ui/chat_theme.rs DARK,HIGH_CONTRAST,LAST | the app theme, the same in every window
 
 # Keyed by something that is in one window at a time, or that carries it.
-src/ui/selectable_text.rs OWNERS | keyed by text entity, which lives in one window
 src/ui/image_budget.rs WHOLE | keyed by window scope (None: the main window)
 src/ui/image_budget.rs SLICES | keyed by slice entity, each with its own window
 src/ui/send_fly.rs CELLS | keyed by window scope and file

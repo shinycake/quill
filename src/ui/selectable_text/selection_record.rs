@@ -32,6 +32,10 @@ pub(super) struct WindowSelected {
     /// to, by document order. A text that holds none lets go, so the first
     /// entry is the message the selection starts in.
     pub(super) messages: std::collections::BTreeMap<u64, (i64, u64)>,
+    /// The text the selection started in and the message it belongs to,
+    /// as that text last painted; the texts of other messages let go of
+    /// the selection while it stays on this one.
+    pub(super) anchor_owner: Option<(EntityId, (i64, u64))>,
     /// Custom emoji inside the selection, by (document order, byte
     /// offset): their fallback text replaces the placeholders in the
     /// copied string.

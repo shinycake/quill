@@ -168,7 +168,7 @@ fn run_phone(kind: Kind<'_>, env: &mut Environment, link: &Link) -> Result<End, 
     } else {
         None
     };
-    let _ = link.events.send(CeremonyEvent::Hybrid { qr: code });
+    link.emit(CeremonyEvent::Hybrid { qr: code });
 
     let mut seen = HashSet::new();
     let eid = loop {
@@ -185,7 +185,7 @@ fn run_phone(kind: Kind<'_>, env: &mut Environment, link: &Link) -> Result<End, 
                     // tdesktop `securityKeyChosen`: a toast when no key is
                     // there, else the key path.
                     if env.keys.open_all().is_empty() {
-                        let _ = link.events.send(CeremonyEvent::NoKey);
+                        link.emit(CeremonyEvent::NoKey);
                     } else {
                         guard.stop();
                         return Ok(End::SecurityKey);
@@ -218,7 +218,7 @@ fn run_phone(kind: Kind<'_>, env: &mut Environment, link: &Link) -> Result<End, 
         }
     };
     guard.stop();
-    let _ = link.events.send(CeremonyEvent::PhoneConnecting);
+    link.emit(CeremonyEvent::PhoneConnecting);
 
     let parts = eid::parts(&eid);
     let domain = eid::tunnel_server_domain(parts.tunnel_server_domain).ok_or_else(|| {
@@ -320,7 +320,7 @@ fn converse(
     let sealed = crypter
         .encrypt(&messages::frame_request(&request, post.protocol_revision))
         .ok_or(CeremonyError::Phone)?;
-    let _ = link.events.send(CeremonyEvent::PhoneContinue);
+    link.emit(CeremonyEvent::PhoneContinue);
     tunnel.send(&sealed, stop).map_err(tunnel_error)?;
     loop {
         let sealed = tunnel.recv(stop).map_err(tunnel_error)?;

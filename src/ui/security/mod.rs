@@ -485,7 +485,7 @@ impl QuillApp {
             live.driver.refresh_storage_statistics();
             let _ = live.driver.maybe_fetch_storage_statistics();
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.settings.storage_stats.succeed(demo_storage_stats());
+            session.settings.storage_stats = Fetch::Ready(demo_storage_stats());
         }
         cx.notify();
     }
@@ -603,54 +603,48 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Slice A2: one `setPassword` round-trip — enable (empty current),
-    /// change, or disable (empty new). A recovery email rides along only
-    /// on the enable form (TGX `PasswordController.java:1990`); on
-    /// change/disable a leftover email would put the request into
-    /// pending-confirmation and silently not apply (schema 1.8.67, line
-    /// 11434). The fields are cleared and the password strings zeroized
-    /// after the driver took the request; the status view shows TDLib's
-    /// authoritative answer when it arrives.
+    /// Slice A2: one `setPassword` round-trip for `form` (`PasswordForm`
+    /// decides which inputs it reads and what it refuses). A recovery email
+    /// rides along only on the enable form (TGX
+    /// `PasswordController.java:1990`); on change/disable a leftover email
+    /// would put the request into pending-confirmation and silently not
+    /// apply (schema 1.8.67, line 11434). The fields are cleared and the
+    /// password strings zeroized after the driver took the request; the
+    /// status view shows TDLib's authoritative answer when it arrives.
     pub(super) fn submit_twofa_password(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
-        include_email: bool,
+        form: PasswordForm,
     ) {
         let mut current = self.twofa.current_password.read(cx).value().to_string();
         let mut new = self.twofa.new_password.read(cx).value().to_string();
         let hint = self.twofa.hint.read(cx).value().to_string();
         let email = self.twofa.email.read(cx).value().trim().to_string();
-        // Slice A2 fixup: never fire a doomed request — the driver
-        // rejects it silently and the old code cleared the form first, so
-        // the submit vanished with no feedback.
-        let missing: Option<&str> = if include_email && new.is_empty() {
-            Some(tr(keys::Q_PREFS_ENTER_A_NEW_PASSWORD))
-        } else if !include_email && current.is_empty() {
-            Some(tr(keys::Q_PREFS_ENTER_YOUR_CURRENT_PASSWORD))
-        } else {
-            None
+        let inputs = FormInputs {
+            current: &current,
+            new: &new,
+            hint: &hint,
+            email: &email,
         };
-        if let Some(note) = missing {
-            self.twofa.set_notice(Some(note.to_string()));
-            current.zeroize();
-            new.zeroize();
-            cx.notify();
-            return;
-        }
+        // Never fire a doomed request: say so instead of clearing the form.
+        let request = match form.request(&inputs) {
+            Ok(request) => request,
+            Err(note) => {
+                self.twofa.set_notice(Some(note.to_string()));
+                current.zeroize();
+                new.zeroize();
+                cx.notify();
+                return;
+            }
+        };
         // The form stays until the driver took the request: one it refused
         // (not connected, shutting down) keeps what was typed and says so.
         let sent = match self.live.as_mut() {
-            Some(live) => {
-                let email_opt = if include_email && !email.is_empty() {
-                    Some(email.as_str())
-                } else {
-                    None
-                };
-                live.driver
-                    .set_two_step_password(&current, &new, &hint, email_opt)
-                    .is_ok()
-            }
+            Some(live) => live
+                .driver
+                .set_two_step_password(request.current, request.new, request.hint, request.email)
+                .is_ok(),
             None => true,
         };
         current.zeroize();
@@ -668,7 +662,7 @@ impl QuillApp {
     }
 
     /// Empty every field of the two-step forms.
-    fn clear_twofa_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn clear_twofa_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.twofa
             .current_password
             .update(cx, |input, cx| input.set_value("", window, cx));
@@ -813,6 +807,8 @@ crate::ui::shell::register_dialogs! {
 }
 
 mod passkey_ceremony;
+mod twofa_form;
+use twofa_form::{FormInputs, PasswordForm};
 mod passkey_login;
 pub(in crate::ui) mod passkeys;
 mod session_list;

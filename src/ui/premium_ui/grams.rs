@@ -31,7 +31,7 @@ use quill::premium_hub::ton::{
 use quill::state::Session;
 use quill::telegram::envelope::MessageSender;
 use quill::text::LinkTarget;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -247,17 +247,14 @@ impl QuillApp {
                 None => overview(session, grams, &roots, cx),
             };
             let scroll = this.payments.grams_scroll.clone();
-            let body = Rc::new(RefCell::new(Some(
+            let body = Rc::new(Cell::new(Some(
                 watch(body, cx, Self::grams_more).into_any_element(),
             )));
             dialog
                 .content(crate::ui::shell::scrollable_dialog_content_tracked(
                     Some(scroll),
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     },
                 ))

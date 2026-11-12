@@ -25,7 +25,6 @@ use quill::proxy::{
     parse_proxy_link, proxy_link_from_text,
 };
 use quill::telegram::envelope::ConnectionState;
-use std::cell::RefCell;
 use std::rc::Rc;
 
 /// All proxy-related UI state, in one field of [`QuillApp`].

@@ -235,7 +235,6 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let narrow = f32::from(window.viewport_size().width) < NARROW;
-        self.settle_settings_search(window, cx);
         self.settle_arrival(window, cx);
         self.settings_search_input(window, cx);
         if !window.has_active_dialog(cx) && window.focused(cx).is_none() {

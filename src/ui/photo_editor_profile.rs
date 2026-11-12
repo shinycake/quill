@@ -177,11 +177,14 @@ impl QuillApp {
             multiple: false,
             prompt: Some(tr(keys::ATTACH_PHOTO_OR_VIDEO).into()),
         });
-        self.spawn_scoped_in(window, cx, async move |this, cx| {
-            let Ok(Ok(Some(paths))) = picker.await else {
-                return;
+        let pick = self.spawn_scoped_in(window, cx, async move |this, cx| {
+            let path = match picker.await {
+                Ok(Ok(Some(paths))) => paths.into_iter().next(),
+                _ => None,
             };
-            let Some(path) = paths.into_iter().next() else {
+            let Some(path) = path else {
+                // Cancelled: the sources stop waiting for the pick.
+                let _ = this.update(cx, |this, _| this.end_photo_pick());
                 return;
             };
             let read = path.clone();
@@ -192,8 +195,8 @@ impl QuillApp {
             let _ = this.update_in(cx, |this, window, cx| {
                 this.open_picked_photo(target, path, decoded, window, cx);
             });
-        })
-        .detach();
+        });
+        self.hold_photo_pick(target, pick);
     }
 
     /// "From clipboard" (tdesktop `addFromClipboard`): the copied image
@@ -209,13 +212,13 @@ impl QuillApp {
             self.photo_target_note(target, tr(keys::BAD_PHOTO), cx);
             return;
         };
-        self.spawn_scoped_in(window, cx, async move |this, cx| {
+        let pick = self.spawn_scoped_in(window, cx, async move |this, cx| {
             let decoded = cx
                 .background_executor()
                 .spawn(async move { decode_image(&image.bytes, None, DecodeSize::FULL) })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                if this.photo_target() != Some(target) {
+                if !this.end_photo_pick() {
                     return;
                 }
                 match decoded {
@@ -223,8 +226,8 @@ impl QuillApp {
                     Err(_) => this.photo_target_note(target, tr(keys::BAD_PHOTO), cx),
                 }
             });
-        })
-        .detach();
+        });
+        self.hold_photo_pick(target, pick);
     }
 
     fn open_picked_photo(
@@ -235,8 +238,9 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // The box or dialog the photo was for closed meanwhile.
-        if self.photo_target() != Some(target) {
+        // The box or dialog the photo was for closed meanwhile (its sources
+        // held the pick, and went with it).
+        if !self.end_photo_pick() {
             return;
         }
         match decoded {

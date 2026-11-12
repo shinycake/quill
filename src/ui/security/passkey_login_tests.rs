@@ -3,7 +3,7 @@
 //! feature for gpui-kit's test support). No security key or account is
 //! touched: the sheets are shown without a worker and its events are fed
 //! by hand.
-use super::super::passkey_ceremony::{CeremonySheet, CeremonyUi};
+use super::super::passkey_ceremony::{CeremonySheet, CeremonyUi, CeremonyView};
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
@@ -45,7 +45,7 @@ fn shown_dialog(shell: &Entity<QuillShell>, vcx: &mut VisualTestContext) -> Opti
     shell.read_with(vcx, |shell, _| shell.open_dialog.kind())
 }
 
-fn sheet(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<CeremonySheet> {
+fn sheet(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<CeremonyView> {
     app.read_with(vcx, |app, _| {
         app.privacy.passkeys.ceremony().map(CeremonyUi::sheet)
     })
@@ -109,7 +109,9 @@ fn the_sign_in_dialog_waits_for_the_key_and_maps_failures(cx: &mut TestAppContex
     });
     assert_eq!(
         sheet(&app, vcx),
-        Some(CeremonySheet::Error(keys::PASSKEY_ERROR_NO_CREDENTIALS))
+        Some(CeremonyView::Sheet(CeremonySheet::Error(
+            keys::PASSKEY_ERROR_NO_CREDENTIALS
+        )))
     );
     shown_dialog(&shell, vcx);
     vcx.update(|window, _| {
@@ -125,7 +127,9 @@ fn the_sign_in_dialog_waits_for_the_key_and_maps_failures(cx: &mut TestAppContex
     });
     assert_eq!(
         sheet(&app, vcx),
-        Some(CeremonySheet::Error(keys::PASSKEY_ERROR_LOGIN))
+        Some(CeremonyView::Sheet(CeremonySheet::Error(
+            keys::PASSKEY_ERROR_LOGIN
+        )))
     );
     shown_dialog(&shell, vcx);
     vcx.update(|window, cx| window.click("passkey-ceremony-close", cx));

@@ -363,10 +363,15 @@ impl QuillApp {
                     .gap_2()
                     .child(Button::new(submit_id).label(submit_label).ghost().on_click(
                         cx.listener(move |this, _, window, cx| {
-                            if form == TwofaView::Email {
-                                this.submit_twofa_email(window, cx);
-                            } else {
-                                this.submit_twofa_password(window, cx, form == TwofaView::Enable);
+                            match form {
+                                TwofaView::Email => this.submit_twofa_email(window, cx),
+                                TwofaView::Enable => {
+                                    this.submit_twofa_password(window, cx, PasswordForm::Enable)
+                                }
+                                TwofaView::Change => {
+                                    this.submit_twofa_password(window, cx, PasswordForm::Change)
+                                }
+                                _ => this.submit_twofa_password(window, cx, PasswordForm::Disable),
                             }
                             this.close_kit_dialog_if_done(DialogKind::TwoFa, window, cx);
                         }),
@@ -375,7 +380,8 @@ impl QuillApp {
                         Button::new("twofa-back")
                             .label(tr(keys::Q_PREFS_BACK))
                             .ghost()
-                            .on_click(cx.listener(|this, _, _, cx| {
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.clear_twofa_inputs(window, cx);
                                 this.goto_twofa_view(TwofaView::Status);
                                 cx.notify();
                             })),

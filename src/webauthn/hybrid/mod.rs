@@ -95,7 +95,7 @@ pub fn register(options: CreationOptions, mut env: Environment) -> Ceremony {
         move |link| match flow::run(flow::Kind::Register(&options), &mut env, link) {
             flow::End::Event(event) => event,
             flow::End::SecurityKey => {
-                let _ = link.events.send(CeremonyEvent::UseKey);
+                link.emit(CeremonyEvent::UseKey);
                 match ceremony::run_register(&options, env.keys.as_mut(), link) {
                     Ok(registration) => CeremonyEvent::Registered(registration),
                     Err(error) => CeremonyEvent::Failed(error),
@@ -112,7 +112,7 @@ pub fn login(options: RequestOptions, mut env: Environment) -> Ceremony {
         move |link| match flow::run(flow::Kind::Login(&options), &mut env, link) {
             flow::End::Event(event) => event,
             flow::End::SecurityKey => {
-                let _ = link.events.send(CeremonyEvent::UseKey);
+                link.emit(CeremonyEvent::UseKey);
                 match ceremony::run_login(&options, env.keys.as_mut(), link) {
                     Ok(assertion) => CeremonyEvent::SignedIn(assertion),
                     Err(error) => CeremonyEvent::Failed(error),

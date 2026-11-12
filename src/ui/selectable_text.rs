@@ -20,15 +20,11 @@ thread_local! {
     /// Bounds of the scrolling region whose paint is in progress; see
     /// [`SelectionViewport`].
     static VIEWPORT: Cell<Option<Bounds<Pixels>>> = const { Cell::new(None) };
-    /// The message each painted text participant belongs to, by the
-    /// participant's entity id; see [`SelectableRichText::message`].
-    static OWNERS: Cell<std::collections::HashMap<EntityId, (i64, u64)>> =
-        Cell::new(std::collections::HashMap::new());
 }
 
 mod selection_record;
 mod selection_start;
-use selection_record::{WindowSelected, with_selected, with_taken};
+use selection_record::{WindowSelected, with_selected};
 pub(super) use selection_start::selected_occurrence;
 
 /// Called with the index of the clicked range.
@@ -599,21 +595,27 @@ impl Element for SelectableRichText {
             .with_rendered_element(handle, window, cx);
         handle.register(registration, window, cx);
         let layout = self.laid(bounds);
-        if let Some(message) = self.message {
-            with_taken(&OWNERS, |owners| {
-                // Entries are tiny; drop them all now and then rather than
-                // track every participant's lifetime. Painted text re-adds
-                // itself the same frame.
-                if owners.len() > 50_000 {
-                    owners.clear();
-                }
-                owners.insert(handle.entity_id(), message);
+        // The message of the text the selection started in is kept with the
+        // window's selection record (one entry, replaced by the next
+        // anchor), not in a table of every text ever painted.
+        let anchor_entity = handle
+            .snapshot(cx)
+            .and_then(|snapshot| snapshot.anchor().entity_id());
+        if let (Some(message), Some(anchor)) = (self.message, anchor_entity)
+            && anchor == handle.entity_id()
+        {
+            with_selected(window, cx, |selected| {
+                selected.anchor_owner = Some((anchor, message));
             });
         }
-        let anchor_message = handle
-            .snapshot(cx)
-            .and_then(|snapshot| snapshot.anchor().entity_id())
-            .and_then(|anchor| with_taken(&OWNERS, |owners| owners.get(&anchor).copied()));
+        let anchor_message = anchor_entity.and_then(|anchor| {
+            with_selected(window, cx, |selected| {
+                selected
+                    .anchor_owner
+                    .filter(|(owner, _)| *owner == anchor)
+                    .map(|(_, message)| message)
+            })
+        });
         let foreign =
             self.message.is_some() && anchor_message.is_some() && anchor_message != self.message;
         let runs = if foreign {

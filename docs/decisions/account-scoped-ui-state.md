@@ -10220,3 +10220,28 @@ add and closed link save), `composer_sends_tests` (an ack never takes a
 neighbour's clear), `chat_window::asker_tests` (gif ask settles; two
 windows keep their own link text), `forum_extras::tests` (both answer
 orders), `deep_link_routes_tests` (seek stays with its account).
+
+### Sweep fixes (r4-10)
+
+| Ids | What changed |
+| --- | --- |
+| 21-003, 21-004 | The password forms read only the inputs they draw. `PasswordForm::{Enable, Change, Disable}` (`security/twofa_form.rs`) builds the `setPassword` arguments: Change refuses an empty new password (it used to send `""`, which turns two-step verification off), Turn off sends an empty new password and hint on purpose and ignores the other forms' text, Enable ignores a stale current password, and only Enable carries the recovery email. Back clears the shared inputs. Tests in `twofa_form`. |
+| 20-003, 20-004 | `SendTarget` carries the `SendSlot` fixed when Send was tapped; the voice and round-video sends register their draft clear under it (`composer_sends.set_draft_clear(&target.slot, ..)`), not under whichever chat is open when the file is ready. |
+| 20-006 | `SourceStage::Picking { _pick: Task }`: the "Photo or video" picker and the clipboard decode are held by the sources of the box that asked (`hold_photo_pick`), so closing the box or opening another source drops them. A landing pick is taken only while that stage is the one waiting (`end_photo_pick`); a cancelled picker ends the stage. |
+| 20-007 | `PollView::{Voters { option }, Stats { option }}` replaces `show_stats` beside `selected_option`. |
+| 20-001 | The Premium `/start` is queued only when a resolve went out (its `RequestId`); the `RequestId(0)` sentinel is gone. Without a driver (demos) nothing is queued. |
+| 20-008 | `PullUi` is reset in three methods (`retarget`, `abandon_jump`, `end_slide`); no call site touches `slide` or the machine's restart. The slide cannot live inside the machine's `Jumping` stage: it is drawn after the jump ends and the chat change restarts the machine. `g-337`: the jump waits on `wake::APPLIED` (with the stage deadline as the timeout) instead of a 100 ms timer (`JUMP_POLL_MS` is gone). |
+| 21-006 | `SettingsSearch` has no `Finished` marker. Closing Settings drops the search field with its text, and the next open makes a new one; `selected` is a plain field. Test `closing_settings_drops_the_search_text_for_the_next_open`. |
+| 21-005 | The anchor text's message is kept as one entry in the window's `WindowSelected` (`anchor_owner`), replacing the thread-local table of every painted text (cleared at 50,000 entries). |
+| 21-001 | A media check that lands after its give-up removes the JPEG it made. |
+| 21-007 | Tile buttons and menu items hold the `TrayItem` they were drawn for and act on its current index (`act_on_tile`); a file that left the tray makes the click do nothing. |
+| 21-002 | `MenuActions` records an ask in flight (`Know::Asked(RequestId)`), and a gallery hover asks only when no ask is out and none failed. Tests in `menu_actions`. |
+| g-327 | `Lookup::Waiting` is gone: a waiting draw gets `Lookup::Now(None)`. |
+| g-288, g-289 | `CeremonyRun::{Probing, Connecting}` hold the worker; `CeremonySheet` is only the sheets that draw, and `CeremonyView` is the derived view. |
+| g-299 | The passkey ticker rests on `wake::APPLIED` and the new `wake::PASSKEY` (poked by the ceremony worker's `Link::emit`), with a 2 s fallback, instead of a 100 ms timer. |
+| g-323 | `pump_saved_messages` no longer asks the request table by purpose; the tags fetch (`Fetch`) is the gate. |
+| g-286 | The demo storage stats are set as `Fetch::Ready` instead of `Fetch::succeed`. |
+| g-300 | Not in the baseline: `selection_drag_loop` is in `owned-timers-allow.txt` with a reason (a held pointer beyond the list's edge sends no event; the drag stage owns the task). |
+| g-344 … g-367 (refcell) | The one-shot dialog bodies are `Cell<Option<_>>` with `take()`; `platform_cursor` holds a `Cell<Option<Weak<_>>>`; `selection_bar` uses `try_borrow`. |
+| 20-002 | Skipped: `op` (username or photo) and `save` (name and bio) are two independent operations, each settled on its own request and shown in its own place; they can overlap. |
+| 20-005 | Skipped: lock, discard row and "Play once" are user toggles of one recording, dropped with the `Capture`; none waits for an answer. |

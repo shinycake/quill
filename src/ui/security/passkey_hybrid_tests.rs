@@ -3,8 +3,8 @@
 //! "Use a security key" pill. No phone or Bluetooth is involved: the
 //! worker's events are fed by hand (the worker itself is covered by
 //! `quill::webauthn::hybrid`'s tests over a scripted fake phone).
-use super::CeremonySheet;
 use super::tests::{new_app, sheet, shown_dialog};
+use super::{CeremonySheet, CeremonyView};
 use crate::ui::shell::DialogKind;
 use gpui_kit::TestAppContext;
 use gpui_kit::test::TestWindowExt;
@@ -22,7 +22,7 @@ fn the_qr_sheet_follows_the_bluetooth_probe(cx: &mut TestAppContext) {
     let (app, shell, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     app.update_in(vcx, |app, _, cx| {
-        app.show_passkey_sheet(CeremonySheet::Probing, cx)
+        app.show_passkey_sheet(CeremonyView::Probing, cx)
     });
     assert_eq!(shown_dialog(&shell, vcx), Some(DialogKind::PasskeysAbout));
     app.update_in(vcx, |app, _, cx| {
@@ -35,7 +35,9 @@ fn the_qr_sheet_follows_the_bluetooth_probe(cx: &mut TestAppContext) {
     });
     assert_eq!(
         sheet(&app, vcx),
-        Some(CeremonySheet::Choose { bluetooth: true })
+        Some(CeremonyView::Sheet(CeremonySheet::Choose {
+            bluetooth: true
+        }))
     );
     assert_eq!(shown_dialog(&shell, vcx), Some(DialogKind::PasskeyCeremony));
     vcx.update(|window, _| {
@@ -64,12 +66,14 @@ fn bluetooth_off_keeps_only_the_security_key(cx: &mut TestAppContext) {
     let (app, shell, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     app.update_in(vcx, |app, _, cx| {
-        app.show_passkey_sheet(CeremonySheet::Probing, cx);
+        app.show_passkey_sheet(CeremonyView::Probing, cx);
         app.feed_ceremony_event(CeremonyEvent::Hybrid { qr: None }, cx);
     });
     assert_eq!(
         sheet(&app, vcx),
-        Some(CeremonySheet::Choose { bluetooth: false })
+        Some(CeremonyView::Sheet(CeremonySheet::Choose {
+            bluetooth: false
+        }))
     );
     assert_eq!(shown_dialog(&shell, vcx), Some(DialogKind::PasskeyCeremony));
     vcx.update(|window, _| {
@@ -90,7 +94,7 @@ fn the_security_key_pill_switches_to_the_key_sheet(cx: &mut TestAppContext) {
     let (app, shell, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     app.update_in(vcx, |app, _, cx| {
-        app.show_passkey_sheet(CeremonySheet::Probing, cx);
+        app.show_passkey_sheet(CeremonyView::Probing, cx);
         app.feed_ceremony_event(
             CeremonyEvent::Hybrid {
                 qr: Some(demo_qr()),
@@ -103,14 +107,18 @@ fn the_security_key_pill_switches_to_the_key_sheet(cx: &mut TestAppContext) {
     vcx.update(|window, cx| window.click("passkey-cable-use-key", cx));
     assert_eq!(
         sheet(&app, vcx),
-        Some(CeremonySheet::Choose { bluetooth: true })
+        Some(CeremonyView::Sheet(CeremonySheet::Choose {
+            bluetooth: true
+        }))
     );
     app.update_in(vcx, |app, _, cx| {
         app.feed_ceremony_event(CeremonyEvent::NoKey, cx)
     });
     assert_eq!(
         sheet(&app, vcx),
-        Some(CeremonySheet::Choose { bluetooth: true })
+        Some(CeremonyView::Sheet(CeremonySheet::Choose {
+            bluetooth: true
+        }))
     );
     app.read_with(vcx, |app, _| {
         assert_eq!(
@@ -121,7 +129,10 @@ fn the_security_key_pill_switches_to_the_key_sheet(cx: &mut TestAppContext) {
     app.update_in(vcx, |app, _, cx| {
         app.feed_ceremony_event(CeremonyEvent::UseKey, cx)
     });
-    assert_eq!(sheet(&app, vcx), Some(CeremonySheet::Key));
+    assert_eq!(
+        sheet(&app, vcx),
+        Some(CeremonyView::Sheet(CeremonySheet::Key))
+    );
     assert_eq!(shown_dialog(&shell, vcx), Some(DialogKind::PasskeyCeremony));
     vcx.update(|window, _| {
         assert_eq!(
@@ -139,7 +150,7 @@ fn the_phone_sheets_end_on_the_error_sheet(cx: &mut TestAppContext) {
     let (app, shell, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     app.update_in(vcx, |app, _, cx| {
-        app.show_passkey_sheet(CeremonySheet::Probing, cx);
+        app.show_passkey_sheet(CeremonyView::Probing, cx);
         app.feed_ceremony_event(
             CeremonyEvent::Hybrid {
                 qr: Some(demo_qr()),
@@ -148,7 +159,7 @@ fn the_phone_sheets_end_on_the_error_sheet(cx: &mut TestAppContext) {
         );
         app.feed_ceremony_event(CeremonyEvent::PhoneConnecting, cx);
     });
-    assert_eq!(sheet(&app, vcx), Some(CeremonySheet::Connecting));
+    assert_eq!(sheet(&app, vcx), Some(CeremonyView::Connecting));
     assert_eq!(shown_dialog(&shell, vcx), Some(DialogKind::PasskeyCeremony));
     vcx.update(|window, _| {
         assert!(window.try_find("passkey-ceremony-about").is_none());
@@ -170,7 +181,9 @@ fn the_phone_sheets_end_on_the_error_sheet(cx: &mut TestAppContext) {
     });
     assert_eq!(
         sheet(&app, vcx),
-        Some(CeremonySheet::Error(keys::PASSKEY_CABLE_ERROR))
+        Some(CeremonyView::Sheet(CeremonySheet::Error(
+            keys::PASSKEY_CABLE_ERROR
+        )))
     );
     shown_dialog(&shell, vcx);
     vcx.update(|window, cx| {
@@ -192,7 +205,7 @@ fn a_failure_during_the_probe_is_a_toast(cx: &mut TestAppContext) {
     let (app, shell, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     app.update_in(vcx, |app, _, cx| {
-        app.show_passkey_sheet(CeremonySheet::Probing, cx);
+        app.show_passkey_sheet(CeremonyView::Probing, cx);
         app.feed_ceremony_event(CeremonyEvent::Failed(CeremonyError::Phone), cx);
     });
     assert_eq!(sheet(&app, vcx), None);

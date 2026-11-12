@@ -178,12 +178,13 @@ impl Ceremony {
         };
         let spawned = crate::thread_guard::spawn_guarded("quill-passkey", move || {
             let last = work(&link);
-            let _ = link.events.send(last);
+            link.emit(last);
         });
         if spawned.is_err() {
             let _ = event_tx.send(CeremonyEvent::Failed(CeremonyError::Other(
                 "could not start the worker".into(),
             )));
+            crate::wake::PASSKEY.poke();
         }
         Self {
             state: CeremonyState::Running(events),
@@ -331,6 +332,13 @@ fn map_error<T>(error: CtapError) -> Attempt<T> {
 }
 
 impl Link {
+    /// Tell the dialog something happened: it reads the event when
+    /// `wake::PASSKEY` pokes, so it never has to look on a timer.
+    pub(super) fn emit(&self, event: CeremonyEvent) {
+        let _ = self.events.send(event);
+        crate::wake::PASSKEY.poke();
+    }
+
     pub(super) fn cancelled(&self) -> bool {
         self.cancel.load(Ordering::SeqCst)
     }
@@ -372,7 +380,7 @@ impl Link {
         // A PIN sent while none was asked answers nothing: only one typed
         // after this ask's event counts.
         while self.pins.try_recv().is_ok() {}
-        let _ = self.events.send(CeremonyEvent::NeedPin { invalid });
+        self.emit(CeremonyEvent::NeedPin { invalid });
         loop {
             if self.cancelled() {
                 return Err(CeremonyError::Cancelled);

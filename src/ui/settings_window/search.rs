@@ -19,27 +19,9 @@ pub(in crate::ui) struct SettingsSearch {
     /// Created with the window the settings window first renders in.
     input: Option<Entity<InputState>>,
     recent: Option<RecentSearches>,
-    /// Where the search stands; the query is the field's own text.
-    stage: Stage,
-}
-
-/// The search, as one value: the highlighted row lives with the search it
-/// belongs to, so ending a search drops it with the text.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Stage {
-    /// The field holds the user's text (maybe none); `selected` is the
-    /// highlighted result (or recent pick).
-    Live { selected: usize },
-    /// A result opened or Settings closed: the field still holds the text
-    /// of a search that is over, and the next render clears it (that needs
-    /// the window), back to `Live`.
-    Finished,
-}
-
-impl Default for Stage {
-    fn default() -> Self {
-        Self::Live { selected: 0 }
-    }
+    /// The highlighted result (or recent pick) of the search the field's
+    /// text asks for; a new search starts at the first.
+    selected: usize,
 }
 
 /// What the results area lists.
@@ -49,17 +31,16 @@ enum Listing {
 }
 
 impl SettingsSearch {
-    /// Settings closed: the next open starts with an empty field.
+    /// Settings closed: the field goes with its text, and the next open
+    /// makes a new, empty one (`settings_search_input`).
     pub(super) fn close(&mut self) {
-        self.stage = Stage::Finished;
+        self.input = None;
+        self.selected = 0;
     }
 
     /// The highlighted row.
     pub(super) fn selected(&self) -> usize {
-        match self.stage {
-            Stage::Live { selected } => selected,
-            Stage::Finished => 0,
-        }
+        self.selected
     }
 
     /// The field's text (empty before the field exists).
@@ -102,7 +83,7 @@ impl QuillApp {
             window,
             |this, _, event: &InputEvent, window, cx| match event {
                 InputEvent::Change => {
-                    this.settings.search.stage = Stage::Live { selected: 0 };
+                    this.settings.search.selected = 0;
                     cx.notify();
                 }
                 InputEvent::PressEnter { .. } => this.open_selected_search(window, cx),
@@ -174,12 +155,10 @@ impl QuillApp {
             return;
         }
         let selected = self.settings.search.selected().min(len - 1);
-        self.settings.search.stage = Stage::Live {
-            selected: if down {
-                (selected + 1) % len
-            } else {
-                (selected + len - 1) % len
-            },
+        self.settings.search.selected = if down {
+            (selected + 1) % len
+        } else {
+            (selected + len - 1) % len
         };
         cx.notify();
     }
@@ -233,7 +212,7 @@ impl QuillApp {
         if let Some(input) = self.settings.search.input.clone() {
             input.update(cx, |input, cx| input.set_value("", window, cx));
         }
-        self.settings.search.stage = Stage::default();
+        self.settings.search.selected = 0;
         window.focus(&self.settings.focus, cx);
         cx.notify();
     }
@@ -249,17 +228,10 @@ impl QuillApp {
         if let Some(text) = typed {
             let value = format!("{}{text}", self.settings.search.query(cx));
             input.update(cx, |input, cx| input.set_value(value, window, cx));
-            self.settings.search.stage = Stage::default();
+            self.settings.search.selected = 0;
         }
         input.update(cx, |input, cx| input.focus(window, cx));
         cx.notify();
-    }
-
-    /// Clears the field after a result opened (needs the window).
-    pub(super) fn settle_settings_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.settings.search.stage == Stage::Finished {
-            self.clear_settings_search(window, cx);
-        }
     }
 
     /// The field, for the sidebar header (made by `settings_search_input`).

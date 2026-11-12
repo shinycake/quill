@@ -27,7 +27,7 @@ use quill::state::{SAVED_TAG_LABEL_MAX, clean_tag_label};
 use quill::telegram::envelope::{
     ReactionType, SavedMessagesTag, SavedMessagesTopic, SavedTopicKind,
 };
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 
 /// Which Saved Messages view the open chat shows instead of its history.
@@ -367,11 +367,8 @@ impl QuillApp {
         if session.threads.saved.waiting_to_retry() {
             return;
         }
-        if session.threads.saved.tags.is_idle()
-            && !session
-                .requests
-                .has_purpose(quill::state::RequestPurpose::GetSavedMessagesTags { topic_id: 0 })
-        {
+        // The tags fetch is `Idle` until `load_saved_tags` records its ask.
+        if session.threads.saved.tags.is_idle() {
             let _ = live.driver.load_saved_tags(0);
         }
         let session = &live.driver.session;
@@ -904,7 +901,7 @@ impl QuillApp {
                         ),
                 )
                 .into_any_element();
-            let body = Rc::new(RefCell::new(Some(body)));
+            let body = Rc::new(Cell::new(Some(body)));
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(if named {
@@ -914,10 +911,7 @@ impl QuillApp {
                 }))
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     },
                 ))

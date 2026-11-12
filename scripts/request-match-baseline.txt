@@ -85,7 +85,6 @@ purpose:QuillApp::gif_grid 2
 purpose:QuillApp::manager_set_pending 1
 purpose:QuillApp::manager_view 3
 purpose:QuillApp::onboarding 1
-purpose:QuillApp::pump_saved_messages 1
 purpose:QuillApp::registration_form 1
 purpose:QuillApp::set_sticker_suggest_mode 1
 purpose:QuillApp::sidebar_auth 1
@@ -102,7 +101,6 @@ purpose:Session::suggested_post_busy 1
 unmatched:ConnectDriver::save_connected_bot 1
 unmatched:ForumTopicsMap::insert 1
 unmatched:GifPanel::search_answered 1
-unmatched:QuillApp::refresh_storage_usage 1
 unmatched:QuillApp::submit_default_auto_delete 1
 unmatched:SearchState::accept_recommended 1
 unmatched:Session::apply_auth_payload 1

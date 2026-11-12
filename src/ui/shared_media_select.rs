@@ -60,17 +60,33 @@ impl QuillApp {
         hovered: bool,
         _cx: &mut Context<Self>,
     ) {
-        if !hovered || self.shared_media_actions(message_id).is_some() {
-            return;
+        if hovered && self.shared_media_actions(message_id).is_none() {
+            self.ask_shared_media_actions(message_id);
         }
+    }
+
+    /// Ask what a row allows, unless an ask is out for it or TDLib already
+    /// refused (the menu asks again by forgetting the refusal).
+    fn ask_shared_media_actions(&mut self, message_id: MessageId) {
         let Some(chat) = self
             .session()
             .and_then(|session| session.media.shared_media.chat_id())
         else {
             return;
         };
-        if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.refresh_message_menu_actions(chat, message_id);
+        let Some(live) = self.live.as_mut() else {
+            return;
+        };
+        let known = &live.driver.session.messages.menu_actions;
+        if known.is_asked(chat, message_id) || known.is_failed(chat, message_id) {
+            return;
+        }
+        if let Ok(request) = live.driver.refresh_message_menu_actions(chat, message_id) {
+            live.driver
+                .session
+                .messages
+                .menu_actions
+                .asked(chat, message_id, request);
         }
     }
 
@@ -110,13 +126,8 @@ impl QuillApp {
         }
         // A row ticked before TDLib answered asks for its own properties; the
         // answer lands on the ticked entry by message id.
-        if known.is_none()
-            && let Some(chat) = self
-                .session()
-                .and_then(|session| session.media.shared_media.chat_id())
-            && let Some(live) = self.live.as_mut()
-        {
-            let _ = live.driver.refresh_message_menu_actions(chat, message_id);
+        if known.is_none() {
+            self.ask_shared_media_actions(message_id);
         }
         cx.notify();
     }

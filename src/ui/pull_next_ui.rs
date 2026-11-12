@@ -69,10 +69,33 @@ impl PullUi {
         self.machine.begin_jump(now, TaskHold::new(task));
     }
 
-    /// The pulled history changed or the jump is over: the machine starts
-    /// over, dropping a jump's task and what the pull found.
-    fn restart(&mut self, now: u64) {
+    /// The shown history changed: the pull follows it and starts over,
+    /// dropping a jump's task and what the pull found. The slide of a chat
+    /// the jump just opened goes on (`slide_in`).
+    fn retarget(&mut self, target: Option<Target>, now: u64) {
+        self.target = target;
         self.machine.reset_all(now);
+    }
+
+    /// The jump is over without a new chat shown: the pull starts over and
+    /// no slide is owed.
+    fn abandon_jump(&mut self, now: u64) {
+        self.slide = None;
+        self.machine.reset_all(now);
+    }
+
+    /// The slide is over or no longer shown.
+    fn end_slide(&mut self) {
+        self.slide = None;
+    }
+
+    /// The chat or topic the jump opened slides in from the bottom.
+    fn slide_in(&mut self, chat: ChatId, topic: Option<i32>) {
+        self.slide = Some(Slide {
+            chat,
+            topic,
+            start: Instant::now(),
+        });
     }
 
     /// The chat the pull leads to.
@@ -225,9 +248,7 @@ impl QuillApp {
         let target = self.pull_target();
         if self.history.pull.target != target {
             let now = self.pull_now(cx);
-            let pull = &mut self.history.pull;
-            pull.target = target;
-            pull.restart(now);
+            self.history.pull.retarget(target, now);
         }
     }
 
@@ -389,11 +410,7 @@ impl QuillApp {
                                 if this.history.pull.target.map(|t| t.chat) == Some(chat)
                                     && this.history.pull.machine.jumping()
                                 {
-                                    this.history.pull.slide = Some(Slide {
-                                        chat,
-                                        topic: Some(next),
-                                        start: Instant::now(),
-                                    });
+                                    this.history.pull.slide_in(chat, Some(next));
                                     this.select_topic_ui(next, cx);
                                 }
                                 this.pull_jump_ended(cx);
@@ -412,8 +429,8 @@ impl QuillApp {
     }
 
     /// `jumpWhenReady`: wait for the next channel's history (up to 1.5 s)
-    /// and its pinned bar (up to 0.6 s), checking every 100 ms, then open
-    /// it.
+    /// and its pinned bar (up to 0.6 s), waking on each applied update, then
+    /// open it.
     fn pull_jump_when_ready(
         &mut self,
         next: ChatId,
@@ -424,6 +441,9 @@ impl QuillApp {
         // `next` is a chat of the account the pull started on.
         let task = self.spawn_screen(cx, async move |this, cx| {
             loop {
+                // Taken before the readiness check, so an update applied
+                // during it ends the rest below.
+                let seen = quill::wake::APPLIED.epoch();
                 let waited = started.elapsed().as_millis() as u64;
                 // Locked: nothing opens behind the lock screen, and the
                 // wait stops polling the client (`pull_jump_ended`).
@@ -455,28 +475,34 @@ impl QuillApp {
                 if (history && pinned) || waited >= metrics::JUMP_MAX_WAIT_MS {
                     break;
                 }
-                cx.background_executor()
-                    .timer(Duration::from_millis(metrics::JUMP_POLL_MS))
-                    .await;
+                // Rests until TDLib's next applied update (the history and
+                // the pinned bar arrive in one), or the next deadline.
+                let deadline = if pinned {
+                    metrics::JUMP_MAX_WAIT_MS
+                } else {
+                    metrics::JUMP_PINNED_MAX_WAIT_MS.min(metrics::JUMP_MAX_WAIT_MS)
+                };
+                super::wake_wait::sleep_or_wake(
+                    cx.background_executor(),
+                    &quill::wake::APPLIED,
+                    seen,
+                    Duration::from_millis(deadline.saturating_sub(waited).max(1)),
+                )
+                .await;
             }
             let opened = cx.update_window(handle, |_, window, cx| {
                 let _ = this.update(cx, |this, cx| {
                     this.in_window_scope(scope, cx, |this, cx| {
                         if this.history.pull.machine.jumping() && !this.refused_while_locked() {
-                            this.history.pull.slide = Some(Slide {
-                                chat: next,
-                                topic: None,
-                                start: Instant::now(),
-                            });
+                            this.history.pull.slide_in(next, None);
                             let open = super::chat_window::ChatOpen::new(next);
                             if !this.select_chat_request(open, window, cx) {
                                 // The next channel showed in a window of
                                 // its own: this history stays, and its
                                 // pull starts over instead of staying in
                                 // the jump.
-                                this.history.pull.slide = None;
                                 let now = this.pull_now(cx);
-                                this.history.pull.restart(now);
+                                this.history.pull.abandon_jump(now);
                                 cx.notify();
                             }
                         }
@@ -503,9 +529,8 @@ impl QuillApp {
     fn pull_jump_ended(&mut self, cx: &mut Context<Self>) {
         self.pull_sync(cx);
         if self.history.pull.machine.jumping() {
-            self.history.pull.slide = None;
             let now = self.pull_now(cx);
-            self.history.pull.restart(now);
+            self.history.pull.abandon_jump(now);
             cx.notify();
         }
     }
@@ -837,7 +862,7 @@ impl QuillApp {
             && self.session().and_then(|s| s.open_forum_topic()) == topic;
         let t = start.elapsed().as_secs_f32() * 1000. / SLIDE_MS;
         if !shown || t >= 1. {
-            self.history.pull.slide = None;
+            self.history.pull.end_slide();
             return 0.;
         }
         self.request_app_tick(60, cx);
