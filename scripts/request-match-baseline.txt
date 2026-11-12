@@ -116,3 +116,6 @@ unmatched:Session::apply_saved_tags 1
 unmatched:Session::apply_ton_wallet 1
 unmatched:Session::login_config_answered 1
 unmatched:SettingsState::apply_blocked_page 2
+generation:CheckBotUsername 1
+generation:CreateBot 1
+generation:GetChatMessageCalendar 1

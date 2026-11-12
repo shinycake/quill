@@ -17,6 +17,13 @@ the re-sweep of 2026-11-11), and this check counts both:
   request it came from. An older request's late answer overwrites a newer
   one.
 
+- `generation`: a request purpose variant that carries `generation: u64`.
+  A hand-bumped counter stamped on the purpose stands in for the
+  `RequestId` the stage should hold (r3 sweep: shared-media tabs, deep
+  links and chat-search jumps all carried one, and a duplicate request for
+  the same stamp could not be told apart). Put the `RequestId` in the
+  stage (`Loading { request }`) and compare the answer's.
+
 Screenshot-demo and fixture files seed state this way and are not checked.
 
 The calls in the tree when the check was added are in
@@ -53,10 +60,21 @@ ADVICE = (
 OWNER = "src/state/requests.rs"
 PURPOSE = re.compile(r"\.\s*(?:has_purpose|take_purpose|has_auth_submit)\s*\(")
 SUCCEED = re.compile(r"\.\s*succeed\s*\(")
+PURPOSE_FILE = re.compile(r"^src/state/(?:request_purpose\.rs|domains/[^/]+/purpose\.rs)$")
+VARIANT = re.compile(r"^\s{4}([A-Z]\w*)\s*\{")
+GENERATION_FIELD = re.compile(r"^\s+generation\s*:\s*u64\b")
 
 
 def hits(root):
     for path, text in shape_guard.source(root):
+        if PURPOSE_FILE.match(path):
+            variant = ""
+            for number, line in enumerate(text.splitlines(), 1):
+                found = VARIANT.match(line)
+                if found:
+                    variant = found.group(1)
+                elif GENERATION_FIELD.match(line):
+                    yield f"generation:{variant}", path, number
         if path == OWNER or shape_guard.is_seeder(path):
             continue
         purpose = "_purpose" in text or "has_auth_submit" in text
