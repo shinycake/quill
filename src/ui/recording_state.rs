@@ -133,6 +133,8 @@ pub(crate) struct RecordingUi {
 enum RecordTick {
     Stopped,
     Running {
+        /// Read by the tests that watch the chain re-arm.
+        #[cfg_attr(not(test), allow(dead_code))]
         due: std::time::Instant,
         _task: gpui_kit::Task<()>,
     },

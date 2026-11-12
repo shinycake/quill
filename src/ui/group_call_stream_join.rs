@@ -53,19 +53,19 @@ impl QuillApp {
         };
         if joining_call != facts.id {
             self.stream_join_failed();
-        } else if facts.joined {
-            self.group_call_screen.clear_stream_joining();
-        } else if self.session().is_some_and(|session| {
-            // The transport now waits on another join's request (a rejoin
-            // took its place): this join's request is no longer the one in
-            // flight, so it ends with no failure of its own.
-            matches!(sent, JoinSent::Request(mine) if session
-                .calls
-                .active_group_call
-                .as_ref()
-                .and_then(|call| call.transport.join_request())
-                .is_some_and(|waits| waits != mine))
-        }) {
+        } else if facts.joined
+            || self.session().is_some_and(|session| {
+                // The transport now waits on another join's request (a
+                // rejoin took its place): this join's request is no longer
+                // the one in flight, so it ends with no failure of its own.
+                matches!(sent, JoinSent::Request(mine) if session
+                    .calls
+                    .active_group_call
+                    .as_ref()
+                    .and_then(|call| call.transport.join_request())
+                    .is_some_and(|waits| waits != mine))
+            })
+        {
             self.group_call_screen.clear_stream_joining();
         } else if self.session().is_some_and(|session| {
             // The call's transport failed: a join clears it, so while a
