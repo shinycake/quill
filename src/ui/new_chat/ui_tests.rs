@@ -90,7 +90,7 @@ fn an_empty_name_keeps_the_first_step(cx: &mut TestAppContext) {
     assert_eq!(step(&app, vcx), Some(NewChatStep::Info));
     assert_eq!(
         app.read_with(vcx, |app, _| app.new_chat_dialog().map(|d| d.title.clone())),
-        Some(super::TitleCheck::Rejected("  ".into()))
+        Some(super::TitleCheck::Judged("  ".into()))
     );
 }
 

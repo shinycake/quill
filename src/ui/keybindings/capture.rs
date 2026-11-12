@@ -7,8 +7,8 @@
 pub(in crate::ui) enum Capture {
     #[default]
     Idle,
-    /// The action with this id waits for a keystroke.
-    Waiting(String),
+    /// The action with this id is being rebound: its row waits for a keystroke.
+    Rebinding(String),
     /// Settings > Calls waits for the push-to-talk key.
     PushToTalk,
 }
@@ -17,7 +17,7 @@ impl Capture {
     /// The action waiting for a keystroke.
     pub(in crate::ui) fn waiting(&self) -> Option<&str> {
         match self {
-            Self::Waiting(id) => Some(id),
+            Self::Rebinding(id) => Some(id),
             Self::Idle | Self::PushToTalk => None,
         }
     }
@@ -167,7 +167,7 @@ impl KeybindingUi {
     /// Row `id` starts waiting for a keystroke; its old message goes.
     pub(in crate::ui) fn start_capture(&mut self, id: String) {
         self.refusals.clear_of(&id);
-        self.capture = Capture::Waiting(id);
+        self.capture = Capture::Rebinding(id);
     }
 }
 

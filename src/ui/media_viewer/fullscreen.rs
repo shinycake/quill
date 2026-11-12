@@ -22,8 +22,9 @@ pub(in crate::ui) enum VideoFullscreen {
     Active,
     /// On, over a window that was already full screen: it stays so.
     InFullscreenWindow,
-    /// Off; the window goes back to windowed on the next frame.
-    Leaving,
+    /// Off; the window goes back to windowed on the next frame (nothing is
+    /// in flight: the frame toggles it).
+    GoingBack,
     /// Off before the window got there: once it reports full screen (until
     /// `until`), it goes back.
     Cancelling { until: Instant },
@@ -44,11 +45,11 @@ impl VideoFullscreen {
     pub(in crate::ui) fn enter(self, window_fullscreen: bool) -> (Self, bool) {
         match self {
             Self::Entering | Self::Active | Self::InFullscreenWindow => (self, false),
-            Self::Leaving | Self::Cancelling { .. } if window_fullscreen => (Self::Active, false),
+            Self::GoingBack | Self::Cancelling { .. } if window_fullscreen => (Self::Active, false),
             // The OS may still be on its way there.
             Self::Cancelling { .. } => (Self::Entering, false),
-            Self::Off | Self::Leaving if window_fullscreen => (Self::InFullscreenWindow, false),
-            Self::Off | Self::Leaving => (Self::Entering, true),
+            Self::Off | Self::GoingBack if window_fullscreen => (Self::InFullscreenWindow, false),
+            Self::Off | Self::GoingBack => (Self::Entering, true),
         }
     }
 
@@ -58,9 +59,9 @@ impl VideoFullscreen {
             Self::Entering => Self::Cancelling {
                 until: now + CANCEL_WAIT,
             },
-            Self::Active => Self::Leaving,
+            Self::Active => Self::GoingBack,
             Self::InFullscreenWindow => Self::Off,
-            Self::Off | Self::Leaving | Self::Cancelling { .. } => self,
+            Self::Off | Self::GoingBack | Self::Cancelling { .. } => self,
         }
     }
 
@@ -73,7 +74,7 @@ impl VideoFullscreen {
     ) -> (Self, bool) {
         match self {
             Self::Off => (Self::Off, false),
-            Self::Leaving => (Self::Off, window_fullscreen),
+            Self::GoingBack => (Self::Off, window_fullscreen),
             Self::Cancelling { until } if now >= until => (Self::Off, false),
             Self::Cancelling { .. } if window_fullscreen => (Self::Off, true),
             Self::Cancelling { .. } => (self, false),

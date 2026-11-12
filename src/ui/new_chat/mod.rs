@@ -38,22 +38,28 @@ const DESCRIPTION_ROWS: (usize, usize) = (3, 8);
 pub(crate) enum TitleCheck {
     /// Nothing judged yet.
     Fine,
-    /// Confirm found this name empty or too long.
-    Rejected(String),
-    /// This name went to TDLib; its `NO_CHAT_TITLE` refusal is about it.
-    Sent(String),
+    /// This name went through Confirm: the dialog's own check refuses it when
+    /// it is empty or too long, and TDLib's `NO_CHAT_TITLE` refusal is about it.
+    Judged(String),
 }
 
 impl TitleCheck {
-    /// The error shows while the field still holds the judged text and it
-    /// was refused by the dialog's own check or by TDLib.
+    /// The error shows while the field still holds the judged text and the
+    /// dialog's own check or TDLib refused it.
     pub(crate) fn shows_error(&self, server_rejected: bool, current: &str) -> bool {
         match self {
             Self::Fine => false,
-            Self::Rejected(text) => text == current,
-            Self::Sent(text) => server_rejected && text == current,
+            Self::Judged(text) => text == current && (server_rejected || title_refused(text)),
         }
     }
+}
+
+/// The dialog's own check of a name: empty or too long.
+fn title_refused(title: &str) -> bool {
+    matches!(
+        plan_new_chat(NewChatKind::Group, title, "", &[], None, 0),
+        Err(NewChatInvalid::EmptyTitle | NewChatInvalid::TitleTooLong)
+    )
 }
 
 pub(crate) struct NewChatDialog {
@@ -351,7 +357,7 @@ impl QuillApp {
         match plan_new_chat(kind, &title, &description, &[], None, 0) {
             Err(NewChatInvalid::EmptyTitle | NewChatInvalid::TitleTooLong) => {
                 if let Some(dialog) = self.new_chat_dialog_mut() {
-                    dialog.title = TitleCheck::Rejected(title);
+                    dialog.title = TitleCheck::Judged(title);
                     let input = dialog.title_input.clone();
                     input.update(cx, |input, cx| input.focus(window, cx));
                 }
@@ -399,7 +405,7 @@ impl QuillApp {
         match live.driver.create_new_chat(&request, photo) {
             Ok(Some(request)) => {
                 if let Some(dialog) = self.admin.create_chat_dialog.as_mut() {
-                    dialog.title = TitleCheck::Sent(title);
+                    dialog.title = TitleCheck::Judged(title);
                 }
                 self.set_new_chat_stage(NewChatStage::Creating { request, back }, cx);
             }

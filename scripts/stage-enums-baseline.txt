@@ -60,7 +60,6 @@ bare:PinTarget::Loading 1
 bare:PlayHead::Waiting 1
 bare:PlayState::Opening 1
 bare:Playback::Waiting 1
-bare:Refire::Running 1
 bare:ReplyState::Loading 1
 bare:Restore::Pending 1
 bare:RichHtmlStage::Running 1
@@ -91,7 +90,6 @@ bare:TransportState::Connecting 1
 bare:TypeSave::Sent 1
 bare:Unavailable::Checking 1
 bare:VenueList::Loading 1
-bare:VideoFullscreen::Leaving 1
 bare:ViewState::Opening 1
 bare:ViewState::Waiting 1
 bare:Waker::Pending 1
@@ -117,11 +115,9 @@ unkeyed:ChatSearchPaging::Loading 1
 unkeyed:ConferenceStage::Upgrading 1
 unkeyed:CreateStage::Creating 1
 unkeyed:DebugConfirm::Asking 1
-unkeyed:DemandStage::Asked 1
 unkeyed:DeviceRun::Running 1
 unkeyed:Dnd::Refreshing 1
 unkeyed:ExtractionStage::Running 1
-unkeyed:FileState::Downloading 1
 unkeyed:First::Preparing 1
 unkeyed:GiftPurchaseStage::Sent 1
 unkeyed:GiftValueStage::Loading 1
@@ -144,10 +140,8 @@ unkeyed:RowState::Downloading 1
 unkeyed:SendStage::Sent 1
 unkeyed:SendToMenu::Applying 1
 unkeyed:SetState::Loading 1
-unkeyed:SizedState::Loading 1
 unkeyed:Stage::Running 1
 unkeyed:StoryFetch::Asked 1
-unkeyed:TitleCheck::Sent 1
 unkeyed:TonConnectRequestState::Pending 1
 unkeyed:UpdateControl::Downloading 1
 unkeyed:VcardImport::Reading 1

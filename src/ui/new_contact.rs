@@ -98,6 +98,10 @@ impl QuillApp {
                         },
                         None => AddContactStage::NotJoined { name: first },
                     };
+                } else if request.is_none() {
+                    // The driver declined without an error (an import of
+                    // another box is still out): say so, never a dead button.
+                    self.set_note(StatusNote::error(tr(keys::Q_NOTES_FAILED_ADD_CONTACT)));
                 }
             }
             Err(err) => self.set_note(StatusNote::error(user_error_for(
