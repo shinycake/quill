@@ -852,6 +852,19 @@ fn a_wake_registered_before_the_open_runs_when_the_file_opens() {
     assert!(heard_late.try_recv().is_ok());
 }
 
+/// A clip with no picture to give (a seek at or past the last one) ends the
+/// wait for a picture: it does not sleep out the whole deadline. The
+/// deadline is a day away, so a wait that ignored the end would never
+/// return.
+#[test]
+fn waiting_for_a_picture_ends_when_the_clip_has_none() {
+    let (mut player, _calls) = scripted_player(Some(0), false, 3);
+    let deadline = Instant::now() + Duration::from_secs(24 * 60 * 60);
+    player.wait_open(deadline);
+    player.wait_frame(deadline);
+    assert!(player.take_frame().is_none());
+}
+
 #[test]
 fn waiting_for_the_open_and_the_first_picture_returns_when_they_come() {
     let (mut player, _calls) = scripted_player(None, false, 3);

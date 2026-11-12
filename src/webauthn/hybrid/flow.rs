@@ -197,11 +197,24 @@ fn run_phone(kind: Kind<'_>, env: &mut Environment, link: &Link) -> Result<End, 
             Some(advert) => Some(advert),
             None => match scan_rx.recv_timeout(POLL) {
                 Ok(ScanEvent::Advert(advert)) => Some(advert),
+                // Bluetooth went away after the code was shown (bluetoothd
+                // stopped, the adapter was switched off): no phone can
+                // find the code any more, so the ceremony ends with the
+                // phone error instead of a code that does nothing.
+                Ok(ScanEvent::Available(false)) if available => {
+                    log("bluetooth went away");
+                    return Err(CeremonyError::Phone);
+                }
                 Ok(ScanEvent::Available(_)) => None,
                 Err(RecvTimeoutError::Timeout) => None,
+                // The scanner stopped after the code was shown: the same.
+                Err(RecvTimeoutError::Disconnected) if available => {
+                    log("bluetooth scanner stopped");
+                    return Err(CeremonyError::Phone);
+                }
                 Err(RecvTimeoutError::Disconnected) => {
-                    // No scanner (or it stopped): only Cancel, a key or
-                    // the deadline end this now.
+                    // No scanner from the start (the sheet shows no code):
+                    // only Cancel, a key or the deadline end this now.
                     std::thread::sleep(POLL);
                     None
                 }

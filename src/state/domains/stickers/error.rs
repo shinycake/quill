@@ -84,6 +84,8 @@ impl Session {
             // The lookup's ids are asked for again. A rate limit is no
             // failure: the connect layer holds lookups until it is over.
             Some(RequestPurpose::GetCustomEmojiStickers) => {
+                // A mini app's suggested-emoji lookup ends with this error.
+                crate::wake::MINI_APPS.poke();
                 let emoji = &mut self.stickers.emoji;
                 if let Some(pending) = pending {
                     if err.is_flood() {

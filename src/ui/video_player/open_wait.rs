@@ -35,7 +35,7 @@ impl VideoPlayer {
             let now = Instant::now();
             player.update_status(now);
             player.with_inner(|inner| inner.life.await_picture(now));
-            let watchers = player.watchers();
+            let watchers = player.views_to_redraw();
             cx.update(|cx| {
                 for id in watchers {
                     cx.notify(id);

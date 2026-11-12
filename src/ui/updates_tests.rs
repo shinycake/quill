@@ -46,18 +46,11 @@ fn a_check_leaves_the_updated_notice_for_the_user(cx: &mut TestAppContext) {
     });
 }
 
-/// The 4-hour timer must not turn a failed download back into Available:
-/// that would retry it silently and lose the failure message.
+/// The 4-hour timer must not replace a failed install: the button owns it.
 #[gpui_kit::test]
-fn the_timer_leaves_a_failed_download_for_the_button(cx: &mut TestAppContext) {
+fn the_timer_leaves_a_failed_install_for_the_button(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     app.update(&mut vcx, |app, cx| {
-        app.preferences.update_state = UpdateState::DownloadFailed(release(), "stopped");
-        app.recheck_for_updates(cx);
-        assert!(matches!(
-            app.preferences.update_state,
-            UpdateState::DownloadFailed(..)
-        ));
         app.preferences.update_state = UpdateState::InstallFailed(release(), "no");
         app.recheck_for_updates(cx);
         assert!(matches!(

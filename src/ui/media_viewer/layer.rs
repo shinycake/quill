@@ -16,7 +16,7 @@
 
 use super::caption::CaptionLayout;
 use super::*;
-use crate::ui::video_player::controls::{PictureOverlay, PictureState, WaitingCheck, WaitingGate};
+use crate::ui::video_player::controls::{PictureOverlay, PictureState, WaitingGate};
 use crate::ui::video_player::{PlayState, WeakVideoPlayer, video_frame};
 
 /// Where the media sits in the window, and its zoomed box inside that.
@@ -72,18 +72,7 @@ impl ViewerVideoLayer {
     /// Whether the clip has waited long enough for the spinner; arms a
     /// redraw for when it will have (an opening clip asks for no frames).
     fn waiting_shown(&mut self, waiting: bool, cx: &mut Context<Self>) -> bool {
-        let now = cx.background_executor().now();
-        match self.waiting.observe(waiting, now) {
-            WaitingCheck::Settled { shown } => shown,
-            WaitingCheck::ShowAfter(wait) => {
-                let timer = cx.spawn(async move |this, cx| {
-                    cx.background_executor().timer(wait).await;
-                    let _ = this.update(cx, |_, cx| cx.notify());
-                });
-                self.waiting.arm(timer);
-                false
-            }
-        }
+        self.waiting.shown_in(waiting, cx)
     }
 }
 

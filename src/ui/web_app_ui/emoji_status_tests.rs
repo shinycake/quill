@@ -2,7 +2,7 @@
 //! for the web view helper: what the window writes to the helper's stdin comes
 //! back on its stdout, where the test reads the popups and bridge replies.
 
-use super::AccessStage;
+use super::{AccessStage, SetRequest, SetStage, status_reply};
 use crate::ui::app::QuillApp;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::web_app_ui::helper_pipe::HelperWriter;
@@ -13,11 +13,10 @@ use quill::ids::FileId;
 use quill::telegram::envelope::{BotInfo, StickerFormat, StickerItem};
 use quill::web_app::bridge::WebAppEvent;
 use quill::web_app::{LaunchSource, WebAppLaunch};
-use quill_webview_protocol::{HostCommand, ShellEvent, decode};
+use quill_webview_protocol::{HelperEvent, HostCommand, ShellEvent, decode};
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
-use std::time::Duration;
 
 const BOT: i64 = 900;
 
@@ -96,9 +95,7 @@ fn open_window(
 }
 
 fn next(received: &mpsc::Receiver<HostCommand>) -> HostCommand {
-    received
-        .recv_timeout(Duration::from_secs(5))
-        .expect("the window wrote to the helper")
+    received.recv().expect("the window wrote to the helper")
 }
 
 fn reply(received: &mpsc::Receiver<HostCommand>) -> (String, serde_json::Value) {
@@ -338,5 +335,79 @@ fn an_access_answer_from_another_popup_leaves_the_stage(cx: &mut TestAppContext)
         assert_eq!(access(app), AccessStage::Asking { popup });
         app.answer_emoji_status_access(popup, "cancel", cx);
         assert_eq!(access(app), AccessStage::Idle);
+    });
+}
+
+/// `Ok(None)` (Quill's own status change in flight) sent nothing for the
+/// app: it hears a failure, not "set".
+#[test]
+fn a_status_change_that_sent_nothing_is_not_reported_set() {
+    use quill::ids::RequestId;
+    let reply = |sent: Option<Result<Option<RequestId>, ()>>| {
+        let reply = status_reply(sent);
+        (
+            reply.event,
+            reply.data["error"].as_str().map(str::to_string),
+        )
+    };
+    assert_eq!(reply(Some(Ok(Some(RequestId(1))))).0, "emoji_status_set");
+    for nothing in [Some(Ok(None)), Some(Err(())), None] {
+        let (event, error) = reply(nothing);
+        assert_eq!(event, "emoji_status_failed");
+        assert_eq!(error.as_deref(), Some("UNKNOWN_ERROR"));
+    }
+}
+
+/// A `PopupClosed` already queued for the popup the helper shows is its
+/// real answer: the poll drains the helper's events before it shows a popup
+/// of its own (which replaces the first), so Paste pastes.
+#[gpui_kit::test]
+fn a_queued_popup_answer_is_applied_before_the_poll_shows_another(cx: &mut TestAppContext) {
+    use quill::ids::RequestId;
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, _, cx| {
+        let received = open_window(app, false, cx);
+        app.demo_session
+            .as_mut()
+            .unwrap()
+            .stickers
+            .emoji
+            .custom_emoji_stickers
+            .push(emoji_sticker(777, "\u{1F31F}"));
+        app.handle_web_app_event(
+            WebAppEvent::ReadTextFromClipboard {
+                req_id: "paste-1".into(),
+            },
+            cx,
+        );
+        let paste = prompt(&received);
+        let (events, queue) = mpsc::channel();
+        app.with_window(|window| {
+            window.events = queue;
+            // The suggested emoji is found in the cache this pass: its
+            // confirmation replaces the clipboard popup.
+            window.emoji.set = Some(SetRequest {
+                custom_emoji_id: 777,
+                duration_secs: 0,
+                since: std::time::Instant::now(),
+                stage: SetStage::Resolving {
+                    request: RequestId(1),
+                },
+            });
+        });
+        events
+            .send(HelperEvent::Shell {
+                event: ShellEvent::PopupClosed {
+                    id: paste.id.clone(),
+                    button: "allow".into(),
+                },
+            })
+            .unwrap();
+        cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string("pasted".into()));
+        app.poll_mini_apps(cx);
+        let (event, data) = reply(&received);
+        assert_eq!(event, "clipboard_text_received");
+        assert_eq!(data["data"], "pasted", "answered by its own button");
+        assert_eq!(prompt(&received).title, "Set Emoji Status");
     });
 }

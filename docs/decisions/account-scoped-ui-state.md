@@ -10279,3 +10279,25 @@ launch_flow}`, `widgets_lock_tests`, `wallpaper_preview_tests`, `voice`,
 | BLE scan (Linux) | The stop branch is polled first, and a stream that ends sends `Available(false)`. |
 | CTAPHID | `Phase::{Waiting { deadline }, Cancelling { reason, until }}` replaces `Option<(HidError, Instant)>`. |
 | baselines | `poll:scan` is gone from the owned-timers baseline; stale allow lines for `Phase::Opening`, `LiveOverlay::Opening` and `poll:run_poll_loop` are gone. `app-wide-fields.txt` lists the new `UpdatePill` paths in place of the old ones. |
+
+#### Fix round 3 (r4-12)
+
+| Ids | What changed |
+| --- | --- |
+| 23-011 | `translation_unsettled` is true for everything but `Done`, so a `Pending` message stays in the pump's scan; `needs_translation` still keeps the ask from going twice. Ask, fail out of attempts, reconnect, asked again is tested through `finish_translation`. |
+| open wake | `PlayerCell.drawn_in` remembers the view the element last painted in; the open wake redraws it with the watchers, so an unwatched autoplaying inline clip leaves its still. |
+| mini-app window | `WebAppPending.window` is set from `asking_window()` when the open request goes out (`note_open_window`) and rides into `WebAppOpenResult::Opened.window`; `spawn_mini_app_window` takes it from the matched answer. The helper's queued events are drained before the session poll, so a popup shown from the poll side does not treat a queued `PopupClosed` as replaced. A lost `sendWebAppData` ends with an error (`end_lost_data_sends`) and keeps the poll alive until it does. |
+| vanish | `begin_vanish` returns whether a ghost holds the request; the callers `expect` it only then. `Crumbling` keeps the `Deletion` until its answer is taken; `prune_vanishing` leaves ghosts holding a request to `settle_ghosts`, which forgets it. `settle_vanishing` runs in every window; a waiting ghost whose message is gone in a chat not shown is dropped. Split `vanish/settle.rs`. |
+| video editor | `Drag::release` names the release for any held drag; the blur and button-up-move hooks run it (`release_lost_video_drag`). |
+| translate Hide | `HideStage::Sent(RequestId)` in `TranslateScreen` is settled by the `toggleChatIsTranslatable` answer through `RequestAcks`; it outlives the toast, and Undo forgets it. `toggle_chat_is_translatable` returns its request. |
+| suggested posts | Decline is not opened or confirmed, and Accept not confirmed, while a Publish or Decline of the post is out. |
+| update pill | A pill already `Ready` keeps its glide for the next `Restart` pass. |
+| recheck timer | From `DownloadFailed` the timer retries the download from the kept release without going through `Checking`. |
+| emoji status | `Ok(None)` from `change_emoji_status` answers `UNKNOWN_ERROR`. A `getCustomEmojiStickers` answer or error pokes `MINI_APPS`; `mini_app_watch_due` carries the lookup's 15 s deadline instead of a 250 ms tick. |
+| tests | `emoji_status_tests.rs` and `mini_app_flow_tests.rs` block on `recv()` instead of `recv_timeout`. |
+| hybrid sign-in | After the code is shown, `Available(false)` or a stopped scanner ends the ceremony with the phone error. |
+| AVPlayer | `OpenWatch` holds its item and removes the observer in `Drop`; the observer is released on the main queue. `buffer` is `Option<(Instant, BufferState)>`. |
+| FFmpeg reopen | The open wake lives in the backend and every player it opens forwards to it; a clip that failed is not reopened. |
+| video decode | `wait_frame` also stops on `at_end()` and `is_stopped()`. |
+| waiting gate | `WaitingGate::Delayed { since, _timer }` is built whole by `observe`; `shown_in` spawns the redraw timer. |
+| voice | `Recording::{Ours, HandedOn}` replaces the empty `PathBuf` sentinel in `VoiceCapture` and `VoiceFinish`. |

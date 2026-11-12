@@ -18,7 +18,7 @@ use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::ids::{ChatId, MessageId};
+use quill::ids::{ChatId, MessageId, RequestId};
 use quill::lang::{keys, tr};
 use quill::state::{HistoryMessage, Session, Translation};
 use quill::telegram::envelope::ChatKind;
@@ -63,6 +63,18 @@ pub(super) struct TranslateToast {
     text: String,
     label: &'static str,
     action: ToastAction,
+}
+
+/// The Hide the bar sent and has not heard an answer to: the request
+/// outlives the toast, so a refusal after the toast went still says so, and
+/// an unrelated change of the flag is not taken for one.
+#[derive(Default)]
+pub(super) enum HideStage {
+    #[default]
+    Idle,
+    /// `toggleChatIsTranslatable` is out: its answer (an error, a lost
+    /// request) ends the stage.
+    Sent(quill::ids::RequestId),
 }
 
 /// The toast under the bar: shown with the timer that hides it, or not
@@ -135,6 +147,8 @@ impl TranslateUi {
 pub(super) struct TranslateScreen {
     pub(super) dialog: Option<TranslateDialog>,
     toast: ToastStage,
+    /// The Hide whose answer is awaited (`end_refused_hide`).
+    hide: HideStage,
     /// The offered language per chat: each window shows its own chat, and
     /// one slot thrashed when two showed different ones.
     offer: RefCell<HashMap<i64, (OfferKey, Option<&'static str>)>>,

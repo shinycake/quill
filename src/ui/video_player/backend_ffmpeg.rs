@@ -27,7 +27,7 @@ use super::transport::{
 use super::{Backend, ErrorKind, Picture, PictureStats, PlayerError, Present, Pulled, Purpose};
 use quill::video_decode::{BgraPool, OpenOptions, PixelOutput, Pixels, Player, VideoFrame};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use super::super::audio::StreamSound;
@@ -117,6 +117,24 @@ pub(super) struct FfmpegBackend {
     nv12_paused_until: Option<Instant>,
     /// A picture stepped to while paused, shown on the next pull.
     pending_step: Option<VideoFrame>,
+    /// The wake the player asked for (`on_open`), until the open it waits
+    /// for settles: every player the backend opens forwards to it, so a
+    /// volume reopen neither fires it early nor loses it.
+    open_wake: OpenWake,
+}
+
+/// The wake for the clip's open, shared by the players the backend opens.
+type OpenWake = Arc<Mutex<Option<Box<dyn FnOnce() + Send>>>>;
+
+/// Runs the wake in `slot` once, if it is still there.
+fn forward_open(slot: &OpenWake) -> impl FnOnce() + Send + 'static {
+    let slot = slot.clone();
+    move || {
+        let wake = slot.lock().ok().and_then(|mut wake| wake.take());
+        if let Some(wake) = wake {
+            wake();
+        }
+    }
 }
 
 impl FfmpegBackend {
@@ -140,6 +158,7 @@ impl FfmpegBackend {
             on_screen: OnScreen::Nothing,
             nv12_paused_until: None,
             pending_step: None,
+            open_wake: OpenWake::default(),
         }
     }
 
@@ -264,7 +283,10 @@ fn elapsed_us(since: Instant) -> u32 {
 
 impl Backend for FfmpegBackend {
     fn on_open(&mut self, wake: Box<dyn FnOnce() + Send>) -> bool {
-        self.player.on_open(wake);
+        if let Ok(mut slot) = self.open_wake.lock() {
+            *slot = Some(wake);
+        }
+        self.player.on_open(forward_open(&self.open_wake));
         true
     }
 
@@ -341,7 +363,9 @@ impl Backend for FfmpegBackend {
     /// is turned up, where it was.
     fn set_volume(&mut self, volume: f32) {
         self.volume = volume.clamp(0.0, 1.0);
-        if self.volume > 0.0 && !self.options.want_audio {
+        // A clip that failed to open stays failed: a reopen would start a
+        // decode thread for nothing.
+        if self.volume > 0.0 && !self.options.want_audio && self.player.error().is_none() {
             // Sound is wanted only once the reopen started: one that is
             // refused at once leaves the clip as it was, and the next
             // turn-up tries again. The open itself runs on the new player's
@@ -360,6 +384,9 @@ impl Backend for FfmpegBackend {
                 if running {
                     player.play();
                 }
+                // The new player says when it opened, for a wake still
+                // waiting on the clip's open.
+                player.on_open(forward_open(&self.open_wake));
                 self.options = reopened;
                 self.player = player;
                 self.sound = None;
@@ -542,6 +569,67 @@ mod tests {
         output.settle_device();
         assert!(!backend.status().has_sound);
         assert!(!backend.player.has_sound(), "the wall clock is");
+    }
+
+    /// A wake asked for before a volume reopen runs exactly once, whichever
+    /// player's open settles it.
+    #[test]
+    fn a_reopen_for_volume_keeps_the_open_wake_and_fires_it_once() {
+        let options = OpenOptions {
+            want_audio: false,
+            ..OpenOptions::viewer()
+        };
+        let tone = Tone {
+            started: None,
+            pts: 0.0,
+        };
+        let player = Player::with_demuxer(Box::new(tone), options.clone()).unwrap();
+        let mut backend = FfmpegBackend::with_player(Path::new("tone"), options, player);
+        let (woken, heard) = mpsc::channel();
+        assert!(backend.on_open(Box::new(move || {
+            let _ = woken.send(());
+        })));
+        backend.set_volume(0.5);
+        assert!(heard.recv().is_ok(), "the open woke it");
+        assert!(heard.try_recv().is_err(), "once, not once per player");
+    }
+
+    /// A clip whose decoding failed.
+    struct Broken;
+
+    impl Demuxer for Broken {
+        fn info(&self) -> MediaInfo {
+            MediaInfo {
+                frame_rate: 25.0,
+                has_video: true,
+                ..MediaInfo::default()
+            }
+        }
+
+        fn next(&mut self) -> Result<Option<Item>, String> {
+            Err("broken".into())
+        }
+
+        fn seek(&mut self, _secs: f64) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    /// A clip that failed is not reopened for its volume.
+    #[test]
+    fn a_failed_clip_is_not_reopened_for_its_volume() {
+        let options = OpenOptions {
+            want_audio: false,
+            ..OpenOptions::viewer()
+        };
+        let player = Player::with_demuxer(Box::new(Broken), options.clone()).unwrap();
+        // Returns once the decode thread hit the error: nothing to wait on
+        // but the failure itself, so the deadline is a day away.
+        player.wait_frame(Instant::now() + std::time::Duration::from_secs(24 * 60 * 60));
+        assert!(player.error().is_some());
+        let mut backend = FfmpegBackend::with_player(Path::new("broken"), options, player);
+        backend.set_volume(0.5);
+        assert!(!backend.options.want_audio, "no reopen was started");
     }
 
     #[test]

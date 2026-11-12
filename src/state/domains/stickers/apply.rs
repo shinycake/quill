@@ -212,6 +212,9 @@ impl Session {
                     if let Some(pending) = pending {
                         self.stickers.emoji.custom_emoji_lookup_answered(pending.id);
                     }
+                    // A mini app's suggested-emoji lookup waits on this
+                    // answer: it finds it in the cache on its next pass.
+                    crate::wake::MINI_APPS.poke();
                 } else if purpose == Some(RequestPurpose::GetForumTopicDefaultIcons) {
                     self.accept_topic_default_icons(stickers);
                 } else if purpose == Some(RequestPurpose::GetBackgroundEmojiIcons) {

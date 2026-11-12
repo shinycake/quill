@@ -234,6 +234,9 @@ struct PlayerCell {
     live: Option<Rc<backend_live::LiveCore>>,
     /// The width last reported through `video_frame(..).on_width`.
     reported_width: Rc<Cell<f32>>,
+    /// The view the element last drew the picture in: redrawn with the
+    /// watchers when the clip opens, for an inline clip nothing watches.
+    drawn_in: Cell<Option<EntityId>>,
 }
 
 /// Shared with `frame_clock::request_video_frame`.
@@ -342,6 +345,7 @@ impl VideoPlayer {
             shown: Cell::new(0),
             live,
             reported_width: Rc::new(Cell::new(-1.0)),
+            drawn_in: Cell::new(None),
         }))
     }
 
@@ -563,6 +567,23 @@ impl VideoPlayer {
     /// The size of the picture on screen, once there is one.
     pub(crate) fn picture_size(&self) -> Option<(u32, u32)> {
         self.current_picture().map(|picture| picture.size())
+    }
+
+    /// The element draws the picture in `view`.
+    pub(super) fn note_drawn_in(&self, view: EntityId) {
+        self.0.drawn_in.set(Some(view));
+    }
+
+    /// The views a change of the clip redraws: its watchers and the view
+    /// it was last drawn in.
+    fn views_to_redraw(&self) -> Vec<EntityId> {
+        let mut views = self.watchers();
+        if let Some(view) = self.0.drawn_in.get()
+            && !views.contains(&view)
+        {
+            views.push(view);
+        }
+        views
     }
 
     fn watchers(&self) -> Vec<EntityId> {

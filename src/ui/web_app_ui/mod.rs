@@ -592,8 +592,7 @@ impl QuillApp {
                 source,
             } => live
                 .driver
-                .open_web_app(*chat_id, *bot_id, url, source.clone(), &theme)
-                .map(|_| ()),
+                .open_web_app(*chat_id, *bot_id, url, source.clone(), &theme),
             PendingOpen::Simple {
                 chat_id,
                 bot_id,
@@ -601,43 +600,49 @@ impl QuillApp {
                 button_text,
             } => live
                 .driver
-                .get_web_app_url(*chat_id, *bot_id, url, button_text, &theme)
-                .map(|_| ()),
+                .get_web_app_url(*chat_id, *bot_id, url, button_text, &theme),
             PendingOpen::Main {
                 chat_id,
                 bot_id,
                 start_parameter,
-            } => live
-                .driver
-                .get_main_web_app(
-                    chat_id.unwrap_or(ChatId(0)),
-                    *bot_id,
-                    start_parameter,
-                    &theme,
-                )
-                .map(|_| ()),
+            } => live.driver.get_main_web_app(
+                chat_id.unwrap_or(ChatId(0)),
+                *bot_id,
+                start_parameter,
+                &theme,
+            ),
             PendingOpen::Link {
                 chat_id,
                 bot_id,
                 short_name,
                 start_parameter,
-            } => live
-                .driver
-                .get_web_app_link_url(
-                    chat_id.unwrap_or(ChatId(0)),
-                    *bot_id,
-                    short_name,
-                    start_parameter,
-                    allow_write,
-                    &theme,
-                )
-                .map(|_| ()),
-            PendingOpen::Attach { chat_id, bot_id } => live
-                .driver
-                .open_web_app(*chat_id, *bot_id, "", LaunchSource::AttachmentMenu, &theme)
-                .map(|_| ()),
+            } => live.driver.get_web_app_link_url(
+                chat_id.unwrap_or(ChatId(0)),
+                *bot_id,
+                short_name,
+                start_parameter,
+                allow_write,
+                &theme,
+            ),
+            PendingOpen::Attach { chat_id, bot_id } => live.driver.open_web_app(
+                *chat_id,
+                *bot_id,
+                "",
+                LaunchSource::AttachmentMenu,
+                &theme,
+            ),
         });
-        if matches!(sent, Some(Ok(()))) {
+        if let Some(Ok(request)) = sent {
+            // The window the person pressed in: the answer carries it, so
+            // the app opens there whatever pass lands it.
+            let window = self.asking_window().flatten();
+            if let Some(live) = self.live.as_mut() {
+                live.driver
+                    .session
+                    .bots
+                    .web_apps
+                    .note_open_window(request, window);
+            }
             self.set_status_note(
                 StatusNote::silent(tr(keys::Q_MEDIA_OPENING_THE_MINI_APP)),
                 cx,

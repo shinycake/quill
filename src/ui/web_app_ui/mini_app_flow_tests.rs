@@ -18,7 +18,6 @@ use quill_webview_protocol::{HostCommand, ShellEvent, decode};
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
-use std::time::Duration;
 
 const BOT: i64 = 900;
 
@@ -85,9 +84,7 @@ fn open_window(app: &mut QuillApp, cx: &mut gpui_kit::App) -> mpsc::Receiver<Hos
 }
 
 fn next(received: &mpsc::Receiver<HostCommand>) -> HostCommand {
-    received
-        .recv_timeout(Duration::from_secs(5))
-        .expect("the window wrote to the helper")
+    received.recv().expect("the window wrote to the helper")
 }
 
 fn reply(received: &mpsc::Receiver<HostCommand>) -> (String, serde_json::Value) {
@@ -427,5 +424,28 @@ fn a_write_access_answer_must_be_for_the_request_the_window_waits_on(cx: &mut Te
         let (event, data) = reply(&received);
         assert_eq!(event, "write_access_requested");
         assert_eq!(data["status"], "allowed");
+    });
+}
+
+/// A `sendWebAppData` whose request left flight with no answer ends with an
+/// error note, and does not stay in the list for the life of the screen.
+#[gpui_kit::test]
+fn a_lost_data_send_ends_with_an_error(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update(&mut vcx, |app, cx| {
+        // A request nothing has in flight: dropped, as the stale sweep or
+        // a reconnect leaves it.
+        app.mini_apps
+            .data_sends
+            .push(quill::ids::RequestId(987_654));
+        assert!(
+            app.poll_mini_apps(cx) == false,
+            "the poll has nothing left to wait for"
+        );
+        assert!(app.mini_apps.data_sends.is_empty());
+        assert_eq!(
+            app.connection.note().text(),
+            quill::lang::tr(quill::lang::keys::Q_MEDIA_COULDNT_SEND_THE_APPS_DATA)
+        );
     });
 }

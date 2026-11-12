@@ -203,7 +203,11 @@ impl QuillApp {
                 }
             }
             HeaderEntry::AutoDelete => self.open_ttl_picker(chat_id, cx),
-            HeaderEntry::Translate => self.set_translate_bar_hidden(chat_id, false, cx),
+            HeaderEntry::Translate => {
+                // Shown again: the Hide's answer no longer matters.
+                self.forget_hide();
+                self.set_translate_bar_hidden(chat_id, false, cx);
+            }
             HeaderEntry::SendMoney => self.show_wallet_notice(WalletSurface::SendMoney, cx),
             HeaderEntry::CloseSecretChat => self.open_close_secret_chat_confirm(chat_id, cx),
             HeaderEntry::AgentAccess => self.open_agent_access_for_chat(chat_id.0, cx),

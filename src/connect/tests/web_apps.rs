@@ -4,7 +4,7 @@ use super::super::*;
 use super::*;
 use crate::diagnostics::DiagnosticSink;
 use crate::diagnostics::MemorySink;
-use crate::ids::{AccountKey, ChatId};
+use crate::ids::{AccountKey, ChatId, RequestId};
 use crate::platform::MemorySecretStore;
 use crate::state::{Session, WebAppOpenResult, WriteAccessResult, WriteAnswer};
 use crate::telegram::client::copy_and_parse;
@@ -110,11 +110,51 @@ fn open_web_app_sends_theme_and_keeps_the_launch_context() {
             bot_user_id: 42,
             chat_id: Some(5),
             source: LaunchSource::InlineButton,
+            window: None,
             launch_id: 777,
             url: "https://bot.example/app?tgWebAppData=x".into(),
         })
     );
     assert!(h.driver.session.bots.web_apps.opening.is_none());
+}
+
+/// Sweep r4-12: the window the launch was pressed in rides with the open
+/// request, so the answer opens the app there whatever pass lands it.
+#[test]
+fn the_open_answer_carries_the_window_the_launch_was_pressed_in() {
+    let mut h = Harness::ready();
+    let theme = ThemeParams::light_default();
+    let extra = h
+        .driver
+        .open_web_app(
+            ChatId(5),
+            42,
+            "https://bot.example/app",
+            LaunchSource::InlineButton,
+            &theme,
+        )
+        .expect("sent");
+    // A note for another request changes nothing; this one's sticks.
+    h.driver
+        .session
+        .bots
+        .web_apps
+        .note_open_window(RequestId(extra.0 + 1), Some(ChatId(99)));
+    h.driver
+        .session
+        .bots
+        .web_apps
+        .note_open_window(extra, Some(ChatId(12)));
+    h.ingest(&format!(
+        r#"{{"@type":"webAppInfo","@extra":"{}","launch_id":"7","url":{{"@type":"webAppUrl","url":"https://bot.example/app?x","require_same_origin":false}}}}"#,
+        extra.as_extra()
+    ));
+    let Some(WebAppOpenResult::Opened { window, .. }) =
+        h.driver.session.bots.web_apps.open_result.take()
+    else {
+        panic!("not opened");
+    };
+    assert_eq!(window, Some(ChatId(12)));
 }
 
 #[test]

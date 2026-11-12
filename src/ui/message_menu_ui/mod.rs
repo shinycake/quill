@@ -558,8 +558,11 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let note = match live.driver.cancel_upload(chat_id, message_id) {
                 Ok(request) => {
-                    live.driver.session.acks.expect(request);
-                    self.begin_vanish(chat_id, &[message_id], Deletion::Sent(request));
+                    if self.begin_vanish(chat_id, &[message_id], Deletion::Sent(request))
+                        && let Some(live) = self.live.as_mut()
+                    {
+                        live.driver.session.acks.expect(request);
+                    }
                     StatusNote::silent(tr(keys::Q_CHAT_UPLOAD_CANCELED))
                 }
                 Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_CANCEL_THE_UPLOAD)),

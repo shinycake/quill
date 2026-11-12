@@ -271,6 +271,29 @@ fn a_publish_in_flight_refuses_a_second_terms_box_and_a_decided_post_closes_one(
 /// The Decline box closes with nothing sent when the post is decided
 /// elsewhere, as the Accept box does; a Decline confirmed after that sends
 /// nothing either.
+/// Sweep r4-12: a Decline is not opened or confirmed over a Publish that is
+/// still out; the post's own answer settles it.
+#[gpui_kit::test]
+fn a_publish_in_flight_refuses_a_decline_box_and_a_decline_confirm(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.open_suggest_decline(ChatId(CHAT), MessageId(COUNTER), window, cx);
+        assert!(app.suggested_posts.decline().is_some(), "free: it opens");
+        // The Publish goes out while the box is open: confirming sends
+        // nothing and closes the box.
+        set_busy(app, true);
+        app.confirm_suggest_decline(cx);
+        assert!(app.suggested_posts.decline().is_none());
+        app.open_suggest_decline(ChatId(CHAT), MessageId(COUNTER), window, cx);
+        assert!(app.suggested_posts.decline().is_none(), "busy: no box");
+    });
+    assert_eq!(
+        state_of(&app, &mut vcx, COUNTER),
+        Some(SuggestedPostState::Pending),
+        "not declined"
+    );
+}
+
 #[gpui_kit::test]
 fn a_decided_post_closes_its_decline_box_and_declines_nothing(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);

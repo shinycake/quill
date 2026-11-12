@@ -45,6 +45,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             bot_user_id,
             chat_id: chat_id.map(|id| id.0),
             source,
+            window: None,
         });
         self.session.bots.web_apps.replace_open_result(None);
     }

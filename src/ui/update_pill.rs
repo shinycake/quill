@@ -74,7 +74,10 @@ impl UpdatePill {
         let downloading = matches!(control, UpdateControl::Progress { .. });
         let ready = matches!(control, UpdateControl::Restart | UpdateControl::Restarting);
         let was_downloading = matches!(self, Self::Percent { .. });
-        let eases = was_downloading && (downloading || ready);
+        let was_ready = matches!(self, Self::Ready { .. });
+        // A pill already `Ready` keeps its glide for the next `Restart`
+        // pass: resetting it would jump the fill to 100% after a frame.
+        let eases = (was_downloading && (downloading || ready)) || (was_ready && ready);
         let (from, to, since) = self.glide(now);
         let (from, to, since) = if !eases {
             (target, target, now)
@@ -417,6 +420,15 @@ mod tests {
         assert_eq!(pill.fill(later), 1.0);
         assert_eq!(pill.ready_mix(later), 1.0);
         assert!(!pill.animating(later));
+        // A later follow mid-glide goes on gliding, not to the end at once.
+        let mut pill = UpdatePill::default();
+        pill.follow(&downloading(90), now);
+        pill.follow(&UpdateControl::Restart, now);
+        pill.follow(&UpdateControl::Restart, now + FILL / 2);
+        assert!(pill.fill(now + FILL / 2) < 1.0);
+        let mut pill = UpdatePill::default();
+        pill.follow(&downloading(90), now);
+        pill.follow(&UpdateControl::Restart, now);
         // Later frames keep the swap's start.
         pill.follow(&UpdateControl::Restart, later);
         assert_eq!(pill.ready_mix(later), 1.0);

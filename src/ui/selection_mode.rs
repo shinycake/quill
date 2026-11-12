@@ -625,8 +625,11 @@ impl QuillApp {
                         )));
                     }
                     Ok(request) => {
-                        live.driver.session.acks.expect(request);
-                        self.begin_vanish(chat_id, ids, Deletion::Sent(request));
+                        if self.begin_vanish(chat_id, ids, Deletion::Sent(request))
+                            && let Some(live) = self.live.as_mut()
+                        {
+                            live.driver.session.acks.expect(request);
+                        }
                     }
                 }
             } else if self.demo_session.is_some() {

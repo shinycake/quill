@@ -239,6 +239,29 @@ fn a_backend_that_signals_its_open_needs_no_frames_while_opening(
     assert!(player.frame_demand(Instant::now()).animates);
 }
 
+#[gpui_kit::test]
+fn the_open_wake_redraws_the_view_an_unwatched_clip_was_drawn_in(
+    cx: &mut gpui_kit::TestAppContext,
+) {
+    let (player, script) = scripted(false);
+    script.borrow_mut().signals = true;
+    let _wake = cx
+        .update(|cx| player.await_open(cx))
+        .expect("the backend signals");
+    player.play();
+    // No watcher: only the element's own view knows the clip.
+    let view = cx.update(|cx| gpui_kit::AppContext::new(cx, |_| ()));
+    player.note_drawn_in(view.entity_id());
+    let redraws = Rc::new(std::cell::Cell::new(0u32));
+    let seen = redraws.clone();
+    let _sub = cx.update(|cx| cx.observe(&view, move |_, _| seen.set(seen.get() + 1)));
+    script.borrow_mut().ready = true;
+    let wake = script.borrow_mut().wake.take().expect("the wake was kept");
+    wake();
+    cx.run_until_parked();
+    assert_eq!(redraws.get(), 1, "the view it was drawn in is redrawn");
+}
+
 #[test]
 fn a_pull_asks_for_the_picture_at_the_predicted_present_time() {
     let (player, script) = scripted(true);

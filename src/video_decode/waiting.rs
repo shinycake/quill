@@ -40,11 +40,15 @@ impl Player {
         });
     }
 
-    /// Sleep until a picture is queued or decoding failed, or `deadline`
-    /// passes (tests and screenshot captures; never the UI thread).
+    /// Sleep until a picture is queued, decoding failed, ended (a seek at
+    /// or past the last picture) or stopped, or `deadline` passes (tests
+    /// and screenshot captures; never the UI thread).
     pub fn wait_frame(&self, deadline: Instant) {
         self.sleep_while(deadline, |state| {
-            state.video.is_empty() && state.decoding.error().is_none()
+            state.video.is_empty()
+                && state.decoding.error().is_none()
+                && !state.decoding.at_end()
+                && !state.decoding.is_stopped()
         });
     }
 

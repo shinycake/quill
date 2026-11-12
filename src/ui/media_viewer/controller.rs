@@ -7,7 +7,7 @@
 use super::*;
 use crate::ui::play_intent::PlayTarget;
 use crate::ui::video_player::controls::{
-    ControllerActions, PictureOverlay, PictureState, VideoController, WaitingCheck, speed_trigger,
+    ControllerActions, PictureOverlay, PictureState, VideoController, speed_trigger,
 };
 use crate::ui::video_player::{PlayState, Transport};
 use quill::media_viewer::{BoostPress, BoostRelease, SPEED_BOOST_HOLD_MS, SPEED_BOOST_RATE};
@@ -185,18 +185,7 @@ impl QuillApp {
         let waiting = self.viewer.clip.player().is_some_and(|player| {
             matches!(player.state(), PlayState::NotOpen | PlayState::Buffering)
         });
-        let now = cx.background_executor().now();
-        match self.viewer.controls.waiting.observe(waiting, now) {
-            WaitingCheck::Settled { shown } => shown,
-            WaitingCheck::ShowAfter(wait) => {
-                let timer = cx.spawn(async move |this, cx| {
-                    cx.background_executor().timer(wait).await;
-                    let _ = this.update(cx, |_, cx| cx.notify());
-                });
-                self.viewer.controls.waiting.arm(timer);
-                false
-            }
-        }
+        self.viewer.controls.waiting.shown_in(waiting, cx)
     }
 
     /// Redraw only the view the controller is in (the cached viewer slice,

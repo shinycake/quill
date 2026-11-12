@@ -239,3 +239,108 @@ fn a_refused_delete_drops_its_ghost_and_an_answered_one_waits(cx: &mut TestAppCo
         assert_eq!(held, 1, "only the answered delete still waits");
     });
 }
+
+/// Sweep r4-12: `begin_vanish` says whether a ghost now holds the delete's
+/// request; the callers register the request with the acks only then, so a
+/// request no ghost holds (power saving, a message not in the history, a
+/// ghost already there) leaves nothing in them.
+#[gpui_kit::test]
+fn a_delete_no_ghost_holds_registers_no_ack(cx: &mut TestAppContext) {
+    use quill::ids::RequestId;
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    open_group(&app, vcx);
+    dissolves_enabled();
+    app.update(vcx, |app, _| {
+        let sent = Deletion::Sent(RequestId(910));
+        assert!(app.begin_vanish(ChatId(GROUP), &[MessageId(202)], sent));
+        assert!(
+            !app.begin_vanish(ChatId(GROUP), &[MessageId(202)], sent),
+            "a ghost already holds that message"
+        );
+        assert!(
+            !app.begin_vanish(ChatId(GROUP), &[MessageId(999)], sent),
+            "not in the history"
+        );
+        quill::power_saving::set_force_all(true);
+        assert!(
+            !app.begin_vanish(ChatId(GROUP), &[MessageId(203)], sent),
+            "power saving: no effect, no ghost"
+        );
+        quill::power_saving::set_force_all(false);
+    });
+}
+
+/// A wait that ran out forgets its request, and a ghost already crumbling
+/// (the update that removed the message came before the answer) lets go of
+/// its request when the answer comes: neither leaves an ack behind.
+#[gpui_kit::test]
+fn a_ghost_that_ends_or_crumbles_leaves_no_ack(cx: &mut TestAppContext) {
+    use quill::ids::RequestId;
+    use quill::state::{Answer, RequestAcks};
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    open_group(&app, vcx);
+    dissolves_enabled();
+    let (waits, lands) = (RequestId(920), RequestId(921));
+    app.update(vcx, |app, _| {
+        app.freeze_vanish_clock();
+        app.begin_vanish(ChatId(GROUP), &[MessageId(202)], Deletion::Sent(waits));
+        app.begin_vanish(ChatId(GROUP), &[MessageId(203)], Deletion::Sent(lands));
+        app.paint_vanishing_for_test();
+    });
+    apply(
+        &app,
+        vcx,
+        &[
+            r#"{"@type":"updateDeleteMessages","chat_id":31,"message_ids":[203],"is_permanent":true,"from_cache":false}"#,
+        ],
+    );
+    frames(vcx);
+    app.update(vcx, |app, _| {
+        let mut acks = RequestAcks::default();
+        acks.expect(waits);
+        acks.expect(lands);
+        // The crumbling one's answer comes late; the waiting one's never.
+        acks.settle(lands, Answer::Done);
+        app.advance_vanish_clock(11.0);
+        app.settle_ghosts_for_test(&mut acks);
+        assert!(acks.take(lands).is_none(), "its answer was taken");
+        // Forgotten: an answer that comes now is not kept.
+        acks.settle(waits, Answer::Failed("late".into()));
+        assert!(acks.take(waits).is_none(), "its wait was forgotten");
+    });
+}
+
+/// A waiting ghost whose message is already gone, in a chat that is not the
+/// one shown, is dropped: back in that chat the message must not reappear
+/// and crumble on arrival.
+#[gpui_kit::test]
+fn a_waiting_ghost_of_a_chat_not_shown_is_dropped_once_its_message_is_gone(
+    cx: &mut TestAppContext,
+) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    open_group(&app, vcx);
+    dissolves_enabled();
+    app.update(vcx, |app, _| {
+        app.begin_vanish(ChatId(GROUP), &[MessageId(202)], Deletion::Local);
+        app.paint_vanishing_for_test();
+        // Another chat is shown (none here) when the deletion lands.
+        if let Some(session) = app.demo_session.as_mut() {
+            session.open = quill::state::OpenView::of(None);
+        }
+    });
+    apply(
+        &app,
+        vcx,
+        &[
+            r#"{"@type":"updateDeleteMessages","chat_id":31,"message_ids":[202],"is_permanent":true,"from_cache":false}"#,
+        ],
+    );
+    app.update(vcx, |app, cx| {
+        assert_eq!(app.vanishing_state_for_test().0, 1, "still waiting");
+        app.settle_vanishing(cx);
+        assert_eq!(app.vanishing_state_for_test().0, 0, "dropped");
+    });
+}

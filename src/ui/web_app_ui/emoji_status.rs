@@ -45,13 +45,27 @@ enum AccessStage {
     Granting(quill::ids::RequestId),
 }
 
+/// The app's answer to its `setEmojiStatus`: set only when a request went
+/// out for it. `Ok(None)` is Quill's own status change still in flight:
+/// nothing was sent.
+fn status_reply<E>(sent: Option<Result<Option<quill::ids::RequestId>, E>>) -> BridgeReply {
+    match sent {
+        Some(Ok(Some(_))) => BridgeReply::emoji_status_set(),
+        _ => BridgeReply::emoji_status_failed("UNKNOWN_ERROR"),
+    }
+}
+
 impl EmojiStatusFlow {
-    /// A suggested emoji is being looked up: nothing pokes when the lookup
-    /// lands, so the poll looks again on a short tick.
-    pub(super) fn is_active(&self) -> bool {
-        self.set
-            .as_ref()
-            .is_some_and(|request| matches!(request.stage, SetStage::Resolving { .. }))
+    /// A suggested emoji is being looked up: its answer (or error) pokes
+    /// the mini-app wake, so the poll only needs a look when the lookup
+    /// runs out of time.
+    pub(super) fn resolve_due_in(&self) -> Option<std::time::Duration> {
+        let request = self.set.as_ref()?;
+        matches!(request.stage, SetStage::Resolving { .. }).then(|| {
+            RESOLVE_TIMEOUT
+                .saturating_sub(request.since.elapsed())
+                .saturating_add(std::time::Duration::from_millis(1))
+        })
     }
 
     /// The access prompt the flow waits on, if it is up.
@@ -343,12 +357,7 @@ impl QuillApp {
         });
         // tdesktop answers as soon as it has asked; the status itself arrives
         // with the next user update.
-        self.with_window(|window| {
-            window.emit(match sent {
-                Some(Ok(_)) => BridgeReply::emoji_status_set(),
-                _ => BridgeReply::emoji_status_failed("UNKNOWN_ERROR"),
-            });
-        });
+        self.with_window(|window| window.emit(status_reply(sent)));
     }
 
     /// The grant answers drained this tick: the one to the request the

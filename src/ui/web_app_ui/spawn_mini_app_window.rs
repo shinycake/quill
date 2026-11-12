@@ -6,7 +6,12 @@ use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
-    pub(super) fn spawn_mini_app_window(&mut self, launch: WebAppLaunch, cx: &mut Context<Self>) {
+    pub(super) fn spawn_mini_app_window(
+        &mut self,
+        launch: WebAppLaunch,
+        window: Option<quill::ids::ChatId>,
+        cx: &mut Context<Self>,
+    ) {
         // An app whose URL lands while Quill is locked (asked for just
         // before the lock) is refused: the helper window would show it,
         // usable, over the lock. TDLib closes the launch.
@@ -123,7 +128,7 @@ impl QuillApp {
             settings_button: false,
             popups: HashMap::new(),
             popup_seq: 0,
-            launch_window: self.asking_window().flatten(),
+            launch_window: window,
             write_access: launch_flow::WriteAccess::Idle,
             privacy_policy_url,
             in_attachment_menu,
@@ -217,6 +222,7 @@ impl QuillApp {
                     bot_user_id,
                     chat_id,
                     source,
+                    window,
                     launch_id,
                     url,
                 } => {
@@ -235,6 +241,7 @@ impl QuillApp {
                             launch_id,
                             url,
                         },
+                        window,
                         cx,
                     );
                 }
@@ -348,6 +355,35 @@ impl QuillApp {
                 }
                 Err(message) => self.set_status_note(StatusNote::error(&message), cx),
             }
+        }
+    }
+
+    /// The `sendWebAppData` requests that left flight with no answer
+    /// (dropped by the stale sweep or a reconnect) never report: they end
+    /// here with an error, as the lost launch waits do. Runs every poll
+    /// pass, with or without a live account.
+    pub(super) fn end_lost_data_sends(&mut self, cx: &mut Context<Self>) {
+        let lost = {
+            let session = self.session();
+            let out = |request: &quill::ids::RequestId| {
+                session.is_some_and(|session| session.requests.get(*request).is_some())
+            };
+            let (_, lost): (Vec<_>, Vec<_>) = self
+                .mini_apps
+                .data_sends
+                .iter()
+                .copied()
+                .partition(|request| out(request));
+            lost
+        };
+        if !lost.is_empty() {
+            self.mini_apps
+                .data_sends
+                .retain(|request| !lost.contains(request));
+            self.set_status_note(
+                StatusNote::error(tr(keys::Q_MEDIA_COULDNT_SEND_THE_APPS_DATA)),
+                cx,
+            );
         }
     }
 

@@ -64,7 +64,9 @@ impl QuillApp {
 
     /// One poll step; `true` while there is still something to wait for.
     pub(super) fn poll_mini_apps(&mut self, cx: &mut Context<Self>) -> bool {
-        self.poll_mini_app_session(cx);
+        // The helper's queued events first: a popup the poll side shows
+        // replaces the one the helper shows, and a `PopupClosed` already
+        // queued for that one is its real answer, not a dismissal.
         let events: Vec<HelperEvent> = match self.mini_apps.window.as_ref() {
             Some(window) => window.events.try_iter().collect(),
             None => Vec::new(),
@@ -72,6 +74,8 @@ impl QuillApp {
         for event in events {
             self.handle_helper_event(event, cx);
         }
+        self.poll_mini_app_session(cx);
+        self.end_lost_data_sends(cx);
         let overdue = self.mini_apps.window.as_ref().is_some_and(|window| {
             window.helper.start_due_in(std::time::Instant::now()) == Some(Duration::ZERO)
         });
@@ -85,6 +89,7 @@ impl QuillApp {
         }
         self.mini_apps.window.is_some()
             || self.mini_apps.flow.is_waiting()
+            || !self.mini_apps.data_sends.is_empty()
             || self.session().is_some_and(|session| {
                 session.bots.web_apps.opening.is_some() || session.web_app_answer_due()
             })
@@ -97,9 +102,11 @@ impl QuillApp {
         if let Some(due) = window.helper.start_due_in(std::time::Instant::now()) {
             return Some(due.max(WATCH_TICK));
         }
-        let watching = window.emoji.is_active()
-            || window.phone.waiting_on().is_some()
-            || window.invoice.is_some();
-        watching.then_some(WATCH_TICK)
+        let tick =
+            (window.phone.waiting_on().is_some() || window.invoice.is_some()).then_some(WATCH_TICK);
+        match (window.emoji.resolve_due_in(), tick) {
+            (Some(deadline), Some(tick)) => Some(deadline.min(tick)),
+            (deadline, tick) => deadline.or(tick),
+        }
     }
 }

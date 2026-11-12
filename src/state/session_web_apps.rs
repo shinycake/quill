@@ -102,9 +102,9 @@ impl Session {
         url: String,
     ) {
         let pending = self.take_web_app_pending(request);
-        let Some((chat_id, source)) = pending
+        let Some((chat_id, source, window)) = pending
             .filter(|p| p.bot_user_id == bot_user_id)
-            .map(|p| (p.chat_id, p.source))
+            .map(|p| (p.chat_id, p.source, p.window))
         else {
             // The launch was dropped (an account switch): nothing opens,
             // and an app TDLib started is closed by the driver.
@@ -125,6 +125,7 @@ impl Session {
                     bot_user_id,
                     chat_id,
                     source,
+                    window,
                     launch_id,
                     url,
                 }

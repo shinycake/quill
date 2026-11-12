@@ -201,7 +201,7 @@ impl Session {
 
     /// Record the answer (or failure) of `request`; an entry another
     /// request has replaced ignores it.
-    pub(crate) fn finish_translation(&mut self, request: RequestId, result: Translation) {
+    pub fn finish_translation(&mut self, request: RequestId, result: Translation) {
         let translate = &mut self.messages.translate;
         let is_mine = |slot: &Translation| matches!(slot, Translation::Pending { request: asked, .. } if *asked == request);
         let slot = match translate.texts.get_mut(&request) {
@@ -350,14 +350,15 @@ impl Session {
         self.messages.translate.revision += 1;
     }
 
-    /// Whether `message_id` has no translation into `to` yet or its last
-    /// ask failed: what the pump keeps in its scan, so a failure that ran
-    /// out of attempts is tested again once they are given back
-    /// ([`Self::translations_back_online`]).
+    /// Whether `message_id` has no finished translation into `to`: what
+    /// the pump keeps in its scan. A `Pending` ask is kept too, so a
+    /// failure that ran out of attempts is tested again once they are
+    /// given back ([`Self::translations_back_online`]); `needs_translation`
+    /// keeps the pending ask from being sent twice.
     pub fn translation_unsettled(&self, chat_id: ChatId, message_id: MessageId, to: &str) -> bool {
-        matches!(
+        !matches!(
             self.message_translation(chat_id, message_id, to),
-            None | Some(Translation::Failed { .. })
+            Some(Translation::Done { .. })
         )
     }
 

@@ -162,6 +162,14 @@ impl QuillApp {
         let Some(accept) = self.suggested_posts.accept().cloned() else {
             return;
         };
+        // The Terms box stayed open while a Publish or Decline went out
+        // (the other window, a keyboard shortcut): the driver would
+        // refuse a second one and the note would blame the wrong action.
+        if self.publish_busy(accept.chat_id, accept.message_id) {
+            self.suggested_posts.close_accept();
+            cx.notify();
+            return;
+        }
         // The other side declined or the offer expired meanwhile: nothing
         // is sent for a suggestion that is no longer pending.
         let pending = self
@@ -231,6 +239,12 @@ impl QuillApp {
         let Some(suggestion) = self.suggestion(chat_id, message_id) else {
             return;
         };
+        // A Publish or Decline of this post is still out: its answer
+        // settles it, and a Decline over a Publish would read "couldn't
+        // decline" for a post that is being published.
+        if self.publish_busy(chat_id, message_id) {
+            return;
+        }
         let reason = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder(tr(keys::SUGGEST_DECLINE_REASON))
@@ -270,9 +284,12 @@ impl QuillApp {
         let Some(decline) = self.suggested_posts.take_decline() else {
             return;
         };
-        // Decided meanwhile (the other side, or it expired): nothing is sent
-        // for a post that is no longer pending.
-        if self.suggestion_decided(decline.chat_id, decline.message_id) {
+        // Decided meanwhile (the other side, or it expired), or a Publish
+        // is out for it: nothing is sent for a post that is no longer
+        // pending.
+        if self.suggestion_decided(decline.chat_id, decline.message_id)
+            || self.publish_busy(decline.chat_id, decline.message_id)
+        {
             cx.notify();
             return;
         }

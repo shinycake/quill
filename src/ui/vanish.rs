@@ -44,6 +44,8 @@ const BUBBLE_RADIUS: f32 = 14.;
 const VANISH_WAIT: Duration = Duration::from_secs(10);
 
 mod painted;
+mod settle;
+use settle::{held_request, settle_ghosts};
 
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
@@ -300,9 +302,13 @@ enum GhostStage {
         requested: Instant,
     },
     /// The message left the history at `started`: the animation's clock.
+    /// `deletion` is still the `Sent` request until its answer is taken
+    /// (the update that removed the message can come first), so the ack
+    /// of a delete that landed first is not left behind.
     Crumbling {
         started: Instant,
         grains: Rc<Vec<Grain>>,
+        deletion: Deletion,
     },
 }
 
@@ -380,52 +386,6 @@ impl Vanishing {
     }
 }
 
-/// Settles the ghosts that wait on a sent delete with its answer: a refused
-/// one ends its ghost (the message stays), an answered one waits for the
-/// message to leave the history. A wait that ran out forgets its request.
-fn settle_ghosts(
-    vanishing: &RefCell<Vec<Vanishing>>,
-    now: Instant,
-    acks: &mut quill::state::RequestAcks,
-) {
-    let Ok(mut ghosts) = vanishing.try_borrow_mut() else {
-        return;
-    };
-    let mut requests: Vec<RequestId> = ghosts
-        .iter()
-        .filter_map(|ghost| match ghost.stage {
-            GhostStage::Waiting {
-                deletion: Deletion::Sent(request),
-                ..
-            } => Some(request),
-            _ => None,
-        })
-        .collect();
-    requests.sort_unstable_by_key(|request| request.0);
-    requests.dedup();
-    let refused: Vec<RequestId> = requests
-        .into_iter()
-        .filter(|request| matches!(acks.take(*request), Some(quill::state::Answer::Failed(_))))
-        .collect();
-    ghosts.retain(|ghost| {
-        let GhostStage::Waiting {
-            deletion: Deletion::Sent(request),
-            ..
-        } = ghost.stage
-        else {
-            return true;
-        };
-        if refused.contains(&request) {
-            return false;
-        }
-        if ghost.phase(now) == Phase::Done {
-            acks.forget(request);
-            return false;
-        }
-        true
-    });
-}
-
 /// A photo's preview, for coloring its dust.
 fn picture_of(message: &HistoryMessage) -> Option<image::RgbaImage> {
     let MessageContent::Photo(photo) = &message.content else {
@@ -438,24 +398,34 @@ fn picture_of(message: &HistoryMessage) -> Option<image::RgbaImage> {
 impl QuillApp {
     /// Remember the messages about to be deleted — where they are on
     /// screen and what they look like — so they can crumble once the
-    /// deletion lands.
-    pub(super) fn begin_vanish(&self, chat_id: ChatId, ids: &[MessageId], deletion: Deletion) {
+    /// deletion lands. `true` when a ghost now holds the request of a
+    /// [`Deletion::Sent`]: only then does the caller register it with
+    /// `RequestAcks::expect` (`settle_ghosts` takes the answer, or forgets
+    /// the request when the wait runs out), so a request no ghost holds
+    /// leaves nothing in the acks.
+    pub(super) fn begin_vanish(
+        &self,
+        chat_id: ChatId,
+        ids: &[MessageId],
+        deletion: Deletion,
+    ) -> bool {
         // `ThanosEffect::Supported`: not with "Effects in messages" or
         // interface animations saving power.
         if quill::power_saving::on(quill::power_saving::Flag::ChatEffects)
             || quill::power_saving::reduce_motion_now()
         {
-            return;
+            return false;
         }
         let Some(history) = self.session().and_then(|s| s.histories.get(&chat_id.0)) else {
-            return;
+            return false;
         };
         let now = self.vanish_clock_now();
         // A borrow conflict drops the request: the message just vanishes
         // without the effect.
         let Ok(mut vanishing) = self.history.vanishing.try_borrow_mut() else {
-            return;
+            return false;
         };
+        let mut held = false;
         for id in ids {
             let Some(message) = history.messages.get(&id.0) else {
                 continue;
@@ -484,6 +454,7 @@ impl QuillApp {
                 }),
                 picture: picture_of(message),
             };
+            held = true;
             vanishing.push(Vanishing {
                 message: message.clone(),
                 stage: GhostStage::Waiting {
@@ -495,6 +466,7 @@ impl QuillApp {
                 palette,
             });
         }
+        held
     }
 
     /// Put the crumbling messages back among `messages` (oldest first)
@@ -529,7 +501,11 @@ impl QuillApp {
             }
             if ghost.is_waiting() {
                 let area = ghost.bubble.or(ghost.row);
+                let GhostStage::Waiting { deletion, .. } = ghost.stage else {
+                    continue;
+                };
                 ghost.stage = GhostStage::Crumbling {
+                    deletion,
                     started: now,
                     grains: Rc::new(area.map_or_else(Vec::new, |area| {
                         grains(ghost.message.id.0 as u64, area, &ghost.palette)
@@ -565,23 +541,16 @@ impl QuillApp {
         })
     }
 
-    /// The answers to the deletes the ghosts wait on (see
-    /// [`settle_ghosts`]).
-    pub(super) fn settle_vanishing(&mut self) {
-        let now = self.vanish_clock_now();
-        let vanishing = &self.screen.history.vanishing;
-        if let Some(live) = self.live.as_mut() {
-            settle_ghosts(vanishing, now, &mut live.driver.session.acks);
-        }
-    }
-
-    /// Drop the dissolves that are over, or whose deletion never landed.
-    /// Runs every frame (`vanish_overlay`), not only when rows are built:
-    /// a pane without rows (no chat, an empty or loading one) would keep
-    /// them, and the tick, forever.
+    /// Drop the dissolves that are over. A ghost that holds a sent
+    /// delete's request is left to `settle_ghosts`, which forgets the
+    /// request as it drops the ghost (while an account is live to settle).
     fn prune_vanishing(&self, now: Instant) {
+        let settled_elsewhere = self.live.is_some();
         if let Ok(mut vanishing) = self.history.vanishing.try_borrow_mut() {
-            vanishing.retain(|ghost| ghost.phase(now) != Phase::Done);
+            vanishing.retain(|ghost| {
+                ghost.phase(now) != Phase::Done
+                    || (settled_elsewhere && held_request(ghost).is_some())
+            });
         }
     }
 
