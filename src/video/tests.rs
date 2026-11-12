@@ -63,15 +63,10 @@ fn cancelable_extraction_kill_aborts_and_reports_cancelled() {
         });
         // Wait for the child to be published, then kill it the way the UI
         // does on viewer close/step.
-        let mut published = false;
-        for _ in 0..200 {
-            if extraction.is_running() {
-                published = true;
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(50));
-        }
-        assert!(published, "child was published to the slot");
+        assert!(
+            extraction.wait_until_running(),
+            "child was published to the slot"
+        );
         extraction.cancel();
         let err = handle.join().expect("worker thread").unwrap_err();
         assert!(

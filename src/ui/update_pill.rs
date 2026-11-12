@@ -26,50 +26,43 @@ const HEIGHT: Pixels = px(20.);
 /// pill's less this, so the two are concentric.
 const INSET: Pixels = px(2.);
 
-/// The fill's share of the pill: settled, or easing to a new target.
-#[derive(Clone, Copy)]
-pub(super) enum Fill {
-    Settled(f32),
-    Easing { from: f32, to: f32, since: Instant },
-}
-
-impl Fill {
-    /// The share the fill is at or easing to.
-    fn target(self) -> f32 {
-        match self {
-            Self::Settled(to) | Self::Easing { to, .. } => to,
-        }
-    }
-}
-
 /// The pill's motion, in one value with the control it follows: where the
-/// fill eases from and to, and for a ready update when the finished
-/// download started fading into the restart label. The control itself
-/// stays the source of truth; this only remembers the last target so a
-/// change can ease instead of jump.
+/// fill eases from and to (settled when they are equal), and for a ready
+/// update when the finished download started fading into the restart
+/// label. The control itself stays the source of truth; this only
+/// remembers the last target so a change can ease instead of jump.
 #[derive(Clone, Copy)]
 pub(super) enum UpdatePill {
     /// Any other control: shown at once, the fill settled at its share.
-    Other(f32),
+    Other { share: f32 },
     /// The last control showed the download's percentage.
-    Percent(Fill),
+    Percent { from: f32, to: f32, since: Instant },
     /// The update is ready. `swap` is when the percentage began fading into
     /// the restart label; `None` for an update that was ready without a
     /// download to watch (shown at once).
-    Ready { fill: Fill, swap: Option<Instant> },
+    Ready {
+        from: f32,
+        to: f32,
+        since: Instant,
+        swap: Option<Instant>,
+    },
 }
 
 impl Default for UpdatePill {
     fn default() -> Self {
-        Self::Other(0.0)
+        Self::Other { share: 0.0 }
     }
 }
 
 impl UpdatePill {
-    fn fill_state(self) -> Fill {
+    /// The fill's glide: from, to and when it began (`from == to`: settled).
+    fn glide(self, now: Instant) -> (f32, f32, Instant) {
         match self {
-            Self::Other(share) => Fill::Settled(share),
-            Self::Percent(fill) | Self::Ready { fill, .. } => fill,
+            Self::Other { share } => (share, share, now),
+            Self::Percent { from, to, since }
+            | Self::Ready {
+                from, to, since, ..
+            } => (from, to, since),
         }
     }
 
@@ -80,46 +73,45 @@ impl UpdatePill {
         let target = control.fraction().unwrap_or(1.0);
         let downloading = matches!(control, UpdateControl::Progress { .. });
         let ready = matches!(control, UpdateControl::Restart | UpdateControl::Restarting);
-        let was_downloading = matches!(self, Self::Percent(_));
+        let was_downloading = matches!(self, Self::Percent { .. });
         let eases = was_downloading && (downloading || ready);
-        let before = self.fill_state();
-        let fill = if !eases {
-            Fill::Settled(target)
-        } else if target != before.target() {
-            Fill::Easing {
-                from: self.fill(now),
-                to: target,
-                since: now,
-            }
+        let (from, to, since) = self.glide(now);
+        let (from, to, since) = if !eases {
+            (target, target, now)
+        } else if target != to {
+            (self.fill(now), target, now)
         } else {
-            before
+            (from, to, since)
         };
         *self = match (ready, *self) {
-            (true, Self::Ready { swap, .. }) => Self::Ready { fill, swap },
+            (true, Self::Ready { swap, .. }) => Self::Ready {
+                from,
+                to,
+                since,
+                swap,
+            },
             (true, _) => Self::Ready {
-                fill,
+                from,
+                to,
+                since,
                 swap: was_downloading.then_some(now),
             },
-            (false, _) if downloading => Self::Percent(fill),
-            (false, _) => Self::Other(target),
+            (false, _) if downloading => Self::Percent { from, to, since },
+            (false, _) => Self::Other { share: target },
         };
     }
 
     /// The share of the pill filled at `now`, 0 to 1.
     pub(super) fn fill(&self, now: Instant) -> f32 {
-        match self.fill_state() {
-            Fill::Settled(to) => to,
-            Fill::Easing { from, to, since } => {
-                let t = progress(now.saturating_duration_since(since), FILL);
-                from + (to - from) * super::sidebar_reveal::ease_out_cubic(t)
-            }
-        }
+        let (from, to, since) = self.glide(now);
+        let t = progress(now.saturating_duration_since(since), FILL);
+        from + (to - from) * super::sidebar_reveal::ease_out_cubic(t)
     }
 
     /// How far the percentage has faded into the restart label, 0 to 1.
     pub(super) fn ready_mix(&self, now: Instant) -> f32 {
         match self {
-            Self::Other(_) | Self::Percent(_) => 0.0,
+            Self::Other { .. } | Self::Percent { .. } => 0.0,
             Self::Ready { swap: None, .. } => 1.0,
             Self::Ready {
                 swap: Some(since), ..
@@ -128,8 +120,8 @@ impl UpdatePill {
     }
 
     pub(super) fn animating(&self, now: Instant) -> bool {
-        let filling = matches!(self.fill_state(), Fill::Easing { since, .. }
-            if now.saturating_duration_since(since) < FILL);
+        let (from, to, since) = self.glide(now);
+        let filling = from != to && now.saturating_duration_since(since) < FILL;
         let swapping = matches!(self, Self::Ready { swap: Some(since), .. }
             if now.saturating_duration_since(*since) < SWAP);
         filling || swapping

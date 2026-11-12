@@ -342,8 +342,11 @@ impl Backend for FfmpegBackend {
     fn set_volume(&mut self, volume: f32) {
         self.volume = volume.clamp(0.0, 1.0);
         if self.volume > 0.0 && !self.options.want_audio {
-            // Sound is wanted only once the reopen worked: a failed one
-            // leaves the clip as it was, and the next turn-up tries again.
+            // Sound is wanted only once the reopen started: one that is
+            // refused at once leaves the clip as it was, and the next
+            // turn-up tries again. The open itself runs on the new player's
+            // thread, so a failure there (the file just opened, so a rare
+            // one) shows as the clip failing, not as the old player.
             let reopened = OpenOptions {
                 want_audio: true,
                 output: self.output,

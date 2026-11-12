@@ -50,7 +50,7 @@ use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 #[derive(Serialize, Deserialize)]
 pub struct InstallPlan {
@@ -322,21 +322,12 @@ pub(crate) fn valid_release(release: &ReleaseInfo) -> bool {
 /// Waits for `child` up to `limit`, then kills it. Output is read after this
 /// returns, so a child that floods a pipe blocks until the deadline and dies.
 fn wait_with_timeout(child: &mut Child, limit: Duration) -> std::io::Result<ExitStatus> {
-    let deadline = Instant::now() + limit;
-    loop {
-        if let Some(status) = child.try_wait()? {
-            return Ok(status);
-        }
-        if Instant::now() >= deadline {
+    crate::child_timeout::wait_within(child, limit).inspect_err(|err| {
+        if crate::child_timeout::is_timeout(err) {
             let _ = child.kill();
             let _ = child.wait();
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::TimedOut,
-                "Process did not finish in time",
-            ));
         }
-        std::thread::sleep(Duration::from_millis(50));
-    }
+    })
 }
 
 fn probe_binary(path: &Path, version: &str) -> std::io::Result<()> {

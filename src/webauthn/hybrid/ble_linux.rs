@@ -131,6 +131,12 @@ fn handle(events: &Sender<ScanEvent>, message: &zbus::Message) {
     }
 }
 
+/// What ended one wait of the scan loop.
+enum Wake {
+    Stopped,
+    Signal(Option<zbus::Result<zbus::Message>>),
+}
+
 async fn scan(events: &Sender<ScanEvent>, mut stop: oneshot::Receiver<()>) {
     let tell = |available| {
         let _ = events.send(ScanEvent::Available(available));
@@ -221,16 +227,26 @@ async fn scan(events: &Sender<ScanEvent>, mut stop: oneshot::Receiver<()>) {
         }
     }
     loop {
-        // The stop signal ends the wait at once, sent or dropped.
-        let next = futures_lite::future::or(async { Some(stream.next().await) }, async {
-            let _ = (&mut stop).await;
-            None
-        })
+        // The stop signal is polled first, so a flood of adverts cannot
+        // starve it; sent or dropped, it ends the wait at once.
+        let next = futures_lite::future::or(
+            async {
+                let _ = (&mut stop).await;
+                Wake::Stopped
+            },
+            async { Wake::Signal(stream.next().await) },
+        )
         .await;
         match next {
-            None | Some(None) => break,
-            Some(Some(Ok(message))) => handle(events, &message),
-            Some(Some(Err(_))) => {}
+            Wake::Stopped => break,
+            // BlueZ went away (bluetoothd stopped): no more adverts will
+            // come, which the ceremony hears as Bluetooth being gone.
+            Wake::Signal(None) => {
+                tell(false);
+                break;
+            }
+            Wake::Signal(Some(Ok(message))) => handle(events, &message),
+            Wake::Signal(Some(Err(_))) => {}
         }
     }
     let _ = proxy.call_method("StopDiscovery", &()).await;

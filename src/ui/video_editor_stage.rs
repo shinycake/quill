@@ -288,6 +288,9 @@ impl VideoEditorDialog {
         let EditorStage::Ready { look, timeline, .. } = self.stage else {
             return;
         };
+        // A pointer drag the encode outlives would hold the loop and the
+        // cover bubble for good.
+        self.motion.end_drag();
         self.stage = EditorStage::Encoding {
             info,
             look,

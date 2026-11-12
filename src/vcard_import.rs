@@ -34,17 +34,13 @@ pub struct VcardPreview {
     pub truncated: usize,
 }
 
-/// The import box: no file yet, a file being read, what the file holds, or
-/// why it cannot be used. The box renders from this and nothing else.
+/// What a read file gave: no file yet, what the file holds, or why it
+/// cannot be used. (A file still being read is a stage of the box, which
+/// owns the read: `ui::contacts_import::ImportStage::Reading`.)
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum VcardImport {
     #[default]
     Empty,
-    /// A file was picked and is being read (the import dialog's stage
-    /// holds the read's task).
-    Picked {
-        file_name: String,
-    },
     Ready(VcardPreview),
     Failed {
         file_name: String,

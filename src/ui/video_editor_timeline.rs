@@ -264,6 +264,12 @@ impl EditorMotion {
         }
     }
 
+    /// Every drag ends where it is: the editor goes on to encode, or the
+    /// release never reached it (the window lost the pointer or focus).
+    pub(super) fn end_drag(&mut self) {
+        self.drag = Drag::Idle;
+    }
+
     /// The held part of the strip is let go; any other drag stays.
     fn take_strip(&mut self) -> Option<(Grab, Seek)> {
         match std::mem::take(&mut self.drag) {
@@ -456,6 +462,12 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The window lost focus with the strip held: the mouse-up goes to
+    /// another window, so the hold ends as if it came.
+    pub(in crate::ui) fn release_video_timeline_on_blur(&mut self, cx: &mut Context<Self>) {
+        self.video_timeline_release(cx);
+    }
+
     /// The strip is let go: playback resumes from where the drag left it,
     /// and a moved head sends the picture into the bubble.
     fn video_timeline_release(&mut self, cx: &mut Context<Self>) {
@@ -576,11 +588,16 @@ impl QuillApp {
                 });
                 let move_app = app.clone();
                 window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
-                    if phase == DispatchPhase::Bubble
-                        && event.pressed_button == Some(MouseButton::Left)
-                    {
+                    if phase != DispatchPhase::Bubble {
+                        return;
+                    }
+                    if event.pressed_button == Some(MouseButton::Left) {
                         let x = f32::from(event.position.x - origin);
                         let _ = move_app.update(cx, |this, cx| this.video_timeline_drag(x, cx));
+                    } else {
+                        // The button is up: a mouse-up that never came (let
+                        // go outside the window) ends the held part here.
+                        let _ = move_app.update(cx, |this, cx| this.video_timeline_release(cx));
                     }
                 });
                 let up_app = app.clone();
@@ -935,4 +952,25 @@ fn paint_labels(
             let _ = duration.paint(origin, line_height, TextAlign::Left, None, window, cx);
         },
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A drag that lost its mouse-up ends with `end_drag`, so the loop and
+    /// the cover bubble it kept held go on.
+    #[test]
+    fn ending_a_drag_lets_the_strip_go() {
+        let mut motion = EditorMotion::default();
+        motion.drag = Drag::Strip {
+            grab: Grab::Head,
+            shift: 0.0,
+            seek: Seek::default(),
+        };
+        assert!(motion.drag.strip_held());
+        motion.end_drag();
+        assert!(!motion.drag.strip_held());
+        assert!(matches!(motion.drag, Drag::Idle));
+    }
 }

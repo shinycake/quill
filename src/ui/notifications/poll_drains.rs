@@ -81,6 +81,8 @@ impl QuillApp {
             self.land_widget_answers(answers, cx);
             progressed = true;
         }
+        // A refused delete ends the delete animation waiting for it.
+        self.settle_vanishing();
         // B7: a basic group became a supergroup: leave the old chat.
         if self.pump_chat_upgrades(cx) {
             progressed = true;

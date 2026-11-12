@@ -9,6 +9,7 @@ use super::app::QuillApp;
 use super::chat_ui_state::A11yFocus;
 use super::motion;
 use crate::ui::status_note::StatusNote;
+use crate::ui::vanish::Deletion;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -616,16 +617,20 @@ impl QuillApp {
         let mut went_out = true;
         if !ids.is_empty() {
             if let Some(live) = self.live.as_mut() {
-                if live.driver.delete_selected(chat_id, ids, revoke).is_err() {
-                    went_out = false;
-                    self.set_note(StatusNote::error(tr(
-                        keys::Q_CHAT_COULD_NOT_DELETE_MESSAGES,
-                    )));
-                } else {
-                    self.begin_vanish(chat_id, ids);
+                match live.driver.delete_selected(chat_id, ids, revoke) {
+                    Err(_) => {
+                        went_out = false;
+                        self.set_note(StatusNote::error(tr(
+                            keys::Q_CHAT_COULD_NOT_DELETE_MESSAGES,
+                        )));
+                    }
+                    Ok(request) => {
+                        live.driver.session.acks.expect(request);
+                        self.begin_vanish(chat_id, ids, Deletion::Sent(request));
+                    }
                 }
             } else if self.demo_session.is_some() {
-                self.begin_vanish(chat_id, ids);
+                self.begin_vanish(chat_id, ids, Deletion::Local);
                 for id in ids {
                     self.apply_demo_delete(chat_id, *id);
                 }

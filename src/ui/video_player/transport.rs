@@ -48,19 +48,19 @@ enum Intent {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Stage {
     At(PlayState, Intent),
-    Landing(PlayState, Intent),
+    Landing(PlayState, Intent, Instant),
 }
 
 impl Stage {
     fn play_state(self) -> PlayState {
         match self {
-            Self::At(state, _) | Self::Landing(state, _) => state,
+            Self::At(state, _) | Self::Landing(state, _, _) => state,
         }
     }
 
     fn intent(self) -> Intent {
         match self {
-            Self::At(_, intent) | Self::Landing(_, intent) => intent,
+            Self::At(_, intent) | Self::Landing(_, intent, _) => intent,
         }
     }
 
@@ -72,8 +72,8 @@ impl Stage {
     /// only while the player stays playing or buffering.
     fn in_state(self, state: PlayState) -> Self {
         let playing = matches!(state, PlayState::Playing | PlayState::Buffering);
-        if playing && self.landing() {
-            Self::Landing(state, self.intent())
+        if playing && let Self::Landing(_, _, since) = self {
+            Self::Landing(state, self.intent(), since)
         } else {
             Self::At(state, self.intent())
         }
@@ -83,11 +83,14 @@ impl Stage {
     fn wanting(self, intent: Intent) -> Self {
         match self {
             Self::At(state, _) => Self::At(state, intent),
-            Self::Landing(state, _) => Self::Landing(state, intent),
+            Self::Landing(state, _, since) => Self::Landing(state, intent, since),
         }
     }
 }
 
+/// A loop's seek that has not left the end by then is sent again (a backend
+/// that dropped it would otherwise stay at the end for good).
+const LANDING_WAIT: Duration = Duration::from_secs(2);
 /// A paused seek or step waits this long for its picture at most.
 const AWAIT_PICTURE: Duration = Duration::from_secs(2);
 
@@ -543,6 +546,15 @@ impl TransportMachine {
             self.position = status.position.max(0.0);
             self.pulled_at = now;
         }
+        // The seek was sent a while ago and the backend still reports the
+        // end: it was lost, so it goes again (and the wait restarts).
+        if let Stage::Landing(state, intent, since) = self.stage
+            && (near_end || flow == Some(Flow::AtEnd))
+            && now.saturating_duration_since(since) >= LANDING_WAIT
+        {
+            self.stage = Stage::Landing(state, intent, now);
+            return Some(Command::Loop);
+        }
         let loops_early = near_end && !self.stage.landing();
         let flow = flow.unwrap_or_default();
         let ended = flow == Flow::AtEnd && !self.stage.landing();
@@ -550,7 +562,7 @@ impl TransportMachine {
             PlayState::Playing | PlayState::Buffering if ended || loops_early => {
                 if self.looping {
                     self.position = 0.0;
-                    self.stage = Stage::Landing(PlayState::Playing, self.stage.intent());
+                    self.stage = Stage::Landing(PlayState::Playing, self.stage.intent(), now);
                     return Some(Command::Loop);
                 }
                 self.move_to(PlayState::Ended, Intent::Pause);
@@ -630,8 +642,8 @@ pub(crate) fn merge_ranges(mut ranges: Vec<Range<f64>>) -> Vec<Range<f64>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        BackendStatus, Command, Correction, Engine, EngineHealth, Flow, PlayStart, PlayState,
-        TransportMachine, Want, merge_ranges, reconcile,
+        BackendStatus, Command, Correction, Engine, EngineHealth, Flow, LANDING_WAIT, PlayStart,
+        PlayState, TransportMachine, Want, merge_ranges, reconcile,
     };
     use std::time::{Duration, Instant};
 
@@ -747,6 +759,29 @@ mod tests {
         once.observe(&ready(0.0), t0);
         assert_eq!(once.observe(&ready(9.99), t0), None);
         assert_eq!(once.state(), PlayState::Playing);
+    }
+
+    /// A loop's seek the backend never acted on is sent again after the
+    /// wait, not waited for forever.
+    #[test]
+    fn a_loop_seek_that_never_lands_is_sent_again() {
+        let t0 = Instant::now();
+        let mut machine = TransportMachine::new(None, t0);
+        machine.set_looping(true);
+        machine.play(t0);
+        machine.observe(&ready(0.0), t0);
+        let end = BackendStatus {
+            health: EngineHealth::Open(Flow::AtEnd),
+            ..ready(10.0)
+        };
+        assert_eq!(machine.observe(&end, t0), Some(Command::Loop));
+        let soon = t0 + LANDING_WAIT / 2;
+        assert_eq!(machine.observe(&end, soon), None, "still landing");
+        let late = t0 + LANDING_WAIT;
+        assert_eq!(machine.observe(&end, late), Some(Command::Loop), "again");
+        assert_eq!(machine.observe(&end, late), None, "the wait restarts");
+        assert_eq!(machine.observe(&ready(0.02), late), None);
+        assert_eq!(machine.state(), PlayState::Playing);
     }
 
     #[test]

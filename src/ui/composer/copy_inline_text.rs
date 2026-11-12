@@ -3,6 +3,7 @@
 use super::*;
 use crate::ui::chat_ui_state::EditStage;
 use crate::ui::status_note::StatusNote;
+use crate::ui::vanish::Deletion;
 use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
@@ -471,16 +472,21 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.delete_confirmed(&confirm);
             // The message dissolves only once the delete went out: a refused
-            // send leaves it on screen.
-            if result.is_ok() {
-                self.begin_vanish(confirm.chat_id, &[confirm.message_id]);
+            // send leaves it on screen, and so does a refused delete.
+            if let Ok(request) = result.as_ref().copied() {
+                live.driver.session.acks.expect(request);
+                self.begin_vanish(
+                    confirm.chat_id,
+                    &[confirm.message_id],
+                    Deletion::Sent(request),
+                );
             }
             self.set_note(match result {
                 Ok(_) => StatusNote::silent(tr(keys::Q_CHAT_DELETING)),
                 Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_DELETE_MESSAGE)),
             });
         } else if self.demo_session.is_some() {
-            self.begin_vanish(confirm.chat_id, &[confirm.message_id]);
+            self.begin_vanish(confirm.chat_id, &[confirm.message_id], Deletion::Local);
             self.apply_demo_delete(confirm.chat_id, confirm.message_id);
             self.set_note(StatusNote::silent(tr(
                 keys::Q_CHAT_DEMO_DELETE_APPLIED_LOCALLY_NO,

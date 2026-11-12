@@ -16,11 +16,10 @@
 
 use super::app::QuillApp;
 use gpui_kit::*;
-use quill::ids::{ChatId, ChatMessage, MessageId};
+use quill::ids::{ChatId, ChatMessage, MessageId, RequestId};
 use quill::state::HistoryMessage;
 use quill::telegram::envelope::MessageContent;
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -44,93 +43,13 @@ const BUBBLE_RADIUS: f32 = 14.;
 /// A delete that never lands (failed, offline) stops waiting after this.
 const VANISH_WAIT: Duration = Duration::from_secs(10);
 
-/// A row's bounds and its bubble's, in window coordinates.
-type Painted = (Bounds<Pixels>, Option<Bounds<Pixels>>);
+mod painted;
 
-/// A window's draw: the frame a row was painted in.
-type Stamp = (WindowId, u64);
-
-thread_local! {
-    /// Where each history row and its bubble were last painted, by
-    /// chat and message id, and in which frame: a delete starts its dust
-    /// there.
-    static PAINTED: RefCell<HashMap<ChatMessage, (Painted, Stamp)>> =
-        RefCell::new(HashMap::new());
-    /// The latest frame of each window that painted a row. A row painted
-    /// in an older frame is not on screen now (scrolled away, or another
-    /// chat), so its bounds are not where the dust belongs.
-    static LATEST: RefCell<HashMap<WindowId, u64>> = RefCell::new(HashMap::new());
-}
-
-fn record(id: ChatMessage, window: &Window, update: impl FnOnce(&mut Painted)) {
-    let stamp = (window.window_handle().window_id(), window.frame_number());
-    LATEST.with(|latest| {
-        if let Ok(mut latest) = latest.try_borrow_mut() {
-            let frame = latest.entry(stamp.0).or_insert(stamp.1);
-            *frame = (*frame).max(stamp.1);
-        }
-    });
-    PAINTED.with(|painted| {
-        // A conflict skips this frame's record; the next paint writes it.
-        let Ok(mut painted) = painted.try_borrow_mut() else {
-            return;
-        };
-        if painted.len() > 4096 {
-            painted.clear();
-        }
-        let entry = painted
-            .entry(id)
-            .or_insert(((Bounds::default(), None), stamp));
-        if entry.1 != stamp {
-            // The other half of the last frame's record is out of date.
-            *entry = ((Bounds::default(), None), stamp);
-        }
-        update(&mut entry.0);
-    });
-}
-
-/// Where a message's row and bubble were painted, when that was in the
-/// latest frame of its window: otherwise the message is not on screen.
-fn painted_now(id: ChatMessage) -> Option<Painted> {
-    let (bounds, (window, frame)) =
-        PAINTED.with(|painted| painted.try_borrow().ok()?.get(&id).copied())?;
-    let latest = LATEST.with(|latest| latest.try_borrow().ok()?.get(&window).copied());
-    (latest == Some(frame)).then_some(bounds)
-}
-
-/// Where a message's row and bubble were last painted.
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
-pub(super) fn painted(id: ChatMessage) -> Option<Painted> {
-    PAINTED.with(|painted| painted.borrow().get(&id).map(|(bounds, _)| *bounds))
-}
-
-/// An invisible child that notes where a history row is painted.
-pub(super) fn row_tracker(id: ChatMessage) -> impl IntoElement {
-    canvas(
-        |_, _, _| {},
-        move |bounds, _, window, _| {
-            record(id, window, |entry| entry.0 = bounds);
-        },
-    )
-    .absolute()
-    .inset_0()
-    .size_full()
-}
-
-/// An invisible child that notes where a message's bubble is painted.
-pub(super) fn bubble_tracker(id: ChatMessage) -> impl IntoElement {
-    canvas(
-        |_, _, _| {},
-        move |bounds, _, window, _| {
-            record(id, window, |entry| entry.1 = Some(bounds));
-        },
-    )
-    .absolute()
-    .inset_0()
-    .size_full()
-}
-
+pub(super) use painted::painted;
+use painted::painted_now;
+pub(super) use painted::{bubble_tracker, row_tracker, window_closed};
 /// One grain of dust.
 #[derive(Clone, Copy)]
 struct Grain {
@@ -361,10 +280,25 @@ impl VanishClock {
     }
 }
 
+/// The delete a ghost waits on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Deletion {
+    /// A `deleteMessages` Quill sent: its answer (refused: the message
+    /// stays and the ghost goes) and the message leaving the history
+    /// (`message_deleted`) both end the wait.
+    Sent(RequestId),
+    /// A delete applied here, with no answer to wait for (the demo): only
+    /// the message leaving ends the wait.
+    Local,
+}
+
 /// Where a ghost is: waiting for the deletion to land, or crumbling.
 enum GhostStage {
     /// Deletion requested at this instant, not landed yet.
-    Waiting { requested: Instant },
+    Waiting {
+        deletion: Deletion,
+        requested: Instant,
+    },
     /// The message left the history at `started`: the animation's clock.
     Crumbling {
         started: Instant,
@@ -405,7 +339,7 @@ impl Vanishing {
     }
 
     fn phase(&self, now: Instant) -> Phase {
-        if let GhostStage::Waiting { requested } = self.stage {
+        if let GhostStage::Waiting { requested, .. } = self.stage {
             // A clock behind the request counts as no time passed.
             let waited = now
                 .checked_duration_since(requested)
@@ -446,6 +380,52 @@ impl Vanishing {
     }
 }
 
+/// Settles the ghosts that wait on a sent delete with its answer: a refused
+/// one ends its ghost (the message stays), an answered one waits for the
+/// message to leave the history. A wait that ran out forgets its request.
+fn settle_ghosts(
+    vanishing: &RefCell<Vec<Vanishing>>,
+    now: Instant,
+    acks: &mut quill::state::RequestAcks,
+) {
+    let Ok(mut ghosts) = vanishing.try_borrow_mut() else {
+        return;
+    };
+    let mut requests: Vec<RequestId> = ghosts
+        .iter()
+        .filter_map(|ghost| match ghost.stage {
+            GhostStage::Waiting {
+                deletion: Deletion::Sent(request),
+                ..
+            } => Some(request),
+            _ => None,
+        })
+        .collect();
+    requests.sort_unstable_by_key(|request| request.0);
+    requests.dedup();
+    let refused: Vec<RequestId> = requests
+        .into_iter()
+        .filter(|request| matches!(acks.take(*request), Some(quill::state::Answer::Failed(_))))
+        .collect();
+    ghosts.retain(|ghost| {
+        let GhostStage::Waiting {
+            deletion: Deletion::Sent(request),
+            ..
+        } = ghost.stage
+        else {
+            return true;
+        };
+        if refused.contains(&request) {
+            return false;
+        }
+        if ghost.phase(now) == Phase::Done {
+            acks.forget(request);
+            return false;
+        }
+        true
+    });
+}
+
 /// A photo's preview, for coloring its dust.
 fn picture_of(message: &HistoryMessage) -> Option<image::RgbaImage> {
     let MessageContent::Photo(photo) = &message.content else {
@@ -459,7 +439,7 @@ impl QuillApp {
     /// Remember the messages about to be deleted — where they are on
     /// screen and what they look like — so they can crumble once the
     /// deletion lands.
-    pub(super) fn begin_vanish(&self, chat_id: ChatId, ids: &[MessageId]) {
+    pub(super) fn begin_vanish(&self, chat_id: ChatId, ids: &[MessageId], deletion: Deletion) {
         // `ThanosEffect::Supported`: not with "Effects in messages" or
         // interface animations saving power.
         if quill::power_saving::on(quill::power_saving::Flag::ChatEffects)
@@ -506,7 +486,10 @@ impl QuillApp {
             };
             vanishing.push(Vanishing {
                 message: message.clone(),
-                stage: GhostStage::Waiting { requested: now },
+                stage: GhostStage::Waiting {
+                    deletion,
+                    requested: now,
+                },
                 row,
                 bubble,
                 palette,
@@ -523,9 +506,7 @@ impl QuillApp {
         let Ok(mut vanishing) = self.history.vanishing.try_borrow_mut() else {
             return;
         };
-        // An emptied chat has no first message: it is the chat shown, and
-        // an empty list only means a deletion once the session knows it.
-        let emptied = messages.is_empty();
+        // An emptied chat has no first message: it is the chat shown.
         let chat = messages
             .first()
             .map(|m| m.chat_id)
@@ -537,8 +518,9 @@ impl QuillApp {
             {
                 continue;
             }
-            if emptied
-                && ghost.is_waiting()
+            // Missing from the rows is not deleted: a switch of topic, a
+            // search or a jump leaves the message out of them too.
+            if ghost.is_waiting()
                 && !self
                     .session()
                     .is_some_and(|s| s.message_deleted(ghost.message.chat_id, ghost.message.id))
@@ -581,6 +563,16 @@ impl QuillApp {
                         .session()
                         .is_some_and(|s| s.message_deleted(chat, ghost.message.id)))
         })
+    }
+
+    /// The answers to the deletes the ghosts wait on (see
+    /// [`settle_ghosts`]).
+    pub(super) fn settle_vanishing(&mut self) {
+        let now = self.vanish_clock_now();
+        let vanishing = &self.screen.history.vanishing;
+        if let Some(live) = self.live.as_mut() {
+            settle_ghosts(vanishing, now, &mut live.driver.session.acks);
+        }
     }
 
     /// Drop the dissolves that are over, or whose deletion never landed.
@@ -806,6 +798,11 @@ impl QuillApp {
             ghost.row = Some(area);
             ghost.bubble = Some(area);
         }
+    }
+
+    /// Settle the dissolves with `acks`, as the poll does with the session's.
+    pub(super) fn settle_ghosts_for_test(&self, acks: &mut quill::state::RequestAcks) {
+        settle_ghosts(&self.history.vanishing, self.vanish_clock_now(), acks);
     }
 
     /// Whether each dissolve held a painted row to start its dust from.

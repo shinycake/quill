@@ -10241,10 +10241,41 @@ orders), `deep_link_routes_tests` (seek stays with its account).
 | 24-008 | Not a leak: `Answers::take_for` drops every answer it is not asked for, and the preview's drain runs on every poll, so a link arriving after Cancel is dropped at once (test `a_share_link_arriving_after_cancel_is_dropped`). |
 | 23-002 | Skipped (plausible): the dropped order is held only until the model shows it (`Echo::Caught` ends it), and the driver's optimistic reorder puts the dropped order into the model before the send returns, so a later server refusal rolls back a hold that is already over. Only a refusal before any sync saw the dropped order would hold it, and `reorder_refused` covers the synchronous refusals. No Touch Bar on Linux to drive it. |
 | 23-003 | Skipped: tdesktop seeks the viewer's video while the slider moves (`playbackControlsSeekProgress`), as the comment at `Command::ViewerSeek` says. |
-| 23-011 | Skipped: the retry on reopen is the documented choice (a pass that retried would hammer a connection that is down); a backoff retry needs a clock the pump does not have, and tdesktop's source was not at hand to copy its rule. |
+| 23-011 | Fixed in fix round 2 (below). Skipped before: the retry on reopen is the documented choice (a pass that retried would hammer a connection that is down); a backoff retry needs a clock the pump does not have, and tdesktop's source was not at hand to copy its rule. |
 | g-403..g-430, g-434..g-438 | Names that said work was in flight on values that hold none: `Decoding::Active`, `Stage::Claimed`, `LookStage::Coming`, `Phase::Intact`/`Percent`/`NoPicture`, `PlayState::NotOpen`, `PictureState::{Spinner, Progress}`, `LiveOverlay::Placeholder`, `WaitingCheck::ShowAfter`, `Echo::OldOrder`, `PickerFill::Held`, `Unavailable::Undecided`, `Kind::HelperHolds`, `ToldStage::Untold`, `SendResult`, `ExtractionStage::{NoChild, Spawned}`, `VcardImport::Picked`, `Assembly::Partial`, `Cancellation::Active`. The open poll of `VideoPlayer` is gone: `Player::on_open` runs a wake from the decode thread when the file opens, and a capture's still waits on a condvar (`wait_open`, `wait_frame`). The caBLE scan waits on a stop signal instead of a 200 ms flag check. `run_poll_loop`'s gap is `throttle`. |
 
 Tests: `story_viewer::open_tests`, `profile_photo_sources::tests`,
 `video_editor_timeline::frames`, `web_app_ui::{emoji_status_tests,
 launch_flow}`, `widgets_lock_tests`, `wallpaper_preview_tests`, `voice`,
 `media_viewer`, `video_decode::tests`.
+
+#### Fix round 2 (r4-12)
+
+| Ids | What changed |
+| --- | --- |
+| toast footer | `Footer::Kept(note)`: `drop_toasts` (before a session exists) keeps a toast-kind note for the footer line, and `advance` (called only with a session) turns it into the blank default, so a failed sign-in's error no longer swallows the progress notes after sign-in. |
+| AVPlayer open | `avplayer_open::OpenWatch`: a key-value observer on `AVPlayerItem.status` signals `Backend::on_open`, so the open wake exists on macOS too. `awaits_picture` lost its `NotOpen` branch; a backend that signals gets no vsync frames while it opens (`await_open` clears the wait, the wake asks for the first picture). |
+| 23-011 | A reconnect (`updateConnectionState` to Ready) gives every failed translation its attempts back (`Session::translations_back_online`), and the pump's scan keeps unsettled messages, failures that ran out of attempts included, so a chat that stays open asks again. |
+| recheck timer | `recheck_for_updates` starts a check only from Idle, UpToDate, NoRelease or Failed: it never turns a known update (Available, Staged, Downloading, Installing, Installed) into `Checking`. |
+| updates.rs doc | `RECHECK_EVERY` has its own doc again. |
+| self-update probe | `finish_previous_update` answers `AVAILABILITY` when `current_exe` fails and when the cleanup thread cannot start. `wait_with_timeout` is `child_timeout::wait_within` plus the kill. |
+| widgets drain | `schedule_widget_polls` does not call a poll dropped while its answer waits in `bots.widget_answers` (held back while locked). |
+| story doc | `StoryAsk::NoneOut` says what gives it. |
+| vanish | `GhostStage::Waiting { deletion: Deletion, requested }`: `Deletion::Sent(RequestId)` is ended by the answer (a refused delete drops the ghost: `settle_ghosts`, run by `poll_drains`), `Local` is the demo's. A ghost turns to dust only when the session knows the deletion (`message_deleted`), in every merge case. `LATEST` and the painted rows of a closed window are dropped (`painted::window_closed`). Split `vanish/painted.rs`. |
+| popups | The popups map holds only `App`, `Clipboard` and `CloseConfirm`; a stage that opened its popup holds the `PopupId` and `popup_owner` asks each stage whether it owns an answer's id. `show_popup` returns the ids it replaced and `show_mini_app_popup` answers them, so no later helper event is needed (`answer_replaced_popups` is gone). |
+| mini-app window | `MiniAppWindow::launch_window` replaces `MiniApps::from_window`: the poll and the helper's events run as the window the open app's flow started in. `mini_app_watch_due` ticks only while the phone flow waits on a request. |
+| emoji status | `SetStage::Deferred` is gone: the suggested emoji's own lookup (`ConnectDriver::resolve_suggested_emoji`) does not wait behind the shared slot, so the stage goes straight to `Resolving { request }`. |
+| helper pipe tests | The broken sink holds a sender dropped when the writer thread ends; the tests block on `recv()`. |
+| translate Hide | A Hide that TDLib refuses (the flag is back) ends its Undo toast with an error note (`end_refused_hide_toast`). |
+| suggested posts | The Decline box closes when its post is decided elsewhere (`close_decided_decline`) and `confirm_suggest_decline` sends nothing for a decided post; the dead `.loading/.disabled` and the dead busy branch of Publish are gone. |
+| touch bar | `PickerFill::{Unfilled, Shown(contents), Held { shown, waiting }}` compares against what is shown first; `Anim::{Idle, Animating(timer)}` replaces `Option<NSTimer>`. |
+| update pill | `UpdatePill` is one enum (`Other`, `Percent`, `Ready`) carrying the glide and the swap start. |
+| video editor | A pointer move with the button up ends a held strip, a window losing focus ends it, and `start_encode` ends every drag. |
+| video player | `Stage::Landing` carries the instant of the loop seek; one not left after `LANDING_WAIT` is sent again. The FFmpeg volume reopen comment says what a failed open does. |
+| video decode | `Decoding::Gone(reason)`: a dead decode thread's failure stays, `seek` and `fail` leave it alone, and the decode loop notifies on a failed seek and on the end. |
+| video/mod.rs | The extraction worker blocks in `waitid` (unix) or `Child::wait` (Windows) instead of polling `try_wait`; cancel kills by pid or handle while the stage says `Spawned`, and the worker reaps. |
+| vcard import | `VcardImport::Picked` is gone; `BoxView::{Reading, Shown}` is the box's view of an `ImportStage`. |
+| voice | `Drop for VoiceFinish` removes the file of a finish nobody completed (a fixture's is kept); `VoiceCapture::drop` closes the microphone on the discard thread. |
+| BLE scan (Linux) | The stop branch is polled first, and a stream that ends sends `Available(false)`. |
+| CTAPHID | `Phase::{Waiting { deadline }, Cancelling { reason, until }}` replaces `Option<(HidError, Instant)>`. |
+| baselines | `poll:scan` is gone from the owned-timers baseline; stale allow lines for `Phase::Opening`, `LiveOverlay::Opening` and `poll:run_poll_loop` are gone. `app-wide-fields.txt` lists the new `UpdatePill` paths in place of the old ones. |

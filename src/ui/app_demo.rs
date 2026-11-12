@@ -267,6 +267,11 @@ impl QuillApp {
             this.hold_video_avatar(any_active);
             super::glyph_sweep::window_activation(window.window_handle().window_id(), active);
             this.viewer_window_activation(window, cx);
+            if !active {
+                this.in_window_of(window, cx, |this, _, cx| {
+                    this.release_video_timeline_on_blur(cx)
+                });
+            }
             // The system accent may have changed while another app was in
             // front, and the night clock's wait ran on a clock that stops
             // while the machine sleeps: apply again and arm it afresh.

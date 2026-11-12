@@ -134,6 +134,7 @@ impl Decoder {
                 && let Err(err) = result
             {
                 state.decoding.fail(err);
+                shared.progress.notify_all();
             }
             return Turn::Worked;
         }
@@ -193,6 +194,7 @@ impl Decoder {
                     shared.progress.notify_all();
                 } else {
                     state.decoding.end();
+                    shared.progress.notify_all();
                 }
             }
             Err(err) => {
