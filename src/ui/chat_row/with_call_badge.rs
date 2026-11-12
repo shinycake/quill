@@ -56,7 +56,7 @@ pub(super) fn pinned_here(chat: &ChatSummary, archived: bool) -> bool {
     if archived {
         chat.archive_is_pinned()
     } else {
-        chat.is_pinned
+        chat.is_pinned()
     }
 }
 

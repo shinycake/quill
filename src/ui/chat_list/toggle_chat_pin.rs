@@ -38,7 +38,7 @@ impl QuillApp {
         let pinned = if archived {
             chat.archive_is_pinned()
         } else {
-            chat.is_pinned
+            chat.is_pinned()
         };
         let secret = matches!(chat.kind, ChatKind::Secret { .. });
         if !pinned {
@@ -54,7 +54,7 @@ impl QuillApp {
                     let is_pinned = if archived {
                         c.in_archive() && c.archive_is_pinned()
                     } else {
-                        c.in_main_list() && c.is_pinned
+                        c.in_main_list() && c.is_pinned()
                     };
                     is_pinned && matches!(c.kind, ChatKind::Secret { .. }) == secret
                 })

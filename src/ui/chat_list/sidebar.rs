@@ -269,7 +269,7 @@ impl QuillApp {
                 .iter()
                 .map(|chat| ListedChat {
                     chat_id: chat.id.0,
-                    pinned: chat.is_pinned,
+                    pinned: chat.is_pinned(),
                     date: chat.last_message().as_ref().map_or(0, |m| m.date),
                 })
                 .collect();

@@ -528,7 +528,7 @@ impl QuillApp {
                         if chat.in_archive() {
                             chat.archive_is_pinned()
                         } else {
-                            chat.is_pinned
+                            chat.is_pinned()
                         }
                     });
                 (id, pinned)

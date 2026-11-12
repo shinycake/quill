@@ -239,7 +239,7 @@ impl QuillApp {
         let pinned = if chat.in_archive() {
             chat.archive_is_pinned()
         } else {
-            chat.is_pinned
+            chat.is_pinned()
         };
         let unread = chat.is_marked_as_unread || chat.unread_count > 0;
         let archived = chat.in_archive();

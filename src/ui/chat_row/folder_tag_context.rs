@@ -74,7 +74,7 @@ impl QuillApp {
                 let pinned = if archived {
                     chat.archive_is_pinned()
                 } else {
-                    chat.is_pinned
+                    chat.is_pinned()
                 };
                 let draggable = pinned
                     && self.pinned_list_shown(archived)
