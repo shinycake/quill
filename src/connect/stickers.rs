@@ -390,15 +390,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         if changes.set_busy(set_id) || changes.reordering() {
             return Ok(None);
         }
-        let sent = self.sticker_request(
+        self.sticker_request(
             RequestPurpose::Stickers(StickersPurpose::ManageStickerSet {
                 set_id,
                 installed,
                 archived,
             }),
             |id| change_sticker_set(id, set_id, installed, archived),
-        );
-        sent
+        )
     }
 
     pub(crate) fn refresh_installed_sticker_sets(
