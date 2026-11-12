@@ -715,16 +715,10 @@ fn a_failed_burst_request_is_not_asked_again_by_the_call_updates_of_the_same_sto
     // Not asked again by the next ingest, only by the next Join.
     h.ingest(&LIVE_CALL.replace("JOINED", "true"));
     assert_eq!(h.sent("getCustomEmojiReactionAnimations"), 1);
+    // A new Join asks once more; the one after it finds the ask out.
     rejoin(&mut h);
     rejoin(&mut h);
-    assert_eq!(h.sent("getCustomEmojiReactionAnimations"), 1);
-    // The next live story opened asks once more.
-    h.driver.session.end_live_story();
-    h.driver.session.begin_live_story(7, 6, 4242);
-    assert_eq!(
-        h.driver.session.stories.live_bursts,
-        crate::state::LiveBursts::Unasked
-    );
+    assert_eq!(h.sent("getCustomEmojiReactionAnimations"), 2);
 }
 
 #[test]

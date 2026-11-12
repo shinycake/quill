@@ -726,14 +726,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             }),
             Some(chat_id),
         );
-        if first_page {
-            self.session.bots.inline_query = Some(InlineQuerySlot {
-                chat_id,
-                bot_user_id,
-                query: query.to_string(),
-                fetch: InlineQueryFetch::Loading { request: extra },
-            });
-        }
         let json = get_inline_query_results(extra, bot_user_id, chat_id, query, offset);
         // The slot changes once the request went out: a refused send leaves
         // the previous query's results where they were.
