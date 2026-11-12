@@ -727,7 +727,8 @@ fn the_chooser_lists_saved_gifs_except_when_adapting(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.stickers.gifs.saved_answered(vec![AnimationItem {
+            session.stickers.gifs.saved_asked(quill::ids::RequestId(1));
+            session.stickers.gifs.saved_answered(Some(quill::ids::RequestId(1)), vec![AnimationItem {
                 duration: 2,
                 width: 320,
                 height: 240,

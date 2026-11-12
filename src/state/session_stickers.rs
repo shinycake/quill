@@ -257,8 +257,12 @@ impl Session {
         self.stickers.stickers.selection.stage = StickerSetStage::Loading { set_id, request };
     }
 
-    pub fn accept_saved_animations(&mut self, animations: Vec<AnimationItem>) {
-        self.stickers.gifs.saved_answered(animations);
+    pub fn accept_saved_animations(
+        &mut self,
+        request: Option<RequestId>,
+        animations: Vec<AnimationItem>,
+    ) {
+        self.stickers.gifs.saved_answered(request, animations);
     }
 
     /// Slice S9: store a GIF-search `inlineQueryResults` page. A first page

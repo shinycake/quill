@@ -259,7 +259,6 @@ fn a_keyword_search_is_settled_only_by_its_own_answer_and_a_refusal_is_not_asked
         extra_of(&first[0])
     ));
     let keywords = &rig.driver.session.stickers.emoji.keyword_emojis;
-    assert_eq!(keywords.query(), "water");
     assert_eq!(keywords.for_query("fire"), ["🔥".to_string()]);
     assert!(keywords.for_query("water").is_empty() && keywords.asking("water"));
     // The second is refused: the query stays known, so the panel does not
@@ -271,6 +270,25 @@ fn a_keyword_search_is_settled_only_by_its_own_answer_and_a_refusal_is_not_asked
     let keywords = &rig.driver.session.stickers.emoji.keyword_emojis;
     assert!(keywords.knows("water") && !keywords.asking("water"));
     assert_eq!(keywords.for_query("fire"), ["🔥".to_string()]);
+}
+
+/// Sweep r4-03 round 2 (item 8): a refused keyword query is forgotten when
+/// the field is cleared, and when the connection comes back, so typing the
+/// same words again asks again.
+#[test]
+fn a_refused_keyword_query_is_asked_again_after_the_field_is_cleared() {
+    let mut rig = Rig::new();
+    rig.driver.search_keyword_emojis("fire").unwrap();
+    let first = rig.sent("getKeywordEmojis");
+    rig.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":500,"message":"X"}}"#,
+        extra_of(&first[0])
+    ));
+    assert!(rig.driver.session.stickers.emoji.keyword_emojis.knows("fire"));
+    rig.driver.search_keyword_emojis("").unwrap();
+    assert!(!rig.driver.session.stickers.emoji.keyword_emojis.knows("fire"));
+    rig.driver.search_keyword_emojis("fire").unwrap();
+    assert_eq!(rig.sent("getKeywordEmojis").len(), 2);
 }
 
 #[test]

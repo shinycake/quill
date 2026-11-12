@@ -44,7 +44,6 @@ pub struct AccountSummary {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AccountStage {
-    Starting,
     /// Listing the chats: how many were found so far.
     ChatsList {
         found: usize,
@@ -70,48 +69,48 @@ pub enum AccountStage {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountProgress {
-    pub stage: AccountStage,
+    /// `None` until the worker reports its first step: the box says
+    /// "Initializing…" meanwhile.
+    pub stage: Option<AccountStage>,
 }
 
 impl AccountProgress {
     pub fn starting() -> Self {
-        Self {
-            stage: AccountStage::Starting,
-        }
+        Self { stage: None }
     }
 
     pub fn is_settled(&self) -> bool {
         matches!(
             self.stage,
-            AccountStage::Finished(_) | AccountStage::Failed(_) | AccountStage::Cancelled
+            Some(AccountStage::Finished(_) | AccountStage::Failed(_) | AccountStage::Cancelled)
         )
     }
 
     /// The main line of the progress box (tdesktop's state names).
     pub fn label(&self) -> String {
         match &self.stage {
-            AccountStage::Starting => "Initializing…".into(),
-            AccountStage::ChatsList { found } => format!("Processing chats… {found}"),
-            AccountStage::PersonalInfo => "Account information".into(),
-            AccountStage::Userpics => "Profile photos".into(),
-            AccountStage::Stories => "Story archive".into(),
-            AccountStage::ProfileMusic => "Music on Profiles".into(),
-            AccountStage::Contacts => "Contacts list".into(),
-            AccountStage::Sessions => "Active sessions".into(),
-            AccountStage::Chats {
+            None => "Initializing…".into(),
+            Some(AccountStage::ChatsList { found }) => format!("Processing chats… {found}"),
+            Some(AccountStage::PersonalInfo) => "Account information".into(),
+            Some(AccountStage::Userpics) => "Profile photos".into(),
+            Some(AccountStage::Stories) => "Story archive".into(),
+            Some(AccountStage::ProfileMusic) => "Music on Profiles".into(),
+            Some(AccountStage::Contacts) => "Contacts list".into(),
+            Some(AccountStage::Sessions) => "Active sessions".into(),
+            Some(AccountStage::Chats {
                 index, count, name, ..
-            } => format!("Chats: {} of {} · {}", index + 1, count, name),
-            AccountStage::Finished(_) => "Your data was exported.".into(),
-            AccountStage::Failed(reason) => format!("Export failed: {reason}"),
-            AccountStage::Cancelled => "Export cancelled".into(),
+            }) => format!("Chats: {} of {} · {}", index + 1, count, name),
+            Some(AccountStage::Finished(_)) => "Your data was exported.".into(),
+            Some(AccountStage::Failed(reason)) => format!("Export failed: {reason}"),
+            Some(AccountStage::Cancelled) => "Export cancelled".into(),
         }
     }
 
     /// The line under it: the running chat's own step.
     pub fn detail(&self) -> Option<String> {
         match &self.stage {
-            AccountStage::Chats { chat, .. } => Some(chat.label()),
-            AccountStage::Finished(summary) => Some(format!(
+            Some(AccountStage::Chats { chat, .. }) => Some(chat.label()),
+            Some(AccountStage::Finished(summary)) => Some(format!(
                 "{} chats, {} messages and {} files saved. {} files left out.",
                 summary.chats, summary.messages, summary.files, summary.skipped
             )),
@@ -122,13 +121,13 @@ impl AccountProgress {
     /// 0.0..=1.0 across the chats, `None` before they start.
     pub fn fraction(&self) -> Option<f32> {
         match &self.stage {
-            AccountStage::Chats {
+            Some(AccountStage::Chats {
                 index, count, chat, ..
-            } if *count > 0 => {
+            }) if *count > 0 => {
                 let inner = chat.fraction().unwrap_or(0.0);
                 Some((*index as f32 + inner) / *count as f32)
             }
-            AccountStage::Finished(_) => Some(1.0),
+            Some(AccountStage::Finished(_)) => Some(1.0),
             _ => None,
         }
     }
@@ -227,10 +226,9 @@ fn run_inner<T: Tdlib>(
     let offset_at = job.offset_at;
     let mut progress = AccountProgress::starting();
     let step = |progress: &mut AccountProgress, stage: AccountStage| {
-        progress.stage = stage;
+        progress.stage = Some(stage);
         (job.report)(progress.clone());
     };
-    step(&mut progress, AccountStage::Starting);
     let me = query(tdlib, json!({"@type": "getMe"}))?;
     let me_id = me.at("id").as_i64().unwrap_or(0);
 
@@ -238,7 +236,7 @@ fn run_inner<T: Tdlib>(
         step(&mut progress, AccountStage::ChatsList { found: 0 });
         let report_found = |n: usize| {
             (job.report)(AccountProgress {
-                stage: AccountStage::ChatsList { found: n },
+                stage: Some(AccountStage::ChatsList { found: n }),
             });
         };
         dialogs::list(tdlib, settings, me_id, &report_found)?
@@ -474,12 +472,12 @@ fn export_chats<T: Tdlib>(
         // counts carry over from the one before.
         chat_progress.stage = Stage::Starting;
         let chat_stage = |chat: Progress| AccountProgress {
-            stage: AccountStage::Chats {
+            stage: Some(AccountStage::Chats {
                 index,
                 count: dialogs.len(),
                 name: dialog.name.clone(),
                 chat,
-            },
+            }),
         };
         *progress = chat_stage(chat_progress.clone());
         (job.report)(progress.clone());

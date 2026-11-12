@@ -90,7 +90,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .stickers
             .emoji
-            .upgraded_gift_statuses
+            .upgraded_gift_statuses()
             .iter()
             .filter_map(|item| item.gift.clone())
             .find(|gift| gift.model_custom_emoji_id == custom_emoji_id)
@@ -209,14 +209,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .stickers
             .emoji
-            .recent_statuses
+            .recent_statuses()
             .iter()
             .map(|s| s.custom_emoji_id)
             .chain(
                 self.session
                     .stickers
                     .emoji
-                    .themed_status_ids
+                    .themed_status_ids()
                     .iter()
                     .copied(),
             )
@@ -224,7 +224,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session
                     .stickers
                     .emoji
-                    .default_status_ids
+                    .default_status_ids()
                     .iter()
                     .copied(),
             )
@@ -232,7 +232,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session
                     .stickers
                     .emoji
-                    .chat_default_status_ids
+                    .chat_default_status_ids()
                     .iter()
                     .copied(),
             )
@@ -240,7 +240,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session
                     .stickers
                     .emoji
-                    .upgraded_gift_statuses
+                    .upgraded_gift_statuses()
                     .iter()
                     .filter_map(|item| item.gift.as_ref().map(|g| g.model_custom_emoji_id)),
             )
@@ -301,25 +301,30 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if purpose != RequestPurpose::ViewTrendingEmojiSets
-            && self.session.requests.has_purpose(purpose)
-        {
+        // A list is asked again unless its own request is out (an older ask
+        // that a change outdated was dropped with its stage); a request
+        // that has no list waits for the one in flight.
+        let busy = match self.session.stickers.emoji.lists.loading(purpose) {
+            Some(loading) => loading,
+            None => {
+                purpose != RequestPurpose::ViewTrendingEmojiSets
+                    && self.session.requests.has_purpose(purpose)
+            }
+        };
+        if busy {
             return Ok(None);
         }
         let extra = self.session.request(purpose, None);
         if let Err(err) = self.sender.send_json(&build(extra)) {
             self.session.requests.take(extra);
-            if let Some(list) = self.session.stickers.emoji.lists.for_purpose(purpose) {
-                list.fail(crate::lang::tr(
-                    crate::lang::keys::Q_MEDIA_COULD_NOT_UPDATE_EMOJI_PACKS,
-                ));
-            }
+            self.session.stickers.emoji.lists.send_failed(
+                purpose,
+                crate::lang::tr(crate::lang::keys::Q_MEDIA_COULD_NOT_UPDATE_EMOJI_PACKS)
+                    .to_string(),
+            );
             return Err(err);
         }
-        if let Some(list) = self.session.stickers.emoji.lists.for_purpose(purpose) {
-            list.begin();
-            list.sent(extra);
-        }
+        self.session.stickers.emoji.lists.sent(purpose, extra);
         Ok(Some(extra))
     }
 
@@ -391,6 +396,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.stickers.emoji.open = true;
+        // A cover whose download failed is tried again each time the box
+        // opens.
+        self.session.stickers.emoji.covers_requested.clear();
         // "Could not update emoji packs" was the last box's; a change
         // still in flight sets it again if it fails.
         self.session.stickers.emoji.mutation.forget_failure();
@@ -500,11 +508,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let requests = &self.session.requests;
+        let connected = self.session.connection == crate::telegram::envelope::ConnectionState::Ready;
         self.session
             .stickers
             .emoji
             .keyword_lookups
-            .retain_in_flight(|id| requests.get(id).is_some());
+            .retain_in_flight(|id| requests.get(id).is_some(), connected);
         let locale = crate::emoji::system_locale();
         for query in queries {
             if !self.session.stickers.emoji.keyword_lookups.wants(query) {
@@ -643,9 +652,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::GetTrendingEmojiSets,
         ] {
             drop(self.session.requests.take_purpose(purpose));
-            if let Some(list) = self.session.stickers.emoji.lists.for_purpose(purpose) {
-                list.cancel();
-            }
+            self.session.stickers.emoji.lists.cancel(purpose);
         }
         self.session.stickers.emoji.lists.trending.cancel();
         if !self.chats_path_active() {

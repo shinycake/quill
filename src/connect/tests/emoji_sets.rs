@@ -284,7 +284,7 @@ fn emoji_status_choices_resolution_timing_and_confirmed_clear() {
     let expiry = sent["emoji_status"]["expiration_date"].as_u64().unwrap();
     assert!(expiry >= before + 3600 && expiry <= crate::state::unix_ms_now() / 1000 + 3600);
     assert!(driver.clear_recent_emoji_statuses().unwrap().is_none());
-    assert_eq!(driver.session.stickers.emoji.recent_statuses.len(), 1);
+    assert_eq!(driver.session.stickers.emoji.recent_statuses().len(), 1);
     assert!(
         driver
             .session
@@ -297,7 +297,7 @@ fn emoji_status_choices_resolution_timing_and_confirmed_clear() {
         &mut driver,
         json!({"@type":"error","@extra":set.as_extra(),"code":400,"message":"PRIVATE_DETAIL"}),
     );
-    assert_eq!(driver.session.stickers.emoji.recent_statuses.len(), 1);
+    assert_eq!(driver.session.stickers.emoji.recent_statuses().len(), 1);
     let set = driver.change_emoji_status(Some(92), 0).unwrap().unwrap();
     assert_eq!(
         sent_request(&recorder, "setEmojiStatus")["emoji_status"]["expiration_date"],
@@ -351,7 +351,7 @@ fn emoji_status_choices_resolution_timing_and_confirmed_clear() {
         &mut driver,
         json!({"@type":"emojiStatuses","@extra":stale.as_extra(),"emoji_statuses":[{"@type":"emojiStatus","type":{"@type":"emojiStatusTypeCustomEmoji","custom_emoji_id":"91"},"expiration_date":0}]}),
     );
-    assert!(driver.session.stickers.emoji.recent_statuses.is_empty());
+    assert!(driver.session.stickers.emoji.recent_statuses().is_empty());
     // The selector also lists the collectibles, and sets one as its gift.
     driver.load_emoji_status_choices().unwrap();
     let gifts = request_id("getUpgradedGiftEmojiStatuses");
@@ -504,5 +504,68 @@ fn the_suggestion_bar_asks_for_the_installed_sets_until_they_answer() {
         2,
         "a new list asks for a failed list again"
     );
+    let _ = dir;
+}
+
+/// Sweep r4-03 round 2: a recent-statuses fetch that a status change
+/// outdated is dropped with its stage, and the next ask goes out (it was
+/// skipped while any request with the purpose was out). Only the new ask's
+/// answer fills the row.
+#[test]
+fn a_fetch_dropped_by_a_status_change_is_asked_again() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, payload: serde_json::Value| {
+        driver
+            .ingest(copy_and_parse(&payload.to_string(), &seq, &sink).unwrap())
+            .unwrap();
+    };
+    let request_id = |kind| {
+        RequestId(
+            sent_request(&recorder, kind)["@extra"]
+                .as_str()
+                .unwrap()
+                .parse()
+                .unwrap(),
+        )
+    };
+    let statuses = |id: i64| {
+        json!([{"@type":"emojiStatus","type":{"@type":"emojiStatusTypeCustomEmoji","custom_emoji_id":id.to_string()},"expiration_date":0}])
+    };
+    driver.load_emoji_status_choices().unwrap();
+    let old = request_id("getRecentEmojiStatuses");
+    let clear = driver.clear_recent_emoji_statuses().unwrap().unwrap();
+    ingest(&mut driver, json!({"@type":"ok","@extra":clear.as_extra()}));
+    driver.load_emoji_status_choices().unwrap();
+    let new = request_id("getRecentEmojiStatuses");
+    assert_ne!(old, new, "the refetch is sent");
+    ingest(
+        &mut driver,
+        json!({"@type":"emojiStatuses","@extra":old.as_extra(),"emoji_statuses":statuses(91)}),
+    );
+    assert!(driver.session.stickers.emoji.recent_statuses().is_empty());
+    ingest(
+        &mut driver,
+        json!({"@type":"emojiStatuses","@extra":new.as_extra(),"emoji_statuses":statuses(92)}),
+    );
+    assert_eq!(driver.session.stickers.emoji.recent_statuses().len(), 1);
+    let _ = dir;
+}
+
+/// Sweep r4-03 round 2 (item 19): a cover whose download failed is asked
+/// for again when the Emoji Sets box opens.
+#[test]
+fn opening_the_emoji_sets_box_forgets_the_covers_asked() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    driver.session.stickers.emoji.covers_requested.insert(5);
+    driver.open_emoji_sets().unwrap();
+    assert!(driver.session.stickers.emoji.covers_requested.is_empty());
     let _ = dir;
 }

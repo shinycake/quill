@@ -228,16 +228,9 @@ enum KeywordStage {
 pub struct KeywordEmojis {
     /// Oldest first; at most [`KEYWORD_KEPT`].
     entries: VecDeque<(String, KeywordStage)>,
-    /// The trimmed query asked last (empty when it was cleared).
-    last: String,
 }
 
 impl KeywordEmojis {
-    /// The trimmed query asked last.
-    pub fn query(&self) -> &str {
-        &self.last
-    }
-
     fn stage(&self, query: &str) -> Option<&KeywordStage> {
         let query = query.trim();
         self.entries
@@ -264,9 +257,17 @@ impl KeywordEmojis {
         }
     }
 
-    /// A cleared query: nothing is searched for.
+    /// The query was cleared: the searches that failed are forgotten, so
+    /// typing the same words again asks again.
     pub fn cleared(&mut self) {
-        self.last.clear();
+        self.forgive_failures();
+    }
+
+    /// The connection is back, or the field was cleared: refused searches
+    /// are asked again.
+    pub fn forgive_failures(&mut self) {
+        self.entries
+            .retain(|(_, stage)| !matches!(stage, KeywordStage::Failed));
     }
 
     fn put(&mut self, query: &str, stage: KeywordStage) {
@@ -275,7 +276,6 @@ impl KeywordEmojis {
         if self.entries.len() >= KEYWORD_KEPT {
             self.entries.pop_front();
         }
-        self.last.clone_from(&query);
         self.entries.push_back((query, stage));
     }
 

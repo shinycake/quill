@@ -43,7 +43,7 @@ fn a_late_page_of_an_earlier_search_does_not_answer_the_new_one() {
 #[test]
 fn a_failed_save_while_the_list_loads_keeps_the_fetch() {
     let mut panel = GifPanel::default();
-    panel.saved_asked();
+    panel.saved_asked(RequestId(1));
     panel.saved_mutation_failed();
     assert!(panel.loading() && !panel.failed());
 }
@@ -69,12 +69,12 @@ fn an_answer_to_a_left_search_changes_nothing() {
 fn the_saved_list_is_loaded_after_an_answer_or_a_failure_and_asked_again_after_a_retry() {
     let mut panel = GifPanel::default();
     assert!(!panel.loaded());
-    panel.saved_asked();
+    panel.saved_asked(RequestId(1));
     assert!(panel.loading() && !panel.loaded());
-    panel.saved_answered(Vec::new());
+    panel.saved_answered(Some(RequestId(1)), Vec::new());
     assert!(panel.loaded() && !panel.loading() && !panel.failed());
     // A refresh runs over the answer: still loaded, and loading.
-    panel.saved_asked();
+    panel.saved_asked(RequestId(2));
     assert!(panel.loaded() && panel.loading());
     panel.saved_failed();
     assert!(panel.loaded() && panel.failed() && !panel.loading());
@@ -86,7 +86,8 @@ fn the_saved_list_is_loaded_after_an_answer_or_a_failure_and_asked_again_after_a
 #[test]
 fn a_failed_save_leaves_the_list_in_place() {
     let mut panel = GifPanel::default();
-    panel.saved_answered(Vec::new());
+    panel.saved_asked(RequestId(1));
+    panel.saved_answered(Some(RequestId(1)), Vec::new());
     panel.saved_mutation_failed();
     assert!(panel.loaded() && panel.failed());
     // The next request starts clean.
@@ -97,13 +98,14 @@ fn a_failed_save_leaves_the_list_in_place() {
 #[test]
 fn clearing_a_failure_leaves_a_list_that_did_not_fail_alone() {
     let mut panel = GifPanel::default();
-    panel.saved_answered(Vec::new());
+    panel.saved_asked(RequestId(1));
+    panel.saved_answered(Some(RequestId(1)), Vec::new());
     panel.saved_failure_cleared();
     assert!(panel.loaded() && !panel.failed());
     let mut idle = GifPanel::default();
     idle.saved_failure_cleared();
     assert!(!idle.loaded());
-    idle.saved_asked();
+    idle.saved_asked(RequestId(5));
     idle.saved_failure_cleared();
     assert!(idle.loading());
 }
@@ -129,20 +131,43 @@ fn a_new_search_replaces_what_the_last_one_found() {
 fn a_saved_list_marked_out_of_date_drops_the_older_answer_and_is_asked_again() {
     // Sweep r2-19 (06-028): the mark is the fetch's own `Outdated`.
     let mut panel = GifPanel::default();
-    panel.saved_answered(Vec::new());
+    panel.saved_asked(RequestId(1));
+    panel.saved_answered(Some(RequestId(1)), Vec::new());
     assert!(panel.loaded() && !panel.saved_is_outdated());
-    panel.saved_asked();
+    panel.saved_asked(RequestId(2));
     panel.saved_outdated();
-    panel.saved_answered(Vec::new());
-    assert!(
-        !panel.loaded() || panel.saved_is_outdated(),
-        "the answer predates the change"
-    );
-    panel.saved_failed();
-    assert!(
-        !panel.loaded() || panel.saved_is_outdated(),
-        "a failure keeps the mark"
-    );
-    panel.saved_asked();
+    panel.saved_answered(Some(RequestId(2)), Vec::new());
+    assert!(panel.saved_is_outdated(), "the answer predates the change");
+    panel.saved_request_failed(Some(RequestId(2)));
+    assert!(panel.saved_is_outdated(), "a failure keeps the mark");
+    panel.saved_asked(RequestId(3));
     assert!(panel.loaded() && !panel.saved_is_outdated());
+}
+
+/// Sweep r4-03 round 2 (item 5): a removal while getSavedAnimations #1 is
+/// out forgets the list; #2 goes out. #1's answer predates the removal and
+/// must not bring the GIF back, and #1's error must not fail #2.
+#[test]
+fn an_older_saved_gif_fetch_never_lands_on_a_newer_one() {
+    let gif = |id| crate::telegram::envelope::AnimationItem {
+        duration: 1,
+        width: 1,
+        height: 1,
+        file_name: format!("{id}.mp4"),
+        mime_type: "video/mp4".into(),
+        file_id: crate::ids::FileId(id),
+        thumb: crate::telegram::envelope::Thumb::of(None, 1, 1, false),
+        minithumbnail: None,
+    };
+    let mut panel = GifPanel::default();
+    panel.saved_asked(RequestId(1));
+    panel.saved_forgotten();
+    panel.saved_asked(RequestId(2));
+    panel.saved_answered(Some(RequestId(1)), vec![gif(7)]);
+    assert!(panel.animations.is_empty(), "the old answer is dropped");
+    assert!(panel.loading());
+    panel.saved_request_failed(Some(RequestId(1)));
+    assert!(panel.loading() && !panel.failed(), "the old error is dropped");
+    panel.saved_answered(Some(RequestId(2)), Vec::new());
+    assert!(panel.loaded() && !panel.loading());
 }

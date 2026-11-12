@@ -572,21 +572,28 @@ impl GifPanel {
         }
     }
 
-    /// `getSavedAnimations` went out.
-    pub fn saved_asked(&mut self) {
+    /// `getSavedAnimations` went out as `request`: the list waits for its
+    /// answer.
+    pub fn saved_asked(&mut self, request: RequestId) {
         self.saved.begin();
+        self.saved.sent(request);
     }
 
-    /// `getSavedAnimations` answered. An `updateSavedAnimations` that came
-    /// while the request was out marks the list out of date: the answer may
-    /// predate the change, so it is shown (the list does not blank) and the
-    /// mark stays, so the list is asked for again.
-    pub fn saved_answered(&mut self, animations: Vec<AnimationItem>) {
-        self.animations = animations;
-        // Kept `Outdated` (now with a list held) when
-        // `updateSavedAnimations` arrived meanwhile: asked for again.
-        if !self.saved.answer(()) {
-            self.saved = Fetch::Outdated(Some(()));
+    /// `getSavedAnimations` answered as `request`. Only the fetch that waits
+    /// for it takes the answer: an `updateSavedAnimations` or a removal that
+    /// came while it was out dropped it (the list is asked for again), so
+    /// an answer that predates the change never shows.
+    pub fn saved_answered(&mut self, request: Option<RequestId>, animations: Vec<AnimationItem>) {
+        if self.saved.answered(request, ()) {
+            self.animations = animations;
+        }
+    }
+
+    /// `getSavedAnimations` came back with an error as `request`: only the
+    /// fetch that waits for it fails.
+    pub fn saved_request_failed(&mut self, request: Option<RequestId>) {
+        if request.is_some_and(|id| self.saved.waits_for(id)) {
+            self.saved_failed();
         }
     }
 
@@ -601,7 +608,8 @@ impl GifPanel {
         self.saved.is_outdated()
     }
 
-    /// `getSavedAnimations` failed, or could not be sent: counted as loaded,
+    /// `getSavedAnimations` could not be sent (or its error was matched, see
+    /// [`Self::saved_request_failed`]): counted as loaded,
     /// so nothing asks again until the panel is opened. A list marked out
     /// of date stays marked.
     pub fn saved_failed(&mut self) {

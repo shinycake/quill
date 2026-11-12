@@ -445,18 +445,11 @@ pub struct SettingsState {
     /// Slice S3: `readDatePrivacySettings.show_read_date` (schema 1.8.67,
     /// :9026) with the request in flight, or how the last one ended.
     pub read_date: ReadDate,
-    /// Slice S3: blocked user ids from `getBlockedMessageSenders`
-    /// (schema 1.8.67, :14505); idle while never fetched.
-    /// A blocked-senders page in flight or a failed get/set shows in the
-    /// same value; the loaded ids stay meanwhile.
-    pub blocked_senders: Fetch<Vec<i64>>,
-    /// `total_count` from the last `messageSenders` answer; more pages
-    /// exist while `blocked_senders.len() < blocked_total`.
-    pub blocked_total: i32,
-    /// Changes whenever the blocked list restarts or is dropped. A page
-    /// answers under the generation it was asked in and only extends that
-    /// list.
-    pub blocked_generation: u32,
+    /// Slice S3: blocked user ids and the server total from
+    /// `getBlockedMessageSenders` (schema 1.8.67, :14505); idle while never
+    /// fetched. A page in flight holds its request, and only that
+    /// request's answer or error settles it; the loaded ids stay meanwhile.
+    pub blocked_senders: Fetch<BlockedList>,
     /// MED1: local media preferences (remember-media-grouping),
     /// persisted via `settings::MediaPrefs`. Loaded at startup like
     /// `call_prefs`; the UI saves on toggle.
@@ -517,33 +510,95 @@ impl SettingsState {
         self.account_ttl.is_loading() || self.account_delete.is_loading()
     }
 
-    /// The blocked list starts over (a fresh fetch, or its data was
-    /// dropped): pages asked for the old one no longer apply.
-    pub fn restart_blocked_list(&mut self) {
-        self.blocked_generation = self.blocked_generation.wrapping_add(1);
+    /// The blocked ids loaded so far.
+    pub fn blocked_ids(&self) -> &[i64] {
+        self.blocked_senders
+            .data()
+            .map_or(&[], |list| list.ids.as_slice())
     }
 
-    /// One blocked-senders page. Page 0 replaces the list; a later page
-    /// extends the list it was asked for, without ids already there. A page
-    /// of an older list, or one with no list left to extend, is dropped and
-    /// changes nothing (not even the total).
+    /// `total_count` of the last page; more pages exist while it is above
+    /// the loaded length.
+    pub fn blocked_total(&self) -> i32 {
+        self.blocked_senders.data().map_or(0, |list| list.total)
+    }
+
+    /// One blocked-senders page, taken only by the fetch that waits for
+    /// `request`. Page 0 replaces the list; a later page extends it, without
+    /// ids already there.
     pub fn apply_blocked_page(
         &mut self,
+        request: Option<RequestId>,
         offset: i32,
-        generation: u32,
         total_count: i32,
         sender_ids: Vec<i64>,
     ) {
-        if generation != self.blocked_generation {
+        let Some(request) = request.filter(|id| self.blocked_senders.waits_for(*id)) else {
+            return;
+        };
+        let held = if offset == 0 {
+            Vec::new()
+        } else {
+            match self.blocked_senders.data_mut() {
+                Some(list) => std::mem::take(&mut list.ids),
+                None => return,
+            }
+        };
+        self.blocked_senders.answered(
+            Some(request),
+            BlockedList {
+                ids: dedup_ids(held, sender_ids),
+                total: total_count,
+            },
+        );
+    }
+
+    /// A block or unblock of `user_id` goes out, applied to the list at send
+    /// time. A page asked before it would replace the list without the
+    /// change, so a page in flight gives way to this request: its `ok`
+    /// asks for the first page again ([`Self::block_change_landed`]).
+    pub fn block_change_sent(&mut self, request: RequestId, user_id: i64, blocked: bool) {
+        self.blocked_senders.insert_data_if_missing(BlockedList::default);
+        if let Some(list) = self.blocked_senders.data_mut() {
+            let had = list.ids.contains(&user_id);
+            if blocked && !had {
+                list.ids.push(user_id);
+                list.total = list.total.saturating_add(1);
+            } else if !blocked && had {
+                list.ids.retain(|id| *id != user_id);
+                list.total = list.total.saturating_sub(1);
+            }
+        }
+        if self.blocked_senders.is_loading() {
+            self.blocked_senders.begin();
+            self.blocked_senders.sent(request);
+        }
+    }
+
+    /// `request`, a block or unblock, landed: a page it replaced is fetched
+    /// again (the list turns `Outdated`, and the pump asks).
+    pub fn block_change_landed(&mut self, request: Option<RequestId>) {
+        if request.is_some_and(|id| self.blocked_senders.waits_for(id)) {
+            self.blocked_senders.outdate();
+        }
+    }
+
+    /// A block or unblock was refused, or never left. Its own stand-in
+    /// request ends in `Failed`; a page of the list in flight is not its
+    /// to end, so the list is fetched again instead (when the change was
+    /// applied and is now wrong), and an unsent change leaves it alone.
+    pub fn block_change_failed(&mut self, request: Option<RequestId>, error: String, applied: bool) {
+        if self.blocked_senders.failed(request, error.clone(), true) {
             return;
         }
-        if offset == 0 {
-            self.blocked_total = total_count;
-            self.blocked_senders
-                .succeed(dedup_ids(Vec::new(), sender_ids));
-        } else if let Some(list) = self.blocked_senders.take_data() {
-            self.blocked_total = total_count;
-            self.blocked_senders.succeed(dedup_ids(list, sender_ids));
+        if self.blocked_senders.is_loading() {
+            if applied {
+                self.blocked_senders.outdate();
+            }
+        } else if applied {
+            self.blocked_senders.fail_dropping_data(error);
+        } else {
+            self.blocked_senders.fail(error);
         }
     }
 
@@ -622,8 +677,6 @@ impl SettingsState {
             privacy: HashMap::new(),
             read_date: ReadDate::Unknown,
             blocked_senders: Fetch::Idle,
-            blocked_total: 0,
-            blocked_generation: 0,
             media_prefs: MediaPrefs::default(),
             contact_prefs: ContactPrefs::default(),
             badge_prefs: BadgePrefs::default(),
@@ -641,6 +694,13 @@ impl SettingsState {
 }
 
 /// `list` followed by the ids of `more` it does not hold yet.
+/// The blocked-senders list and the server's total for it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BlockedList {
+    pub ids: Vec<i64>,
+    pub total: i32,
+}
+
 fn dedup_ids(mut list: Vec<i64>, more: Vec<i64>) -> Vec<i64> {
     for id in more {
         if !list.contains(&id) {

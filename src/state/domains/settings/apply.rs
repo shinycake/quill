@@ -106,11 +106,14 @@ impl Session {
                     }
                 } else if let Some(RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders {
                     offset,
-                    generation,
                 })) = pending.map(|p| p.purpose)
                 {
-                    self.settings
-                        .apply_blocked_page(offset, generation, total_count, sender_ids);
+                    self.settings.apply_blocked_page(
+                        pending.map(|p| p.id),
+                        offset,
+                        total_count,
+                        sender_ids,
+                    );
                 }
             }
             SettingsPayload::NotificationSounds { sounds } => {

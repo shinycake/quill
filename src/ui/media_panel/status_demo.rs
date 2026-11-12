@@ -2,6 +2,7 @@
 //! box, over an offline Premium account.
 #![deny(clippy::indexing_slicing)]
 
+use quill::state::fetch::Fetch;
 use crate::ui::demo::seed_ready_custom_emoji_session;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
@@ -82,17 +83,20 @@ pub(super) fn seed_status_session(sink: Arc<MemorySink>) -> Session {
             list.push(status_sticker(*id, face));
         }
     });
-    emoji.themed_status_ids = (5001..=5010).collect();
-    emoji.default_status_ids = (5011..=5026).collect();
-    emoji.recent_statuses = [5003, 5030, 5031]
-        .into_iter()
-        .map(|id| EmojiStatusItem {
-            custom_emoji_id: id,
-            expiration_date: 0,
-            gift: None,
-        })
-        .collect();
-    emoji.upgraded_gift_statuses = [5033, 5034]
+    emoji.lists.themed_statuses = Fetch::Ready((5001..=5010).collect());
+    emoji.lists.default_statuses = Fetch::Ready((5011..=5026).collect());
+    emoji.lists.recent_statuses = Fetch::Ready(
+        [5003, 5030, 5031]
+            .into_iter()
+            .map(|id| EmojiStatusItem {
+                custom_emoji_id: id,
+                expiration_date: 0,
+                gift: None,
+            })
+            .collect(),
+    );
+    emoji.lists.upgraded_gift_statuses = Fetch::Ready(
+        [5033, 5034]
         .into_iter()
         .map(|id| EmojiStatusItem {
             custom_emoji_id: 0,
@@ -109,6 +113,7 @@ pub(super) fn seed_status_session(sink: Arc<MemorySink>) -> Session {
                 backdrop_text_color: 0,
             }),
         })
-        .collect();
+        .collect(),
+    );
     session
 }

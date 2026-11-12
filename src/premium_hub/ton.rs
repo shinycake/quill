@@ -58,7 +58,7 @@ pub enum WithdrawalState {
 }
 
 impl WithdrawalState {
-    fn parse(value: Option<&Value>) -> Self {
+    pub(crate) fn parse(value: Option<&Value>) -> Self {
         let Some(value) = value else {
             return Self::Unknown;
         };

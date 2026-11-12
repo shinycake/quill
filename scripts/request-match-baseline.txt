@@ -1,6 +1,5 @@
 # Answers not matched by RequestId (scripts/check-request-match.py).
 # <rule>:<Type::function> <count>. Only remove lines or lower counts.
-counter:SettingsPurpose::GetBlockedSenders 1
 counter:SettingsPurpose::LookupBusinessBot 1
 purpose:ConnectDriver::ask_gift_text_limit 1
 purpose:ConnectDriver::buy_marketplace_gift 1
@@ -71,7 +70,6 @@ unmatched:Session::apply_auth_payload 1
 unmatched:Session::apply_chat_list_payload 1
 unmatched:Session::apply_saved_tags 1
 unmatched:Session::apply_ton_wallet 1
-unmatched:SettingsState::apply_blocked_page 2
 unsent:ConnectDriver::ask_countries 1
 unsent:ConnectDriver::fetch_chat_lists_to_add_chat 1
 unsent:ConnectDriver::fetch_contacts 1

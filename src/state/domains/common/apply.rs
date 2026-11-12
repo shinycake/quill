@@ -226,6 +226,7 @@ impl Session {
                     self.media.media_library.forget_failures();
                     // And the keyword searches given up while offline.
                     self.stickers.emoji.keyword_lookups.forgive_failures();
+                    self.stickers.emoji.keyword_emojis.forgive_failures();
                 }
                 self.connection = state;
             }

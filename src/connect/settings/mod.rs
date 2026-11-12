@@ -162,12 +162,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// The next page of the blocked-senders list, continuing from the
     /// loaded length (the first page when nothing is loaded).
     pub fn fetch_more_blocked_senders(&mut self) -> Result<(), ConnectSendError> {
-        let offset = self
-            .session
-            .settings
-            .blocked_senders
-            .data()
-            .map_or(0, Vec::len);
+        let offset = self.session.settings.blocked_ids().len();
         self.ask_blocked_page(offset)
     }
 
@@ -175,17 +170,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        // One page at a time: the answer of the one out decides the next.
-        if self.session.settings.blocked_senders.is_loading() {
+        // A next page waits for the one out; a first page replaces it, so
+        // the page asked before no longer matches.
+        if offset > 0 && self.session.settings.blocked_senders.is_loading() {
             return Ok(());
-        }
-        if offset == 0 {
-            self.session.settings.restart_blocked_list();
         }
         let extra = self.session.request(
             RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders {
                 offset: offset as i32,
-                generation: self.session.settings.blocked_generation,
             }),
             None,
         );
@@ -194,10 +186,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .send_json(&get_blocked_message_senders(extra, offset as i32, 100))
         {
             self.session.requests.take(extra);
-            self.session
-                .settings
-                .blocked_senders
-                .fail("The blocked users request was not sent.");
+            let blocked = &mut self.session.settings.blocked_senders;
+            if !blocked.is_loading() {
+                blocked.fail("The blocked users request was not sent.");
+            }
             return Err(err);
         }
         // Only a page that went out is waited for, under its own request.
@@ -207,73 +199,59 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(())
     }
 
+    /// The first page again once a block or unblock that replaced a page in
+    /// flight has landed (the list is `Outdated`).
+    pub(crate) fn refetch_blocked_senders(&mut self) -> Result<(), ConnectSendError> {
+        if self.session.settings.blocked_senders.is_outdated() {
+            self.ask_blocked_page(0)?;
+        }
+        Ok(())
+    }
+
     /// Slice S3: unblock a user (`setMessageSenderBlockList` with a null
     /// block list, schema 1.8.67, :14492 — TGX `Tdlib.unblockSender`).
     /// Applied optimistically: the user leaves the list at send time.
     pub fn unblock_sender(&mut self, user_id: i64) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() {
-            return Err(ConnectSendError::InvalidRequest);
-        }
-        let extra = self.session.request(
-            RequestPurpose::Settings(SettingsPurpose::SetSenderBlockList {
-                user_id,
-                block: false,
-            }),
-            None,
-        );
-        if let Err(err) = self
-            .sender
-            .send_json(&set_message_sender_block_list(extra, user_id, false))
-        {
-            self.session.requests.take(extra);
-            self.session
-                .settings
-                .blocked_senders
-                .fail("The unblock request was not sent.");
-            return Err(err);
-        }
-        if let Some(list) = self.session.settings.blocked_senders.data_mut() {
-            list.retain(|id| *id != user_id);
-            self.session.settings.blocked_total =
-                self.session.settings.blocked_total.saturating_sub(1);
-        }
-        Ok(extra)
+        self.change_block_list(user_id, false)
     }
 
     /// Slice S3: block a user (`setMessageSenderBlockList` with
     /// `blockListMain`, schema 1.8.67, :14492). Applied optimistically:
     /// the user joins the list at send time.
     pub fn block_sender(&mut self, user_id: i64) -> Result<RequestId, ConnectSendError> {
+        self.change_block_list(user_id, true)
+    }
+
+    fn change_block_list(
+        &mut self,
+        user_id: i64,
+        block: bool,
+    ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(
-            RequestPurpose::Settings(SettingsPurpose::SetSenderBlockList {
-                user_id,
-                block: true,
-            }),
+            RequestPurpose::Settings(SettingsPurpose::SetSenderBlockList { user_id, block }),
             None,
         );
         if let Err(err) = self
             .sender
-            .send_json(&set_message_sender_block_list(extra, user_id, true))
+            .send_json(&set_message_sender_block_list(extra, user_id, block))
         {
             self.session.requests.take(extra);
+            let line = if block {
+                "The block request was not sent."
+            } else {
+                "The unblock request was not sent."
+            };
             self.session
                 .settings
-                .blocked_senders
-                .fail("The block request was not sent.");
+                .block_change_failed(None, line.to_string(), false);
             return Err(err);
         }
-        let blocked = &mut self.session.settings.blocked_senders;
-        blocked.insert_data_if_missing(Vec::new);
-        if let Some(list) = blocked.data_mut()
-            && !list.contains(&user_id)
-        {
-            list.push(user_id);
-            self.session.settings.blocked_total =
-                self.session.settings.blocked_total.saturating_add(1);
-        }
+        self.session
+            .settings
+            .block_change_sent(extra, user_id, block);
         Ok(extra)
     }
 }

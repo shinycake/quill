@@ -321,11 +321,10 @@ fn settle_asked_word(
     word: &str,
     request: RequestId,
 ) -> Settle {
-    use quill::emoji::keyword_lookup::Outcome;
     if lookups.waits_for(request) {
         return Settle::Wait(request);
     }
-    if lookups.outcome(request) == Some(Outcome::Answered) {
+    if lookups.answer(word).is_some() {
         return Settle::Open;
     }
     match lookups.request_for(word) {

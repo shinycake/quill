@@ -109,24 +109,22 @@ impl Session {
                     self.settings.read_date.request_failed(pending.id);
                 }
             }
-            Some(RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders {
-                generation,
-                ..
-            })) => {
-                // A page of an older list failing says nothing about this one.
-                if generation == self.settings.blocked_generation {
-                    self.settings
-                        .blocked_senders
-                        .fail(sessions_error_line("load the blocked users", err));
-                }
+            Some(RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders { .. })) => {
+                // A page that no longer waits (replaced by a newer ask)
+                // says nothing about the list.
+                self.settings.blocked_senders.failed(
+                    pending.map(|p| p.id),
+                    sessions_error_line("load the blocked users", err),
+                    false,
+                );
             }
             Some(RequestPurpose::Settings(SettingsPurpose::SetSenderBlockList { .. })) => {
-                // Drop the optimistic list; the next fetch
-                // restores the truth.
-                self.settings.restart_blocked_list();
-                self.settings
-                    .blocked_senders
-                    .fail_dropping_data(sessions_error_line("change the block list", err));
+                // Drop the optimistic list; the next fetch restores the truth.
+                self.settings.block_change_failed(
+                    pending.map(|p| p.id),
+                    sessions_error_line("change the block list", err),
+                    true,
+                );
             }
             // Phase S2: a failed `getStorageStatistics` clears the
             // in-flight flag so the overlay shows "No storage data

@@ -789,13 +789,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let owed = self.session.stickers.gifs.saved_is_outdated();
-        self.session.stickers.gifs.saved_asked();
         let extra = self
             .session
             .request(RequestPurpose::GetSavedAnimations, None);
         match self.sender.send_json(&get_saved_animations(extra)) {
             Ok(()) => {
-                self.session.stickers.gifs.saved.sent(extra);
+                self.session.stickers.gifs.saved_asked(extra);
                 Ok(Some(extra))
             }
             Err(err) => {

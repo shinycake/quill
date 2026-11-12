@@ -890,6 +890,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.maybe_load_selected_sticker_set()?;
         self.maybe_refresh_saved_animations()?;
         self.refresh_stale_panels()?;
+        self.refetch_blocked_senders()?;
         self.open_attached_sticker_set()?;
         if chat_search_hits {
             // Unigram ChatSearchViewModel: first hit → LoadMessageSliceAsync.

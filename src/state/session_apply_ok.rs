@@ -31,6 +31,14 @@ impl Session {
         }
         self.apply_profile_music_ok(pending);
         self.apply_proxy_ok(pending);
+        if let Some(pending) = pending
+            && matches!(
+                pending.purpose,
+                RequestPurpose::Settings(SettingsPurpose::SetSenderBlockList { .. })
+            )
+        {
+            self.settings.block_change_landed(Some(pending.id));
+        }
         if let Some(request) = extra
             && matches!(
                 pending.map(|p| p.purpose),

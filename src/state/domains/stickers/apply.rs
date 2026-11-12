@@ -83,11 +83,6 @@ impl Session {
                 {
                     // Slice S10: emoji `stickerSets` land in the emoji panel (see emoji.rs).
                     self.accept_installed_emoji_sets(pending.map(|p| p.id), sets);
-                } else if let Some(RequestPurpose::Stickers(
-                    StickersPurpose::GetArchivedEmojiSets { first_page },
-                )) = pending.map(|p| p.purpose)
-                {
-                    self.accept_archived_emoji_sets(sets, first_page);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::SearchEmojiSets) {
                     self.accept_found_emoji_sets(pending.map(|p| p.id), sets);
                 }
@@ -347,7 +342,7 @@ impl Session {
             StickersPayload::Animations { animations, files } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSavedAnimations) {
                     self.remember_files(&files);
-                    self.accept_saved_animations(animations);
+                    self.accept_saved_animations(pending.map(|p| p.id), animations);
                 }
             }
             StickersPayload::UpdateSavedAnimations { .. } => {

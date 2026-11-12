@@ -162,10 +162,12 @@ fn s9_gif_backend_purpose_gated_dispatch() {
 
     // An addSavedAnimation `ok` clears the saved-GIF cache so it
     // refetches the server-confirmed list.
-    with_purpose
-        .stickers
-        .gifs
-        .saved_answered(with_purpose.stickers.gifs.search_results().to_vec());
+    let saved = with_purpose.request(RequestPurpose::GetSavedAnimations, None);
+    with_purpose.stickers.gifs.saved_asked(saved);
+    with_purpose.stickers.gifs.saved_answered(
+        Some(saved),
+        with_purpose.stickers.gifs.search_results().to_vec(),
+    );
     let extra = with_purpose.request(RequestPurpose::AddSavedAnimation, None);
     apply_json(
         &mut with_purpose,
@@ -176,10 +178,12 @@ fn s9_gif_backend_purpose_gated_dispatch() {
     assert!(with_purpose.stickers.gifs.animations.is_empty());
 
     // A removeSavedAnimation `ok` invalidates the same way.
-    with_purpose
-        .stickers
-        .gifs
-        .saved_answered(with_purpose.stickers.gifs.search_results().to_vec());
+    let saved = with_purpose.request(RequestPurpose::GetSavedAnimations, None);
+    with_purpose.stickers.gifs.saved_asked(saved);
+    with_purpose.stickers.gifs.saved_answered(
+        Some(saved),
+        with_purpose.stickers.gifs.search_results().to_vec(),
+    );
     let extra = with_purpose.request(RequestPurpose::RemoveSavedAnimation, None);
     apply_json(
         &mut with_purpose,
@@ -312,7 +316,8 @@ fn gif_panel_downloads_stills_then_preview_loops_then_unpreviewed_clips() {
         thumb: crate::telegram::envelope::Thumb::of(thumb.map(FileId), 160, 90, still),
         minithumbnail: None,
     };
-    session.stickers.gifs.saved_answered(vec![
+    session.stickers.gifs.saved_asked(RequestId(1));
+    session.stickers.gifs.saved_answered(Some(RequestId(1)), vec![
         // An MP4 preview loop: the loop plays, the GIF itself waits.
         gif(1, Some(11), false),
         // A still JPEG and no loop: the GIF itself plays.
@@ -433,23 +438,22 @@ fn saved_gif(id: i32) -> crate::telegram::envelope::AnimationItem {
 #[test]
 fn an_update_during_the_request_survives_its_answer_and_asks_again() {
     let mut gifs = crate::state::GifPanel::default();
-    gifs.saved_asked();
+    gifs.saved_asked(RequestId(1));
+    gifs.saved_answered(Some(RequestId(1)), vec![saved_gif(1)]);
+    gifs.saved_asked(RequestId(2));
     // `updateSavedAnimations` while the request is out: the answer may
-    // predate the change.
+    // predate the change, so it is dropped and the list asked for again.
     gifs.saved_outdated();
-    gifs.saved_answered(vec![saved_gif(1)]);
-    assert!(
-        gifs.loaded() && gifs.saved_is_outdated(),
-        "the list is asked for again"
-    );
+    gifs.saved_answered(Some(RequestId(2)), vec![saved_gif(2)]);
+    assert!(gifs.saved_is_outdated(), "the list is asked for again");
     assert_eq!(gifs.animations.len(), 1, "the list does not blank");
     // The failure of the ask that predates the change keeps the mark.
-    gifs.saved_failed();
+    gifs.saved_request_failed(Some(RequestId(2)));
     assert!(gifs.loaded() && gifs.saved_is_outdated());
     // A failure of the new ask keeps the list and counts as loaded until
     // the next opening.
-    gifs.saved_asked();
-    gifs.saved_failed();
+    gifs.saved_asked(RequestId(3));
+    gifs.saved_request_failed(Some(RequestId(3)));
     assert!(gifs.failed() && gifs.loaded());
     assert_eq!(gifs.animations.len(), 1);
     gifs.saved_retry();
