@@ -43,7 +43,7 @@ impl<T> Draft<T> {
         }
     }
 
-    pub(super) fn is_waiting(&self) -> bool {
+    pub(super) fn is_unbuilt(&self) -> bool {
         matches!(self, Self::Unbuilt)
     }
 }
@@ -385,12 +385,12 @@ impl Screen {
     pub(crate) fn draft_missing(&self) -> bool {
         match self {
             Self::Hub | Self::ChatLinks { .. } => false,
-            Self::Greeting { draft, .. } => draft.is_waiting(),
-            Self::Away { draft, .. } => draft.is_waiting(),
-            Self::Hours { draft, .. } => draft.is_waiting(),
-            Self::Location(draft) => draft.is_waiting(),
-            Self::StartPage { draft, .. } => draft.is_waiting(),
-            Self::Chatbots { draft, .. } => draft.is_waiting(),
+            Self::Greeting { draft, .. } => draft.is_unbuilt(),
+            Self::Away { draft, .. } => draft.is_unbuilt(),
+            Self::Hours { draft, .. } => draft.is_unbuilt(),
+            Self::Location(draft) => draft.is_unbuilt(),
+            Self::StartPage { draft, .. } => draft.is_unbuilt(),
+            Self::Chatbots { draft, .. } => draft.is_unbuilt(),
         }
     }
 

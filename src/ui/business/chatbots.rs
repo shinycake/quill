@@ -40,10 +40,16 @@ enum FoundView {
 /// Take what TDLib reported into a draft that waits for it.
 fn apply_server_bot(draft: &mut ChatbotDraft, server: Option<ConnectedBot>) {
     draft.bot = BotLink::Empty;
+    draft.base = None;
     if let Some(bot) = server {
         draft.bot = BotLink::Connected(bot.bot_user_id);
         draft.recipients = bot.recipients.make_valid();
         draft.rights = bot.rights;
+        draft.base = Some(ConnectedBot {
+            bot_user_id: bot.bot_user_id,
+            recipients: draft.recipients.clone(),
+            rights: bot.rights,
+        });
     }
 }
 
@@ -97,6 +103,7 @@ impl QuillApp {
             let _ = live.driver.lookup_business_bot("");
         }
         let mut draft = ChatbotDraft {
+            base: None,
             username,
             _typing: typing,
             debounce: LookupDebounce::Idle,
@@ -637,6 +644,7 @@ impl QuillApp {
             rights: draft.rights,
         });
         let loaded = draft.bot.is_loaded();
+        let base = draft.base.clone();
         if let Some(d) = self.business_mut() {
             d.screen.put_chatbot(draft);
         }
@@ -647,11 +655,12 @@ impl QuillApp {
             cx.notify();
             return Leave::Stay;
         }
-        let server = self.server_bot().flatten();
-        if !loaded || wanted == server {
+        // Untouched means unchanged from what the draft was built from:
+        // the server's bot now may be this very save's, still on its way.
+        if !loaded || wanted == base {
             return Leave::Go(None);
         }
-        let previous = server.map(|b| b.bot_user_id);
+        let previous = self.server_bot().flatten().map(|b| b.bot_user_id);
         self.business_send(tr(keys::Q_MEDIA_CHATBOT_SETTINGS), |driver| {
             driver.save_connected_bot(wanted.as_ref(), previous).is_ok()
         })

@@ -11,6 +11,10 @@ use quill::composer::SendOptions;
 pub(in crate::ui) enum MenuSendOutcome {
     /// The message went out (or a demo session applied it).
     Sent,
+    /// The chat charges Stars: the guard holds the send for the paid
+    /// confirmation. Nothing went out yet, so the reply target and the
+    /// typed token stay where they were (a declined Pay leaves them).
+    Held,
     /// A gate said no or the send failed; a note says why. Nothing went out.
     Refused,
     /// No live send here (connecting): the composer's own path decides.
@@ -23,7 +27,8 @@ impl QuillApp {
     /// unless the chat's own silent setting says so, and it respects slow
     /// mode and the viewer's rights. A chat that charges Stars holds the send
     /// for the usual confirmation (the paid guard), as tdesktop's
-    /// `sendBotCommand` does. `Unavailable` when the live path is not
+    /// `sendBotCommand` does (`Held`: the reply and the typed token stay
+    /// until it goes). `Unavailable` when the live path is not
     /// available (not signed in), so the caller falls back to the plain
     /// composer send. A demo session applies the message locally. The
     /// answer says whether anything went out: a gate that refuses (slow
@@ -92,6 +97,7 @@ impl QuillApp {
                 .with_reply(reply.clone())
                 .with_send_options(options);
         let outcome = match live.driver.send_snapshot(&snapshot) {
+            Ok(request) if live.driver.paid_send_is_held(request) => MenuSendOutcome::Held,
             Ok(_) => {
                 if reply.is_some() {
                     self.chat_ui.set_reply(None);

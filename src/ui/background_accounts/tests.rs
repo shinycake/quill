@@ -190,6 +190,41 @@ fn an_older_call_summary_does_not_silence_another_accounts_ring(cx: &mut TestApp
 }
 
 #[gpui_kit::test]
+fn the_end_chime_of_a_call_does_not_cut_another_accounts_ring(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, _, _| {
+        app.screen.call_screen.sound_marks = crate::ui::call_sounds::SoundMarks::connected_call(5);
+        let Some(session) = app.demo_session.as_deref_mut() else {
+            panic!("the demo has a session");
+        };
+        session.calls.active_call = None;
+        session.calls.summary = Some(quill::state::CallSummary {
+            call_id: 5,
+            user_id: 12,
+            is_outgoing: true,
+            is_video: false,
+            duration_secs: 30,
+            had_audio: true,
+            end_line: String::new(),
+            end: quill::state::CallEnd::Ended,
+            rating: quill::state::CallRating::NotNeeded,
+            debug_information: quill::state::CallUpload::NotNeeded,
+            log: quill::state::CallUpload::NotNeeded,
+            final_transport: None,
+            reconnect_attempts: 0,
+            muted: false,
+        });
+        app.background.ringing = Some(ring());
+        // The call ends while the background ring sounds: the hang-up chime
+        // plays over it, and the ring is still what loops afterwards.
+        app.sync_call_sounds();
+        assert_eq!(app.calls.sounds.looping(), Some(CallSound::Incoming));
+        app.sync_call_sounds();
+        assert_eq!(app.calls.sounds.looping(), Some(CallSound::Incoming));
+    });
+}
+
+#[gpui_kit::test]
 fn the_main_menu_counts_the_other_accounts(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     app.update_in(&mut vcx, |app, _, cx| {

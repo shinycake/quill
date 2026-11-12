@@ -95,6 +95,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.sender.paid_guard()?.held()
     }
 
+    /// Whether the send that went out as `request` is held for the
+    /// user's confirmation, not sent: its `Ok` meant only that the guard
+    /// took it.
+    pub fn paid_send_is_held(&self, request: RequestId) -> bool {
+        self.sender
+            .paid_guard()
+            .is_some_and(|guard| guard.holds(&request.0.to_string()))
+    }
+
     /// The user confirmed: sends the oldest held request with its total,
     /// remembering the price when asked to.
     pub fn release_paid_send(&mut self, remember: bool) -> Result<(), ConnectSendError> {

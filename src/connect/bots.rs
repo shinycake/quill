@@ -12,7 +12,7 @@ use crate::telegram::requests::{
     get_callback_query_answer, get_callback_query_answer_game,
     get_callback_query_answer_with_password, get_commands, get_game_high_scores,
     get_inline_query_results, get_login_url, get_login_url_info, get_message,
-    get_recent_inline_bots, get_user_full_info, search_public_chat,
+    get_recent_inline_bots, search_public_chat,
     send_bot_start_message as send_bot_start_message_request, send_game as send_game_request,
     send_inline_query_result_message, set_message_sender_block_list, share_chat_with_bot,
     share_users_with_bot,

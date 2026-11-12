@@ -552,9 +552,8 @@ impl QuillApp {
     }
 
     /// Phase C1: 1s tick while `call_tick_wanted`, keeping the overlay's
-    /// ringing / connected clock fresh and the ringtones looping. Mirrors
-    /// the Phase A1 slow-mode tick (at most one pending beat; none when
-    /// unwanted).
+    /// ringing / connected clock fresh and the ringtones looping: at most
+    /// one pending beat, none when unwanted.
     pub(super) fn ensure_call_tick(&mut self, cx: &mut Context<Self>) {
         if !self.call_tick_wanted() || self.calls.tick.is_running() {
             return;

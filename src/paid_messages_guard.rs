@@ -169,6 +169,15 @@ impl PaidGuard {
         None
     }
 
+    /// Whether the request sent as `extra` is among the held ones.
+    pub fn holds(&self, extra: &str) -> bool {
+        self.state
+            .lock_or_recover()
+            .held
+            .iter()
+            .any(|held| held.extra().as_deref() == Some(extra))
+    }
+
     /// The oldest held request.
     pub fn held(&self) -> Option<HeldSend> {
         self.state.lock_or_recover().held.front().cloned()

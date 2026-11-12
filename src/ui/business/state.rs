@@ -243,6 +243,11 @@ pub(crate) enum LookupDebounce {
 }
 
 pub(crate) struct ChatbotDraft {
+    /// The saved bot this draft was built from, as TDLib reported it
+    /// (recipients made valid): leaving saves only when the draft differs
+    /// from it, never from the server's bot now. `None` until reported,
+    /// and when none is connected.
+    pub(super) base: Option<quill::business_bots::ConnectedBot>,
     pub(super) username: Entity<InputState>,
     /// The username field's change events; they end with the draft.
     pub(super) _typing: Subscription,

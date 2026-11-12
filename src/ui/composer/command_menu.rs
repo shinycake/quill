@@ -330,7 +330,7 @@ impl QuillApp {
         // The gates run first: a command that cannot go (slow mode, no right
         // to send, a frozen account) stays typed in the field.
         let outcome = self.send_menu_command(&command, cx);
-        if outcome == MenuSendOutcome::Refused {
+        if matches!(outcome, MenuSendOutcome::Refused | MenuSendOutcome::Held) {
             return;
         }
         self.close_command_menu(cx);

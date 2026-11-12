@@ -620,6 +620,10 @@ fn the_chooser_reads_loading_while_the_owned_bots_load(cx: &mut TestAppContext) 
     frames(&mut vcx);
     app.update(&mut vcx, |app, _| {
         if let Some(session) = app.demo_session.as_mut() {
+            session.users_state.profile_chat_lists.insert(
+                (quill::state::ProfileChatsKind::SuitableCommunityChats, 0),
+                quill::state::ProfileChatsFetch::complete(Vec::new()),
+            );
             session.communities.owned_bots.begin();
         }
     });
@@ -636,4 +640,36 @@ fn the_chooser_reads_loading_while_the_owned_bots_load(cx: &mut TestAppContext) 
     });
     let status = app.read_with(&vcx, |app, _| app.community_candidates("").1);
     assert_eq!(status, CandidateView::Ready);
+}
+
+/// A list whose request never went out (no entry, or the bots back to
+/// idle) reads as failed, with Retry, not "No chats found".
+#[gpui_kit::test]
+fn the_chooser_reads_failed_for_a_list_that_was_not_sent(cx: &mut TestAppContext) {
+    use super::chooser::CandidateView;
+    let (app, mut vcx) = new_app(cx);
+    frames(&mut vcx);
+    let status = |app: &Entity<QuillApp>, vcx: &VisualTestContext| {
+        app.read_with(vcx, |app, _| app.community_candidates("").1)
+    };
+    app.update(&mut vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session
+                .users_state
+                .profile_chat_lists
+                .remove(&(quill::state::ProfileChatsKind::SuitableCommunityChats, 0));
+            session.communities.owned_bots = quill::state::fetch::Fetch::Ready(Vec::new());
+        }
+    });
+    assert!(matches!(status(&app, &vcx), CandidateView::Failed(_)));
+    app.update(&mut vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.users_state.profile_chat_lists.insert(
+                (quill::state::ProfileChatsKind::SuitableCommunityChats, 0),
+                quill::state::ProfileChatsFetch::complete(Vec::new()),
+            );
+            session.communities.owned_bots = quill::state::fetch::Fetch::Idle;
+        }
+    });
+    assert!(matches!(status(&app, &vcx), CandidateView::Failed(_)));
 }
