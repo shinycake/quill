@@ -6,7 +6,6 @@ State::frame_requested mirrors the C qw_state struct field by field (repr(C)); i
 ActiveGroupCall::loaded_all_participants TDLib's groupCall.loaded_all_participants: the server's own report that the participant list is complete, mirrored as is
 ParsedGroupCall::loaded_all_participants TDLib's groupCall.loaded_all_participants as parsed: the server's own report that the participant list is complete, copied into the tracked call as is
 ChecklistSend::others_can_mark_tasks_as_done a send option of inputChecklist (may others tick tasks off), sent as the user chose; not a stage of anything
-ActiveGroupCall::loaded_all_participants+screen_share_error TDLib's groupCall.loaded_all_participants beside the screen share's last failure: independent
 
 MiniAppWindow::closing_confirmation the mini app's own setting (`web_app_setup_closing_behavior`: ask before closing), set and cleared by the app; not a stage of anything Quill runs
 MediaFacts::in_saved_messages the message's chat is Saved Messages: a fact about where the message lives, read once when the menu opens, not a stage of anything

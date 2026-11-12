@@ -198,11 +198,15 @@ impl GroupMedia {
     }
 }
 
-/// The screen share of a tracked group call.
+/// The screen share of a tracked group call, one value: off, the last
+/// share's failure, the start in flight, or the connected presentation.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum GroupScreenShare {
     #[default]
     Off,
+    /// The last share failed (its offer, start, connect or stop); the call
+    /// itself still works. A new start or a stop replaces it.
+    Failed(String),
     /// `startGroupCallScreenSharing` is in flight as `request` (only its
     /// answer or error counts); `answer` is its `Text` answer once it
     /// arrived, for the pump to connect. Leaves by the connect, the
@@ -231,7 +235,15 @@ impl GroupScreenShare {
 
     /// Sharing, or on the way to it.
     pub fn is_on(&self) -> bool {
-        !matches!(self, Self::Off)
+        matches!(self, Self::Starting { .. } | Self::Sharing | Self::Paused)
+    }
+
+    /// The failure of the last share, until another starts.
+    pub fn error(&self) -> Option<&str> {
+        match self {
+            Self::Failed(error) => Some(error),
+            _ => None,
+        }
     }
 
     /// The stored presentation answer, empty unless one waits.
@@ -297,9 +309,14 @@ impl GroupScreenShare {
         was
     }
 
-    /// Stopped, failed or reset.
+    /// Stopped or reset.
     pub fn stop(&mut self) {
         *self = Self::Off;
+    }
+
+    /// The share failed (or could not start): off, with the reason.
+    pub fn fail(&mut self, error: String) {
+        *self = Self::Failed(error);
     }
 }
 
@@ -375,8 +392,14 @@ mod tests {
         assert_eq!(share.answer(), "fresh");
         share.connected();
         assert!(share.is_sharing() && share.is_on() && !share.is_starting());
+        share.set_paused(true);
+        assert!(share.is_paused());
         share.stop();
-        assert!(!share.is_on());
+        assert!(!share.is_on() && !share.is_paused());
+        share.fail("no".into());
+        assert_eq!(share.error(), Some("no"));
+        share.start(RequestId(3));
+        assert_eq!(share.error(), None, "a new start leaves the failure");
     }
 
     #[test]

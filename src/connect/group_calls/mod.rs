@@ -274,14 +274,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
                 match result {
-                    Ok(()) => {
-                        call.screen_share.connected();
-                        call.screen_share_error = None;
-                    }
-                    Err(err) => {
-                        call.screen_share.stop();
-                        call.screen_share_error = Some(err.to_string());
-                    }
+                    Ok(()) => call.screen_share.connected(),
+                    Err(err) => call.screen_share.fail(err.to_string()),
                 }
             }
         }

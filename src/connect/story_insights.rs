@@ -45,12 +45,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             // insights: a page that answered, or one on its way, stays (a
             // second first page would show twice). Insights another story
             // replaced start at `NotAsked` and ask again.
-            let never_asked = self
-                .session
-                .stories
-                .insights
-                .as_ref()
-                .is_some_and(|state| state.forwards_page == ForwardsPage::NotAsked);
+            let never_asked = self.session.stories.insights.as_ref().is_some_and(|state| {
+                state.forwards_page == ForwardsPage::NotAsked
+                        // A first page that failed has nothing to show:
+                        // opening the panel again asks for it again.
+                        || (state.forwards.is_empty() && state.forwards_error().is_some())
+            });
             if never_asked {
                 let _ = self.fetch_story_public_forwards(chat_id, story_id, "");
             }
@@ -116,6 +116,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             Err(err) => {
                 self.session.requests.take(extra);
+                self.session.story_forwards_unsent(
+                    chat_id.0,
+                    story_id,
+                    "Could not load statistics.".to_string(),
+                );
                 Err(err)
             }
         }

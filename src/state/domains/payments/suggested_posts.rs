@@ -38,6 +38,19 @@ impl Session {
         })
     }
 
+    /// An `addOffer` for this message is on its way (at any price): a second
+    /// submit of the box must not send another offer message.
+    pub fn suggested_offer_busy(&self, chat_id: i64, message_id: i64) -> bool {
+        self.requests.pending.values().any(|pending| {
+            matches!(
+                pending.purpose,
+                RequestPurpose::Payments(PaymentsPurpose::SuggestedPost(
+                    SuggestedPostPurpose::AddOffer { chat_id: c, message_id: m, .. }
+                )) if c == chat_id && m == message_id
+            )
+        })
+    }
+
     pub(crate) fn apply_suggested_post(&mut self, payload: SuggestedPostPayload) {
         match payload {
             SuggestedPostPayload::InfoUpdated {

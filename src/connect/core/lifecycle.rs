@@ -122,7 +122,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetAuthorizationState, None);
-        self.sender.send_json(&get_authorization_state(extra))?;
+        if let Err(err) = self.sender.send_json(&get_authorization_state(extra)) {
+            // Nothing went out: no answer will come for a registered request.
+            self.session.requests.take(extra);
+            return Err(err);
+        }
         self.maybe_send_parameters()?;
         Ok(extra)
     }
@@ -223,6 +227,15 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn request_logout(&mut self) -> Result<RequestId, ConnectSendError> {
         if !matches!(self.session.auth, AuthorizationState::Ready) {
             return Err(ConnectSendError::InvalidRequest);
+        }
+        // A `logOut` already out answers a second confirm: another would
+        // settle the account's requests again and replace the request its
+        // answer is matched to. A close or a quit under way takes none.
+        match self.session.shutdown {
+            crate::state::ShutdownPhase::Running
+            | crate::state::ShutdownPhase::LogoutRefused(_) => {}
+            crate::state::ShutdownPhase::LogoutRequested(request) => return Ok(request),
+            _ => return Err(ConnectSendError::InvalidRequest),
         }
         let extra = self.session.request(RequestPurpose::LogOut, None);
         if let Err(err) = self.sender.send_json(&log_out(extra)) {

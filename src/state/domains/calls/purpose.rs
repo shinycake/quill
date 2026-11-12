@@ -34,13 +34,6 @@ pub enum CallsPurpose {
     /// `deleteAllCallMessages` ("Clear all" on the Calls list). The
     /// answer is `ok`; the cached list is emptied then.
     DeleteAllCallMessages,
-    /// Phase C2i: `getUserPrivacySettingRules`. Response is
-    /// `userPrivacySettingRules`; `setting` selects which of the two
-    /// call privacy settings is fetched.
-    GetCallPrivacyRules { setting: CallPrivacySetting },
-    /// Phase C2i: `setUserPrivacySettingRules`. Response is `ok`; the
-    /// new value is applied optimistically at send time.
-    SetCallPrivacyRules { setting: CallPrivacySetting },
     /// Phase C2i: `sendCallLog` for the ended call. Response is `ok`.
     SendCallLog,
     /// Phase C3a: `createVideoChat`. Response is `groupCallId`; the

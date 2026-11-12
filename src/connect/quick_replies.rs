@@ -84,17 +84,18 @@ impl<S: JsonSender> ConnectDriver<S> {
             None,
             None,
             |extra| qr::load_messages_request(extra, shortcut_id),
-        );
-        if sent.is_ok() {
-            self.session.settings.quick_replies.messages.insert(
-                shortcut_id,
-                Fetch::Loading {
-                    stale: None,
-                    request: None,
-                },
-            );
+        )?;
+        if let Some(request) = sent {
+            let mut load = Fetch::Idle;
+            load.begin();
+            load.sent(request);
+            self.session
+                .settings
+                .quick_replies
+                .messages
+                .insert(shortcut_id, load);
         }
-        sent.map(|_| ())
+        Ok(())
     }
 
     /// Add a text message; the shortcut `name` is created when new.

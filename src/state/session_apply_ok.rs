@@ -47,6 +47,7 @@ impl Session {
         self.apply_group_type_ok(pending);
         self.apply_ai_compose_ok(pending);
         self.apply_hang_up_ok(pending);
+        self.settle_group_paging(pending, false);
         self.apply_communities_ok(pending);
         self.settle_permissions_save(pending);
         self.apply_backgrounds_ok(pending);
@@ -323,7 +324,7 @@ impl Session {
             self.finish_set_change(set_id, SetChange::of(installed, archived), true);
             for sets in [
                 &mut self.stickers.stickers.trending,
-                &mut self.stickers.stickers.found_sets,
+                &mut self.stickers.stickers.search.sets,
             ] {
                 for set in sets.iter_mut().filter(|set| set.id == set_id) {
                     set.is_installed = installed;
@@ -335,9 +336,7 @@ impl Session {
             self.stickers.stickers.archived_has_more = false;
             self.stickers.stickers.archived_next_offset = 0;
             if self.stickers.stickers.tab == StickerTab::Archived {
-                self.stickers.stickers.selected_set_id = None;
-                self.stickers.stickers.set = StickerSetStage::Idle;
-                self.stickers.stickers.stickers.clear();
+                self.stickers.stickers.selection = StickerSelection::default();
             }
         }
         self.finish_mask_mutation(pending.map(|p| p.purpose));
@@ -536,14 +535,6 @@ impl Session {
             && summary.rating.sends(pending.id)
         {
             summary.rating = CallRating::Sent;
-        }
-        // Phase C2i: `setUserPrivacySettingRules` confirmed (the
-        // new value was applied optimistically at send time).
-        if let Some(pending) = pending
-            && let RequestPurpose::Calls(CallsPurpose::SetCallPrivacyRules { setting }) =
-                pending.purpose
-        {
-            self.calls.privacy_asks.answered(setting, pending.id);
         }
         // Slice S3: `setReadDatePrivacySettings` confirmed — clear
         // the optimistic spinner (the value itself was set at

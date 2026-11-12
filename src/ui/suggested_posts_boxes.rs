@@ -228,6 +228,16 @@ impl QuillApp {
                 self.screen.connection.set_note_for(
                     &self.screen.windows,
                     match self.live.as_mut() {
+                        // A second submit before the first answer: the first
+                        // is still on its way.
+                        Some(live)
+                            if live
+                                .driver
+                                .session
+                                .suggested_offer_busy(chat_id.0, message_id.0) =>
+                        {
+                            StatusNote::silent(tr(keys::Q_MONEY_SENDING_THE_OFFER))
+                        }
                         Some(live) => match live.driver.add_offer(chat_id, message_id, terms) {
                             Ok(_) => StatusNote::silent(tr(keys::Q_MONEY_SENDING_THE_OFFER)),
                             Err(_) => StatusNote::error(tr(keys::Q_MONEY_COULDNT_SEND_THE_OFFER)),

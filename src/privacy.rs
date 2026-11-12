@@ -602,8 +602,7 @@ mod tests {
     }
 
     /// Sweep 04-046, 12-013, 04-045: a refused save puts back what the
-    /// server kept, keeps the rule editable and says why; the mirrored call
-    /// rule goes back too.
+    /// server kept, keeps the rule editable and says why.
     #[test]
     fn privacy_set_failure_restores_the_kept_rule_and_stays_editable() {
         let (mut session, sink) = session();
@@ -613,7 +612,6 @@ mod tests {
             .settings
             .privacy
             .insert(key, PrivacyKeyState::Ready(who(PrivacyWho::Nobody)));
-        session.calls.privacy_allow_calls = Some(PrivacyWho::Nobody);
         let extra = session.request(
             RequestPurpose::Settings(SettingsPurpose::SetPrivacyRules { key }),
             None,
@@ -621,12 +619,10 @@ mod tests {
         session
             .settings
             .begin_privacy_save(key, who(PrivacyWho::Everybody), extra);
-        session.mirror_call_privacy(key, &who(PrivacyWho::Everybody));
         apply_json(&mut session, &seq, &sink, &error_json(extra));
         let state = &session.settings.privacy[&key];
         assert_eq!(state.detail(), Some(&who(PrivacyWho::Nobody)));
         assert!(state.save_error().is_some());
-        assert_eq!(session.calls.privacy_allow_calls, Some(PrivacyWho::Nobody));
     }
 
     /// Two saves in flight: the first one's refusal does not touch the

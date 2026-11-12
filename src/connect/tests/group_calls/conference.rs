@@ -154,6 +154,31 @@ fn a_refused_join_drops_the_instance() {
     let _ = std::fs::remove_dir_all(&harness.0);
 }
 
+/// r2-14, 02-061: the join's stage answers to its own request only: an
+/// error of some other request leaves the join waiting.
+#[test]
+fn another_requests_error_leaves_the_join_waiting() {
+    let mut harness = conference_driver();
+    let request = harness
+        .1
+        .join_conference_link("https://t.me/call/abc".into())
+        .expect("join sends");
+    let other = serde_json::to_string(&crate::ids::RequestId(request.0 + 1000).as_extra()).unwrap();
+    feed(
+        &mut harness,
+        &format!(
+            r#"{{"@type":"error","code":400,"message":"GROUPCALL_INVALID","@extra":{other}}}"#
+        ),
+    );
+    assert_eq!(
+        bound_call(&harness.1),
+        Some((-1, None)),
+        "still under the provisional key"
+    );
+    assert!(harness.1.session.calls.pending_conference.is_some());
+    let _ = std::fs::remove_dir_all(&harness.0);
+}
+
 #[test]
 fn without_an_engine_or_during_a_call_nothing_is_joined() {
     let (dir, mut driver, recorder, sink, seq) = call_driver();

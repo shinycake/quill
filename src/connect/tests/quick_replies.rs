@@ -413,3 +413,20 @@ fn a_change_is_answered_by_its_own_request() {
     assert!(driver.session.settings.quick_replies.error.is_some());
     assert_eq!(driver.session.acks.take(add), Some(Answer::Done));
 }
+
+#[test]
+fn a_message_load_answered_without_an_update_stops_waiting() {
+    let (mut driver, recorder, sink, seq) = driver_parts();
+    seed_shortcuts(&mut driver, &seq, &sink);
+    driver.ensure_quick_reply_messages(1).unwrap();
+    assert!(!driver.session.settings.quick_replies.messages_settled(1));
+    let request = sent_request(&recorder, "loadQuickReplyShortcutMessages");
+    let extra = request["@extra"].as_str().unwrap().to_string();
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{extra}"}}"#),
+    );
+    assert!(driver.session.settings.quick_replies.messages_settled(1));
+}

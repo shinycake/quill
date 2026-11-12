@@ -91,7 +91,9 @@ impl QuillApp {
             || (state.forwards_error().is_some() && !scrolled)
             || !load_due(
                 scrolled_near_end(&self.stories.stats_scroll),
-                !state.forwards_next_offset.is_empty(),
+                // A failed first page has no next offset: a scroll asks for
+                // the first page again.
+                !state.forwards_next_offset.is_empty() || state.forwards_error().is_some(),
                 state.forwards_loading(),
             )
             || !self
@@ -136,12 +138,19 @@ impl QuillApp {
         let Some(item) = self.stories.viewer.current().cloned() else {
             return;
         };
-        let offset = self
+        let Some((offset, failed)) = self
             .session()
             .and_then(|s| s.stories.insights.as_ref())
-            .map(|state| state.forwards_next_offset.clone())
-            .unwrap_or_default();
-        if offset.is_empty() {
+            .map(|state| {
+                (
+                    state.forwards_next_offset.clone(),
+                    state.forwards_error().is_some(),
+                )
+            })
+        else {
+            return;
+        };
+        if offset.is_empty() && !failed {
             return;
         }
         if let Some(live) = self.live.as_mut()

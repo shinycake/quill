@@ -852,7 +852,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                 && self.session.stickers.stickers.tab == crate::state::StickerTab::Archived
             {
                 self.drop_in_flight(RequestPurpose::GetStickerSet);
-                self.session.stickers.stickers.set = crate::state::StickerSetStage::Idle;
+                self.session.stickers.stickers.selection.stage =
+                    crate::state::StickerSetStage::Idle;
                 self.fetch_archived_stickers(false)?;
             }
         }

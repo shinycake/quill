@@ -391,7 +391,7 @@ impl QuillApp {
         }
         // The panel's library holds the demo set's contents.
         if let Some(session) = self.demo_session.as_mut() {
-            let mut stickers = session.stickers.stickers.stickers.clone();
+            let mut stickers = session.stickers.stickers.selection.stickers.clone();
             // Performance fixture: `QUILL_DEMO_STICKERS=<n>` fills the
             // picker with `n` distinct animated stickers (more than the
             // playback cache holds).

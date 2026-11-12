@@ -9517,3 +9517,42 @@ and their register entries were all closed in round 1;
 `StickersManager::open` and `sponsored_hidden` are a box's visibility and a
 fact the server confirmed.
 
+### Sweep fixes (r2-14)
+
+Second-round re-sweep of `src/connect` files (peer QR, polls, proxy, quick
+replies, stickers and their creator, story insights, suggested posts, calls,
+group calls, boosts). Every answer is matched to the request its stage holds.
+
+| Id | What changed |
+| --- | --- |
+| 02-094 | `UserLinkFetch::Loading(RequestId)`; `accept_link`/`fail_link` take the request and act only on their own. |
+| 02-093 | Same shape as r2-18's 05-073: `PollVotersFetch::Loading(RequestId)` and `VotersMore::{Ready, Asking(RequestId)}` inside `Loaded` (this branch's `PollVotersMore` is dropped in the merge). |
+| 02-091 | `PingStatus::Checking(RequestId)`, set once the send went out (r2-10's shape kept in the merge, with its `PROBE_TIMEOUT_MS` give-up); `proxy_ping_requests` deleted. |
+| 02-095 | A change is answered by its own request through `session.acks` (r2-05's 12-B002; this branch's `in_flight` list is dropped in the merge). Message loads carry their `RequestId` and an `ok` with no update ends the wait (`messages_settled`). |
+| 02-099 | `StickerBatch::{Idle, Running, Finished}` with `begin(total, sent)` and `finish_item(request, success)` (r2-18's shape kept in the merge). |
+| 02-100, 05-056, 06-029 | Stale marks are `Fetch::Outdated` on `lists.recent/favorites/trending` and `GifPanel::saved`, and `MessageReactionsState::Outdated`; a refused refetch keeps the mark (lists, GIFs) or fails the picker (reactions). The in-flight request asked before the change is dropped, not trusted. |
+| 02-101 | `StickerSelection` and `StickerSearchResults` are replaced whole at every mode change. |
+| 02-105 | `StickerSetViewStage::{LookingUp(RequestId), AttachedFound(set)}`; the answer slots and the set-0 sentinel are gone. |
+| 13-027 | The refetch after a set edit drops a list request asked before the edit and sends a new one. |
+| 13-029 | A refused `getStickerSet` refresh ends the ask with a note instead of being rebuilt every poll. |
+| 13-036 | A first forwards page that cannot be sent is `ForwardsPage::Failed`; a scroll asks again. |
+| 02-107 | One `addOffer` per message at a time (`suggested_offer_busy`); the box keeps its "Sending" note. |
+| 03-A009 | Same fix as r2-03's 02-056: `OwnerClaim::{Unclaimed, Saved, Unsaved}` and `account_data::write_owner` (this branch's `Claimed` and `save_owner` are dropped in the merge). |
+| 02-031 | A refused `discardCall` keeps its entry and the rest of both queues. |
+| 02-037 | The call-privacy ask stage, its mirror fields (`privacy_allow_calls`, `privacy_p2p`), `CallPrivacySetting` and the two driver methods are deleted: nothing in production used them. |
+| 02-032 | `CallProgress::Answered { call_id, accept }`: a second Accept returns the first request; only its own error clears the answer. |
+| 02-040 | `createPrivateChat` is guarded per user, keyed by the chat it creates (the integration branch's shape). |
+| 02-039 | A second Log out confirm returns the `logOut` request that is out. |
+| 02-059, 02-060 | `ParticipantPaging::{Idle, Loading(RequestId), Failed}` on the call; `loaded_all_participants` stays as TDLib's own report (allow list), its baseline lines are dropped. |
+| 02-061 | `ConferenceKey::Joining(RequestId)`: the join's answer or error is taken only by the stage waiting for it. |
+| 02-058 | `GroupScreenShare::{Off, Failed(String), Starting { request, answer: Option }, Sharing { paused }}`; `screen_share_paused` and `screen_share_error` deleted. |
+| 02-072 | Replacing the engine fails each waiting offer (`EngineError::Unavailable`) so the rejoin, share or conference join is put back. |
+| 02-069 | A start after a failed first fetch asks again. |
+| 02-071 | `BoostWork::{Slots { request }, SlotsReady, Boosting { request, reassign }}` as r2-05's 01-022: a press whose slots read is still out joins that request. |
+| 02-075 | A boost status asked before the level moved is dropped and asked again. |
+
+- **Behaviour that changed.** Opening the "Show more" of a call with
+  100+ people twice sends one page. A rejoin's fresh native context and a
+  new share clear the last share's failure (`GroupScreenShare::Failed` is
+  left by `start`).
+- **Skipped.** None.

@@ -19,6 +19,7 @@ mod levels;
 mod link;
 mod no_engine;
 mod offers;
+mod paging;
 mod pump_gates;
 mod rejoin;
 mod ringing_invite;

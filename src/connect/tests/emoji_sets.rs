@@ -80,7 +80,15 @@ fn custom_emoji_pack_search_paging_previews_and_mutation_races() {
     );
     assert_eq!(driver.session.stickers.emoji.lists.trending.sets().len(), 2);
     assert!(!driver.session.stickers.emoji.lists.trending.has_more()); // Raw page length, not deduped count.
-    assert!(driver.session.stickers.stickers.stickers.is_empty());
+    assert!(
+        driver
+            .session
+            .stickers
+            .stickers
+            .selection
+            .stickers
+            .is_empty()
+    );
     let remove = driver.set_emoji_pack_installed(1, false).unwrap().unwrap();
     assert_eq!(
         driver.session.stickers.emoji.mutation.running(),

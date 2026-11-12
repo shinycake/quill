@@ -311,7 +311,9 @@ impl Session {
                     pending.map(|p| p.purpose)
                 {
                     let now = i64::try_from(crate::state::unix_ms_now() / 1000).unwrap_or(0);
-                    self.users_state.peer_qr.accept_link(free, answer, now);
+                    if let Some(id) = pending.map(|p| p.id) {
+                        self.users_state.peer_qr.accept_link(free, id, answer, now);
+                    }
                 }
             }
         }

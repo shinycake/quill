@@ -184,11 +184,11 @@ fn sticker_search_and_set_management_use_latest_confirmed_state() {
     driver
         .ingest(copy_and_parse(&result(old, "66"), &seq, &sink).unwrap())
         .unwrap();
-    assert!(driver.session.stickers.stickers.found_sets.is_empty());
+    assert!(driver.session.stickers.stickers.search.sets.is_empty());
     driver
         .ingest(copy_and_parse(&result(latest, "77"), &seq, &sink).unwrap())
         .unwrap();
-    assert_eq!(driver.session.stickers.stickers.found_sets[0].id, 77);
+    assert_eq!(driver.session.stickers.stickers.search.sets[0].id, 77);
     // The sets answered; the stickers half is still out, so the tab keeps
     // loading instead of reading "No stickers found".
     let search_loading = |driver: &ConnectDriver<_>| {
@@ -213,9 +213,9 @@ fn sticker_search_and_set_management_use_latest_confirmed_state() {
             .unwrap(),
         )
         .unwrap();
-    assert_eq!(driver.session.stickers.stickers.found_stickers.len(), 100);
+    assert_eq!(driver.session.stickers.stickers.search.stickers.len(), 100);
     assert!(!search_loading(&driver), "both halves answered");
-    assert!(driver.session.stickers.stickers.search_has_more);
+    assert!(driver.session.stickers.stickers.search.has_more);
     let more = driver.more_sticker_search_results().unwrap().unwrap();
     assert_eq!(sent_request(&recorder, "searchStickers")["offset"], 100);
     driver
@@ -229,13 +229,13 @@ fn sticker_search_and_set_management_use_latest_confirmed_state() {
             .unwrap(),
         )
         .unwrap();
-    assert_eq!(driver.session.stickers.stickers.found_stickers.len(), 100);
-    assert_eq!(driver.session.stickers.stickers.search_offset, 101);
-    assert!(!driver.session.stickers.stickers.search_has_more);
+    assert_eq!(driver.session.stickers.stickers.search.stickers.len(), 100);
+    assert_eq!(driver.session.stickers.stickers.search.offset, 101);
+    assert!(!driver.session.stickers.stickers.search.has_more);
     driver.select_sticker_set(77).unwrap();
     assert_eq!(sent_request(&recorder, "getStickerSet")["set_id"], "77");
     driver.select_sticker_tab(StickerTab::Search).unwrap();
-    assert_eq!(driver.session.stickers.stickers.selected_set_id, None);
+    assert_eq!(driver.session.stickers.stickers.selection.set_id, None);
     assert!(
         !driver
             .session
@@ -244,7 +244,7 @@ fn sticker_search_and_set_management_use_latest_confirmed_state() {
     );
     assert!(driver.manage_sticker_set(77, true, true).is_err());
     let install = driver.manage_sticker_set(77, true, false).unwrap().unwrap();
-    assert!(!driver.session.stickers.stickers.found_sets[0].is_installed);
+    assert!(!driver.session.stickers.stickers.search.sets[0].is_installed);
     assert_eq!(driver.manage_sticker_set(77, false, false).unwrap(), None);
     assert_eq!(sent_request(&recorder, "changeStickerSet")["set_id"], "77");
     driver
@@ -257,7 +257,7 @@ fn sticker_search_and_set_management_use_latest_confirmed_state() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.stickers.stickers.found_sets[0].is_installed);
+    assert!(driver.session.stickers.stickers.search.sets[0].is_installed);
     assert!(
         driver
             .session
@@ -291,7 +291,7 @@ fn sticker_search_and_set_management_use_latest_confirmed_state() {
             .is_none()
     );
     assert!(!driver.session.stickers.creator_notes.is_empty());
-    assert!(driver.session.stickers.stickers.found_sets[0].is_installed);
+    assert!(driver.session.stickers.stickers.search.sets[0].is_installed);
     driver.close_sticker_panel();
     let remove = driver
         .manage_sticker_set(77, false, false)
@@ -313,7 +313,7 @@ fn sticker_search_and_set_management_use_latest_confirmed_state() {
             .requests
             .has_purpose(RequestPurpose::GetInstalledStickerSets)
     );
-    assert!(!driver.session.stickers.stickers.found_sets[0].is_installed);
+    assert!(!driver.session.stickers.stickers.search.sets[0].is_installed);
     driver.search_sticker_picker("").unwrap();
     assert!(
         driver
@@ -325,7 +325,7 @@ fn sticker_search_and_set_management_use_latest_confirmed_state() {
             .error()
             .is_none()
     );
-    assert!(driver.session.stickers.stickers.found_sets.is_empty());
+    assert!(driver.session.stickers.stickers.search.sets.is_empty());
     assert!(
         !driver
             .session
@@ -504,7 +504,7 @@ fn archived_sticker_paging_and_restore_ignore_pre_mutation_fetches() {
         )
         .unwrap();
     assert!(driver.session.stickers.stickers.archived.is_empty());
-    assert_eq!(driver.session.stickers.stickers.selected_set_id, None);
+    assert_eq!(driver.session.stickers.stickers.selection.set_id, None);
     assert!(
         !driver
             .session
@@ -589,7 +589,7 @@ fn composer_suggestions_wait_for_installed_sets_and_keep_the_latest_emoji() {
         driver.session.stickers.stickers.suggestions[0].file_id,
         FileId(9)
     );
-    assert!(driver.session.stickers.stickers.found_stickers.is_empty());
+    assert!(driver.session.stickers.stickers.search.stickers.is_empty());
     assert!(!driver.session.stickers.stickers.open);
     assert_eq!(sent_request(&recorder, "downloadFile")["file_id"], 9);
     driver.update_sticker_suggestions("plain text").unwrap();
@@ -721,7 +721,7 @@ fn premium_sticker_send_uses_full_type_and_current_account_entitlement() {
     assert!(driver.send_sticker(ChatId(7), send(9)).is_ok());
     // History metadata remains sufficient after picker/search caches have changed.
     driver.ingest(copy_and_parse(&json!({"@type":"updateNewMessage","message":{"id":1,"chat_id":7,"content":{"@type":"messageSticker","is_premium":false,"sticker":sticker(9,json!({"@type":"file","id":90}))}}}).to_string(),&seq,&sink).unwrap()).unwrap();
-    driver.session.stickers.stickers.stickers.clear();
+    driver.session.stickers.stickers.selection.stickers.clear();
     driver.session.users.get_mut(&7).unwrap().is_premium = false;
     assert!(driver.session.sticker_requires_premium(FileId(9)));
     assert!(driver.send_sticker(ChatId(7), send(9)).is_err());
