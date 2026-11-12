@@ -209,12 +209,20 @@ fn a_failed_translation_is_asked_again_when_the_chat_is_reopened(cx: &mut TestAp
     let (app, mut vcx) = new_app(cx);
     app.update_in(&mut vcx, |app, window, cx| {
         app.toggle_chat_translation(CHANNEL, cx);
+        // The language is whatever the saved preferences give (another test
+        // may have saved one), so the test reads it back.
         app.open_translate_chooser("en", window, cx);
+    });
+    let to = app.read_with(&vcx, |app, _| {
+        app.session()
+            .and_then(|s| s.chat_translated_to(CHANNEL))
+            .unwrap_or("en")
+            .to_string()
     });
     let failed = |app: &QuillApp| {
         matches!(
             app.session()
-                .and_then(|s| s.message_translation(CHANNEL, NEWEST_POST, "en")),
+                .and_then(|s| s.message_translation(CHANNEL, NEWEST_POST, &to)),
             Some(Translation::Failed(_))
         )
     };
@@ -222,7 +230,7 @@ fn a_failed_translation_is_asked_again_when_the_chat_is_reopened(cx: &mut TestAp
         app.pump_translation();
         if let Some(session) = app.session_mut() {
             session.messages.translate.messages.insert(
-                (CHANNEL.0, NEWEST_POST.0, "en".to_string()),
+                (CHANNEL.0, NEWEST_POST.0, to.to_string()),
                 Translation::Failed("send".into()),
             );
         }
@@ -250,7 +258,7 @@ fn a_failed_translation_is_asked_again_when_the_chat_is_reopened(cx: &mut TestAp
         app.pump_translation();
         assert!(!failed(app), "the failure is dropped for another ask");
         assert!(
-            app.translate.asked.contains(&(NEWEST_POST, "en")),
+            app.translate.asked.contains(&(NEWEST_POST, to.as_str())),
             "asked: {:?}",
             app.translate.asked
         );
@@ -265,13 +273,21 @@ fn turning_translation_on_again_asks_for_failed_messages(cx: &mut TestAppContext
     let (app, mut vcx) = new_app(cx);
     app.update_in(&mut vcx, |app, window, cx| {
         app.toggle_chat_translation(CHANNEL, cx);
+        // The language is whatever the saved preferences give (another test
+        // may have saved one), so the test reads it back.
         app.open_translate_chooser("en", window, cx);
+    });
+    let to = app.read_with(&vcx, |app, _| {
+        app.session()
+            .and_then(|s| s.chat_translated_to(CHANNEL))
+            .unwrap_or("en")
+            .to_string()
     });
     app.update_in(&mut vcx, |app, _, cx| {
         app.pump_translation();
         if let Some(session) = app.session_mut() {
             session.messages.translate.messages.insert(
-                (CHANNEL.0, NEWEST_POST.0, "en".to_string()),
+                (CHANNEL.0, NEWEST_POST.0, to.to_string()),
                 Translation::Failed("send".into()),
             );
         }
@@ -282,7 +298,7 @@ fn turning_translation_on_again_asks_for_failed_messages(cx: &mut TestAppContext
         app.toggle_chat_translation(CHANNEL, cx);
         app.pump_translation();
         assert!(
-            app.translate.asked.contains(&(NEWEST_POST, "en")),
+            app.translate.asked.contains(&(NEWEST_POST, to.as_str())),
             "asked: {:?}",
             app.translate.asked
         );
