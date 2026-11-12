@@ -94,7 +94,6 @@ impl RequestPurpose {
                 | RequestPurpose::CheckChatFolderInviteLink
                 | RequestPurpose::AddChatFolderByInviteLink
                 | RequestPurpose::AddContact
-                | RequestPurpose::Settings(SettingsPurpose::SetAutoDownloadSettings { .. })
         )
     }
 }
