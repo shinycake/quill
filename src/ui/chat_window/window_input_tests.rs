@@ -239,6 +239,8 @@ fn each_window_owns_the_timer_of_its_typed_chat_search(cx: &mut TestAppContext) 
     });
     cx.run_until_parked();
     assert!(cancelled.get(), "the window's own next query replaces it");
+}
+
 /// Sweep r4-10 round 4: a selection in a Saved Messages sublist picks from
 /// the sublist's own rows, not the main Saved history.
 #[gpui_kit::test]
