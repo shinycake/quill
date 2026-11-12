@@ -460,16 +460,16 @@ fn spawn_menu_sync(window: &mut Window, cx: &mut Context<QuillApp>) {
             if !alive {
                 break;
             }
-            // Event-driven: applied updates, activation, lock changes,
-            // notification toggles and player changes poke `CHROME`. The
-            // deadline is the age at which the registry is read again, for
-            // what nothing announces (the account registry on disk).
-            // A burst of pokes rebuilds the menus at most once a second.
-            super::wake_wait::sleep_or_wake_paced(
+            // Event-driven, no timer: applied updates, activation, lock
+            // changes, notification toggles and player changes poke
+            // `CHROME`. The registry another process wrote is read on the
+            // first poke after its age limit (activation is one), never on
+            // a clock. A burst of pokes rebuilds the menus at most once a
+            // second.
+            super::wake_wait::wake_paced(
                 cx.background_executor(),
                 &quill::wake::CHROME,
                 seen,
-                sync.registry_wait(std::time::Instant::now()),
                 Duration::from_secs(1),
             )
             .await;

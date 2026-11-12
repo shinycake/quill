@@ -24,16 +24,16 @@ pub async fn sleep_or_wake(
 }
 
 #[cfg(target_os = "macos")]
-/// [`sleep_or_wake`], then a plain `gap`: a burst of pokes gets one pass per
-/// gap, and the thread is given back between two passes.
-pub async fn sleep_or_wake_paced(
+/// Wait for `signal` to move past `seen` (no timeout), then a plain `gap`: a
+/// burst of pokes gets one pass per gap, and the thread is given back between
+/// two passes.
+pub async fn wake_paced(
     executor: &BackgroundExecutor,
     signal: &'static Signal,
     seen: u64,
-    timeout: Duration,
     gap: Duration,
 ) {
-    sleep_or_wake(executor, signal, seen, timeout).await;
+    signal.wait_since(seen).await;
     executor.timer(gap).await;
 }
 

@@ -36,7 +36,7 @@ use quill::lang::{keys, tr, tr_with, trn};
 use quill::telegram::envelope::MessageSender;
 use std::cell::Cell;
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// The open create flow: the chat, what it creates and the step on screen.
 pub(crate) struct GroupCallCreate {
@@ -180,7 +180,7 @@ impl QuillApp {
         let max = schedule_max(now, &offset_at);
         let picker = new_date_time_picker(window, cx, initial, max - now);
         let wait = countdown_nap(initial, now);
-        let refresh = self.schedule_refresh_timer(wait, cx);
+        let refresh = self.schedule_refresh_timer(Instant::now() + wait, cx);
         self.group_call_boxes.start_dialog = Some(GroupCallCreate {
             chat_id,
             kind: CreateKind::Schedule,
@@ -198,8 +198,9 @@ impl QuillApp {
     /// the picked time), then the next, owned by the schedule step
     /// (`ScheduleStep::_refresh`): leaving the step drops it. A new pick
     /// changes the time and redraws by itself.
-    fn schedule_refresh_timer(&mut self, wait: Duration, cx: &mut Context<Self>) -> Task<()> {
+    fn schedule_refresh_timer(&mut self, due: Instant, cx: &mut Context<Self>) -> Task<()> {
         self.spawn_screen(cx, async move |this, cx| {
+            let wait = due.saturating_duration_since(Instant::now());
             cx.background_executor().timer(wait).await;
             let _ = this.update(cx, |app, cx| {
                 if !matches!(
@@ -212,7 +213,7 @@ impl QuillApp {
                     return;
                 }
                 let wait = app.schedule_countdown_wait(cx);
-                let next = app.schedule_refresh_timer(wait, cx);
+                let next = app.schedule_refresh_timer(Instant::now() + wait, cx);
                 if let Some(GroupCallCreate {
                     step: CreateStep::Schedule(step),
                     ..

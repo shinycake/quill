@@ -39,9 +39,12 @@ pub const SLOW_HIDE_MS: u64 = 4000;
 pub const WAIT_LONG_HIDE_MS: u64 = 3000;
 /// tdesktop `st::notifyActionsDuration`: the Reply button's fade (ms).
 pub const ACTIONS_MS: u64 = 200;
-/// How often a notification waiting for the user to come back checks
-/// (tdesktop `_inputCheckTimer`, ms).
-pub const INPUT_CHECK_MS: u64 = 300;
+/// The longest a notification waits for the user to come back (ms). tdesktop
+/// polls the OS idle clock every 300 ms (`_inputCheckTimer`); Quill has no
+/// clock that polls, so the idle clock is read when something wakes the
+/// notification clock (a hover, a click, a new notice, the pointer leaving)
+/// and at this deadline, where the hold ends as if the user were back.
+pub const INPUT_WAIT_CAP_MS: u64 = 60_000;
 /// tdesktop `kMaxNotificationsCount` and the default count.
 pub const MAX_COUNT: u8 = 5;
 pub const DEFAULT_COUNT: u8 = 3;

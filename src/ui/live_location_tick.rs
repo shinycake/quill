@@ -9,7 +9,7 @@
 use super::app::QuillApp;
 use gpui_kit::*;
 use quill::ids::ChatId;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// The wait before the next redraw: the label's own pace, but never a
 /// busy loop.
@@ -44,14 +44,15 @@ impl QuillApp {
         else {
             return;
         };
-        self.arm_live_location_wake(chat_id, wait_for(refresh_in), cx);
+        self.arm_live_location_wake(chat_id, Instant::now() + wait_for(refresh_in), cx);
     }
 
-    /// Wake once after `wait`: redraw, and arm the next wake while a share
+    /// Wake once at `due`: redraw, and arm the next wake while a share
     /// still runs. The stage holds the one task, so closing the chat or the
     /// window ends it, and each wake replaces the task that ran it.
-    fn arm_live_location_wake(&mut self, chat_id: ChatId, wait: Duration, cx: &mut Context<Self>) {
+    fn arm_live_location_wake(&mut self, chat_id: ChatId, due: Instant, cx: &mut Context<Self>) {
         let task = self.spawn_scoped(cx, async move |this, cx| {
+            let wait = due.saturating_duration_since(Instant::now());
             cx.background_executor().timer(wait).await;
             let _ = this.update(cx, |this, cx| {
                 match this.live_location_wait(chat_id) {
@@ -61,7 +62,7 @@ impl QuillApp {
                         if this.frame.window_active.get() {
                             cx.notify();
                         }
-                        this.arm_live_location_wake(chat_id, next, cx);
+                        this.arm_live_location_wake(chat_id, Instant::now() + next, cx);
                     }
                     None => {
                         if this

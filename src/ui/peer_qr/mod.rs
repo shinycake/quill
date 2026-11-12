@@ -643,7 +643,9 @@ impl QuillApp {
     /// that ran it.
     fn arm_qr_clock(&mut self, cx: &mut Context<Self>) {
         let clock = self.spawn_screen(cx, async move |this, cx| {
-            cx.background_executor().timer(qr_clock_wait()).await;
+            let due = Instant::now() + qr_clock_wait();
+            let wait = due.saturating_duration_since(Instant::now());
+            cx.background_executor().timer(wait).await;
             let _ = this.update(cx, |this, cx| {
                 if this.qr_clock(cx) {
                     this.arm_qr_clock(cx);

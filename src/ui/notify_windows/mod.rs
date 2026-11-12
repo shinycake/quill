@@ -30,7 +30,7 @@ use gpui_kit::*;
 use hold::{Clock, Hold};
 use quill::ids::{AccountKey, ChatId};
 use quill::notify::custom::{
-    self, DELTA_Y, FAST_ANIM_MS, HIDE_ALL_HEIGHT, INPUT_CHECK_MS, MIN_HEIGHT, NativeService,
+    self, DELTA_Y, FAST_ANIM_MS, HIDE_ALL_HEIGHT, INPUT_WAIT_CAP_MS, MIN_HEIGHT, NativeService,
     NotifyPlatform, NotifyQueue, Rect, SLOW_HIDE_MS, ScreenCorner, WAIT_LONG_HIDE_MS, WIDTH,
 };
 use quill::notify::{NotificationAction, OsNotification};
@@ -790,8 +790,8 @@ impl QuillApp {
     /// holds the one task and its due instant, so each step replaces the
     /// task that ran it and a step that finds nothing left to do stops the
     /// clock. The due instants are the next fade, the next frame of a slide
-    /// or fade, or the next look at the OS idle clock (`notify_check_input`),
-    /// which has no event; a hold that waits on the pointer needs none.
+    /// or fade, or the cap on a wait for the user (`INPUT_WAIT_CAP_MS`); the OS idle
+    /// clock is read at each step, and no step is armed only to read it.
     fn arm_notify_clock(&mut self, due: Instant, cx: &mut Context<Self>) {
         // screen-scope: the notification windows are the app's; the tick
         // shows whichever account's notices are queued.
@@ -885,21 +885,21 @@ impl QuillApp {
             })
             .flatten()
             .map(|at| at.saturating_duration_since(now));
-        let waiting = windows
+        // A window still waiting for the user has one more deadline: the
+        // cap on the wait (`notify_check_input`).
+        let capped = windows
             .shown
             .iter()
-            .any(|s| s.hold.waiting() && !s.unlinked());
-        let next = match (deadline, waiting) {
-            (Some(deadline), true) => Some(deadline.min(Duration::from_millis(INPUT_CHECK_MS))),
-            (Some(deadline), false) => Some(deadline),
-            (None, true) => Some(Duration::from_millis(INPUT_CHECK_MS)),
-            (None, false) => None,
+            .filter(|s| s.hold.waiting() && !s.unlinked())
+            .map(|s| s.started + Duration::from_millis(INPUT_WAIT_CAP_MS))
+            .min()
+            .map(|at| at.saturating_duration_since(now));
+        let next = match (deadline, capped) {
+            (Some(deadline), Some(capped)) => Some(deadline.min(capped)),
+            (deadline, capped) => deadline.or(capped),
         };
         match next {
             Some(delay) => Some(delay.max(FRAME)),
-            // A hovered window that went sends no leave, so the pointer's
-            // hold is looked at again (`notify_settle_hiding`).
-            None if windows.hovered.is_some() => Some(Duration::from_millis(INPUT_CHECK_MS)),
             // Held, nothing is due: the hold ends on an event, which wakes
             // the clock (`ensure_notify_clock`).
             None => {
@@ -912,17 +912,20 @@ impl QuillApp {
     /// tdesktop `checkLastInput`: a notification stays until the user has
     /// touched the computer after it appeared, then lingers
     /// `WAIT_LONG_HIDE_MS` before the slow fade. Without an idle clock it
-    /// starts the timer at once.
+    /// starts the timer at once; a wait that reaches `INPUT_WAIT_CAP_MS`
+    /// ends as if the user were back.
     fn notify_check_input(&mut self, now: Instant) {
         let idle = quill::passcode::os_idle_ms().map(Duration::from_millis);
         let windows = &mut self.delivery.windows;
         for shown in windows.shown.iter_mut().filter(|s| s.hold.waiting()) {
-            let back = match idle {
-                None => true,
-                Some(idle) => now
-                    .checked_sub(idle)
-                    .is_some_and(|input| input > shown.started),
-            };
+            let capped = now >= shown.started + Duration::from_millis(INPUT_WAIT_CAP_MS);
+            let back = capped
+                || match idle {
+                    None => true,
+                    Some(idle) => now
+                        .checked_sub(idle)
+                        .is_some_and(|input| input > shown.started),
+                };
             if back {
                 let due = now + Duration::from_millis(WAIT_LONG_HIDE_MS);
                 shown.hold = shown.hold.input_back(due);

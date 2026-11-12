@@ -362,3 +362,28 @@ fn a_cleared_window_does_not_count_as_replying(cx: &mut TestAppContext) {
         assert!(!app.delivery.windows.any_replying());
     });
 }
+
+/// A notification that waits for the user ends its wait at the cap even when
+/// no input is ever seen: the clock is armed to that deadline, not to a look
+/// at the idle clock every few hundred milliseconds.
+#[gpui_kit::test]
+fn a_wait_for_the_user_ends_at_its_deadline(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let me = app.read_with(vcx, |app, _| app.notification_account(None));
+    app.update(vcx, |app, cx| {
+        app.delivery.windows.platform = NotifyPlatform::Windows;
+        app.show_custom_notification(&me, message(7), None, None, false, false, cx);
+        let cap = std::time::Duration::from_millis(quill::notify::custom::INPUT_WAIT_CAP_MS);
+        let Some(shown) = app.delivery.windows.shown.first_mut() else {
+            panic!("a window shows");
+        };
+        shown.hold = super::hold::Hold::WaitingForInput { hide_at: None };
+        let started = shown.started;
+        app.notify_check_input(started + cap);
+        let Some(shown) = app.delivery.windows.shown.first() else {
+            panic!("a window shows");
+        };
+        assert!(!shown.hold.waiting(), "the wait ended at the cap");
+    });
+}

@@ -34,7 +34,6 @@ purpose:ConnectDriver::get_story_available_reactions 1
 purpose:ConnectDriver::gif_request 1
 purpose:ConnectDriver::import_contacts 1
 purpose:ConnectDriver::leave_live_story 1
-purpose:ConnectDriver::load_forum_topic_icons 1
 purpose:ConnectDriver::load_saved_tags 1
 purpose:ConnectDriver::login_request 1
 purpose:ConnectDriver::manage_sticker_set 2

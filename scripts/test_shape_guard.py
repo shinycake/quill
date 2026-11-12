@@ -271,20 +271,58 @@ class Timers(unittest.TestCase):
                 "        self.task = Some(task);\n"
                 "    }\n"
                 "}\n"
-                "fn menus(cx: &mut Cx) -> Task<()> {\n"
-                "    cx.spawn(async move |cx| loop {\n"
-                "        sleep_or_wake_paced(cx.background_executor(), &S, seen, TEN, ONE).await;\n"
-                "    })\n"
-                "}\n"
-                "fn menus_by_deadline(cx: &mut Cx) -> Task<()> {\n"
-                "    cx.spawn(async move |cx| loop {\n"
-                "        sleep_or_wake_paced(cx.background_executor(), &S, seen, sync.registry_wait(now), ONE).await;\n"
-                "    })\n"
+            )
+        }
+        self.assertEqual(
+            keys(timers, files), ["poll:App::clock", "poll:App::tick"]
+        )
+
+    def test_a_deadline_elsewhere_in_the_function_does_not_exempt_a_fixed_rearm(self):
+        files = {
+            "src/ui/a.rs": (
+                "impl App {\n"
+                # A fixed re-arm in one branch beside a deadline in another.
+                "    fn clock(&mut self, due: Option<Instant>, cx: &mut Cx) {\n"
+                "        let wait = match due {\n"
+                "            Some(due) => due.saturating_duration_since(Instant::now()),\n"
+                "            None => Duration::from_millis(300),\n"
+                "        };\n"
+                "        let task = cx.spawn(async move |this, cx| {\n"
+                "            cx.background_executor().timer(wait).await;\n"
+                "            this.update(cx, |this, cx| this.clock(None, cx)).ok();\n"
+                "        });\n"
+                "        self.task = Some(task);\n"
+                "    }\n"
+                # The same through an `if` binding and a `*_wait(` call.
+                "    fn idle(&mut self, held: bool, deadline: Instant, cx: &mut Cx) {\n"
+                "        let wait = if held { HELD_MS } else { deadline - Instant::now() };\n"
+                "        let task = cx.spawn(async move |this, cx| {\n"
+                "            cx.background_executor().timer(wait).await;\n"
+                "            this.update(cx, |this, cx| this.idle(held, deadline, cx)).ok();\n"
+                "        });\n"
+                "        self.task = Some(task);\n"
+                "    }\n"
+                "    fn walk(&mut self, cx: &mut Cx) {\n"
+                "        let task = cx.spawn(async move |this, cx| {\n"
+                "            cx.background_executor().timer(self.registry_wait()).await;\n"
+                "            this.update(cx, |this, cx| this.walk(cx)).ok();\n"
+                "        });\n"
+                "        self.task = Some(task);\n"
+                "    }\n"
+                # Every branch computed from a deadline: not a poll.
+                "    fn both(&mut self, due: Instant, next: Instant, cx: &mut Cx) {\n"
+                "        let wait = if due < next { due.saturating_duration_since(Instant::now()) } else { next.saturating_duration_since(Instant::now()) };\n"
+                "        let task = cx.spawn(async move |this, cx| {\n"
+                "            cx.background_executor().timer(wait).await;\n"
+                "            this.update(cx, |this, cx| this.both(due, next, cx)).ok();\n"
+                "        });\n"
+                "        self.task = Some(task);\n"
+                "    }\n"
                 "}\n"
             )
         }
         self.assertEqual(
-            keys(timers, files), ["poll:App::clock", "poll:App::tick", "poll:menus"]
+            keys(timers, files), ["poll:App::clock", "poll:App::idle", "poll:App::walk"]
         )
 
 

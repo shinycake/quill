@@ -58,13 +58,16 @@ ADVICE = (
     "frame clock) instead of a timer in a loop (docs/contributing/state-machines.md)."
 )
 TIMER = re.compile(
-    r"\.\s*timer\s*\(|\bTimer::(?:after|at|interval)\b|\bsleep\s*\(|\bsleep_or_wake_paced\s*\("
+    r"\.\s*timer\s*\(|\bTimer::(?:after|at|interval)\b|\bsleep\s*\("
 )
-# A wait computed from a deadline (`due - now`) is not a fixed period.
+# A wait computed from a deadline (`due - now`) is not a fixed period. Only the
+# timer's own delay is tested (never the words elsewhere in the function), and
+# a `*_wait(` call is no proof: it may hand back a constant.
 DEADLINE = re.compile(
     r"duration_since|saturating_sub|checked_sub|\bdeadline\b|\bdue\b|\bremaining\b|\bnext_wake\b"
-    r"|\b\w+_wait\w*\s*\("
 )
+CONSTANT = re.compile(r"\b[A-Z][A-Z0-9_]{2,}\b|Duration::from_\w+\s*\(\s*[0-9]")
+IDENT = re.compile(r"\s*([A-Za-z_]\w*)\s*$")
 # Receivers that are not a call of the function itself (`cx.new(..)`).
 GENERIC = {"new", "update", "spawn", "default", "from", "into", "sleep"}
 # In src/ui a thread that sleeps in a loop is a timer in a loop too (the
@@ -102,6 +105,32 @@ def fixed_timer(body):
     return False
 
 
+def delay_from_deadline(expr, body, before):
+    """Whether the delay `expr` comes from a stored deadline on every path.
+
+    A plain identifier is read through its last `let` in `body`; an `if` or
+    `match` must be driven by a deadline in each of its branches.
+    """
+    named = IDENT.fullmatch(expr)
+    if named:
+        made = None
+        for made in re.finditer(rf"\blet\s+(?:mut\s+)?{named.group(1)}\b[^=]*=", body[:before]):
+            pass
+        if not made:
+            return False
+        end = body.find(";", made.end())
+        return delay_from_deadline(body[made.end() : end if end >= 0 else len(body)], body, made.start())
+    if re.search(r"\bif\b|\bmatch\b", expr):
+        arms = []
+        at = 0
+        while (brace := expr.find("{", at)) >= 0:
+            close = shape_guard.closing(expr, brace)
+            arms.append(expr[brace + 1 : close])
+            at = close + 1
+        return bool(arms) and all(delay_from_deadline(arm.strip(), body, before) for arm in arms)
+    return bool(DEADLINE.search(expr)) and not CONSTANT.search(re.split(r"\.(?:min|max)\(", expr)[0])
+
+
 def in_loop(body, offset):
     """Whether a `loop`/`while` body around `offset` holds it (that is `poll`)."""
     for match in LOOP.finditer(body, 0, offset):
@@ -119,7 +148,12 @@ def rearm_hits(text, scopes):
         body = text[start:end]
         call = re.compile(rf"(?:\.|\bSelf::)\s*{re.escape(name)}\s*\(")
         for timer in TIMER.finditer(body):
-            if DEADLINE.search(body) or not call.search(body, timer.end()):
+            if not call.search(body, timer.end()):
+                continue
+            paren = body.find("(", timer.start())
+            if paren >= 0 and delay_from_deadline(
+                body[paren + 1 : shape_guard.closing(body, paren)].strip(), body, timer.start()
+            ):
                 continue
             if in_loop(body, timer.start()):
                 continue

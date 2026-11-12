@@ -609,20 +609,25 @@ impl QuillApp {
             self.viewer.visibility.timer_done();
             return;
         }
-        // Never mid-drag (a seek, volume or speed thumb).
+        // Never mid-drag (a seek, volume or speed thumb). Held, no timer
+        // runs: the pointer leaving the controls and the end of a drag call
+        // `viewer_note_activity`, which arms the next real deadline.
         let held = self.viewer.pointer.over_controls() || self.viewer.controls.dragging();
+        if held {
+            self.viewer.visibility.timer_done();
+            return;
+        }
         if controls_should_hide(idle, held) {
             let end = self.viewer_fade_end(cx);
             self.viewer.visibility.hide(end);
             cx.notify();
             return;
         }
-        let wait = Duration::from_millis(if held {
-            VIEWER_WAIT_HIDE_MS
-        } else {
-            controls_hide_wait_ms(idle).max(16)
-        });
+        let due = self.viewer.last_activity + Duration::from_millis(VIEWER_WAIT_HIDE_MS);
         let timer = self.spawn_scoped(cx, async move |this, cx| {
+            let wait = due
+                .saturating_duration_since(std::time::Instant::now())
+                .max(Duration::from_millis(16));
             cx.background_executor().timer(wait).await;
             let _ = this.update(cx, |this, cx| this.viewer_idle_check(cx));
         });

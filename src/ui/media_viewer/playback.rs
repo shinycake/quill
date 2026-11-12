@@ -23,6 +23,7 @@ impl QuillApp {
             }
             SliderEvent::Release(value) => {
                 self.viewer.controls.drag = SliderDrag::None;
+                self.viewer_note_activity(cx);
                 self.seek_viewer_to(f64::from(value.end()), cx);
             }
         }
@@ -237,6 +238,7 @@ impl QuillApp {
             }
             SliderEvent::Release(value) => {
                 self.viewer.controls.drag = SliderDrag::None;
+                self.viewer_note_activity(cx);
                 self.set_playback_volume(f64::from(value.end()) as f32 / 100.0, cx);
             }
         }
@@ -334,6 +336,7 @@ impl QuillApp {
                 SliderEvent::Release(value) => {
                     let speed = quill::viewer_extras::snap_speed(f64::from(value.end()));
                     this.set_playback_speed(speed, cx);
+                    this.viewer_note_activity(cx);
                 }
             });
         })
