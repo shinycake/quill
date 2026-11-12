@@ -2,6 +2,7 @@
 # <rule>:<Enum>::<Variant> <count>. Only remove lines.
 bare:AccessStage::Asking 1
 bare:ApplyStage::Sent 1
+bare:CallWindow::Opening 1
 bare:CarrierStage::Closing 1
 bare:CarrierStage::Starting 1
 bare:ClipState::Opening 1
@@ -73,4 +74,3 @@ unkeyed:UpdateControl::Downloading 1
 unkeyed:VcardImport::Reading 1
 unkeyed:WaitingCheck::Pending 1
 unkeyed:Writer::Running 1
-bare:CallWindow::Opening 1
