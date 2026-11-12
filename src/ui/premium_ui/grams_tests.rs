@@ -293,6 +293,7 @@ fn a_failed_page_is_drawn_with_a_retry_and_a_shut_box_takes_no_receipt(cx: &mut 
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     app.update_in(vcx, |app, _, cx| {
+        app.close_grams(cx);
         app.select_grams_tx(Some("tx-sale".into()), cx);
     });
     assert!(!grams_open(&app, vcx), "a receipt does not open the box");
