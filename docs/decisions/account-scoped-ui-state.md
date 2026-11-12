@@ -10254,3 +10254,24 @@ orders), `deep_link_routes_tests` (seek stays with its account).
 Tests: `connect/tests/sweep_r4_02.rs`, `closing_refused.rs`, `communities.rs`
 (older create), `deep_link_routing.rs` (a text link beside a flow), `asked.rs`,
 `paging.rs`, `disk_pauses.rs`, `engine_sync.rs`.
+
+#### Fix round 2 (review of r4-02)
+
+| What | Change |
+| --- | --- |
+| Guard housekeeping | Removed the `Session::apply_earn` and `drop_in_flight` allow lines and pruned the request-match baseline. `RequestRegistry::supersede` carries the reason a purpose sweep is right for session-wide lists. |
+| Recommended folders, share box chats, delete box chats | Each is a `Fetch` (`recommended_folders`, `share.chats`, `folder_chats_to_leave`) and the sender tests `is_loading()` instead of the registry. |
+| `getChatFolder` | `FolderSpecs` holds one `Fetch<ChatFolderSpec>` per folder (`Ready` is fresh, `Outdated` is stale, `Loading` holds the request). The answer and error are matched by `RequestId`; `updateChatFolders`, an edit answer and a removal outdate it, so an answer that predates the change is dropped. |
+| Folder removal | `ChatListState::folder_writes` holds the `editChatFolder` request per folder (the editor's save and a queued removal); the answer or error of that request ends it. A removal waits while it is set. |
+| New-chats poll | `NewChatsAsk::{Out(request), Answered(at)}` replaces the answer-time map plus the registry test. |
+| Community create | A second create with a picture is refused while one is out, so the first keeps its photo. |
+| Close | `ShutdownPhase::CloseRefused { retry_at }` backs off (`CLOSE_RETRY_BACKOFF`); `release_close` resends only at `retry_at`. |
+| Disk pauses | `DiskPauses::forget_unheld` does the retain and marks the save itself. |
+| Group-call engine retry | `Wake` is gone: `EngineApply::due(wanted, now)` takes the caller's clock, so updates and polls both wait out the backoff. |
+| Status lists, topic icons | The recent, themed, default, chat-default and upgraded-gift status lists and the forum topic icons are `Fetch` values (`EmojiPanel::status_list_*`), matched by request id, failing on error, and asked again after a failure. The `Asked` ledger stays only for stage-less mutations. `emoji_set_request` is busy by the list's fetch, the status stage or `SetMutation`. |
+| Saved tags (topic 0) | Busy by `saved.tags`, not the ledger. |
+| Business bot lookup, contacts delete, earn recipients | A refused lookup send fails each part (the field shows the error with Retry); a half-sent contacts delete returns `Ok` with the second send's error as the contacts note; the recipient list returns the sender's error. |
+
+Tests: `sweep_r4_02_round2.rs`, `chat_list/folder_removals.rs`,
+`closing_refused.rs`, `earn.rs`, `folder_followups.rs`, `camera_join.rs`, and
+the `engine_sync` and `disk_pauses` unit tests.
