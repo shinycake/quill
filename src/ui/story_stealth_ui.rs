@@ -132,6 +132,8 @@ impl QuillApp {
                 toast,
                 until: Instant::now() + TOAST_DURATION,
             });
+            // A held story's tick has ended: it runs again to clear the toast.
+            self.ensure_story_tick(cx);
             self.notify_story(cx);
         } else {
             self.set_status_note(StatusNote::info(toast.plain_text()), cx);

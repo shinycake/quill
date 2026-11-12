@@ -685,3 +685,44 @@ fn an_open_nobody_answers_stops_asking_for_ticks_after_the_give_up() {
     assert_eq!(view.fps(), 0, "given up: it rests");
     assert!(!view.changes_in(draw));
 }
+
+/// The engine always answers an open, so a clip that opened late (queued
+/// behind frames on a slow machine) plays once it opens: the view's give-up
+/// only stops its ticks, it never fails the clip.
+#[test]
+fn a_clip_that_opens_after_the_give_up_still_plays() {
+    let (player, spec) = player(8);
+    let other = ClipSpec {
+        file: FileId(8),
+        ..spec
+    };
+    player.set_fixture(
+        8,
+        Arc::new(|edge| DecodedFrames {
+            frames: vec![vec![5; (edge as usize).pow(2) * 4]],
+            fps: FPS,
+        }),
+    );
+    let at_head = head("slow");
+    let now = || player.now();
+    assert!(
+        player
+            .frame(&other, at_head, PlayMode::Loop, EDGE, false, None, now())
+            .is_none(),
+        "asked, not open"
+    );
+    player.skip(OPEN_GIVE_UP + ms(1));
+    assert!(
+        player
+            .frame(&other, at_head, PlayMode::Loop, EDGE, false, None, now())
+            .is_none(),
+        "still waiting"
+    );
+    player.settle();
+    assert!(
+        player
+            .frame(&other, at_head, PlayMode::Loop, EDGE, false, None, now())
+            .is_some(),
+        "the engine opened it: it shows"
+    );
+}

@@ -315,7 +315,7 @@ fn a_set_video_pick_goes_with_its_window(cx: &mut TestAppContext) {
     let (app, main, chat_window) = new_app(cx);
     app.update(cx, |app, _| {
         app.sticker_box.editing = crate::ui::sticker_set_box::state::SetEditing::Waiting(
-            crate::ui::sticker_set_box::state::PickWait::downloading_now(PendingVideo {
+            crate::ui::sticker_set_box::state::PickWait::FileWanted(PendingVideo {
                 pick: PickExisting {
                     set_id: 78,
                     kind: quill::sticker_set_box::SetKind::Stickers,

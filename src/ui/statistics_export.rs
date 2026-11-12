@@ -195,14 +195,18 @@ fn page_sheets(
 pub(super) enum StatsExport {
     #[default]
     Idle,
-    /// Choosing the file, then writing it; a second press does nothing.
-    Choosing { _task: Task<()> },
+    /// Choosing the file, then writing it (the task covers both); a second
+    /// press does nothing.
+    Exporting { _task: Task<()> },
 }
 
 impl QuillApp {
     /// "Export to File…": ask where, then write the workbook there.
     pub(super) fn export_statistics(&mut self, chat_id: i64, cx: &mut Context<Self>) {
-        if matches!(self.dialogs.statistics_export, StatsExport::Choosing { .. }) {
+        if matches!(
+            self.dialogs.statistics_export,
+            StatsExport::Exporting { .. }
+        ) {
             return;
         }
         let Some((sheets, name)) = self.session().and_then(|s| page_workbook(s, chat_id)) else {
@@ -250,7 +254,7 @@ impl QuillApp {
                 cx.notify();
             });
         });
-        self.dialogs.statistics_export = StatsExport::Choosing { _task: task };
+        self.dialogs.statistics_export = StatsExport::Exporting { _task: task };
     }
 }
 

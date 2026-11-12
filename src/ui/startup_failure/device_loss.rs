@@ -70,54 +70,55 @@ enum Recovery {
 
 /// What the watcher holds between closes: the window the platform kept
 /// (it holds the app until used or dropped), under the stage of recovery
-/// it was kept in. Recovering takes the window and moves to `Recovered`
-/// in the one call, so the two cannot disagree.
+/// it was kept in. Recovering takes the window and moves on in the one
+/// call, so the two cannot disagree.
 enum Watch {
     Healthy {
         kept: Option<KeptWindow>,
     },
+    /// The task that attaches a new device and opens the window again. The
+    /// watcher holds it, so it ends with the app and is never detached.
     Recovered {
         kept: Option<KeptWindow>,
-        reopen: Reopen,
+        _reopen: gpui_kit::Task<()>,
     },
-}
-
-/// The task that attaches a new device and opens the window again. The
-/// watcher holds it, so it ends with the app and is never detached.
-enum Reopen {
-    NotStarted,
-    Running { _task: gpui_kit::Task<()> },
+    /// Recovery was due with no window to reopen, so Quill quits.
+    GaveUp {
+        kept: Option<KeptWindow>,
+    },
 }
 
 impl Watch {
     fn recovery(&self) -> Recovery {
         match self {
             Self::Healthy { .. } => Recovery::Healthy,
-            Self::Recovered { .. } => Recovery::Recovered,
+            Self::Recovered { .. } | Self::GaveUp { .. } => Recovery::Recovered,
         }
     }
 
     fn kept_mut(&mut self) -> &mut Option<KeptWindow> {
         match self {
-            Self::Healthy { kept } | Self::Recovered { kept, .. } => kept,
+            Self::Healthy { kept } | Self::Recovered { kept, .. } | Self::GaveUp { kept } => kept,
         }
     }
 
-    /// Recovering starts: the kept window is handed over, and a later
-    /// loss gives up.
-    fn recover(&mut self) -> Option<KeptWindow> {
-        let kept = self.kept_mut().take();
-        *self = Self::Recovered {
-            kept: None,
-            reopen: Reopen::NotStarted,
-        };
-        kept
-    }
-
-    /// Keep the reopening task running while the watcher lives.
-    fn hold_reopen(&mut self, task: gpui_kit::Task<()>) {
-        if let Self::Recovered { reopen, .. } = self {
-            *reopen = Reopen::Running { _task: task };
+    /// Recovering starts: the kept window goes to `start`, whose reopening
+    /// task the watcher then holds, and a later loss gives up. With no
+    /// window kept there is nothing to reopen: the watcher gives up and
+    /// this returns false.
+    fn recover(&mut self, start: impl FnOnce(KeptWindow) -> gpui_kit::Task<()>) -> bool {
+        match self.kept_mut().take() {
+            Some(left) => {
+                *self = Self::Recovered {
+                    kept: None,
+                    _reopen: start(left),
+                };
+                true
+            }
+            None => {
+                *self = Self::GaveUp { kept: None };
+                false
+            }
         }
     }
 }
@@ -250,12 +251,11 @@ fn watch_closed_windows(
                 }
             }),
             step @ (Step::Recover | Step::Reopen) => {
-                let Some(left) = watch.recover() else {
+                let started = watch
+                    .recover(|left| reopen_task(step == Step::Recover, left, reopen.clone(), cx));
+                if !started {
                     give_up(tr(keys::Q_MISC_GPU_STOPPED_WORKING_AGAIN), cx);
-                    return;
-                };
-                let task = reopen_task(step == Step::Recover, left, reopen.clone(), cx);
-                watch.hold_reopen(task);
+                }
             }
             Step::GiveUp => give_up(tr(keys::Q_MISC_GPU_STOPPED_WORKING_AGAIN), cx),
         }

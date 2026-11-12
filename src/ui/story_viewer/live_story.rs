@@ -33,6 +33,17 @@ pub(super) fn live_item(item: Option<&StoryViewerItem>) -> Option<(ChatId, i32)>
 }
 
 impl QuillApp {
+    /// The live story to be watching: the one the viewer shows, else the
+    /// one in Picture-in-Picture.
+    pub(super) fn live_story_target(&self) -> Option<(ChatId, i32)> {
+        let shown = if self.stories.viewer.is_open() {
+            live_item(self.stories.viewer.current())
+        } else {
+            None
+        };
+        shown.or_else(|| self.live_pip_story())
+    }
+
     fn live_session_mut(&mut self) -> Option<&mut Session> {
         match self.live.as_mut() {
             Some(live) => Some(&mut live.driver.session),
@@ -45,12 +56,7 @@ impl QuillApp {
     /// shows no other. Runs on open, on every step and close, on the tick
     /// and when a live PiP goes.
     pub(in crate::ui) fn sync_live_story(&mut self, cx: &mut Context<Self>) {
-        let shown = if self.stories.viewer.is_open() {
-            live_item(self.stories.viewer.current())
-        } else {
-            None
-        };
-        let target = shown.or_else(|| self.live_pip_story());
+        let target = self.live_story_target();
         let watching = self.stories.live.watching();
         if watching.is_some() && watching != target {
             self.leave_live_story_view(cx);

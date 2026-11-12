@@ -5,8 +5,9 @@ use super::{ChatId, Part, Place};
 use quill::sticker_playback::player::Timeline;
 use std::time::{Duration, Instant};
 
-/// How long the engine may take to answer an open before the clip counts
-/// as failed (a worker that never answers must not keep views opening).
+/// How long a view keeps ticking for an open that has not answered. The
+/// engine always answers an open (ready or failed) and wakes the UI, so
+/// this only stops the polling ticks; it never fails the clip.
 pub(super) const OPEN_GIVE_UP: Duration = Duration::from_secs(30);
 
 /// Whether the open of a clip started at `since` has outlived [`OPEN_GIVE_UP`].

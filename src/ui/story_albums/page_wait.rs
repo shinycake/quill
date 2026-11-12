@@ -58,7 +58,8 @@ impl QuillApp {
         };
         let delete_answer = deleting.map(|request| answer(&session.stories.page_ops, &[request]));
         let answered = waits.then(|| answer(&session.stories.page_ops, &requests));
-        if delete_answer.is_none() && answered.is_none() {
+        // A call still out answers nothing: no redraw asks for the next frame.
+        if delete_answer.flatten().is_none() && answered.flatten().is_none() {
             return;
         }
         let Some(page) = self.stories.page.as_mut() else {

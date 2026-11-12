@@ -511,13 +511,10 @@ impl Player {
             clip.used = Some(now);
             note_drawn(&mut clip.drawn, drawn);
             note_place(&mut clip.places, place);
-            if let Opening::Pending { since } = clip.opening {
+            if let Opening::Pending { .. } = clip.opening {
                 match self.engine.state(&key) {
                     Some(ClipState::Ready(info)) => clip.opening = Opening::Ready(info.timeline),
                     Some(ClipState::Failed(_)) | None => clip.opening = Opening::Failed,
-                    Some(ClipState::Opening) if open_gave_up(since, now) => {
-                        clip.opening = Opening::Failed;
-                    }
                     Some(ClipState::Opening) => {}
                 }
             }

@@ -203,7 +203,7 @@ impl QuillApp {
     /// Phase 9.2+: custom-emoji ids the viewer still needs stickers for —
     /// the picker's custom options plus the current story's chosen
     /// custom-emoji reaction. The viewer tick feeds these to the driver.
-    fn story_custom_emoji_fetch_ids(&self) -> Vec<i64> {
+    pub(super) fn story_custom_emoji_fetch_ids(&self) -> Vec<i64> {
         let Some(session) = self.session() else {
             return Vec::new();
         };
@@ -814,47 +814,23 @@ impl QuillApp {
             cx.background_executor()
                 .timer(Duration::from_millis(100))
                 .await;
-            let _ = this.update(cx, |this, cx| {
-                if !this.stories.viewer.is_open() {
+            let _ = this.update(cx, |this, cx| match this.story_tick_wake(cx) {
+                tick_rest::Wake::Closed => {
                     this.stories.playback.stop();
                     this.stories.tick.finish();
                     this.stories.emoji_warm = None;
-                    return;
                 }
-                let now = Instant::now();
-                // B14: the native player drives video stories;
-                // the duration clock stays frozen meanwhile.
-                this.sync_story_video(cx);
-                let user_paused = this.story_playback_paused();
-                let video_driven = this.story_video_driven();
-                this.stories
-                    .playback
-                    .set_paused(user_paused || video_driven, now);
-                this.apply_story_native_pause(user_paused);
-                this.tick_close_friends(cx);
-                this.live_story_tick(cx);
-                let mut stepped = false;
-                if this.story_segment_finished(now) {
-                    this.step_story_viewer(1, cx);
-                    stepped = true;
+                // Nothing moves and nothing is waited on: the tick ends.
+                // What resumes the story starts it again
+                // (`refresh_story_pause`, and the frame upkeep for what
+                // only a redraw sees, such as the window becoming active).
+                tick_rest::Wake::Rests => this.stories.tick.finish(),
+                tick_rest::Wake::Goes => {
+                    // Not through `ensure_story_tick`: this wake's own task
+                    // is still the stage's, and the next replaces it.
+                    let next = this.story_tick_task(cx);
+                    this.stories.tick = StoryTick::Running(next);
                 }
-                // Phase 9.2+: keep custom-emoji reaction stickers
-                // warm while the viewer is open (picker options +
-                // the chosen-reaction badge), once per story and
-                // per change of what they need.
-                this.warm_story_custom_emoji();
-                // Only the overlay shows what a tick advances, and a
-                // paused one (Space, a panel over it, the window behind
-                // another app) shows nothing new: what pauses or resumes it
-                // redraws it itself. A live story keeps moving under a pause.
-                let still = user_paused && this.stories.live.watching().is_none();
-                if stepped || !still {
-                    this.notify_story(cx);
-                }
-                // Not through `ensure_story_tick`: this wake's own task is
-                // still the stage's, and the next replaces it.
-                let next = this.story_tick_task(cx);
-                this.stories.tick = StoryTick::Running(next);
             });
         })
     }
@@ -914,6 +890,10 @@ mod story_viewer_overlay;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod tick_notify_tests;
+mod tick_rest;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod tick_rest_tests;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod video_wait_tests;

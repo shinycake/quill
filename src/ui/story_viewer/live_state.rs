@@ -144,7 +144,7 @@ pub(in crate::ui) enum LiveJoin {
         request: RequestId,
     },
     /// Watching with no connection to join through (the demo): nothing is
-    /// out, so nothing can fail, and no call is ever seen.
+    /// out, so nothing can fail; a call the demo feeds is still seen.
     Offline(LiveTarget),
     /// Joined: the call was seen tracked since the join, so its end is
     /// noticed.
