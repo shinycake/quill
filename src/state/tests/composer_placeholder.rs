@@ -32,7 +32,7 @@ fn forum_session(topics: &[(i32, &str, bool)]) -> Session {
         .iter()
         .map(|(id, name, general)| topic_json(FORUM, *id, name, *general))
         .collect();
-    let extra = session.request(RequestPurpose::GetForumTopics, Some(ChatId(FORUM)));
+    let extra = session.ask_forum_topics(ChatId(FORUM));
     apply_json(
         &mut session,
         &seq,

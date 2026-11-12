@@ -49,9 +49,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return;
         }
         let purpose =
-            RequestPurpose::Settings(SettingsPurpose::Language(LanguagePurpose::PsaLabels {
-                epoch: plan.epoch,
-            }));
+            RequestPurpose::Settings(SettingsPurpose::Language(LanguagePurpose::PsaLabels));
         let extra = self.session.request(purpose, None);
         self.session.chat_list.psa_labels.begin(&plan, extra);
         // A send that did not leave counts as a failed ask: the next pump

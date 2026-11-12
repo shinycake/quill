@@ -40,10 +40,10 @@ pub struct ThreadsState {
     pub direct: DirectMessagesTopics,
     /// Answers to the composer's new-thread requests in bot chats, until
     /// the window that asked takes its own.
-    pub bot_thread_starts: Vec<BotThreadStarted>,
+    pub bot_thread_starts: AnswerBox<Result<i32, String>>,
     /// How a topic menu action's request ended (`true`: it went through),
     /// until the window that asked takes its own.
-    pub topic_action_answers: Vec<(RequestId, bool)>,
+    pub topic_action_answers: AnswerBox<bool>,
 }
 
 impl ThreadsState {
@@ -58,8 +58,8 @@ impl ThreadsState {
             forum_sidebar_supergroups: HashSet::new(),
             thread: None,
             direct: DirectMessagesTopics::default(),
-            bot_thread_starts: Vec::new(),
-            topic_action_answers: Vec::new(),
+            bot_thread_starts: AnswerBox::default(),
+            topic_action_answers: AnswerBox::default(),
         }
     }
 }

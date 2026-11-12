@@ -187,10 +187,12 @@ impl GiftView {
         }
     }
 
-    /// The sale failed or was cancelled: the confirmation is gone, the
-    /// panel stays.
-    pub fn abandon_confirmation(&mut self) {
-        if let Self::ConfirmConvert(id) = self {
+    /// The sale of `gift` failed or was cancelled: its confirmation is
+    /// gone, the panel stays. The confirmation of another gift stays.
+    pub fn abandon_confirmation(&mut self, gift: Option<&str>) {
+        if let Self::ConfirmConvert(id) = self
+            && gift == Some(id.as_str())
+        {
             *self = Self::Detail(std::mem::take(id));
         }
     }
@@ -263,9 +265,13 @@ mod tests {
     #[test]
     fn a_failed_sale_keeps_the_panel_and_drops_the_confirmation() {
         let mut asking = GiftView::ConfirmConvert("a".into());
-        asking.abandon_confirmation();
+        asking.abandon_confirmation(Some("b"));
+        assert_eq!(asking, GiftView::ConfirmConvert("a".into()));
+        asking.abandon_confirmation(None);
+        assert_eq!(asking, GiftView::ConfirmConvert("a".into()));
+        asking.abandon_confirmation(Some("a"));
         assert_eq!(asking, GiftView::Detail("a".into()));
-        asking.abandon_confirmation();
+        asking.abandon_confirmation(Some("a"));
         assert_eq!(asking, GiftView::Detail("a".into()));
     }
 

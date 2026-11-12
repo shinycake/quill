@@ -85,7 +85,7 @@ fn sponsored_tail_hides_after_report_and_hide() {
             chat_id
         ))
     );
-    assert!(!session.messages.sponsored_hidden);
+    assert!(!session.sponsored_hidden());
 
     // Premium: the driver sends toggleHasSponsoredMessagesEnabled(false);
     // `ok` hides everything.
@@ -97,6 +97,7 @@ fn sponsored_tail_hides_after_report_and_hide() {
             r#"{"@type":"updateOption","name":"is_premium","value":{"@type":"optionValueBoolean","value":true}}"#,
         ],
     );
+    session.my_user_id = Some(5);
     assert_eq!(session.begin_sponsored_hide(chat_id, 9002), Some(true));
     let extra = session.request(
         RequestPurpose::ToggleHasSponsoredMessagesEnabled,
@@ -108,7 +109,7 @@ fn sponsored_tail_hides_after_report_and_hide() {
         &seq,
         &[&format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0)],
     );
-    assert!(session.messages.sponsored_hidden);
+    assert!(session.sponsored_hidden());
     assert_eq!(shown(&mut session), None);
     assert!(!session.sponsored_fetch_due(chat_id, std::time::Instant::now()));
 }

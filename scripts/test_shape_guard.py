@@ -266,6 +266,24 @@ class Requests(unittest.TestCase):
             ["purpose:Driver::fetch", "purpose:Driver::fetch", "unmatched:Session::apply"],
         )
 
+    def test_a_counter_in_a_purpose_variant_fails(self):
+        files = {
+            "src/state/domains/a/purpose.rs": (
+                "pub enum ChatsPurpose {\n"
+                "    DeepLinkInfo { generation: u64 },\n"
+                "    Labels {\n        epoch: Option<u32>,\n    },\n"
+                "    Plain { request: RequestId },\n"
+                "    Id(u64),\n"
+                "}\n"
+                "pub enum Stage { Jump { generation: u64 } }\n"
+            ),
+            "src/ui/a_demo.rs": "pub enum DemoPurpose { Seed { token: u8 } }\n",
+        }
+        self.assertEqual(
+            keys(requests, files),
+            ["counter:ChatsPurpose::DeepLinkInfo", "counter:ChatsPurpose::Labels"],
+        )
+
 
 class Enums(unittest.TestCase):
     def test_in_flight_variants_must_hold_a_request_or_a_task(self):

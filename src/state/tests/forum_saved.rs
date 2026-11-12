@@ -461,7 +461,7 @@ fn forum_with_pins(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU6
         sink,
         r#"{"@type":"updateNewChat","chat":{"id":16,"title":"Forum","type":{"@type":"chatTypeSupergroup","supergroup_id":16,"is_channel":false},"unread_count":0}}"#,
     );
-    let extra = session.request(RequestPurpose::GetForumTopics, Some(ChatId(16)));
+    let extra = session.ask_forum_topics(ChatId(16));
     let topic = |id: i32, pinned: bool, order: i64, mentions: i32| {
         format!(
             r#"{{"info":{{"@type":"forumTopicInfo","chat_id":16,"forum_topic_id":{id},"name":"T{id}","icon":{{"@type":"forumTopicIcon","color":0,"custom_emoji_id":"0"}},"is_general":false,"is_closed":false,"is_hidden":false}},"last_message":null,"order":"{order}","is_pinned":{pinned},"unread_count":0,"last_read_inbox_message_id":0,"unread_mention_count":{mentions},"unread_reaction_count":2,"notification_settings":{{"@type":"chatNotificationSettings"}}}}"#
@@ -563,8 +563,8 @@ fn default_icons_keep_only_custom_emoji_stickers() {
 #[test]
 fn a_topic_action_answer_waits_for_the_request_that_asked() {
     let (mut session, _) = session();
-    session.topic_action_answered(RequestId(7), true);
-    session.topic_action_answered(RequestId(8), false);
+    session.topic_action_answered(RequestId(7), AskingView::Main, true);
+    session.topic_action_answered(RequestId(8), AskingView::Main, false);
     assert_eq!(session.take_topic_action_answer(RequestId(9)), None);
     assert_eq!(session.take_topic_action_answer(RequestId(8)), Some(false));
     assert_eq!(session.take_topic_action_answer(RequestId(7)), Some(true));

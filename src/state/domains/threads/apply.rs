@@ -84,7 +84,11 @@ impl Session {
                         }
                         None => Err(tr(keys::Q_CHAT_COULDN_T_START_A_NEW_THREAD).to_string()),
                     };
-                    self.bot_thread_answered(request, outcome);
+                    self.bot_thread_answered(
+                        request,
+                        pending.map(|p| p.asked_in).unwrap_or_default(),
+                        outcome,
+                    );
                 }
                 _ => {}
             },

@@ -157,3 +157,28 @@ pub(crate) fn error_reason(err: &TdError) -> String {
         ),
     }
 }
+
+impl Session {
+    /// Settle a request that will never be answered (swept after its TTL,
+    /// dropped because the flood-retry re-send failed, or abandoned with its
+    /// account) by feeding it through the same per-domain failure handling a
+    /// TDLib error uses. Every purpose settles in this one place: spinners
+    /// and "loading more" flags clear, the history window offers Retry.
+    /// The request must already be out of the registry.
+    pub(crate) fn settle_lost_request(&mut self, pending: PendingRequest) {
+        let extra = pending.id;
+        self.drop_admin_followups_of_lost(extra);
+        let seq = self.last_seq;
+        let error = TdError::from_code(LOST_REQUEST_ERROR_CODE);
+        // An export's worker waits on its link for this answer: without it
+        // the link stays busy and no further export request goes out.
+        self.settings.fail_lost_export(pending.purpose, extra);
+        self.acks.settle_lost(extra);
+        self.apply_payload_in_asking_view(
+            EnvelopePayload::Error(error),
+            Some(&pending),
+            Some(extra),
+            seq,
+        );
+    }
+}

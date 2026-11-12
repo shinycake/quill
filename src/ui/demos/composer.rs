@@ -441,10 +441,7 @@ fn apply_placeholder_chats(
     for json in &jsons {
         apply(session, json);
     }
-    let extra = session.request(
-        quill::state::RequestPurpose::GetForumTopics,
-        Some(FORUM_CHAT),
-    );
+    let extra = session.ask_forum_topics(FORUM_CHAT);
     apply(
         session,
         &format!(

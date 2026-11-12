@@ -69,6 +69,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 &mut self.session.stickers.emoji.lists.installed
             };
             fetch.begin();
+            fetch.sent(extra);
         }
         Ok(())
     }

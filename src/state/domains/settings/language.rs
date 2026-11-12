@@ -11,67 +11,60 @@ use crate::telegram::envelope::{LanguagePackInfoData, LanguagePayload};
 pub const LOCALIZATION_TARGET: &str = "tdesktop";
 
 /// In-flight language requests; wrapped as `SettingsPurpose::Language`.
+/// The switch in flight holds the `RequestId` of each request it waits for
+/// ([`LanguageSwitch`]); the purposes only say what a request is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LanguagePurpose {
-    /// `setOption` of a language option. Response is `ok`. `generation` is
-    /// the switch a `language_pack_id` option selects; `None` for the
-    /// startup options, which no switch waits on.
-    SetOption { generation: Option<u32> },
+    /// `setOption` of a startup language option, which no switch waits on.
+    /// Response is `ok`.
+    SetOption,
+    /// `setOption` of the `language_pack_id` a switch selects. Response is
+    /// `ok`.
+    SwitchOption,
     /// `getLocalizationTargetInfo`. Response is `localizationTargetInfo`.
     TargetInfo,
-    /// `getLanguagePackStrings` of the switch `generation`, for the pack
-    /// itself or its base pack. Response is `languagePackStrings`.
-    Strings { generation: u32, base: bool },
+    /// `getLanguagePackStrings` of a switch's pack or its base pack.
+    /// Response is `languagePackStrings`.
+    Strings,
     /// `getLanguagePackStrings` of the announcement badge texts
-    /// (`cloud_lng_badge_psa_<type>`) of one pack; `epoch` tells whether the
-    /// pack is still the one asked about. Response is `languagePackStrings`.
-    PsaLabels { epoch: u32 },
-    /// `synchronizeLanguagePack` / `addCustomServerLanguagePack` of the
-    /// switch `generation`. Response is `ok`.
-    Synchronize { generation: u32 },
+    /// (`cloud_lng_badge_psa_<type>`) of one pack; the label set waits for the
+    /// request itself. Response is `languagePackStrings`.
+    PsaLabels,
+    /// `synchronizeLanguagePack` / `addCustomServerLanguagePack` of a
+    /// switch. Response is `ok`.
+    Synchronize,
 }
 
 type Strings = Vec<(String, PackValue)>;
 
-/// Which of a switch's two string sets have arrived.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub enum SwitchStrings {
-    /// Neither the pack nor its base.
-    #[default]
-    Neither,
-    Pack(Strings),
-    Base(Strings),
-    Both {
-        pack: Strings,
-        base: Strings,
-    },
+/// The requests of a switch whose refusal ends it: the `language_pack_id`
+/// option and the pack synchronization. TDLib keeps the old language when
+/// one is refused, so the switch leaves with the reason instead of
+/// installing a pack TDLib did not select.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SwitchGuards {
+    pub option: Option<RequestId>,
+    pub add: Option<RequestId>,
+    pub sync: Option<RequestId>,
 }
 
-impl SwitchStrings {
-    fn with(self, base: bool, strings: Strings) -> Self {
-        match (self, base) {
-            (Self::Neither | Self::Pack(_), false) => Self::Pack(strings),
-            (Self::Neither | Self::Base(_), true) => Self::Base(strings),
-            (Self::Base(held) | Self::Both { base: held, .. }, false) => Self::Both {
-                pack: strings,
-                base: held,
-            },
-            (Self::Pack(held) | Self::Both { pack: held, .. }, true) => Self::Both {
-                pack: held,
-                base: strings,
-            },
-        }
+impl SwitchGuards {
+    fn holds(&self, request: RequestId) -> bool {
+        [self.option, self.add, self.sync].contains(&Some(request))
     }
 }
 
-/// A pack whose strings are being fetched.
+/// A pack whose strings are being fetched: the pack's and its base pack's
+/// strings, each under the request that asked for them.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LanguageSwitch {
     pub info: LanguagePackInfoData,
-    pub generation: u32,
-    /// The strings that arrived; a pack with no base pack starts with an
-    /// empty base.
-    pub strings: SwitchStrings,
+    /// The pack's own strings.
+    pub pack: Fetch<Strings>,
+    /// The base pack's strings; a pack with no base pack starts with an
+    /// empty, answered base.
+    pub base: Fetch<Strings>,
+    pub guards: SwitchGuards,
     /// What the server changed in this pack while its strings were being
     /// fetched; applied once the switch is ready.
     pub late: LateChange,
@@ -79,17 +72,41 @@ pub struct LanguageSwitch {
 
 impl LanguageSwitch {
     /// A switch to `info`; `no_base` says the pack has no base pack.
-    pub fn new(info: LanguagePackInfoData, generation: u32, no_base: bool) -> Self {
+    pub fn new(info: LanguagePackInfoData, no_base: bool) -> Self {
         Self {
             info,
-            generation,
-            strings: if no_base {
-                SwitchStrings::Base(Vec::new())
+            pack: Fetch::Idle,
+            base: if no_base {
+                Fetch::Ready(Vec::new())
             } else {
-                SwitchStrings::Neither
+                Fetch::Idle
             },
+            guards: SwitchGuards::default(),
             late: LateChange::Nothing,
         }
+    }
+
+    /// The pack's (`base` false) or the base pack's strings were asked as
+    /// `request`.
+    pub fn strings_sent(&mut self, base: bool, request: RequestId) {
+        let fetch = if base { &mut self.base } else { &mut self.pack };
+        fetch.begin();
+        fetch.sent(request);
+    }
+
+    /// The strings `request` brought: taken by the fetch that waits for it.
+    /// `false` when no fetch of this switch does (an older switch's answer).
+    fn take_strings(&mut self, request: RequestId, strings: Strings) -> bool {
+        if self.pack.waits_for(request) {
+            self.pack.answered(Some(request), strings)
+        } else {
+            self.base.answered(Some(request), strings)
+        }
+    }
+
+    /// `request` is one this switch waits for, so its refusal ends it.
+    fn is_waiting_for(&self, request: RequestId) -> bool {
+        self.pack.waits_for(request) || self.base.waits_for(request) || self.guards.holds(request)
     }
 }
 
@@ -158,13 +175,20 @@ pub struct LanguageState {
     /// names); empty for the built-in English.
     pub current: Option<LanguagePackInfoData>,
     pub stage: LanguageStage,
-    pub generation: u32,
     /// Queue for the UI: strings to install, changed strings, a reload
     /// request, a failure.
     pub events: Vec<LanguageEvent>,
 }
 
 impl LanguageState {
+    /// The switch whose strings are being fetched, mutably.
+    pub fn switching_mut(&mut self) -> Option<&mut LanguageSwitch> {
+        match &mut self.stage {
+            LanguageStage::Fetching(switch) => Some(switch),
+            LanguageStage::Idle => None,
+        }
+    }
+
     /// The switch whose strings are being fetched.
     pub fn switching(&self) -> Option<&LanguageSwitch> {
         match &self.stage {
@@ -262,34 +286,37 @@ impl Session {
         let state = &mut self.settings.language;
         match payload {
             LanguagePayload::TargetInfo(packs) => {
-                state.packs.succeed(packs);
+                state.packs.answered(pending.map(|p| p.id), packs);
             }
             LanguagePayload::Strings(strings) => {
                 if let Some(RequestPurpose::Settings(SettingsPurpose::Language(
-                    LanguagePurpose::PsaLabels { epoch },
+                    LanguagePurpose::PsaLabels,
                 ))) = pending.map(|p| p.purpose)
                 {
                     self.chat_list
                         .psa_labels
-                        .store(epoch, pending.map(|p| p.id), strings);
+                        .store(pending.map(|p| p.id), strings);
                     return;
                 }
-                let Some(RequestPurpose::Settings(SettingsPurpose::Language(
-                    LanguagePurpose::Strings { generation, base },
-                ))) = pending.map(|p| p.purpose)
-                else {
+                let Some(pending) = pending.filter(|p| {
+                    p.purpose
+                        == RequestPurpose::Settings(SettingsPurpose::Language(
+                            LanguagePurpose::Strings,
+                        ))
+                }) else {
                     return;
                 };
                 let LanguageStage::Fetching(switch) = &mut state.stage else {
                     return;
                 };
-                if switch.generation != generation {
+                if !switch.take_strings(pending.id, strings) {
                     return;
                 }
-                switch.strings = std::mem::take(&mut switch.strings).with(base, strings);
-                if matches!(switch.strings, SwitchStrings::Both { .. })
-                    && let LanguageStage::Fetching(switch) = std::mem::take(&mut state.stage)
-                    && let SwitchStrings::Both { pack, base } = switch.strings
+                if switch.pack.data().is_some()
+                    && switch.base.data().is_some()
+                    && let LanguageStage::Fetching(mut switch) = std::mem::take(&mut state.stage)
+                    && let (Some(pack), Some(base)) =
+                        (switch.pack.take_data(), switch.base.take_data())
                 {
                     state.current = Some(switch.info.clone());
                     // Changes queued for the old pack do not apply to this one.
@@ -351,9 +378,20 @@ impl Session {
     ) {
         let state = &mut self.settings.language;
         match purpose {
-            LanguagePurpose::TargetInfo => state.packs.fail(error_reason(err)),
-            LanguagePurpose::Strings { generation, .. } => {
-                if state.switching().map(|s| s.generation) == Some(generation) {
+            LanguagePurpose::TargetInfo => {
+                state.packs.failed(request, error_reason(err), false);
+            }
+            // The switch's own strings, option or synchronize refused: TDLib
+            // keeps the old language, so the switch leaves with the reason
+            // instead of installing a pack TDLib did not select. A request
+            // of an older switch fails nothing.
+            LanguagePurpose::Strings
+            | LanguagePurpose::SwitchOption
+            | LanguagePurpose::Synchronize => {
+                let waited = request
+                    .zip(state.switching())
+                    .is_some_and(|(request, switch)| switch.is_waiting_for(request));
+                if waited {
                     state.stage = LanguageStage::Idle;
                     state.forget_failure();
                     state
@@ -362,27 +400,12 @@ impl Session {
                 }
             }
             // The badge types it asked for are asked again by the next pump.
-            LanguagePurpose::PsaLabels { .. } => {
+            LanguagePurpose::PsaLabels => {
                 if let Some(request) = request {
                     self.chat_list.psa_labels.fail_request(request);
                 }
             }
-            // The switch's own option or synchronize refused: TDLib keeps the
-            // old language, so the switch leaves with the reason instead of
-            // installing a pack TDLib did not select.
-            LanguagePurpose::SetOption {
-                generation: Some(generation),
-            }
-            | LanguagePurpose::Synchronize { generation } => {
-                if state.switching().map(|s| s.generation) == Some(generation) {
-                    state.stage = LanguageStage::Idle;
-                    state.forget_failure();
-                    state
-                        .events
-                        .push(LanguageEvent::SwitchFailed(error_reason(err)));
-                }
-            }
-            LanguagePurpose::SetOption { generation: None } => {}
+            LanguagePurpose::SetOption => {}
         }
     }
 }

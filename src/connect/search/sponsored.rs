@@ -115,6 +115,24 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
+    /// Asks for the own full info when hiding ads was confirmed before it
+    /// was cached (`Session::hide_own_sponsored`): its answer carries the
+    /// new setting. Called from the app's poll loop; a send that does not
+    /// leave fails the entry, so the pump never repeats it.
+    pub fn pump_wanted_full_infos(&mut self) {
+        if !self.chats_path_active() {
+            return;
+        }
+        for user_id in self.session.users_state.user_full_infos.wanted() {
+            if let Err(err) = self.fetch_user_full_info(user_id) {
+                self.session
+                    .users_state
+                    .user_full_infos
+                    .fail(user_id, format!("{err:?}"));
+            }
+        }
+    }
+
     /// `reportChatSponsoredMessage` (TDLib 1.8.67). Empty `option_id` starts
     /// the flow; TDLib may answer `reportSponsoredResultOptionRequired`.
     /// Returns `None` when the row is missing or `can_be_reported` is false.

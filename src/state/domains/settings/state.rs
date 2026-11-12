@@ -166,13 +166,17 @@ impl ListEdit {
     }
 }
 
-/// The answer of the device-link round trip (`confirmQrCodeAuthentication`).
-/// The request in flight is `sessions_op`'s (it locks the sessions page);
-/// this holds only how that request ended, for the screen that sent it.
+/// The device-link round trip (`confirmQrCodeAuthentication`). The page
+/// lock is `sessions_op`'s; this holds the request the screen that sent it
+/// waits for and then how it ended. `Waiting` leaves on that request's
+/// answer or error (`Done`) or when the screen's account goes away
+/// (`discard`); an answer for any other request lands nowhere.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum DeviceLogin {
     #[default]
     Idle,
+    /// The confirmation went out as `request`; the screen waits for it.
+    Waiting { request: RequestId },
     /// That request ended; the screen that sent it takes the result once.
     Done {
         request: RequestId,
@@ -184,6 +188,16 @@ impl DeviceLogin {
     /// The screen that asked went away: nobody takes the answer.
     pub fn discard(&mut self) {
         *self = Self::Idle;
+    }
+
+    /// `request` ended with `result`: kept for the screen only while it is
+    /// the one waited for (`false` when nobody waits for it).
+    pub fn settle(&mut self, request: RequestId, result: crate::auth::DeviceLoginResult) -> bool {
+        let waits = matches!(*self, Self::Waiting { request: waited } if waited == request);
+        if waits {
+            *self = Self::Done { request, result };
+        }
+        waits
     }
 
     /// The result of the confirmation `asked` sent, once: the stage returns
@@ -208,14 +222,16 @@ pub enum AutoDownloadAnswer {
 }
 
 /// The local storage clear (`optimizeStorage`): one at a time. `Clearing`
-/// leaves on its answer (`Freed`) or its error (`Failed`, the line the page
-/// shows); `Freed` and `Failed` stay until the screen is reopened or the
-/// next clear starts.
+/// holds the request it waits for and leaves on that request's answer
+/// (`Freed`) or error (`Failed`, the line the page shows); `Freed` and
+/// `Failed` stay until the screen is reopened or the next clear starts.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum StorageClear {
     #[default]
     Idle,
-    Clearing,
+    Clearing {
+        request: RequestId,
+    },
     /// Bytes the last confirmed clear freed: the screen shows "{size}
     /// freed on your device!".
     Freed(i64),
@@ -225,20 +241,44 @@ pub enum StorageClear {
 
 impl StorageClear {
     pub fn is_clearing(&self) -> bool {
-        matches!(self, StorageClear::Clearing)
+        matches!(self, StorageClear::Clearing { .. })
+    }
+
+    /// The `optimizeStorage` this clear waits for.
+    pub fn waits_for(&self, asked: Option<RequestId>) -> bool {
+        matches!(self, StorageClear::Clearing { request } if Some(*request) == asked)
+    }
+
+    /// `asked` answered with the bytes it freed: taken only by the clear
+    /// that waits for it.
+    pub fn answered(&mut self, asked: Option<RequestId>, freed: i64) -> bool {
+        let waits = self.waits_for(asked);
+        if waits {
+            *self = StorageClear::Freed(freed);
+        }
+        waits
+    }
+
+    /// `asked` failed: only the clear that waits for it fails.
+    pub fn failed_by(&mut self, asked: Option<RequestId>, why: String) -> bool {
+        let waits = self.waits_for(asked);
+        if waits {
+            *self = StorageClear::Failed(why);
+        }
+        waits
     }
 
     pub fn freed(&self) -> Option<i64> {
         match self {
             StorageClear::Freed(bytes) => Some(*bytes),
-            StorageClear::Idle | StorageClear::Clearing | StorageClear::Failed(_) => None,
+            StorageClear::Idle | StorageClear::Clearing { .. } | StorageClear::Failed(_) => None,
         }
     }
 
     pub fn failed(&self) -> Option<&str> {
         match self {
             StorageClear::Failed(why) => Some(why),
-            StorageClear::Idle | StorageClear::Clearing | StorageClear::Freed(_) => None,
+            StorageClear::Idle | StorageClear::Clearing { .. } | StorageClear::Freed(_) => None,
         }
     }
 }

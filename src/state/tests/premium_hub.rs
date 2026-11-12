@@ -105,7 +105,7 @@ fn gift_mutation_ok_marks_the_list_stale_and_errors_release_the_lock() {
         .received
         .view
         .confirm_convert(Some("g1".into()));
-    let extra = session.request(RequestPurpose::SellGift, None);
+    let extra = session.request_for_subject(RequestPurpose::SellGift, "g1");
     session.payments.hub.received.op = crate::state::fetch::ListOp::Mutating(extra);
     apply_json(
         &mut session,

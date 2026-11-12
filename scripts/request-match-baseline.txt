@@ -1,8 +1,16 @@
 # Answers not matched by RequestId (scripts/check-request-match.py).
 # <rule>:<Type::function> <count>. Only remove lines or lower counts.
-generation:CheckBotUsername 1
-generation:CreateBot 1
-generation:GetChatMessageCalendar 1
+counter:AiComposePurpose::ApplyInPlace 1
+counter:AiComposePurpose::BoxCompose 1
+counter:AiComposePurpose::BoxFix 1
+counter:AiComposePurpose::GetExample 1
+counter:AiComposePurpose::SearchStyle 1
+counter:BotsPurpose::CheckBotUsername 1
+counter:BotsPurpose::CreateBot 1
+counter:BotsPurpose::GetWidgetQueryAnswer 1
+counter:SearchPurpose::GetChatMessageCalendar 1
+counter:SettingsPurpose::GetBlockedSenders 1
+counter:SettingsPurpose::LookupBusinessBot 1
 purpose:ConnectDriver::ask_gift_text_limit 1
 purpose:ConnectDriver::begin_login 1
 purpose:ConnectDriver::buy_marketplace_gift 1
@@ -33,7 +41,6 @@ purpose:ConnectDriver::leave_live_story 1
 purpose:ConnectDriver::load_forum_topic_icons 1
 purpose:ConnectDriver::load_saved_tags 1
 purpose:ConnectDriver::load_saved_topics 1
-purpose:ConnectDriver::load_wearable_gifts 1
 purpose:ConnectDriver::login_request 1
 purpose:ConnectDriver::manage_sticker_set 2
 purpose:ConnectDriver::mark_all_chats_as_read 1
@@ -44,7 +51,6 @@ purpose:ConnectDriver::maybe_fetch_connected_websites 1
 purpose:ConnectDriver::maybe_fetch_notification_sounds 1
 purpose:ConnectDriver::maybe_fetch_storage_statistics 1
 purpose:ConnectDriver::maybe_fetch_story_custom_emoji_stickers 1
-purpose:ConnectDriver::maybe_load_active_stories 1
 purpose:ConnectDriver::maybe_load_archive_chats 1
 purpose:ConnectDriver::maybe_load_main_chats 1
 purpose:ConnectDriver::maybe_load_selected_sticker_set 1
@@ -106,14 +112,8 @@ unmatched:PaidReactions::set_senders 1
 unmatched:QuillApp::refresh_storage_usage 1
 unmatched:QuillApp::submit_default_auto_delete 1
 unmatched:SearchState::accept_recommended 1
-unmatched:Session::accept_archived_mask_sets 1
-unmatched:Session::accept_installed_mask_sets 1
-unmatched:Session::accept_installed_sticker_sets 1
-unmatched:Session::accept_mask_set 1
 unmatched:Session::apply_auth_payload 1
 unmatched:Session::apply_chat_list_payload 2
-unmatched:Session::apply_language_payload 1
-unmatched:Session::apply_payments_payload 2
 unmatched:Session::apply_privacy_data_payload 1
 unmatched:Session::apply_quick_replies_ok 1
 unmatched:Session::apply_saved_tags 1

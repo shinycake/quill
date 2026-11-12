@@ -39,7 +39,11 @@ impl Session {
                 )
             )
         {
-            self.topic_action_answered(request, true);
+            self.topic_action_answered(
+                request,
+                pending.map(|p| p.asked_in).unwrap_or_default(),
+                true,
+            );
         }
         self.apply_gift_code_ok(pending);
         self.apply_giveaway_ok(pending);
@@ -58,6 +62,16 @@ impl Session {
         self.apply_sticker_creator_ok(pending);
         self.apply_gift_market_ok(pending);
         self.apply_stories_ok(pending);
+        // A page of a direct messages chat's conversations answered: the
+        // next one may be asked.
+        if let Some(pending) =
+            pending.filter(|p| p.purpose == RequestPurpose::LoadDirectMessagesChatTopics)
+            && let Some(chat_id) = pending.chat_id
+        {
+            self.threads
+                .direct
+                .page_answered(chat_id.0, Some(pending.id));
+        }
         self.apply_share_theme_ok(pending);
         self.apply_group_type_ok(pending);
         self.apply_ai_compose_ok(pending);

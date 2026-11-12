@@ -160,7 +160,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let json = get_star_payment_options(extra);
         match self.send_json_request(extra, &json) {
             Ok(id) => {
-                self.session.payments.star_packs.options.begin();
+                let options = &mut self.session.payments.star_packs.options;
+                options.begin();
+                options.sent(id);
                 Ok(Some(id))
             }
             Err(err) => Err(err),

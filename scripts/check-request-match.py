@@ -16,13 +16,15 @@ the re-sweep of 2026-11-11), and this check counts both:
 - `unmatched`: a call to `Fetch::succeed`, which sets the answer whatever
   request it came from. An older request's late answer overwrites a newer
   one.
-
-- `generation`: a request purpose variant that carries `generation: u64`.
-  A hand-bumped counter stamped on the purpose stands in for the
-  `RequestId` the stage should hold (r3 sweep: shared-media tabs, deep
-  links and chat-search jumps all carried one, and a duplicate request for
-  the same stamp could not be told apart). Put the `RequestId` in the
-  stage (`Loading { request }`) and compare the answer's.
+- `counter`: a `generation`, `epoch` or `token` number (`uN` or
+  `Option<uN>`) in a variant of a `*Purpose` enum, listed by enum and
+  variant. A counter in the purpose stands in for the `RequestId`: the
+  stage has to bump it by hand to tell its own answer from an older one,
+  a stage that forgets answers the wrong request, and a duplicate request
+  for the same stamp cannot be told apart (r3 sweep: shared-media tabs,
+  deep links and chat-search jumps all carried one). Hold the `RequestId`
+  in the stage instead (`Loading { request }`; `LanguageSwitch` holds one
+  per ask) and compare the answer's.
 
 Screenshot-demo and fixture files seed state this way and are not checked.
 
@@ -65,37 +67,41 @@ PURPOSE = re.compile(r"\.\s*(?:has_purpose|take_purpose|has_auth_submit)\s*\(")
 # is not an answer match.
 PURPOSE_FOR_CHAT = re.compile(r"\.\s*(?:has_purpose|take_purpose)_for_chat\s*\(")
 SUCCEED = re.compile(r"\.\s*succeed\s*\(")
-PURPOSE_FILE = re.compile(r"^src/state/(?:request_purpose\.rs|domains/[^/]+/purpose\.rs)$")
-VARIANT = re.compile(r"^\s{4}([A-Z]\w*)\s*\{")
-GENERATION_FIELD = re.compile(r"^\s+generation\s*:\s*u64\b")
-GENERATION_INLINE = re.compile(r"\{[^}]*\bgeneration\s*:\s*u64\b")
+PURPOSE_ENUM = re.compile(r"\benum\s+(\w*Purpose)\b[^{;]*\{")
+VARIANT = re.compile(r"\b([A-Z]\w*)\s*[{(]")
+COUNTER = re.compile(
+    r"\b(?:generation|epoch|token)\s*:\s*(?:Option\s*<\s*)?u(?:8|16|32|64)\b"
+)
 
 
-def generation_hits(text):
-    """(variant, line number) of every purpose variant carrying `generation: u64`."""
-    variant = ""
-    for number, line in enumerate(text.splitlines(), 1):
-        found = VARIANT.match(line)
-        if found:
-            variant = found.group(1)
-            if GENERATION_INLINE.search(line):
-                yield variant, number
-        elif GENERATION_FIELD.match(line):
-            yield variant, number
+def counter_hits(text):
+    """(enum, variant, offset) of every counter field in a `*Purpose` enum's variants."""
+    for enum in PURPOSE_ENUM.finditer(text):
+        end = shape_guard.closing(text, enum.end() - 1)
+        pos = enum.end()
+        while True:
+            variant = VARIANT.search(text, pos, end)
+            if not variant:
+                break
+            close = shape_guard.closing(text, variant.end() - 1)
+            for match in COUNTER.finditer(text, variant.end(), close):
+                yield enum.group(1), variant.group(1), match.start()
+            pos = close + 1
 
 
 def hits(root):
     for path, text in shape_guard.source(root):
-        if PURPOSE_FILE.match(path):
-            for variant, number in generation_hits(text):
-                yield f"generation:{variant}", path, number
         if path == OWNER or shape_guard.is_seeder(path):
             continue
         purpose = "_purpose" in text or "has_auth_submit" in text
         succeed = ".succeed" in text
-        if not purpose and not succeed:
+        counter = "Purpose" in text and COUNTER.search(text)
+        if not purpose and not succeed and not counter:
             continue
         scopes = shape_guard.Scopes(path, text)
+        if counter:
+            for enum, variant, offset in counter_hits(text):
+                yield f"counter:{enum}::{variant}", path, shape_guard.line_of(text, offset)
         if purpose:
             patterns = [PURPOSE]
             if path.startswith("src/ui/"):
@@ -111,11 +117,18 @@ def hits(root):
 
 
 def self_test():
-    one_line = "    DeepLinkInfo { generation: u64 },\n"
-    multi = "    Jump {\n        generation: u64,\n    },\n"
-    assert list(generation_hits(one_line)) == [("DeepLinkInfo", 1)]
-    assert list(generation_hits(multi)) == [("Jump", 2)]
-    assert not list(generation_hits("    Plain { request: u64 },\n"))
+    def found(variants):
+        text = "pub enum ChatsPurpose {\n" + variants + "}\n"
+        return [(v, shape_guard.line_of(text, o)) for _, v, o in counter_hits(text)]
+
+    assert found("    DeepLinkInfo { generation: u64 },\n") == [("DeepLinkInfo", 2)]
+    assert found("    Jump {\n        generation: u64,\n    },\n") == [("Jump", 3)]
+    assert found("    Labels { epoch: Option<u32> },\n    Link { token: u8 },\n") == [
+        ("Labels", 2),
+        ("Link", 3),
+    ]
+    assert not found("    Plain { request: u64 },\n    Id(u64),\n    Unit,\n")
+    assert not list(counter_hits("pub enum Stage { Jump { generation: u64 } }\n"))
 
 
 if __name__ == "__main__":

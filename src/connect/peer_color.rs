@@ -61,15 +61,17 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .my_user_id
             .ok_or(ConnectSendError::InvalidRequest)?;
-        let purpose = RequestPurpose::Payments(PaymentsPurpose::GetWearableGifts);
-        if self.session.requests.has_purpose(purpose) {
+        if self.session.users_state.wearable_gifts.is_loading() {
             return Ok(None);
         }
+        let purpose = RequestPurpose::Payments(PaymentsPurpose::GetWearableGifts);
         let extra = self.session.request(purpose, None);
         let json = get_wearable_gifts(extra, MessageSender::User { user_id: me }, 50);
         let sent = self.send_json_request(extra, &json).map(Some);
         if sent.is_ok() {
-            self.session.users_state.wearable_gifts.begin();
+            let gifts = &mut self.session.users_state.wearable_gifts;
+            gifts.begin();
+            gifts.sent(extra);
         }
         sent
     }

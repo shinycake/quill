@@ -7,7 +7,6 @@ use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::diagnostics::DiagnosticSink;
 use quill::ids::ChatId;
-use quill::state::RequestPurpose;
 use quill::telegram::client::copy_and_parse;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -99,7 +98,7 @@ impl QuillApp {
             if topics.is_empty() {
                 continue;
             }
-            let extra = session.request(RequestPurpose::GetForumTopics, Some(ChatId(*chat)));
+            let extra = session.ask_forum_topics(ChatId(*chat));
             let list: Vec<String> = topics
                 .iter()
                 .map(|(id, name, unread)| topic(*chat, *id, name, *unread))

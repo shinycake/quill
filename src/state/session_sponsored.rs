@@ -99,7 +99,7 @@ impl Session {
     /// after the user hid ads, and not again within five minutes of the last
     /// response (tdesktop `TooEarlyForRequest`).
     pub fn sponsored_fetch_due(&self, chat_id: ChatId, now: std::time::Instant) -> bool {
-        if self.messages.sponsored_hidden {
+        if self.sponsored_hidden() {
             return false;
         }
         match self
@@ -116,7 +116,7 @@ impl Session {
     /// How the open chat's ads enter its history. `None` without a fetched
     /// list, after ads were hidden, and in topic views.
     pub fn open_sponsored_layout(&self) -> Option<SponsoredLayout> {
-        if self.messages.sponsored_hidden || self.open_forum_topic().is_some() {
+        if self.sponsored_hidden() || self.open_forum_topic().is_some() {
             return None;
         }
         let entry = self.messages.sponsored.get(&self.open_chat_id()?.0)?;
@@ -378,10 +378,41 @@ impl Session {
         });
     }
 
+    /// Whether ads are off for this account: a Premium account whose own
+    /// full info says `has_sponsored_messages_enabled` is false, or whose
+    /// hiding was confirmed and whose own full info is on its way. Derived,
+    /// so an `updateUserFullInfo` that turns ads back on, or a Premium
+    /// lapse, shows them again with nothing to reset. Without the own full
+    /// info the server decides (ads are asked for).
+    pub fn sponsored_hidden(&self) -> bool {
+        let Some(me) = self.my_user_id.filter(|_| self.my_is_premium()) else {
+            return false;
+        };
+        match self.users_state.user_full_infos.get(&me) {
+            Some(info) => !info.extras.sponsored_enabled,
+            None => self.users_state.user_full_infos.is_wanted(&me),
+        }
+    }
+
+    /// Records the confirmed hiding in the own cached full info, where
+    /// [`Self::sponsored_hidden`] reads it. Without one cached, the own
+    /// full info is wanted: the driver asks for it, and its answer carries
+    /// the new setting. No placeholder is stored, so the real info is
+    /// still fetched.
+    fn hide_own_sponsored(&mut self) {
+        let Some(me) = self.my_user_id else {
+            return;
+        };
+        match self.users_state.user_full_infos.get_mut(&me) {
+            Some(info) => info.extras.sponsored_enabled = false,
+            None => self.users_state.user_full_infos.want(me),
+        }
+    }
+
     /// `toggleHasSponsoredMessagesEnabled(false)` answered `ok`: no ads are
     /// shown or fetched for the rest of the session.
     pub fn accept_sponsored_hidden(&mut self, chat_id: ChatId) {
-        self.messages.sponsored_hidden = true;
+        self.hide_own_sponsored();
         // A report in flight keeps its place: its answer is still awaited.
         if matches!(
             self.messages.sponsored_report,
@@ -495,7 +526,7 @@ impl Session {
                             .dismissed
                             .insert(message_id);
                     }
-                    ReportSponsoredResult::AdsHidden => self.messages.sponsored_hidden = true,
+                    ReportSponsoredResult::AdsHidden => self.hide_own_sponsored(),
                     ReportSponsoredResult::PremiumRequired => {
                         self.request_no_ads_preview(chat_id);
                         return;

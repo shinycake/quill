@@ -87,15 +87,12 @@ impl ForumTopicsMap {
         topics: Vec<ForumTopic>,
     ) -> bool {
         let unread = counted_unread(&topics);
-        let list = self.lists.entry(chat_id).or_default();
-        // An ask other than the one waited for, or one a change outdated,
-        // is stale; an answer nobody tracked (TDLib's own) is taken.
-        let taken = match list {
-            Fetch::Loading {
-                request: Some(_), ..
-            } => list.answered(request, topics),
-            _ => list.answer(topics),
+        // An ask other than the one waited for, or one a change outdated or
+        // a reset forgot, is stale and lands nowhere.
+        let Some(list) = self.lists.get_mut(&chat_id) else {
+            return false;
         };
+        let taken = list.answered(request, topics);
         if taken {
             self.unread.insert(chat_id, unread);
         }
@@ -109,21 +106,12 @@ impl ForumTopicsMap {
         request: Option<RequestId>,
         error: impl Into<String>,
     ) -> bool {
-        let list = self.lists.entry(chat_id).or_default();
-        // Another ask's refusal, or an outdated one's, is stale; one nobody
-        // tracked is taken.
-        let ours = match list {
-            Fetch::Loading {
-                request: Some(waiting),
-                ..
-            } => Some(*waiting) == request,
-            Fetch::Outdated(_) => false,
-            _ => true,
-        };
-        if ours {
-            list.fail(error);
-        }
-        ours
+        // Only the ask in flight fails: another ask's refusal, an outdated
+        // one's, or one against a list that is loaded or never asked is
+        // stale and changes nothing.
+        self.lists
+            .get_mut(&chat_id)
+            .is_some_and(|list| list.failed(request, error, false))
     }
 
     /// A failed ask for `chat_id` is forgotten (the held list, if any,
@@ -190,6 +178,19 @@ impl ForumTopicsMap {
     }
 }
 
+impl Session {
+    /// `getForumTopics` for `chat_id` as the driver sends it: the request is
+    /// registered and the topic list waits for exactly that request. The
+    /// driver's own sender records the same after its send went out; this
+    /// is the one a fixture or demo that plays the answer uses.
+    pub fn ask_forum_topics(&mut self, chat_id: ChatId) -> RequestId {
+        let request = self.request(RequestPurpose::GetForumTopics, Some(chat_id));
+        self.threads.forum_topics.begin(chat_id.0);
+        self.threads.forum_topics.sent(chat_id.0, request);
+        request
+    }
+}
+
 /// The topic's unread count when it can be trusted: only a topic with a
 /// read position has a meaningful server count (see `Session::topic_badge`).
 pub fn topic_unread_count(topic: &ForumTopic) -> Option<i32> {
@@ -213,8 +214,9 @@ mod tests {
         let mut map = ForumTopicsMap::default();
         assert!(!map.asked(5) && !map.failed(5) && !map.contains_key(&5));
         map.begin(5);
+        map.sent(5, RequestId(1));
         assert!(map.asked(5) && !map.failed(5) && !map.contains_key(&5));
-        map.insert(5, Vec::new());
+        assert!(map.answered(5, Some(RequestId(1)), Vec::new()));
         assert!(map.asked(5) && map.contains_key(&5));
         // A failed refetch keeps the answer and does not ask again.
         map.begin(5);

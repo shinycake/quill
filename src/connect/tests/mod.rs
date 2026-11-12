@@ -60,6 +60,7 @@ mod group_bot_commands;
 mod group_calls;
 mod group_type;
 mod groups;
+mod hidden_ads_own_info;
 mod history_liveness;
 mod history_prune_answers;
 mod history_window;

@@ -86,6 +86,13 @@ pub enum ActiveStoriesPaging {
     /// The next page may go out.
     #[default]
     Idle,
+    /// A page is in flight as `request`; only its answer or error leaves
+    /// this stage. `wait` is the wait of the failure the page follows, so
+    /// the next failure doubles it.
+    Loading {
+        request: RequestId,
+        wait: Option<Duration>,
+    },
     /// After a failure other than 404: no page goes out before `until`,
     /// and `wait` doubles per failure.
     Waiting { until: Instant, wait: Duration },
@@ -99,7 +106,7 @@ impl ActiveStoriesPaging {
         match self {
             Self::Idle => true,
             Self::Waiting { until, .. } => now >= *until,
-            Self::Exhausted => false,
+            Self::Loading { .. } | Self::Exhausted => false,
         }
     }
 
@@ -111,24 +118,42 @@ impl ActiveStoriesPaging {
         }
     }
 
-    /// `loadActiveStories` failed with `code`: 404 means everything is
+    /// The next page went out as `request`.
+    pub fn begin(&mut self, request: RequestId) {
+        let wait = match self {
+            Self::Waiting { wait, .. } => Some(*wait),
+            Self::Loading { wait, .. } => *wait,
+            Self::Idle | Self::Exhausted => None,
+        };
+        *self = Self::Loading { request, wait };
+    }
+
+    /// The page `request` asked failed with `code`: 404 means everything is
     /// loaded; anything else (a timeout, FLOOD_WAIT, a 500) waits and tries
-    /// again.
-    pub fn failed(&mut self, code: i32, now: Instant) {
-        *self = match self {
-            _ if code == 404 => Self::Exhausted,
-            // Nothing left to load: a late failure changes nothing.
-            Self::Exhausted => Self::Exhausted,
-            _ => {
-                let (until, wait) = next_retry(self.retry(), now);
-                Self::Waiting { until, wait }
-            }
+    /// again. Only the page in flight fails; any other request's error
+    /// changes nothing.
+    pub fn failed(&mut self, request: Option<RequestId>, code: i32, now: Instant) {
+        let Self::Loading {
+            request: asked,
+            wait,
+        } = *self
+        else {
+            return;
+        };
+        if request != Some(asked) {
+            return;
+        }
+        *self = if code == 404 {
+            Self::Exhausted
+        } else {
+            let (until, wait) = next_retry(wait.map(|wait| (now, wait)), now);
+            Self::Waiting { until, wait }
         };
     }
 
-    /// A page answered: a wait for the next one is over.
-    pub fn answered(&mut self) {
-        if matches!(self, Self::Waiting { .. }) {
+    /// The page `request` asked answered: the next one may go out.
+    pub fn answered(&mut self, request: Option<RequestId>) {
+        if matches!(self, Self::Loading { request: asked, .. } if Some(*asked) == request) {
             *self = Self::Idle;
         }
     }

@@ -383,6 +383,42 @@ fn driver_group_sticker_set_gates_and_shape() {
     let sent = recorder.snapshot().len();
     driver.load_group_sticker_choices(ChatId(10)).unwrap();
     assert_eq!(recorder.snapshot().len(), sent);
+    // The answers fill the lists and end their loading.
+    for (request, ty) in [(&requests[0], 0), (&requests[1], 1)] {
+        let extra = request["@extra"].as_str().expect("extra");
+        let id = 500 + ty;
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"stickerSets","@extra":"{extra}","sets":[{{"@type":"stickerSetInfo","id":"{id}","title":"Pack","name":"pack{id}","size":1,"is_installed":true}}]}}"#
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+    }
+    assert!(
+        !driver
+            .session
+            .stickers
+            .stickers
+            .lists
+            .installed
+            .is_loading()
+    );
+    assert!(!driver.session.stickers.emoji.lists.installed.is_loading());
+    assert!(
+        driver
+            .session
+            .stickers
+            .stickers
+            .sets
+            .iter()
+            .any(|set| set.id == 500)
+    );
     assert!(!driver.session.stickers.stickers.open && !driver.session.stickers.emoji.open);
     let extra = driver
         .set_supergroup_sticker_set(ChatId(10), 1234567890123)

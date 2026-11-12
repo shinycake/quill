@@ -370,9 +370,7 @@ fn driver_send_text_snapshot_in_topic_addresses_message_topic_forum() {
             .unwrap();
     }
     // Inject the topic list through the reducer; topic 3 is closed.
-    let extra = driver
-        .session
-        .request(RequestPurpose::GetForumTopics, Some(ChatId(16)));
+    let extra = driver.session.ask_forum_topics(ChatId(16));
     let topics = [(2, "General", false), (3, "Random", true)]
             .iter()
             .map(|(id, name, closed)| {
