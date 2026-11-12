@@ -1,0 +1,13 @@
+# Re-review of r3-02 fix round (Opus, 2026-11-12). Verdict: merge
+
+Line numbers are on origin/claude/sweep-r3-02.
+
+No defects remain. The fix round is 691230e59. Each item from reviews/r3-02.md:
+
+- 07-003: resolved. `OwnMember::AdminRightsUnread` (src/state/chat_types.rs:291) and `Restricted(None)` count as not fetched (chat_types.rs:455-460). `adopt_status_only` (chat_types.rs:475-484) replaces `set_member_status` in both `adopt_supergroup_status` arms (src/state/session_members.rs:145, :153), so the probe still goes out for a supergroup admin. `note_no_member_record` turns any unfetched value into `NoRecord(status)` (chat_types.rs:465-469), so a refused probe settles and keeps the status. Both requested tests are in src/connect/tests/sweep_r2_15.rs:381-429. The probe gate (src/connect/groups/mod.rs:181) is unchanged from main.
+- 06-002: resolved. `PeerQrData::forget_dropped` and `ThemeGifts::forget_dropped` return whether they dropped anything (src/peer_qr/session.rs:160-172, src/peer_qr/theme.rs:501-513). `qr_settle_dropped_requests` returns `changed`, which is set only by those calls or by a `qr_act` that fires (src/ui/peer_qr/mod.rs:714-737). The test checks that a pass with nothing dropped returns false (src/peer_qr/theme_tests.rs:523-532).
+- 07-002: resolved. `start_writer` treats `Running { thread }` whose `is_finished()` as gone, resets to `Idle` and spawns again (src/settings/window_save.rs:69-80). Poisoned `writer` locks are recovered in both places (window_save.rs:70, :88). The test is at window_save.rs:242-261.
+- 05-004: resolved. The test reads `Instant::now()` after the `WorkerEnd` drop and retries relative to it (src/icon_badge.rs:626-638), so it no longer depends on the process-wide `t0()`.
+- 07-001: resolved. `load_registry_via` takes the cache slot and the write count (src/settings/accounts.rs:341-346). The test owns a local slot and a fixed count (accounts.rs:858-868). `UNREADABLE` is keyed by the test's own temp path.
+
+New defects in the fix round: none. No new unwrap/expect/indexing outside tests, no baseline or allow-list lines, no platform cfg. All guards pass on the tip (implicit-state, screen-state, window-scope, request-match, stage-enums, refcell-borrows, owned-timers, dialog-answers, drained-notes, submit-settle, window-root, click-through, file-size). Non-blocking nit: in `saves_while_the_writer_runs_start_no_second_thread` (window_save.rs:210-236), the two parked writer threads are never unparked after `release.store(true)`, so they stay parked until the test process exits. Harmless; an `unpark` on their handles would tidy it.
