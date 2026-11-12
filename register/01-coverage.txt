@@ -26,7 +26,3 @@ src/advanced/hardware_video.rs 112 read
 src/advanced/mod.rs 12 read
 src/advanced/platform_log.rs 311 read
 src/advanced/test_environment.rs 300 read
-src/agent/access.rs 603 read
-src/agent/activity.rs 685 read
-src/agent/cli/client.rs 122 read
-src/agent/cli/connect.rs 494 read
