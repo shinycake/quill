@@ -38,6 +38,11 @@ Read whole, with nothing S3 or worse:
 - `src/state/sticker_gif_types.rs` (the GIF panel and search half)
 - `src/ui/composer/mod.rs`, `src/ui/composer/bot_thread.rs`
 - `src/ui/on_screen.rs`
+- `src/connect/settings/mod.rs`, `sessions.rs`, `storage.rs`, `notifications.rs` (every send takes its request back and settles its stage when the send is refused)
+- `src/connect/bots.rs`
+- `src/state/info_types.rs` (the profile, photo, invite link, voters, inline query, event log and deep link stages)
+- `src/state/call_types.rs` (the call, rating, upload, transport and rejoin stages)
+- `src/ui/shell.rs`, `src/ui/story_viewer/mod.rs`, `src/ui/deep_links.rs`, `src/ui/search_ui/mod.rs`, `src/ui/chat_look_ui.rs` (to the end of the Apply code) with `chat_look_ui/stage.rs`
 - the three merges of the last batch as merged: r2-31 (forward stage, chat overlay, ttl picker), r2-41 (payment outcomes, emoji access answers, transport), r2-38 (right press, origin rows, boost hold, loop pause, location search)
 
 Read while tracing a caller, in r2-26's set (not counted): `src/state/session_apply_ok.rs`, `src/ui/chat_ui_state.rs`, `src/ui/esc_stack.rs`, `src/ui/app_render/mod.rs`, `src/ui/app_render/window_upkeep.rs`, `src/state/domains/threads/bot_thread.rs`.
@@ -79,9 +84,9 @@ Both are heuristics over single functions: a stage written in one function and a
 
 None so far.
 
-### S4, fixed (waits for the next gate run)
+### S4, fixed
 
-- `PaymentsState::outcomes` grew by one entry per paid invoice for the whole session, and the verdicts of one account's mini app were still there for the next account on screen. Fixed in 9299dd787 (local, on top of dc633d7f3): the list keeps the newest 16, `forget_screen_outcomes` clears it, and a test covers both. It goes onto the follow-up with the r2-26 merge's gate.
+- `PaymentsState::outcomes` grew by one entry per paid invoice for the whole session, and the verdicts of one account's mini app were still there for the next account on screen. Fixed in 9299dd787: the list keeps the newest 16, `forget_screen_outcomes` clears it, and a test covers both. It is on the follow-up under the r2-26 merge (0a22b2d88, `GATE OK core=8595 0 ui=3755 0`).
 
 ### S4, listed
 
@@ -97,8 +102,10 @@ None so far.
 - `src/state/domains/messages/error.rs`: a failed `getPollOptionProperties` fails the open option menu by chat, message and option, not by request, so the failure of an ask made before the menu was reopened on the same option fails the new one. A failed `GetSharingProtection` sets `private_sharing.enable = AskToRequest(chat)` with no request match.
 - `src/state/domains/payments/error.rs`: the failures of `GetStarPackOptions`, `GetWearableGifts` and `EditStarSubscription` settle their value by purpose. `src/state/domains/settings/error.rs`: `OptimizeStorage` the same. One request of each is out at a time.
 - `src/state/domains/messages/apply.rs`: the poll statistics arm checks "the request the dialog waits for" twice in a row (a merge leftover; harmless).
+- `src/state/info_types.rs`: a failed next page of groups in common ends in `MorePage::Exhausted`, so the list stops with no Retry (as Telegram Desktop's `loadMoreRows` does, which has no failure handler; left as it is); `ChatEventLogFetch::Loading` carries no request and the requests it waits for are in `EventLog::wait` beside it (r2-01's shape, one writer for both).
+- `src/ui/story_viewer/mod.rs` (`send_story_report_text`): the details field is emptied after the report step whether or not the request went out, so a refused send loses the typed details (the flow ends in `Failed` and reopening starts over).
 - Transport (`r2-41`): a status that is both at-end and stalled while a loop seek lands stays `Playing`. Accepted at review.
 
 ## Not read
 
-Of the 335 files resolved by hand at the merges, 18 were read whole or in the half named above, and the files of r2-26's diff were read as that diff. The rest, and the other in-scope files, were not read in this pass beyond the two scans and the merge checks: among them `src/state/info_types.rs`, `src/state/call_types.rs`, the settings and messages state files, `src/connect/stickers.rs`, `src/connect/bots.rs`, `src/connect/settings/*`, and the UI files with four merges each (`story_viewer/mod.rs`, `shell.rs`, `search_ui/mod.rs`, `group_call_panel.rs`, `deep_links.rs`, `chat_look_ui.rs`). A second confirm pass should start there.
+Only the files listed under "Coverage so far" were read whole or in the part named there (32 files, most of them among the 335 resolved by hand at the merges), and the files of r2-26's diff were read as that diff. The other in-scope files were not read in this pass beyond the two scans and the merge checks: among them the settings and messages state files, `src/connect/stickers.rs` and `src/ui/group_call_panel.rs`. A second confirm pass should start there.
