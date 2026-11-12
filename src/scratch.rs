@@ -46,6 +46,32 @@ fn register_hook() {
     });
 }
 
+/// A file on disk that its owner removes unless it is claimed. Work on a
+/// background thread returns it, so a result nobody takes (the task was
+/// dropped because the box or screen it was for went away) removes the
+/// file when it is dropped.
+#[derive(Debug)]
+pub struct TempFile(Option<PathBuf>);
+
+impl TempFile {
+    pub fn new(path: PathBuf) -> Self {
+        Self(Some(path))
+    }
+
+    /// The file is someone's to keep or remove now.
+    pub fn claim(mut self) -> PathBuf {
+        self.0.take().unwrap_or_default()
+    }
+}
+
+impl Drop for TempFile {
+    fn drop(&mut self) {
+        if let Some(path) = self.0.take() {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
 /// Records `dir` for removal at process exit.
 pub fn remove_at_exit(dir: PathBuf) {
     register_hook();

@@ -110,10 +110,15 @@ impl QuillApp {
     /// while the open chat has a live `self_destruct_in` timer. At most
     /// one task per open chat (held in `self_destruct_tick`,
     /// mirroring the Phase A1 slow-mode tick); it exits when no timer is
-    /// live or the open chat changes. Called from `render`, which has the
+    /// live, the open chat changes or Quill locks. Called from `render`, which has the
     /// `&mut self` the tick needs.
     pub(super) fn ensure_self_destruct_tick(&mut self, cx: &mut Context<Self>) {
         let now_ms = unix_ms_now();
+        // A locked Quill draws no history: no tick starts, and a running one
+        // ends at its next beat (the first render after the unlock asks again).
+        if self.refused_while_locked() {
+            return;
+        }
         let Some(chat_id) = self.session().and_then(|session| session.open_chat_id()) else {
             return;
         };
@@ -144,7 +149,7 @@ impl QuillApp {
                         let still_live = this.session().is_some_and(|session| {
                             session.open_chat_has_live_self_destruct(now_ms)
                         });
-                        if still_open && still_live {
+                        if still_open && still_live && !this.refused_while_locked() {
                             // The badges are in the history rows.
                             this.notify_conversations(cx);
                             true

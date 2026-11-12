@@ -570,8 +570,9 @@ impl QuillApp {
     }
 
     /// Apply `edit` to the key's rule detail and save the result.
-    /// Not Ready (Loading/Failed): ignored — an empty detail would
-    /// recompose into a base-less rule list (first-match => deny-all).
+    /// Loading/Failed: ignored — the stale copy may be older than the
+    /// server's rule, and an empty detail would recompose into a base-less
+    /// rule list (first-match => deny-all).
     pub(super) fn mutate_privacy_detail(
         &mut self,
         key: PrivacySettingKey,
@@ -582,7 +583,7 @@ impl QuillApp {
             s.settings
                 .privacy
                 .get(&key)
-                .and_then(|st| st.detail().cloned())
+                .and_then(|st| st.editable_detail().cloned())
         });
         let Some(mut detail) = current else {
             return false;

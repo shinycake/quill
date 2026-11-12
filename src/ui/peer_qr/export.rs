@@ -20,6 +20,7 @@ use quill::peer_qr::layout::{
 };
 use quill::peer_qr::pattern::{Falloff, LAYER_BAND, Metrics, Rect, overlaps, pick_index, tiles};
 use quill::peer_qr::state::{QrToast, ShownLink};
+use quill::scratch::TempFile;
 use std::fmt::Write as _;
 use std::sync::Arc;
 
@@ -503,18 +504,21 @@ impl QuillApp {
         self.qr_export(
             picture,
             window,
-            |png| quill::composer::clipboard_image_attachment(&png, "png").map(|file| file.path),
+            |png| {
+                quill::composer::clipboard_image_attachment(&png, "png")
+                    .map(|file| TempFile::new(file.path))
+            },
             move |this, image, current, cx| {
                 let open = this.peer_qr.open.as_mut().filter(|_| current);
                 let Some(open) = open else {
-                    if let Some(path) = image {
-                        super::remove_card_file(path, cx);
+                    if let Some(card) = image {
+                        super::remove_card_file(card.claim(), cx);
                     }
                     return;
                 };
                 open.share = super::QrShare::Chooser {
                     window: from,
-                    image,
+                    image: image.map(TempFile::claim),
                 };
                 this.as_asked_by(from, |this| {
                     this.in_asking_window(cx, |this, _| this.share.link_text = Some(shown.link));
@@ -530,6 +534,7 @@ impl QuillApp {
 
 #[cfg(test)]
 mod tests {
+    use super::TempFile;
     use super::{
         BOX_WIDTH, CARD_WIDTH, CopyKind, FONT_FALLBACK, MARGIN, Picture, QrToast, Rgb, UsernameFit,
         card_layout, copy_item, gift_picture, picture_svg, picture_tiles,
@@ -595,6 +600,24 @@ mod tests {
         let (stills, tiles) = gift_picture(None, Some(still()), &card);
         assert_eq!(stills.len(), 1);
         assert!(tiles.iter().all(|tile| tile.still == 0));
+    }
+
+    /// Sweep r3-11, 19-005: a share render nobody claimed (its task was
+    /// dropped with the box) leaves no card file; a claimed one stays.
+    #[test]
+    fn an_unclaimed_card_file_is_removed_and_a_claimed_one_stays() {
+        let dir = std::env::temp_dir().join(format!("quill-temp-card-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let dropped = dir.join("dropped.png");
+        let kept = dir.join("kept.png");
+        let _ = std::fs::write(&dropped, b"png");
+        let _ = std::fs::write(&kept, b"png");
+        drop(TempFile::new(dropped.clone()));
+        let path = TempFile::new(kept.clone()).claim();
+        assert!(!dropped.exists());
+        assert_eq!(path, kept);
+        assert!(kept.exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -180,6 +180,64 @@ fn gift_settings_are_sent_and_applied_to_the_own_full_info() {
     cleanup(f);
 }
 
+/// Sweep r3-11, 20-004: a refused gift-settings save puts back what the
+/// server holds, whichever of two saves in flight fails first.
+#[test]
+fn a_refused_gift_settings_save_restores_the_confirmed_value() {
+    let mut f = fixture();
+    ingest(
+        &mut f,
+        r#"{"@type":"updateOption","name":"my_id","value":{"@type":"optionValueInteger","value":"60"}}"#,
+    );
+    ingest(
+        &mut f,
+        r#"{"@type":"updateUserFullInfo","user_id":60,"user_full_info":{"@type":"userFullInfo","gift_settings":{"@type":"giftSettings","show_gift_button":true,"accepted_gift_types":{"@type":"acceptedGiftTypes","unlimited_gifts":true,"limited_gifts":false,"upgraded_gifts":true,"gifts_from_channels":true,"premium_subscription":false}}}}"#,
+    );
+    let confirmed = f.1.session.my_gift_settings().expect("parsed");
+    let first = GiftSettings {
+        limited_gifts: true,
+        ..confirmed
+    };
+    let second = GiftSettings {
+        premium_subscription: true,
+        ..first
+    };
+    f.1.set_gift_settings(first).unwrap();
+    let first_request = last_request(&f);
+    f.1.set_gift_settings(second).unwrap();
+    let second_request = last_request(&f);
+    assert_eq!(f.1.session.my_gift_settings(), Some(second));
+    error_for(&mut f, &second_request);
+    assert_eq!(f.1.session.my_gift_settings(), Some(first));
+    error_for(&mut f, &first_request);
+    assert_eq!(f.1.session.my_gift_settings(), Some(confirmed));
+    assert_eq!(
+        f.1.session.settings.privacy_data.gift_save,
+        crate::privacy::GiftSave::Idle
+    );
+    cleanup(f);
+}
+
+/// Sweep r3-11, 20-005: a password check the driver cannot send leaves the
+/// card on Failed (which the card draws), not on Idle with nothing said.
+#[test]
+fn a_refused_password_check_is_a_failed_card() {
+    let mut f = fixture();
+    f.2.refuse_sends(true);
+    assert!(f.1.check_remembered_password("hunter2").is_err());
+    assert_eq!(
+        f.1.session.settings.privacy_data.password_check,
+        PasswordCheck::Failed
+    );
+    f.2.refuse_sends(false);
+    f.1.check_remembered_password("hunter2").unwrap();
+    assert!(matches!(
+        f.1.session.settings.privacy_data.password_check,
+        PasswordCheck::Checking { .. }
+    ));
+    cleanup(f);
+}
+
 #[test]
 fn inactive_session_ttl_comes_from_sessions_and_is_set_optimistically() {
     let mut f = fixture();

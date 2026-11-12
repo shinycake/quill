@@ -4,7 +4,7 @@
 //! "Do you still remember your password?" check.
 use super::*;
 use crate::network_usage::NetworkUsage;
-use crate::privacy::{NewChatPrivacy, NewChatPrivacyState};
+use crate::privacy::{GiftSave, NewChatPrivacy, NewChatPrivacyState};
 use crate::state::saves::Optimistic;
 use crate::telegram::envelope::SettingsPayload;
 
@@ -62,6 +62,8 @@ pub struct PrivacyData {
     /// failed (a failed reset lands here too).
     pub network: crate::state::fetch::Fetch<NetworkUsage>,
     pub password_check: PasswordCheck,
+    /// The own gift settings' saves in flight, over the confirmed value.
+    pub gift_save: GiftSave,
     /// The last failure of each control's request, shown where that
     /// control is (never as a toast). A control's success or retry clears
     /// only its own line.
@@ -210,6 +212,11 @@ impl Session {
                 }
                 data.clear_error(PrivacyControl::SessionTtl);
             }
+            Some(RequestPurpose::SetGiftSettings) => {
+                if let Some(id) = pending.map(|p| p.id) {
+                    self.settings.privacy_data.gift_save.landed(id);
+                }
+            }
             Some(RequestPurpose::Settings(SettingsPurpose::SetNewChatPrivacy)) => {
                 if let Some(id) = pending.map(|p| p.id)
                     && let Some(state) = self.settings.privacy_data.new_chat.as_mut()
@@ -306,6 +313,11 @@ impl Session {
                 );
             }
             RequestPurpose::SetGiftSettings => {
+                let shown = pending.and_then(|p| data.gift_save.failed(p.id));
+                if let Some(shown) = shown {
+                    self.set_my_gift_settings_local(shown);
+                }
+                let data = &mut self.settings.privacy_data;
                 data.fail(
                     PrivacyControl::Gifts,
                     sessions_error_line("change the gift settings", err),

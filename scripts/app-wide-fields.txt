@@ -169,7 +169,6 @@ group_call.tile_overlays * | tile control fades by `LiveKey`, pruned with the pl
 group_call.stream * | the stream window's player, photo and controls (the box over it is the call view's `CallBox`); `clear` runs when the call shown is no stream; the join wait is the screen's (`group_call_screen.stream_joining`)
 group_call.live_pip * | the live picture-in-picture link; it carries its account (`account`), and enlarge closes it for any other
 screen_share.chooser * | the share chooser: its listing (tagged with the screen that asked: another screen's never blocks), its window (closed by the screen's goodbye, `CallScreen`), the windows and screens listed, the source picked, and the screen recording permission box; each names the call it shares into (one, or the video chat), and another call or none closes them
-screen_share.generation | which listing may land
 screen_share.backend | the capture backend
 screen_share.demo_active | the screenshot demos' running share
 screen_share.demo_active.source | the screenshot demos' shared source

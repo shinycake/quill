@@ -173,3 +173,35 @@ fn a_mark_as_read_click_waits_for_the_unlock(cx: &mut TestAppContext) {
         );
     });
 }
+
+/// Sweep r3-11, 21-003: the self-destruct badge tick starts for an open chat
+/// with a running countdown, but not behind the lock screen.
+#[gpui_kit::test]
+fn the_self_destruct_tick_does_not_start_while_locked(cx: &mut TestAppContext) {
+    use quill::telegram::envelope::{MessageSelfDestruct, SelfDestructClock, SelfDestructKind};
+    let (app, mut vcx) = open_chat(cx);
+    app.update(&mut vcx, |app, _| {
+        let now = quill::state::unix_ms_now();
+        let session = app.demo_session.as_mut().expect("demo session");
+        let open = session.open_chat_id().expect("open chat");
+        let history = session.histories.get_mut(&open.0).expect("history");
+        let message = history.messages.values_mut().next().expect("a message");
+        message.self_destruct = Some(MessageSelfDestruct {
+            kind: SelfDestructKind::Timer { secs: 600 },
+            clock: SelfDestructClock::Counting {
+                expires_in_ms: 600_000,
+                fetched_at_ms: now,
+            },
+        });
+    });
+    lock(&app, &mut vcx);
+    app.update(&mut vcx, |app, cx| {
+        app.ensure_self_destruct_tick(cx);
+        assert!(app.chat_ui.self_destruct_tick.is_none(), "locked");
+    });
+    app.update(&mut vcx, |app, cx| {
+        app.set_locked(false, cx);
+        app.ensure_self_destruct_tick(cx);
+        assert!(app.chat_ui.self_destruct_tick.is_some(), "unlocked");
+    });
+}

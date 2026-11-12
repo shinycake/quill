@@ -129,12 +129,9 @@ impl QuillApp {
     }
 
     pub(super) fn close_stars(&mut self, cx: &mut Context<Self>) {
+        // The packs section folds with the box (it is part of the open view).
         if let Some(hub) = self.hub_mut() {
             hub.stars.close();
-        }
-        // "Buy more Stars" starts folded the next time.
-        if let Some(packs) = self.packs_mut() {
-            packs.open = false;
         }
         cx.notify();
     }

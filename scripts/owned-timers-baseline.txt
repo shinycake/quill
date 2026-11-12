@@ -24,7 +24,6 @@ poll:QuillApp::ensure_slow_mode_tick 1
 poll:QuillApp::ensure_sticker_closer 1
 poll:QuillApp::ensure_story_tick 1
 poll:QuillApp::pull_jump_when_ready 1
-poll:QuillApp::quick_replies_watch 1
 poll:QuillApp::refresh_system_accent 1
 poll:QuillApp::request_tick 1
 poll:QuillApp::run_passkey_ticker 1

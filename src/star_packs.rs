@@ -22,8 +22,6 @@ pub struct StarPack {
 pub struct StarPacksState {
     /// Asked once; a failure is asked again at the next open.
     pub options: crate::state::fetch::Fetch<Vec<StarPack>>,
-    /// "Buy more Stars" is expanded in the dialog.
-    pub open: bool,
 }
 
 /// Parses a `starPaymentOptions` answer, smallest pack first.

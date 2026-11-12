@@ -48,28 +48,28 @@ fn bounce_settles_at_zero() {
 
 #[test]
 fn pull_starts_only_at_the_bottom_of_an_active_chat() {
-    let mut machine = PullMachine::new();
+    let mut machine: PullMachine = PullMachine::new();
     machine.wheel(Phase::Started, 0., false, true, 0);
     let step = machine.wheel(Phase::Moved, 30., false, true, 10);
     assert!(!step.consumed && !step.started);
-    let mut machine = PullMachine::new();
+    let mut machine: PullMachine = PullMachine::new();
     machine.wheel(Phase::Started, 0., true, false, 0);
     let step = machine.wheel(Phase::Moved, 30., true, false, 10);
     assert!(!step.consumed && !step.started);
     // Scrolling up at the bottom is the list's.
-    let mut machine = PullMachine::new();
+    let mut machine: PullMachine = PullMachine::new();
     machine.wheel(Phase::Started, 0., true, true, 0);
     let step = machine.wheel(Phase::Moved, -30., true, true, 10);
     assert!(!step.consumed);
     // A wheel without a finger down (mouse, momentum) never pulls.
-    let mut machine = PullMachine::new();
+    let mut machine: PullMachine = PullMachine::new();
     let step = machine.wheel(Phase::Moved, 30., true, true, 10);
     assert!(!step.consumed && !step.started);
 }
 
 #[test]
 fn holding_past_the_threshold_gets_ready_after_the_dwell() {
-    let mut machine = PullMachine::new();
+    let mut machine: PullMachine = PullMachine::new();
     let (steps, now) = pull(&mut machine, 10, 25., 0);
     assert!(steps.iter().filter(|s| s.started).count() == 1);
     assert!(steps.iter().skip(1).all(|s| s.consumed));
@@ -85,7 +85,7 @@ fn holding_past_the_threshold_gets_ready_after_the_dwell() {
     // Letting go asks the UI to jump.
     let release = machine.wheel(Phase::Ended, 0., true, true, now + 200);
     assert!(release.release_ready);
-    machine.begin_jump(now + 200);
+    machine.begin_jump(now + 200, crate::task_hold::TaskHold::new(()));
     assert!(machine.jumping());
     // The card finishes expanding, then holds while the jump happens.
     machine.frame(true, now + 600);
@@ -98,7 +98,7 @@ fn holding_past_the_threshold_gets_ready_after_the_dwell() {
 
 #[test]
 fn a_flick_past_the_threshold_springs_back() {
-    let mut machine = PullMachine::new();
+    let mut machine: PullMachine = PullMachine::new();
     let (_, now) = pull(&mut machine, 10, 25., 0);
     // Released before the dwell fired.
     let release = machine.wheel(Phase::Ended, 0., true, true, now + 20);
@@ -118,7 +118,7 @@ fn a_flick_past_the_threshold_springs_back() {
 
 #[test]
 fn pulling_back_unwinds_one_to_one_and_resets_ready() {
-    let mut machine = PullMachine::new();
+    let mut machine: PullMachine = PullMachine::new();
     let (_, now) = pull(&mut machine, 12, 25., 0);
     machine.frame(true, now + READY_DWELL_MS);
     assert!(machine.reached());
@@ -132,10 +132,16 @@ fn pulling_back_unwinds_one_to_one_and_resets_ready() {
 
 #[test]
 fn the_hint_shows_only_with_a_next_chat() {
-    let mut machine = PullMachine::new();
+    let mut machine: PullMachine = PullMachine::new();
     let (_, now) = pull(&mut machine, 3, 25., 0);
     assert!(machine.hint(now + 400).is_none());
-    machine.set_has_next(true, now);
+    machine.set_found(
+        Some(Found {
+            next: Next::Topic(1),
+            via: (),
+        }),
+        now,
+    );
     machine.wheel(Phase::Moved, 5., true, true, now + 10);
     let hint = machine.hint(now + 400).expect("hint");
     assert_eq!(hint.panel, 1.);
@@ -324,4 +330,60 @@ fn texts_are_tdesktops() {
         nothing_left_text(Mode::Topic, "Rustaceans"),
         "No more unread topics in Rustaceans"
     );
+}
+
+/// Sweep r3-11, 20-007: where the pull leads and the jump's job live in the
+/// machine's stages, so the stage that ends them takes them along.
+#[test]
+fn what_a_pull_found_and_its_jump_end_with_the_stage() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    struct Flag(Arc<AtomicBool>);
+    impl Drop for Flag {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::Relaxed);
+        }
+    }
+    let found = Found {
+        next: Next::Chat(ChatId(9)),
+        via: 3_u8,
+    };
+    let mut machine: PullMachine<u8> = PullMachine::new();
+    machine.set_found(Some(found), 0);
+    assert_eq!(machine.found(), None, "nothing to attach it to while idle");
+    let mut now = 0;
+    machine.wheel(Phase::Started, 0., true, true, now);
+    for _ in 0..30 {
+        now += 16;
+        machine.wheel(Phase::Moved, 14., true, true, now);
+    }
+    machine.set_found(Some(found), now);
+    assert_eq!(machine.found_for_release(), Some(found));
+    now += 600;
+    machine.frame(true, now);
+    let release = machine.wheel(Phase::Ended, 0., true, true, now + 10);
+    assert!(release.release_ready);
+    let ended = Arc::new(AtomicBool::new(false));
+    machine.begin_jump(
+        now + 10,
+        crate::task_hold::TaskHold::new(Flag(ended.clone())),
+    );
+    assert!(machine.jumping());
+    assert_eq!(
+        machine.found(),
+        Some(found),
+        "the indicator keeps showing it"
+    );
+    assert_eq!(
+        machine.found_for_release(),
+        None,
+        "a jump is not released twice"
+    );
+    assert!(!ended.load(Ordering::Relaxed));
+    machine.reset_all(now + 20);
+    assert!(
+        ended.load(Ordering::Relaxed),
+        "starting over stops the jump"
+    );
+    assert_eq!(machine.found(), None);
 }

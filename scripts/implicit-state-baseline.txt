@@ -39,7 +39,6 @@ PlaybackHealth::output_failed
 
 
 
-Step::started
 
 StreamFacts::transport_failed
 

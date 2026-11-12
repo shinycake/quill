@@ -86,6 +86,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// communities" list (tdesktop `PublicsController::prepare`).
     pub fn load_created_public_chats(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
+            // A refused ask is a failed fetch the box draws with Retry, not
+            // a list left on None that the next render asks for again.
+            self.session.groups.group_type.public_chats = PublicChatsFetch::Failed;
             return Err(ConnectSendError::InvalidRequest);
         }
         let state = &mut self.session.groups.group_type;

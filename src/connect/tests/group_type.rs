@@ -453,3 +453,23 @@ fn a_refused_link_count_send_is_a_failed_count() {
             .chat_invite_link_count_loading(ChatId(13))
     );
 }
+
+/// Sweep r3-11, 20-002: an ask the driver refuses (chats path inactive)
+/// lands in Failed, which the limit box draws with Retry, instead of
+/// staying on None for the next render to ask again.
+#[test]
+fn a_refused_public_chats_ask_is_a_failed_fetch() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let session = crate::state::Session::new(crate::ids::AccountKey::primary(), sink);
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    assert!(driver.load_created_public_chats().is_err());
+    assert_eq!(
+        driver.session.groups.group_type.public_chats,
+        crate::state::PublicChatsFetch::Failed
+    );
+    assert!(recorder.snapshot().is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
+}

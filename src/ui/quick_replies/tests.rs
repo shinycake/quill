@@ -245,8 +245,10 @@ fn opening_the_box_clears_the_last_refusal_and_retries_a_failed_load(cx: &mut Te
     });
 }
 
+/// The poll belongs to the stage that waits: leaving the stage, or closing
+/// the box, ends it.
 #[gpui_kit::test]
-fn one_poll_runs_at_a_time_and_closing_the_box_ends_it(cx: &mut TestAppContext) {
+fn the_poll_lives_in_its_stage_and_leaving_the_stage_ends_it(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     seed(&app, vcx);
@@ -259,30 +261,30 @@ fn one_poll_runs_at_a_time_and_closing_the_box_ends_it(cx: &mut TestAppContext) 
             id: Some(1),
         },
     );
-    let watch = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+    let start = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
         vcx.update(|window, cx| {
             app.update(cx, |app, cx| {
-                app.quick_replies_watch(window, cx);
-                app.dialogs
-                    .quick_replies_dialog
-                    .as_ref()
-                    .unwrap()
-                    .watch
-                    .clone()
-                    .unwrap()
+                let poll = app.quick_replies_poll(window, cx);
+                let weak = poll.weak();
+                if let Some(dialog) = app.dialogs.quick_replies_dialog.as_mut() {
+                    dialog.pane.stage = super::PaneStage::Accepted { _poll: poll };
+                }
+                weak
             })
         })
     };
-    let first = watch(&app, vcx);
-    let second = watch(&app, vcx);
-    assert!(
-        std::rc::Rc::ptr_eq(&first, &second),
-        "a second submit stacks no loop"
-    );
-    let poll = std::rc::Rc::downgrade(&first);
-    drop((first, second));
+    let replaced = start(&app, vcx);
+    assert!(replaced.upgrade().is_some(), "the waiting stage holds it");
+    app.update(vcx, |app, _| {
+        if let Some(dialog) = app.dialogs.quick_replies_dialog.as_mut() {
+            dialog.pane.stage = super::PaneStage::default();
+        }
+    });
+    assert!(replaced.upgrade().is_none(), "leaving the stage ends it");
+    let closed = start(&app, vcx);
+    assert!(closed.upgrade().is_some());
     app.update(vcx, |app, cx| app.close_quick_replies(cx));
-    assert!(poll.upgrade().is_none(), "the poll goes with its box");
+    assert!(closed.upgrade().is_none(), "the poll goes with its box");
 }
 
 /// Open a private chat with a person and type `/` in the composer.
@@ -374,8 +376,9 @@ fn a_new_shortcut_nobody_reported_does_not_keep_the_poll_running(cx: &mut TestAp
     assert!(done, "nothing was accepted, so there is no id to wait for");
     let waiting = vcx.update(|window, cx| {
         app.update(cx, |app, cx| {
+            let poll = app.quick_replies_poll(window, cx);
             if let Some(dialog) = app.dialogs.quick_replies_dialog.as_mut() {
-                dialog.pane.stage = super::PaneStage::Accepted;
+                dialog.pane.stage = super::PaneStage::Accepted { _poll: poll };
             }
             app.quick_replies_pump(window, cx)
         })

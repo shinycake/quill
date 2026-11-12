@@ -197,7 +197,17 @@ impl<S: JsonSender> ConnectDriver<S> {
             .users_state
             .profile_chat_lists
             .remove(&(ProfileChatsKind::SuitablePersonalChats, 0));
-        self.fetch_profile_chats(ProfileChatsKind::SuitablePersonalChats, 0)
+        let sent = self.fetch_profile_chats(ProfileChatsKind::SuitablePersonalChats, 0);
+        if sent.is_err() {
+            // Refused before anything was recorded (chats path inactive):
+            // the picker draws the failure with Retry, not Loading for good.
+            self.session
+                .users_state
+                .profile_chat_lists
+                .entry((ProfileChatsKind::SuitablePersonalChats, 0))
+                .or_insert_with(|| ProfileChatsFetch::Failed("not sent".into()));
+        }
+        sent
     }
 
     /// `getUserProfilePhotos` for the gallery (line 14591); deduped like

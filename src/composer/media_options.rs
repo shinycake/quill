@@ -142,9 +142,15 @@ pub enum PhotoPrep {
     /// unreadable, animated, or too narrow), so "Compress" is not offered.
     FileOnly,
     /// A photo edit is rendering into a new file for this one: the latest
-    /// Done's number. Until it lands the file must not be sent. If the
-    /// render fails, `before` is what the picture was.
-    Rendering { render: u64, before: Box<PhotoPrep> },
+    /// Done's number, and the `hold` that owns its work (a newer Done, the
+    /// card going or the tray going drops it, which cancels the render).
+    /// Until it lands the file must not be sent. If the render fails,
+    /// `before` is what the picture was.
+    Rendering {
+        render: u64,
+        hold: crate::task_hold::TaskHold,
+        before: Box<PhotoPrep>,
+    },
 }
 
 impl PhotoPrep {
@@ -251,10 +257,15 @@ impl AttachmentExtras {
         }
     }
 
-    /// A render of an edit starts (the latest Done replaces an earlier one).
-    pub fn begin_render(&mut self, render: u64) {
+    /// A render of an edit starts (the latest Done replaces an earlier one,
+    /// whose work is cancelled by dropping its hold).
+    pub fn begin_render(&mut self, render: u64, hold: crate::task_hold::TaskHold) {
         let before = Box::new(self.photo.settled().clone());
-        self.photo = PhotoPrep::Rendering { render, before };
+        self.photo = PhotoPrep::Rendering {
+            render,
+            hold,
+            before,
+        };
     }
 
     /// The render ended without a file: the picture is as it was.

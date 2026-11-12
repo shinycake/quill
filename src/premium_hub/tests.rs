@@ -290,6 +290,33 @@ fn another_stars_tab_replaces_the_whole_history() {
     assert!(hub.stars.selected().is_none());
 }
 
+/// Sweep r3-11, 20-001: "Buy more Stars" is part of the open Stars view, so
+/// every way of closing the box folds it, and it survives a tab change and a
+/// transaction's details.
+#[test]
+fn the_packs_section_lives_and_dies_with_the_open_stars_box() {
+    let mut hub = PremiumHub::default();
+    assert!(!hub.stars.toggle_packs(), "nothing to expand while closed");
+    hub.stars.expand_packs();
+    assert!(!hub.stars.packs_expanded());
+    hub.stars.open();
+    assert!(!hub.stars.packs_expanded(), "folded when the box opens");
+    assert!(hub.stars.toggle_packs());
+    hub.stars.select(Some("a".into()));
+    assert!(
+        hub.stars.packs_expanded(),
+        "kept under a transaction's details"
+    );
+    hub.stars.switch_filter(TxFilter::Incoming);
+    assert!(hub.stars.packs_expanded(), "kept over a tab change");
+    assert!(!hub.stars.toggle_packs());
+    hub.stars.expand_packs();
+    hub.stars.close();
+    assert!(!hub.stars.packs_expanded());
+    hub.stars.open();
+    assert!(!hub.stars.packs_expanded(), "folded again after a close");
+}
+
 /// 04-025: opening the gifts of another owner replaces the whole list; a
 /// change still out keeps its lock, and a refetch owed to the old list goes.
 #[test]
