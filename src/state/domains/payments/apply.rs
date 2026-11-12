@@ -155,7 +155,8 @@ impl Session {
                 self.apply_gift_market_purchase(result, pending.map(|p| p.id));
             }
             PaymentsPayload::GiftPurchaseResult(result) => {
-                if let Some(p) = pending.filter(|p| p.purpose == RequestPurpose::SendMarketplaceGift)
+                if let Some(p) =
+                    pending.filter(|p| p.purpose == RequestPurpose::SendMarketplaceGift)
                     && let Some(gift) = self.payments.marketplace_gift.as_mut()
                 {
                     gift.accept_result(p.id, result);

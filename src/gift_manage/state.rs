@@ -95,6 +95,10 @@ pub enum GiftListFetch<T> {
     Failed(String),
 }
 
+#[allow(
+    clippy::derivable_impls,
+    reason = "a derive would need `T: Default`, which a list of gifts does not"
+)]
 impl<T> Default for GiftListFetch<T> {
     fn default() -> Self {
         Self::NotAsked

@@ -329,7 +329,10 @@ mod stage_tests {
         let mut gift = purchase();
         assert!(gift.is_loading() && gift.waits_for(RequestId(1)));
         gift.fail(RequestId(9), "other".into());
-        assert!(gift.is_loading(), "another request's failure changes nothing");
+        assert!(
+            gift.is_loading(),
+            "another request's failure changes nothing"
+        );
         gift.fail(RequestId(1), "no".into());
         assert!(!gift.is_loading() && gift.quote().is_none());
 
