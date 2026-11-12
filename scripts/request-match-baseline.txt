@@ -41,7 +41,6 @@ purpose:ConnectDriver::maybe_fetch_connected_websites 1
 purpose:ConnectDriver::maybe_fetch_notification_sounds 1
 purpose:ConnectDriver::maybe_fetch_storage_statistics 1
 purpose:ConnectDriver::maybe_fetch_story_custom_emoji_stickers 1
-purpose:ConnectDriver::maybe_load_active_stories 1
 purpose:ConnectDriver::maybe_load_archive_chats 1
 purpose:ConnectDriver::maybe_load_main_chats 1
 purpose:ConnectDriver::maybe_load_selected_sticker_set 1

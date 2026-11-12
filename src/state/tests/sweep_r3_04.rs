@@ -213,3 +213,48 @@ fn an_older_sticker_list_answer_does_not_replace_the_newer_one() {
     assert_eq!(session.stickers.stickers.favorites.len(), 1);
     assert_eq!(session.stickers.stickers.favorites[0].emoji, "😀");
 }
+
+#[test]
+fn only_the_story_page_in_flight_settles_its_list() {
+    use crate::state::ActiveStoriesPaging;
+    use std::time::Instant;
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let old = session.request(RequestPurpose::LoadActiveStories, None);
+    session.stories.main_paging.begin(old);
+    // The list was paged from the start again; the old page's 404 lands late.
+    session.stories.reset_active_stories_paging();
+    let new = session.request(RequestPurpose::LoadActiveStories, None);
+    session.stories.main_paging.begin(new);
+    let error = |extra: RequestId, code: i32| {
+        format!(
+            r#"{{"@type":"error","@extra":"{}","code":{code},"message":"x"}}"#,
+            extra.0
+        )
+    };
+    apply_json(&mut session, &seq, &sink, &error(old, 404));
+    assert_eq!(
+        session.stories.main_paging,
+        ActiveStoriesPaging::Loading {
+            request: new,
+            wait: None
+        }
+    );
+    assert!(!session.stories.main_paging.may_load(Instant::now()));
+    apply_json(&mut session, &seq, &sink, &error(new, 404));
+    assert_eq!(session.stories.main_paging, ActiveStoriesPaging::Exhausted);
+}
+
+#[test]
+fn a_lost_story_page_waits_and_pages_again() {
+    use crate::state::ActiveStoriesPaging;
+    let (mut session, _sink) = session();
+    let page = session.request(RequestPurpose::LoadHiddenStories, None);
+    session.stories.hidden_paging.begin(page);
+    let lost = session.requests.take(page).expect("pending");
+    session.settle_lost_request(lost);
+    assert!(matches!(
+        session.stories.hidden_paging,
+        ActiveStoriesPaging::Waiting { .. }
+    ));
+}

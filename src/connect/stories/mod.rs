@@ -48,13 +48,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         if !self.chats_path_active()
             || !self.session.stories.paging(list).may_load(Instant::now())
-            || self.session.requests.has_purpose(purpose)
         {
             return Ok(None);
         }
         let extra = self.session.request(purpose, None);
         match self.sender.send_json(&load_active_stories(extra, list)) {
-            Ok(()) => Ok(Some(extra)),
+            Ok(()) => {
+                self.session.stories.paging_mut(list).begin(extra);
+                Ok(Some(extra))
+            }
             Err(err) => {
                 self.session.requests.take(extra);
                 Err(err)

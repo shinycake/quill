@@ -81,14 +81,18 @@ impl Session {
                 }
             }
             Some(RequestPurpose::LoadActiveStories) => {
-                self.stories
-                    .main_paging
-                    .failed(err.code, std::time::Instant::now());
+                self.stories.main_paging.failed(
+                    pending.map(|p| p.id),
+                    err.code,
+                    std::time::Instant::now(),
+                );
             }
             Some(RequestPurpose::LoadHiddenStories) => {
-                self.stories
-                    .hidden_paging
-                    .failed(err.code, std::time::Instant::now());
+                self.stories.hidden_paging.failed(
+                    pending.map(|p| p.id),
+                    err.code,
+                    std::time::Instant::now(),
+                );
             }
             // Only a not-found or invalid answer means the story is gone; a
             // timeout, FLOOD_WAIT or 500 is asked for again after a wait.

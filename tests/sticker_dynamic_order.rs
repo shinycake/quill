@@ -49,6 +49,8 @@ fn s15_dynamic_set_order_applies_update() {
         )
     };
     let extra = session.request(RequestPurpose::GetInstalledStickerSets, None);
+    session.stickers.stickers.lists.installed.begin();
+    session.stickers.stickers.lists.installed.sent(extra);
     apply(
         &mut session,
         &seq,

@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 fn fail_page(session: &mut Session, sink: &Arc<MemorySink>, code: i32) {
     let seq = AtomicU64::new(session.last_seq);
     let extra = session.request(RequestPurpose::LoadActiveStories, None);
+    session.stories.main_paging.begin(extra);
     apply_json(
         session,
         &seq,
@@ -65,6 +66,7 @@ fn a_page_that_loads_ends_the_wait() {
     assert!(session.stories.main_paging.retry().is_some());
     let seq = AtomicU64::new(session.last_seq);
     let extra = session.request(RequestPurpose::LoadActiveStories, None);
+    session.stories.main_paging.begin(extra);
     apply_json(
         &mut session,
         &seq,
@@ -124,9 +126,10 @@ fn a_custom_emoji_answer_ends_the_backoff_and_the_failure_count() {
 fn an_exhausted_list_stays_exhausted() {
     let mut paging = ActiveStoriesPaging::default();
     let now = std::time::Instant::now();
-    paging.failed(404, now);
-    paging.failed(500, now);
+    paging.begin(RequestId(1));
+    paging.failed(Some(RequestId(1)), 404, now);
+    paging.failed(Some(RequestId(1)), 500, now);
     assert_eq!(paging, ActiveStoriesPaging::Exhausted);
-    paging.answered();
+    paging.answered(Some(RequestId(1)));
     assert!(!paging.may_load(now + STORIES_RETRY_MAX));
 }

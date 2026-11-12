@@ -137,6 +137,10 @@ impl RequestPurpose {
                 // The composer's link chip and reply bar wait on these:
                 // a lost one settles as a failure they draw and ask again.
                 | RequestPurpose::GetLinkPreview
+                // A story list's page: a lost one ends as a failure the
+                // list waits out and pages again.
+                | RequestPurpose::LoadActiveStories
+                | RequestPurpose::LoadHiddenStories
                 | RequestPurpose::Messages(MessagesPurpose::GetComposerReplyTarget { .. })
                 // Panels that draw "Loading" for these end in their error
                 // state (with Retry) when the answer is lost.
