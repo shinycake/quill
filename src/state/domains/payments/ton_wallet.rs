@@ -22,7 +22,7 @@ impl Session {
             // every change, so it applies whenever the wallet is on.
             TonWalletPayload::State(state) => {
                 if wallet.can_use {
-                    wallet.own.pushed(state);
+                    wallet.own.replace_data(state);
                 }
             }
             TonWalletPayload::ExchangeRates(rates) => {
@@ -227,9 +227,16 @@ impl Session {
             let wallet = &mut self.ton_wallet;
             let request = pending.map(|p| p.id);
             if request.is_some_and(|request| wallet.own.waits_for(request)) {
-                wallet
-                    .own
-                    .failed(request, "the wallet state did not arrive", false);
+                match wallet.own.data().cloned() {
+                    Some(state) => {
+                        wallet.own.answered(request, state);
+                    }
+                    None => {
+                        wallet
+                            .own
+                            .failed(request, "the wallet state did not arrive", false);
+                    }
+                }
             }
         }
     }

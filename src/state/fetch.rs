@@ -317,22 +317,15 @@ impl<T> Fetch<T> {
         true
     }
 
-    /// A server push (`updateXxx`): the value as it is now, whatever the
-    /// stage. A request in flight is dropped with the stage, since the push
-    /// is the newer word or the same as its answer.
-    ///
-    /// Only for a value a server push carries; a local value no request
-    /// stands behind (the demo's) goes through [`Fetch::set_local`]. The
-    /// push names no request, and a late answer of the fetch it replaced
-    /// finds `Ready` and is dropped (`answered` takes only a waiting fetch).
-    pub fn pushed(&mut self, value: T) {
-        *self = Self::Ready(value);
-    }
-
-    /// A value set by this client with no request behind it (the screenshot
-    /// demo's local choice): the stage becomes `Ready` whatever it was.
-    pub fn set_local(&mut self, value: T) {
-        *self = Self::Ready(value);
+    /// The held value is now `value`, and the stage stays what it was: a
+    /// request in flight keeps waiting for its own answer, a failure stays
+    /// failed. For a value that no request of this fetch carries (a server
+    /// push, a local choice), which is therefore not an answer to match.
+    pub fn replace_data(&mut self, value: T) {
+        match self.data_mut() {
+            Some(held) => *held = value,
+            None => self.insert_data_if_missing(|| value),
+        }
     }
 
     /// An answer that names no request: a fetch whose
@@ -595,5 +588,27 @@ mod tests {
         let mut fetch = Fetch::Ready(7);
         assert_eq!(fetch.take_data(), Some(7));
         assert!(fetch.is_idle());
+    }
+
+    #[test]
+    fn replacing_the_data_keeps_the_stage_and_its_request() {
+        let mut idle: Fetch<i32> = Fetch::Idle;
+        idle.replace_data(1);
+        assert_eq!(idle, Fetch::Ready(1));
+
+        let mut loading: Fetch<i32> = Fetch::Idle;
+        loading.begin();
+        loading.sent(RequestId(7));
+        loading.replace_data(2);
+        assert!(loading.waits_for(RequestId(7)), "{loading:?}");
+        assert_eq!(loading.data(), Some(&2));
+        assert!(loading.answered(Some(RequestId(7)), 3));
+        assert_eq!(loading, Fetch::Ready(3));
+
+        let mut failed: Fetch<i32> = Fetch::Idle;
+        failed.fail("no");
+        failed.replace_data(4);
+        assert_eq!(failed.error(), Some("no"));
+        assert_eq!(failed.data(), Some(&4));
     }
 }

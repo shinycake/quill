@@ -375,14 +375,7 @@ impl TonWalletState {
         url: Option<String>,
     ) {
         let url = url.or_else(|| self.explorer.data().cloned().flatten());
-        if !self.explorer.answered(request, url.clone())
-            && url.is_some()
-            && !self.explorer.is_loading()
-        {
-            // An app-config answer asked for something else carries the
-            // current explorer too.
-            self.explorer.pushed(url);
-        }
+        self.explorer.answered(request, url);
     }
 
     /// The own wallet, once known.

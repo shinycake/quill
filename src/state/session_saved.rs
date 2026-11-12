@@ -120,22 +120,16 @@ impl Session {
         tags: Vec<SavedMessagesTag>,
         request: Option<RequestId>,
     ) {
-        if topic_id == 0 {
-            let fetch = &mut self.threads.saved.tags;
-            match request {
-                Some(_) => {
-                    fetch.answered(request, tags);
-                }
-                None => fetch.pushed(tags),
-            }
+        let fetch = if topic_id == 0 {
+            &mut self.threads.saved.tags
         } else {
-            let fetch = self.threads.saved.topic_tags.entry(topic_id).or_default();
-            match request {
-                Some(_) => {
-                    fetch.answered(request, tags);
-                }
-                None => fetch.pushed(tags),
+            self.threads.saved.topic_tags.entry(topic_id).or_default()
+        };
+        match request {
+            Some(_) => {
+                fetch.answered(request, tags);
             }
+            None => fetch.replace_data(tags),
         }
         self.view_generation.bump();
     }
