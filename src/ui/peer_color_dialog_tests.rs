@@ -86,3 +86,26 @@ fn leaving_the_account_forgets_the_applys_waiting_answers(cx: &mut gpui_kit::Tes
         assert!(left.is_none(), "the settled answer was forgotten");
     });
 }
+
+/// An Apply is on its way: opening the box again (the Settings window, a
+/// color link) keeps the box and its answers, and edits wait for them.
+#[gpui_kit::test]
+fn an_apply_on_its_way_keeps_its_box_and_refuses_edits(cx: &mut gpui_kit::TestAppContext) {
+    use quill::peer_color::PeerColorTab;
+    let (app, mut vcx) =
+        crate::ui::notifications::viewer_progress_tests::open_app(cx, "ready-privacy");
+    app.update(&mut vcx, |app, cx| {
+        app.dialogs.peer_color_dialog = Some(
+            crate::ui::peer_color_dialog::PeerColorDialog::applying(vec![RequestId(7)]),
+        );
+        app.open_peer_color_dialog(PeerColorTab::Profile, cx);
+        let dialog = app.dialogs.peer_color_dialog.as_ref().expect("the box");
+        assert!(matches!(dialog.stage, ApplyStage::Applying { .. }), "kept");
+        assert_eq!(dialog.tab, PeerColorTab::Profile, "on the tab asked for");
+        let before = dialog.draft;
+        app.edit_peer_color(cx, |draft, _| draft.name_color_id += 1);
+        let dialog = app.dialogs.peer_color_dialog.as_ref().expect("the box");
+        assert_eq!(dialog.draft, before, "no edit while applying");
+        assert!(matches!(dialog.stage, ApplyStage::Applying { .. }));
+    });
+}
