@@ -33,12 +33,40 @@ impl GroupsState {
         self.event_log_filter(chat).is_some() || !self.event_log_users(chat).is_empty()
     }
 
-    /// `chat`'s log forgets its fetch and the requests it waits for (a
-    /// refresh): what it is asked with stays.
+    /// `chat`'s log forgets its fetch, and with it every request it waits
+    /// for (a refresh): what it is asked with stays.
     pub(crate) fn reset_event_log_fetch(&mut self, chat: i64) {
         if let Some(log) = self.event_logs.get_mut(&chat) {
             log.fetch = ChatEventLogFetch::Idle;
-            log.wait = EventLogWait::default();
+        }
+    }
+
+    /// The `getChatEventLog` request `request` was sent for `chat`: the stage
+    /// that asked now holds it (the first page: `Loading`; an older page and
+    /// the poll: inside the loaded page).
+    pub fn event_log_sent(
+        &mut self,
+        chat: i64,
+        request: RequestId,
+        polling: bool,
+        first_page: bool,
+    ) {
+        if first_page {
+            self.set_event_log_fetch(chat, ChatEventLogFetch::Loading { request });
+        } else if let Some(page) = self.loaded_event_log_mut(chat) {
+            if polling {
+                page.poll = LogPoll::Polling { request };
+            } else {
+                page.older = OlderEvents::Loading { request };
+            }
+        }
+    }
+
+    /// `chat`'s loaded page, when there is one.
+    pub(crate) fn loaded_event_log_mut(&mut self, chat: i64) -> Option<&mut ChatEventLogPage> {
+        match &mut self.event_logs.get_mut(&chat)?.fetch {
+            ChatEventLogFetch::Loaded(page) => Some(page),
+            _ => None,
         }
     }
 

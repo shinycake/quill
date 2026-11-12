@@ -103,6 +103,7 @@ fn cl2_pin_order_error_rolls_back_and_surfaces() {
         .expect("pending")
         .rollback = Some(RequestRollback::ChatPinOrder {
         previous: vec![(11, 300), (12, 200)],
+        shown: vec![(11, 200), (12, 300)],
         archived: false,
     });
     session.reorder_pinned_chats(false, &[12, 11]);
@@ -159,7 +160,13 @@ fn cl2_archive_settings_fetch_stores_and_set_rolls_back() {
         .requests
         .pending_mut(extra)
         .expect("pending")
-        .rollback = Some(RequestRollback::ArchiveChatListSettings { previous: old });
+        .rollback = Some(RequestRollback::ArchiveChatListSettings {
+        previous: old,
+        shown: ArchiveChatListSettings {
+            keep_unmuted_chats_archived: true,
+            ..old.unwrap_or_default()
+        },
+    });
     session
         .chat_list
         .edit_archive_settings(Some(ArchiveChatListSettings {

@@ -119,7 +119,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(SearchQueryOutcome::Unchanged);
         }
-        let _search_gen = self.session.search.search.begin_query(trimmed);
+        self.session.search.search.begin_query(trimmed);
         let token = self.session.search.search.typed.arm(trimmed.to_string());
         Ok(SearchQueryOutcome::Debounced { token })
     }
@@ -136,7 +136,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     fn clear_typed_debounce(&mut self) {
-        self.session.search.search.typed.cancel();
+        self.session.search.search.cancel_typed();
     }
 
     /// Slice (communities-search-filter): community filter chip in the
@@ -160,7 +160,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if trimmed.is_empty() {
             return Ok(None);
         }
-        let _search_gen = self.session.search.search.begin_query(trimmed);
+        self.session.search.search.begin_query(trimmed);
         self.send_typed_search(trimmed)
     }
 
@@ -198,7 +198,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Ok(None)
             };
         }
-        let _search_gen = self.session.search.search.begin_query(trimmed);
+        self.session.search.search.begin_query(trimmed);
         self.send_typed_search(trimmed)
     }
 
@@ -229,11 +229,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         trimmed: &str,
     ) -> Result<Option<SearchFlight>, ConnectSendError> {
-        let search_gen = self.session.search.search.generation;
         if self.session.search.search.filters.scope()
             == crate::search_filters::SearchScope::PublicPosts
         {
-            return self.send_public_posts_search(trimmed, search_gen);
+            return self.send_public_posts_search(trimmed);
         }
         // The Apps tab lists bots the session already knows; nothing to
         // search for, so the query resolves at once.
@@ -256,15 +255,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .accept_public_chats(Vec::new(), false);
             return Ok(None);
         }
-        let chats_extra = self
-            .session
-            .request_search(RequestPurpose::SearchChats, search_gen);
-        let messages_extra = self
-            .session
-            .request_search(RequestPurpose::SearchMessages, search_gen);
+        let chats_extra = self.session.request_search(RequestPurpose::SearchChats);
+        let messages_extra = self.session.request_search(RequestPurpose::SearchMessages);
         let public_extra = self
             .session
-            .request_search(RequestPurpose::SearchPublicChats, search_gen);
+            .request_search(RequestPurpose::SearchPublicChats);
         if let Err(err) = self
             .sender
             .send_json(&search_chats(chats_extra, trimmed, SEARCH_LIMIT))
@@ -286,13 +281,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         // the offline hits, fire-and-forget on failure.
         let server_extra = self
             .session
-            .request_search(RequestPurpose::SearchChatsOnServer, search_gen);
+            .request_search(RequestPurpose::SearchChatsOnServer);
         if self
             .sender
             .send_json(&search_chats_on_server(server_extra, trimmed, SEARCH_LIMIT))
             .is_err()
         {
             self.session.requests.take(server_extra);
+            self.session.search.search.server_chats.cancel();
         }
         match self
             .sender
@@ -316,7 +312,6 @@ impl<S: JsonSender> ConnectDriver<S> {
     fn send_public_posts_search(
         &mut self,
         trimmed: &str,
-        search_gen: u64,
     ) -> Result<Option<SearchFlight>, ConnectSendError> {
         self.session.search.search.begin_public_scope();
         let tag = crate::search_filters::tag_query(trimmed);
@@ -327,10 +322,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         if tag.is_none() {
             // What the last query's quota said is not this query's.
-            self.session.search.search.tabs.limits = None;
-            let _ = self.fetch_public_post_limits(trimmed, search_gen);
+            self.session.search.search.tabs.limits = Default::default();
+            let _ = self.fetch_public_post_limits(trimmed);
         }
-        let extra = self.session.request_search(purpose, search_gen);
+        let extra = self.session.request_search(purpose);
         let json = match tag {
             Some(tag) => search_public_messages_by_tag(extra, tag, "", SEARCH_LIMIT),
             None => search_public_posts(extra, trimmed, "", SEARCH_LIMIT),
@@ -359,7 +354,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.clear_typed_debounce();
         let filters = self.session.search.search.filters;
         self.session.search.search.filters = filters.in_scope(scope);
-        let _search_gen = self.session.search.search.begin_query(tag);
+        self.session.search.search.begin_query(tag);
         self.send_typed_search(tag)
     }
 
@@ -510,10 +505,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         // The frequent contacts ride along; their failure never blocks the
         // Recent list.
         let _ = self.fetch_top_chats();
-        let search_gen = self.session.search.search.begin_recents();
+        self.session.search.search.begin_recents();
         let extra = self
             .session
-            .request_search(RequestPurpose::SearchRecentlyFoundChats, search_gen);
+            .request_search(RequestPurpose::SearchRecentlyFoundChats);
         match self
             .sender
             .send_json(&search_recently_found_chats(extra, "", RECENT_SEARCH_LIMIT))

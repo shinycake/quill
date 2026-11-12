@@ -290,7 +290,7 @@ fn the_posts_tab_pages_and_reads_the_quota_without_a_paid_search() {
         "publicPostSearchLimits",
         r#""daily_free_query_count":5,"remaining_free_query_count":3,"next_free_query_in":0,"star_count":25,"is_current_query_free":true"#,
     );
-    let quota = fx.driver.session.search.search.tabs.limits.unwrap();
+    let quota = fx.driver.session.search.search.tabs.limits().unwrap();
     assert_eq!(quota.remaining_free, 3);
     assert_eq!(quota.quota_line(), "3 free searches left today");
 
@@ -461,13 +461,19 @@ fn a_paid_search_needs_a_plain_query_and_a_price() {
     let search = &mut fx.driver.session.search.search;
     search.accept_messages(Vec::new(), false);
     search.note_public_limits(true);
-    fx.driver.session.search.search.tabs.limits = Some(crate::state::PublicPostLimits {
-        daily_free: 5,
-        remaining_free: 0,
-        next_free_in: 60,
-        star_count: 25,
-        current_query_free: false,
-    });
+    fx.driver
+        .session
+        .search
+        .search
+        .tabs
+        .limits
+        .succeed(crate::state::PublicPostLimits {
+            daily_free: 5,
+            remaining_free: 0,
+            next_free_in: 60,
+            star_count: 25,
+            current_query_free: false,
+        });
     // A tag search is never paid.
     assert!(
         fx.driver
@@ -568,7 +574,7 @@ fn the_quota_of_an_older_query_does_not_label_the_new_one() {
     commit_typed_search(&mut fx.driver, "arrakis");
     let new = fx.requests("getPublicPostSearchLimits").pop().unwrap();
     assert_eq!(new["query"], "arrakis");
-    assert!(fx.driver.session.search.search.tabs.limits.is_none());
+    assert!(fx.driver.session.search.search.tabs.limits().is_none());
     let body = |extra: &Value, free: bool, stars: i64| {
         format!(
             r#"{{"@type":"publicPostSearchLimits","@extra":"{}","daily_free_query_count":5,"remaining_free_query_count":0,"next_free_query_in":60,"star_count":{stars},"is_current_query_free":{free}}}"#,
@@ -578,7 +584,7 @@ fn the_quota_of_an_older_query_does_not_label_the_new_one() {
     // The answer for "arrakis" lands; the late one for "dune" is dropped.
     fx.feed(&body(&new, false, 25));
     fx.feed(&body(&old, true, 99));
-    let quota = fx.driver.session.search.search.tabs.limits.unwrap();
+    let quota = fx.driver.session.search.search.tabs.limits().unwrap();
     assert_eq!(quota.star_count, 25);
     assert!(!quota.current_query_free);
 }

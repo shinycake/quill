@@ -22,11 +22,11 @@ fn server_chats_merge_behind_local_hits_without_gating_status() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     session.open_search();
-    let search_gen = session.search.search.begin_query("al");
-    let chats = session.request_search(RequestPurpose::SearchChats, search_gen);
-    let messages = session.request_search(RequestPurpose::SearchMessages, search_gen);
-    let public = session.request_search(RequestPurpose::SearchPublicChats, search_gen);
-    let server = session.request_search(RequestPurpose::SearchChatsOnServer, search_gen);
+    session.search.search.begin_query("al");
+    let chats = session.request_search(RequestPurpose::SearchChats);
+    let messages = session.request_search(RequestPurpose::SearchMessages);
+    let public = session.request_search(RequestPurpose::SearchPublicChats);
+    let server = session.request_search(RequestPurpose::SearchChatsOnServer);
     // The three gating answers settle the search ...
     apply_json(&mut session, &seq, &sink, &chats_json(chats, "[11]"));
     apply_json(&mut session, &seq, &sink, &chats_json(public, "[11,42]"));
@@ -49,11 +49,11 @@ fn server_chats_alone_turn_empty_into_ready() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     session.open_search();
-    let search_gen = session.search.search.begin_query("zed");
-    let chats = session.request_search(RequestPurpose::SearchChats, search_gen);
-    let messages = session.request_search(RequestPurpose::SearchMessages, search_gen);
-    let public = session.request_search(RequestPurpose::SearchPublicChats, search_gen);
-    let server = session.request_search(RequestPurpose::SearchChatsOnServer, search_gen);
+    session.search.search.begin_query("zed");
+    let chats = session.request_search(RequestPurpose::SearchChats);
+    let messages = session.request_search(RequestPurpose::SearchMessages);
+    let public = session.request_search(RequestPurpose::SearchPublicChats);
+    let server = session.request_search(RequestPurpose::SearchChatsOnServer);
     apply_json(&mut session, &seq, &sink, &chats_json(chats, "[]"));
     apply_json(&mut session, &seq, &sink, &chats_json(public, "[]"));
     apply_json(&mut session, &seq, &sink, &no_messages_json(messages));
@@ -67,8 +67,8 @@ fn a_failed_server_search_changes_nothing() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     session.open_search();
-    let search_gen = session.search.search.begin_query("al");
-    let server = session.request_search(RequestPurpose::SearchChatsOnServer, search_gen);
+    session.search.search.begin_query("al");
+    let server = session.request_search(RequestPurpose::SearchChatsOnServer);
     apply_json(
         &mut session,
         &seq,
@@ -78,7 +78,7 @@ fn a_failed_server_search_changes_nothing() {
             server.0
         ),
     );
-    assert!(session.search.search.server_chat_ids.is_empty());
+    assert!(session.search.search.server_chats.items().is_empty());
     assert_eq!(session.search.search.status(), SearchStatus::Searching);
 }
 
@@ -99,9 +99,9 @@ fn public_posts_fill_the_messages_and_flag_an_exhausted_quota() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     session.open_search();
-    let search_gen = session.search.search.begin_query("dune");
+    session.search.search.begin_query("dune");
     session.search.search.begin_public_scope();
-    let extra = session.request_search(RequestPurpose::SearchPublicPosts, search_gen);
+    let extra = session.request_search(RequestPurpose::SearchPublicPosts);
     apply_json(
         &mut session,
         &seq,
@@ -112,9 +112,9 @@ fn public_posts_fill_the_messages_and_flag_an_exhausted_quota() {
     assert_eq!(session.search.search.messages.len(), 1);
     assert!(!session.search.search.public_limits_exceeded());
 
-    let search_gen = session.search.search.begin_query("arrakis");
+    session.search.search.begin_query("arrakis");
     session.search.search.begin_public_scope();
-    let extra = session.request_search(RequestPurpose::SearchPublicPosts, search_gen);
+    let extra = session.request_search(RequestPurpose::SearchPublicPosts);
     apply_json(
         &mut session,
         &seq,
@@ -130,9 +130,9 @@ fn tag_search_results_land_in_the_messages() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     session.open_search();
-    let search_gen = session.search.search.begin_query("#dune");
+    session.search.search.begin_query("#dune");
     session.search.search.begin_public_scope();
-    let extra = session.request_search(RequestPurpose::SearchPublicMessagesByTag, search_gen);
+    let extra = session.request_search(RequestPurpose::SearchPublicMessagesByTag);
     apply_json(
         &mut session,
         &seq,
@@ -238,4 +238,57 @@ fn top_people_lists_known_chats_by_first_name_and_hides_when_disabled() {
     assert!(people.iter().all(|p| !p.muted()));
     session.search.search.top_chats_disabled = true;
     assert!(crate::top_people::top_people(&session).is_empty());
+}
+
+#[test]
+fn a_leg_settles_only_on_the_request_it_waits_for() {
+    // Two `searchChats` asks inside one query: the second replaces the
+    // leg's request, so the first one's late answer settles nothing.
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.open_search();
+    session.search.search.begin_query("al");
+    let first = session.request_search(RequestPurpose::SearchChats);
+    let second = session.request_search(RequestPurpose::SearchChats);
+    apply_json(&mut session, &seq, &sink, &chats_json(first, "[11]"));
+    assert!(session.search.search.chat_ids.is_empty());
+    assert_eq!(session.search.search.status(), SearchStatus::Searching);
+    apply_json(&mut session, &seq, &sink, &chats_json(second, "[42]"));
+    assert_eq!(session.search.search.chat_ids, vec![ChatId(42)]);
+}
+
+#[test]
+fn a_page_of_a_closed_list_is_dropped_and_the_next_page_waits_for_its_own_request() {
+    use crate::state::SearchPaging;
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.open_search();
+    session.search.search.begin_query("dune");
+    session.search.search.set_first_page_offset("p2".into());
+    let first = session.request_search(RequestPurpose::SearchMessagesMore);
+    session.search.search.tabs.page_sent(first);
+    // The query changes: the list starts over and the page is no longer out.
+    session.search.search.begin_query("arrakis");
+    session.search.search.set_first_page_offset("q2".into());
+    assert_eq!(session.search.search.tabs.paging, SearchPaging::Idle);
+    let second = session.request_search(RequestPurpose::SearchMessagesMore);
+    session.search.search.tabs.page_sent(second);
+    apply_json(&mut session, &seq, &sink, &no_messages_json(first));
+    assert_eq!(
+        session.search.search.tabs.paging,
+        SearchPaging::Loading { request: second },
+        "the old page's answer does not end the new page's wait"
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":500,"message":"boom"}}"#,
+            first.0
+        ),
+    );
+    assert!(session.search.search.tabs.loading_more());
+    apply_json(&mut session, &seq, &sink, &no_messages_json(second));
+    assert_eq!(session.search.search.tabs.paging, SearchPaging::Idle);
 }

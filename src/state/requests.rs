@@ -602,19 +602,6 @@ impl RequestRegistry {
         })
     }
 
-    pub fn register_search(
-        &mut self,
-        account_generation: AccountGeneration,
-        purpose: RequestPurpose,
-        search_generation: u64,
-    ) -> RequestId {
-        let blank = self.blank(account_generation, purpose);
-        self.insert(PendingRequest {
-            search_generation: Some(search_generation),
-            ..blank
-        })
-    }
-
     pub fn register_chat_search(
         &mut self,
         account_generation: AccountGeneration,

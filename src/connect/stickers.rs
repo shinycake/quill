@@ -798,7 +798,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         let emoji_trending = emoji.open
             && emoji.tab == crate::emoji::EmojiSetTab::Trending
             && emoji.lists.trending.wants_fetch();
-        let reactions = self.session.stickers.message_reaction_options.is_stale();
+        let reactions = self
+            .session
+            .stickers
+            .message_reaction_options
+            .stale_messages();
         if !self.chats_path_active() {
             return Ok(());
         }
@@ -834,15 +838,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         if emoji_trending {
             self.select_emoji_set_tab(crate::emoji::EmojiSetTab::Trending)?;
         }
-        if reactions {
-            // With no picker open there is nothing to refetch.
-            if let Some((chat_id, message_id)) =
-                self.session.stickers.message_reaction_options.target()
-            {
-                self.session.stickers.message_reaction_options =
-                    crate::state::MessageReactionsState::Idle;
-                self.fetch_message_reactions(chat_id, message_id)?;
-            }
+        // Each open picker whose options went out of date asks again.
+        for (chat_id, message_id) in reactions {
+            self.session
+                .stickers
+                .message_reaction_options
+                .forget(chat_id, message_id);
+            self.fetch_message_reactions(chat_id, message_id)?;
         }
         Ok(())
     }

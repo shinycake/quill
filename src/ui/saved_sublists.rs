@@ -439,9 +439,7 @@ impl QuillApp {
     }
 
     fn saved_topics_in_flight(session: &quill::state::Session) -> bool {
-        session
-            .requests
-            .has_purpose(RequestPurpose::LoadSavedMessagesTopics)
+        session.threads.saved.topics_load.is_loading()
     }
 
     /// The next page of sublists, once the list is scrolled near its end or

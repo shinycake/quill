@@ -217,15 +217,18 @@ fn event_log_failure_states() {
         "the failed older page draws its Retry"
     );
     assert!(loaded.has_more(), "Retry may ask again");
-    session.begin_older_events(13);
+    let again = event_log_request(
+        &mut session,
+        GroupsPurpose::GetChatEventLog { from_event_id: 50 },
+    );
     let ChatEventLogFetch::Loaded(loaded) = session.groups.event_log_fetch(13).expect("log loaded")
     else {
         panic!("expected loaded event log");
     };
     assert_eq!(
         loaded.older,
-        OlderEvents::Available,
-        "asking clears the line"
+        OlderEvents::Loading { request: again },
+        "asking replaces the line with the request"
     );
 }
 
@@ -1029,6 +1032,7 @@ fn event_log_admin_ids_dedupes_and_skips_chat_senders() {
             event(4, MessageSender::User { user_id: 7 }),
         ],
         older: crate::state::OlderEvents::Exhausted,
+        poll: crate::state::LogPoll::Idle,
     };
     assert_eq!(page.admin_user_ids(), vec![7, 9]);
 }

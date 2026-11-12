@@ -21,6 +21,11 @@ impl Session {
         {
             self.finish_pending_bot_stop(chat_id, topic_id, draft_id);
         }
+        if let Some(pending) = pending
+            && pending.purpose == RequestPurpose::LoadSavedMessagesTopics
+        {
+            self.threads.saved.page_answered(pending.id);
+        }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::RemoveSavedNotificationSound) {
             self.mark_saved_sounds_stale();
         }

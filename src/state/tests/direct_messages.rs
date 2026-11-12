@@ -76,7 +76,7 @@ fn opening_a_conversation_swaps_the_history_window() {
     assert!(!session.select_direct_topic(direct, Some(501)), "no change");
     assert!(session.histories[&DIRECT].messages.is_empty());
     assert_eq!(
-        session.histories[&DIRECT].unread_anchor,
+        session.histories[&DIRECT].unread_anchor(),
         Some(MessageId(1_999)),
         "the conversation's own read position"
     );

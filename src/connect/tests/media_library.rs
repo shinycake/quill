@@ -199,7 +199,7 @@ fn message_reaction_options_parse_and_custom_emoji_reactions_toggle() {
         .session
         .stickers
         .message_reaction_options
-        .ready()
+        .ready_for(ChatId(7), MessageId(50))
         .cloned()
         .unwrap();
     assert_eq!(options.message_id, MessageId(50));
@@ -307,7 +307,7 @@ fn message_reaction_options_wait_while_the_request_is_in_flight() {
         .unwrap();
     let state = &h.driver.session.stickers.message_reaction_options;
     assert!(state.is_loading_for(ChatId(7), MessageId(50)));
-    assert!(state.ready().is_none());
+    assert!(state.ready_for(ChatId(7), MessageId(50)).is_none());
 }
 
 #[test]
@@ -341,7 +341,7 @@ fn empty_message_reaction_answer_marks_the_options_unavailable() {
     ));
     let state = &h.driver.session.stickers.message_reaction_options;
     assert!(state.is_unavailable_for(ChatId(7), MessageId(50)));
-    assert!(state.ready().is_none());
+    assert!(state.ready_for(ChatId(7), MessageId(50)).is_none());
 }
 
 #[test]
@@ -542,11 +542,81 @@ fn closing_the_menu_resets_the_options_and_ignores_the_late_answer() {
         .fetch_message_reactions(ChatId(7), MessageId(50))
         .unwrap()
         .expect("request");
-    h.driver.session.reset_message_reactions();
+    h.driver
+        .session
+        .reset_message_reactions(ChatId(7), MessageId(50));
     h.ingest(&reactions_answer(&extra.0.to_string(), THUMB));
-    assert_eq!(
-        h.driver.session.stickers.message_reaction_options,
-        crate::state::MessageReactionsState::Idle
+    assert!(
+        h.driver
+            .session
+            .stickers
+            .message_reaction_options
+            .state(ChatId(7), MessageId(50))
+            .is_none()
+    );
+}
+
+#[test]
+fn two_menus_on_two_messages_keep_their_own_options() {
+    // The main window's menu on message 50 and a chat window's on 51.
+    let mut h = menu_harness();
+    let main = h
+        .driver
+        .fetch_message_reactions(ChatId(7), MessageId(50))
+        .unwrap()
+        .expect("request");
+    let window = h
+        .driver
+        .fetch_message_reactions(ChatId(7), MessageId(51))
+        .unwrap()
+        .expect("request");
+    h.ingest(&reactions_answer(&main.0.to_string(), THUMB));
+    let book = &h.driver.session.stickers.message_reaction_options;
+    assert!(book.ready_for(ChatId(7), MessageId(50)).is_some());
+    assert!(book.is_loading_for(ChatId(7), MessageId(51)));
+    // The first menu closing does not touch the second's wait.
+    h.driver
+        .session
+        .reset_message_reactions(ChatId(7), MessageId(50));
+    h.ingest(&reactions_answer(&window.0.to_string(), THUMB));
+    let book = &h.driver.session.stickers.message_reaction_options;
+    assert!(book.ready_for(ChatId(7), MessageId(51)).is_some());
+}
+
+#[test]
+fn an_older_request_for_the_same_message_cannot_settle_the_newer_ask() {
+    let mut h = menu_harness();
+    let lost = h
+        .driver
+        .fetch_message_reactions(ChatId(7), MessageId(50))
+        .unwrap()
+        .expect("request");
+    // The first reply never came (its request is gone); the menu asks again.
+    h.driver.session.requests.take(lost);
+    let again = h
+        .driver
+        .fetch_message_reactions(ChatId(7), MessageId(50))
+        .unwrap()
+        .expect("a new request");
+    h.ingest(&reactions_answer(&lost.0.to_string(), THUMB));
+    h.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":500,"message":"Timeout"}}"#,
+        lost.0
+    ));
+    assert!(
+        h.driver
+            .session
+            .stickers
+            .message_reaction_options
+            .is_loading_for(ChatId(7), MessageId(50))
+    );
+    h.ingest(&reactions_answer(&again.0.to_string(), THUMB));
+    assert!(
+        h.driver
+            .session
+            .stickers
+            .message_reaction_options
+            .covers(ChatId(7), MessageId(50))
     );
 }
 

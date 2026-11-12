@@ -266,14 +266,9 @@ impl Session {
                     .chat_available_reactions
                     .insert(chat_id, available_reactions);
                 // An open reaction picker for this chat refetches.
-                if self
-                    .stickers
+                self.stickers
                     .message_reaction_options
-                    .ready()
-                    .is_some_and(|options| options.chat_id.0 == chat_id)
-                {
-                    self.stickers.message_reaction_options.mark_stale();
-                }
+                    .mark_stale(|chat, _| chat.0 == chat_id);
             }
             // Batch 8: `updateChatActionBar` (schema 1.8.67, line 10526).
             ChatsPayload::UpdateChatActionBar {

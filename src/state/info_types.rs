@@ -643,21 +643,28 @@ pub enum InlineBotResolve {
 pub const CHAT_EVENT_LOG_PAGE_SIZE: i32 = 100;
 
 /// Phase D3c: fetch state for one chat's `getChatEventLog` result
-/// (schema 1.8.67, line 15252). Keyed by chat id. `Loading` is the
-/// in-flight guard — the driver never sends a second request while one
-/// is outstanding.
+/// (schema 1.8.67, line 15252). Keyed by chat id. Every stage that waits
+/// holds the request it waits for: the first page in `Loading`, an older
+/// page in `OlderEvents::Loading` and the live poll in `LogPoll::Polling`
+/// (both inside the loaded page). Only the answer of that request moves the
+/// stage, so a page or poll asked under an earlier query or filter lands on
+/// a log that no longer holds its id and is dropped. A refresh drops the
+/// whole stage (`Idle`).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub enum ChatEventLogFetch {
     /// Never asked, or cleared by a refresh.
     #[default]
     Idle,
-    Loading,
+    /// The first page is in flight.
+    Loading {
+        request: crate::ids::RequestId,
+    },
     Loaded(ChatEventLogPage),
     Failed(String),
 }
 
 /// One chat's recent actions: what it is asked for (kept across
-/// refreshes), where the asking stands, and the requests it waits for.
+/// refreshes) and where the asking stands.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct EventLog {
     /// The text search (`getChatEventLog.query`); empty = no search.
@@ -667,19 +674,15 @@ pub struct EventLog {
     /// The `user_ids` filter; empty = every admin.
     pub users: Vec<i64>,
     pub fetch: ChatEventLogFetch,
-    pub wait: EventLogWait,
 }
 
-/// The `getChatEventLog` requests one chat's log waits for
-/// (`GroupsState::event_log_waits`). Only their answers fill the list: a
-/// refresh (a new search query or filter) forgets both, so a page or poll
-/// asked under the previous query is dropped when it lands.
+/// The live poll of a loaded log (tdesktop checks every five seconds).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct EventLogWait {
-    /// The first or older page in flight.
-    pub page: Option<crate::ids::RequestId>,
-    /// The live poll in flight.
-    pub poll: Option<crate::ids::RequestId>,
+pub enum LogPoll {
+    #[default]
+    Idle,
+    /// The newest page is in flight.
+    Polling { request: crate::ids::RequestId },
 }
 
 /// Phase D3c: one cached `getChatEventLog` result. Events arrive in
@@ -690,6 +693,7 @@ pub struct EventLogWait {
 pub struct ChatEventLogPage {
     pub events: Vec<ParsedChatEvent>,
     pub older: OlderEvents,
+    pub poll: LogPoll,
 }
 
 /// Where the log's older events stand. A full last page is `Available`; a
@@ -700,6 +704,10 @@ pub enum OlderEvents {
     #[default]
     Exhausted,
     Available,
+    /// The older page is in flight.
+    Loading {
+        request: crate::ids::RequestId,
+    },
     Failed(String),
 }
 
@@ -707,6 +715,11 @@ impl ChatEventLogPage {
     /// Older events may exist (also after a failed ask: Retry asks again).
     pub fn has_more(&self) -> bool {
         !matches!(self.older, OlderEvents::Exhausted)
+    }
+
+    /// An older page may be asked for now: one exists and none is in flight.
+    pub fn can_ask_older(&self) -> bool {
+        matches!(self.older, OlderEvents::Available | OlderEvents::Failed(_))
     }
 
     /// Slice G2: distinct admin user ids (first-seen order) from a loaded

@@ -201,10 +201,13 @@ impl QuillApp {
                     user_id: UserId(11),
                 };
             }
-            session.stickers.message_reaction_options = MessageReactionsState::Loading {
-                chat_id: ChatId(11),
-                message_id: MessageId(102),
-            };
+            session.stickers.message_reaction_options.set(
+                ChatId(11),
+                MessageId(102),
+                MessageReactionsState::Loading {
+                    request: quill::ids::RequestId(0),
+                },
+            );
         }
         self.message_ui.menu.open_at(MessageMenuState {
             chat_id: ChatId(11),

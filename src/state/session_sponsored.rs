@@ -229,7 +229,7 @@ impl Session {
         }
         // `history->firstUnreadMessage()`: the message after the last read.
         let history = self.histories.get(&chat_id.0)?;
-        let anchor = history.unread_anchor?;
+        let anchor = history.unread_anchor()?;
         let first_unread = history
             .messages
             .range((

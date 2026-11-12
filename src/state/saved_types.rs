@@ -48,8 +48,10 @@ pub enum SavedTopicsLoad {
     /// The first page was not asked for yet.
     #[default]
     Idle,
-    /// The first page went out; later pages follow the scroll.
-    Started,
+    /// A page went out as `request`; only its answer or failure settles it.
+    Loading { request: RequestId },
+    /// The last page was answered; later pages follow the scroll.
+    Loaded,
     /// A page failed: the pump asks again once the connection is back
     /// (`updateConnectionState` ready) or Saved Messages is opened again
     /// (`Session::open_chat`), not on every poll pass.
@@ -58,7 +60,45 @@ pub enum SavedTopicsLoad {
     Exhausted,
 }
 
+impl SavedTopicsLoad {
+    /// A page is in flight.
+    pub fn is_loading(self) -> bool {
+        matches!(self, Self::Loading { .. })
+    }
+}
+
 impl SavedMessagesState {
+    /// A page of sublists was asked for as `request` (the first page, or the
+    /// next one when the list is scrolled). Exhausted stays exhausted.
+    pub fn page_sent(&mut self, request: RequestId) {
+        if self.topics_load != SavedTopicsLoad::Exhausted {
+            self.topics_load = SavedTopicsLoad::Loading { request };
+        }
+    }
+
+    /// `request`, a page of sublists, was answered: the next follows the
+    /// scroll. Another request's answer settles nothing.
+    pub fn page_answered(&mut self, request: RequestId) {
+        if self.topics_load == (SavedTopicsLoad::Loading { request }) {
+            self.topics_load = SavedTopicsLoad::Loaded;
+        }
+    }
+
+    /// `request` failed: a 404 says every sublist is loaded; any other
+    /// failure waits for the connection. Another request's failure settles
+    /// nothing. Returns whether it was the page this list waits for.
+    pub fn page_failed(&mut self, request: RequestId, all_loaded: bool) -> bool {
+        if self.topics_load != (SavedTopicsLoad::Loading { request }) {
+            return false;
+        }
+        self.topics_load = if all_loaded {
+            SavedTopicsLoad::Exhausted
+        } else {
+            SavedTopicsLoad::Retry
+        };
+        true
+    }
+
     /// The tags of all Saved Messages held.
     pub fn tag_list(&self) -> &[SavedMessagesTag] {
         self.tags.data().map_or(&[], Vec::as_slice)

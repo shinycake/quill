@@ -100,7 +100,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // boundary, so the chat starts where the reader left off.
         if let Some(history) = self.session.histories.get(&chat_id.0)
             && history.messages.is_empty()
-            && let Some(anchor) = history.unread_anchor
+            && let Some(anchor) = history.unread_anchor()
         {
             let extra = self.session.request_history_around(chat_id, anchor);
             if let Err(err) = self.sender.send_json(&self.main_history_request(

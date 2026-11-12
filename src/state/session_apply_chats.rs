@@ -746,13 +746,15 @@ impl Session {
             self.search.search.accept_recommended(chat_ids);
             return;
         }
-        if self.search.search.matches_generation(pending) {
+        if self.search.search.awaits(pending) {
             match pending.map(|p| p.purpose) {
                 Some(RequestPurpose::SearchChats | RequestPurpose::SearchRecentlyFoundChats) => {
                     self.search.search.accept_chats(chat_ids, false);
                 }
                 Some(RequestPurpose::SearchChatsOnServer) => {
-                    self.search.search.accept_server_chats(chat_ids);
+                    if let Some(pending) = pending {
+                        self.search.search.accept_server_chats(pending.id, chat_ids);
+                    }
                 }
                 Some(RequestPurpose::SearchPublicChats) => {
                     self.search.search.accept_public_chats(chat_ids, false);

@@ -153,6 +153,7 @@ impl Session {
                     && let Some(chat_id) = pending.chat_id
                 {
                     self.accept_message_reaction_options(
+                        pending.id,
                         chat_id,
                         MessageId(message_id),
                         reactions,

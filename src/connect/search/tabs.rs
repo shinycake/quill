@@ -61,15 +61,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let search_gen = if self.search_tab().takes_query() {
-            self.session.search.search.begin_query("")
+        if self.search_tab().takes_query() {
+            self.session.search.search.begin_query("");
         } else {
-            self.session.search.search.begin_browse()
-        };
+            self.session.search.search.begin_browse();
+        }
         self.session.search.search.begin_public_scope();
-        let extra = self
-            .session
-            .request_search(RequestPurpose::SearchMessages, search_gen);
+        let extra = self.session.request_search(RequestPurpose::SearchMessages);
         let filters = self.current_message_filters();
         match self
             .sender
@@ -98,7 +96,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(offset) = self.session.search.search.tabs.begin_more() else {
             return Ok(None);
         };
-        let search_gen = self.session.search.search.generation;
         let query = self.session.search.search.query.trim().to_string();
         let scope = self.session.search.search.filters.scope();
         let tag = crate::search_filters::tag_query(&query).map(str::to_owned);
@@ -106,7 +103,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             (SearchScope::PublicPosts, None) => RequestPurpose::SearchPublicPostsMore,
             _ => RequestPurpose::SearchMessagesMore,
         };
-        let extra = self.session.request_search(purpose, search_gen);
+        let extra = self.session.request_search(purpose);
         let json = match (scope, &tag) {
             (SearchScope::PublicPosts, Some(tag)) => {
                 search_public_messages_by_tag(extra, tag, &offset, SEARCH_LIMIT)
@@ -123,7 +120,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             ),
         };
         match self.sender.send_json(&json) {
-            Ok(()) => Ok(Some(extra)),
+            Ok(()) => {
+                self.session.search.search.tabs.page_sent(extra);
+                Ok(Some(extra))
+            }
             Err(err) => {
                 self.session.requests.take(extra);
                 self.session.search.search.fail_page();
@@ -148,7 +148,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let query = query.trim().to_string();
         // What the user confirmed: this query at this price. A query typed
         // or a price TDLib reported since is another purchase.
-        let reported = search.tabs.limits.map_or(0, |limits| limits.star_count);
+        let reported = search.tabs.limits().map_or(0, |limits| limits.star_count);
         if search.filters.scope() != SearchScope::PublicPosts
             || !search.public_limits_exceeded()
             || price <= 0
@@ -159,11 +159,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        let search_gen = self.session.search.search.begin_query(&query);
+        self.session.search.search.begin_query(&query);
         self.session.search.search.begin_public_scope();
         let extra = self
             .session
-            .request_search(RequestPurpose::SearchPublicPosts, search_gen);
+            .request_search(RequestPurpose::SearchPublicPosts);
         self.session.search.search.begin_paid_posts(extra, price);
         match self.sender.send_json(&search_public_posts_paid(
             extra,
@@ -208,18 +208,17 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// `getPublicPostSearchLimits`: the free searches left, without
-    /// spending one. The answer is for the search generation that asked.
+    /// spending one. Only the request that asked fills the quota.
     pub fn fetch_public_post_limits(
         &mut self,
         query: &str,
-        search_gen: u64,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self
             .session
-            .request_search(RequestPurpose::GetPublicPostSearchLimits, search_gen);
+            .request(RequestPurpose::GetPublicPostSearchLimits, None);
         if let Err(err) = self
             .sender
             .send_json(&get_public_post_search_limits(extra, query))
@@ -227,6 +226,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        let limits = &mut self.session.search.search.tabs.limits;
+        limits.begin();
+        limits.sent(extra);
         Ok(Some(extra))
     }
 }

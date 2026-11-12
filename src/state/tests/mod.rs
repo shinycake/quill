@@ -60,6 +60,7 @@ mod reaction_undo;
 mod redraw;
 mod requests;
 mod requests_download_index;
+mod rollback_shown;
 mod screen_outcomes;
 mod search;
 mod search_upgrades;

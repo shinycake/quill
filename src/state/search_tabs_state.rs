@@ -63,7 +63,8 @@ pub enum SearchPaging {
     /// Nothing in flight; the next page can be asked.
     #[default]
     Idle,
-    Loading,
+    /// A page is out as `request`; only its answer or failure settles it.
+    Loading { request: RequestId },
     /// The page failed, or the ask was refused (the client is not ready).
     Failed,
 }
@@ -79,7 +80,9 @@ pub struct SearchTabsState {
     /// The next page: asked once, and a refused or failed one waits for
     /// the user's retry instead of being asked on every frame.
     pub paging: SearchPaging,
-    pub limits: Option<PublicPostLimits>,
+    /// `getPublicPostSearchLimits` of the open query: the quota line and
+    /// the price of a paid search. Only the request it waits for fills it.
+    pub limits: crate::state::fetch::Fetch<PublicPostLimits>,
 }
 
 impl SearchTabsState {
@@ -95,7 +98,12 @@ impl SearchTabsState {
 
     /// A page is in flight.
     pub fn loading_more(&self) -> bool {
-        self.paging == SearchPaging::Loading
+        matches!(self.paging, SearchPaging::Loading { .. })
+    }
+
+    /// The quota of the open query, once it answered.
+    pub fn limits(&self) -> Option<PublicPostLimits> {
+        self.limits.data().copied()
     }
 
     /// The last page failed or was refused; "Load more" says so and tries
@@ -104,14 +112,19 @@ impl SearchTabsState {
         self.paging == SearchPaging::Failed
     }
 
-    /// The offset of the page to ask for, once; `None` while one is in
-    /// flight or the list has ended.
-    pub(crate) fn begin_more(&mut self) -> Option<String> {
+    /// The offset of the page to ask for; `None` while one is in flight or
+    /// the list has ended. The sender records the page it sent with
+    /// [`Self::page_sent`].
+    pub(crate) fn begin_more(&self) -> Option<String> {
         if self.loading_more() || !self.has_more() {
             return None;
         }
-        self.paging = SearchPaging::Loading;
         Some(self.next_offset.clone())
+    }
+
+    /// The next page went out as `request`.
+    pub(crate) fn page_sent(&mut self, request: RequestId) {
+        self.paging = SearchPaging::Loading { request };
     }
 }
 
@@ -230,6 +243,7 @@ mod tests {
         };
         search.set_first_page_offset("p2".into());
         assert_eq!(search.tabs.begin_more().as_deref(), Some("p2"));
+        search.tabs.page_sent(crate::ids::RequestId(1));
         // One page in flight at a time.
         assert_eq!(search.tabs.begin_more(), None);
         search.append_page(vec![hit(1, 9), hit(2, 8)], String::new());
@@ -244,9 +258,11 @@ mod tests {
         let mut search = SearchState::default();
         search.set_first_page_offset("p2".into());
         assert!(search.tabs.begin_more().is_some());
+        search.tabs.page_sent(crate::ids::RequestId(1));
         search.fail_page();
         assert!(search.tabs.more_failed());
         assert_eq!(search.tabs.begin_more().as_deref(), Some("p2"));
+        search.tabs.page_sent(crate::ids::RequestId(2));
         assert!(!search.tabs.more_failed());
     }
 

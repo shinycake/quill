@@ -421,13 +421,18 @@ impl QuillApp {
     /// Close the message menu (another menu stays) and forget the reaction
     /// options it asked for.
     pub(super) fn close_message_menu(&mut self) {
+        let target = self
+            .message_ui
+            .menu
+            .at()
+            .map(|menu| (menu.chat_id, menu.message_id));
         self.message_ui.menu.close_message();
         let session = match self.live.as_mut() {
             Some(live) => Some(&mut live.driver.session),
             None => self.demo_session.as_deref_mut(),
         };
-        if let Some(session) = session {
-            session.reset_message_reactions();
+        if let (Some(session), Some((chat_id, message_id))) = (session, target) {
+            session.reset_message_reactions(chat_id, message_id);
         }
     }
 

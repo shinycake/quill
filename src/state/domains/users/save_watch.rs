@@ -3,6 +3,8 @@
 //! request and stay open, saving, until it is answered. The request is
 //! watched here by its id, so an answer for another request (or an earlier
 //! box) never closes this one.
+use std::collections::HashMap;
+
 use crate::ids::RequestId;
 use crate::state::RequestRegistry;
 
@@ -29,44 +31,39 @@ pub enum SaveOutcome {
     Unknown,
 }
 
-/// The request the open profile box waits on. Only one profile box is open
-/// at a time, so one slot: watching a new request replaces whatever an
-/// earlier box left (a box replaced without closing), and none outlives
-/// the next one.
+/// The requests the open boxes wait on: the profile boxes and the proxy
+/// editor, in the main window and in chat windows alike. Each box watches
+/// its own request by id, so one box's save never replaces another's. A box
+/// ends its watch when it closes or is replaced (`forget`) or takes its
+/// outcome.
 #[derive(Debug, Default)]
 pub struct SaveWatch {
-    entry: Option<(RequestId, SaveAnswer)>,
+    entries: HashMap<RequestId, SaveAnswer>,
 }
 
 impl SaveWatch {
-    /// Start watching `request`, just sent, in place of any earlier one.
+    /// Start watching `request`, just sent.
     pub fn watch(&mut self, request: RequestId) {
-        self.entry = Some((request, SaveAnswer::Waiting));
+        self.entries.insert(request, SaveAnswer::Waiting);
     }
 
-    /// `request` was answered. Only the watched, unanswered one records it.
+    /// `request` was answered. Only a watched, unanswered one records it.
     pub fn answered(&mut self, request: RequestId) {
-        if let Some((id, answer @ SaveAnswer::Waiting)) = self.entry.as_mut()
-            && *id == request
-        {
+        if let Some(answer @ SaveAnswer::Waiting) = self.entries.get_mut(&request) {
             *answer = SaveAnswer::Answered;
         }
     }
 
-    /// `request` was refused. Only the watched, unanswered one records it.
+    /// `request` was refused. Only a watched, unanswered one records it.
     pub fn failed(&mut self, request: RequestId, reason: String) {
-        if let Some((id, answer @ SaveAnswer::Waiting)) = self.entry.as_mut()
-            && *id == request
-        {
+        if let Some(answer @ SaveAnswer::Waiting) = self.entries.get_mut(&request) {
             *answer = SaveAnswer::Failed(reason);
         }
     }
 
     /// The box stopped waiting (closed, or took its outcome).
     pub fn forget(&mut self, request: RequestId) {
-        if self.entry.as_ref().is_some_and(|(id, _)| *id == request) {
-            self.entry = None;
-        }
+        self.entries.remove(&request);
     }
 
     /// Where `request` stands. Saved only on its answer: a watched request
@@ -79,19 +76,16 @@ impl SaveWatch {
     }
 
     fn outcome(&mut self, request: RequestId, in_flight: bool) -> SaveOutcome {
-        let Some((id, answer)) = self.entry.as_ref() else {
+        let Some(answer) = self.entries.get(&request) else {
             return SaveOutcome::Unknown;
         };
-        if *id != request {
-            return SaveOutcome::Unknown;
-        }
         let outcome = match answer {
             SaveAnswer::Waiting if in_flight => return SaveOutcome::Saving,
             SaveAnswer::Waiting => SaveOutcome::Unknown,
             SaveAnswer::Answered => SaveOutcome::Saved,
             SaveAnswer::Failed(reason) => SaveOutcome::Failed(reason.clone()),
         };
-        self.entry = None;
+        self.entries.remove(&request);
         outcome
     }
 }
@@ -132,16 +126,19 @@ mod tests {
     }
 
     #[test]
-    fn a_box_replaced_without_closing_leaves_nothing_behind() {
+    fn two_boxes_save_at_once_and_each_settles_on_its_own_request() {
         let mut watch = SaveWatch::default();
-        watch.watch(RequestId(1));
-        // The box was replaced, never taken nor forgotten; the next one
-        // takes the slot.
-        watch.watch(RequestId(2));
-        watch.answered(RequestId(1));
-        assert_eq!(watch.outcome(RequestId(1), false), SaveOutcome::Unknown);
-        watch.answered(RequestId(2));
-        assert_eq!(watch.outcome(RequestId(2), false), SaveOutcome::Saved);
+        let (main, window) = (RequestId(1), RequestId(2));
+        watch.watch(main);
+        watch.watch(window);
+        watch.answered(main);
+        assert_eq!(watch.outcome(window, true), SaveOutcome::Saving);
+        watch.failed(window, "no".into());
+        assert_eq!(watch.outcome(main, false), SaveOutcome::Saved);
+        assert_eq!(
+            watch.outcome(window, false),
+            SaveOutcome::Failed("no".into())
+        );
     }
 
     #[test]

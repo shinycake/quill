@@ -337,6 +337,7 @@ fn tag_search_pages_land_in_the_filter() {
 fn load_topics_404_marks_the_list_complete() {
     let (mut session, sink, seq) = saved_session();
     let extra = session.request(RequestPurpose::LoadSavedMessagesTopics, None);
+    session.threads.saved.page_sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -364,8 +365,8 @@ fn a_failed_first_page_is_asked_again_once_back_online() {
             extra.0
         )
     };
-    session.threads.saved.topics_load = SavedTopicsLoad::Started;
     let page = session.request(RequestPurpose::LoadSavedMessagesTopics, None);
+    session.threads.saved.page_sent(page);
     apply_json(&mut session, &seq, &sink, &error(page));
     assert_eq!(session.threads.saved.topics_load, SavedTopicsLoad::Retry);
     assert!(session.threads.saved.waiting_to_retry());
@@ -404,8 +405,8 @@ fn a_failure_while_online_is_asked_again_on_the_next_open() {
     let (mut session, sink, seq) = saved_session();
     session.connection = ConnectionState::Ready;
     session.open_chat(ChatId(ME));
-    session.threads.saved.topics_load = SavedTopicsLoad::Started;
     let page = session.request(RequestPurpose::LoadSavedMessagesTopics, None);
+    session.threads.saved.page_sent(page);
     apply_json(
         &mut session,
         &seq,
@@ -614,4 +615,37 @@ fn a_saved_page_lands_only_in_the_view_that_asked_it() {
     );
     let view = session.threads.saved.sublist.as_ref().unwrap();
     assert_eq!(view.history.older, OlderEnd::Failed);
+}
+
+#[test]
+fn an_older_page_cannot_settle_the_page_now_out() {
+    let (mut session, sink, seq) = saved_session();
+    session.connection = ConnectionState::Ready;
+    let first = session.request(RequestPurpose::LoadSavedMessagesTopics, None);
+    session.threads.saved.page_sent(first);
+    // The first page failed and was asked again before its late answer.
+    session.threads.saved.topics_load = SavedTopicsLoad::Idle;
+    let second = session.request(RequestPurpose::LoadSavedMessagesTopics, None);
+    session.threads.saved.page_sent(second);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":404,"message":"Not Found"}}"#,
+            first.0
+        ),
+    );
+    assert_eq!(
+        session.threads.saved.topics_load,
+        SavedTopicsLoad::Loading { request: second },
+        "a late 404 of the first page is not the second's answer"
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, second.0),
+    );
+    assert_eq!(session.threads.saved.topics_load, SavedTopicsLoad::Loaded);
 }

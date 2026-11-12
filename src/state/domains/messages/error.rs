@@ -100,12 +100,13 @@ impl Session {
                 );
             }
         }
-        if let Some(RequestPurpose::Messages(MessagesPurpose::GetMessageAvailableReactions {
-            message_id,
-        })) = pending.map(|p| p.purpose)
-            && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+        if let Some(pending) = pending
+            && let RequestPurpose::Messages(MessagesPurpose::GetMessageAvailableReactions {
+                message_id,
+            }) = pending.purpose
+            && let Some(chat_id) = pending.chat_id
         {
-            self.fail_message_reaction_options(chat_id, MessageId(message_id));
+            self.fail_message_reaction_options(pending.id, chat_id, MessageId(message_id));
         }
         if let Some(RequestPurpose::Messages(MessagesPurpose::GetSharingProtection { chat_id })) =
             pending.map(|p| p.purpose)

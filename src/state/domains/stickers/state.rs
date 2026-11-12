@@ -23,8 +23,8 @@ impl PackTitle {
 }
 
 pub struct StickersState {
-    /// Reaction options for the message whose reaction picker is open.
-    pub message_reaction_options: MessageReactionsState,
+    /// Reaction options of every message a menu is open on.
+    pub message_reaction_options: MessageReactionBook,
     /// `updateActiveEmojiReactions`: the emoji reactions Telegram offers (also
     /// the emoji usable as reactions in a group).
     pub active_reactions: Vec<String>,
@@ -64,7 +64,7 @@ pub struct StickersState {
 impl StickersState {
     pub(crate) fn new() -> Self {
         Self {
-            message_reaction_options: MessageReactionsState::Idle,
+            message_reaction_options: MessageReactionBook::default(),
             active_reactions: Vec::new(),
             default_reaction: None,
             reaction_limits: Default::default(),

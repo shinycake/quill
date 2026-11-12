@@ -115,18 +115,24 @@ pub enum RequestRollback {
     },
     /// Slice CL2: `setPinnedChats` — the previous `(chat_id, order)`
     /// pairs of the pinned chats in the list (`archived` = archive
-    /// list). The reorder swaps `order` values among the pinned chats
-    /// so `rebuild_main_order` keeps the new arrangement until the
-    /// authoritative `updateChatPosition` orders arrive.
+    /// list) and the pairs the reorder showed instead. The reorder swaps
+    /// `order` values among the pinned chats so `rebuild_main_order` keeps
+    /// the new arrangement until the authoritative `updateChatPosition`
+    /// orders arrive. A refusal puts back only the chats whose order is
+    /// still the shown one: an `updateChatPosition` that landed since
+    /// is the server's truth.
     ChatPinOrder {
         previous: Vec<(i64, i64)>,
+        shown: Vec<(i64, i64)>,
         archived: bool,
     },
     /// Slice CL2: `setArchiveChatListSettings` — the previous settings
     /// (`None` = never fetched; the optimistic value is dropped and
-    /// the panel re-fetches).
+    /// the panel re-fetches) and the ones the flip showed. Restored only
+    /// while the cache still holds `shown` (a fetch since is the truth).
     ArchiveChatListSettings {
         previous: Option<ArchiveChatListSettings>,
+        shown: ArchiveChatListSettings,
     },
     /// The tab menu's Mute / Unmute (`setForumTopicNotificationSettings`):
     /// the topic's settings before it and the ones it showed instead.
@@ -192,13 +198,24 @@ impl Session {
             }
             // Restore the pre-reorder `order` values the server refused,
             // then rebuild the list order.
-            RequestRollback::ChatPinOrder { previous, archived } => {
+            RequestRollback::ChatPinOrder {
+                previous,
+                shown,
+                archived,
+            } => {
                 for (chat_id, order) in previous {
+                    let shown_order = shown
+                        .iter()
+                        .find(|(id, _)| *id == chat_id)
+                        .map(|(_, order)| *order);
                     if let Some(chat) = self.chats.get_mut(&chat_id) {
-                        if archived {
-                            chat.archive_order = order;
+                        let slot = if archived {
+                            &mut chat.archive_order
                         } else {
-                            chat.order = order;
+                            &mut chat.order
+                        };
+                        if Some(*slot) == shown_order {
+                            *slot = order;
                         }
                     }
                 }
@@ -206,8 +223,10 @@ impl Session {
             }
             // Drop the refused archive-settings flip; the panel
             // re-fetches the truth on next open.
-            RequestRollback::ArchiveChatListSettings { previous } => {
-                self.chat_list.edit_archive_settings(previous);
+            RequestRollback::ArchiveChatListSettings { previous, shown } => {
+                if self.chat_list.archive_chat_list_settings() == Some(shown) {
+                    self.chat_list.edit_archive_settings(previous);
+                }
             }
             RequestRollback::ForumTopicMute {
                 chat_id,

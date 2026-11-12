@@ -81,8 +81,10 @@ fn open_menu(app: &Entity<QuillApp>, cx: &mut VisualTestContext) {
             );
             if let Some(session) = app.demo_session.as_mut() {
                 crate::ui::demos::reaction_fixtures::seed_reaction_options(session, CHAT, MESSAGE);
-                if let MessageReactionsState::Ready(options) =
-                    &mut session.stickers.message_reaction_options
+                if let Some(options) = session
+                    .stickers
+                    .message_reaction_options
+                    .ready_mut(CHAT, MESSAGE)
                 {
                     options.top.truncate(6);
                     options.top.push(ReactionChoice::CustomEmoji(77));
