@@ -4,7 +4,6 @@ bare:AccessStage::Asking 1
 bare:AccountStage::Starting 1
 bare:Answer::Waiting 1
 bare:ApplyStage::Sent 1
-bare:AskStage::InFlight 1
 bare:Audience::Loading 1
 bare:BackgroundStatus::Connecting 1
 bare:BoxStage::Opening 1
@@ -137,7 +136,6 @@ unkeyed:First::Preparing 1
 unkeyed:GiftPurchaseStage::Sent 1
 unkeyed:GiftValueStage::Loading 1
 unkeyed:GiftsRest::Waiting 1
-unkeyed:IconState::Requested 1
 unkeyed:IdLookup::Asking 1
 unkeyed:LanguageStage::Fetching 1
 unkeyed:Lifecycle::Loading 1
@@ -164,7 +162,6 @@ unkeyed:SetState::Loading 1
 unkeyed:SizedState::Loading 1
 unkeyed:Stage::Running 1
 unkeyed:StoryFetch::Asked 1
-unkeyed:TileState::Requested 1
 unkeyed:TitleCheck::Sent 1
 unkeyed:TonConnectRequestState::Pending 1
 unkeyed:Translation::Pending 1

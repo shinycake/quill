@@ -43,6 +43,22 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.location.picker().is_none() || !self.chats_path_active() {
             return Ok(());
         }
+        // A request a reconnect dropped fails here, after the answers that
+        // did arrive were applied.
+        let pending: std::collections::HashSet<RequestId> = self
+            .session
+            .requests
+            .pending
+            .values()
+            .filter(|pending| {
+                matches!(
+                    pending.purpose,
+                    RequestPurpose::Media(MediaPurpose::LocationPicker(_))
+                )
+            })
+            .map(|pending| pending.id)
+            .collect();
+        self.session.location.forget_dropped(&pending);
         for request in self.session.location.next_requests() {
             let chat_id = match &request {
                 PickerRequest::Venues { chat_id, .. } | PickerRequest::MapTile { chat_id, .. } => {
@@ -56,7 +72,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             );
             let json = picker_request_json(extra, &request);
             match self.sender.send_json(&json) {
-                Ok(()) => self.session.location.request_sent(&request, extra.0),
+                Ok(()) => self.session.location.request_sent(&request, extra),
                 Err(err) => {
                     self.session.requests.take(extra);
                     self.session.location.request_unsent(&request);

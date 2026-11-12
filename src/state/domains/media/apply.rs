@@ -48,7 +48,7 @@ impl Session {
                         LocationPickerPurpose::MapTile | LocationPickerPurpose::VenueIcon,
                     )) = pending.purpose
                 {
-                    self.location.file_answered(pending.id.0, Some(file.id));
+                    self.location.file_answered(pending.id, Some(file.id));
                 }
                 let paths = self.media.files.paths_revision();
                 self.upsert_file(file, true);
