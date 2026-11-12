@@ -17,6 +17,13 @@ hold what ends it:
   `JoinHandle`, `Subscription`, channel end or deadline in it, or in the
   types it names.
 
+Any variant, in flight or not, is also checked for `rawid`: a field named
+`request`, `extra`, `request_id`, `generation` or `serial` typed `u64`,
+a counter standing in for the `RequestId` of the request the stage waits
+for. A stage holds the `RequestId` itself, so a request the session's table
+dropped can be tied to the stage that waits for it. (A `..Purpose` enum is
+the request's own data and keeps its generation.)
+
 The variants in the tree when the check was added are in
 scripts/stage-enums-baseline.txt as `rule:Enum::Variant`. That list is
 debt: it only shrinks. A new one fails. Put the request in the variant
@@ -70,6 +77,7 @@ CARRIER = re.compile(
 NOT_A_STAGE = re.compile(
     r"(?:View|Action|Event|Command|Refusal|Reason|Error|Outcome|Result|Label|Line|Icon|Demo|Reply)$"
 )
+RAW_ID = re.compile(r"\b(?:request|extra|request_id|generation|serial)\s*:\s*(?:Option\s*<\s*)?[ui]64\b")
 TYPE = re.compile(r"\b(?:struct|enum)\s+([A-Z]\w*)\s*(?:<[^{;(]*>)?\s*(?:where[^{;(]*)?([({])")
 ENUM = re.compile(r"\benum\s+([A-Z]\w*)\s*(?:<[^{;]*>)?\s*(?:where[^{;]*)?\{")
 ATTR = re.compile(r"#\[[^\]]*\]")
@@ -129,11 +137,13 @@ def hits(root):
             body = text[brace + 1 : shape_guard.closing(text, brace)]
             offset = brace + 1
             for name, data in variants(body):
-                if name not in IN_FLIGHT:
-                    continue
                 found = re.search(rf"\b{name}\b", text[offset:])
                 at = offset + (found.start() if found else 0)
                 line = shape_guard.line_of(text, at)
+                if RAW_ID.search(data) and not match.group(1).endswith("Purpose"):
+                    yield f"rawid:{match.group(1)}::{name}", path, line
+                if name not in IN_FLIGHT:
+                    continue
                 if not data:
                     yield f"bare:{match.group(1)}::{name}", path, line
                 elif not carries(data, types):

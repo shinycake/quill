@@ -262,13 +262,13 @@ impl QuillApp {
                 else {
                     return None;
                 };
-                (answered == request.0).then(|| {
+                (answered == request).then(|| {
                     market.auction = AuctionFetch::Idle;
                     gift_id
                 })
             });
             let loading = self.session().is_some_and(|s| {
-                s.payments.gift_market.auction == (AuctionFetch::Loading { request: request.0 })
+                s.payments.gift_market.auction == (AuctionFetch::Loading { request })
             });
             let send_box_open = self
                 .session()

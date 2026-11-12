@@ -185,7 +185,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let grams = &mut self.session.payments.hub.grams;
         match sent {
             Ok(extra) => {
-                grams.load.begin(extra.0, append);
+                grams.load.begin(extra, append);
                 Ok(extra)
             }
             Err(err) => {

@@ -282,6 +282,27 @@ class Enums(unittest.TestCase):
         }
         self.assertEqual(keys(enums, files), ["bare:Load::Loading", "unkeyed:Gate::Asking"])
 
+    def test_a_u64_standing_in_for_a_request_id_fails(self):
+        files = {
+            "src/state/a.rs": (
+                "pub enum Fetch { Idle, Loading { request: u64 } }\n"
+                "pub enum Fetch2 { Idle, Waiting { chat: ChatId, serial: u64 } }\n"
+                "pub enum Sound { Idle, Ready { generation: u64 } }\n"
+                "pub enum Good { Idle, Loading { request: RequestId }, Ready { count: u64 } }\n"
+                "pub enum UsersPurpose { Check { generation: u64 } }\n"
+            ),
+        }
+        self.assertEqual(
+            keys(enums, files),
+            [
+                "rawid:Fetch2::Waiting",
+                "rawid:Fetch::Loading",
+                "rawid:Sound::Ready",
+                "unkeyed:Fetch2::Waiting",
+                "unkeyed:Fetch::Loading",
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -9817,3 +9817,37 @@ kept until sent, a refused refetch does not repeat), `state/account_notices`
 `connect/tests/stories.rs` (tray refresh on ingest),
 `connect/tests/chat_list/folder_removals.rs` (leaving a folder stops the
 retry; no wall clock), `state/tests/history_prune.rs` (translations pruned).
+
+### Sweep fixes (r3-02)
+
+Bundle `r3-02` of the third full read. Each stage below is one value that
+holds its request, and a request the session no longer holds ends the stage
+that waited for it.
+
+| Ids | Fix |
+|---|---|
+| 05-001 | `GiftManageState::flow_sent(FlowForm, request)`: a collection form is marked sent by its own submit (`create`, `rename` or `delete_gift_collection`), not by matching the request's `PaymentsPurpose`, so a `ChangeGiftCollection` from the gifts list no longer takes over an open form. The Upgrade and resale forms of a gift panel are matched by the gift's id too (`GiftView::form_sent(gift, ..)`). |
+| 05-002 | `GiftMarketState::events: Vec<MarketEvent>` (`Note`, `Toast`, `BalanceLow`) replaces `notes`, `toasts` and `balance_low`; the UI drains it once, in the order the events happened. The market's stage fields that held a bare `u64` for a request (`AuctionFetch`, `AuctionFollow`, `CraftRun`, `PageLoad`, `ResaleBuy::waits_for`) now hold the `RequestId`. |
+| 05-004 | `BadgeStage::Failed { count, at }`: the same count that failed is pushed again after `FAILED_RETRY_AFTER`, a different count at once. A missing session bus no longer wakes the launcher worker on every pass. |
+| 05-005 | The picker's stages hold their `RequestId` (`VenueBot::Resolving { request }`, `AskStage::InFlight { request }`, `TileState::Requested`, `IconState::Requested`), nothing is marked asked before the send went out, and `LocationSharing::forget_dropped` (run first in `pump_location_picker`) fails what the session no longer holds: the bot lookup and the venue query (the list shows its Retry), a tile (one more failed try), an icon (asked again). The venue `generation` counter is gone: an answer is matched by its request. |
+| 05-006 | `MediaViewer::origin: Origin` (`Closed`, `Chat`, `Shared { total }`, `Profile { owner, total }`, `Poll`) replaces `source` and `total`; the viewer is open exactly when it has an origin, and `retain` that empties the list closes it. |
+| 05-003 | `NewChatStage::{Creating { request, back }, Created, CreateRefused, CreateLost}`: `Session::settled_new_chat` folds the answer in and the request is not held past it. `CreateProgress` is gone. |
+| 06-002 | The QR box's `ThemeStage::Saving { request, choice }`, `FreeUi::Requesting { what, request }` and `GiftsAsk { request, at }` hold the `RequestId`; the counters (`save_serial`, `FreeState::last_serial`, `ThemeGifts::last_serial`) and the `SaveTicket` / `FreeTicket` are gone. The UI sends, then tells the box (`SaveSent` / `FreeSent`, or `SaveUnsent` / `FreeUnsent`); `PeerQrData::saves` is keyed by request; `qr_settle_dropped_requests` finds a waiting save or free code gone from the request table and settles it as a failure with no reason, and `PeerQrData::forget_dropped` lets go of the saves, the gifts page and the contact link. |
+| 06-001 | `ProxyFetch::{NotSent { at }, NotSentStale { at }}` replace `Failed` / `FailedStale` for a `getProxies` that could not be sent: `refresh_proxies_if_stale` (every ingest) sends it again once `UNSENT_RETRY_AFTER` has passed, so a background account's list settles. An error answer is still `Failed` (the box's Refresh). |
+| 07-001 | A corrupt `accounts.json` that cannot be moved aside is marked unreadable and its default is cached under the file's stamp: a save refuses, and the file is not read, parsed and renamed again on every frame. |
+| 07-002 | `Saver::writer: Writer { Idle, Running { thread } }`: one background writer takes the staged geometry until the slot is empty (checked under the writer lock), so a drag stages and does not spawn a thread per report; a failed write ends the writer with the state still staged. |
+| 07-006 | `ReviewItem::stage: ReviewItemStage { ToSend, InFlight(RequestId) }` replaces the `Option<RequestId>`. |
+| 07-003 | `ChatSummary::my_member: OwnMember` holds the restriction (`Unknown`, `NoRecord`, `Other`, `Restricted(Option<MemberRestriction>)`, `Administrator`); `my_restriction` is gone. A status change (`updateSupergroup`, leaving, rejoining) replaces the restriction with it, and `record_own_member` lands the status, rights and restriction together. |
+| 07-004 | `HangUp::stage: HangUpStage { Discarding, EngineOwed, EngineTold }` replaces `engine_hang_up_due`; the driver pump settles `EngineOwed` with `take_engine_hang_up`. |
+
+Guard: `check-stage-enums.py` gained the `rawid` rule: a stage variant (not a
+`..Purpose`) with a `request`, `extra`, `request_id`, `generation` or `serial`
+field typed `u64` is rejected; the hits in the tree are in the baseline.
+
+Tests: `peer_qr/theme_tests` and `peer_qr/tests` (answers matched by request,
+a save or code that never left, a dropped request), `connect/tests/location_picker`
+and `location_picker/{picker,sharing}_tests` (dropped requests),
+`connect/tests/gift_manage` (a list change is not the form's request),
+`proxy_ops` and `connect/tests/sweep_s3_payments_1` (retry after the wait, on a
+fixed clock), `icon_badge` (backoff), `settings/{accounts,window_save}`,
+`state/tests/{calls,groups_more}`, `media_viewer`, `new_chat`.

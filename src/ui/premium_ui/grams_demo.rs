@@ -89,7 +89,7 @@ impl QuillApp {
                 if let Some(grams) = self.grams_mut() {
                     grams.next_offset = "more".into();
                     grams.load = quill::gift_market::PageLoad::Loading {
-                        request: 0,
+                        request: quill::ids::RequestId(0),
                         more: true,
                     };
                 }

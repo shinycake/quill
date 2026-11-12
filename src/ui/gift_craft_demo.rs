@@ -107,7 +107,7 @@ impl QuillApp {
             "forge" => {
                 // Half way through the forge, still waiting for the answer.
                 if let Some(craft) = self.craft_mut() {
-                    craft.run = quill::gift_market::CraftRun::Crafting { request: 0 };
+                    craft.run = quill::gift_market::CraftRun::Crafting { request: quill::ids::RequestId(0) };
                 }
                 if let Some(since) = Instant::now().checked_sub(Duration::from_millis(1_400)) {
                     self.gift_market.craft.start_forge(since);

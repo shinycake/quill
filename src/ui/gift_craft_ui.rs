@@ -215,7 +215,7 @@ impl QuillApp {
             Some(live) => live.driver.craft_gift().is_ok(),
             // The demo crafts nothing; the forge ends in a failure.
             None => self.craft_mut().is_some_and(|craft| {
-                craft.run = CraftRun::Crafting { request: 0 };
+                craft.run = CraftRun::Crafting { request: quill::ids::RequestId(0) };
                 true
             }),
         };

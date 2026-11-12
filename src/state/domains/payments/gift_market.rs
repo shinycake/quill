@@ -22,7 +22,7 @@ impl Session {
         pending: Option<&PendingRequest>,
     ) {
         let purpose = market_purpose(pending);
-        let request = pending.map_or(0, |p| p.id.0);
+        let request = pending.map_or(crate::ids::RequestId(0), |p| p.id);
         let asked = pending.map(|p| p.id);
         match payload {
             GiftMarketPayload::ResalePage(page) => {
@@ -58,7 +58,7 @@ impl Session {
             GiftMarketPayload::AuctionState(state) => {
                 self.remember_files(&state.gift.files);
                 let market = &mut self.payments.gift_market;
-                if request != 0 && market.auction == (AuctionFetch::Loading { request }) {
+                if request.0 != 0 && market.auction == (AuctionFetch::Loading { request }) {
                     market.auction = AuctionFetch::Ready {
                         gift_id: state.gift_id(),
                         request,
@@ -177,7 +177,7 @@ impl Session {
         let Some(buy) = market
             .buy
             .as_mut()
-            .filter(|buy| request.is_some_and(|id| buy.waits_for(id.0)))
+            .filter(|buy| request.is_some_and(|id| buy.waits_for(id)))
         else {
             return;
         };
@@ -256,7 +256,7 @@ impl Session {
                 });
             }
             Some(GiftMarketPurpose::Craft) => {
-                let request = pending.map_or(0, |p| p.id.0);
+                let request = pending.map_or(crate::ids::RequestId(0), |p| p.id);
                 if let Some(craft) = market
                     .craft
                     .as_mut()
@@ -277,7 +277,7 @@ impl Session {
         purpose: GiftMarketPurpose,
         asked: Option<crate::ids::RequestId>,
     ) {
-        let request = asked.map(|id| id.0);
+        let request = asked;
         let market = &mut self.payments.gift_market;
         let note = error_note(purpose, &error_reason(err));
         let low = err.earn_hint == Some(crate::earn::EarnErrorHint::BalanceTooLow);
@@ -323,7 +323,7 @@ impl Session {
             GiftMarketPurpose::PlaceBid { .. } | GiftMarketPurpose::IncreaseBid { .. } => {
                 if market
                     .bidding
-                    .is_some_and(|(_, waiting)| request == Some(waiting.0))
+                    .is_some_and(|(_, waiting)| request == Some(waiting))
                 {
                     market.bidding = None;
                 }

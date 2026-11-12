@@ -154,7 +154,7 @@ fn a_chat_windows_gift_box_goes_on_without_the_main_window(cx: &mut TestAppConte
         if let Some(session) = app.demo_session.as_mut() {
             session.payments.gift_market.auction = quill::gift_market::AuctionFetch::Ready {
                 gift_id: 5,
-                request: 7,
+                request: quill::ids::RequestId(7),
             };
         }
     });

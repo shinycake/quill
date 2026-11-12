@@ -5,6 +5,7 @@ use super::{
     ResaleListing, ResalePage, UpgradePreview,
 };
 use crate::gift_manage::GiftRecipient;
+use crate::ids::RequestId;
 use crate::marketplace::GiftPrice;
 use crate::state::fetch::Fetch;
 use std::collections::HashMap;
@@ -24,7 +25,7 @@ pub enum PageLoad {
     /// The page is out as `request`. `more`: it extends a list that already
     /// had an answer.
     Loading {
-        request: u64,
+        request: RequestId,
         more: bool,
     },
     Ready,
@@ -56,18 +57,18 @@ impl PageLoad {
     }
 
     /// The page out as `request`, if it is this one.
-    pub fn waits_for(&self, request: u64) -> bool {
-        request != 0 && matches!(self, Self::Loading { request: asked, .. } if *asked == request)
+    pub fn waits_for(&self, request: RequestId) -> bool {
+        request.0 != 0 && matches!(self, Self::Loading { request: asked, .. } if *asked == request)
     }
 
     /// The page out as `request` extends the list instead of replacing it.
-    pub fn appends(&self, request: u64) -> bool {
-        request != 0
+    pub fn appends(&self, request: RequestId) -> bool {
+        request.0 != 0
             && matches!(self, Self::Loading { request: asked, more: true } if *asked == request)
     }
 
     /// A page went out as `request`: a next page extends the list.
-    pub fn begin(&mut self, request: u64, more: bool) {
+    pub fn begin(&mut self, request: RequestId, more: bool) {
         *self = Self::Loading { request, more };
     }
 
@@ -87,7 +88,7 @@ pub enum CraftRun {
     /// `craftGift` is out as `request` (0: the demo's), whose answer this
     /// box shows.
     Crafting {
-        request: u64,
+        request: RequestId,
     },
     Done(CraftResult),
 }
@@ -260,12 +261,8 @@ impl ResaleBuy {
     }
 
     /// `request` is the purchase this box sent.
-    pub fn waits_for(&self, request: u64) -> bool {
-        request != 0
-            && self.stage
-                == (BuyStage::Sending {
-                    request: crate::ids::RequestId(request),
-                })
+    pub fn waits_for(&self, request: RequestId) -> bool {
+        request.0 != 0 && self.stage == (BuyStage::Sending { request })
     }
 
     /// The purchase went out as `request`.
@@ -467,13 +464,13 @@ pub enum AuctionFetch {
     #[default]
     Idle,
     Loading {
-        request: u64,
+        request: RequestId,
     },
     /// The state of this gift arrived as the answer to `request`; the box
     /// that asked takes it once, and one that did not ask leaves it.
     Ready {
         gift_id: i64,
-        request: u64,
+        request: RequestId,
     },
 }
 
@@ -483,7 +480,7 @@ pub enum AuctionFollow {
     #[default]
     None,
     /// The open request went out as `request`; updates arrive for it.
-    Following { gift_id: i64, request: u64 },
+    Following { gift_id: i64, request: RequestId },
     /// The open request was refused or could not be sent. It is not asked
     /// again while the same box shows (that would be a request every
     /// frame); closing the box and opening it again follows afresh.
