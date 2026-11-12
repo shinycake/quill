@@ -88,7 +88,6 @@ impl QuillApp {
         let request = quill::ids::RequestId(1);
         labels.begin(&plan, request);
         labels.store(
-            plan.epoch,
             Some(request),
             vec![(
                 "cloud_lng_badge_psa_covid".into(),
