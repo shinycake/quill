@@ -87,3 +87,8 @@ src/ui/send_effects/mod.rs 607 read
 src/ui/settings_window/agent_activity.rs 576 read
 src/ui/settings_window/agent_page.rs 618 read
 src/ui/settings_window/agent_tools.rs 578 read
+src/ui/search_ui/mod.rs 948 read
+src/ui/search_ui/chat_search_bar.rs 825 read
+src/ui/security/mod.rs 820 read
+src/ui/security/passkey_ceremony.rs 812 read
+src/ui/security/passkeys.rs 888 read
