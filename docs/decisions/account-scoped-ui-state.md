@@ -10256,7 +10256,7 @@ launch_flow}`, `widgets_lock_tests`, `wallpaper_preview_tests`, `voice`,
 | toast footer | `Footer::Kept(note)`: `drop_toasts` (before a session exists) keeps a toast-kind note for the footer line, and `advance` (called only with a session) turns it into the blank default, so a failed sign-in's error no longer swallows the progress notes after sign-in. |
 | AVPlayer open | `avplayer_open::OpenWatch`: a key-value observer on `AVPlayerItem.status` signals `Backend::on_open`, so the open wake exists on macOS too. `awaits_picture` lost its `NotOpen` branch; a backend that signals gets no vsync frames while it opens (`await_open` clears the wait, the wake asks for the first picture). |
 | 23-011 | A reconnect (`updateConnectionState` to Ready) gives every failed translation its attempts back (`Session::translations_back_online`), and the pump's scan keeps unsettled messages, failures that ran out of attempts included, so a chat that stays open asks again. |
-| recheck timer | `recheck_for_updates` starts a check only from Idle, UpToDate, NoRelease or Failed: it never turns a known update (Available, Staged, Downloading, Installing, Installed) into `Checking`. |
+| recheck timer | `recheck_for_updates` starts a check only from Idle, UpToDate, NoRelease or Failed: it never turns a known update (Available, Staged, Downloading, Installing, Installed) into `Checking`. Superseded by the round 3 and 5 tables: `DownloadFailed` is in the timer's start set too, and its check keeps the kept release. |
 | updates.rs doc | `RECHECK_EVERY` has its own doc again. |
 | self-update probe | `finish_previous_update` answers `AVAILABILITY` when `current_exe` fails and when the cleanup thread cannot start. `wait_with_timeout` is `child_timeout::wait_within` plus the kill. |
 | widgets drain | `schedule_widget_polls` does not call a poll dropped while its answer waits in `bots.widget_answers` (held back while locked). |
@@ -10286,18 +10286,18 @@ launch_flow}`, `widgets_lock_tests`, `wallpaper_preview_tests`, `voice`,
 | --- | --- |
 | 23-011 | `translation_unsettled` is true for everything but `Done`, so a `Pending` message stays in the pump's scan; `needs_translation` still keeps the ask from going twice. Ask, fail out of attempts, reconnect, asked again is tested through `finish_translation`. |
 | open wake | `PlayerCell.drawn_in` remembers the view the element last painted in; the open wake redraws it with the watchers, so an unwatched autoplaying inline clip leaves its still. |
-| mini-app window | `WebAppPending.window` is set from `asking_window()` when the open request goes out (`note_open_window`) and rides into `WebAppOpenResult::Opened.window`; `spawn_mini_app_window` takes it from the matched answer. The helper's queued events are drained before the session poll, so a popup shown from the poll side does not treat a queued `PopupClosed` as replaced. A lost `sendWebAppData` ends with an error (`end_lost_data_sends`) and keeps the poll alive until it does. |
-| vanish | `begin_vanish` returns whether a ghost holds the request; the callers `expect` it only then. `Crumbling` keeps the `Deletion` until its answer is taken; `prune_vanishing` leaves ghosts holding a request to `settle_ghosts`, which forgets it. `settle_vanishing` runs in every window; a waiting ghost whose message is gone in a chat not shown is dropped. Split `vanish/settle.rs`. |
+| mini-app window | `WebAppPending.window` is set from `asking_window()` when the open request goes out (`note_open_window`) and rides into `WebAppOpenResult::Opened.window`; `spawn_mini_app_window` takes it from the matched answer. The helper's queued events are drained before the session poll, so a popup shown from the poll side does not treat a queued `PopupClosed` as replaced. A lost `sendWebAppData` ends with an error (`end_lost_data_sends`) and keeps the poll alive until it does. Superseded by the round 4 table: the window is a parameter of every driver launch call; `note_open_window` is gone. |
+| vanish | `begin_vanish` returns whether a ghost holds the request; the callers `expect` it only then. `Crumbling` keeps the `Deletion` until its answer is taken; `prune_vanishing` leaves ghosts holding a request to `settle_ghosts`, which forgets it. `settle_vanishing` runs in every window; a waiting ghost whose message is gone in a chat not shown is dropped. Split `vanish/settle.rs`. Superseded by the round 4 table: a waiting ghost lets go of its `Deletion` too (`settle_ghosts`). |
 | video editor | `Drag::release` names the release for any held drag; the blur and button-up-move hooks run it (`release_lost_video_drag`). |
 | translate Hide | `HideStage::Sent(RequestId)` in `TranslateScreen` is settled by the `toggleChatIsTranslatable` answer through `RequestAcks`; it outlives the toast, and Undo forgets it. `toggle_chat_is_translatable` returns its request. |
 | suggested posts | Decline is not opened or confirmed, and Accept not confirmed, while a Publish or Decline of the post is out. |
 | update pill | A pill already `Ready` keeps its glide for the next `Restart` pass. |
-| recheck timer | From `DownloadFailed` the timer retries the download from the kept release without going through `Checking`. |
+| recheck timer | From `DownloadFailed` the timer retries the download from the kept release without going through `Checking`. Superseded by the round 4 and 5 tables: the timer runs a check from `DownloadFailed`, keeping the release. |
 | emoji status | `Ok(None)` from `change_emoji_status` answers `UNKNOWN_ERROR`. A `getCustomEmojiStickers` answer or error pokes `MINI_APPS`; `mini_app_watch_due` carries the lookup's 15 s deadline instead of a 250 ms tick. |
 | tests | `emoji_status_tests.rs` and `mini_app_flow_tests.rs` block on `recv()` instead of `recv_timeout`. |
 | hybrid sign-in | After the code is shown, `Available(false)` or a stopped scanner ends the ceremony with the phone error. |
 | AVPlayer | `OpenWatch` holds its item and removes the observer in `Drop`; the observer is released on the main queue. `buffer` is `Option<(Instant, BufferState)>`. |
-| FFmpeg reopen | The open wake lives in the backend and every player it opens forwards to it; a clip that failed is not reopened. |
+| FFmpeg reopen | The open wake lives in the backend and every player it opens forwards to it; a clip that failed is not reopened. Superseded by the round 4 and 5 tables: each reopen gets a fresh wake slot, and a refused one registers again. |
 | video decode | `wait_frame` also stops on `at_end()` and `is_stopped()`. |
 | waiting gate | `WaitingGate::Delayed { since, _timer }` is built whole by `observe`; `shown_in` spawns the redraw timer. |
 | voice | `Recording::{Ours, HandedOn}` replaces the empty `PathBuf` sentinel in `VoiceCapture` and `VoiceFinish`. |
@@ -10315,3 +10315,11 @@ launch_flow}`, `widgets_lock_tests`, `wallpaper_preview_tests`, `voice`,
 | recheck timer | Supersedes round 3's row: from `DownloadFailed` the timer runs a fresh check (`Checking`), not only a retry of the kept release. A newer release that fixes a bad download is found; the kept one, when still the latest, downloads again from the check's answer. A check that fails offline leaves `Failed`, and the next timer checks again. `updater::force_latest_release` is the test seam; test on the manual clock. |
 | docs | The 14-002 and translate Hide rows of earlier rounds say they are superseded. |
 | suggested posts | The old test's doc comment is back above its test. |
+
+#### Fix round 5 (r4-12)
+
+| Ids | What changed |
+| --- | --- |
+| recheck timer | Supersedes round 4's row: from `DownloadFailed(release, _)` the timer's check keeps the release. `check_for_updates_keeping` maps a `Failed(message)` answer to `DownloadFailed(release, message)`, so an offline recheck leaves the release notes, the Update button and the pill. `Available`, `UpToDate` and `NoRelease` apply as before. Tests on the manual clock force the check failure (`updater::force_check_failure`) and the self-update answer, so none depends on the real process. |
+| FFmpeg reopen | Supersedes round 4's row for the refused branch: after the wake is put back, `set_volume` calls `on_open` again, which runs at once for a player that settled while the slot was empty, else queues a forwarder that finds the slot empty after the first. The test seam `reopen_with` is a closure that may refuse; the test refuses after the first open settled and the wake fires once. |
+| decisions | The five round 2 to 4 rows that stated the old behaviour say they are superseded. |
