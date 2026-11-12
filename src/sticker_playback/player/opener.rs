@@ -7,7 +7,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::engine::Shared;
-use super::engine::{Open, Stage, Taking, WorkerTicket};
+use super::engine::{Open, Stage, Taking};
 use super::source::Packer;
 use super::store::Scratch;
 use super::{Cancel, ClipInfo, ClipKey, DecodeAll};
@@ -16,7 +16,7 @@ use crate::locks::lock_or_recover;
 pub(super) fn run(index: usize, shared: &Shared) {
     let mut scratch = Scratch::default();
     loop {
-        let (key, id, decode, cancel) = {
+        let (key, id, decode, cancel, taking) = {
             let mut state = lock_or_recover(&shared.state);
             loop {
                 if state.stop {
@@ -35,7 +35,7 @@ pub(super) fn run(index: usize, shared: &Shared) {
             shared,
             &mut scratch,
             (key, id),
-            Taking::Opener(WorkerTicket::new(index)),
+            taking,
             decode,
             &cancel,
         );

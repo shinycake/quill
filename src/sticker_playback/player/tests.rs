@@ -1,4 +1,4 @@
-use super::engine::{Taking, WorkerTicket};
+use super::engine::Taking;
 use super::head::{PAUSE_GAP, REPAINT_GAP, pick};
 use super::source::{Packer, Source};
 use super::store::{self, Scratch, Store};
@@ -988,18 +988,18 @@ fn only_the_worker_that_took_a_clip_lands_its_open() {
     engine.open(key, Origin::Lottie(std::path::PathBuf::from("missing.tgs")));
     let job = crate::locks::lock_or_recover(&engine.shared().state).next_job(0);
     let Some(engine::Job::Open {
-        id, path, worker, ..
+        id, path, taking, ..
     }) = job
     else {
         panic!("the worker takes the clip to open it");
     };
-    assert_eq!(worker, 0);
+    assert!(taking == Taking::forged_worker(0));
     // An open that names another worker lands nowhere.
     let other = engine::Job::Open {
         key,
         id,
         path: path.clone(),
-        worker: worker + 1,
+        taking: Taking::forged_worker(1),
     };
     worker::work(
         engine.shared(),
@@ -1013,7 +1013,7 @@ fn only_the_worker_that_took_a_clip_lands_its_open() {
         key,
         id,
         path,
-        worker,
+        taking,
     };
     worker::work(
         engine.shared(),
@@ -1135,7 +1135,7 @@ fn a_late_open_does_not_bring_back_a_clip_its_ended_opener_failed() {
     let clip = key(1, 16);
     engine.open(clip, synthetic(16, 3));
     let taken = crate::locks::lock_or_recover(&engine.shared().state).next_decode(0);
-    let (_, id, decode, cancel) = taken.expect("the opener takes the waiting clip");
+    let (_, id, decode, cancel, taking) = taken.expect("the opener takes the waiting clip");
     let ended = {
         let mut bodies = crate::locks::lock_or_recover(&started);
         let at = bodies
@@ -1150,7 +1150,7 @@ fn a_late_open_does_not_bring_back_a_clip_its_ended_opener_failed() {
         engine.shared(),
         &mut Scratch::default(),
         (clip, id),
-        Taking::Opener(WorkerTicket::new(0)),
+        taking,
         decode,
         &cancel,
     );

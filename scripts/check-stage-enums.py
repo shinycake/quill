@@ -75,10 +75,8 @@ IN_FLIGHT = set(
     "Installing Paying Buying Transferring Upgrading Lingering Decoding Clearing Merging "
     "Building Cutting Encoding Activating Rendering Listing Jumping Capturing".split()
 )
-# `WorkerTicket` (src/sticker_playback/player/engine.rs) names the thread whose
-# end-guard fails the clips that hold it: it is what ends the stage.
 CARRIER = re.compile(
-    r"\b(?:RequestId|Task|TaskHold|RenderJob|JoinHandle|Subscription|Receiver|Sender|Instant|SystemTime|WorkerTicket)\b"
+    r"\b(?:RequestId|Task|TaskHold|RenderJob|JoinHandle|Subscription|Receiver|Sender|Instant|SystemTime)\b"
 )
 OPTIONAL_REQUEST = re.compile(r"Option\s*<\s*(?:[\w:]*::)?RequestId\s*>")
 # Enums that name a message, a reason or a derived view, not a stored stage.

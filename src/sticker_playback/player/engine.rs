@@ -64,41 +64,55 @@ pub(super) struct Clip {
     pub(super) coarse: bool,
 }
 
-/// The thread (a draw worker or an opener, by index) holding a clip in
-/// `Opening` or `Decoding`: the thread's `WorkerEnd`, dropped when it
-/// returns, panics or never starts, fails every clip that holds its ticket,
-/// and a late open of a clip lands only for the ticket it holds.
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) struct WorkerTicket(usize);
-
-impl WorkerTicket {
-    pub(super) fn new(index: usize) -> Self {
-        Self(index)
-    }
+enum TakenBy {
+    Worker,
+    Opener,
 }
 
-/// Which stage a thread took a clip into, for the open that lands it.
-#[derive(Clone, Copy)]
-pub(super) enum Taking {
-    /// A draw worker opening (or decoding, with no opener thread) it.
-    Worker(WorkerTicket),
-    /// An opener thread decoding it.
-    Opener(WorkerTicket),
+/// The thread (a draw worker or an opener, by index) a clip was handed to.
+/// Only the engine's state makes one, when it hands a clip out
+/// ([`State::next_job`], [`State::next_decode`]); the thread passes it back
+/// with the open, which lands only for the thread the clip holds. The
+/// thread's `WorkerEnd` fails every clip that holds it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) struct Taking {
+    by: TakenBy,
+    index: usize,
+}
+
+impl Taking {
+    fn worker(index: usize) -> Self {
+        Self {
+            by: TakenBy::Worker,
+            index,
+        }
+    }
+
+    fn opener(index: usize) -> Self {
+        Self {
+            by: TakenBy::Opener,
+            index,
+        }
+    }
+
+    /// A ticket of draw worker `index` that the state did not hand out.
+    #[cfg(test)]
+    pub(super) fn forged_worker(index: usize) -> Self {
+        Self::worker(index)
+    }
 }
 
 /// A clip's stage: one value for what the worker holding it is doing.
 pub(super) enum Stage {
     /// Not taken yet: a worker takes `Origin` to open it.
     Waiting(Origin),
-    /// Draw worker `worker` has taken it and is opening it (or decoding
-    /// it, with no opener thread running). The worker's `WorkerEnd` fails
-    /// it if the thread ends first, and only that worker's open lands.
-    Opening {
-        worker: WorkerTicket,
-    },
-    /// Opener thread `opener` is decoding it.
+    /// A thread has taken it and is opening or decoding it: a draw worker
+    /// (opening it, or decoding with no opener thread running) or an opener
+    /// thread. The thread's `WorkerEnd` fails it if the thread ends first,
+    /// and only that thread's open lands.
     Decoding {
-        opener: WorkerTicket,
+        by: Taking,
     },
     /// Open, and no worker is on it.
     Ready(Open),
@@ -138,7 +152,7 @@ impl Stage {
     /// What the UI sees: a clip not open yet is opening.
     pub(super) fn state(&self) -> ClipView {
         match self {
-            Self::Waiting(_) | Self::Opening { .. } | Self::Decoding { .. } => ClipView::Opening,
+            Self::Waiting(_) | Self::Decoding { .. } => ClipView::Opening,
             Self::Ready(open) | Self::Drawing { open, .. } => ClipView::Ready(open.info),
             Self::Failed(error) => ClipView::Failed(error.clone()),
         }
@@ -146,24 +160,17 @@ impl Stage {
 
     /// A worker is on it.
     pub(super) fn busy(&self) -> bool {
-        matches!(
-            self,
-            Self::Opening { .. } | Self::Decoding { .. } | Self::Drawing { .. }
-        )
+        matches!(self, Self::Decoding { .. } | Self::Drawing { .. })
     }
 
     fn decoding_on(&self, index: usize) -> bool {
-        matches!(self, Self::Decoding { opener } if *opener == WorkerTicket::new(index))
+        matches!(self, Self::Decoding { by } if *by == Taking::opener(index))
     }
 
     /// Whether `taking` is the thread this clip was handed to, so its open
     /// may land.
     pub(super) fn taken_by(&self, taking: Taking) -> bool {
-        match (self, taking) {
-            (Self::Opening { worker }, Taking::Worker(me)) => *worker == me,
-            (Self::Decoding { opener }, Taking::Opener(me)) => *opener == me,
-            _ => false,
-        }
+        matches!(self, Self::Decoding { by } if *by == taking)
     }
 
     fn drawing(&self) -> Option<u32> {
@@ -259,14 +266,14 @@ pub(super) enum Job {
         id: u64,
         path: PathBuf,
         /// The worker that took it.
-        worker: usize,
+        taking: Taking,
     },
     /// Decode a clip whose frames all come up front: on the opener
     /// threads, or on its worker when none started.
     Decode {
         key: ClipKey,
         id: u64,
-        worker: usize,
+        taking: Taking,
         decode: DecodeAll,
         cancel: Cancel,
     },
@@ -827,8 +834,8 @@ impl State {
         let id = clip.id;
         let Stage::Waiting(origin) = std::mem::replace(
             &mut clip.stage,
-            Stage::Opening {
-                worker: WorkerTicket::new(me),
+            Stage::Decoding {
+                by: Taking::worker(me),
             },
         ) else {
             return None;
@@ -838,12 +845,12 @@ impl State {
                 key,
                 id,
                 path,
-                worker: me,
+                taking: Taking::worker(me),
             }),
             Origin::Decoded(decode) => Some(Job::Decode {
                 key,
                 id,
-                worker: me,
+                taking: Taking::worker(me),
                 decode,
                 cancel: clip.cancel.clone(),
             }),
@@ -886,7 +893,7 @@ impl State {
     pub(super) fn next_decode(
         &mut self,
         opener: usize,
-    ) -> Option<(ClipKey, u64, DecodeAll, Cancel)> {
+    ) -> Option<(ClipKey, u64, DecodeAll, Cancel, Taking)> {
         if self.workers_decode() {
             return None;
         }
@@ -897,11 +904,17 @@ impl State {
         let Stage::Waiting(Origin::Decoded(decode)) = std::mem::replace(
             &mut clip.stage,
             Stage::Decoding {
-                opener: WorkerTicket::new(opener),
+                by: Taking::opener(opener),
             },
         ) else {
             return None;
         };
-        Some((*key, clip.id, decode, clip.cancel.clone()))
+        Some((
+            *key,
+            clip.id,
+            decode,
+            clip.cancel.clone(),
+            Taking::opener(opener),
+        ))
     }
 }
