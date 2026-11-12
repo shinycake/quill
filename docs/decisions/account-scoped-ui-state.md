@@ -10292,7 +10292,7 @@ gone.
 
 - The sign-in submit is `AuthSubmit::Out { request, screen: ScreenEpoch }`. Request ids restart with each client, so a stage from another screen epoch reads as not out; there is no reset in on_screen.rs. The driver fixture is declared in auth_state.rs.
 - A menu command held by the paid-messages guard is `ChatUi::menu_send: MenuSendStage`. The guard reports `PaidOutcome::{Held, Released, Discarded, Unknown}`; release closes the menu and sets the Sending note, discard keeps everything.
-- Ungroup closes at once on confirm, as tdesktop does. The send is `send_ungroup`, generic over the driver: one toggle goes out, a second press while it is out sends nothing and shows no note, and the collapsed state flips on the answer.
+- Ungroup closes at once on confirm, as tdesktop does. The send is `send_ungroup`, generic over the driver: one toggle goes out, a second press while it is out sends nothing and shows no note, the asked state shows at once, and the wait ends on its own answer.
 - A queued answer counts as waiting (`request_waits`), so a clear is not pruned while its answer is queued.
 - `AccountDeletion { Running, Deferred }`: a deferred removal holds no task and a second Remove is refused.
 - A deduped report reads as `Started::Nothing` before any leave goes out.
@@ -10301,3 +10301,7 @@ gone.
 ### Sweep fixes (r4-07, round 5)
 
 - `send_ungroup` is tested with the driver fixture, and the test fails when a second press returns a note.
+
+### Sweep fixes (r4-07, round 6)
+
+- The Ungroup test asserts the toggle is in flight with the asked state showing, that another request's `ok` leaves it in flight, and that its own `ok` ends the wait so a third press sends a second toggle. It fails if the in-flight wait is removed.
