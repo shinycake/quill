@@ -1490,7 +1490,7 @@ fn a_recording_wakes_only_at_its_deadlines_while_no_window_draws(cx: &mut TestAp
     );
     // The deadline arrives: the step runs and arms the next deadline.
     cx.executor()
-        .advance_clock(ACTION_REFRESH - Duration::from_millis(350));
+        .advance_clock(ACTION_REFRESH.saturating_sub(Duration::from_millis(350)));
     cx.run_until_parked();
     let next = h.app.update(cx, |app, _| app.recording.wake_due());
     assert_eq!(next, Some(armed_at + ACTION_REFRESH * 2));
