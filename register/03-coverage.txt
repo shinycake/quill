@@ -103,3 +103,8 @@ src/connect/paid_messages.rs 295 read
 src/connect/paid_reaction.rs 169 read
 src/connect/passkeys.rs 176 read
 src/connect/passkeys_login.rs 137 read
+src/connect/payments.rs 343 read
+src/connect/peer_color.rs 155 read
+src/connect/peer_qr.rs 224 read
+src/connect/polls.rs 461 read
+src/connect/premium_hub.rs 386 read
