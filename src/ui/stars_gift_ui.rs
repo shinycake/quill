@@ -220,7 +220,7 @@ impl QuillApp {
                         session
                             .search
                             .search
-                            .top_chats
+                            .top_chat_ids()
                             .iter()
                             .filter_map(|chat| match session.chats.get(&chat.0)?.kind {
                                 ChatKind::Private { user_id } => eligible(user_id.0),

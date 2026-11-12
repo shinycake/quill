@@ -532,9 +532,7 @@ fn a_fetch_dropped_by_a_status_change_is_asked_again() {
                 .unwrap(),
         )
     };
-    let statuses = |id: i64| {
-        json!([{"@type":"emojiStatus","type":{"@type":"emojiStatusTypeCustomEmoji","custom_emoji_id":id.to_string()},"expiration_date":0}])
-    };
+    let statuses = |id: i64| json!([{"@type":"emojiStatus","type":{"@type":"emojiStatusTypeCustomEmoji","custom_emoji_id":id.to_string()},"expiration_date":0}]);
     driver.load_emoji_status_choices().unwrap();
     let old = request_id("getRecentEmojiStatuses");
     let clear = driver.clear_recent_emoji_statuses().unwrap().unwrap();

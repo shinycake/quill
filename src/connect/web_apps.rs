@@ -30,40 +30,37 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(self.session.request(purpose, chat_id))
     }
 
-    fn mark_web_app_pending(
-        &mut self,
+    /// The launch `request` makes, once it went out.
+    fn web_app_pending(
         request: RequestId,
         bot_user_id: i64,
         chat_id: Option<ChatId>,
         source: LaunchSource,
-    ) {
-        // The latest launch asked is the current one: an older one still
-        // out is dropped, so its answer opens nothing (the app TDLib
-        // started for it is closed) and its error is nobody's.
-        self.session.bots.web_apps.opening = Some(WebAppPending {
+    ) -> WebAppPending {
+        WebAppPending {
             request,
             bot_user_id,
             chat_id: chat_id.map(|id| id.0),
             source,
-        });
-        self.session.bots.web_apps.replace_open_result(None);
+        }
     }
 
-    /// Send an open call marked pending: a send that fails leaves no
-    /// context behind for an answer that never comes.
+    /// Send an open call, and only when it went out make it the launch:
+    /// the latest launch asked is the current one, so an older one still
+    /// out is dropped (its answer opens nothing, the app TDLib started for
+    /// it is closed, and its error is nobody's). A send that fails leaves
+    /// the launch before it as it was.
     fn send_web_app_open(
         &mut self,
-        extra: RequestId,
+        pending: WebAppPending,
         json: &str,
     ) -> Result<RequestId, ConnectSendError> {
-        let sent = self.send_json_request(extra, json);
-        if sent.is_err() {
-            let apps = &mut self.session.bots.web_apps;
-            if apps.opening.as_ref().is_some_and(|o| o.request == extra) {
-                apps.opening = None;
-            }
-        }
-        sent
+        let extra = pending.request;
+        let sent = self.send_json_request(extra, json)?;
+        let apps = &mut self.session.bots.web_apps;
+        apps.opening = Some(pending);
+        apps.replace_open_result(None);
+        Ok(sent)
     }
 
     /// `openWebApp` from a menu button, an inline `web_app` button or an
@@ -80,9 +77,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Bots(BotsPurpose::OpenWebApp { bot_user_id }),
             Some(chat_id),
         )?;
-        self.mark_web_app_pending(extra, bot_user_id, Some(chat_id), source);
+        let pending = Self::web_app_pending(extra, bot_user_id, Some(chat_id), source);
         let json = open_web_app(extra, chat_id, bot_user_id, url, theme.td_json());
-        self.send_web_app_open(extra, &json)
+        self.send_web_app_open(pending, &json)
     }
 
     /// `getWebAppUrl` for a custom-keyboard `web_app` button; the app may
@@ -99,7 +96,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Bots(BotsPurpose::GetWebAppUrl { bot_user_id }),
             Some(chat_id),
         )?;
-        self.mark_web_app_pending(
+        let pending = Self::web_app_pending(
             extra,
             bot_user_id,
             Some(chat_id),
@@ -108,7 +105,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             },
         );
         let json = get_web_app_url(extra, bot_user_id, url, theme.td_json());
-        self.send_web_app_open(extra, &json)
+        self.send_web_app_open(pending, &json)
     }
 
     /// `getMainWebApp`: the bot's main app.
@@ -123,7 +120,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Bots(BotsPurpose::GetMainWebApp { bot_user_id }),
             Some(chat_id),
         )?;
-        self.mark_web_app_pending(extra, bot_user_id, Some(chat_id), LaunchSource::MainApp);
+        let pending =
+            Self::web_app_pending(extra, bot_user_id, Some(chat_id), LaunchSource::MainApp);
         let json = get_main_web_app(
             extra,
             chat_id,
@@ -131,7 +129,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             start_parameter,
             theme.td_json(),
         );
-        self.send_web_app_open(extra, &json)
+        self.send_web_app_open(pending, &json)
     }
 
     /// `getWebAppLinkUrl`: a named app link, after `searchWebApp` and the
@@ -149,7 +147,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Bots(BotsPurpose::GetWebAppLinkUrl { bot_user_id }),
             Some(chat_id),
         )?;
-        self.mark_web_app_pending(
+        let pending = Self::web_app_pending(
             extra,
             bot_user_id,
             Some(chat_id),
@@ -166,7 +164,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             allow_write_access,
             theme.td_json(),
         );
-        self.send_web_app_open(extra, &json)
+        self.send_web_app_open(pending, &json)
     }
 
     /// `searchWebApp`: what a `t.me/bot/app` link points at.

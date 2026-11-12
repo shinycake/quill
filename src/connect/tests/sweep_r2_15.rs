@@ -284,9 +284,23 @@ fn a_refused_keyword_query_is_asked_again_after_the_field_is_cleared() {
         r#"{{"@type":"error","@extra":"{}","code":500,"message":"X"}}"#,
         extra_of(&first[0])
     ));
-    assert!(rig.driver.session.stickers.emoji.keyword_emojis.knows("fire"));
+    assert!(
+        rig.driver
+            .session
+            .stickers
+            .emoji
+            .keyword_emojis
+            .knows("fire")
+    );
     rig.driver.search_keyword_emojis("").unwrap();
-    assert!(!rig.driver.session.stickers.emoji.keyword_emojis.knows("fire"));
+    assert!(
+        !rig.driver
+            .session
+            .stickers
+            .emoji
+            .keyword_emojis
+            .knows("fire")
+    );
     rig.driver.search_keyword_emojis("fire").unwrap();
     assert_eq!(rig.sent("getKeywordEmojis").len(), 2);
 }

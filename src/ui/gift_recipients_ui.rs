@@ -172,7 +172,7 @@ fn recipient_sections(session: &Session, query: &str) -> Vec<Section> {
         session
             .search
             .search
-            .top_chats
+            .top_chat_ids()
             .iter()
             .filter_map(|chat| match session.chats.get(&chat.0)?.kind {
                 ChatKind::Private { user_id } => Some(user_id.0),

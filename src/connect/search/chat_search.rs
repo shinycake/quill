@@ -561,7 +561,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             CHAT_SEARCH_LIMIT,
             media.constructor().map(search_messages_filter_json),
         )) {
-            Ok(()) => Ok(Some(ChatSearchFlight::Query(extra))),
+            Ok(()) => {
+                self.session.search.chat_search.searching(extra);
+                Ok(Some(ChatSearchFlight::Query(extra)))
+            }
             Err(err) => {
                 self.session.requests.take(extra);
                 self.session

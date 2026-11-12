@@ -234,7 +234,8 @@ fn account_export_worker_requests_flow_through_the_driver() {
     }
     assert_eq!(answered, 3);
     let export = driver.session.settings.account_export.as_ref().unwrap();
-    let Some(crate::export::account::AccountStage::Finished(summary)) = export.progress().stage else {
+    let Some(crate::export::account::AccountStage::Finished(summary)) = export.progress().stage
+    else {
         panic!("export should finish: {:?}", export.progress());
     };
     assert!(summary.folder.join("export_results.html").exists());

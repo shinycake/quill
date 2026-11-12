@@ -23,38 +23,39 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        // One fetch at a time: the first is the stage's own, a refresh over a
-        // value already shown holds its request in `new_chat_refresh`, stays
-        // quiet and keeps taking saves.
-        let data = &self.session.settings.privacy_data;
-        if matches!(data.new_chat, Some(NewChatPrivacyState::Loading(_)))
-            || data.new_chat_refresh.is_some()
-        {
-            return Ok(());
-        }
-        let extra = self
-            .session
-            .request(RequestPurpose::GetNewChatPrivacy, None);
-        let showing = self
+        // One fetch at a time. The first is the stage's own; a refresh over
+        // a value already shown is the stage's too (`Refreshing`) and keeps
+        // taking saves. Saves in flight carry the newest value, so nothing
+        // is asked over them.
+        let shown = self
             .session
             .settings
             .privacy_data
             .new_chat
             .as_ref()
-            .is_some_and(|state| state.value().is_some());
-        if !showing {
-            self.session.settings.privacy_data.new_chat = Some(NewChatPrivacyState::Loading(extra));
+            .map(|state| (state.is_busy(), state.value()));
+        if shown.is_some_and(|(busy, _)| busy) {
+            return Ok(());
         }
+        let extra = self
+            .session
+            .request(RequestPurpose::GetNewChatPrivacy, None);
         if let Err(err) = self.sender.send_json(&get_new_chat_privacy_settings(extra)) {
             self.session.requests.take(extra);
-            if !showing {
+            // A value on screen stays; a row with none says it failed.
+            if shown.and_then(|(_, value)| value).is_none() {
                 self.session.settings.privacy_data.new_chat = Some(NewChatPrivacyState::Failed);
             }
             return Err(err);
         }
-        if showing {
-            self.session.settings.privacy_data.new_chat_refresh = Some(extra);
-        }
+        self.session.settings.privacy_data.new_chat =
+            Some(match shown.and_then(|(_, value)| value) {
+                Some(value) => NewChatPrivacyState::Refreshing {
+                    value,
+                    request: extra,
+                },
+                None => NewChatPrivacyState::Loading(extra),
+            });
         Ok(())
     }
 

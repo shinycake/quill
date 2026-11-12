@@ -520,6 +520,13 @@ pub enum NewChatPrivacyState {
     /// The first fetch is out; only its answer (or error) leaves the stage.
     Loading(RequestId),
     Ready(NewChatPrivacy),
+    /// A refresh of the value shown is out as `request`: the row keeps
+    /// `value`, a save takes the stage over, and the refresh's answer or
+    /// error ends only this stage.
+    Refreshing {
+        value: NewChatPrivacy,
+        request: RequestId,
+    },
     /// Saves are out over the confirmed value; the row shows the newest.
     Saving(crate::state::saves::Saves<NewChatPrivacy>),
     Failed,
@@ -529,7 +536,7 @@ impl NewChatPrivacyState {
     /// What the row shows, once a value is known.
     pub fn value(&self) -> Option<NewChatPrivacy> {
         match self {
-            Self::Ready(value) => Some(*value),
+            Self::Ready(value) | Self::Refreshing { value, .. } => Some(*value),
             Self::Saving(saves) => Some(saves.value()),
             Self::Loading(_) | Self::Failed => None,
         }
@@ -546,7 +553,10 @@ impl NewChatPrivacyState {
     /// A save goes out under `request` over the value shown.
     pub fn save(&mut self, request: RequestId, next: NewChatPrivacy) {
         match self {
-            Self::Ready(confirmed) => {
+            Self::Ready(confirmed)
+            | Self::Refreshing {
+                value: confirmed, ..
+            } => {
                 *self = Self::Saving(crate::state::saves::Saves::first(*confirmed, request, next));
             }
             Self::Saving(saves) => saves.push(request, next),
@@ -572,20 +582,37 @@ impl NewChatPrivacyState {
         }
     }
 
-    /// The fetch `fetch` answered `server`: it replaces what is shown
-    /// unless a save asked after it is still out. The first fetch of this
-    /// stage always lands.
+    /// The fetch `fetch` answered `server`: only the stage that waits for
+    /// it takes it. A save taking the stage over (`Saving`) left the fetch
+    /// behind: it was asked before the save.
     pub fn fetched(&mut self, fetch: RequestId, server: NewChatPrivacy) {
         match self {
             Self::Loading(live) if *live == fetch => *self = Self::Ready(server),
-            Self::Ready(_) => *self = Self::Ready(server),
-            Self::Saving(saves) => {
-                if let Some(value) = saves.fetched(fetch, server) {
-                    *self = Self::Ready(value);
-                }
+            Self::Refreshing { request, .. } if *request == fetch => {
+                *self = Self::Ready(server);
             }
-            Self::Loading(_) | Self::Failed => {}
+            _ => {}
         }
+    }
+
+    /// `fetch` was refused: the first fetch fails the row, a refresh leaves
+    /// the value the row already shows.
+    pub fn fetch_failed(&mut self, fetch: RequestId) {
+        match self {
+            Self::Loading(live) if *live == fetch => *self = Self::Failed,
+            Self::Refreshing { value, request } if *request == fetch => {
+                *self = Self::Ready(*value);
+            }
+            _ => {}
+        }
+    }
+
+    /// A fetch is out for this stage, or a save is (nothing is asked over it).
+    pub fn is_busy(&self) -> bool {
+        matches!(
+            self,
+            Self::Loading(_) | Self::Refreshing { .. } | Self::Saving(_)
+        )
     }
 }
 
@@ -639,8 +666,8 @@ mod tests {
     use super::*;
     use crate::diagnostics::{DiagnosticSink, MemorySink};
     use crate::ids::AccountKey;
-    use crate::state::{BlockedList, SettingsPurpose};
     use crate::state::fetch::Fetch;
+    use crate::state::{BlockedList, SettingsPurpose};
     use crate::state::{ReadDate, RequestPurpose, Session};
     use crate::telegram::client::copy_and_parse;
     use crate::telegram::requests_privacy::PrivacySettingKey;
@@ -1028,7 +1055,10 @@ mod tests {
         apply_json(&mut session, &seq, &sink, &blocked_json(old, 9, &[70]));
         assert_eq!(session.settings.blocked_senders.data(), None);
         assert!(session.settings.blocked_senders.is_loading());
-        session.settings.blocked_senders.failed(Some(old), "late", false);
+        session
+            .settings
+            .blocked_senders
+            .failed(Some(old), "late", false);
         assert!(session.settings.blocked_senders.is_loading());
         apply_json(&mut session, &seq, &sink, &blocked_json(live, 3, &[61, 62]));
         assert_eq!(session.settings.blocked_ids(), &[61, 62]);
@@ -1061,7 +1091,11 @@ mod tests {
         session.settings.block_change_sent(unblock, 61, false);
         assert_eq!(session.settings.blocked_ids(), &[62]);
         apply_json(&mut session, &seq, &sink, &blocked_json(page, 2, &[61, 62]));
-        assert_eq!(session.settings.blocked_ids(), &[62], "the old page is dropped");
+        assert_eq!(
+            session.settings.blocked_ids(),
+            &[62],
+            "the old page is dropped"
+        );
         apply_json(
             &mut session,
             &seq,
@@ -1082,7 +1116,9 @@ mod tests {
             total: 1,
         });
         let page = ask_page(&mut session, 1);
-        session.settings.block_change_failed(None, "never sent".into(), false);
+        session
+            .settings
+            .block_change_failed(None, "never sent".into(), false);
         assert!(session.settings.blocked_senders.waits_for(page));
         session
             .settings
@@ -1098,7 +1134,12 @@ mod tests {
         let (mut session, sink) = session();
         let seq = AtomicU64::new(0);
         let extra = ask_page(&mut session, 0);
-        apply_json(&mut session, &seq, &sink, &blocked_json(extra, 3, &[61, 62]));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &blocked_json(extra, 3, &[61, 62]),
+        );
         assert_eq!(session.settings.blocked_ids(), &[61, 62]);
         assert_eq!(session.settings.blocked_total(), 3);
         assert!(!session.settings.blocked_senders.is_loading());

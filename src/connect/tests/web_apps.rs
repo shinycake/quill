@@ -195,6 +195,52 @@ fn only_the_latest_launch_asked_opens() {
     assert!(h.driver.session.bots.web_apps.opening.is_none());
 }
 
+/// Sweep r4-03 round 2 (item 15): a second launch whose send is refused
+/// leaves the first launch as it was, so it still opens.
+#[test]
+fn a_refused_second_launch_leaves_the_first_alone() {
+    let mut h = Harness::ready();
+    let theme = ThemeParams::light_default();
+    let first = h
+        .driver
+        .open_web_app(
+            ChatId(5),
+            42,
+            "https://bot.example/a",
+            LaunchSource::InlineButton,
+            &theme,
+        )
+        .expect("sent");
+    h.recorder.refuse_sends(true);
+    assert!(
+        h.driver
+            .get_web_app_url(ChatId(5), 43, "https://bot.example/b", "Open", &theme)
+            .is_err()
+    );
+    h.recorder.refuse_sends(false);
+    assert_eq!(
+        h.driver
+            .session
+            .bots
+            .web_apps
+            .opening
+            .as_ref()
+            .map(|o| o.request),
+        Some(first)
+    );
+    h.ingest(&format!(
+        r#"{{"@type":"webAppInfo","@extra":"{}","launch_id":"801","url":{{"@type":"webAppUrl","url":"https://bot.example/a?x","require_same_origin":false}}}}"#,
+        first.as_extra()
+    ));
+    assert!(matches!(
+        h.driver.session.bots.web_apps.open_result,
+        Some(WebAppOpenResult::Opened {
+            bot_user_id: 42,
+            ..
+        })
+    ));
+}
+
 #[test]
 fn keyboard_button_apps_use_get_web_app_url_and_may_send_data() {
     let mut h = Harness::ready();

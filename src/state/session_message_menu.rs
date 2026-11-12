@@ -185,10 +185,6 @@ pub struct StickerSetView {
     /// The box's Add / Remove / Archive of this set: asked, then answered
     /// by TDLib (the box closes on `Done`, says so on `Failed`).
     pub change: SetChangeStage,
-    /// The `getStickerSet` that refreshes the box after an edit, while it
-    /// is out: only its answer or error frees the slot, and no second
-    /// refresh is asked meanwhile.
-    pub refresh: Option<RequestId>,
 }
 
 /// What the set box asked TDLib to do with the viewed set.
@@ -229,21 +225,29 @@ pub enum SetChangeStage {
 }
 
 impl StickerSetView {
-    /// A view that is still loading its set.
-    pub fn loading(set_id: i64) -> Self {
+    /// A view that is loading its set, as `request`.
+    pub fn loading(set_id: i64, request: RequestId) -> Self {
         Self {
             set_id,
-            stage: StickerSetViewStage::Loading,
+            stage: StickerSetViewStage::Loading { request },
             edits: StickerSetEdits::default(),
             change: SetChangeStage::Idle,
-            refresh: None,
         }
+    }
+
+    /// The first load of the set is out as `request` and nothing else.
+    pub fn waits_for_load(&self, request: Option<RequestId>) -> bool {
+        matches!(self.stage, StickerSetViewStage::Loading { request: asked } if Some(asked) == request)
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StickerSetViewStage {
-    Loading,
+    /// The set's first `getStickerSet` is out as `request`: only its answer
+    /// or error leaves the stage.
+    Loading {
+        request: RequestId,
+    },
     Ready {
         title: String,
         /// The set's short name, for its `t.me` link (empty if unknown).
@@ -376,14 +380,14 @@ impl Session {
         if let Some(view) = self.stickers.sticker_set_view.as_mut()
             && view.set_id == set_id
         {
-            if view.refresh.is_some() && view.refresh == request {
-                view.refresh = None;
+            // Only the answer of the load the box waits for, or of the
+            // refresh it waits for, lands.
+            if view.waits_for_load(request) {
+                view.stage = stage;
+                view.edits.set_arrived();
+            } else if view.edits.refresh_arrived(request) {
+                view.stage = stage;
             }
-            view.stage = stage;
-            // An edit still in flight (a move applied locally) may have
-            // changed the set after this answer was built: ask again once
-            // it is answered.
-            view.edits.set_arrived();
         }
     }
 
@@ -397,11 +401,10 @@ impl Session {
         if view.set_id != set_id {
             return;
         }
-        if view.refresh.is_some() && view.refresh == request {
-            view.refresh = None;
-        }
-        if matches!(view.stage, StickerSetViewStage::Loading) {
+        if view.waits_for_load(request) {
             view.stage = StickerSetViewStage::Failed;
+        } else {
+            view.edits.refresh_failed(request);
         }
     }
 

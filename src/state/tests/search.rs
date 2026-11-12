@@ -521,6 +521,7 @@ fn chat_search_happy_empty_stale_and_jump() {
     assert!(session.open_chat_search());
     session.search.chat_search.begin_query("hello");
     let extra = session.request_chat_search(RequestPurpose::SearchChatMessages, ChatId(11));
+    session.search.chat_search.searching(extra);
     apply_json(
         &mut session,
         &seq,
@@ -576,6 +577,7 @@ fn chat_search_happy_empty_stale_and_jump() {
 
     session.search.chat_search.begin_query("zzz");
     let empty_extra = session.request_chat_search(RequestPurpose::SearchChatMessages, ChatId(11));
+    session.search.chat_search.searching(empty_extra);
     apply_json(
         &mut session,
         &seq,
@@ -589,8 +591,10 @@ fn chat_search_happy_empty_stale_and_jump() {
 
     session.search.chat_search.begin_query("old");
     let stale_extra = session.request_chat_search(RequestPurpose::SearchChatMessages, ChatId(11));
+    session.search.chat_search.searching(stale_extra);
     session.search.chat_search.begin_query("new");
     let fresh_extra = session.request_chat_search(RequestPurpose::SearchChatMessages, ChatId(11));
+    session.search.chat_search.searching(fresh_extra);
     apply_json(
         &mut session,
         &seq,

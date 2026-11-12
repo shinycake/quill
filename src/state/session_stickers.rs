@@ -76,12 +76,13 @@ impl Session {
         }
     }
 
-    pub fn accept_archived_sticker_sets(&mut self, sets: Vec<StickerSetInfo>) {
+    /// An archived page that started at `from` (0 = the first, which
+    /// replaces the list), as its request carried it.
+    pub fn accept_archived_sticker_sets(&mut self, from: i64, sets: Vec<StickerSetInfo>) {
         let next = sets.last().map(|set| set.id).unwrap_or(0);
-        self.stickers.stickers.archived_has_more =
-            sets.len() == 100 && next > 0 && next != self.stickers.stickers.archived_offset;
+        self.stickers.stickers.archived_has_more = sets.len() == 100 && next > 0 && next != from;
         self.stickers.stickers.archived_next_offset = next;
-        if self.stickers.stickers.archived_offset == 0 {
+        if from == 0 {
             self.stickers.stickers.archived.clear();
         }
         let mut ids: HashSet<_> = self
@@ -119,13 +120,18 @@ impl Session {
     }
 
     /// Replace the first trending page; append later pages without duplicate sets.
-    pub fn accept_trending_sticker_sets(&mut self, sets: Vec<StickerSetInfo>, is_premium: bool) {
-        self.stickers.stickers.trending_next_offset =
-            self.stickers.stickers.trending_offset + sets.len();
+    /// `from` is the offset the page started at, as its request carried it.
+    pub fn accept_trending_sticker_sets(
+        &mut self,
+        from: usize,
+        sets: Vec<StickerSetInfo>,
+        is_premium: bool,
+    ) {
+        self.stickers.stickers.trending_next_offset = from + sets.len();
         if sets.is_empty() {
             self.stickers.stickers.trending_total = self.stickers.stickers.trending_next_offset;
         }
-        if self.stickers.stickers.trending_offset == 0 {
+        if from == 0 {
             self.stickers.stickers.trending = sets;
         } else {
             let mut ids: HashSet<_> = self

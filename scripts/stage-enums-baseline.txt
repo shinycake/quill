@@ -78,7 +78,6 @@ bare:Stage::Opening 1
 bare:Stage::Queued 1
 bare:Stage::Running 1
 bare:Stage::Starting 1
-bare:StickerSetViewStage::Loading 1
 bare:StoryCardState::Loading 1
 bare:StoryPageOpState::Checking 1
 bare:StoryPageOpState::Sending 1

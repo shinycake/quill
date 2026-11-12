@@ -140,6 +140,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             if self.session.stickers.manager.step_out() {
                 return Ok(());
             }
+            // A reorder of regular sets waits for another reorder or change
+            // in flight (the drag in the panel, the set box): two cannot be
+            // out at once, and the answer of one would end the other.
+            if !masks && front.next_is_reorder() && self.session.stickers.stickers.changes.busy() {
+                return Ok(());
+            }
             let step = self
                 .session
                 .stickers

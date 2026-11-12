@@ -126,14 +126,9 @@ fn an_empty_or_oversized_query_is_refused_before_tdlib() {
 }
 
 #[test]
-fn one_public_data_poll_at_a_time_and_its_period_is_held_to_bounds() {
+fn a_public_data_poll_is_answered_by_its_own_request_and_its_period_is_held_to_bounds() {
     let (mut driver, recorder, sink, seq) = driver_parts();
     let first = driver.poll_widget_public_data(KEY).unwrap();
-    assert_eq!(
-        driver.poll_widget_public_data(KEY).unwrap(),
-        first,
-        "one poll out: the second names it"
-    );
     let sent = sent_request(&recorder, "getWidgetPublicData");
     assert_eq!(sent["message_id"], 7 << 20);
     feed(

@@ -292,16 +292,15 @@ impl ChatSearchState {
         }
     }
 
-    /// The page `request` failed (`None`: its record is gone): back to
-    /// waiting for the user's Retry. Another request's error changes
-    /// nothing.
+    /// The page `request` failed: back to waiting for the user's Retry.
+    /// Another request's error changes nothing.
     pub(crate) fn fail_more(&mut self, request: Option<RequestId>) {
         if let Some(open) = self.open_mut()
             && let ChatSearchPaging::Loading {
                 from,
                 request: waiting,
             } = open.paging
-            && request.is_none_or(|id| id == waiting)
+            && request == Some(waiting)
         {
             open.paging = ChatSearchPaging::Failed { from };
         }
@@ -367,7 +366,7 @@ impl ChatSearchState {
     }
 
     /// The query of [`Self::begin_query`] went out as `request`.
-    pub(crate) fn searching(&mut self, request: RequestId) {
+    pub fn searching(&mut self, request: RequestId) {
         if let Some(open) = self.open_mut()
             && open.phase == ChatSearchPhase::Typing
         {

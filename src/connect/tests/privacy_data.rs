@@ -834,7 +834,11 @@ fn a_refresh_replaces_a_page_in_flight_and_an_unblock_survives_it() {
     ingest(&mut f, &refresh);
     assert_eq!(f.1.session.settings.blocked_ids(), &[62]);
     ingest(&mut f, &format!(r#"{{"@type":"ok","@extra":"{unblock}"}}"#));
-    assert_eq!(last_request(&f)["offset"], 0, "the first page is asked again");
+    assert_eq!(
+        last_request(&f)["offset"],
+        0,
+        "the first page is asked again"
+    );
     let page = blocked_page(&f, 1, &[62]);
     ingest(&mut f, &page);
     assert_eq!(f.1.session.settings.blocked_ids(), &[62]);

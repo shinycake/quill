@@ -279,3 +279,28 @@ fn taking_back_a_refused_commit_keeps_an_earlier_unshown_failure() {
         Some(crate::state::CommitFailure { masks: true })
     );
 }
+
+/// Sweep r4-03 round 2 (item 7): the manager's new order waits while
+/// another reorder is out, and goes once it has been answered.
+#[test]
+fn the_new_order_waits_for_a_reorder_already_out() {
+    let (_dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let other = crate::ids::RequestId(900);
+    driver.session.stickers.stickers.changes.reorder_sent(other);
+    driver
+        .commit_sticker_manager(false, vec![], Some(vec![3, 1, 2]))
+        .unwrap();
+    assert_eq!(count(&recorder, "reorderInstalledStickerSets"), 0);
+    driver.session.stickers.stickers.changes.settled(other);
+    driver.pump_sticker_manager();
+    assert_eq!(
+        sent_request(&recorder, "reorderInstalledStickerSets")["sticker_set_ids"],
+        json!([3, 1, 2])
+    );
+    driver.pump_sticker_manager();
+    assert_eq!(count(&recorder, "reorderInstalledStickerSets"), 1);
+}

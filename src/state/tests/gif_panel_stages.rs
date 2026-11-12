@@ -167,7 +167,10 @@ fn an_older_saved_gif_fetch_never_lands_on_a_newer_one() {
     assert!(panel.animations.is_empty(), "the old answer is dropped");
     assert!(panel.loading());
     panel.saved_request_failed(Some(RequestId(1)));
-    assert!(panel.loading() && !panel.failed(), "the old error is dropped");
+    assert!(
+        panel.loading() && !panel.failed(),
+        "the old error is dropped"
+    );
     panel.saved_answered(Some(RequestId(2)), Vec::new());
     assert!(panel.loaded() && !panel.loading());
 }

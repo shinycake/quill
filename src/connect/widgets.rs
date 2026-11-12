@@ -35,9 +35,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.send_json_request(extra, &json)
     }
 
-    /// Poll an on-screen widget's public data (`getWidgetPublicData`); one
-    /// poll per widget at a time: while one is out, this names it instead
-    /// of sending another. The answer carries the id.
+    /// Poll an on-screen widget's public data (`getWidgetPublicData`). The
+    /// widget's own stage (`Poll::Asking`, in the UI) holds the poll out, so
+    /// the UI asks only for a widget that is due. The answer carries the
+    /// id.
     pub fn poll_widget_public_data(
         &mut self,
         key: WidgetKey,
@@ -46,13 +47,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let purpose = RequestPurpose::Bots(BotsPurpose::GetWidgetPublicData);
-        if let Some(out) =
-            self.session
-                .requests
-                .find_for_message(purpose, key.chat_id, key.message_id)
-        {
-            return Ok(out);
-        }
         let extra = self
             .session
             .request_for_message(purpose, key.chat_id, key.message_id);

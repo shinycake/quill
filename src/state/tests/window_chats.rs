@@ -82,7 +82,9 @@ fn search_in_window(session: &mut Session) -> RequestId {
         .with_view(Some(ChatId(7)), |session| {
             assert!(session.open_chat_search());
             session.search.chat_search.begin_query("m");
-            session.request_chat_search(RequestPurpose::SearchChatMessages, ChatId(7))
+            let extra = session.request_chat_search(RequestPurpose::SearchChatMessages, ChatId(7));
+            session.search.chat_search.searching(extra);
+            extra
         })
         .expect("chat 7 has a window")
 }
@@ -133,7 +135,8 @@ fn a_search_answer_for_a_closed_window_lands_in_no_view() {
     session.open_chat(ChatId(7));
     assert!(session.open_chat_search());
     session.search.chat_search.begin_query("other");
-    session.request_chat_search(RequestPurpose::SearchChatMessages, ChatId(7));
+    let other = session.request_chat_search(RequestPurpose::SearchChatMessages, ChatId(7));
+    session.search.chat_search.searching(other);
 
     apply_json(&mut session, &seq, &sink, &found_json(extra));
     assert!(

@@ -266,8 +266,10 @@ impl Session {
             } => {
                 if self.search.search.top_chats_disabled == shown {
                     self.search.search.top_chats_disabled = previous;
-                    if self.search.search.top_chats.is_empty() {
-                        self.search.search.top_chats = top_chats;
+                    if self.search.search.top_chat_ids().is_empty()
+                        && !self.search.search.top_chats.is_loading()
+                    {
+                        self.search.search.top_chats = crate::state::fetch::Fetch::Ready(top_chats);
                     }
                 }
             }

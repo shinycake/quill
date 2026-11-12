@@ -64,7 +64,7 @@ impl QuillApp {
                     .with_mute_for(quill::telegram::envelope::MUTE_FOREVER);
         }
         session.open_search();
-        session.search.search.top_chats = top;
+        session.search.search.top_chats = quill::state::fetch::Fetch::Ready(top);
         session.search.search.chat_ids = vec![ChatId(11), ChatId(12)];
         session.search.search.surface = quill::state::SearchSurface::Recents;
         self.set_note(StatusNote::silent("screenshot demo — top people strip"));

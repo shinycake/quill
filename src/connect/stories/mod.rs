@@ -381,6 +381,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
+    /// [`Self::maybe_fetch_story_custom_emoji_stickers`] for the viewer's
+    /// warm-up: whether its ids are settled. A fetch sent, or nothing left
+    /// to fetch, is; a fetch refused, or one still out for other ids, is
+    /// not, so the viewer asks again (it is no-op'd while the fetch is out).
+    pub fn warm_story_custom_emoji_stickers(&mut self, ids: &[i64]) -> bool {
+        match self.maybe_fetch_story_custom_emoji_stickers(ids) {
+            Ok(Some(_)) => true,
+            Ok(None) => !self.session.stories.custom_emoji_fetch.is_asking(),
+            Err(_) => false,
+        }
+    }
+
     /// Phase 9.2: `setStoryReaction` — set (or with `None`, remove) the
     /// user's emoji reaction on a story. Gates: the story must be cached
     /// and must not be live (`setStoryReaction` is not supported for live

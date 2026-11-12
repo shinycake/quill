@@ -45,14 +45,13 @@ impl Session {
                 ) {
                     // B11: "Attached Stickers" of a photo or video, for the
                     // request the box waits for.
-                    if self
-                        .stickers
-                        .stickers
-                        .attached
-                        .waits_for(pending.map(|p| p.id))
+                    if let Some(request) = pending.map(|p| p.id)
+                        && self.stickers.stickers.attached.waits_for(Some(request))
                     {
-                        self.stickers.stickers.attached =
-                            AttachedSets::Answered(sets.first().map(|set| set.id));
+                        self.stickers.stickers.attached = AttachedSets::Answered {
+                            request,
+                            first: sets.first().map(|set| set.id),
+                        };
                     }
                 } else if pending.map(|p| p.purpose)
                     == Some(RequestPurpose::GetInstalledStickerSets)
@@ -63,7 +62,10 @@ impl Session {
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetArchivedStickerSets)
                 {
                     if current {
-                        self.accept_archived_sticker_sets(sets);
+                        self.accept_archived_sticker_sets(
+                            pending.map_or(0, PendingRequest::page_from),
+                            sets,
+                        );
                     }
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::SearchStickerSets) {
                     // Slice S8: `searchStickerSets` answers with `stickerSets`.
@@ -150,7 +152,11 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetTrendingStickerSets) {
                     if current {
                         self.stickers.stickers.trending_total = total_count.max(0) as usize;
-                        self.accept_trending_sticker_sets(sets, is_premium);
+                        self.accept_trending_sticker_sets(
+                            pending.map_or(0, PendingRequest::page_from).max(0) as usize,
+                            sets,
+                            is_premium,
+                        );
                     }
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetTrendingEmojiSets) {
                     // Slice S10: emoji `trendingStickerSets` land in the emoji panel (see emoji.rs).

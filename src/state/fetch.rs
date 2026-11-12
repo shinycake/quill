@@ -232,6 +232,14 @@ impl<T> Fetch<T> {
         }
     }
 
+    /// The request the fetch waits for, once it went out.
+    pub fn asked(&self) -> Option<crate::ids::RequestId> {
+        match self {
+            Self::Loading { request, .. } => *request,
+            _ => None,
+        }
+    }
+
     /// The fetch waits for the answer of `request`.
     pub fn waits_for(&self, request: crate::ids::RequestId) -> bool {
         matches!(self, Self::Loading { request: Some(asked), .. } if *asked == request)

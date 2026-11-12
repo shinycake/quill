@@ -202,3 +202,39 @@ fn each_saved_view_has_its_own_history_key(cx: &mut TestAppContext) {
         "never a reply thread's id"
     );
 }
+
+/// Sweep r4-03 round 2 (item 12): the quiet-window timer of a typed in-chat
+/// query belongs to its window. Typing in the main window's bar replaces the
+/// main window's timer and leaves a chat window's alone, so the chat
+/// window's query still commits.
+#[gpui_kit::test]
+fn each_window_owns_the_timer_of_its_typed_chat_search(cx: &mut TestAppContext) {
+    struct Dropped(std::rc::Rc<std::cell::Cell<bool>>);
+    impl Drop for Dropped {
+        fn drop(&mut self) {
+            self.0.set(true);
+        }
+    }
+    let h = new_app(cx);
+    let _chat_window = h.open_in_new_window(OTHER, cx);
+    h.settle(cx);
+    let cancelled = std::rc::Rc::new(std::cell::Cell::new(false));
+    let flag = cancelled.clone();
+    scoped(&h, Some(OTHER), cx, |app, cx| {
+        app.search_ui.debounce.chat = cx.spawn(async move |_, _| {
+            let _held = Dropped(flag);
+            std::future::pending::<()>().await;
+        });
+    });
+    scoped(&h, None, cx, |app, _| {
+        app.search_ui.debounce.chat = gpui_kit::Task::ready(());
+    });
+    assert!(
+        !cancelled.get(),
+        "typing in the main window leaves the chat window's timer running"
+    );
+    scoped(&h, Some(OTHER), cx, |app, _| {
+        app.search_ui.debounce.chat = gpui_kit::Task::ready(());
+    });
+    assert!(cancelled.get(), "the window's own next query replaces it");
+}

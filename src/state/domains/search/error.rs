@@ -28,10 +28,11 @@ impl Session {
         }
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::GetTopChats) => {
-                let search = &mut self.search.search;
-                if search.top_chats_asked == pending.map(|p| p.id) {
-                    search.top_chats_asked = None;
-                }
+                self.search.search.top_chats.failed(
+                    pending.map(|p| p.id),
+                    format!("error {}", err.code),
+                    false,
+                );
             }
             Some(RequestPurpose::GetRecommendedChats) => {
                 self.search.search.tabs.recommended.failed(

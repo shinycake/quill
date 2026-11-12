@@ -46,10 +46,8 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Phase S2: drop the cached storage stats so the next
     /// `maybe_fetch_storage_statistics` refetches (the overlay's Refresh).
-    /// Also drops the in-flight request: otherwise the immediate refetch
-    /// sees the stale purpose, no-ops, and the overlay shows "No storage
-    /// data yet." until the old answer lands (late answers to the dropped
-    /// `@extra` are ignored by the purpose match).
+    /// The stage goes with the request it waited for, which is dropped from
+    /// the table: a late answer to it finds no stage waiting and is ignored.
     pub fn refresh_storage_statistics(&mut self) {
         let dropped = std::mem::take(&mut self.session.settings.storage_stats);
         if let crate::state::fetch::Fetch::Loading {

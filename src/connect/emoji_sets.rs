@@ -508,7 +508,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let requests = &self.session.requests;
-        let connected = self.session.connection == crate::telegram::envelope::ConnectionState::Ready;
+        let connected =
+            self.session.connection == crate::telegram::envelope::ConnectionState::Ready;
         self.session
             .stickers
             .emoji

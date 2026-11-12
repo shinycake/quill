@@ -29,6 +29,12 @@ pub struct QuickRepliesState {
     pub message_count_max: Option<usize>,
     /// Counter for `sendQuickReplyShortcutMessages.sending_id`.
     pub next_sending_id: i32,
+    /// The writes on their way, by what they change (the change itself, or
+    /// the shortcut sent to a chat) and chat: the same write is not sent
+    /// twice while its request is out, so a double click on Add does not
+    /// create the message twice. An entry whose request has been answered
+    /// (it left the request table) is spent.
+    pub writes: HashMap<(Option<i64>, String), RequestId>,
 }
 
 impl QuickRepliesState {

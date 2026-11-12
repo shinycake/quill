@@ -582,17 +582,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || set_id == 0 {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.stickers.sticker_set_view =
-            Some(crate::state::StickerSetView::loading(set_id));
         let extra = self.session.request(
             RequestPurpose::Stickers(StickersPurpose::ViewStickerSet { set_id }),
             None,
         );
         match self.sender.send_json(&get_sticker_set(extra, set_id)) {
-            Ok(()) => Ok(extra),
+            Ok(()) => {
+                // The box waits for its set only once the ask went out: a
+                // refused send leaves the box that was open as it was.
+                self.session.stickers.sticker_set_view =
+                    Some(crate::state::StickerSetView::loading(set_id, extra));
+                Ok(extra)
+            }
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.fail_sticker_set_view(set_id, Some(extra));
                 Err(err)
             }
         }

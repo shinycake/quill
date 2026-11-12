@@ -150,6 +150,10 @@ impl Session {
                 .supergroup_chat_ids
                 .insert(supergroup_id, chat_id.0);
         }
+        // A `chat` object asked before a notification save and answered after
+        // it carries the old settings: while a save is out, the save's own
+        // answer settles what shows.
+        let saving = self.settings.chat_saves.is_saving(&chat_id);
         let chat = self
             .chats
             .entry(chat_id.0)
@@ -159,7 +163,9 @@ impl Session {
         chat.unread_count = unread_count;
         chat.last_read_inbox_message_id = last_read_inbox_message_id;
         chat.last_read_outbox_message_id = last_read_outbox_message_id;
-        chat.notification_settings = notification_settings;
+        if !saving {
+            chat.notification_settings = notification_settings;
+        }
         let old_photo_file_id = std::mem::replace(&mut chat.photo_file_id, photo_file_id);
         // Slice G1: full default permissions block for the editor.
         chat.permissions = permissions;
@@ -682,11 +688,10 @@ impl Session {
         // `getTopChats`: tied to the strip's ask, not to a query.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetTopChats) {
             let search = &mut self.search.search;
-            if search.top_chats_asked.is_some() && search.top_chats_asked == pending.map(|p| p.id) {
-                search.top_chats_asked = None;
-                if !search.top_chats_disabled {
-                    search.top_chats = chat_ids;
-                }
+            if search.top_chats_disabled {
+                search.top_chats = Default::default();
+            } else {
+                search.top_chats.answered(pending.map(|p| p.id), chat_ids);
             }
             return;
         }

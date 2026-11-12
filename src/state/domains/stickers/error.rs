@@ -42,10 +42,10 @@ impl Session {
             }
             Some(RequestPurpose::SearchEmojis) => {
                 if let Some(pending) = pending {
-                    self.stickers.emoji.keyword_lookups.failed(
-                        pending.id,
-                        self.connection == ConnectionState::Ready,
-                    );
+                    self.stickers
+                        .emoji
+                        .keyword_lookups
+                        .failed(pending.id, self.connection == ConnectionState::Ready);
                 }
             }
             Some(RequestPurpose::Stickers(StickersPurpose::GetMessageEffect { effect_id })) => {
@@ -84,7 +84,7 @@ impl Session {
                     .waits_for(pending.map(|p| p.id))
                 {
                     self.stickers.stickers.attached = AttachedSets::Idle;
-                    self.fail_sticker_set_view(0, None);
+                    self.fail_sticker_set_view(0, pending.map(|p| p.id));
                 }
             }
             // The lookup's ids are asked for again. A rate limit is no
@@ -194,7 +194,8 @@ impl Session {
             self.stickers.emoji.lists.request_failed(
                 purpose,
                 pending.map(|p| p.id),
-                crate::lang::tr(crate::lang::keys::Q_MEDIA_COULD_NOT_UPDATE_EMOJI_PACKS).to_string(),
+                crate::lang::tr(crate::lang::keys::Q_MEDIA_COULD_NOT_UPDATE_EMOJI_PACKS)
+                    .to_string(),
             );
         }
         if matches!(
@@ -247,7 +248,9 @@ impl Session {
             self.stickers.gifs.saved_mutation_failed();
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSavedAnimations) {
-            self.stickers.gifs.saved_request_failed(pending.map(|p| p.id));
+            self.stickers
+                .gifs
+                .saved_request_failed(pending.map(|p| p.id));
         }
     }
 }

@@ -91,21 +91,23 @@ impl QuillApp {
     /// page, new-chat and archive settings, unguarded (always fresh). Demo:
     /// the `ReadyPrivacy` fixture seeds state directly.
     pub(crate) fn fetch_privacy(&mut self) {
+        let mut refreshed = false;
         if let Some(live) = self.live.as_mut() {
             for key in PrivacySettingKey::all() {
                 let _ = live.driver.fetch_privacy_rules(key);
             }
             let _ = live.driver.fetch_read_date_privacy();
-            if live.driver.fetch_blocked_senders().is_ok() {
-                // The first page refills the list: the next page is asked
-                // for again at the length it reaches.
-                self.privacy.blocked_asked.reset();
-            }
+            refreshed = live.driver.fetch_blocked_senders().is_ok();
             let _ = live.driver.fetch_new_chat_privacy();
             let _ = live.driver.fetch_archive_chat_list_settings();
             if let Some(me) = live.driver.session.my_user_id {
                 let _ = live.driver.fetch_user_full_info(me);
             }
+        }
+        if refreshed {
+            // The first page refills the list: the next page is asked for
+            // again at the length it reaches.
+            self.privacy.blocked_asked.reset();
         }
     }
 
@@ -514,7 +516,8 @@ impl QuillApp {
                 )));
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
-            demo.settings.block_change_sent(RequestId(0), user_id, true);
+            demo.settings
+                .block_change_sent(quill::ids::RequestId(0), user_id, true);
         }
         cx.notify();
     }
@@ -532,7 +535,8 @@ impl QuillApp {
                 )));
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
-            demo.settings.block_change_sent(RequestId(0), user_id, false);
+            demo.settings
+                .block_change_sent(quill::ids::RequestId(0), user_id, false);
         }
         cx.notify();
     }

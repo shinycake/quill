@@ -11,15 +11,10 @@ impl Session {
     }
 
     pub fn request_chat_search(&mut self, purpose: RequestPurpose, chat_id: ChatId) -> RequestId {
-        let id = self
-            .requests
-            .register_chat_search(self.account_generation, purpose, chat_id);
-        // The first page of a query is what the bar waits for from here on;
-        // a send that fails ends the stage itself.
-        if purpose == RequestPurpose::SearchChatMessages {
-            self.search.chat_search.searching(id);
-        }
-        id
+        // The bar waits for the first page of a query only once it went out
+        // (`ChatSearchState::searching`, from the sender's `Ok` arm).
+        self.requests
+            .register_chat_search(self.account_generation, purpose, chat_id)
     }
 
     pub fn request_history_around(&mut self, chat_id: ChatId, message_id: MessageId) -> RequestId {

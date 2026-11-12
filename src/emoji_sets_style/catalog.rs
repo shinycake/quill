@@ -266,7 +266,10 @@ mod tests {
     #[test]
     fn state_follows_tdesktop() {
         use EmojiSetId::*;
-        assert_eq!(SetRowView::of(Noto, Noto, true, None, None), SetRowView::Active);
+        assert_eq!(
+            SetRowView::of(Noto, Noto, true, None, None),
+            SetRowView::Active
+        );
         assert_eq!(
             SetRowView::of(System, Noto, false, None, None),
             SetRowView::Ready

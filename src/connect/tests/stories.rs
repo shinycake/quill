@@ -566,6 +566,10 @@ fn driver_fetch_story_custom_emoji_stickers_dedupes_and_caches() {
             .is_none()
     );
     assert_eq!(recorder.snapshot().len(), sent);
+    // A fetch still out is not "settled": the viewer asks again for the
+    // ids it switched to meanwhile.
+    assert!(!driver.warm_story_custom_emoji_stickers(&[456]));
+    assert_eq!(recorder.snapshot().len(), sent);
 
     // Cache path: ingest the stickers answer, then the same id is a no-op.
     driver
@@ -593,6 +597,10 @@ fn driver_fetch_story_custom_emoji_stickers_dedupes_and_caches() {
             .maybe_fetch_story_custom_emoji_stickers(&[123])
             .unwrap()
             .is_none()
+    );
+    assert!(
+        driver.warm_story_custom_emoji_stickers(&[123]),
+        "nothing left to fetch is settled"
     );
     assert_eq!(recorder.snapshot().len(), sent);
 

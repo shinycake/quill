@@ -192,25 +192,23 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || set_id == 0 {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if view.refresh.is_some() {
-            return Ok(None);
-        }
         let purpose = RequestPurpose::Stickers(StickersPurpose::ViewStickerSet { set_id });
         let extra = self.session.request(purpose, None);
         let sent = self.sender.send_json(&get_sticker_set(extra, set_id));
         if sent.is_err() {
             self.session.requests.take(extra);
-            // The refresh is over either way: a refused one is not asked
-            // again from every poll; the box keeps what it shows and says so.
+            // The refresh is over: a refused one is not asked again from
+            // every poll; the box keeps what it shows and says so.
             self.session.stickers.creator_notes.push_back(
                 crate::lang::tr(crate::lang::keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN)
                     .to_string(),
             );
         }
         if let Some(view) = self.session.stickers.sticker_set_view.as_mut() {
-            view.edits.refreshed();
             if sent.is_ok() {
-                view.refresh = Some(extra);
+                view.edits.refresh_sent(extra);
+            } else {
+                view.edits.refresh_unsent();
             }
         }
         sent.map(|()| Some(extra))

@@ -2,6 +2,18 @@
 use crate::state::*;
 
 impl Session {
+    /// A terminate or a session setting was refused. With the list shown
+    /// the refusal is its error line; with a refetch out (a change before
+    /// it landed) the answer of that refetch is the list's, so the refusal
+    /// is a toast and never ends it.
+    fn refuse_sessions_change(&mut self, line: String) {
+        if self.settings.sessions.is_loading() {
+            self.chats_state.chat_action_error.push(line);
+        } else {
+            self.settings.sessions.fail(line);
+        }
+    }
+
     /// Reacts to a failed settings request; called by
     /// [`Session::apply_error`] after the shared handling.
     pub(crate) fn apply_settings_error(
@@ -196,9 +208,8 @@ impl Session {
                 | RequestPurpose::TerminateAllOtherSessions,
             ) => {
                 self.settings.sessions_op.failed(pending.map(|p| p.id));
-                self.settings
-                    .sessions
-                    .fail(sessions_error_line("terminate the session", err));
+                let line = sessions_error_line("terminate the session", err);
+                self.refuse_sessions_change(line);
             }
             // Slice A4: a refused session toggle surfaces an honest
             // classified error and leaves the list untouched (the
@@ -208,9 +219,8 @@ impl Session {
                 | RequestPurpose::Settings(SettingsPurpose::ToggleSessionCalls { .. }),
             ) => {
                 self.settings.sessions_op.failed(pending.map(|p| p.id));
-                self.settings
-                    .sessions
-                    .fail(sessions_error_line("change the session setting", err));
+                let line = sessions_error_line("change the session setting", err);
+                self.refuse_sessions_change(line);
             }
             // Slice A7: a refused account-lifecycle op (TTL fetch
             // or set, account deletion) clears the in-flight
@@ -290,9 +300,14 @@ impl Session {
                 | RequestPurpose::DisconnectAllWebsites,
             ) => {
                 self.settings.websites_op.failed(pending.map(|p| p.id));
-                self.settings
-                    .connected_websites
-                    .fail(sessions_error_line("disconnect the website", err));
+                let line = sessions_error_line("disconnect the website", err);
+                if self.settings.connected_websites.is_loading() {
+                    // A refetch is out: its answer is the list's, and the
+                    // refusal is told as a toast instead of ending it.
+                    self.chats_state.chat_action_error.push(line);
+                } else {
+                    self.settings.connected_websites.fail(line);
+                }
             }
             _ => {}
         }

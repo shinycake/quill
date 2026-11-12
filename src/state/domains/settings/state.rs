@@ -558,7 +558,8 @@ impl SettingsState {
     /// change, so a page in flight gives way to this request: its `ok`
     /// asks for the first page again ([`Self::block_change_landed`]).
     pub fn block_change_sent(&mut self, request: RequestId, user_id: i64, blocked: bool) {
-        self.blocked_senders.insert_data_if_missing(BlockedList::default);
+        self.blocked_senders
+            .insert_data_if_missing(BlockedList::default);
         if let Some(list) = self.blocked_senders.data_mut() {
             let had = list.ids.contains(&user_id);
             if blocked && !had {
@@ -587,7 +588,12 @@ impl SettingsState {
     /// request ends in `Failed`; a page of the list in flight is not its
     /// to end, so the list is fetched again instead (when the change was
     /// applied and is now wrong), and an unsent change leaves it alone.
-    pub fn block_change_failed(&mut self, request: Option<RequestId>, error: String, applied: bool) {
+    pub fn block_change_failed(
+        &mut self,
+        request: Option<RequestId>,
+        error: String,
+        applied: bool,
+    ) {
         if self.blocked_senders.failed(request, error.clone(), true) {
             return;
         }

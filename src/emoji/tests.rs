@@ -253,7 +253,12 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
     // Themed/default ids land in their own slots.
     let extra = with_purpose.request(RequestPurpose::GetThemedEmojiStatuses, None);
     with_purpose.stickers.emoji.lists.themed_statuses.begin();
-    with_purpose.stickers.emoji.lists.themed_statuses.sent(extra);
+    with_purpose
+        .stickers
+        .emoji
+        .lists
+        .themed_statuses
+        .sent(extra);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -266,7 +271,12 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
     assert_eq!(with_purpose.stickers.emoji.themed_status_ids(), &[11, 22]);
     let extra = with_purpose.request(RequestPurpose::GetDefaultEmojiStatuses, None);
     with_purpose.stickers.emoji.lists.default_statuses.begin();
-    with_purpose.stickers.emoji.lists.default_statuses.sent(extra);
+    with_purpose
+        .stickers
+        .emoji
+        .lists
+        .default_statuses
+        .sent(extra);
     apply_json(
         &mut with_purpose,
         &seq,

@@ -577,7 +577,11 @@ fn a_full_export_follows_tdesktops_layout() {
     assert_eq!(summary.messages, 3 + 1 + 1 + 2 + 1);
     assert!(!root.join(".spool").exists());
     // Progress walked through every step and ended on the last chat.
-    let stages: Vec<&AccountStage> = run.reports.iter().filter_map(|p| p.stage.as_ref()).collect();
+    let stages: Vec<&AccountStage> = run
+        .reports
+        .iter()
+        .filter_map(|p| p.stage.as_ref())
+        .collect();
     let walked = |wanted: fn(&AccountStage) -> bool| stages.iter().any(|s| wanted(s));
     assert!(walked(|s| matches!(s, AccountStage::ChatsList { .. })));
     assert!(walked(|s| matches!(s, AccountStage::PersonalInfo)));

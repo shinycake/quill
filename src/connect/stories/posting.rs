@@ -252,8 +252,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// `schema/td_api.tl:13702`) for the given chat — the user's own
     /// story chat or an eligible channel / supergroup from
     /// `getChatsToPostStories`. The composer calls this before every
-    /// post; the answer lands in `Session::story_post.check`.
-    /// Deduped per chat while a check is in flight.
+    /// post; the answer lands in `Session::story_post.check`. Every call
+    /// sends a check.
     pub fn check_can_post_story(&mut self, chat_id: ChatId) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);

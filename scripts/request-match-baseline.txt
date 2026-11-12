@@ -28,7 +28,6 @@ purpose:ConnectDriver::maybe_load_archive_chats 1
 purpose:ConnectDriver::maybe_load_main_chats 1
 purpose:ConnectDriver::maybe_probe_channel_membership 1
 purpose:ConnectDriver::maybe_search_gifs 2
-purpose:ConnectDriver::open_chat_appearance 1
 purpose:ConnectDriver::open_media_panel 3
 purpose:ConnectDriver::open_send_gift_to 1
 purpose:ConnectDriver::parameters_sent 1
@@ -75,7 +74,6 @@ unsent:ConnectDriver::fetch_chat_lists_to_add_chat 1
 unsent:ConnectDriver::fetch_contacts 1
 unsent:ConnectDriver::maybe_fetch_live_story_extras 1
 unsent:ConnectDriver::probe_self_star_stats 1
-unsent:GifPanel::saved_asked 1
 unsent:GiveawayOptions::begin 2
 unsent:QuillApp::begin_screen_worker 1
 unsent:QuillApp::menu_focus_upkeep 1

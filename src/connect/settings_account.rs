@@ -36,10 +36,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         let EnvelopePayload::Users(UsersPayload::Me { user_id, .. }) = &envelope.payload else {
             return None;
         };
-        let purpose = envelope
+        // Only the answer of the ask the row waits for opens the chat: an
+        // earlier `getSupportUser`, whose box was left, opens nothing.
+        let asked = envelope
             .extra
-            .and_then(|id| self.session.requests.purpose(id))?;
-        (purpose == RequestPurpose::GetSupportUser).then_some(*user_id)
+            .filter(|id| self.session.settings.support_user.waits_for(*id))?;
+        (self.session.requests.purpose(asked)? == RequestPurpose::GetSupportUser)
+            .then_some(*user_id)
     }
 
     /// Open the private chats an answer named: the support user's, and a

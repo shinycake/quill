@@ -215,7 +215,9 @@ impl Session {
             pending.map(|p| p.purpose),
             Some(RequestPurpose::DeleteAccount)
         ) {
-            self.settings.account_delete = crate::state::fetch::Fetch::Idle;
+            self.settings
+                .account_delete
+                .answered(pending.map(|p| p.id), ());
         }
         // Slice A8: a `checkPhoneNumberCode` succeeded — the
         // server completed the number change of the number the

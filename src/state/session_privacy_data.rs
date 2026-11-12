@@ -50,9 +50,6 @@ pub struct PrivacyData {
     /// `getNewChatPrivacySettings` state; `None` = never asked. Saves in
     /// flight live inside the stage.
     pub new_chat: Option<NewChatPrivacyState>,
-    /// The refresh of a value already shown, in flight as this request (a
-    /// second open sends nothing; its answer or error frees the slot).
-    pub new_chat_refresh: Option<RequestId>,
     /// Days of inactivity before sessions end (`getActiveSessions`), with
     /// the `setInactiveSessionTtl` saves in flight.
     pub inactive_session_ttl: Optimistic<i32>,
@@ -126,9 +123,6 @@ impl Session {
                     && let Some(state) = self.settings.privacy_data.new_chat.as_mut()
                 {
                     state.fetched(id, *settings);
-                    if self.settings.privacy_data.new_chat_refresh == Some(id) {
-                        self.settings.privacy_data.new_chat_refresh = None;
-                    }
                 }
                 true
             }
@@ -292,15 +286,10 @@ impl Session {
             // Only the first fetch can fail the row; a refresh that fails
             // leaves the value the row already shows.
             RequestPurpose::GetNewChatPrivacy => {
-                if data.new_chat_refresh.is_some() && data.new_chat_refresh == pending.map(|p| p.id)
+                if let Some(id) = pending.map(|p| p.id)
+                    && let Some(state) = data.new_chat.as_mut()
                 {
-                    data.new_chat_refresh = None;
-                }
-                if matches!(
-                    data.new_chat,
-                    Some(NewChatPrivacyState::Loading(live)) if Some(live) == pending.map(|p| p.id)
-                ) {
-                    data.new_chat = Some(NewChatPrivacyState::Failed);
+                    state.fetch_failed(id);
                 }
             }
             RequestPurpose::Settings(SettingsPurpose::SetNewChatPrivacy) => {

@@ -98,8 +98,12 @@ pub enum AttachedSets {
     Idle,
     /// The request the box waits for.
     Asked(RequestId),
-    /// The first set of the answer (`None`: the media has none).
-    Answered(Option<i64>),
+    /// The first set of the answer to `request` (`None`: the media has
+    /// none); the box that waited for that request takes it.
+    Answered {
+        request: RequestId,
+        first: Option<i64>,
+    },
 }
 
 impl AttachedSets {
@@ -109,11 +113,11 @@ impl AttachedSets {
     }
 
     /// The answer, once, leaving the stage.
-    pub fn take_answer(&mut self) -> Option<Option<i64>> {
+    pub fn take_answer(&mut self) -> Option<(RequestId, Option<i64>)> {
         match *self {
-            Self::Answered(first) => {
+            Self::Answered { request, first } => {
                 *self = Self::Idle;
-                Some(first)
+                Some((request, first))
             }
             _ => None,
         }
@@ -393,7 +397,6 @@ pub struct StickerPanel {
     pub tab: StickerTab,
     pub sets: Vec<StickerSetInfo>,
     pub archived: Vec<StickerSetInfo>,
-    pub archived_offset: i64,
     pub archived_next_offset: i64,
     pub archived_has_more: bool,
     /// The selected set: its id, `getStickerSet` stage and stickers, one
@@ -409,7 +412,6 @@ pub struct StickerPanel {
     /// Slice S8: trending sets (`getTrendingStickerSets`) + premium-row flag.
     pub trending: Vec<StickerSetInfo>,
     pub trending_total: usize,
-    pub trending_offset: usize,
     pub trending_next_offset: usize,
     pub trending_is_premium: bool,
     /// `getGreetingStickers`: hello stickers for empty private chats.
@@ -805,56 +807,6 @@ impl GifPanel {
 
     pub fn close(&mut self) {
         self.open = false;
-    }
-}
-
-/// The "Attached Stickers" lookup of a photo or video
-/// (`getAttachedStickerSets`): asked as one request, then answered with the
-/// first set (`None`: the media has none) until the box takes it. An answer
-/// or error of an earlier request is dropped.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum AttachedStickers {
-    #[default]
-    Idle,
-    Asking(RequestId),
-    Answered(Option<i64>),
-}
-
-impl AttachedStickers {
-    /// The lookup goes out as `request`.
-    pub fn asked(&mut self, request: RequestId) {
-        *self = Self::Asking(request);
-    }
-
-    /// `request` answered with `first`: taken only while it is the lookup
-    /// waited for.
-    pub fn answered(&mut self, request: Option<RequestId>, first: Option<i64>) -> bool {
-        if request.is_some_and(|request| *self == Self::Asking(request)) {
-            *self = Self::Answered(first);
-            return true;
-        }
-        false
-    }
-
-    /// `request` failed (or never went out): only the lookup waited for
-    /// ends. `true` when it was.
-    pub fn failed(&mut self, request: Option<RequestId>) -> bool {
-        if request.is_some_and(|request| *self == Self::Asking(request)) {
-            *self = Self::Idle;
-            return true;
-        }
-        false
-    }
-
-    /// The answer, once.
-    pub fn take_answer(&mut self) -> Option<Option<i64>> {
-        match *self {
-            Self::Answered(first) => {
-                *self = Self::Idle;
-                Some(first)
-            }
-            _ => None,
-        }
     }
 }
 

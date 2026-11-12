@@ -209,12 +209,11 @@ impl ProxyListOps {
         matches!(self.ipv6, Ipv6Set::Setting { on: asked, .. } if asked == on)
     }
 
-    /// The IPv6 write `request` came back (answer or error; `None`: an
-    /// answer with no request record frees the stage). Only the write in
-    /// flight leaves it.
+    /// The IPv6 write `request` came back (answer or error). Only the write
+    /// in flight leaves it.
     pub fn ipv6_ended(&mut self, request: Option<RequestId>) {
         if let Ipv6Set::Setting { request: asked, .. } = self.ipv6
-            && request.is_none_or(|id| id == asked)
+            && request == Some(asked)
         {
             self.ipv6 = Ipv6Set::Idle;
         }

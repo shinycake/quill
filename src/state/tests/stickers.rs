@@ -317,14 +317,17 @@ fn gif_panel_downloads_stills_then_preview_loops_then_unpreviewed_clips() {
         minithumbnail: None,
     };
     session.stickers.gifs.saved_asked(RequestId(1));
-    session.stickers.gifs.saved_answered(Some(RequestId(1)), vec![
-        // An MP4 preview loop: the loop plays, the GIF itself waits.
-        gif(1, Some(11), false),
-        // A still JPEG and no loop: the GIF itself plays.
-        gif(2, Some(12), true),
-        // Nothing but the GIF.
-        gif(3, None, true),
-    ]);
+    session.stickers.gifs.saved_answered(
+        Some(RequestId(1)),
+        vec![
+            // An MP4 preview loop: the loop plays, the GIF itself waits.
+            gif(1, Some(11), false),
+            // A still JPEG and no loop: the GIF itself plays.
+            gif(2, Some(12), true),
+            // Nothing but the GIF.
+            gif(3, None, true),
+        ],
+    );
     // A closed panel fetches nothing.
     assert!(session.gif_panel_file_ids_to_download().is_empty());
     session.stickers.gifs.open = true;
@@ -346,8 +349,8 @@ fn attached_sticker_sets_fail_the_box_and_drop_an_earlier_answer() {
     let seq = AtomicU64::new(0);
     let purpose = RequestPurpose::Stickers(StickersPurpose::GetAttachedStickerSets { file_id: 1 });
     let ask = |session: &mut Session| {
-        session.stickers.sticker_set_view = Some(StickerSetView::loading(0));
         let extra = session.request(purpose, None);
+        session.stickers.sticker_set_view = Some(StickerSetView::loading(0, extra));
         session.stickers.stickers.attached = crate::state::AttachedSets::Asked(extra);
         extra
     };
@@ -387,7 +390,10 @@ fn attached_sticker_sets_fail_the_box_and_drop_an_earlier_answer() {
     apply_json(&mut session, &seq, &sink, &sets(later));
     assert_eq!(
         session.stickers.stickers.attached,
-        crate::state::AttachedSets::Answered(None)
+        crate::state::AttachedSets::Answered {
+            request: later,
+            first: None
+        }
     );
 }
 
@@ -405,7 +411,7 @@ fn a_failed_refetch_keeps_the_shown_sticker_set() {
         stickers: Vec::new(),
         files: Default::default(),
     };
-    let mut view = StickerSetView::loading(5);
+    let mut view = StickerSetView::loading(5, RequestId(1));
     view.stage = ready.clone();
     session.stickers.sticker_set_view = Some(view);
     session.fail_sticker_set_view(5, None);
@@ -417,8 +423,14 @@ fn a_failed_refetch_keeps_the_shown_sticker_set() {
             .map(|v| v.stage.clone())
     };
     assert_eq!(stage(&session), Some(ready));
-    session.stickers.sticker_set_view = Some(StickerSetView::loading(5));
-    session.fail_sticker_set_view(5, None);
+    session.stickers.sticker_set_view = Some(StickerSetView::loading(5, RequestId(1)));
+    // Another request's error leaves the load waiting.
+    session.fail_sticker_set_view(5, Some(RequestId(2)));
+    assert!(matches!(
+        stage(&session),
+        Some(StickerSetViewStage::Loading { .. })
+    ));
+    session.fail_sticker_set_view(5, Some(RequestId(1)));
     assert_eq!(stage(&session), Some(StickerSetViewStage::Failed));
 }
 

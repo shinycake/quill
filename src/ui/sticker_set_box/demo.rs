@@ -78,7 +78,7 @@ impl QuillApp {
                     cover_files: Vec::new(),
                     is_viewed: true,
                 });
-            let mut view = StickerSetView::loading(78);
+            let mut view = StickerSetView::loading(78, quill::ids::RequestId(0));
             view.stage = StickerSetViewStage::Ready {
                 title: "My doodles".into(),
                 name: "my_doodles_by_quill".into(),
