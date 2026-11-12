@@ -159,6 +159,36 @@ fn cancel_closes_the_box_while_the_create_request_is_out(cx: &mut TestAppContext
     assert!(shell.read_with(vcx, |s, _| s.open_dialog != Some(DialogKind::CreateChat)));
 }
 
+/// The account switch's farewell lets the dialog go, a create still out
+/// included: nothing opens its chat over the account the person is on when
+/// they come back.
+#[gpui_kit::test]
+fn an_account_switch_drops_a_create_still_out(cx: &mut TestAppContext) {
+    use crate::ui::on_screen::Farewell;
+    use quill::new_chat::{NewChatBack, NewChatStage};
+    use quill::state::RequestPurpose;
+    let (app, _shell, mut vcx) = open_demo(cx, "ready-new-channel");
+    let vcx = &mut vcx;
+    app.update(vcx, |app, _| {
+        let request = app
+            .demo_session
+            .as_mut()
+            .map(|session| session.request(RequestPurpose::SetChatTitle, None))
+            .expect("demo session");
+        if let Some(dialog) = app.admin.create_chat_dialog.as_mut() {
+            dialog.stage = NewChatStage::Creating {
+                request,
+                back: NewChatBack::Info,
+                title: String::new(),
+            };
+        }
+    });
+    app.update_in(vcx, |app, window, cx| {
+        crate::ui::admin_state::AdminUi::farewell(app, window, cx);
+    });
+    assert_eq!(step(&app, vcx), None, "the dialog went with the account");
+}
+
 /// A plain group whose create was answered ends its dialog (and with it
 /// the creation row), instead of leaving a hidden dialog behind.
 #[gpui_kit::test]

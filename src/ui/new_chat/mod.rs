@@ -22,7 +22,7 @@ use gpui_kit::*;
 use quill::auto_delete::TTL_CHOICES;
 use quill::group_info_edit::TITLE_MAX;
 use quill::group_type::{GroupTypeData, USERNAME_MAX, plan_group_type_save};
-use quill::ids::ChatId;
+use quill::ids::{ChatId, RequestId};
 use quill::lang::{keys, tr};
 use quill::new_chat::{
     NewChatBack, NewChatInvalid, NewChatKind, NewChatStage, NewChatStep, NewChatView,
@@ -88,6 +88,12 @@ pub(crate) struct NewChatDialog {
     /// The type step of a supergroup or channel (tdesktop
     /// `SetupChannelBox`, which starts on Public).
     type_box: Option<GroupTypeBox>,
+}
+
+/// What a stage that was left no longer waits for.
+enum Release {
+    Create(RequestId),
+    TypeSave(Vec<RequestId>),
 }
 
 impl QuillApp {
@@ -273,7 +279,7 @@ impl QuillApp {
 
     /// The dialog goes: a create still out does not open its chat over what
     /// the person does next, and an answered one is forgotten.
-    fn drop_new_chat_dialog(&mut self) {
+    pub(in crate::ui) fn drop_new_chat_dialog(&mut self) {
         if let Some(dialog) = self.admin.create_chat_dialog.take()
             && let Some(live) = self.live.as_mut()
         {
@@ -314,11 +320,32 @@ impl QuillApp {
             return;
         };
         let left = std::mem::replace(&mut dialog.stage, settled);
-        if let NewChatStage::Creating { request, .. } = left
-            && !matches!(&dialog.stage, NewChatStage::Creating { request: now, .. } if *now == request)
-            && let Some(live) = self.live.as_mut()
-        {
-            live.driver.abandon_new_chat(request);
+        // What the stage waited for is let go once it has left it: the
+        // create's request, or the type Saves' entries.
+        let release = match left {
+            NewChatStage::Creating { request, .. }
+                if !matches!(&dialog.stage, NewChatStage::Creating { request: now, .. } if *now == request) =>
+            {
+                Some(Release::Create(request))
+            }
+            NewChatStage::Type {
+                save: TypeSaveStage::Saving(sent),
+                ..
+            } if !matches!(
+                &dialog.stage,
+                NewChatStage::Type { save: TypeSaveStage::Saving(now), .. } if *now == sent
+            ) =>
+            {
+                Some(Release::TypeSave(sent))
+            }
+            _ => None,
+        };
+        let (Some(release), Some(live)) = (release, self.live.as_mut()) else {
+            return;
+        };
+        match release {
+            Release::Create(request) => live.driver.abandon_new_chat(request),
+            Release::TypeSave(sent) => live.driver.forget_new_chat_type_save(&sent),
         }
     }
 
@@ -415,7 +442,14 @@ impl QuillApp {
                     cx,
                 );
             }
-            Ok(None) => {}
+            // A create of this kind is still out (the dialog's own was let
+            // go, TDLib cannot cancel it): say so rather than do nothing.
+            Ok(None) => {
+                self.set_note(StatusNote::info(tr(
+                    keys::Q_PEOPLE_CHAT_STILL_BEING_CREATED,
+                )));
+                cx.notify();
+            }
             Err(err) => {
                 self.set_note(StatusNote::error(user_error_for(
                     keys::Q_NEW_CHAT_FAILED,

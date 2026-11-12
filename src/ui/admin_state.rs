@@ -113,6 +113,9 @@ impl crate::ui::on_screen::Farewell for AdminUi {
             app.close_boost_box_state(cx);
         }
         app.drop_invite_link_pages();
+        // A create still out is let go: it does not open its chat over the
+        // account the person is on when they come back.
+        app.drop_new_chat_dialog();
     }
 }
 
