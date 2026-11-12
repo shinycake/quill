@@ -120,10 +120,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             // answer lands. The forwards may have come while another post
             // was shown and gone with its page: ask for them again
             // (deduped while in flight).
-            self.session
-                .groups
-                .stats
-                .message_statistics_requested(chat_id.0, message_id.0, waiting);
+            self.session.groups.stats.message_statistics_requested(
+                chat_id.0,
+                message_id.0,
+                waiting,
+            );
             if !self.message_forwards_loaded(chat_id, message_id) {
                 let _ = self.fetch_message_public_forwards(chat_id, message_id, "");
             }

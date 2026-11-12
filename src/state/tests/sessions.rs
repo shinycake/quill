@@ -200,7 +200,11 @@ fn sessions_answer_replaces_cache_for_matching_request() {
     let sessions = session.settings.sessions.data().expect("cached");
     assert_eq!(sessions.len(), 2);
     assert!(sessions.iter().any(|s| s.is_current() && s.id == 11));
-    assert!(sessions.iter().any(|s| s.is_password_pending() && s.id == 33));
+    assert!(
+        sessions
+            .iter()
+            .any(|s| s.is_password_pending() && s.id == 33)
+    );
     assert!(!session.settings.sessions.is_loading());
     assert!(session.settings.sessions.error().is_none());
     assert!(!session.settings.sessions_op.is_stale());

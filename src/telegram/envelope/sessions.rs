@@ -153,10 +153,7 @@ pub(crate) fn parse_session(value: &Value) -> Option<ParsedSession> {
     let bool_field = |name: &str| value.get(name).and_then(Value::as_bool).unwrap_or(false);
     Some(ParsedSession {
         id,
-        kind: SessionKind::from_flags(
-            bool_field("is_current"),
-            bool_field("is_password_pending"),
-        ),
+        kind: SessionKind::from_flags(bool_field("is_current"), bool_field("is_password_pending")),
         is_unconfirmed: bool_field("is_unconfirmed"),
         can_accept_secret_chats: bool_field("can_accept_secret_chats"),
         can_accept_calls: bool_field("can_accept_calls"),

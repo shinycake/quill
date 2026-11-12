@@ -14,7 +14,9 @@ pub enum StoryStatsFetch {
     #[default]
     Idle,
     /// The request waited for.
-    Loading { request: RequestId },
+    Loading {
+        request: RequestId,
+    },
     Loaded(StoryStatisticsView),
     Failed(String),
 }

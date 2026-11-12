@@ -50,7 +50,9 @@ pub enum MessageStatsFetch {
     #[default]
     Idle,
     /// The request waited for.
-    Loading { request: RequestId },
+    Loading {
+        request: RequestId,
+    },
     Loaded(MessageStatisticsView),
     Failed(String),
 }
@@ -262,9 +264,9 @@ impl StatsState {
 
     /// The graph `request` is loading, if a later request has not replaced it.
     fn graph_loading(&mut self, request: RequestId) -> Option<&mut GraphFetch> {
-        self.graphs
-            .values_mut()
-            .find(|fetch| matches!(fetch, GraphFetch::Loading { request: asked } if *asked == request))
+        self.graphs.values_mut().find(
+            |fetch| matches!(fetch, GraphFetch::Loading { request: asked } if *asked == request),
+        )
     }
 
     /// A request that could not be sent: the graph shows the failure with

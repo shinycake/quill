@@ -179,7 +179,9 @@ pub enum SharedMediaTabStatus {
     Idle,
     /// The first page is in flight as `request`; only its answer or error
     /// settles the tab.
-    Loading { request: RequestId },
+    Loading {
+        request: RequestId,
+    },
     /// The first page is in; `more` is where the next page stands.
     Ready {
         more: NextPage,
@@ -762,7 +764,13 @@ impl SharedMediaState {
     }
 
     /// The first page `request` failed.
-    pub fn fail(&mut self, chat_id: ChatId, tab: SharedMediaTab, request: RequestId, error: String) {
+    pub fn fail(
+        &mut self,
+        chat_id: ChatId,
+        tab: SharedMediaTab,
+        request: RequestId,
+        error: String,
+    ) {
         if !self.accepts_first(chat_id, tab, request) {
             return;
         }

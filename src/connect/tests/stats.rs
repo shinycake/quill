@@ -640,9 +640,7 @@ fn returning_to_a_post_adopts_its_statistics_request_in_flight() {
         .unwrap();
     assert_eq!(
         state.statistics,
-        MessageStatsFetch::Loading {
-            request: in_flight
-        }
+        MessageStatsFetch::Loading { request: in_flight }
     );
     rig.answer(
         in_flight,

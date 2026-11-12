@@ -124,10 +124,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Media(MediaPurpose::GetSharedMediaMore { tab }),
             Some(chat_id),
         );
-        self.session
-            .media
-            .shared_media
-            .begin_fetch_more(tab, extra);
+        self.session.media.shared_media.begin_fetch_more(tab, extra);
         let filter = search_messages_filter_json(filter);
         match self.sender.send_json(&search_chat_messages(
             extra,

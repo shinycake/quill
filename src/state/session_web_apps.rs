@@ -263,7 +263,10 @@ impl Session {
                 ));
             }
             RequestPurpose::Bots(BotsPurpose::SharePhoneWithMiniApp { .. }) => {
-                self.bots.web_apps.phone_share.push(PhoneShare::Refused(p.id));
+                self.bots
+                    .web_apps
+                    .phone_share
+                    .push(PhoneShare::Refused(p.id));
             }
             RequestPurpose::Bots(BotsPurpose::ToggleBotEmojiStatusAccess {
                 bot_user_id,

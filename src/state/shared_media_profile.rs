@@ -224,7 +224,12 @@ impl SharedMediaState {
 
     /// Whether `request` is a page (first or older) the open gallery's `tab`
     /// of `chat_id` waits for.
-    pub(crate) fn accepts_profile(&self, chat_id: ChatId, tab: SharedMediaTab, request: RequestId) -> bool {
+    pub(crate) fn accepts_profile(
+        &self,
+        chat_id: ChatId,
+        tab: SharedMediaTab,
+        request: RequestId,
+    ) -> bool {
         self.accepts_first(chat_id, tab, request) || self.accepts_more(chat_id, tab, request)
     }
 
@@ -590,8 +595,7 @@ impl Session {
         let Some(chat_id) = pending.chat_id else {
             return;
         };
-        let RequestPurpose::Media(MediaPurpose::GetProfileGifts { append }) =
-            pending.purpose
+        let RequestPurpose::Media(MediaPurpose::GetProfileGifts { append }) = pending.purpose
         else {
             return;
         };

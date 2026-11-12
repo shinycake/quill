@@ -45,9 +45,7 @@ fn ask_gallery_stories(session: &mut Session, chat: i64) -> RequestId {
         RequestPurpose::GetChatPostedToChatPageStories,
         Some(ChatId(chat)),
     );
-    session
-        .requests
-        .correlate(request, Correlation::GalleryTab);
+    session.requests.correlate(request, Correlation::GalleryTab);
     session
         .media
         .shared_media

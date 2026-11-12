@@ -460,9 +460,15 @@ mod viewers_page_tests {
     #[test]
     fn a_failed_page_does_not_ask_again_on_scroll() {
         assert!(viewers(PageFetch::Idle, "n").wants_next_page());
-        assert!(!viewers(PageFetch::Loading {
+        assert!(
+            !viewers(
+                PageFetch::Loading {
                     request: RequestId(1)
-                }, "n").wants_next_page());
+                },
+                "n"
+            )
+            .wants_next_page()
+        );
         assert!(!viewers(PageFetch::Failed("boom".into()), "n").wants_next_page());
         assert!(!viewers(PageFetch::Idle, "").wants_next_page());
     }

@@ -3,9 +3,9 @@
 //! page's fields and a transition moves the data it carries.
 
 use super::TranslateSource;
-use quill::ids::RequestId;
 use gpui_kit::component::input::TextareaState;
 use gpui_kit::{Entity, Subscription};
+use quill::ids::RequestId;
 
 /// Where the box's request stands. `Refused`: it could not be sent
 /// (offline, a closed client), so the box says it failed instead of

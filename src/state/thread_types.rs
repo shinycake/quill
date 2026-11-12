@@ -29,7 +29,9 @@ pub enum ThreadStatus {
     /// resolves the thread, so a request of an earlier view of the same
     /// origin message (closed and reopened) cannot. The error line leaves it
     /// as `Failed`.
-    Resolving { request: RequestId },
+    Resolving {
+        request: RequestId,
+    },
     /// The thread is known but lives in another chat (a channel post's
     /// discussion group): the driver still has to open that chat. Leaves
     /// by `switch_to_thread_chat` (`Starting`, or `Failed` when the chat

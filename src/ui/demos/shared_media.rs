@@ -305,8 +305,8 @@ impl QuillApp {
             // its way; =failed answers it with an error; =empty finds nothing.
             match std::env::var("QUILL_DEMO_SHARED_MEDIA_STATE").as_deref() {
                 Ok("loading") => {
-                    let request = session
-                        .request(RequestPurpose::GetSharedMedia { tab }, Some(ChatId(CHAT)));
+                    let request =
+                        session.request(RequestPurpose::GetSharedMedia { tab }, Some(ChatId(CHAT)));
                     session.media.shared_media.begin_fetch(tab, request);
                 }
                 Ok("failed") => fail_tab(session, &sink, &seq, tab),

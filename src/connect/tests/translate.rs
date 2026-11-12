@@ -1,10 +1,10 @@
 //! Connect-driver tests: translation (`translateMessageText`,
 //! `translateText`, `updateChatIsTranslatable`) against recorded TDLib JSON.
-use crate::ids::RequestId;
 use super::super::*;
 use super::*;
 use crate::diagnostics::DiagnosticSink;
 use crate::diagnostics::MemorySink;
+use crate::ids::RequestId;
 use crate::ids::{AccountKey, ChatId, MessageId};
 use crate::platform::MemorySecretStore;
 use crate::state::{Session, Translation};
@@ -61,7 +61,12 @@ impl Drop for Harness {
 }
 
 fn extra_of(request: &serde_json::Value) -> RequestId {
-    RequestId(request["@extra"].as_str().and_then(|id| id.parse().ok()).unwrap_or_default())
+    RequestId(
+        request["@extra"]
+            .as_str()
+            .and_then(|id| id.parse().ok())
+            .unwrap_or_default(),
+    )
 }
 
 #[test]

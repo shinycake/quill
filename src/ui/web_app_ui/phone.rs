@@ -233,7 +233,9 @@ impl QuillApp {
                 return None;
             };
             let shares = &mut live.driver.session.bots.web_apps.phone_share;
-            let at = shares.iter().position(|answer| answer.request() == request)?;
+            let at = shares
+                .iter()
+                .position(|answer| answer.request() == request)?;
             Some(shares.remove(at).is_sent())
         });
         match flow.step(Instant::now(), unblocked, sent) {

@@ -104,12 +104,7 @@ impl Session {
 
 impl SharedMediaState {
     /// Like [`Self::begin_fetch`], for a page that starts at `day_number`.
-    pub fn begin_fetch_at_day(
-        &mut self,
-        tab: SharedMediaTab,
-        day_number: i64,
-        request: RequestId,
-    ) {
+    pub fn begin_fetch_at_day(&mut self, tab: SharedMediaTab, day_number: i64, request: RequestId) {
         self.begin_fetch(tab, request);
         let state = self.tab_state(tab);
         state.anchor_day = Some(day_number);

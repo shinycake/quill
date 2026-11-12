@@ -203,9 +203,7 @@ impl Session {
     /// request has replaced ignores it.
     pub(crate) fn finish_translation(&mut self, request: RequestId, result: Translation) {
         let translate = &mut self.messages.translate;
-        let is_mine = |slot: &Translation| {
-            matches!(slot, Translation::Pending { request: asked, .. } if *asked == request)
-        };
+        let is_mine = |slot: &Translation| matches!(slot, Translation::Pending { request: asked, .. } if *asked == request);
         let slot = match translate.texts.get_mut(&request) {
             Some(slot) if is_mine(slot) => Some(slot),
             _ => translate.messages.values_mut().find(|slot| is_mine(slot)),

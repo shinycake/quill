@@ -96,10 +96,7 @@ fn invite_check_confirm_cancel_and_stale_answers() {
     // Cancel clears the retained preview; a later confirmation cannot join.
     driver.session.chats_state.deep_link = None;
     let before = recorder.snapshot().len();
-    assert_eq!(
-        driver.confirm_deep_link_invite(current).unwrap(),
-        None
-    );
+    assert_eq!(driver.confirm_deep_link_invite(current).unwrap(), None);
     assert_eq!(recorder.snapshot().len(), before);
     std::fs::remove_dir_all(dir).unwrap();
 }

@@ -28,7 +28,10 @@ impl Session {
         let window_epoch = chat_id
             .and_then(|chat| self.histories.get(&chat.0))
             .map_or(0, |history| history.window_epoch);
-        let from = self.requests.get(id).and_then(PendingRequest::around_message_id);
+        let from = self
+            .requests
+            .get(id)
+            .and_then(PendingRequest::around_message_id);
         self.requests
             .correlate(id, Correlation::HistoryPage { window_epoch, from });
     }
@@ -76,7 +79,8 @@ impl Session {
         forum_topic_id: i32,
     ) -> RequestId {
         let id = self.request(purpose, chat_id);
-        self.requests.correlate(id, Correlation::ForumTopic(forum_topic_id));
+        self.requests
+            .correlate(id, Correlation::ForumTopic(forum_topic_id));
         id
     }
 
@@ -98,7 +102,8 @@ impl Session {
         supergroup_id: i64,
     ) -> RequestId {
         let id = self.request(purpose, None);
-        self.requests.correlate(id, Correlation::Supergroup(supergroup_id));
+        self.requests
+            .correlate(id, Correlation::Supergroup(supergroup_id));
         id
     }
 
@@ -111,7 +116,8 @@ impl Session {
         community_id: i64,
     ) -> RequestId {
         let id = self.request(purpose, None);
-        self.requests.correlate(id, Correlation::Community(community_id));
+        self.requests
+            .correlate(id, Correlation::Community(community_id));
         id
     }
 
@@ -156,7 +162,8 @@ impl Session {
     /// (`Correlation::user_ids`); its `ok` carries none.
     pub fn request_for_user_ids(&mut self, purpose: RequestPurpose, user_ids: &[i64]) -> RequestId {
         let id = self.request(purpose, None);
-        self.requests.correlate(id, Correlation::UserIds(user_ids.to_vec()));
+        self.requests
+            .correlate(id, Correlation::UserIds(user_ids.to_vec()));
         id
     }
 
@@ -169,7 +176,8 @@ impl Session {
         invite_link: &str,
     ) -> RequestId {
         let id = self.request(purpose, Some(chat_id));
-        self.requests.correlate(id, Correlation::InviteLink(invite_link.to_owned()));
+        self.requests
+            .correlate(id, Correlation::InviteLink(invite_link.to_owned()));
         id
     }
 
@@ -178,7 +186,8 @@ impl Session {
     /// accepts, the gift `sellGift` sells); its `ok` carries none.
     pub fn request_for_subject(&mut self, purpose: RequestPurpose, subject_id: &str) -> RequestId {
         let id = self.request(purpose, None);
-        self.requests.correlate(id, Correlation::Subject(subject_id.to_owned()));
+        self.requests
+            .correlate(id, Correlation::Subject(subject_id.to_owned()));
         id
     }
 
@@ -192,7 +201,8 @@ impl Session {
         secret_chat_id: i32,
     ) -> RequestId {
         let id = self.request(purpose, None);
-        self.requests.correlate(id, Correlation::SecretChat(secret_chat_id));
+        self.requests
+            .correlate(id, Correlation::SecretChat(secret_chat_id));
         id
     }
 

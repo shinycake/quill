@@ -376,8 +376,9 @@ fn replay_reply_to_message_quote_and_jump() {
             message_id: quill::ids::MessageId(50)
         }
     );
-    let quill::state::ChatSearchJumpNeed::LoadAround { request: around, .. } =
-        session.begin_chat_search_jump(quill::ids::MessageId(40))
+    let quill::state::ChatSearchJumpNeed::LoadAround {
+        request: around, ..
+    } = session.begin_chat_search_jump(quill::ids::MessageId(40))
     else {
         panic!("40 is outside the loaded window");
     };

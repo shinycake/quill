@@ -14,7 +14,8 @@ use quill::state::{RequestPurpose, Session, effective_preview};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{
     ChatFolderInfo, ChatFolderSpec, ChatNotificationSettings, ConnectionState, MessageContent,
-    ParsedSession, ParsedWebsite, SessionKind, StickerFormat, StickerItem, StorageFileTypeStats, StorageStats,
+    ParsedSession, ParsedWebsite, SessionKind, StickerFormat, StickerItem, StorageFileTypeStats,
+    StorageStats,
 };
 use std::collections::HashSet;
 use std::path::PathBuf;

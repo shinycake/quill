@@ -727,8 +727,9 @@ fn reply_to_message_preview_and_jump() {
         session.reply_quote_preview(quoted).as_deref(),
         Some("manual quote")
     );
-    let ChatSearchJumpNeed::LoadAround { request: around, .. } =
-        session.begin_chat_search_jump(MessageId(90))
+    let ChatSearchJumpNeed::LoadAround {
+        request: around, ..
+    } = session.begin_chat_search_jump(MessageId(90))
     else {
         panic!("90 is outside the loaded window");
     };

@@ -167,7 +167,10 @@ fn statistics_answers_of_another_request_change_nothing() {
         ),
     );
     let state = session.stories.insights.as_ref().unwrap();
-    assert_eq!(state.statistics, StoryStatsFetch::Loading { request: current });
+    assert_eq!(
+        state.statistics,
+        StoryStatsFetch::Loading { request: current }
+    );
 }
 
 #[test]

@@ -893,7 +893,10 @@ pub enum DeepLinkState {
     /// only its answer or error moves the flow. `original` is the link text
     /// a `getInternalLinkType` lookup resolves (the proxy hand-off and the
     /// web fallback need it back); empty for a `getDeepLinkInfo` lookup.
-    ResolvingInfo { request: RequestId, original: String },
+    ResolvingInfo {
+        request: RequestId,
+        original: String,
+    },
     /// `deepLinkInfo` answer parsed. The UI consumes this once: with an
     /// action it fires the follow-up request, otherwise (or when
     /// `need_update`) it shows `text` in a dialog.

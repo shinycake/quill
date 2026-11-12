@@ -102,9 +102,9 @@ impl Session {
         info: ParsedMessageThreadInfo,
         pending: Option<&PendingRequest>,
     ) {
-        let Some(pending) = pending.filter(|p| {
-            matches!(p.purpose, RequestPurpose::GetMessageThread { .. })
-        }) else {
+        let Some(pending) =
+            pending.filter(|p| matches!(p.purpose, RequestPurpose::GetMessageThread { .. }))
+        else {
             return;
         };
         for message in &info.messages {

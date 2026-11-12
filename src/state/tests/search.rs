@@ -549,8 +549,9 @@ fn chat_search_happy_empty_stale_and_jump() {
             message_id: MessageId(101)
         }
     );
-    let ChatSearchJumpNeed::LoadAround { request: around, .. } =
-        session.begin_chat_search_jump(MessageId(90))
+    let ChatSearchJumpNeed::LoadAround {
+        request: around, ..
+    } = session.begin_chat_search_jump(MessageId(90))
     else {
         panic!("90 is outside the loaded window");
     };
@@ -707,8 +708,9 @@ fn chat_search_jump_missing_deleted_and_inaccessible() {
             auto_delete: None,
             date: 0,
         });
-    let ChatSearchJumpNeed::LoadAround { request: around, .. } =
-        session.begin_chat_search_jump(MessageId(80))
+    let ChatSearchJumpNeed::LoadAround {
+        request: around, ..
+    } = session.begin_chat_search_jump(MessageId(80))
     else {
         panic!("80 is outside the loaded window");
     };
