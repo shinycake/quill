@@ -76,13 +76,13 @@ impl QuillApp {
     /// `SettingsArchiveChatListController` fetches
     /// `getArchiveChatListSettings` on open).
     pub(super) fn open_archive_settings(&mut self, cx: &mut Context<Self>) {
-        if let Some(live) = self.live.as_mut() {
-            if let Err(err) = live.driver.fetch_archive_chat_list_settings() {
-                self.set_note(StatusNote::error(user_error_for(
-                    keys::Q_NOTES_FAILED_ARCHIVE_SETTINGS,
-                    &err,
-                )));
-            }
+        if let Some(live) = self.live.as_mut()
+            && let Err(err) = live.driver.fetch_archive_chat_list_settings()
+        {
+            self.set_note(StatusNote::error(user_error_for(
+                keys::Q_NOTES_FAILED_ARCHIVE_SETTINGS,
+                &err,
+            )));
         }
         self.settings.set_box(SettingsBox::ArchiveSettings, true);
         self.open_box(DialogKind::ArchiveSettings);

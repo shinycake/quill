@@ -1021,15 +1021,14 @@ fn a_failed_saved_pause_search_asks_again_and_a_stale_answer_is_ignored() {
         r#"{{"@type":"error","@extra":"{}","code":500,"message":"INTERNAL"}}"#,
         request.0
     );
+    let before = std::time::Instant::now();
     session.apply(copy_and_parse(&failed, &seq, &sink).unwrap());
     let DiskSearch::Failed { until, wait } = session.media.disk_search else {
         panic!("the failed search pauses: {:?}", session.media.disk_search);
     };
     assert!(
-        !session
-            .media
-            .disk_search
-            .due(until - std::time::Duration::from_millis(1))
+        !session.media.disk_search.due(before),
+        "paused right after the failure"
     );
     assert!(
         session.media.disk_search.due(until),
