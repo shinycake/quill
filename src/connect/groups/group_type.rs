@@ -295,10 +295,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             .upgraded_chat_for(edit.old)
             .is_some_and(|new| self.save_group_type(new, &edit.kind, &edit.info).is_ok());
         if !saved {
-            self.session
-                .chats_state
-                .chat_action_error
-                .push("the group was upgraded, but its link could not be saved".to_string());
+            self.session.chats_state.chat_action_error.push(
+                crate::lang::tr(crate::lang::keys::Q_GROUP_UPGRADED_LINK_NOT_SAVED).to_string(),
+            );
         }
     }
 }

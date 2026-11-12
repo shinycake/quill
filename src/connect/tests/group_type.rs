@@ -386,7 +386,12 @@ fn queued_edits_without_an_upgraded_chat_are_reported() {
         kind: Vec::new(),
     };
     rig.driver.run_edit_after_upgrade(edit, true);
-    assert!(!rig.driver.session.chats_state.chat_action_error.is_empty());
+    assert_eq!(
+        rig.driver.session.chats_state.chat_action_error.last(),
+        Some(crate::lang::tr(
+            crate::lang::keys::Q_GROUP_UPGRADED_LINK_NOT_SAVED
+        ))
+    );
 }
 
 /// r4-02: an upgrade that is lost (or out at logout) takes its waiting save

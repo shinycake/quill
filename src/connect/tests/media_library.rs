@@ -730,3 +730,42 @@ fn an_accepted_reaction_stays_on_the_bubble() {
     h.ingest(&format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0));
     assert!(shows_reaction(&h, "👍"));
 }
+
+fn custom_emoji_asks(h: &Harness) -> Vec<Value> {
+    h.sent("getInstalledStickerSets")
+        .into_iter()
+        .filter(|v| v["sticker_type"]["@type"] == "stickerTypeCustomEmoji")
+        .collect()
+}
+
+fn answer_custom_emoji_empty(h: &mut Harness) {
+    let ask = custom_emoji_asks(h).pop().unwrap();
+    let extra = Harness::extra_of(&ask);
+    h.ingest(&format!(
+        r#"{{"@type":"stickerSets","@extra":"{}","total_count":0,"sets":[]}}"#,
+        extra.0
+    ));
+}
+
+/// An installed list answered as empty is a held answer, not a list to ask
+/// for again each time the panel or the message menu opens.
+#[test]
+fn an_empty_custom_emoji_answer_is_not_asked_again_on_reopen() {
+    let mut h = Harness::ready();
+    h.driver.open_media_panel().unwrap();
+    answer_custom_emoji_empty(&mut h);
+    h.driver.open_media_panel().unwrap();
+    h.driver.fetch_sticker_menu_facts().unwrap();
+    assert_eq!(custom_emoji_asks(&h).len(), 1);
+}
+
+/// A set added on the phone after an empty answer reaches the panel even
+/// while the Emoji Sets box is closed.
+#[test]
+fn a_set_added_after_an_empty_answer_is_asked_for() {
+    let mut h = Harness::ready();
+    h.driver.open_media_panel().unwrap();
+    answer_custom_emoji_empty(&mut h);
+    h.ingest(r#"{"@type":"updateInstalledStickerSets","sticker_type":{"@type":"stickerTypeCustomEmoji"},"sticker_set_ids":["7"]}"#);
+    assert_eq!(custom_emoji_asks(&h).len(), 2);
+}

@@ -80,12 +80,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         // A send that never left lands in `Failed` (drawn with Retry), not
         // back in `Idle`, which a page draws as a spinner and asks again.
-        if sent.is_err() {
+        if let Err(err) = &sent {
             self.session
                 .settings
                 .business_extra
                 .chat_links
-                .fail("The chat links request was not sent.");
+                .fail(err.stage_line());
         }
         sent.map(|_| ())
     }
@@ -195,12 +195,12 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .connected_bot
                 .sent(extra);
         }
-        if sent.is_err() {
+        if let Err(err) = &sent {
             self.session
                 .settings
                 .business_extra
                 .connected_bot
-                .fail("The chatbot request was not sent.");
+                .fail(err.stage_line());
         }
         sent.map(|_| ())
     }

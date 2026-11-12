@@ -92,9 +92,9 @@ impl Session {
             Some(RequestPurpose::CanTransferOwnership) => {
                 self.groups.ownership.check.failed(
                     pending.map(|p| p.id),
-                    format!(
-                        "Could not check whether you can transfer ownership: {}",
-                        error_reason(err)
+                    crate::lang::tr_with(
+                        crate::lang::keys::Q_GROUP_OWNERSHIP_CHECK_FAILED,
+                        &[("reason", error_reason(err).as_str())],
                     ),
                     true,
                 );
@@ -190,10 +190,12 @@ impl Session {
                 | RequestPurpose::SetChatDiscussionGroup
                 | RequestPurpose::UpgradeBasicGroup,
             ) => {
-                self.chats_state.chat_action_error.push(format!(
-                    "could not change the group setting (error {})",
-                    err.code
-                ));
+                self.chats_state
+                    .chat_action_error
+                    .push(crate::lang::tr_with(
+                        crate::lang::keys::Q_GROUP_SETTING_CHANGE_FAILED,
+                        &[("code", err.code.to_string().as_str())],
+                    ));
             }
             Some(
                 RequestPurpose::SetSupergroupStickerSet

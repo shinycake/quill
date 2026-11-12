@@ -632,12 +632,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             None,
         );
         self.session.payments.gifts_manage.send.premium_fetch = GiftListFetch::Asking(extra);
-        if self
-            .send_json_request(extra, &rq::get_premium_gift_payment_options(extra))
-            .is_err()
+        if let Err(err) =
+            self.send_json_request(extra, &rq::get_premium_gift_payment_options(extra))
         {
             self.session.payments.gifts_manage.send.premium_fetch =
-                GiftListFetch::Failed("Couldn't load the Premium options.".into());
+                GiftListFetch::Failed(err.stage_line());
         }
     }
 

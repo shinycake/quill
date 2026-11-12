@@ -39,3 +39,28 @@ fn a_refused_forum_topic_icons_send_shows_the_send_line() {
         Some(no_connection().as_str())
     );
 }
+
+#[test]
+fn a_refused_chat_links_and_chatbot_send_show_the_send_line() {
+    let mut t = Flaky::new();
+    t.sender
+        .refuse(&["getBusinessChatLinks", "getBusinessConnectedBot"]);
+    assert!(t.driver.ensure_chat_links().is_err());
+    assert!(t.driver.ensure_connected_bot().is_err());
+    let b = &t.driver.session.settings.business_extra;
+    assert_eq!(b.chat_links.error(), Some(no_connection().as_str()));
+    assert_eq!(b.connected_bot.error(), Some(no_connection().as_str()));
+}
+
+#[test]
+fn a_refused_premium_options_send_shows_the_send_line() {
+    use crate::gift_manage::GiftListFetch;
+    let mut t = Flaky::new();
+    t.feed(serde_json::json!({"@type":"updateNewChat","chat":{"id":21,"title":"Ann","type":{"@type":"chatTypePrivate","user_id":21},"unread_count":0}}));
+    t.sender.refuse(&["getPremiumGiftPaymentOptions"]);
+    let _ = t.driver.open_send_gift(crate::ids::ChatId(21));
+    assert_eq!(
+        t.driver.session.payments.gifts_manage.send.premium_fetch,
+        GiftListFetch::Failed(no_connection())
+    );
+}

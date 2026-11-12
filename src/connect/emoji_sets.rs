@@ -648,14 +648,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.drop_request(asked);
         self.session.stickers.emoji.lists.installed.cancel();
         let installed_wanted = was_asking
-            || !self
-                .session
-                .stickers
-                .emoji
-                .lists
-                .installed
-                .items()
-                .is_empty()
+            || !self.session.stickers.emoji.lists.installed.is_idle()
             || self.session.stickers.emoji.open;
         let lists = &mut self.session.stickers.emoji.lists;
         let asked = [lists.search.request(), lists.trending.request()];
