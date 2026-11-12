@@ -226,8 +226,6 @@ on_screen_fields! {
     location_ui: super::location_picker::state::LocationPickerUi,
     /// The AI compose box, its style editor and preview (`ui/ai_compose_state.rs`).
     ai_compose: super::ai_compose_state::AiComposeUi,
-    /// The cached files folder and message database size read for this account (`ui/disk_state.rs`).
-    account_files: super::disk_state::AccountFilesUi,
     /// The settings window: its pages, search and the boxes they open (`ui/settings_state.rs`).
     settings: super::settings_state::SettingsUi,
     /// The boxes around 1:1 calls: confirm, dialing, the microphone test, Add People (`ui/calls_state.rs`).
@@ -387,7 +385,6 @@ impl OnScreen {
             premium_preview: Default::default(),
             location_ui: Default::default(),
             ai_compose: super::ai_compose_state::AiComposeUi::new(window, cx),
-            account_files: super::disk_state::AccountFilesUi::default(),
             settings: super::settings_state::SettingsUi::new(cx),
             call_boxes: super::calls_state::CallBoxes::new(),
             translate: Default::default(),

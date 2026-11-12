@@ -244,6 +244,7 @@ impl QuillApp {
             |this, deletion, cx| match deletion {
                 Deletion::Done { error: None } => {
                     this.background.local = LocalData::Swept;
+                    this.disk_accounts_wiped();
                     this.start_connection(cx);
                 }
                 // Nothing opens in this run (a folder that is not gone would

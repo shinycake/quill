@@ -532,7 +532,7 @@ fn a_reading_for_another_account_is_not_kept(cx: &mut TestAppContext) {
         .expect("an account on screen");
     let other = AccountKey("second".into());
     let bytes = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
-        app.read_with(vcx, |app, _| app.account_files.database_bytes())
+        app.read_with(vcx, |app, _| app.database_bytes())
     };
     app.update_in(&mut vcx, |app, _, cx| {
         app.note_account_files(files(&other, 7 << 20), cx)
