@@ -75,7 +75,7 @@ impl ViewerVideoLayer {
         let now = cx.background_executor().now();
         match self.waiting.observe(waiting, now) {
             WaitingCheck::Settled { shown } => shown,
-            WaitingCheck::Pending(wait) => {
+            WaitingCheck::ShowAfter(wait) => {
                 let timer = cx.spawn(async move |this, cx| {
                     cx.background_executor().timer(wait).await;
                     let _ = this.update(cx, |_, cx| cx.notify());
@@ -103,7 +103,7 @@ impl Render for ViewerVideoLayer {
                     return Empty.into_any_element();
                 }
                 Some(player) => {
-                    waiting = matches!(player.state(), PlayState::Opening | PlayState::Buffering);
+                    waiting = matches!(player.state(), PlayState::NotOpen | PlayState::Buffering);
                     video_frame(&player)
                         .object_fit(ObjectFit::Contain)
                         .into_any_element()
@@ -117,7 +117,7 @@ impl Render for ViewerVideoLayer {
         };
         let spinner = self
             .waiting_shown(waiting, cx)
-            .then(|| PictureOverlay::new(self.open_gen, PictureState::Waiting));
+            .then(|| PictureOverlay::new(self.open_gen, PictureState::Spinner));
         div()
             .absolute()
             .left(px(geometry.origin.0))

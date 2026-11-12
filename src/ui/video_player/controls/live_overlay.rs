@@ -52,7 +52,7 @@ pub(crate) enum LiveOverlay {
     /// The picture plays (or the sender has no video): nothing.
     None,
     /// No picture yet: the placeholder, and the spinner past its delay.
-    Opening {
+    Placeholder {
         spinner: bool,
     },
     /// Stalled: the picture dimmed with the spinner, and "Connecting…"
@@ -71,7 +71,8 @@ pub(crate) enum LiveOverlay {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Phase {
     None,
-    Opening,
+    /// No picture yet (the player is not open, or nothing came).
+    NoPicture,
     Stalled,
     Paused,
     Idle,
@@ -95,7 +96,7 @@ fn phase(input: LiveInput) -> Phase {
         return Phase::Idle;
     }
     match state {
-        None | Some(PlayState::Opening) => Phase::Opening,
+        None | Some(PlayState::NotOpen) => Phase::NoPicture,
         Some(PlayState::Buffering) => Phase::Stalled,
         Some(PlayState::Paused) => Phase::Paused,
         Some(PlayState::Ready | PlayState::Playing) => Phase::None,
@@ -109,12 +110,12 @@ fn phase(input: LiveInput) -> Phase {
 fn overlay_at(phase: Phase, elapsed: Duration) -> (LiveOverlay, Option<Duration>) {
     match phase {
         Phase::None => (LiveOverlay::None, None),
-        Phase::Opening => {
+        Phase::NoPicture => {
             let left = OPENING_SPINNER
                 .checked_sub(elapsed)
                 .filter(|d| !d.is_zero());
             (
-                LiveOverlay::Opening {
+                LiveOverlay::Placeholder {
                     spinner: left.is_none(),
                 },
                 left,
@@ -197,16 +198,16 @@ mod tests {
         let t0 = Instant::now();
         let mut clock = LiveOverlayClock::default();
         let (overlay, due) = clock.observe(input(None), t0);
-        assert_eq!(overlay, LiveOverlay::Opening { spinner: false });
+        assert_eq!(overlay, LiveOverlay::Placeholder { spinner: false });
         assert_eq!(due, Some(t0 + OPENING_SPINNER));
         // The player arrives, still opening: the same phase, same clock.
         let (overlay, _) = clock.observe(
-            input(Some(PlayState::Opening)),
+            input(Some(PlayState::NotOpen)),
             t0 + Duration::from_millis(499),
         );
-        assert_eq!(overlay, LiveOverlay::Opening { spinner: false });
-        let (overlay, due) = clock.observe(input(Some(PlayState::Opening)), t0 + OPENING_SPINNER);
-        assert_eq!(overlay, LiveOverlay::Opening { spinner: true });
+        assert_eq!(overlay, LiveOverlay::Placeholder { spinner: false });
+        let (overlay, due) = clock.observe(input(Some(PlayState::NotOpen)), t0 + OPENING_SPINNER);
+        assert_eq!(overlay, LiveOverlay::Placeholder { spinner: true });
         assert_eq!(due, None);
         // The first frame: nothing over the picture.
         let (overlay, _) = clock.observe(input(Some(PlayState::Playing)), t0 + OPENING_SPINNER);

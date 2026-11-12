@@ -32,8 +32,6 @@ poll:QuillApp::start_mic_test 1
 poll:QuillApp::stealth_box_tick 1
 poll:QuillApp::sync_qr_clock 1
 poll:QuillApp::with_device_access 1
-poll:VideoPlayer::spawn_open_poll 1
-poll:first_picture 2
 poll:poll_answer_unless 1
 poll:scan 1
 poll:spawn_menu_sync 1

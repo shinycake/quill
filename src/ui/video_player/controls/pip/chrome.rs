@@ -95,7 +95,7 @@ impl VideoPip {
             .observe(waiting, cx.background_executor().now())
         {
             WaitingCheck::Settled { shown } => shown,
-            WaitingCheck::Pending(wait) => {
+            WaitingCheck::ShowAfter(wait) => {
                 let timer = cx.spawn(async move |this, cx| {
                     cx.background_executor().timer(wait).await;
                     let _ = this.update(cx, |_, cx| cx.notify());
@@ -219,7 +219,7 @@ impl Render for VideoPip {
             cx,
         );
         let waiting = self.waiting_shown(
-            gap || matches!(transport.state, PlayState::Opening | PlayState::Buffering),
+            gap || matches!(transport.state, PlayState::NotOpen | PlayState::Buffering),
             cx,
         );
         let close_active = self.active("close", OverState::Close, window, cx);

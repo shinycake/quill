@@ -184,7 +184,7 @@ fn calls(script: &Rc<RefCell<Script>>) -> Vec<String> {
 fn play_waits_for_the_open_then_starts_the_backend() {
     let (player, script) = scripted(false);
     player.play();
-    assert_eq!(player.state(), PlayState::Opening);
+    assert_eq!(player.state(), PlayState::NotOpen);
     assert!(calls(&script).is_empty());
     // Opening wants pictures every frame, until the first one comes.
     assert!(player.frame_demand(Instant::now()).animates);
@@ -630,7 +630,7 @@ mod viewer {
         app.read_with(vcx, |app, _| {
             assert!(app.viewer.state.is_open());
             let transport = app.viewer_transport().expect("a player for the clip");
-            assert_eq!(transport.state, PlayState::Opening);
+            assert_eq!(transport.state, PlayState::NotOpen);
             assert_eq!(transport.duration, Some(10.0));
             assert!(app.viewer.video_layer.is_some(), "the video layer is drawn");
         });

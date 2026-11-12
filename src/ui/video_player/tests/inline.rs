@@ -344,7 +344,7 @@ fn a_story_paused_while_its_clip_opens_does_not_start_once_open(cx: &mut TestApp
     let script = Rc::new(RefCell::new(Script::default()));
     let player = VideoPlayer::from_backend(Box::new(Scripted(script.clone())), Some(10.0));
     player.play();
-    assert_eq!(player.state(), PlayState::Opening);
+    assert_eq!(player.state(), PlayState::NotOpen);
     let story_player = player.clone();
     app.update_in(vcx, |app, _, _| {
         app.stories.video = crate::ui::story_video_state::StoryVideo::Playing {

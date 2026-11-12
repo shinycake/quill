@@ -30,11 +30,11 @@ fn the_waiting_gate_waits_half_a_second() {
     // A stall begins: wait out the rest of the delay.
     assert_eq!(
         gate.observe(true, ms(100)),
-        WaitingCheck::Pending(Duration::from_millis(500))
+        WaitingCheck::ShowAfter(Duration::from_millis(500))
     );
     assert_eq!(
         gate.observe(true, ms(300)),
-        WaitingCheck::Pending(Duration::from_millis(300))
+        WaitingCheck::ShowAfter(Duration::from_millis(300))
     );
     // A short stall that ends never shows anything.
     assert_eq!(
@@ -43,7 +43,7 @@ fn the_waiting_gate_waits_half_a_second() {
     );
     assert_eq!(
         gate.observe(true, ms(1000)),
-        WaitingCheck::Pending(Duration::from_millis(500))
+        WaitingCheck::ShowAfter(Duration::from_millis(500))
     );
     assert_eq!(
         gate.observe(true, ms(1500)),
@@ -161,12 +161,12 @@ mod ui {
             let boosted = self.controls.boost.is_active();
             let waiting = matches!(
                 self.transport.state,
-                PlayState::Opening | PlayState::Buffering
+                PlayState::NotOpen | PlayState::Buffering
             );
             let now = cx.background_executor().now();
             let shown = match self.gate.observe(waiting, now) {
                 WaitingCheck::Settled { shown } => shown,
-                WaitingCheck::Pending(wait) => {
+                WaitingCheck::ShowAfter(wait) => {
                     let timer = cx.spawn(async move |this, cx| {
                         cx.background_executor().timer(wait).await;
                         let _ = this.update(cx, |_, cx| cx.notify());
@@ -181,7 +181,7 @@ mod ui {
                     open: Some(Rc::new(|_, _| {})),
                 })
             } else {
-                shown.then_some(PictureState::Waiting)
+                shown.then_some(PictureState::Spinner)
             };
             div()
                 .size_full()

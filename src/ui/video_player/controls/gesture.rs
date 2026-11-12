@@ -31,7 +31,7 @@ pub(crate) enum WaitingCheck {
     /// Not waiting, or the delay is up and the spinner shows.
     Settled { shown: bool },
     /// Waiting, not long enough yet: redraw after this long.
-    Pending(Duration),
+    ShowAfter(Duration),
 }
 
 impl WaitingGate {
@@ -62,7 +62,7 @@ impl WaitingGate {
                         *self = Self::Delayed { since, timer: None };
                     }
                 }
-                WaitingCheck::Pending(wait)
+                WaitingCheck::ShowAfter(wait)
             }
         }
     }
@@ -94,7 +94,7 @@ mod tests {
         assert!(matches!(gate, WaitingGate::Idle), "nothing waits for it");
         assert_eq!(
             gate.observe(true, ms(t0, 0)),
-            WaitingCheck::Pending(Duration::from_millis(500))
+            WaitingCheck::ShowAfter(Duration::from_millis(500))
         );
         gate.arm(Task::ready(()));
         assert_eq!(

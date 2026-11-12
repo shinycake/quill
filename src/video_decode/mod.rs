@@ -622,11 +622,29 @@ impl Drop for AudioTap {
 struct Shared {
     state: Mutex<State>,
     wake: Condvar,
+    /// Notified when the open ends, a picture is queued or decoding fails:
+    /// what [`Player::wait_open`] and [`Player::wait_frame`] sleep on.
+    progress: Condvar,
+}
+
+impl Shared {
+    /// The open ended (the file is open, or opening failed or the thread
+    /// died): run the wakes waiting for it, outside the lock.
+    fn open_settled(&self) {
+        let wakes = std::mem::take(&mut lock(&self.state).open_wakes);
+        self.progress.notify_all();
+        for wake in wakes {
+            wake();
+        }
+    }
 }
 
 #[derive(Default)]
 struct State {
     info: Option<MediaInfo>,
+    /// Called once when the file is open or could not be opened
+    /// ([`Player::on_open`]).
+    open_wakes: Vec<Box<dyn FnOnce() + Send>>,
     /// The sound, once the file is open and has some (and it was asked for).
     audio: Option<Arc<AudioShared>>,
     /// Its output end, until the player hands it out.
@@ -674,6 +692,7 @@ impl Drop for ExitReport {
         // Outside the lock: the tap's drop locks it again.
         drop(tap);
         drop(audio);
+        self.0.open_settled();
     }
 }
 
@@ -720,6 +739,7 @@ impl Player {
                 ..State::default()
             }),
             wake: Condvar::new(),
+            progress: Condvar::new(),
         });
         let thread_shared = shared.clone();
         let want_audio = options.want_audio;
@@ -732,8 +752,8 @@ impl Player {
             match opener() {
                 Ok(demuxer) => decode_loop::run(demuxer, thread_shared, want_audio),
                 Err(err) => {
-                    let mut state = lock(&thread_shared.state);
-                    state.decoding.fail(err);
+                    lock(&thread_shared.state).decoding.fail(err);
+                    thread_shared.open_settled();
                 }
             }
         })
@@ -769,6 +789,51 @@ impl Player {
     fn with_clock(&self, change: impl FnOnce(&mut Clock)) {
         change(&mut lock(&self.shared.state).clock);
         self.shared.wake.notify_all();
+    }
+
+    /// Run `wake` once the file is open or could not be opened (at once
+    /// when that already happened). It runs on the decode thread, so it
+    /// must only signal.
+    pub fn on_open(&self, wake: impl FnOnce() + Send + 'static) {
+        let mut state = lock(&self.shared.state);
+        if state.info.is_none() && state.decoding.error().is_none() {
+            state.open_wakes.push(Box::new(wake));
+            return;
+        }
+        drop(state);
+        wake();
+    }
+
+    /// Sleep until the file is open or failed to open, or `deadline`
+    /// passes (tests and screenshot captures; never the UI thread).
+    pub fn wait_open(&self, deadline: Instant) {
+        self.sleep_while(deadline, |state| {
+            state.info.is_none() && state.decoding.error().is_none()
+        });
+    }
+
+    /// Sleep until a picture is queued or decoding failed, or `deadline`
+    /// passes (tests and screenshot captures; never the UI thread).
+    pub fn wait_frame(&self, deadline: Instant) {
+        self.sleep_while(deadline, |state| {
+            state.video.is_empty() && state.decoding.error().is_none()
+        });
+    }
+
+    fn sleep_while(&self, deadline: Instant, mut waiting: impl FnMut(&State) -> bool) {
+        let mut state = lock(&self.shared.state);
+        while waiting(&state) {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return;
+            }
+            state = self
+                .shared
+                .progress
+                .wait_timeout(state, left)
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .0;
+        }
     }
 
     /// What the file holds, once the decode thread has opened it.

@@ -835,3 +835,29 @@ fn a_silent_clip_has_no_detached_sound() {
     assert!(player.take_audio_tap().is_none());
     assert!(!player.sound_detached());
 }
+
+#[test]
+fn a_wake_registered_before_the_open_runs_when_the_file_opens() {
+    let (player, _calls) = scripted_player(None, false, 3);
+    let (opened, heard) = std::sync::mpsc::channel();
+    player.on_open(move || {
+        let _ = opened.send(());
+    });
+    assert!(wait_until(|| heard.try_recv().is_ok()));
+    // After the open it runs at once, on the caller's thread.
+    let (late, heard_late) = std::sync::mpsc::channel();
+    player.on_open(move || {
+        let _ = late.send(());
+    });
+    assert!(heard_late.try_recv().is_ok());
+}
+
+#[test]
+fn waiting_for_the_open_and_the_first_picture_returns_when_they_come() {
+    let (mut player, _calls) = scripted_player(None, false, 3);
+    let deadline = Instant::now() + Duration::from_secs(60);
+    player.wait_open(deadline);
+    assert!(player.info().is_some());
+    player.wait_frame(deadline);
+    assert!(player.take_frame().is_some());
+}

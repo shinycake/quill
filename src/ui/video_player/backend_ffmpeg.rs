@@ -263,6 +263,11 @@ fn elapsed_us(since: Instant) -> u32 {
 }
 
 impl Backend for FfmpegBackend {
+    fn on_open(&mut self, wake: Box<dyn FnOnce() + Send>) -> bool {
+        self.player.on_open(wake);
+        true
+    }
+
     fn status(&mut self) -> BackendStatus {
         self.attach_sound();
         let info = self.player.info();
@@ -448,24 +453,15 @@ pub(super) fn render_image(frame: VideoFrame, pool: &BgraPool) -> Option<Arc<Ren
 /// picture there: the still a screenshot capture shows.
 #[cfg(feature = "demo-capture")]
 pub(super) fn first_picture(path: &Path, at: f64) -> Option<(VideoFrame, Option<f64>)> {
-    let mut player = Player::open(path, OpenOptions::viewer()).ok()?;
     let deadline = Instant::now() + std::time::Duration::from_secs(2);
-    while player.info().is_none() && player.error().is_none() && Instant::now() < deadline {
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
+    let mut player = Player::open(path, OpenOptions::viewer()).ok()?;
+    player.wait_open(deadline);
     if at > 0.0 {
         player.seek(at);
     }
-    while Instant::now() < deadline {
-        if let Some(frame) = player.take_frame() {
-            return Some((frame, player.duration()));
-        }
-        if player.error().is_some() {
-            return None;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
-    None
+    player.wait_frame(deadline);
+    let frame = player.take_frame()?;
+    Some((frame, player.duration()))
 }
 
 #[cfg(test)]

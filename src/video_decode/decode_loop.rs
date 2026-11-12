@@ -111,6 +111,7 @@ impl Decoder {
         }
         state.info = Some(info);
         drop(state);
+        shared.open_settled();
         Self {
             demuxer,
             has_video,
@@ -176,6 +177,7 @@ impl Decoder {
             Ok(Some(Item::Video(frame))) => {
                 if self.has_video {
                     state.video.push_back(frame);
+                    shared.progress.notify_all();
                 }
             }
             Ok(Some(Item::Audio(chunk))) => {
@@ -188,11 +190,15 @@ impl Decoder {
             Ok(None) => {
                 if self.has_video && !self.decoded_a_picture {
                     state.decoding.fail("The video has no pictures".to_string());
+                    shared.progress.notify_all();
                 } else {
                     state.decoding.end();
                 }
             }
-            Err(err) => state.decoding.fail(err),
+            Err(err) => {
+                state.decoding.fail(err);
+                shared.progress.notify_all();
+            }
         }
         Turn::Worked
     }

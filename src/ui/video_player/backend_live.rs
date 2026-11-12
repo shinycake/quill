@@ -700,7 +700,7 @@ impl VideoPlayer {
         let backend = Box::new(LiveBackend { core: core.clone() });
         let player = Self::from_live(backend, core.clone());
         let task = spawn_waker(Rc::downgrade(&core), Rc::downgrade(&player.0), sink, cx);
-        player.with_inner(|inner| inner._poll = Some(task));
+        player.with_inner(|inner| inner._waker = Some(task));
         player
     }
 

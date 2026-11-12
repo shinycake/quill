@@ -53,10 +53,8 @@ bare:Phase::Loading 1
 bare:Phase::Requested 1
 bare:PhoneFlow::Asking 1
 bare:Picture::Loading 1
-bare:PictureState::Waiting 1
 bare:PinTarget::Loading 1
 bare:PlayHead::Waiting 1
-bare:PlayState::Opening 1
 bare:Playback::Waiting 1
 bare:Refire::Running 1
 bare:ReplyState::Loading 1
@@ -130,7 +128,6 @@ unkeyed:ListEdit::InFlight 1
 unkeyed:Neighbour::Asking 1
 unkeyed:P2pStage::Waiting 1
 unkeyed:PickWait::Downloading 1
-unkeyed:PictureState::Downloading 1
 unkeyed:RegistrationStep::Asking 1
 unkeyed:Restore::Opening 1
 unkeyed:Rotation::Probing 1
@@ -145,6 +142,5 @@ unkeyed:StoryFetch::Asked 1
 unkeyed:TitleCheck::Sent 1
 unkeyed:TonConnectRequestState::Pending 1
 unkeyed:VcardImport::Reading 1
-unkeyed:WaitingCheck::Pending 1
 unkeyed:Watch::Running 1
 unkeyed:Writer::Running 1

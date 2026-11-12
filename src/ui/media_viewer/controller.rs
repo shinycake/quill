@@ -147,7 +147,7 @@ impl QuillApp {
                 let progress = files
                     .get(&play_id.0)
                     .and_then(|file| file.download_progress());
-                PictureState::Downloading {
+                PictureState::Progress {
                     progress,
                     on_cancel: Rc::new(move |_, cx| {
                         let _ = view.update(cx, |this, cx| {
@@ -172,7 +172,7 @@ impl QuillApp {
                 }
             }
         } else if !layered && self.viewer_waiting_shown(cx) {
-            PictureState::Waiting
+            PictureState::Spinner
         } else {
             return None;
         };
@@ -183,12 +183,12 @@ impl QuillApp {
     /// spinner, arming a redraw for when it will have.
     fn viewer_waiting_shown(&mut self, cx: &mut Context<Self>) -> bool {
         let waiting = self.viewer.clip.player().is_some_and(|player| {
-            matches!(player.state(), PlayState::Opening | PlayState::Buffering)
+            matches!(player.state(), PlayState::NotOpen | PlayState::Buffering)
         });
         let now = cx.background_executor().now();
         match self.viewer.controls.waiting.observe(waiting, now) {
             WaitingCheck::Settled { shown } => shown,
-            WaitingCheck::Pending(wait) => {
+            WaitingCheck::ShowAfter(wait) => {
                 let timer = cx.spawn(async move |this, cx| {
                     cx.background_executor().timer(wait).await;
                     let _ = this.update(cx, |_, cx| cx.notify());

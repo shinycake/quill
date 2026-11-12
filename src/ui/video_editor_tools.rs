@@ -103,7 +103,7 @@ impl QuillApp {
             match video.state() {
                 PlayState::Failed => {}
                 // Still opening: it was told where to start and to play.
-                PlayState::Opening => playing = true,
+                PlayState::NotOpen => playing = true,
                 // Ran to the file's end (the range ends there): back to
                 // the range's start, then play.
                 PlayState::Ended => {

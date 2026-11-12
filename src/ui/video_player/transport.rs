@@ -14,8 +14,9 @@ use std::time::{Duration, Instant};
 /// Where playback is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PlayState {
-    /// The backend is still opening the file.
-    Opening,
+    /// The backend is still opening the file. (Mirrors the backend's
+    /// state, which the player polls; nothing is held here.)
+    NotOpen,
     /// Open and showing its first picture, not playing yet.
     Ready,
     Playing,
@@ -99,7 +100,7 @@ impl PlayState {
     /// request.
     pub(crate) fn awaits_picture(self, waited: Duration) -> bool {
         waited
-            < if self == PlayState::Opening {
+            < if self == PlayState::NotOpen {
                 OPEN_FRAME_WAIT
             } else {
                 AWAIT_PICTURE
@@ -312,7 +313,7 @@ pub(crate) struct TransportMachine {
 impl TransportMachine {
     pub(crate) fn new(fallback_duration: Option<f64>, now: Instant) -> Self {
         Self {
-            stage: Stage::At(PlayState::Opening, Intent::Pause),
+            stage: Stage::At(PlayState::NotOpen, Intent::Pause),
             looping: false,
             position: 0.0,
             pulled_at: now,
@@ -411,7 +412,7 @@ impl TransportMachine {
         }
         self.stage = self.stage.wanting(Intent::Play);
         match self.state() {
-            PlayState::Opening | PlayState::Failed => PlayStart::Later,
+            PlayState::NotOpen | PlayState::Failed => PlayStart::Later,
             PlayState::Ended => {
                 self.position = 0.0;
                 self.pulled_at = now;
@@ -523,7 +524,7 @@ impl TransportMachine {
         }
         self.buffered = merge_ranges(status.buffered.clone());
         self.has_sound = status.has_sound;
-        if self.state() == PlayState::Opening {
+        if self.state() == PlayState::NotOpen {
             // Still not open: nothing more to take in.
             flow?;
             self.position = status.position.max(0.0);
@@ -591,7 +592,7 @@ impl TransportMachine {
             (FeedEnd::Ended, _) => PlayState::Ended,
             (FeedEnd::Live, Some(LiveState::Paused)) => PlayState::Paused,
             (FeedEnd::Live, Some(LiveState::Inactive)) => PlayState::Ready,
-            (FeedEnd::Live, _) if !status.has_frame => PlayState::Opening,
+            (FeedEnd::Live, _) if !status.has_frame => PlayState::NotOpen,
             (FeedEnd::Live, _) if status.stalled => PlayState::Buffering,
             (FeedEnd::Live, _) => PlayState::Playing,
         };
@@ -682,7 +683,7 @@ mod tests {
     fn opens_then_plays_buffers_and_ends() {
         let t0 = Instant::now();
         let mut machine = TransportMachine::new(Some(9.0), t0);
-        assert_eq!(machine.state(), PlayState::Opening);
+        assert_eq!(machine.state(), PlayState::NotOpen);
         assert_eq!(machine.duration(), Some(9.0));
         // Play before the file is open: it starts once ready.
         assert_eq!(machine.play(t0), PlayStart::Later);
