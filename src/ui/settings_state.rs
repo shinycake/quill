@@ -32,10 +32,8 @@ pub(crate) struct SettingsUi {
     /// window's photo editor): the close commits them from any window.
     pub(super) sticker_manager: super::stickers_manager::StickersManagerUi,
     pub(super) storage_scroll: super::dialogs::data_storage::StorageScroll,
-    /// Slice S4: the Data & Storage per-network editor — the network
-    /// being edited plus its draft settings (saved or discarded
-    /// explicitly, never applied optimistically).
-    pub(super) data_storage_editor: super::dialogs::storage_editor::StorageEditor,
+    /// The automatic media download box open over Data and storage.
+    pub(super) auto_download_editor: super::dialogs::auto_download::AutoDownloadEditor,
     /// Slice S4: the "Clear cache" button is awaiting its second,
     /// confirming tap.
     pub(super) storage_confirm: Option<StorageClear>,
@@ -138,7 +136,7 @@ impl SettingsUi {
             focus: cx.focus_handle(),
             sticker_manager: Default::default(),
             storage_scroll: super::dialogs::data_storage::StorageScroll::new(),
-            data_storage_editor: Default::default(),
+            auto_download_editor: Default::default(),
             storage_confirm: None,
             storage_selected: Default::default(),
             proxy: Default::default(),

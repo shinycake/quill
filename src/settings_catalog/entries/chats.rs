@@ -108,14 +108,4 @@ pub(super) const ENTRIES: &[Entry] = &[
     Entry::new("chats.dictionaries", P, keys::SETTINGS_MANAGE_DICTIONARIES)
         .section(keys::Q_PREFS_SPELLING)
         .keywords(&["hunspell", "download"]),
-    Entry::new("chats.data_saver", P, keys::Q_PREFS_DATA_SAVER)
-        .section(keys::Q_OPS_AUTOMATIC_DOWNLOADS)
-        .keywords(&["low data", "pause downloads"]),
-    Entry::new(
-        "chats.auto_download_chat_types",
-        P,
-        keys::Q_PREFS_AUTO_DOWNLOAD,
-    )
-    .section(keys::Q_OPS_AUTOMATIC_DOWNLOADS)
-    .keywords(&["private", "groups", "channels", "gifs", "music"]),
 ];

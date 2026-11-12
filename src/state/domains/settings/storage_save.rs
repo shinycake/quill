@@ -1,8 +1,6 @@
 //! Data & Storage saves: which one failed, and which answers an editor waits
 //! for. A failure belongs to the kind of save that failed, so a later `ok`
 //! of another request never wipes it.
-use super::state::AutoDownloadAnswer;
-use crate::ids::RequestId;
 
 /// What a Data & Storage save was for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,44 +51,5 @@ impl StorageSaveFailures {
     /// The oldest failure held, for the overview's line.
     pub fn error(&self) -> Option<&str> {
         self.lines.first().map(|(_, line)| line.as_str())
-    }
-}
-
-/// The answers of `setAutoDownloadSettings` requests nobody took yet. An
-/// editor takes the one for its own request; several saves in flight (the
-/// less-data toggle sends three) never overwrite each other.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct AutoDownloadAnswers {
-    answers: Vec<AutoDownloadAnswer>,
-}
-
-/// More answers than any page has requests out: the oldest are dropped.
-const KEPT_ANSWERS: usize = 16;
-
-impl AutoDownloadAnswers {
-    pub fn push(&mut self, answer: AutoDownloadAnswer) {
-        if self.answers.len() >= KEPT_ANSWERS {
-            self.answers.remove(0);
-        }
-        self.answers.push(answer);
-    }
-
-    /// The answer to `request`, handed over once.
-    pub fn take(&mut self, request: RequestId) -> Option<AutoDownloadAnswer> {
-        let at = self.answers.iter().position(|answer| match answer {
-            AutoDownloadAnswer::Saved(id) | AutoDownloadAnswer::Refused(id) => *id == request,
-        })?;
-        Some(self.answers.remove(at))
-    }
-
-    /// The answer to `request`, left in place.
-    pub fn peek(&self, request: RequestId) -> Option<AutoDownloadAnswer> {
-        self.answers.iter().copied().find(|answer| match answer {
-            AutoDownloadAnswer::Saved(id) | AutoDownloadAnswer::Refused(id) => *id == request,
-        })
-    }
-
-    pub fn clear(&mut self) {
-        self.answers.clear();
     }
 }

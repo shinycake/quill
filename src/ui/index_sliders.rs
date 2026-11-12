@@ -13,16 +13,15 @@ use super::app::QuillApp;
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
 use gpui_kit::component::*;
 use gpui_kit::*;
-use quill::data_settings::{CapKind, NO_LIMIT_SIZE_CAP};
-use quill::limit_steps::{CAP_STEPS, KEEP_STEPS, SIZE_STEPS, cap_at, cap_index};
+use quill::limit_steps::{CAP_STEPS, KEEP_STEPS, SIZE_STEPS};
 use quill::limit_steps::{keep_limit_at, size_limit_at};
 use std::collections::HashMap;
 
 /// Which step slider an event or a row belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) enum StepSlider {
-    /// The auto-download size cap of one media type (network editor).
-    DataCap(CapKind),
+    /// A size limit of the automatic media download box.
+    AutoDownloadLimit(quill::settings::AutoDownloadLimitGroup),
     /// Local storage "Total size limit".
     StorageSize,
     /// Local storage "Clear files older than".
@@ -35,7 +34,7 @@ impl StepSlider {
     /// How many positions the slider has.
     pub(super) fn steps(self) -> usize {
         match self {
-            Self::DataCap(_) => CAP_STEPS,
+            Self::AutoDownloadLimit(_) => CAP_STEPS,
             Self::StorageSize => SIZE_STEPS,
             Self::StorageKeep => KEEP_STEPS,
             // Step 0 is Off, then the fixed periods.
@@ -131,11 +130,7 @@ impl QuillApp {
         let (SliderEvent::Change(value) | SliderEvent::Release(value)) = event;
         let index = position(value.end(), key.steps());
         match key {
-            StepSlider::DataCap(kind) => {
-                if let Some(draft) = self.settings.data_storage_editor.draft_mut() {
-                    draft.set_cap(kind, cap_at(index));
-                }
-            }
+            StepSlider::AutoDownloadLimit(group) => self.on_auto_download_slider(group, index),
             StepSlider::StorageSize | StepSlider::StorageKeep => {
                 // tdesktop applies on every move; one `setOption` round per
                 // drag step would flood TDLib, so the release applies, or
@@ -208,15 +203,6 @@ impl QuillApp {
     }
 }
 
-/// The step the cap slider starts on: "No limit" sits on the last step.
-pub(super) fn cap_slider_start(bytes: i64) -> usize {
-    if bytes >= NO_LIMIT_SIZE_CAP {
-        CAP_STEPS - 1
-    } else {
-        cap_index(bytes)
-    }
-}
-
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 #[path = "index_sliders_tests.rs"]
@@ -224,9 +210,7 @@ mod live_tests;
 
 #[cfg(test)]
 mod tests {
-    use super::{cap_slider_start, position};
-    use quill::data_settings::NO_LIMIT_SIZE_CAP;
-    use quill::limit_steps::CAP_STEPS;
+    use super::position;
 
     #[test]
     fn positions_round_and_clamp() {
@@ -236,11 +220,5 @@ mod tests {
         assert_eq!(position(250.0, 100), 99);
         assert_eq!(position(-4.0, 100), 0);
         assert_eq!(position(f32::NAN, 100), 0);
-    }
-
-    #[test]
-    fn no_limit_starts_on_the_last_step() {
-        assert_eq!(cap_slider_start(NO_LIMIT_SIZE_CAP), CAP_STEPS - 1);
-        assert_eq!(cap_slider_start(1024 * 1024), 0);
     }
 }

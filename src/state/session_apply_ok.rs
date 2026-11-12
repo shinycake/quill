@@ -251,11 +251,6 @@ impl Session {
             *self.settings.data_storage.for_network_mut(network) = settings;
             self.settings.data_storage.seeded = crate::data_settings::PresetsSeed::Seeded;
             self.settings.data_storage_dirty = true;
-            if let Some(request) = extra {
-                self.settings
-                    .auto_download_answers
-                    .push(AutoDownloadAnswer::Saved(request));
-            }
         }
         // Batch 4: a `confirmSession` / `terminateSession` for the
         // new-login alert succeeded.

@@ -14,9 +14,7 @@ use crate::notify::{self, OsNotification, QueuedNotification};
 use crate::privacy::{PrivacyKeyState, PrivacyRuleDetail};
 use crate::settings::BadgePrefs;
 use crate::settings::{
-    AUTO_DOWNLOAD_FILE, AUTO_DOWNLOAD_GIF, AUTO_DOWNLOAD_MAX_BYTES, AUTO_DOWNLOAD_MUSIC,
-    AUTO_DOWNLOAD_PHOTO, AUTO_DOWNLOAD_VIDEO, AUTO_DOWNLOAD_VIDEO_NOTE, AUTO_DOWNLOAD_VOICE,
-    CallPrefs, ContactPrefs, LanguagePrefs, MediaPrefs,
+    AutoDownloadKind, AutoDownloadSource, CallPrefs, ContactPrefs, LanguagePrefs, MediaPrefs,
 };
 use crate::sticker_suggest::StickerSuggestMode;
 use crate::story_page::{

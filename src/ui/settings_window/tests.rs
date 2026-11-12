@@ -5,7 +5,6 @@
 
 use super::SubPage;
 use crate::ui::app::QuillApp;
-use crate::ui::dialogs::storage_editor::StorageEditor;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::{DialogKind, QuillShell};
 use gpui_kit::component::Root;
@@ -355,7 +354,7 @@ fn privacy_rules_open_over_the_page_and_esc_closes_them_first(cx: &mut TestAppCo
 }
 
 #[gpui_kit::test]
-fn data_storage_editor_opens_in_the_page_and_leaving_drops_it(cx: &mut TestAppContext) {
+fn auto_download_box_opens_in_the_page_and_leaving_drops_it(cx: &mut TestAppContext) {
     let (app, _, mut vcx) = new_app_sized(cx, 1100., 2400.);
     let vcx = &mut vcx;
     app.update_in(vcx, |app, window, cx| {
@@ -363,46 +362,22 @@ fn data_storage_editor_opens_in_the_page_and_leaving_drops_it(cx: &mut TestAppCo
     });
     frames(vcx);
     assert!(shown(vcx, "settings-page-data"));
-    app.update(vcx, |app, cx| {
-        let network = quill::data_settings::NetworkKind::WiFi;
-        let draft = app
-            .session()
-            .map(|s| *s.settings.data_storage.for_network(network));
-        app.settings.data_storage_editor = draft
-            .map(|draft| StorageEditor::open(network, draft))
-            .unwrap_or_default();
-        cx.notify();
-    });
+    let open = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| app.settings.auto_download_editor.is_open())
+    };
+    vcx.update(|window, cx| window.click("auto-download-open-private", cx));
     frames(vcx);
-    assert!(app.read_with(vcx, |app, _| {
-        app.settings.data_storage_editor.shown().is_some()
-    }));
-    vcx.update(|window, cx| window.click("data-storage-back", cx));
+    assert!(open(&app, vcx));
+    vcx.update(|window, cx| window.click("auto-download-cancel", cx));
     frames(vcx);
-    assert!(
-        app.read_with(vcx, |app, _| app
-            .settings
-            .data_storage_editor
-            .shown()
-            .is_none()),
-        "back returns to the overview"
-    );
+    assert!(!open(&app, vcx), "cancel returns to the overview");
 
-    app.update(vcx, |app, _| {
-        let network = quill::data_settings::NetworkKind::WiFi;
-        let draft = app
-            .session()
-            .map(|s| *s.settings.data_storage.for_network(network));
-        app.settings.data_storage_editor = draft
-            .map(|draft| StorageEditor::open(network, draft))
-            .unwrap_or_default();
-    });
-
+    vcx.update(|window, cx| window.click("auto-download-open-channels", cx));
+    frames(vcx);
+    assert!(open(&app, vcx));
     app.update(vcx, |app, cx| app.show_settings_page(Page::Connection, cx));
     frames(vcx);
-    assert!(app.read_with(vcx, |app, _| {
-        app.settings.data_storage_editor.shown().is_none()
-    }));
+    assert!(!open(&app, vcx), "leaving the page closes the box");
     assert!(shown(vcx, "settings-page-connection"));
 }
 
