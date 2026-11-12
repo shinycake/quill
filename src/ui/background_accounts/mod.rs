@@ -730,6 +730,8 @@ impl QuillApp {
             changed = true;
         }
         self.drain_account_clicks(cx);
+        // A photo a background account's notification waits for may have landed.
+        self.settle_preview_waits(cx);
         self.sync_background_calls(cx);
         self.restart_due(now, cx);
         if changed {
