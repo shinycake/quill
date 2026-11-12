@@ -29,9 +29,11 @@ pub(super) enum LanguageFile {
 /// after the other in the order they were asked (a fast A → B switch never
 /// leaves A on disk): a write waits for the task of the one before it, which
 /// it owns.
-#[derive(Default)]
 pub(super) struct LanguageWrites {
     files: [WriteStage; 3],
+    /// Quitting waits for the writes still out, so a quick A → B switch
+    /// and quit leaves B on disk, not nothing or A.
+    _flush_on_quit: Subscription,
 }
 
 /// The last write asked of one file: none yet, or the task of the newest
@@ -48,6 +50,21 @@ enum WriteStage {
 }
 
 impl LanguageWrites {
+    pub(super) fn new(cx: &mut Context<QuillApp>) -> Self {
+        let flush = cx.on_app_quit(|app: &mut QuillApp, _| {
+            let pending = app.language.writes.take_pending();
+            async move {
+                for task in pending {
+                    task.await;
+                }
+            }
+        });
+        Self {
+            files: Default::default(),
+            _flush_on_quit: flush,
+        }
+    }
+
     pub(super) fn spawn(
         &mut self,
         file: LanguageFile,
@@ -85,9 +102,6 @@ pub(crate) struct LanguageUi {
     pub(super) writes: LanguageWrites,
     /// Packs used before, newest first (`language_recent.json`).
     pub(super) recent: Vec<LanguageChoice>,
-    /// Quitting waits for the writes still out, so a quick A → B switch
-    /// and quit leaves B on disk, not nothing or A.
-    _flush_on_quit: Subscription,
 }
 
 impl LanguageUi {
@@ -102,19 +116,10 @@ impl LanguageUi {
         if let Some(root) = root.as_deref() {
             super::language_ui::install_pack(quill::lang::prefs::load_cached_snapshot(root));
         }
-        let flush = cx.on_app_quit(|app: &mut QuillApp, _| {
-            let pending = app.language.writes.take_pending();
-            async move {
-                for task in pending {
-                    task.await;
-                }
-            }
-        });
         Self {
             open: None,
             recent,
-            writes: LanguageWrites::default(),
-            _flush_on_quit: flush,
+            writes: LanguageWrites::new(cx),
         }
     }
 }
