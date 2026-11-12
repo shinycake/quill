@@ -417,3 +417,27 @@ impl QuillApp {
         }
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod tests {
+    use super::PackChanges;
+    use quill::ids::RequestId;
+
+    #[test]
+    fn pack_buttons_wait_for_this_boxes_request_only() {
+        let mut packs = PackChanges::default();
+        assert!(
+            !packs.busy(|_| true),
+            "another request of the chat alone does not block"
+        );
+        packs.sent(false, RequestId(5));
+        assert!(packs.busy(|id| id == RequestId(5)));
+        assert!(
+            !packs.busy(|_| false),
+            "answered or refused: the buttons are free"
+        );
+        packs.sent(true, RequestId(6));
+        assert!(packs.busy(|id| id == RequestId(6)));
+    }
+}

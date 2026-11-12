@@ -190,7 +190,11 @@ fn answer_forge(app: &mut QuillApp, result: CraftResult) {
         craft.run = quill::gift_market::CraftRun::Done(result);
     }
     if let Some(since) = Instant::now().checked_sub(Duration::from_secs_f32(FORGE_SECONDS + 0.1)) {
-        let request = app.gift_market.craft.forge_request().unwrap_or_default();
+        let request = app
+            .gift_market
+            .craft
+            .forge_request()
+            .unwrap_or(quill::ids::RequestId(0));
         app.gift_market.craft.start_forge(since, request);
     }
 }

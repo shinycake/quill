@@ -9817,3 +9817,26 @@ kept until sent, a refused refetch does not repeat), `state/account_notices`
 `connect/tests/stories.rs` (tray refresh on ingest),
 `connect/tests/chat_list/folder_removals.rs` (leaving a folder stops the
 retry; no wall clock), `state/tests/history_prune.rs` (translations pruned).
+
+### Sweep fixes (r3-09)
+
+| Id | Fix |
+| --- | --- |
+| 16-012 | `CraftStage::Forging` holds the `RequestId` of the `craftGift` it was started for (`start_forge(since, request)`). `craft_frame_upkeep` ends it when the session's `CraftRun` is no longer `Crafting { request }` for that id (answered, refused, or the craft gone), so a forge cannot end on another run's state. `after_craft_pop` reads only the forge stage; it no longer also asks `craft.crafting()`. |
+| 16-009 | The market's `requested_files` / `FileAskOutcome` are gone. `gift_market_frame_upkeep` asks `download_file` for each shown sticker file every upkeep: the session's own file state (`should_download`, the download intents) skips a file that is downloading, downloaded or stalled, and a failed send is asked again. |
+| 16-010 | `SliderStage::Refused(level)`: a release whose send was refused serves nothing, so the stage slider is made again from the server's level (and the view redraws). |
+| 16-011 | Skipped. `window_closed_by_user` is the user's decision about a call and is owned by the account's `GroupCallScreen`; `CallWindow` describes the one app-wide OS window (`GroupCall::window`). They are two owners: a dismissed call can have its window `Open` for the sync pass that removes it, and folding the call id into `CallWindow` would move per-account state into the app-wide window value (and lose the handle the sync needs). |
+| 16-008 | `StreamFacts::transport_failed` is gone (baseline line dropped). `settle_stream_join`, which runs with the window sync outside the draw, reads the call's `transport.error()` from the session. |
+| 17-001 | The Edit box holds `PackChanges { sticker, emoji }` (`PackAsk::Out(RequestId)`): the pack buttons are busy while one of this box's own requests is in the session's pending set, and the click handler refuses while busy. |
+| 17-004 | `save_group_edit_box` closes through `close_group_edit_box` on all three exits (nothing changed, demo mode, empty send list), so the emoji panel and the boost ask go with it. |
+| 17-002 | The HDR probe cache's `Entry::Probing { since }` is lost after `PROBE_TIMEOUT` and probed again (`lookup`); the bare variant is out of the stage baseline. |
+| 17-003 | `InlineBotUi` holds the user's acknowledgement as a plain value (the two-variant enum is gone): it is one fact, not a stage. |
+| 17-005 | The member list's `MembersFetchView` (renamed from `MembersStage`) is a view derived each frame from the session's `SupergroupMembersFetch`, which holds the request and is settled by its `RequestId`; the unused request field is gone. |
+| 17-006 | `InlineVideos` remembers a clip whose file did not open (`unopenable`, with the path), so a tile does not run `VideoPlayer::open` every frame; a new path is tried again. Cleared with the players. |
+| 18-001 | `apply_custom_bindings` returns whether it rebuilt the keymap. `apply_pending_keybindings` records `Keymap::Applied` only then; the Shortcuts page marks the keymap `Stale` (`keymap_missed`) when its rebuild was skipped, so the next poll applies it. |
+| 18-002 | `install_language` drops a re-picked pack from `LanguageBox::removed`, so Restore is not offered for a row that is in the list again. |
+
+Tests: `language_box_tests` (a re-picked removed pack is not restored
+twice), `group_call_stage_volume` (a refused send serves nothing),
+`group_edit_box::extras` (pack buttons wait for their own request),
+`hdr_image::probe_cache` (a lost probe is asked again).
