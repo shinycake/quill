@@ -229,6 +229,7 @@ impl QuillApp {
         if capture.is_paused() {
             capture.resume();
             self.stop_record_preview();
+            self.begin_record_tick(cx);
             self.set_note(StatusNote::silent(tr(keys::Q_MISC_RECORDING_VOICE_NOTE)));
         } else {
             capture.pause();
@@ -288,6 +289,7 @@ impl QuillApp {
         }
         if resumed_preview {
             self.sound_starts(cx);
+            self.begin_record_tick(cx);
             cx.notify();
             return;
         }
@@ -465,17 +467,15 @@ impl QuillApp {
         }
     }
 
-    /// One tick of the running recording (every 100 ms), with its window's
-    /// state in place: a video message at its limit is queued to send, the
-    /// preview and the waveform advance, the chat action is refreshed.
+    /// One wake of the running recording (at its deadlines), with its
+    /// window's state in place: a video message at its limit is queued to send, the
+    /// preview end is noticed, a failed device is reported, the chat action is
+    /// refreshed.
     /// `false` once nothing records any more.
     pub(super) fn recording_tick(&mut self, cx: &mut Context<Self>) -> bool {
         self.check_recording(cx);
         self.check_record_preview();
         let recording = self.recording_active();
-        if let Some(capture) = self.recording.voice_mut() {
-            capture.sample_bar();
-        }
         if recording {
             self.sync_voice_action();
             cx.notify();
@@ -528,7 +528,7 @@ impl QuillApp {
         let bars = self
             .recording
             .voice()
-            .map(|capture| capture.bars.clone())
+            .map(|capture| capture.live_bars())
             .unwrap_or_default();
         let paused = !video
             && self
@@ -623,6 +623,19 @@ impl QuillApp {
                     }),
             )
             .child(self.record_bar_actions(cx))
+            // The pulsing dot above redraws the bar while it records; a
+            // paused recording's preview that plays redraws the playhead from
+            // the frame clock too.
+            .when(previewing, |bar| {
+                bar.child(
+                    canvas(
+                        |_, _, _| (),
+                        |_, _, window, _| window.request_animation_frame(),
+                    )
+                    .absolute()
+                    .size_0(),
+                )
+            })
     }
 
     /// MED2: the record bar's right-side row — either the normal

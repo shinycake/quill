@@ -10246,9 +10246,9 @@ orders), `deep_link_routes_tests` (seek stays with its account).
 | g-379 | `ensure_live_location_tick` arms one wake-up per task (`arm_live_location_wake`), held in `live_location_tick`. |
 | g-383 | The location answer is a oneshot (`geolocation::Answer` / `Receiver`) awaited by the picker's task and raced against one timer (`race_answer`); a limit that ends while the permission prompt is open starts again. `WaitBudget` and the 100 ms poll are gone. |
 | g-338, g-332, 19-002 | `NotifyDelivery::preview_waits` holds `PreviewWait` entries that own their deadline task; the poll's drain shows the ones whose photo landed (`settle_preview_waits`). No id counter, no poll loop. |
-| g-336, 19-003 | `ensure_notify_clock` arms one step per task (`arm_notify_clock`); `notify_windows_tick` stops the clock itself when no popup is left. While a popup shows, the step runs every `INPUT_CHECK_MS` (300 ms) to read the OS idle clock, as tdesktop's `_inputCheckTimer` does (the allow-listed `poll:QuillApp::arm_notify_clock`). |
+| g-336, 19-003 | `ensure_notify_clock` arms one step per task (`arm_notify_clock`); `notify_windows_tick` stops the clock itself when no popup is left. While a popup waits for input, the step runs every `INPUT_CHECK_MS` (300 ms) to read the OS idle clock, as tdesktop's `_inputCheckTimer` does (the allow-listed `poll:QuillApp::arm_notify_clock`). |
 | g-341, g-335 | The macOS menu sync task is held in a `MenuSyncTask` global and waits on the `CHROME` signal through `wake_wait::wake_paced` (a burst of pokes rebuilds at most once a second). There is no `registry_wait`: the registry another process wrote is re-read on the first poke after its age limit. (macOS only: not built in the Linux gate.) |
-| g-382 | The record step is one wake-up per task (`arm_record_tick`), held by the capture as `RecordTick::Running { started, due, _task }`; it falls on the next whole 100 ms after the capture's start, so it is a deadline and not a fixed re-arm. |
+| g-382 | The record timer is one wake-up per task (`arm_record_timer`), held by the capture as `RecordWake::Armed { due, _task }`. It is armed only to the capture's own deadlines (`record_wake.rs`): the chat action's refresh (`ACTION_REFRESH`, 4 s, which also checks the device), a round video's 60 s limit, and the end of a playing preview. A paused recording with no preview has none. There is no fixed 100 ms step and no allow line. |
 | g-381, g-380 | The viewer clip's session tick (`arm_viewer_session_tick`) and the HDR headroom poll (`poll_viewer_headroom(.., tick)`) are one wake-up per task, replacing the task their stage holds. Both were on the allow list; the lines are gone. |
 | g-340, 19-008 | `OpenQr::clock` is `QrClock::{Stopped, Running { _task }}`, one tick per task; the clock no longer carries the box id. |
 | 19-009, g-329, g-330 | `Slot::Loading { _job: Task<()> }` in `Art` and `GiftArt` (`run_off_ui_held`): clearing the art or leaving the screen cancels the job. |
@@ -10314,9 +10314,17 @@ orders), `deep_link_routes_tests` (seek stays with its account).
 
 | Ids | What changed |
 | --- | --- |
-| g-382 | `arm_record_tick` no longer re-arms at `now + RECORD_STEP`: the next step is `step_after(started, now)`, the next whole 100 ms after the capture's stored start, kept as the stage's `due`. Test `a_recording_steps_on_its_own_timer_while_no_window_draws` and `step_after` cases. |
+| g-382 | `arm_record_tick`, `step_after` and `RECORD_STEP` are gone; see the round 5 table. |
 | (guard) | `arm_live_location_wake` and `schedule_refresh_timer` handed on `Instant::now() + wait`; they now hand on a due instant from `live_location_due` and `schedule_countdown_due`. |
-| g-336, 19-003 | The 300 ms idle read is back while a popup shows, with no cap (see the rows above). `NotifyWindows::idle_ms` is the idle clock the test swaps. |
+| g-336, 19-003 | The 300 ms idle read is back while a popup waits for input, with no cap (see the rows above; round 5 limits it to a popup that waits). `NotifyWindows::idle_ms` is the idle clock the test swaps. |
 | (new) | `system_unlock::label()` caches only whether the Mac has biometrics; the text is read on every call, so it follows a language change. Test `the_label_follows_a_language_change`. |
 | 18-001 | A reopen resumes the kept draft when the session's purchase is the one it asked for (`MarketplaceBox::resumes`), whatever stage it is in and however the box closed. Test `a_failure_after_any_close_shows_on_reopen`. |
 | (tests) | `a_settled_type_save_is_forgotten` and `a_create_while_one_is_out_says_so` (`new_chat/release_tests.rs`, through `Release::between` and `created`), `a_wait_settled_after_a_switch_shows_under_its_own_account`, `the_system_offer_waits_for_the_window_to_be_active`. |
+
+#### Fix round 5 (r4-09)
+
+| Ids | What changed |
+| --- | --- |
+| g-382 | The fixed 100 ms record step is gone (no allow line for it). `RecordingUi::wake_in` returns the wait to the capture's nearest real deadline (`Deadlines::next` in `record_wake.rs`): the chat action refresh, a round video's limit, a playing preview's end. The record bar's elapsed time and level are read when the bar draws (`VoiceCapture::live_bars`), and the frame clock redraws it: the pulsing dot is an on-screen animation, and a playing preview adds a frame request. Nothing wakes a recording that has nothing due. Resuming a recording or a preview re-arms the timer. Tests `a_recording_wakes_only_at_its_deadlines_while_no_window_draws` (no fixed-period re-arm, the deadline fires at its moment, cancel drops it) and the `record_wake` cases. |
+| g-336, 19-003 | `notify_windows_tick` no longer re-arms when nothing waits for input: the `None if open` arm is deleted, so the 300 ms clock runs only while a popup is `WaitingForInput`, as tdesktop's `_inputCheckTimer`. The decision is `NotifyWindows::next_step`. Tests `a_hovered_popup_that_is_not_waiting_leaves_the_clock_stopped`, `a_corner_sample_alone_leaves_the_clock_stopped`, `a_waiting_popup_keeps_the_input_poll`. |
+| (hotspot) | `src/ui/on_screen.rs` is back to its base: `GroupCallScreen::new` keeps the call shape `new(send_key_mode, window, cx)` and ignores the arguments, since the composer is made with the call's view. No `Hotspot-change` trailer is needed. |

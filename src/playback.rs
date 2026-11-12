@@ -99,6 +99,15 @@ impl PlaybackClock {
         elapsed.clamp(0.0, self.duration_secs)
     }
 
+    /// How long until the track ends at `now`; `None` while paused.
+    pub fn ends_in_at(&self, now: Instant) -> Option<std::time::Duration> {
+        if !self.is_playing() {
+            return None;
+        }
+        let left = (self.duration_secs - self.elapsed_secs_at(now)).max(0.0) / self.rate;
+        Some(std::time::Duration::from_secs_f64(left))
+    }
+
     /// Fraction of the track played, in `[0, 1]` (0 when duration is 0).
     pub fn fraction(&self) -> f64 {
         if self.duration_secs <= 0.0 {

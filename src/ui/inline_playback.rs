@@ -401,43 +401,41 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// A recording or its preview started: step it at once, then on every
-    /// whole 100 ms step after this instant, from a timer the recording
-    /// holds (not from a window's frame, which stops while Quill is behind
-    /// another app).
+    /// A recording or its preview started: wake it at once, then at its
+    /// own deadlines (`record_wake.rs`). The wake-up is a timer the recording
+    /// holds, not a window's frame, which stops while Quill is behind another
+    /// app; the bar's time and level come from the frame clock while it draws.
     pub(super) fn begin_record_tick(&mut self, cx: &mut Context<Self>) {
-        let started = cx.background_executor().now();
-        self.arm_record_tick(started, started, cx);
+        let now = cx.background_executor().now();
+        self.arm_record_timer(now, cx);
     }
 
-    /// One step at `due`, a whole step after `started`; a step that finds
-    /// the recording still running arms the next whole step, and one that
-    /// finds nothing recording ends the chain. Each step replaces the task
-    /// that ran it.
-    fn arm_record_tick(
-        &mut self,
-        started: std::time::Instant,
-        due: std::time::Instant,
-        cx: &mut Context<Self>,
-    ) {
+    /// The wake-up that ran: step the recording, then arm the capture's next
+    /// deadline, or none when it has nothing due or ended.
+    fn record_wake(&mut self, cx: &mut Context<Self>) {
+        if !self.recording_tick_in_window(cx) {
+            self.recording.stop_wake();
+            return;
+        }
+        match self.recording.wake_in() {
+            Some(wait) => {
+                let due = cx.background_executor().now() + wait;
+                self.arm_record_timer(due, cx);
+            }
+            None => self.recording.stop_wake(),
+        }
+    }
+
+    /// The one wake-up task, due at `due`; it replaces the task that ran.
+    fn arm_record_timer(&mut self, due: std::time::Instant, cx: &mut Context<Self>) {
         // window-scope: the step runs as the window the recording was made in (`recording_tick_in_window`).
         // screen-scope: the recording is the app's alone and ends with the account switch (its farewell cancels it).
         let task = cx.spawn(async move |this, cx| {
             let wait = due.saturating_duration_since(cx.background_executor().now());
             cx.background_executor().timer(wait).await;
-            let _ = this.update(cx, |app, cx| {
-                if app.recording_tick_in_window(cx) {
-                    let now = cx.background_executor().now();
-                    match app.recording.next_step(now) {
-                        Some((started, due)) => app.arm_record_tick(started, due, cx),
-                        None => app.recording.stop_tick(),
-                    }
-                } else {
-                    app.recording.stop_tick();
-                }
-            });
+            let _ = this.update(cx, |app, cx| app.record_wake(cx));
         });
-        self.recording.set_tick(started, due, task);
+        self.recording.set_wake(due, task);
     }
 }
 

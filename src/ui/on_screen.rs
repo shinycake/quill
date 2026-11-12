@@ -390,7 +390,11 @@ impl OnScreen {
             translate: Default::default(),
             group_call_boxes: super::group_call_state::GroupCallBoxes::new(),
             call_screen: Default::default(),
-            group_call_screen: super::group_call_state::GroupCallScreen::new(),
+            group_call_screen: super::group_call_state::GroupCallScreen::new(
+                chat_prefs.send_key_mode,
+                window,
+                cx,
+            ),
             account_boxes: super::account_state::AccountBoxes::new(window, cx),
             auth_ui: super::auth_state::AuthUi::new(window, cx),
             agent_ui: super::agent_state::AgentUi::new(),

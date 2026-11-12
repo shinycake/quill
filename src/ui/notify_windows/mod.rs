@@ -792,7 +792,7 @@ impl QuillApp {
     /// Run one clock step at `due`; the step arms the next one. The stage
     /// holds the one task and its due instant, so each step replaces the
     /// task that ran it, and the step that finds no popup left stops the
-    /// clock. While a popup shows, the OS idle clock is read every
+    /// clock. While a popup waits for the user, the OS idle clock is read every
     /// `INPUT_CHECK_MS` (tdesktop `_inputCheckTimer`): the OS posts no
     /// event for the next key or mouse move anywhere on the desktop.
     fn arm_notify_clock(&mut self, due: Instant, cx: &mut Context<Self>) {
@@ -872,42 +872,10 @@ impl QuillApp {
                 .retain(|(_, p)| !(p.hiding() && p.opacity.done(now)));
             self.notify_show_next(cx);
         }
-        let windows = &mut self.delivery.windows;
         if animating {
             return Some(FRAME);
         }
-        // Held, nothing is due: the hold ends on an event, which settles.
-        let deadline = (!windows.held())
-            .then(|| {
-                windows
-                    .shown
-                    .iter()
-                    .filter(|s| !s.unlinked() && !s.popup.hiding())
-                    .filter_map(|s| s.hold.hide_at())
-                    .min()
-            })
-            .flatten()
-            .map(|at| at.saturating_duration_since(now));
-        let waiting = windows
-            .shown
-            .iter()
-            .any(|s| s.hold.waiting() && !s.unlinked());
-        let next = match (deadline, waiting) {
-            (Some(deadline), true) => Some(deadline.min(Duration::from_millis(INPUT_CHECK_MS))),
-            (Some(deadline), false) => Some(deadline),
-            (None, true) => Some(Duration::from_millis(INPUT_CHECK_MS)),
-            (None, false) => None,
-        };
-        let open =
-            !windows.shown.is_empty() || windows.hide_all.is_some() || !windows.samples.is_empty();
-        match next {
-            Some(delay) => Some(delay.max(FRAME)),
-            None if open => Some(Duration::from_millis(INPUT_CHECK_MS)),
-            None => {
-                windows.clock = Clock::Stopped;
-                None
-            }
-        }
+        self.delivery.windows.next_step(now)
     }
 
     /// tdesktop `checkLastInput`: a notification stays until the user has

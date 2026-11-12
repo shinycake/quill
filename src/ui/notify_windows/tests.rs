@@ -407,6 +407,65 @@ fn a_waiting_notification_sees_the_next_input_within_one_check(cx: &mut TestAppC
     );
 }
 
+/// tdesktop's `_inputCheckTimer` runs only while a notification waits for
+/// input. A popup the pointer holds, with no deadline due, wakes nothing.
+#[gpui_kit::test]
+fn a_hovered_popup_that_is_not_waiting_leaves_the_clock_stopped(cx: &mut TestAppContext) {
+    use super::Hold;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let me = app.read_with(vcx, |app, _| app.notification_account(None));
+    app.update(vcx, |app, cx| {
+        app.delivery.windows.platform = NotifyPlatform::Windows;
+        app.show_custom_notification(&me, message(7), None, None, false, false, cx);
+        let id = shown_id(app, 7);
+        let now = std::time::Instant::now();
+        let windows = &mut app.delivery.windows;
+        assert!(matches!(windows.clock, super::Clock::Running { .. }));
+        for shown in windows.shown.iter_mut() {
+            shown.hold = Hold::Lingering { hide_at: now };
+        }
+        windows.hovered = Some(id);
+        assert_eq!(windows.next_step(now), None);
+        assert!(matches!(windows.clock, super::Clock::Stopped));
+    });
+}
+
+/// A corner sample alone does not need the clock's input poll either.
+#[gpui_kit::test]
+fn a_corner_sample_alone_leaves_the_clock_stopped(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.notify_corner_preview(Some(quill::notify::custom::ScreenCorner::TopLeft), cx);
+        let now = std::time::Instant::now();
+        let windows = &mut app.delivery.windows;
+        assert_eq!(windows.next_step(now), None);
+        assert!(matches!(windows.clock, super::Clock::Stopped));
+    });
+}
+
+/// The same state with the popup waiting for input keeps the poll.
+#[gpui_kit::test]
+fn a_waiting_popup_keeps_the_input_poll(cx: &mut TestAppContext) {
+    use quill::notify::custom::INPUT_CHECK_MS;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let me = app.read_with(vcx, |app, _| app.notification_account(None));
+    app.update(vcx, |app, cx| {
+        app.delivery.windows.platform = NotifyPlatform::Windows;
+        app.show_custom_notification(&me, message(7), None, None, false, false, cx);
+        let id = shown_id(app, 7);
+        let windows = &mut app.delivery.windows;
+        windows.hovered = Some(id);
+        assert_eq!(
+            windows.next_step(std::time::Instant::now()),
+            Some(std::time::Duration::from_millis(INPUT_CHECK_MS))
+        );
+        assert!(matches!(windows.clock, super::Clock::Running { .. }));
+    });
+}
+
 impl super::NotifyWindows {
     /// The (account, chat) of every notification shown and not unlinked.
     pub(in crate::ui) fn shown_keys(&self) -> Vec<(quill::ids::AccountKey, ChatId)> {

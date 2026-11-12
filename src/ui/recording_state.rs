@@ -88,12 +88,11 @@ pub(crate) struct Capture {
     preview: Option<PlaybackClock>,
     /// The live camera image while a video message records.
     round: super::round_record::RoundPreview,
-    /// The step that moves the record bar and the preview and watches the
-    /// capture. It belongs to the recording, so whatever ends it ends the
-    /// step too, and it runs while no window draws (a background recording
-    /// keeps its chat action, reports a failed device and sends a round
-    /// video at its limit).
-    tick: RecordTick,
+    /// The wake-up for the capture's own deadlines: it belongs to the
+    /// recording, so whatever ends it ends the wake-up too, and it runs while
+    /// no window draws (a background recording keeps its chat action,
+    /// reports a failed device and sends a round video at its limit).
+    wake: RecordWake,
 }
 
 /// MED2: lock-to-record — a locked recording ignores Esc; only Send or
@@ -127,37 +126,18 @@ pub(crate) struct RecordingUi {
     pub(super) open_voice: Arc<dyn Fn() -> Result<VoiceCapture, String> + Send + Sync>,
 }
 
-/// The recording's step: not armed yet, or the task that runs the next one,
-/// with the instant it is due. The recording holds it, so it ends with the
-/// recording.
-enum RecordTick {
+/// The recording's wake-up: not armed, or the task that runs the next one,
+/// with the instant it is due (a deadline of the capture, `record_wake.rs`).
+/// The recording holds it, so it ends with the recording.
+enum RecordWake {
     Stopped,
-    Running {
-        /// When the capture began: every step falls on a whole
-        /// [`RECORD_STEP`] after it, however late the last one ran.
-        started: std::time::Instant,
-        /// Read by the tests that watch the chain re-arm.
+    Armed {
+        /// Read by the tests that watch when the wake-up falls.
         #[cfg_attr(not(test), allow(dead_code))]
         due: std::time::Instant,
         _task: gpui_kit::Task<()>,
     },
 }
-
-/// The next whole [`RECORD_STEP`] after `started` that is later than `now`.
-pub(super) fn step_after(
-    started: std::time::Instant,
-    now: std::time::Instant,
-) -> std::time::Instant {
-    let steps = now.saturating_duration_since(started).as_millis() / RECORD_STEP.as_millis() + 1;
-    u32::try_from(steps)
-        .ok()
-        .and_then(|steps| RECORD_STEP.checked_mul(steps))
-        .and_then(|after| started.checked_add(after))
-        .unwrap_or(now)
-}
-
-/// How often the record bar steps while it draws.
-pub(super) const RECORD_STEP: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// A recording still running, or a camera starting, is cancelled: its
 /// file would be the old account's message.
@@ -291,51 +271,48 @@ impl RecordingUi {
         self.capture.is_some()
     }
 
-    /// The recording's next step is the task `task`, due at `due` on the
-    /// steps counted from `started`; the one that ran before is dropped.
-    /// `false` when nothing records.
-    pub(super) fn set_tick(
-        &mut self,
-        started: std::time::Instant,
-        due: std::time::Instant,
-        task: gpui_kit::Task<()>,
-    ) -> bool {
+    /// The recording's next wake-up is the task `task`, due at `due`; the
+    /// one that ran before is dropped. `false` when nothing records.
+    pub(super) fn set_wake(&mut self, due: std::time::Instant, task: gpui_kit::Task<()>) -> bool {
         let Some(capture) = self.capture.as_mut() else {
             return false;
         };
-        capture.tick = RecordTick::Running {
-            started,
-            due,
-            _task: task,
-        };
+        capture.wake = RecordWake::Armed { due, _task: task };
         true
     }
 
-    /// The capture's start and the next whole step after `now`, counted
-    /// from the start the stage holds; `None` when no step is armed.
-    pub(super) fn next_step(
-        &self,
-        now: std::time::Instant,
-    ) -> Option<(std::time::Instant, std::time::Instant)> {
-        match &self.capture.as_ref()?.tick {
-            RecordTick::Running { started, .. } => Some((*started, step_after(*started, now))),
-            RecordTick::Stopped => None,
+    /// The wait until the capture's next deadline, `None` when it has none.
+    pub(super) fn wake_in(&self) -> Option<std::time::Duration> {
+        let capture = self.capture.as_ref()?;
+        let now = std::time::Instant::now();
+        let (acting, limit) = match &capture.media {
+            CaptureMedia::Voice(voice) => (!voice.is_paused(), None),
+            CaptureMedia::Video(video) => (true, Some(video.time_left())),
+        };
+        super::record_wake::Deadlines {
+            acting,
+            limit,
+            preview_end: capture
+                .preview
+                .as_ref()
+                .and_then(|clock| clock.ends_in_at(now)),
         }
+        .next()
     }
 
-    /// The step ended: no next one is armed.
-    pub(super) fn stop_tick(&mut self) {
+    /// The wake-up ended: no next one is armed.
+    pub(super) fn stop_wake(&mut self) {
         if let Some(capture) = self.capture.as_mut() {
-            capture.tick = RecordTick::Stopped;
+            capture.wake = RecordWake::Stopped;
         }
     }
 
-    /// When the next step is due, if one is armed.
+    /// When the next wake-up is due, if one is armed.
     #[cfg(test)]
-    pub(super) fn tick_due(&self) -> Option<std::time::Instant> {
-        match &self.capture.as_ref()?.tick {
-            RecordTick::Running { due, .. } => Some(*due),
-            RecordTick::Stopped => None,
+    pub(super) fn wake_due(&self) -> Option<std::time::Instant> {
+        match &self.capture.as_ref()?.wake {
+            RecordWake::Armed { due, .. } => Some(*due),
+            RecordWake::Stopped => None,
         }
     }
 
@@ -490,29 +467,7 @@ impl QuillApp {
             delivery: Delivery::Normal,
             preview: None,
             round: Default::default(),
-            tick: RecordTick::Stopped,
+            wake: RecordWake::Stopped,
         });
-    }
-}
-
-#[cfg(test)]
-mod step_tests {
-    use super::{RECORD_STEP, step_after};
-    use std::time::{Duration, Instant};
-
-    #[test]
-    fn steps_fall_on_whole_steps_after_the_start_however_late_one_ran() {
-        let started = Instant::now();
-        let ms = Duration::from_millis;
-        assert_eq!(step_after(started, started), started + ms(100));
-        assert_eq!(step_after(started, started + ms(99)), started + ms(100));
-        // A late step does not move the grid: the next is still a whole 100 ms.
-        assert_eq!(step_after(started, started + ms(100)), started + ms(200));
-        assert_eq!(step_after(started, started + ms(250)), started + ms(300));
-        assert_eq!(
-            step_after(started, started + ms(10_050)),
-            started + ms(10_100)
-        );
-        assert_eq!(RECORD_STEP, ms(100));
     }
 }

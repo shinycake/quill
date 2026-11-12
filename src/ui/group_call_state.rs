@@ -350,7 +350,14 @@ impl GroupCallScreen {
         };
     }
 
-    pub(super) fn new() -> Self {
+    /// An empty screen. The in-call composer is made with the call's view
+    /// when its window first draws it (`sync_group_call_composer`), so the
+    /// arguments the caller in `OnScreen::new` passes are not needed here.
+    pub(super) fn new(
+        _send_key_mode: quill::composer::SendKeyMode,
+        _window: &mut Window,
+        _cx: &mut Context<QuillApp>,
+    ) -> Self {
         Self {
             view: None,
             window_closed_by_user: None,
