@@ -446,14 +446,14 @@ impl QuillApp {
                         .when(me, |row| {
                             row.on_drag(
                                 PlaylistDrag {
-                                    index,
+                                    file_id,
                                     title: drag_title.clone(),
                                 },
                                 |drag: &PlaylistDrag, _, _, cx| cx.new(|_| drag.clone()),
                             )
                             .on_drop(cx.listener(
                                 move |this, drag: &PlaylistDrag, _, cx| {
-                                    this.reorder_playlist_track(drag.index, index, cx);
+                                    this.reorder_playlist_track(drag.file_id, file_id, cx);
                                 },
                             ))
                         })

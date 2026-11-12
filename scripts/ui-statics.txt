@@ -25,8 +25,7 @@ src/ui/emoji_effect.rs NEXT_HEAD | an id counter
 src/ui/communities/requests.rs NEXT | an id counter: undo ids are unique across windows
 src/ui/widgets_state.rs LAST_QUERY | an id counter: widget query tokens unique across account switches
 src/ui/vanish.rs PAINTED | keyed by chat and message; a chat shows in one window
-src/ui/pull_next_ui.rs SLIDE | names its chat; a chat shows in one window
-src/ui/premium_sticker_effect.rs SEEN,PLAYED | keyed by chat and message; a chat shows in one window
+src/ui/premium_sticker_effect.rs NOTES | keyed by chat and message under one account (`keep_shown` clears it when the account changes); a chat shows in one window
 src/ui/message_effect_badge.rs BADGES,REPLAYS | keyed by chat and message; a chat shows in one window
 src/ui/message_effect_badge.rs APP | a weak handle to the one app
 src/ui/message_effect_play.rs WAITING | each entry names its message

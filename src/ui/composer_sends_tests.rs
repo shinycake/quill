@@ -452,7 +452,7 @@ fn a_schedule_picker_left_by_a_chat_switch_is_dropped_and_sends_nothing(cx: &mut
         app.composer
             .update(cx, |input, cx| input.set_value("for B", window, cx));
         assert!(
-            app.chat_ui.schedule_picker.is_none(),
+            app.chat_ui.schedule_picker.as_ref().is_none(),
             "A's picker went with A"
         );
         let before = history_len(app, B);
@@ -507,7 +507,10 @@ fn a_time_picked_just_before_its_first_showing_takes_the_second(cx: &mut TestApp
             .expect("the picker");
         date.update(cx, |state, cx| state.set_date_time(value, window, cx));
         app.confirm_schedule_picker(window, cx);
-        assert!(app.chat_ui.schedule_picker.is_none(), "no \"too soon\"");
+        assert!(
+            app.chat_ui.schedule_picker.as_ref().is_none(),
+            "no \"too soon\""
+        );
         assert_eq!(
             app.pending_send().scheduling,
             ComposerScheduling::at(WallClock::CHICAGO_FALL_BACK + 1800)

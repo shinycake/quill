@@ -57,6 +57,11 @@ impl PhotoEditor {
             && !self.is_base(index)
         {
             self.placed.remove(index);
+            // The items after it moved up: a drag of any of them names
+            // the wrong item now.
+            if self.gesture.item().is_some() {
+                self.gesture = Gesture::None;
+            }
         }
     }
 
@@ -83,10 +88,13 @@ impl PhotoEditor {
                 && ((hy - y) * scale_y).abs() <= HANDLE_GRAB
             {
                 let distance = ((x - item.center.0) * scale_x).hypot((y - item.center.1) * scale_y);
-                self.gesture = Gesture::Item(ItemDrag::Resize {
-                    start_width: item.width,
-                    start_distance: distance.max(1.0),
-                });
+                self.gesture = Gesture::Item {
+                    index,
+                    drag: ItemDrag::Resize {
+                        start_width: item.width,
+                        start_distance: distance.max(1.0),
+                    },
+                };
                 return;
             }
         }
@@ -97,17 +105,17 @@ impl PhotoEditor {
         self.selected = hit;
         self.gesture = hit
             .and_then(|index| {
-                Some(ItemDrag::Move {
+                let drag = ItemDrag::Move {
                     from: (x, y),
                     start: self.placed.get(index)?.0.center,
-                })
+                };
+                Some(Gesture::Item { index, drag })
             })
-            .map_or(Gesture::None, Gesture::Item);
+            .unwrap_or(Gesture::None);
     }
 
     pub(super) fn drag_item(&mut self, (x, y): (f32, f32)) {
-        let (Some(index), Some(drag), Some(bounds)) =
-            (self.selected, self.gesture.item(), self.image_bounds.get())
+        let (Some((index, drag)), Some(bounds)) = (self.gesture.item(), self.image_bounds.get())
         else {
             return;
         };

@@ -20,8 +20,6 @@ use quill::lang::{keys, tr, trn};
 use quill::local_path::sandboxed_display_path;
 use quill::state::RequestPurpose;
 use quill::telegram::envelope::StickerSetInfo;
-use std::cell::RefCell;
-use std::rc::Rc;
 use std::time::Duration;
 
 /// How long typing pauses before the search goes out.
@@ -38,7 +36,7 @@ impl QuillApp {
         // The box opens on Installed with an empty field, as its list does:
         // a search typed in an earlier visit does not stay in the field
         // (and a search still waiting on its pause does not fire).
-        self.pickers.emoji_set_keystroke = self.pickers.emoji_set_keystroke.wrapping_add(1);
+        self.pickers.emoji_set_debounce.cancel();
         self.pickers
             .emoji_set_search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
@@ -57,7 +55,7 @@ impl QuillApp {
     }
     pub(super) fn close_emoji_sets(&mut self, cx: &mut Context<Self>) {
         // A search still waiting on its pause is for a box that is gone.
-        self.pickers.emoji_set_keystroke = self.pickers.emoji_set_keystroke.wrapping_add(1);
+        self.pickers.emoji_set_debounce.cancel();
         if let Some(live) = self.live.as_mut() {
             live.driver.session.stickers.emoji.open = false;
         } else if let Some(session) = self.demo_session.as_mut() {
@@ -71,7 +69,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.pickers.emoji_set_keystroke = self.pickers.emoji_set_keystroke.wrapping_add(1);
+        self.pickers.emoji_set_debounce.cancel();
         self.pickers.emoji_set_return_tab = tab;
         self.pickers
             .emoji_set_search_input
@@ -96,8 +94,9 @@ impl QuillApp {
     /// The search field changed: once typing pauses, the packs matching it
     /// replace the list; clearing the field brings the last tab back.
     pub(super) fn emoji_sets_search_typed(&mut self, cx: &mut Context<Self>) {
-        self.pickers.emoji_set_keystroke = self.pickers.emoji_set_keystroke.wrapping_add(1);
-        let keystroke = self.pickers.emoji_set_keystroke;
+        // A search typed earlier is over with this keystroke: even when the
+        // field is now empty, its timer must not fire over the restored list.
+        self.pickers.emoji_set_debounce.cancel();
         let query = self
             .pickers
             .emoji_set_search_input
@@ -115,16 +114,16 @@ impl QuillApp {
             }
             return;
         }
-        self.spawn_scoped(cx, async move |this, cx| {
+        let timer = self.spawn_scoped(cx, async move |this, cx| {
             cx.background_executor().timer(SEARCH_DELAY).await;
             this.update(cx, |this, cx| {
-                if this.pickers.emoji_set_keystroke == keystroke {
+                if let Some(query) = this.pickers.emoji_set_debounce.fire() {
                     this.search_emoji_sets_for(&query, cx);
                 }
             })
             .ok();
-        })
-        .detach();
+        });
+        self.pickers.emoji_set_debounce.arm(query, timer);
     }
     fn search_emoji_sets_for(&mut self, query: &str, cx: &mut Context<Self>) {
         self.pickers
@@ -402,19 +401,13 @@ impl QuillApp {
             if let Some(live) = this.live.as_mut() {
                 let _ = live.driver.ensure_emoji_pack_covers();
             }
-            let body = Rc::new(RefCell::new(Some(this.emoji_sets_panel(cx))));
+            let body = this.emoji_sets_panel(cx);
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(tr(
                     keys::Q_MEDIA_EMOJI_PACKS,
                 )))
-                .content(move |content, _, _| {
-                    content.child(
-                        body.borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element()),
-                    )
-                })
+                .content(crate::ui::shell::one_shot_dialog_content(body))
                 .on_close(close)
         })
     }

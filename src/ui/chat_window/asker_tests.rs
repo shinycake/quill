@@ -314,7 +314,8 @@ fn the_camera_circle_shows_in_the_recording_window_only(cx: &mut TestAppContext)
     let _chat_window = h.open_in_new_window(OTHER, cx);
     h.app.update(cx, |app, cx| {
         app.set_window_scope(Some(OTHER));
-        let _ = app.begin_capture_start(true, CaptureFor::Message);
+        let start = app.recording.next_start_id();
+        app.begin_capture_start(start, true, CaptureFor::Message, gpui_kit::Task::ready(()));
         assert!(app.round_record_overlay(cx).is_some(), "its own window");
         app.set_window_scope(None);
         assert!(

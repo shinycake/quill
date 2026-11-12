@@ -16,8 +16,7 @@ players.inline_videos | the shared inline video players; their owner is checked 
 players.inline_videos.state | cleared by `InlineVideos::own` when the account on screen changes
 players.userpic_videos * | animated profile photos keyed by local file path (files are per account folder); `UserpicVideos::own` drops the failed list and slots when the account on screen changes
 players.speed | the playback speed preference
-players.volume | the playback volume preference
-players.unmuted_volume | the volume to come back to after unmute
+players.volume * | the playback volume preference, and the level the unmute click comes back to
 delivery.notify_clicks | OS notification clicks; each `ChatClick` names its account
 delivery.notify_inflight | how many notification previews are being built, for the process
 delivery.next_preview_wait | the delay before the next preview build, for the process

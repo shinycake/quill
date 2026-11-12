@@ -5,7 +5,6 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::recording_state::PermissionAsk;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with};
@@ -153,24 +152,27 @@ impl QuillApp {
         start: AfterAccess,
         cx: &mut Context<Self>,
     ) {
+        // A prompt already up belongs to an earlier press: this one must not
+        // wipe it (its Allow would be ignored), nor start behind it.
+        if self.recording.asking() {
+            return;
+        }
         for &device in devices {
             match access(device) {
                 Access::Granted => {}
-                // A prompt already up belongs to an earlier press: this one
-                // must not wipe it, or that prompt's Allow would be ignored.
                 Access::Denied => {
                     self.set_note(StatusNote::error(denied_note(device)));
                     cx.notify();
                     return;
                 }
                 Access::Undetermined => {
-                    // The system prompt is up for an earlier press: this one
+                    // Another recording is starting or running: this press
                     // would only queue a second start behind it.
-                    if !self.recording.permission.is_idle() {
+                    if self.recording.starting() {
                         return;
                     }
                     let call = self.active_call_id();
-                    let id = self.next_permission_ask();
+                    let ask = self.recording.next_start_id();
                     self.set_note(StatusNote::silent(tr(if device {
                         keys::Q_LEFTOVERS_ALLOW_CAMERA
                     } else {
@@ -182,7 +184,7 @@ impl QuillApp {
                     // ends whichever window asked; the recording starts in
                     // the window that asked, or not at all once it closed.
                     let asker = self.scoped_app(cx);
-                    let task = self.spawn_screen(cx, async move |this, cx| {
+                    let wait = self.spawn_screen(cx, async move |this, cx| {
                         let granted = loop {
                             match answer.try_recv() {
                                 Ok(granted) => break granted,
@@ -195,9 +197,8 @@ impl QuillApp {
                             }
                         };
                         let ended = this.update(cx, |this, cx| {
-                            let mine = this.recording.permission.is_asking(id);
+                            let mine = this.recording.finish_asking(ask);
                             if mine {
-                                this.recording.permission = PermissionAsk::Idle;
                                 cx.notify();
                             }
                             mine
@@ -219,7 +220,7 @@ impl QuillApp {
                             }
                         });
                     });
-                    self.recording.permission = PermissionAsk::Asking { id, _task: task };
+                    self.recording.begin_asking(ask, wait);
                     cx.notify();
                     return;
                 }
@@ -234,9 +235,5 @@ impl QuillApp {
             .as_ref()
             .and_then(|live| live.driver.session.calls.active_call.as_ref())
             .map(|call| call.id)
-    }
-
-    fn next_permission_ask(&mut self) -> u64 {
-        self.recording.next_permission_ask()
     }
 }

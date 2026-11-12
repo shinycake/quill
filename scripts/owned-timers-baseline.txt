@@ -4,8 +4,6 @@ detached:AgentBridge::new 1
 detached:QuillApp::agent_driver_start 1
 detached:QuillApp::begin_chat_preview_press 1
 detached:QuillApp::bot_username_changed 1
-detached:QuillApp::close_profile_modal 1
-detached:QuillApp::emoji_sets_search_typed 1
 detached:QuillApp::ensure_self_destruct_tick 1
 detached:QuillApp::new_chatbot_draft 1
 detached:QuillApp::show_notification_with_preview 1

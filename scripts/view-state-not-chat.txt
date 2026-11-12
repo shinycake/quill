@@ -47,7 +47,6 @@ HistoryUi.row_hover.under | the row under the pointer, rebuilt by every paint an
 HistoryUi.row_hover.painted | the rows' hitboxes, rebuilt by every paint
 HistoryUi.stream_reveal.Finishing.message | the bot reply finishing its reveal: the reveal names its chat and starts over in another
 HistoryUi.pull.route * | where the pull gesture leads (next chat or topic) and the jump to it; `pull_sync` resets it when the chat or topic shown changes
-HistoryUi.pull.window | the window and chat-window scope of that gesture, read by its jump, which `pull_sync` drops
 ShareUi.forward.Picking.share_at.chat_id | the viewer message the share box was opened at a position for; it lives as long as the box and `take_share_at` hands it out only for that very chat and message
 ShareUi.forward.Picking.share_at.message_id | as `ShareUi.forward.Picking.share_at.chat_id`
 ViewerUi.extra.caption.key | carries its chat and message: the caption built for another never matches

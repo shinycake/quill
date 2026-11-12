@@ -119,7 +119,7 @@ impl GifTab {
     /// Typed text that has not searched yet is dropped (the panel closed
     /// first); what was shown stays, and the field searches on reopening
     /// (`follow_gif_field`).
-    fn stop_typing(&mut self) {
+    pub(in crate::ui) fn stop_typing(&mut self) {
         if let Self::Typing { wanted, .. } = self {
             *self = Self::Wants(std::mem::take(wanted));
         }

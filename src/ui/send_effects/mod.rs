@@ -376,6 +376,8 @@ impl QuillApp {
         let Some(open) = self.composer_ui.send_menu.open.as_mut() else {
             return;
         };
+        // The areas are measured at paint; one being written right now is
+        // skipped, and the card then opens at the menu's own position.
         let center = open
             .areas
             .cells

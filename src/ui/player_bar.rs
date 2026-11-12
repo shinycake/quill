@@ -546,7 +546,7 @@ impl QuillApp {
         let music = kind == PlaybackKind::Audio;
         let (can_previous, can_next) = self.playlist_can_move();
         let (repeat, order) = (self.playback.player.repeat, self.playback.player.order);
-        let muted = self.players.volume < 0.01;
+        let muted = self.players.volume.is_muted();
         // The shared trigger is white for the video overlay; the bar sits on
         // the theme surface.
         let speed_trigger = self

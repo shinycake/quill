@@ -167,7 +167,7 @@ impl QuillApp {
         if self.stories.muted {
             0.0
         } else {
-            self.players.volume
+            self.players.volume()
         }
     }
 

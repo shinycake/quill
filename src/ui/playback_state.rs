@@ -558,12 +558,13 @@ mod tests {
     #[test]
     fn the_bar_follows_consumed_frames_not_the_wall_clock() {
         let (output, mut source) = device();
-        let (mut ui, mut audio) = ui_on(&output);
+        let (mut ui, audio) = ui_on(&output);
+        let (mut audio, clock) = audio.with_manual_clock();
         let path = track("ui-position.wav", 4);
         ui.active = ActiveTrack::Audio(Track::new(MessageId(1)).with_length(4.0));
         audio.start(&path, 0.0, 1.0, 1.0, 4.0).unwrap();
         audio.await_landing();
-        std::thread::sleep(std::time::Duration::from_millis(250));
+        clock.store(250, std::sync::atomic::Ordering::Relaxed);
         assert!(ui.active_position_secs(&audio).unwrap_or(9.0) < 0.05);
         pull(&mut source, usize::try_from(RATE).unwrap() * 2);
         let secs = ui.active_position_secs(&audio).unwrap_or(0.0);
