@@ -31,7 +31,6 @@ impl QuillApp {
     }
 
     pub(super) fn open_mask_sets(&mut self, cx: &mut Context<Self>) {
-        self.settings.sticker_manager.masks.clear();
         self.settings
             .sticker_manager
             .scroll

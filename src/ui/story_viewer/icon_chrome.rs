@@ -9,7 +9,7 @@
 
 use super::*;
 use crate::ui::scroll_load::scrolled_near_end;
-use crate::ui::stories_state::PanelKind;
+use crate::ui::stories_state::{PanelKind, StoryMenu};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::ButtonCustomVariant;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
@@ -140,7 +140,7 @@ impl QuillApp {
                     .on_open_change(move |open, _, cx| {
                         let open = *open;
                         let _ = opened.update(cx, |this, cx| {
-                            this.stories.with_viewer_ui(|ui| ui.menu_open = open);
+                            this.stories.with_viewer_ui(|ui| ui.menu.set(story, open));
                             cx.notify();
                         });
                     }),
@@ -319,7 +319,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(open) = self.stories.viewer_ui_mut() {
-            open.menu_open = false;
+            open.menu = StoryMenu::Closed;
         }
         let item = self.stories.viewer.current().cloned();
         if item.as_ref().map(StoryViewerItem::key) != Some(story) {

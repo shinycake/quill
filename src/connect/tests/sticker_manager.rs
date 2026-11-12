@@ -175,3 +175,23 @@ fn viewing_trending_sends_only_the_unread_sets_and_clears_their_dots() {
     );
     assert_eq!(driver.view_shown_trending_stickers().unwrap(), None);
 }
+
+/// A commit that cannot even be queued (no chats path yet) fails and
+/// leaves nothing behind, so the box can keep its edits for another try;
+/// one that is queued never fails the call, its lost step is reported once
+/// through the manager's failure instead.
+#[test]
+fn a_commit_fails_the_call_only_when_nothing_was_queued() {
+    let (_dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let session = crate::state::Session::new(crate::ids::AccountKey::primary(), sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    assert!(
+        driver
+            .commit_sticker_manager(false, vec![22], Some(vec![3, 1, 2]))
+            .is_err()
+    );
+    assert!(driver.session.stickers.manager.commits.is_empty());
+    assert_eq!(driver.session.stickers.manager.failure, None);
+}

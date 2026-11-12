@@ -106,7 +106,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                 removed.into_iter().filter(|id| *id > 0),
                 order,
             ));
-        self.advance_manager_commit()
+        // The change is queued now. A step that cannot go out is lost and
+        // reported once through `manager.failure`; the call fails only when
+        // nothing was queued, which is what the box keeps its edits for.
+        let _ = self.advance_manager_commit();
+        Ok(())
     }
 
     /// Send the next step of the oldest saved change once the one before it
