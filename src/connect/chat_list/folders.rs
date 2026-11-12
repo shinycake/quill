@@ -92,6 +92,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        self.session.chat_list.folder_write_sent(folder_id, extra);
         Ok(extra)
     }
 
@@ -197,16 +198,15 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .fail(folder_id, ConnectSendError::InvalidRequest.stage_line());
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self
-            .session
-            .requests
-            .has_purpose_for_folder(RequestPurpose::GetChatFolder, folder_id)
-        {
+        if self.session.chat_list.folder_specs.is_loading(folder_id) {
             return Ok(None);
         }
         let extra = self
             .session
             .request_for_folder(RequestPurpose::GetChatFolder, folder_id);
+        let fetch = self.session.chat_list.folder_specs.fetch_mut(folder_id);
+        fetch.begin();
+        fetch.sent(extra);
         if let Err(err) = self.sender.send_json(&get_chat_folder(extra, folder_id)) {
             self.session.requests.take(extra);
             // The box waiting on this spec ends in the error with a Retry.
@@ -216,7 +216,6 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .fail(folder_id, err.stage_line());
             return Err(err);
         }
-        self.session.chat_list.folder_specs.clear_error(folder_id);
         Ok(Some(extra))
     }
 
@@ -238,8 +237,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if self
             .session
-            .requests
-            .has_purpose_for_folder(RequestPurpose::GetChatFolderChatsToLeave, folder_id)
+            .chat_list
+            .folder_chats_to_leave
+            .get(&folder_id)
+            .is_some_and(crate::state::fetch::Fetch::is_loading)
         {
             return Ok(None);
         }
@@ -442,10 +443,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         folder_id: i32,
         chats: &[ChatId],
     ) -> Result<bool, ConnectSendError> {
-        let requests = &self.session.requests;
-        if requests.has_purpose_for_folder(RequestPurpose::EditChatFolder, folder_id)
-            || requests.has_purpose_for_folder(RequestPurpose::RemoveChatFromFolder, folder_id)
-        {
+        if self.session.chat_list.folder_write_out(folder_id) {
             return Ok(false);
         }
         let Some(spec) = self.session.chat_list.fresh_spec(folder_id).cloned() else {
@@ -474,6 +472,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        self.session.chat_list.folder_write_sent(folder_id, extra);
         self.session.chat_list.mark_spec_stale(folder_id);
         Ok(true)
     }

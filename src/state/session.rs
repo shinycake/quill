@@ -12,6 +12,11 @@ pub enum ShutdownPhase {
     HoldingClose {
         until: std::time::Instant,
     },
+    /// `close` was refused by the sender: it is sent again once `retry_at`
+    /// has passed (backing off, not on every drain).
+    CloseRefused {
+        retry_at: std::time::Instant,
+    },
     /// `logOut` went out as this request.
     LogoutRequested(RequestId),
     /// `logOut` was refused; the session is still signed in.

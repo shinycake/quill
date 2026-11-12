@@ -32,20 +32,25 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self
-            .session
-            .requests
-            .pending
-            .values()
-            .any(|p| p.purpose == RequestPurpose::GetRecommendedChatFolders)
-        {
+        if self.session.chat_list.recommended_folders.is_loading() {
             return Ok(None);
         }
         let extra = self
             .session
             .request(RequestPurpose::GetRecommendedChatFolders, None);
-        self.send_folder_request(extra, get_recommended_chat_folders(extra))
-            .map(Some)
+        let list = &mut self.session.chat_list.recommended_folders;
+        list.begin();
+        list.sent(extra);
+        match self.send_folder_request(extra, get_recommended_chat_folders(extra)) {
+            Ok(extra) => Ok(Some(extra)),
+            Err(err) => {
+                self.session
+                    .chat_list
+                    .recommended_folders
+                    .fail(err.stage_line());
+                Err(err)
+            }
+        }
     }
 
     /// `getChatFolderInviteLinks` + `getChatsForChatFolderInviteLink`: what
@@ -111,11 +116,13 @@ impl<S: JsonSender> ConnectDriver<S> {
                 refused = Some(err);
             }
         }
-        if !self
+        let chats_loading = self
             .session
-            .requests
-            .has_purpose_for_folder(RequestPurpose::GetChatsForFolderInviteLink, folder_id)
-        {
+            .chat_list
+            .folder_shares
+            .get(&folder_id)
+            .is_some_and(|share| share.chats.is_loading());
+        if !chats_loading {
             let extra = self
                 .session
                 .request_for_folder(RequestPurpose::GetChatsForFolderInviteLink, folder_id);

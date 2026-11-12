@@ -276,8 +276,15 @@ impl<S: JsonSender> ConnectDriver<S> {
                 })
             })
             .map(|id| self.session.settings.business_extra.lookup.global.sent(id));
-        if sent.is_err() {
-            self.session.settings.business_extra.lookup = BotLookup::default();
+        if let Err(err) = &sent {
+            // The field shows the error with a Retry (typing again asks
+            // again). Searches already out land on a failed part and are
+            // dropped: only a loading part takes an answer.
+            let line = err.stage_line();
+            let lookup = &mut self.session.settings.business_extra.lookup;
+            lookup.exact.fail_dropping_data(line.clone());
+            lookup.mine.fail_dropping_data(line.clone());
+            lookup.global.fail_dropping_data(line);
         }
         sent
     }

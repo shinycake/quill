@@ -29,7 +29,7 @@ mod admin;
 mod conference;
 mod engine_sync;
 pub(crate) use conference::ConferenceCrypto;
-pub(crate) use engine_sync::{GroupEngineSync, Wake};
+pub(crate) use engine_sync::GroupEngineSync;
 mod controls;
 pub use controls::SelfMuteError;
 mod offers;
@@ -70,6 +70,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub(crate) fn pump_group_call_transport(
         &mut self,
         before: [Option<i32>; 2],
+        now: std::time::Instant,
     ) -> Result<(), ConnectSendError> {
         let after = self.session.calls.group_call_ids();
         for before_id in before.into_iter().flatten() {
@@ -81,7 +82,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
         }
         for group_call_id in after.into_iter().flatten() {
-            self.pump_one_group_call(group_call_id, Wake::Update)?;
+            self.pump_one_group_call(group_call_id, now)?;
         }
         Ok(())
     }
@@ -102,14 +103,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         });
         for group_call_id in connected.into_iter().flatten() {
             // A send failure is retried by the next pump.
-            let _ = self.pump_one_group_call(group_call_id, Wake::Poll(now));
+            let _ = self.pump_one_group_call(group_call_id, now);
         }
     }
 
     fn pump_one_group_call(
         &mut self,
         group_call_id: i32,
-        wake: Wake,
+        now: std::time::Instant,
     ) -> Result<(), ConnectSendError> {
         // Track feeds whose video went off end now, engine or not.
         self.sync_call_feeds(group_call_id);
@@ -223,13 +224,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         let mute_due = self
             .group_engine
             .get(&group_call_id)
-            .is_none_or(|sync| sync.mute.due(&wanted_mute, wake));
+            .is_none_or(|sync| sync.mute.due(&wanted_mute, now));
         if mute_due && let Some(engine) = self.call_engine.as_deref_mut() {
             let sync = self.group_engine.entry(group_call_id).or_default();
             match engine.set_group_muted(group_call_id, wanted_mute) {
                 Ok(()) => sync.mute.applied(wanted_mute),
                 Err(err) => {
-                    sync.mute.refused(wanted_mute, wake.at());
+                    sync.mute.refused(wanted_mute, now);
                     // Retried after the backoff; the error is recorded once
                     // so a failing engine does not rewrite it every tick.
                     if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
@@ -250,7 +251,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let camera_due = self
             .group_engine
             .get(&group_call_id)
-            .is_none_or(|sync| sync.camera.due(&wanted_camera, wake));
+            .is_none_or(|sync| sync.camera.due(&wanted_camera, now));
         if camera_due {
             let Some(engine) = self.call_engine.as_deref_mut() else {
                 return Ok(());
@@ -265,7 +266,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     }
                 }
                 Err(err) => {
-                    sync.camera.refused(wanted_camera, wake.at());
+                    sync.camera.refused(wanted_camera, now);
                     // Retried after the backoff; the error is recorded once
                     // so a failing engine does not rewrite it every tick.
                     if let Some(call) = self.session.calls.group_call_mut(group_call_id) {

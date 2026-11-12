@@ -385,12 +385,11 @@ impl Session {
                 }
             }
         }
-        let saved = &mut self.settings.data_storage.disk_paused;
-        let before = saved.len();
-        saved.retain(|key| !asked.contains(key) || held.contains(key));
-        if saved.len() != before {
-            self.media.disk_paused.saved_changed();
-        }
+        self.media.disk_paused.forget_unheld(
+            &mut self.settings.data_storage.disk_paused,
+            &asked,
+            &held,
+        );
     }
 
     /// The download left the list (removed here or on another device).

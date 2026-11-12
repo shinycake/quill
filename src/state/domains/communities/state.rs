@@ -103,7 +103,8 @@ pub enum CommunityOutcome {
 
 /// The `createCommunity` in flight and the picture its identity box chose
 /// for the community it makes (uploaded once the community exists). One
-/// create goes at a time, so a newer one replaces the stage; the answer,
+/// create with a picture goes at a time (the driver refuses a second while
+/// one is out); the answer,
 /// the refusal of that request, or the account going away ends it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum CommunityCreate {

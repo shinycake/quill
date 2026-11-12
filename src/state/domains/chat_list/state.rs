@@ -47,6 +47,11 @@ pub struct ChatListState {
     /// with the chat dropped from the spec — there is no
     /// `removeChatFromList` in 1.8.67.
     pub folder_remove_queue: Vec<(ChatId, i32)>,
+    /// The `editChatFolder` write in flight per folder (the editor's save
+    /// or a queued removal), by its request. A removal builds its edit from
+    /// the spec as it is now, so it waits while one is out; the answer or
+    /// error of that request (a lost one included) ends it.
+    pub folder_writes: HashMap<i32, RequestId>,
     /// Basic groups whose `leaveChat` was answered: the driver now sends
     /// `deleteChatHistory` with `remove_from_chat_list` for each.
     pub delete_after_leave: Vec<ChatId>,
@@ -56,8 +61,9 @@ pub struct ChatListState {
     /// The Share Folder box's data per folder id: the invite links and the
     /// chats a link may include, each with its own load stage.
     pub folder_shares: HashMap<i32, FolderShare>,
-    /// `getRecommendedChatFolders` result; `None` until fetched.
-    pub recommended_folders: Option<Vec<RecommendedChatFolder>>,
+    /// `getRecommendedChatFolders`: the request in flight, the list, or why
+    /// it failed.
+    pub recommended_folders: crate::state::fetch::Fetch<Vec<RecommendedChatFolder>>,
     /// What the requests a folder or contact box waits on ended in, by
     /// request id ([`DialogAnswers`]).
     pub dialog_answers: DialogAnswers,
@@ -227,8 +233,40 @@ impl ChatListState {
     }
 
     /// A `getChatFolder` answer: the folder's spec as it is now.
-    pub(crate) fn store_spec(&mut self, folder_id: i32, spec: ChatFolderSpec) {
-        self.folder_specs.insert(folder_id, spec);
+    pub(crate) fn store_spec(
+        &mut self,
+        folder_id: i32,
+        request: Option<RequestId>,
+        spec: ChatFolderSpec,
+    ) {
+        self.folder_specs.answered(folder_id, request, spec);
+    }
+
+    /// An `editChatFolder` for `folder_id` went out as `request`.
+    pub(crate) fn folder_write_sent(&mut self, folder_id: i32, request: RequestId) {
+        self.folder_writes.insert(folder_id, request);
+    }
+
+    /// An edit of `folder_id` is out.
+    pub fn folder_write_out(&self, folder_id: i32) -> bool {
+        self.folder_writes.contains_key(&folder_id)
+    }
+
+    /// `request` answered or failed: it ends the write it started, and no
+    /// other (a newer write for the folder stays).
+    pub(crate) fn folder_write_settled(&mut self, pending: Option<&PendingRequest>) {
+        let Some(pending) = pending else { return };
+        if !matches!(
+            pending.purpose,
+            RequestPurpose::EditChatFolder | RequestPurpose::RemoveChatFromFolder
+        ) {
+            return;
+        }
+        if let Some(folder_id) = pending.folder_id()
+            && self.folder_writes.get(&folder_id) == Some(&pending.id)
+        {
+            self.folder_writes.remove(&folder_id);
+        }
     }
 
     /// Something changed `folder_id`: its cached spec stays for display,
@@ -283,10 +321,11 @@ impl ChatListState {
             chat_lists_for_add: HashMap::new(),
             folder_paging: HashMap::new(),
             folder_remove_queue: Vec::new(),
+            folder_writes: HashMap::new(),
             delete_after_leave: Vec::new(),
             folder_chats_to_leave: HashMap::new(),
             folder_shares: HashMap::new(),
-            recommended_folders: None,
+            recommended_folders: crate::state::fetch::Fetch::Idle,
             dialog_answers: DialogAnswers::default(),
             folder_new_chats: HashMap::new(),
             folder_new_chats_asked: HashMap::new(),

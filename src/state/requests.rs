@@ -584,6 +584,12 @@ impl RequestRegistry {
     /// answer: the stages that waited for them were outdated already (the
     /// reducer drops a fetch's request when it marks it out of date), so no
     /// stage names them any more.
+    ///
+    /// Why a purpose sweep and not a request id: the purposes passed here
+    /// are session-wide lists (stickers, GIFs; one per session, never per
+    /// chat or window). Every request of such a purpose is older than the
+    /// mutation that changed the list, so all of them go, not one chosen
+    /// by id.
     pub(crate) fn supersede(&mut self, purpose: RequestPurpose) {
         let keys: Vec<u64> = self
             .pending

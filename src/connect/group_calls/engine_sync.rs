@@ -2,35 +2,16 @@
 //! camera, and whether the last change it refused waits out its backoff.
 //!
 //! A refused change is asked again after a growing wait (1 s, 2 s, 4 s, up
-//! to 5 s) when the periodic poll finds it, not on every poll, and at once
-//! when the wanted value changes (a user action) or a Telegram update
-//! arrives. The microphone is retried so the engine follows what
-//! the screen says; the wait only keeps a failing engine from being driven
-//! (and its error rewritten) on every tick.
+//! to 5 s) whoever looks (the periodic poll or a Telegram update: updates
+//! of a live call arrive several times a second), not on every look, and at
+//! once when the wanted value changes (a user action). The microphone is
+//! retried so the engine follows what the screen says; the wait only keeps
+//! a failing engine from being driven (and its error rewritten) on every
+//! tick or update.
 use std::time::{Duration, Instant};
 
 const FIRST_WAIT: Duration = Duration::from_secs(1);
 const MAX_WAIT: Duration = Duration::from_secs(5);
-
-/// What looks at the engine's settings.
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum Wake {
-    /// A Telegram update arrived: a refused change is asked again at once.
-    Update,
-    /// The periodic poll at this time: a refused change waits out its
-    /// backoff.
-    Poll(Instant),
-}
-
-impl Wake {
-    /// When this look happened, for scheduling a refused change's retry.
-    pub(crate) fn at(self) -> Instant {
-        match self {
-            Self::Update => Instant::now(),
-            Self::Poll(now) => now,
-        }
-    }
-}
 
 /// One setting of the engine: nothing applied yet, applied, or refused.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -54,9 +35,8 @@ impl<T: PartialEq + Clone> EngineApply<T> {
         *self = Self::Applied(value);
     }
 
-    /// Whether `wanted` should be handed to the engine: `wake` says what
-    /// found it.
-    pub(crate) fn due(&self, wanted: &T, wake: Wake) -> bool {
+    /// Whether `wanted` should be handed to the engine at `now`.
+    pub(crate) fn due(&self, wanted: &T, now: Instant) -> bool {
         match self {
             Self::Unset => true,
             Self::Applied(held) => held != wanted,
@@ -65,11 +45,7 @@ impl<T: PartialEq + Clone> EngineApply<T> {
                 retry_at,
                 ..
             } => {
-                refused != wanted
-                    || match wake {
-                        Wake::Update => true,
-                        Wake::Poll(now) => now >= *retry_at,
-                    }
+                refused != wanted || now >= *retry_at
             }
         }
     }
@@ -108,7 +84,7 @@ mod tests {
     #[test]
     fn a_refused_change_waits_out_its_backoff_and_a_new_value_goes_at_once() {
         let now = Instant::now();
-        let poll = |after: Duration| Wake::Poll(now + after);
+        let poll = |after: Duration| now + after;
         let mut mute = EngineApply::<bool>::Unset;
         assert!(mute.due(&true, poll(Duration::ZERO)));
         mute.refused(true, now);
@@ -121,8 +97,8 @@ mod tests {
             "another value goes at once"
         );
         assert!(
-            mute.due(&true, Wake::Update),
-            "an update asks again at once"
+            !mute.due(&true, now),
+            "an update inside the backoff does not ask again"
         );
         assert!(mute.due(&true, poll(FIRST_WAIT)));
         mute.refused(true, now + FIRST_WAIT);
@@ -137,10 +113,10 @@ mod tests {
         for _ in 0..10 {
             mute.refused(true, now);
         }
-        assert!(mute.due(&true, Wake::Poll(now + MAX_WAIT)));
-        assert!(!mute.due(&true, Wake::Poll(now + MAX_WAIT / 2)));
+        assert!(mute.due(&true, now + MAX_WAIT));
+        assert!(!mute.due(&true, now + MAX_WAIT / 2));
         mute.applied(true);
-        assert!(!mute.due(&true, Wake::Poll(now)));
-        assert!(mute.due(&false, Wake::Poll(now)));
+        assert!(!mute.due(&true, now));
+        assert!(mute.due(&false, now));
     }
 }

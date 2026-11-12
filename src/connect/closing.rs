@@ -44,6 +44,9 @@ pub const CLOSE_DRAIN_BUDGET: Duration = Duration::from_millis(4);
 /// `leaveGroupCall` can cut them off before they reach the server.
 pub const HANG_UP_HOLD: Duration = Duration::from_millis(500);
 
+/// How long a `close` the sender refused waits before it is sent again.
+pub const CLOSE_RETRY_BACKOFF: Duration = Duration::from_millis(250);
+
 /// What one drain of a closing client found (a return value, never stored).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CloseOutcome {
@@ -98,25 +101,33 @@ pub(crate) fn begin_close<S: JsonSender>(driver: &mut ConnectDriver<S>) {
 }
 
 /// Send `close`. A close TDLib's client could not take (the send failed, the
-/// session still runs) is held for the next drain, which sends it again:
+/// session still runs) is sent again after a backoff ([`release_close`]):
 /// the client would otherwise wait for a Closed nothing asked for.
 fn send_close<S: JsonSender>(driver: &mut ConnectDriver<S>) {
     if let Err(error) = driver.request_close()
         && error != ConnectSendError::InvalidRequest
     {
-        driver.session.shutdown = ShutdownPhase::HoldingClose {
-            until: deadline_after(HANG_UP_HOLD),
+        driver.session.shutdown = ShutdownPhase::CloseRefused {
+            retry_at: deadline_after(CLOSE_RETRY_BACKOFF),
         };
     }
 }
 
 pub(crate) fn release_close<S: JsonSender>(driver: &mut ConnectDriver<S>, now: Instant) {
-    let ShutdownPhase::HoldingClose { until } = driver.session.shutdown else {
-        return;
-    };
-    if now >= until || !driver.hang_up_pending() {
-        driver.session.shutdown = ShutdownPhase::Running;
-        send_close(driver);
+    match driver.session.shutdown {
+        ShutdownPhase::HoldingClose { until } => {
+            if now >= until || !driver.hang_up_pending() {
+                driver.session.shutdown = ShutdownPhase::Running;
+                send_close(driver);
+            }
+        }
+        ShutdownPhase::CloseRefused { retry_at } => {
+            if now >= retry_at {
+                driver.session.shutdown = ShutdownPhase::Running;
+                send_close(driver);
+            }
+        }
+        _ => {}
     }
 }
 

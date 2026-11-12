@@ -429,7 +429,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             let extra = self.session.request(RequestPurpose::RemoveContact, None);
             if let Err(err) = self.sender.send_json(&remove_contacts(extra, &ids)) {
                 self.session.requests.take(extra);
-                return Err(err);
+                // The clear is already running: the call did not fail as a
+                // whole. The contacts it could not remove are named in the
+                // note the Contacts tab shows.
+                self.session.users_state.contacts_notice = Some(err.stage_line());
+                return Ok(sent);
             }
             sent += 1;
         }

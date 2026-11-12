@@ -798,19 +798,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             get_created_public_chats,
             Self::wait_for_recipients,
         );
-        let bots = if chats.is_ok() {
+        let sent = chats.and_then(|_| {
             self.send_earn_tracked(
                 EarnPurpose::RecipientBots,
                 get_owned_bots,
                 Self::wait_for_recipients,
             )
-        } else {
-            chats
-        };
-        if bots.is_err() {
-            let earn = &mut self.session.payments.earn;
-            earn.recipients = Recipients::Failed;
-            return Err(ConnectSendError::InvalidRequest);
+        });
+        if let Err(err) = sent {
+            self.session.payments.earn.recipients = Recipients::Failed;
+            return Err(err);
         }
         Ok(())
     }

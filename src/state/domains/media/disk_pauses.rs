@@ -74,16 +74,26 @@ impl DiskPauses {
         }
     }
 
+    /// The saved pauses whose message was `asked` about and is not `held`
+    /// again are forgotten (the download is gone, finished or no longer
+    /// paused); the list is marked for saving when any went.
+    pub fn forget_unheld(
+        &mut self,
+        saved: &mut BTreeSet<PauseKey>,
+        asked: &BTreeSet<PauseKey>,
+        held: &BTreeSet<PauseKey>,
+    ) {
+        let before = saved.len();
+        saved.retain(|key| !asked.contains(key) || held.contains(key));
+        if saved.len() != before {
+            self.save = PauseSave::Changed;
+        }
+    }
+
     /// A download an earlier instance paused came back as `file_id` and the
     /// disk is low again: it is held, its message is saved already.
     pub fn hold(&mut self, file_id: i32) {
         self.files.insert(file_id);
-    }
-
-    /// Saved pauses were dropped without a resume (the search found them
-    /// gone).
-    pub fn saved_changed(&mut self) {
-        self.save = PauseSave::Changed;
     }
 
     /// The saved set differs from what was last written.
@@ -128,5 +138,19 @@ mod tests {
         assert!(pauses.pause(6, None, &mut saved));
         assert!(saved.is_empty());
         assert!(!pauses.needs_save());
+    }
+
+    #[test]
+    fn forgetting_unheld_pauses_marks_the_save_itself() {
+        let mut pauses = DiskPauses::default();
+        let mut saved: BTreeSet<PauseKey> = [(1, 1), (2, 2), (3, 3)].into();
+        let asked: BTreeSet<PauseKey> = [(1, 1), (2, 2)].into();
+        let held: BTreeSet<PauseKey> = [(2, 2)].into();
+        pauses.forget_unheld(&mut saved, &asked, &held);
+        assert_eq!(saved, [(2, 2), (3, 3)].into(), "(3,3) was not asked about");
+        assert!(pauses.needs_save());
+        pauses.written();
+        pauses.forget_unheld(&mut saved, &asked, &held);
+        assert!(!pauses.needs_save(), "nothing left to forget");
     }
 }
