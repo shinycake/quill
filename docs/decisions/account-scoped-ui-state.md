@@ -10220,3 +10220,25 @@ add and closed link save), `composer_sends_tests` (an ack never takes a
 neighbour's clear), `chat_window::asker_tests` (gif ask settles; two
 windows keep their own link text), `forum_extras::tests` (both answer
 orders), `deep_link_routes_tests` (seek stays with its account).
+
+### Sweep fixes (r4-01)
+
+| Ids | What changed |
+| --- | --- |
+| 01-001, g-487 | The web view's `armed` flag is derived from `Phase` in one place: `enter` is the only writer of the phase and stores "is `Loading`" for the callbacks' threads. `Phase::Loading { asked_at }` carries the instant the page was asked for, and the relay's load clock starts from it. |
+| 01-002 | The `quill://unread` watcher no longer sleeps on a 10 s timer while Quill is locked or signed out. It parks on the message condvar (`events::park`), which new messages, lock and unlock, and `Subscription::stop` wake; the 10 minute cap is only a safety net. Test `a_stop_ends_a_watcher_parked_with_nothing_to_look_at`. |
+| 01-003 | `td_offset::forget_account` runs from `account_data::forget`, so a logged-out account's `quill-offset:` tokens expire and a later sign-in under the same key cannot replay them. Test `a_logged_out_accounts_tokens_expire`. |
+| 01-004 | `ArchiveReload::Suggested` is gone: it was set by the reducer and left only when the driver later sent the reload, and a second suggestion could overwrite an in-flight `Reloading`. The driver's `note_sent` now sets `Reloading(request)` from any stage (a newer reload takes the place of one in flight; the older answer no longer matches). `note_suggested` is deleted. Test `a_second_reload_takes_the_place_of_one_in_flight`. |
+| 02-004 | `SoundSlot` matches a landing output by an identity token (`Arc<()>` made per open, cleared by `clear`), not a `u64` generation. |
+| 02-001, g-ia-output_failed | `PlaybackHealth::output` is `OutputState::{Open, Failed}`; the baseline line is gone. |
+| 02-003, g-501 | `ReplacementProbe::Probing { job: RenderJob }`: the probe's task lives in the stage, so a newer probe, a cleared replacement or the edit ending cancels the old one. Answers compare the job's `RenderToken`. A just-staged video is `Staged` until `probe_edit_replacement` starts its probe in the same call. `ProbeJob` is deleted. Tests `each_probe_of_a_replacement_has_its_own_job`, `replacing_the_probe_cancels_the_one_running`. |
+| 02-002, g-499 | `EditImageFetch::Downloading { file_id, request }`. The old code treated `Ok(None)` (nothing sent) as asked; now only a sent request starts the wait. The wait also ends when the tracker has no live intent for the file (`DownloadIntents::gave_up`: ended, cancelled or cleared), not only on `Ended`. Test `a_download_waiter_leaves_when_the_transfer_is_cancelled_or_never_registered`. |
+| g-490, g-491 | The bridge `Stage` has one `Undecided` stage where `Queued` and `Running` were (nothing read the difference). |
+| g-489 | `Run::Active { last_ms }` carries the session's last step; `Session::last_ms` is gone, so a cut-short session has no stale step time. |
+| g-481, g-497 | `CallLinkStep::OtherCallOn` (a plan, not a wait). `LeavingCall::Private { call_id, request }` holds the hang-up's `RequestId`; `drop_waiting_for(request)` matches by it. |
+| g-484, g-498 | `DeviceRun::Opening(DeviceThread)` / `Running { thread, running }`: the stage owns the device thread, so the `capture`/`mic` field beside `run` is gone in `call_screen.rs` and `call_capture.rs`. |
+| g-488, g-480 | `PhoneSuggestion::Offered`; `BottomBar::Starting { request }`. |
+| g-483, g-486, g-493, g-492, g-482, g-494, g-485, g-500, g-495, g-496 | Steady or mirrored states are named for what they are, not as work in flight: `CardState::Idle`, `Health::Live`, pipewire `StreamState::Linking`, `StreamPhase::NoFrameYet`, `CaptureStage::Live`, engine `StreamState::Joined`, `FeederState::Listed`, `P2pStage::Unconnected`, `TransportState::Establishing`, `Waker::Missed`. None of them waits for a request Quill sent. |
+| g-502, g-503 | `current_agent` reads its cell with `try_borrow`; `retain_community_chats` calls the `Borrow` trait by path (it was never a `RefCell`). |
+
+Five stale lines left `scripts/stage-enums-allow.txt` (their variants hold a request now or are gone).

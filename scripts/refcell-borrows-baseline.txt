@@ -53,7 +53,6 @@ build_create_community_dialog::body.borrow_mut 1
 char_width::cache.borrow 1
 char_width::cache.borrow_mut 1
 current::current.borrow 1
-current_agent::agent.borrow 1
 display_of::displays.borrow 1
 fit::window.borrow_mut 1
 follow_badges::active.borrow_mut 1
@@ -73,7 +72,6 @@ push_message::active.borrow_mut 1
 push_premium::active.borrow_mut 1
 release_media_tile::tile.borrow_mut 1
 remember::slot.borrow_mut 1
-retain_community_chats::chat.borrow 1
 reveal_fade::reveals.borrow 1
 revealing::reveals.borrow 1
 set_display::displays.borrow_mut 1

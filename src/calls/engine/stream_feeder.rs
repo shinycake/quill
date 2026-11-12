@@ -219,9 +219,7 @@ impl StreamFeeder {
             FeederState::Streaming => StreamState::Live,
             FeederState::NoStream => StreamState::NoStream,
             FeederState::Ended => StreamState::Ended,
-            FeederState::Idle | FeederState::Listed | FeederState::Failed => {
-                StreamState::Joined
-            }
+            FeederState::Idle | FeederState::Listed | FeederState::Failed => StreamState::Joined,
         }
     }
 

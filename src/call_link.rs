@@ -31,7 +31,7 @@ pub enum CallLinkStep {
     /// The call is already joined here.
     AlreadyJoined,
     /// Another call (a private one, or a call in another chat) is on.
-    Busy,
+    OtherCallOn,
     /// Fetch the call and show its join screen with the hash.
     Offer { group_call_id: i32 },
 }
@@ -59,11 +59,11 @@ pub fn plan(
         return CallLinkStep::NoCall;
     };
     if private_call {
-        return CallLinkStep::Busy;
+        return CallLinkStep::OtherCallOn;
     }
     match current {
         Some(call) if call.group_call_id == id && call.joined => CallLinkStep::AlreadyJoined,
-        Some(call) if call.joined => CallLinkStep::Busy,
+        Some(call) if call.joined => CallLinkStep::OtherCallOn,
         _ => CallLinkStep::Offer { group_call_id: id },
     }
 }
@@ -80,7 +80,7 @@ pub fn step_note(step: CallLinkStep, live_stream: bool) -> Option<String> {
         CallLinkStep::NoCall => Some(BAD_LINK_NOTE.into()),
         CallLinkStep::AlreadyJoined => Some(format!("You are already in this {what}.")),
         // Busy asks first (`CallLinkConfirm`).
-        CallLinkStep::Busy => None,
+        CallLinkStep::OtherCallOn => None,
     }
 }
 
@@ -166,7 +166,10 @@ pub struct CallLinkLeaving {
 pub enum LeavingCall {
     /// A private call, left by the hang-up sent as `request`: its refusal
     /// (matched by the request) drops the link waiting for the call.
-    Private { call_id: i32, request: RequestId },
+    Private {
+        call_id: i32,
+        request: RequestId,
+    },
     Group(i32),
 }
 
@@ -357,13 +360,13 @@ mod tests {
         );
         assert_eq!(
             plan(&channel(), Some(call(4)), Some(joined(9)), false),
-            CallLinkStep::Busy
+            CallLinkStep::OtherCallOn
         );
         assert_eq!(
             plan(&channel(), Some(call(4)), None, true),
-            CallLinkStep::Busy
+            CallLinkStep::OtherCallOn
         );
-        assert_eq!(step_note(CallLinkStep::Busy, true), None);
+        assert_eq!(step_note(CallLinkStep::OtherCallOn, true), None);
     }
 
     #[test]

@@ -68,8 +68,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             .and_then(|engine| engine.call_sound_health(call_id));
         let line = match (health, watched) {
             (Some(health), _) => format!(
-                "[call] {call_id} ended: {} sound frames, peak {}, output failed {}",
-                health.frames, health.peak, health.output_failed
+                "[call] {call_id} ended: {} sound frames, peak {}, output {:?}",
+                health.frames, health.peak, health.output
             ),
             (None, true) => format!("[call] {call_id} ended: no sound output open"),
             (None, false) => return,

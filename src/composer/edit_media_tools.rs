@@ -11,7 +11,7 @@
 //! video (`video_edit.rs`; `docs/decisions/codex-send-box-options.md`).
 
 use super::*;
-use crate::ids::FileId;
+use crate::ids::{FileId, RequestId};
 use crate::telegram::envelope::{ChatKind, VideoContent};
 
 /// One entry of the edit-media menu.
@@ -43,10 +43,10 @@ pub enum EditImageFetch {
     /// Nothing asked.
     #[default]
     Idle,
-    /// The photo is being downloaded; the editor opens when it lands. The
-    /// download tracker owns the request and says when it ended
-    /// (`downloads.ended_without_file(file_id)`).
-    Downloading { file_id: FileId },
+    /// The photo is being downloaded under `request`; the editor opens when
+    /// it lands. The download tracker owns the transfer and says when it
+    /// ended or was given up (`downloads.gave_up(file_id)`).
+    Downloading { file_id: FileId, request: RequestId },
 }
 
 /// tdesktop `lng_context_clear_cover`.

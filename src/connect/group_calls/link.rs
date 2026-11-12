@@ -52,7 +52,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     invite_hash: invite_hash.to_string(),
                 });
             }
-            CallLinkStep::Busy => {
+            CallLinkStep::OtherCallOn => {
                 let leave = if private_call {
                     LeaveKind::PrivateCall
                 } else {

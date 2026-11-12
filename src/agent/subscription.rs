@@ -83,4 +83,30 @@ mod tests {
             assert!(!subscription.is_current(token));
         }
     }
+
+    #[test]
+    fn a_stop_ends_a_watcher_parked_with_nothing_to_look_at() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let subscription = Arc::new(Subscription::new());
+        let token = subscription.start().expect("first watcher");
+        let ended = Arc::new(AtomicBool::new(false));
+        let watcher = {
+            let (subscription, ended) = (subscription.clone(), ended.clone());
+            std::thread::spawn(move || {
+                while subscription.is_current(token) {
+                    crate::agent::events::park(std::time::Duration::from_secs(600));
+                }
+                ended.store(true, Ordering::SeqCst);
+            })
+        };
+        // The stop wakes the park; a stop that lands before the watcher
+        // parks is seen by its `is_current` check instead.
+        subscription.stop();
+        while !ended.load(Ordering::SeqCst) {
+            crate::agent::events::wake_waiters();
+            std::thread::yield_now();
+        }
+        assert!(watcher.join().is_ok());
+    }
 }

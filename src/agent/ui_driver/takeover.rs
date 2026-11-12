@@ -91,8 +91,12 @@ pub struct Session {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Run {
     /// Live; `last_ms` is the last command or step.
-    Active { last_ms: u64 },
-    Ended { at_ms: u64 },
+    Active {
+        last_ms: u64,
+    },
+    Ended {
+        at_ms: u64,
+    },
 }
 
 impl Session {

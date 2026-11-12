@@ -188,16 +188,21 @@ impl QuillApp {
                 _ => None,
             }
         });
+        // `Ok(None)`: nothing was sent (the file is not wanted), so there is
+        // nothing to wait for.
         let asked = match (file_id, self.live.as_mut()) {
-            (Some(file_id), Some(live)) => {
-                live.driver.download_file(file_id, 8).map(|_| file_id).ok()
-            }
+            (Some(file_id), Some(live)) => live
+                .driver
+                .download_file(file_id, 8)
+                .ok()
+                .flatten()
+                .map(|request| (file_id, request)),
             _ => None,
         };
         match asked {
-            Some(file_id) => {
+            Some((file_id, request)) => {
                 if let Some(edit) = self.chat_ui.pending_edit_mut() {
-                    edit.media_edit.image = EditImageFetch::Downloading { file_id };
+                    edit.media_edit.image = EditImageFetch::Downloading { file_id, request };
                 }
                 self.set_note(StatusNote::silent(tr(keys::Q_MISC_DOWNLOADING)));
             }
@@ -215,7 +220,7 @@ impl QuillApp {
         let Some(edit) = self.chat_ui.pending_edit() else {
             return;
         };
-        let EditImageFetch::Downloading { file_id } = edit.media_edit.image else {
+        let EditImageFetch::Downloading { file_id, .. } = edit.media_edit.image else {
             return;
         };
         let landed = self
@@ -226,7 +231,7 @@ impl QuillApp {
                 session
                     .media
                     .downloads
-                    .ended_without_file(file_id.0, &session.media.files)
+                    .gave_up(file_id.0, &session.media.files)
             });
         if !landed && !failed {
             return;

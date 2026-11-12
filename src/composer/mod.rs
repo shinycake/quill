@@ -50,7 +50,7 @@ pub use draft_content::DraftContent;
 pub use draft_topic::{DraftKey, DraftTopic};
 pub use edit::{
     ComposerEdit, ComposerEditKind, EDIT_MEDIA_ALBUM_ERROR, EDIT_MEDIA_INVALID_FILE, EditMediaKind,
-    EditMediaReplacement, EditRender, EditableMedia, LinkPreviewChoice, MediaEdit, ProbeJob,
+    EditMediaReplacement, EditRender, EditableMedia, LinkPreviewChoice, MediaEdit,
     ReplacementProbe, begin_edit_draft, begin_edit_keeping_reply, cancel_edit_draft,
     cancel_edit_keeping_reply,
 };

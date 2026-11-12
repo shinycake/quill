@@ -92,29 +92,25 @@ pub enum EditMediaKind {
     Audio,
 }
 
-/// One probe of a replacement video. An answer settles the stage only when
-/// it carries the job the stage holds, so the answer of an earlier probe of
-/// the same path (the file staged, cleared and staged again, or re-cut to
-/// the same output) never settles a newer one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ProbeJob(u64);
-
-impl ProbeJob {
-    pub fn next() -> Self {
-        static JOBS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        Self(JOBS.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
-    }
-}
-
 /// What `ffprobe` said about a replacement video. The probe runs in the
-/// background when the file is staged (`probe_edit_replacement`), and Save
-/// waits for it: `Probing` leaves when the answer of its job arrives
+/// background once the file is staged (`probe_edit_replacement`), and Save
+/// waits for it: `Probing` leaves when the answer of its own probe arrives
 /// (`Ready`) or the probe fails (the replacement is dropped with the
-/// reason), and the edit ending drops it with the replacement.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// reason), and the edit ending, or a newer probe, drops the job and with
+/// it the probe still running.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReplacementProbe {
     NotNeeded,
-    Probing { job: ProbeJob },
+    /// A video just staged or re-cut; `probe_edit_replacement` starts its
+    /// probe in the same call that staged it.
+    Staged,
+    /// The probe runs under this job, which owns its task. An answer
+    /// settles the stage only when it carries the job's token, so the
+    /// answer of an earlier probe of the same path never settles a newer
+    /// one.
+    Probing {
+        job: super::RenderJob,
+    },
     Ready(crate::video::VideoProbe),
 }
 
@@ -122,20 +118,20 @@ impl ReplacementProbe {
     /// The stage of a file of `kind` that was just staged or replaced.
     pub fn for_kind(kind: EditMediaKind) -> Self {
         if kind == EditMediaKind::Video {
-            Self::Probing {
-                job: ProbeJob::next(),
-            }
+            Self::Staged
         } else {
             Self::NotNeeded
         }
     }
 
-    /// The job of the probe still to answer.
-    pub fn probing(self) -> Option<ProbeJob> {
-        match self {
-            Self::Probing { job } => Some(job),
-            Self::NotNeeded | Self::Ready(_) => None,
-        }
+    /// Whether a probe is still to answer (started or about to start).
+    pub fn is_pending(&self) -> bool {
+        matches!(self, Self::Staged | Self::Probing { .. })
+    }
+
+    /// Whether `token` names the probe this stage waits for.
+    pub fn waits_for(&self, token: &super::RenderToken) -> bool {
+        matches!(self, Self::Probing { job } if job.token() == token)
     }
 }
 
@@ -794,13 +790,28 @@ mod tests {
 
     #[test]
     fn each_probe_of_a_replacement_has_its_own_job() {
-        let first = ReplacementProbe::for_kind(EditMediaKind::Video);
-        let second = ReplacementProbe::for_kind(EditMediaKind::Video);
-        assert!(first.probing().is_some());
-        assert_ne!(first.probing(), second.probing(), "an old answer is stale");
-        assert_eq!(
-            ReplacementProbe::for_kind(EditMediaKind::Photo).probing(),
-            None
-        );
+        let first_token = crate::composer::RenderToken::new();
+        let second_token = crate::composer::RenderToken::new();
+        let first = ReplacementProbe::Probing {
+            job: crate::composer::RenderJob::new(first_token.clone(), ()),
+        };
+        assert!(ReplacementProbe::for_kind(EditMediaKind::Video).is_pending());
+        assert!(first.is_pending());
+        assert!(first.waits_for(&first_token));
+        assert!(!first.waits_for(&second_token), "an old answer is stale");
+        assert!(!ReplacementProbe::for_kind(EditMediaKind::Photo).is_pending());
+    }
+
+    #[test]
+    fn replacing_the_probe_cancels_the_one_running() {
+        let token = crate::composer::RenderToken::new();
+        let mut probe = ReplacementProbe::Probing {
+            job: crate::composer::RenderJob::new(token.clone(), ()),
+        };
+        assert!(!token.is_cancelled());
+        assert!(probe.waits_for(&token));
+        probe = ReplacementProbe::Staged;
+        assert!(token.is_cancelled(), "the superseded probe is cancelled");
+        assert!(probe.is_pending());
     }
 }

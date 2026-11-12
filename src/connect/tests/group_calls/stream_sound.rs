@@ -1,12 +1,12 @@
 use super::*;
 use crate::calls::engine::{GroupCallMode, StreamState};
-use crate::calls::stream_audio::watch::{NO_SOUND_LIMIT, PlaybackHealth};
+use crate::calls::stream_audio::watch::{NO_SOUND_LIMIT, OutputState, PlaybackHealth};
 use std::time::{Duration, Instant};
 
 const SILENT: PlaybackHealth = PlaybackHealth {
     frames: 0,
     peak: 0,
-    output_failed: false,
+    output: OutputState::Open,
 };
 
 fn joined_stream() -> GroupCallDriverHarness {
@@ -88,7 +88,7 @@ fn a_stream_with_sound_stays_on_quills_output() {
         PlaybackHealth {
             frames: 12,
             peak: 0,
-            output_failed: false,
+            output: OutputState::Open,
         },
     );
     set_stream_state(&mut driver, StreamState::Live);

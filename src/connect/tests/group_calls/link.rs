@@ -92,7 +92,7 @@ fn another_joined_call_blocks_the_offer() {
     driver.session.calls.active_group_call = Some(other);
     let before = recorder.snapshot().len();
     let step = driver.offer_call_link(ChatId(51), "AbC", false).unwrap();
-    assert_eq!(step, CallLinkStep::Busy);
+    assert_eq!(step, CallLinkStep::OtherCallOn);
     assert_eq!(recorder.snapshot().len(), before);
     assert_eq!(driver.session.calls.call_link_stage.hash_for(555), "");
     let ask = driver

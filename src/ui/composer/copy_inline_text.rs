@@ -92,7 +92,7 @@ impl QuillApp {
                     replacement.cover = old.cover.clone();
                     replacement.video_extras = old.video_extras.clone();
                     if old.kind == replacement.kind {
-                        replacement.probe = old.probe;
+                        replacement.probe = old.probe.clone();
                     }
                 }
                 edit.media_edit.replacement = Some(replacement);
@@ -108,11 +108,12 @@ impl QuillApp {
     /// staged; a failed probe drops the replacement with the reason, so
     /// Save never waits for good.
     pub(in crate::ui) fn probe_edit_replacement(&mut self, cx: &mut Context<Self>) {
-        let Some((path, job)) = self
+        let Some(path) = self
             .chat_ui
             .pending_edit()
             .and_then(|edit| edit.media_edit.replacement.as_ref())
-            .and_then(|rep| Some((rep.path.clone(), rep.probe.probing()?)))
+            .filter(|rep| matches!(rep.probe, quill::composer::ReplacementProbe::Staged))
+            .map(|rep| rep.path.clone())
         else {
             return;
         };
@@ -120,19 +121,31 @@ impl QuillApp {
             let path = path.clone();
             async move { quill::video::probe_local_video(&path) }
         });
-        self.spawn_scoped(cx, async move |this, cx| {
-            let result = probe.await;
-            let _ = this.update(cx, |this, cx| {
-                this.finish_edit_replacement_probe(&path, job, result, cx)
-            });
-        })
-        .detach();
+        let token = quill::composer::RenderToken::new();
+        let task = self.spawn_scoped(cx, {
+            let token = token.clone();
+            async move |this, cx| {
+                let result = probe.await;
+                let _ = this.update(cx, |this, cx| {
+                    this.finish_edit_replacement_probe(&path, &token, result, cx)
+                });
+            }
+        });
+        if let Some(replacement) = self
+            .chat_ui
+            .pending_edit_mut()
+            .and_then(|edit| edit.media_edit.replacement.as_mut())
+        {
+            replacement.probe = quill::composer::ReplacementProbe::Probing {
+                job: quill::composer::RenderJob::new(token, task),
+            };
+        }
     }
 
     pub(in crate::ui) fn finish_edit_replacement_probe(
         &mut self,
         path: &std::path::Path,
-        job: quill::composer::ProbeJob,
+        token: &quill::composer::RenderToken,
         result: Result<quill::video::VideoProbe, String>,
         cx: &mut Context<Self>,
     ) {
@@ -143,7 +156,7 @@ impl QuillApp {
             .media_edit
             .replacement
             .as_mut()
-            .filter(|rep| rep.path == path && rep.probe.probing() == Some(job))
+            .filter(|rep| rep.path == path && rep.probe.waits_for(token))
         else {
             return;
         };
@@ -352,7 +365,7 @@ impl QuillApp {
             .media_edit
             .replacement
             .as_ref()
-            .is_some_and(|rep| rep.probe.probing().is_some())
+            .is_some_and(|rep| rep.probe.is_pending())
         {
             self.set_note(StatusNote::silent(tr(keys::Q_CHAT_PREPARING_THE_VIDEO)));
             cx.notify();

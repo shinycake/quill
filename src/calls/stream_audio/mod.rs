@@ -25,7 +25,7 @@ use ring::SampleRing;
 use std::cell::Cell;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering};
-use watch::PlaybackHealth;
+use watch::{OutputState, PlaybackHealth};
 
 /// The rate of the call library's sound (`QC_AUDIO_RATE`), always mono.
 pub const SOURCE_RATE: u32 = 48_000;
@@ -152,7 +152,11 @@ impl StreamAudio {
         PlaybackHealth {
             frames: self.frames.load(Ordering::Relaxed),
             peak: self.peak.load(Ordering::Relaxed),
-            output_failed: self.output_failed.load(Ordering::Relaxed),
+            output: if self.output_failed.load(Ordering::Relaxed) {
+                OutputState::Failed
+            } else {
+                OutputState::Open
+            },
         }
     }
 }

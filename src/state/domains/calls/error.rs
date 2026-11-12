@@ -63,9 +63,7 @@ impl Session {
                 if let Some(hang_up) = self.calls.hang_up_failed(extra) {
                     self.calls.second_call.back_to_prompt();
                     // The call stays up, so no link waits for it to end.
-                    self.calls
-                        .call_link_stage
-                        .drop_waiting_for(hang_up.request);
+                    self.calls.call_link_stage.drop_waiting_for(hang_up.request);
                     self.calls.error =
                         Some(call_request_error_line(err, "Could not hang up the call"));
                 }

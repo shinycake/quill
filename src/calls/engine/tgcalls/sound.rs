@@ -12,9 +12,12 @@ use std::sync::{Arc, Mutex};
 
 /// What the output should be right now. Kept here so that a choice made
 /// while the device opens reaches it, and an open that is no longer wanted
-/// is told apart by its generation.
+/// is told apart by its token.
 struct Wanted {
-    generation: u64,
+    /// The open that may still land: each open makes its own, and a new
+    /// open or `clear` replaces it, so an older open finds a token that is
+    /// not the slot's.
+    open: Option<Arc<()>>,
     volume: f32,
     muted: bool,
 }
@@ -29,7 +32,7 @@ impl Default for SoundSlot {
         Self {
             audio: ArcSwapOption::empty(),
             wanted: Mutex::new(Wanted {
-                generation: 0,
+                open: None,
                 volume: 1.0,
                 muted: false,
             }),
@@ -46,7 +49,7 @@ impl SoundSlot {
     /// Stops the sound at once; an open still running will not land.
     pub(super) fn clear(&self) {
         let mut wanted = self.wanted.lock_or_recover();
-        wanted.generation = wanted.generation.wrapping_add(1);
+        wanted.open = None;
         self.audio.store(None);
     }
 
@@ -98,21 +101,21 @@ impl SoundSlot {
         hold: ReaperHold,
         open: impl FnOnce(f32, bool) -> Result<(D, Arc<StreamAudio>), String> + Send + 'static,
     ) -> DeviceThread {
-        let generation = {
+        let token = Arc::new(());
+        {
             let mut wanted = self.wanted.lock_or_recover();
-            wanted.generation = wanted.generation.wrapping_add(1);
+            wanted.open = Some(token.clone());
             wanted.volume = volume;
             wanted.muted = muted;
             self.audio.store(None);
-            wanted.generation
-        };
+        }
         let slot = Arc::clone(self);
         DeviceThread::open(
             "quill-call-sound",
             &crate::wake::UPDATES,
             move || match open(volume, muted) {
                 Ok((device, audio)) => {
-                    slot.publish(generation, audio);
+                    slot.publish(&token, audio);
                     Ok(device)
                 }
                 Err(err) => {
@@ -129,9 +132,13 @@ impl SoundSlot {
         )
     }
 
-    fn publish(&self, generation: u64, audio: Arc<StreamAudio>) {
+    fn publish(&self, token: &Arc<()>, audio: Arc<StreamAudio>) {
         let wanted = self.wanted.lock_or_recover();
-        if wanted.generation == generation {
+        if wanted
+            .open
+            .as_ref()
+            .is_some_and(|open| Arc::ptr_eq(open, token))
+        {
             audio.gain().set_volume(wanted.volume);
             audio.gain().set_muted(wanted.muted);
             self.audio.store(Some(audio));
