@@ -69,7 +69,7 @@ impl CardInput {
     /// The effect cycle of `press` is over: drop its snapshot, unless the
     /// edit already took it or a newer press replaced it.
     pub(crate) fn expire_delete(&mut self, press: u64) {
-        if matches!(self.delete, DeleteEdit::Pending { press: held, .. } if held == press) {
+        if matches!(self.delete, DeleteEdit::Snapshot { press: held, .. } if held == press) {
             self.delete = DeleteEdit::None;
         }
     }
@@ -85,14 +85,14 @@ impl CardInput {
 /// number lets the end-of-cycle clear leave a newer press's snapshot alone.
 pub(crate) enum DeleteEdit {
     None,
-    Pending { before: EditSnapshot, press: u64 },
+    Snapshot { before: EditSnapshot, press: u64 },
 }
 
 impl DeleteEdit {
     /// The snapshot, leaving none behind.
     fn take(&mut self) -> Option<EditSnapshot> {
         match std::mem::replace(self, Self::None) {
-            Self::Pending { before, .. } => Some(before),
+            Self::Snapshot { before, .. } => Some(before),
             Self::None => None,
         }
     }
@@ -102,7 +102,7 @@ impl DeleteEdit {
 #[cfg(feature = "demo-capture")]
 impl CardInput {
     pub(crate) fn has_delete_snapshot(&self) -> bool {
-        matches!(self.delete, DeleteEdit::Pending { .. })
+        matches!(self.delete, DeleteEdit::Snapshot { .. })
     }
 }
 
@@ -433,7 +433,7 @@ impl QuillApp {
             return;
         };
         let press = input.next_press();
-        input.delete = DeleteEdit::Pending {
+        input.delete = DeleteEdit::Snapshot {
             before: snapshot,
             press,
         };
