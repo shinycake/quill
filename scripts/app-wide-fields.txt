@@ -95,7 +95,6 @@ update_pill.fill.Easing.from | the update pill's glide start
 update_pill.fill.Easing.to | the update pill's glide end
 update_pill.fill.Easing.since | when that glide began
 update_pill.phase | the last control: downloading, or ready and since when its percentage began to fade
-agent_bridge.ui_send | the composer's hand-over slot: a send handed to the agent path while the UI driver injected input, until the driver's task takes it; it carries the screen it was built on and a command takes it only while that screen is still its own (`agent_driver.rs`)
 agent_bridge.driver | the UI driver runs agents' input commands one at a time for whichever account is on screen; a command stops when the screen's epoch changes and the next one starts (`agent_driver.rs`)
 agent_bridge.reads | the read commands (a tree, a screenshot) in flight for whichever account is on screen; each task leaves when it answers, and the bridge drops them with the app (`agent_driver.rs`)
 agent_bridge._wake | the task that wakes the UI for agent state and requests; agents drive whichever account is on screen, and the bridge owns it for the life of the app (`agent_state.rs`)

@@ -336,7 +336,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let purpose = RequestPurpose::Messages(MessagesPurpose::JumpToUnread { kind });
-        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+        // The window's own press is out already; the same chat in another
+        // window asks for itself.
+        let window = self.session.view_in_place();
+        if let Some(asked) = self.session.search.jump_lookups.asked_in(window)
+            && self.session.requests.get(asked).is_some_and(|pending| {
+                pending.purpose == purpose && pending.chat_id == Some(chat_id)
+            })
+        {
             return Ok(());
         }
         let extra = self.session.request(purpose, Some(chat_id));

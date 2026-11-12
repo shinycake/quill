@@ -56,6 +56,14 @@ impl JumpLookups {
         self.0.remove(&Some(window));
     }
 
+    /// The request `window`'s lookup waits for, if it is out.
+    pub(crate) fn asked_in(&self, window: Option<ChatId>) -> Option<RequestId> {
+        match self.0.get(&window) {
+            Some(JumpLookup::Asking { request, .. }) => Some(*request),
+            _ => None,
+        }
+    }
+
     /// The jumps resolved and waiting for the driver to start them. Notes
     /// and asks stay.
     pub(crate) fn take_resolved(&mut self) -> Vec<ViewJump> {

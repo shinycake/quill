@@ -263,3 +263,28 @@ fn a_chat_windows_reply_strip_gets_its_senders_background_emoji() {
         "the window's reply strip is resolved though the main window shows another chat"
     );
 }
+
+#[test]
+fn the_mention_button_is_not_refused_by_the_same_chat_asking_in_another_window() {
+    let mut h = Harness::two_chats();
+    let main_page = h.driver.select_chat(ALICE).unwrap().unwrap();
+    h.answer(ALICE, main_page, &(50..=60).collect::<Vec<_>>());
+    let window_page = h.driver.open_chat_window(ALICE).unwrap().unwrap();
+    h.answer(ALICE, window_page, &(50..=60).collect::<Vec<_>>());
+    h.driver
+        .with_window_chat(ALICE, |driver| {
+            driver.jump_to_unread_marker(UnreadJumpKind::Mention)
+        })
+        .unwrap();
+    let asked = h.sent("searchChatMessages", ALICE).len();
+    // The window's press is out; the main window's own press still asks.
+    h.driver
+        .jump_to_unread_marker(UnreadJumpKind::Mention)
+        .unwrap();
+    assert_eq!(h.sent("searchChatMessages", ALICE).len(), asked + 1);
+    // A second press in the same window waits for the first.
+    h.driver
+        .jump_to_unread_marker(UnreadJumpKind::Mention)
+        .unwrap();
+    assert_eq!(h.sent("searchChatMessages", ALICE).len(), asked + 1);
+}

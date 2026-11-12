@@ -217,8 +217,6 @@ impl QuillApp {
                     }
                 };
                 let mut refusals: Vec<String> = Vec::new();
-                // A send left by an earlier command's deferred half is not this one's.
-                let _ = app.update(cx, |app, _| app.agent_bridge.ui_send = None);
                 let mut ui_send: Option<UiSend> = None;
                 let mut stopped: Option<String> = None;
                 let mut done = 0usize;
@@ -264,7 +262,7 @@ impl QuillApp {
                     refusals.extend(guard::take_refusals());
                     // Only a send built on this command's screen is its own.
                     let send = app.update(cx, |app, _| {
-                        let taken = app.agent_bridge.ui_send.take();
+                        let taken = app.agent_bridge.take_send();
                         taken.filter(|sent| sent.0 == screen).map(|sent| sent.1)
                     });
                     match outcome {
@@ -391,6 +389,7 @@ impl QuillApp {
                     id,
                     _task: task,
                     waiting: std::collections::VecDeque::new(),
+                    sent: None,
                 };
             }
             None => self.agent_bridge.reads.hold(read_id, task),

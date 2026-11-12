@@ -53,11 +53,12 @@ fn a_send_left_by_an_earlier_command_is_not_the_next_ones(cx: &mut TestAppContex
     settle(vcx);
     let tree = read_tree(&app, vcx);
     let composer = message_box(&tree);
-    // A deferred half of an earlier command left its send in the slot.
-    vcx.update(|_, cx| {
+    // A send handed over while no command runs has nowhere to wait: the
+    // next command cannot find a stranger's send.
+    let parked = vcx.update(|_, cx| {
         app.update(cx, |app, _| {
             let epoch = app.screen_epoch();
-            app.agent_bridge.ui_send = Some(Box::new((
+            app.agent_bridge.hand_over_send(Box::new((
                 epoch,
                 UiSend {
                     account: quill::ids::AccountKey("a".into()),
@@ -66,13 +67,14 @@ fn a_send_left_by_an_earlier_command_is_not_the_next_ones(cx: &mut TestAppContex
                     text: "left behind".into(),
                     request: Value::Null,
                 },
-            )));
-        });
+            )))
+        })
     });
+    assert!(!parked, "no command runs to take it");
     let reply = drive(&app, vcx, click(Target::Node(composer)));
     let Ok(UiReply::Done { ui_send, .. }) = reply else {
         panic!("expected Done, got {reply:?}");
     };
     assert!(ui_send.is_none(), "the next command got a send of its own");
-    assert!(vcx.update(|_, cx| app.read(cx).agent_bridge.ui_send.is_none()));
+    assert!(vcx.update(|_, cx| app.update(cx, |app, _| app.agent_bridge.take_send().is_none())));
 }
