@@ -1,7 +1,5 @@
 # Answers not matched by RequestId (scripts/check-request-match.py).
 # <rule>:<Type::function> <count>. Only remove lines or lower counts.
-generation:Session::apply_found_chat_messages 2
-generation:Session::apply_search_error 2
 purpose:ConnectDriver::ask_gift_text_limit 1
 purpose:ConnectDriver::begin_login 1
 purpose:ConnectDriver::buy_marketplace_gift 1
@@ -37,7 +35,6 @@ purpose:ConnectDriver::mark_folder_as_read 1
 purpose:ConnectDriver::mask_request 1
 purpose:ConnectDriver::maybe_fetch_active_sessions 1
 purpose:ConnectDriver::maybe_fetch_connected_websites 1
-purpose:ConnectDriver::maybe_fetch_notification_sounds 1
 purpose:ConnectDriver::maybe_fetch_storage_statistics 1
 purpose:ConnectDriver::maybe_fetch_story_custom_emoji_stickers 1
 purpose:ConnectDriver::maybe_load_archive_chats 1

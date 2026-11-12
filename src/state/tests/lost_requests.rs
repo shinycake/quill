@@ -50,9 +50,8 @@ fn sweeping_an_in_chat_search_page_clears_its_loading_flag() {
     let mut session = ready_session();
     let chat = ChatId(5);
     session.search.chat_search.open_for(chat);
-    let generation = session.search.chat_search.generation;
-    session.search.chat_search.begin_more(MessageId(9));
-    session.request_chat_search(RequestPurpose::SearchChatMessagesMore, chat, generation);
+    let request = session.request_chat_search(RequestPurpose::SearchChatMessagesMore, chat);
+    session.search.chat_search.begin_more(MessageId(9), request);
 
     assert!(sweep(&mut session));
 

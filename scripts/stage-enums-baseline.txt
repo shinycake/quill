@@ -102,7 +102,6 @@ unkeyed:AddressStage::Resolving 1
 unkeyed:Assembly::Reading 1
 unkeyed:CallLinkStage::Leaving 1
 unkeyed:Cancellation::InFlight 1
-unkeyed:ChatSearchPaging::Loading 1
 unkeyed:DebugConfirm::Asking 1
 unkeyed:DemandStage::Asked 1
 unkeyed:DeviceRun::Running 1
@@ -117,7 +116,6 @@ unkeyed:IdLookup::Asking 1
 unkeyed:Lifecycle::Loading 1
 unkeyed:Lifecycle::Running 1
 unkeyed:Lifecycle::Waiting 1
-unkeyed:ListEdit::InFlight 1
 unkeyed:Neighbour::Asking 1
 unkeyed:P2pStage::Waiting 1
 unkeyed:PickWait::Downloading 1

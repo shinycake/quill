@@ -76,18 +76,13 @@ fn found_json(extra: RequestId) -> String {
 }
 
 /// Search chat 7 in its window's view, as typing in that window's search
-/// field does. Returns the request and the search's generation.
-fn search_in_window(session: &mut Session) -> (RequestId, u64) {
+/// field does. Returns the request.
+fn search_in_window(session: &mut Session) -> RequestId {
     session
         .with_view(Some(ChatId(7)), |session| {
             assert!(session.open_chat_search());
-            let generation = session.search.chat_search.begin_query("m");
-            let extra = session.request_chat_search(
-                RequestPurpose::SearchChatMessages,
-                ChatId(7),
-                generation,
-            );
-            (extra, generation)
+            session.search.chat_search.begin_query("m");
+            session.request_chat_search(RequestPurpose::SearchChatMessages, ChatId(7))
         })
         .expect("chat 7 has a window")
 }
@@ -100,7 +95,7 @@ fn a_search_answer_lands_in_the_window_that_asked() {
     apply_json(&mut session, &seq, &sink, BOB_JSON);
     session.open_chat(ChatId(8));
     session.open_window_chat(ChatId(7));
-    let (extra, _) = search_in_window(&mut session);
+    let extra = search_in_window(&mut session);
 
     // The answer arrives with the main window's view in place (the poll
     // loop applies updates there).
@@ -130,15 +125,15 @@ fn a_search_answer_for_a_closed_window_lands_in_no_view() {
     let seq = AtomicU64::new(0);
     apply_json(&mut session, &seq, &sink, CHAT_JSON);
     session.open_window_chat(ChatId(7));
-    let (extra, generation) = search_in_window(&mut session);
+    let extra = search_in_window(&mut session);
     // The window closes before the answer; the main window then opens the
-    // same chat and searches it. Each view counts its own searches, so the
-    // two can carry the same generation.
+    // same chat and searches it. The new search waits for its own request,
+    // not the closed window's.
     assert!(session.close_window_chat(ChatId(7)));
     session.open_chat(ChatId(7));
     assert!(session.open_chat_search());
-    session.search.chat_search.generation = generation - 1;
-    assert_eq!(session.search.chat_search.begin_query("other"), generation);
+    session.search.chat_search.begin_query("other");
+    session.request_chat_search(RequestPurpose::SearchChatMessages, ChatId(7));
 
     apply_json(&mut session, &seq, &sink, &found_json(extra));
     assert!(
@@ -197,7 +192,7 @@ fn an_answer_for_one_window_lands_there_while_another_window_is_in_place() {
     session.open_chat(ChatId(8));
     session.open_window_chat(ChatId(7));
     session.open_window_chat(ChatId(9));
-    let (extra, _) = search_in_window(&mut session);
+    let extra = search_in_window(&mut session);
     // Carol's window is drawing or handling input when the answer comes,
     // with a search of its own under way.
     assert!(session.enter_view(Some(ChatId(9))));
@@ -287,7 +282,7 @@ fn an_answer_for_a_closed_window_leaves_the_main_view_in_place() {
     let seq = AtomicU64::new(0);
     apply_json(&mut session, &seq, &sink, CHAT_JSON);
     session.open_window_chat(ChatId(7));
-    let (extra, _) = search_in_window(&mut session);
+    let extra = search_in_window(&mut session);
     assert!(session.close_window_chat(ChatId(7)));
     apply_json(&mut session, &seq, &sink, &found_json(extra));
     // While it applied, requests were the closed window's; afterwards the

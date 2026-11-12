@@ -67,7 +67,7 @@ impl Session {
                 _ => {}
             }
         }
-        if self.search.chat_search.matches_generation(pending)
+        if self.search.chat_search.more_waits_for(pending)
             && pending.map(|p| p.purpose) == Some(RequestPurpose::SearchChatMessagesMore)
         {
             // The page stays askable: the Retry strip asks it again.
@@ -98,7 +98,7 @@ impl Session {
             }
             _ => {}
         }
-        if self.search.chat_search.matches_generation(pending)
+        if self.search.chat_search.search_waits_for(pending)
             && pending.map(|p| p.purpose) == Some(RequestPurpose::SearchChatMessages)
         {
             self.search

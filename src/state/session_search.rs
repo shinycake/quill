@@ -10,18 +10,16 @@ impl Session {
         id
     }
 
-    pub fn request_chat_search(
-        &mut self,
-        purpose: RequestPurpose,
-        chat_id: ChatId,
-        search_generation: u64,
-    ) -> RequestId {
-        self.requests.register_chat_search(
-            self.account_generation,
-            purpose,
-            chat_id,
-            search_generation,
-        )
+    /// A request of the in-chat search. A search of the typed query is
+    /// recorded in the bar's stage as it is made, so only its answer ends
+    /// the stage; an older page is recorded by `begin_more`, which knows its
+    /// cursor.
+    pub fn request_chat_search(&mut self, purpose: RequestPurpose, chat_id: ChatId) -> RequestId {
+        let id = self.request(purpose, Some(chat_id));
+        if purpose == RequestPurpose::SearchChatMessages {
+            self.search.chat_search.search_sent(id);
+        }
+        id
     }
 
     pub fn request_history_around(&mut self, chat_id: ChatId, message_id: MessageId) -> RequestId {

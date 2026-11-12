@@ -229,7 +229,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(ChatSearchQueryOutcome::Unchanged);
         }
-        let _search_gen = self.session.search.chat_search.begin_query(trimmed);
+        self.session.search.chat_search.begin_query(trimmed);
         let token = self
             .session
             .search
@@ -245,7 +245,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         query: &str,
     ) -> Result<ChatSearchQueryOutcome, ConnectSendError> {
         self.clear_chat_search_debounce();
-        let _ = self.session.search.chat_search.begin_query(query);
+        self.session.search.chat_search.begin_query(query);
         Ok(match self.send_chat_search(query)? {
             Some(flight) => ChatSearchQueryOutcome::Sent(flight),
             None => ChatSearchQueryOutcome::Unchanged,
@@ -376,18 +376,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         };
         let state = &self.session.search.chat_search;
-        let (search_gen, query, sender, media) = (
-            state.generation,
-            state.query().to_owned(),
-            state.sender(),
-            state.media(),
-        );
-        let extra = self.session.request_chat_search(
-            RequestPurpose::SearchChatMessagesMore,
-            chat_id,
-            search_gen,
-        );
-        self.session.search.chat_search.begin_more(from);
+        let (query, sender, media) = (state.query().to_owned(), state.sender(), state.media());
+        let extra = self
+            .session
+            .request_chat_search(RequestPurpose::SearchChatMessagesMore, chat_id);
+        self.session.search.chat_search.begin_more(from, extra);
         match self.sender.send_json(&search_chat_messages_from(
             extra,
             chat_id,
@@ -544,12 +537,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        let search_gen = self.session.search.chat_search.generation;
-        let extra = self.session.request_chat_search(
-            RequestPurpose::SearchChatMessages,
-            chat_id,
-            search_gen,
-        );
+        let extra = self
+            .session
+            .request_chat_search(RequestPurpose::SearchChatMessages, chat_id);
         let (sender, media) = (
             self.session.search.chat_search.sender(),
             self.session.search.chat_search.media(),

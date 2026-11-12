@@ -293,18 +293,22 @@ impl Session {
             }
             return;
         }
-        if self.search.chat_search.matches_generation(pending)
-            && pending.map(|p| p.purpose) == Some(RequestPurpose::SearchChatMessagesMore)
+        if let Some(pending) = pending
+            && self.search.chat_search.more_waits_for(Some(pending))
+            && pending.purpose == RequestPurpose::SearchChatMessagesMore
         {
             for message in &messages {
                 self.remember_files(&message.files);
             }
             let hits = messages.iter().map(SearchMessageHit::from_parsed).collect();
-            self.search
-                .chat_search
-                .append_hits(hits, total_count, next_from_message_id);
+            self.search.chat_search.append_hits(
+                pending.id,
+                hits,
+                total_count,
+                next_from_message_id,
+            );
         }
-        if self.search.chat_search.matches_generation(pending)
+        if self.search.chat_search.search_waits_for(pending)
             && pending.map(|p| p.purpose) == Some(RequestPurpose::SearchChatMessages)
         {
             for message in &messages {

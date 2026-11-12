@@ -45,8 +45,6 @@ pub enum Correlation {
     Subject(String),
     /// `downloadFile`: the file.
     File(i32),
-    /// A search request: the search generation it belongs to.
-    Search(u64),
     /// A page the shared-media gallery's Stories tab asked for (the stories
     /// page asks for the same purpose without it).
     GalleryTab,
@@ -164,13 +162,6 @@ impl PendingRequest {
     pub fn file_id(&self) -> Option<i32> {
         match &self.correlation {
             Correlation::File(file) => Some(*file),
-            _ => None,
-        }
-    }
-
-    pub fn search_generation(&self) -> Option<u64> {
-        match &self.correlation {
-            Correlation::Search(generation) => Some(*generation),
             _ => None,
         }
     }

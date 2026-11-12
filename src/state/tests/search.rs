@@ -519,9 +519,8 @@ fn chat_search_happy_empty_stale_and_jump() {
     );
     session.open_chat(ChatId(11));
     assert!(session.open_chat_search());
-    let search_gen = session.search.chat_search.begin_query("hello");
-    let extra =
-        session.request_chat_search(RequestPurpose::SearchChatMessages, ChatId(11), search_gen);
+    session.search.chat_search.begin_query("hello");
+    let extra = session.request_chat_search(RequestPurpose::SearchChatMessages, ChatId(11));
     apply_json(
         &mut session,
         &seq,
@@ -575,9 +574,8 @@ fn chat_search_happy_empty_stale_and_jump() {
     // joining it across a gap.
     assert!(!session.histories.get(&11).unwrap().contains(MessageId(101)));
 
-    let empty_gen = session.search.chat_search.begin_query("zzz");
-    let empty_extra =
-        session.request_chat_search(RequestPurpose::SearchChatMessages, ChatId(11), empty_gen);
+    session.search.chat_search.begin_query("zzz");
+    let empty_extra = session.request_chat_search(RequestPurpose::SearchChatMessages, ChatId(11));
     apply_json(
         &mut session,
         &seq,
@@ -589,12 +587,10 @@ fn chat_search_happy_empty_stale_and_jump() {
     );
     assert_eq!(session.search.chat_search.status(), SearchStatus::Empty);
 
-    let stale = session.search.chat_search.begin_query("old");
-    let stale_extra =
-        session.request_chat_search(RequestPurpose::SearchChatMessages, ChatId(11), stale);
-    let fresh = session.search.chat_search.begin_query("new");
-    let fresh_extra =
-        session.request_chat_search(RequestPurpose::SearchChatMessages, ChatId(11), fresh);
+    session.search.chat_search.begin_query("old");
+    let stale_extra = session.request_chat_search(RequestPurpose::SearchChatMessages, ChatId(11));
+    session.search.chat_search.begin_query("new");
+    let fresh_extra = session.request_chat_search(RequestPurpose::SearchChatMessages, ChatId(11));
     apply_json(
         &mut session,
         &seq,
@@ -731,7 +727,7 @@ fn chat_search_jump_missing_deleted_and_inaccessible() {
     assert!(!session.histories.get(&11).unwrap().contains(MessageId(80)));
 
     let stale_around = session.request_history_around(ChatId(11), MessageId(80));
-    session.search.chat_search.generation = session.search.chat_search.generation.saturating_add(1);
+    session.search.chat_search.begin_query("other");
     assert_eq!(
         session.begin_chat_search_jump(MessageId(79)),
         ChatSearchJumpNeed::AlreadyReady
@@ -1312,11 +1308,9 @@ fn the_in_chat_search_bar_is_replaced_whole_on_close_and_on_another_chat() {
     assert!(search.sender().is_none() && search.from_picker().is_none());
     assert_eq!(search.media(), crate::search_filters::SearchMediaKind::All);
     search.set_sender(Some(MessageSender::User { user_id: 6 }));
-    let generation = search.generation;
     search.close();
     assert!(!search.is_open() && search.chat_id().is_none());
     assert!(search.sender().is_none() && !search.has_criteria());
-    assert!(search.generation > generation, "late answers are dropped");
     // Nothing writes into a closed bar.
     search.set_sender(Some(MessageSender::User { user_id: 7 }));
     search.begin_query("late");

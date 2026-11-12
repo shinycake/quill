@@ -2,19 +2,19 @@
 use super::*;
 
 /// In-chat search (tdesktop `searchInChat` / ComposeSearch): `searchChatMessages`.
-/// What survives closing the bar (the generation that drops late answers,
-/// the jump a hit starts, the quiet window of a typed query) lives here;
+/// What survives closing the bar (the jump a hit starts, the quiet window of
+/// a typed query) lives here; the requests the bar waits for live in its
+/// stages, so closing it drops its late answers;
 /// everything the open bar owns is replaced whole with its surface.
 #[derive(Debug, Clone)]
 pub struct ChatSearchState {
     pub surface: ChatSearchSurface,
-    pub generation: u64,
     pub jump: ChatSearchJump,
     /// Bumped by every jump request, so the UI can restart its highlight
     /// fade when the same message is jumped to again.
     pub jump_serial: u64,
-    /// The typed query waiting out its quiet window; a new generation
-    /// drops it.
+    /// The typed query waiting out its quiet window; a new query, a close or
+    /// another chat drops it.
     pub(crate) typed: super::debounce::Debounce<String>,
 }
 
@@ -33,7 +33,13 @@ pub enum ChatSearchSurface {
 pub enum ChatSearchPhase {
     #[default]
     Idle,
-    Searching,
+    /// The query is typed and waits out its quiet window.
+    Typing,
+    /// `searchChatMessages` is out as `request`: only its answer or error
+    /// ends the stage.
+    Searching {
+        request: RequestId,
+    },
     Ready,
     Empty,
     Failed,
@@ -43,7 +49,7 @@ impl From<ChatSearchPhase> for SearchStatus {
     fn from(phase: ChatSearchPhase) -> Self {
         match phase {
             ChatSearchPhase::Idle => Self::Idle,
-            ChatSearchPhase::Searching => Self::Searching,
+            ChatSearchPhase::Typing | ChatSearchPhase::Searching { .. } => Self::Searching,
             ChatSearchPhase::Ready => Self::Ready,
             ChatSearchPhase::Empty => Self::Empty,
             ChatSearchPhase::Failed => Self::Failed,
@@ -105,8 +111,8 @@ pub enum ChatSearchPaging {
     End,
     /// An older page can be asked from this cursor.
     More { from: MessageId },
-    /// The page from this cursor is in flight.
-    Loading { from: MessageId },
+    /// The page from this cursor is in flight as `request`.
+    Loading { from: MessageId, request: RequestId },
     /// The page from this cursor failed; asking again is the user's Retry.
     Failed { from: MessageId },
 }
@@ -152,7 +158,6 @@ impl Default for ChatSearchState {
     fn default() -> Self {
         Self {
             surface: ChatSearchSurface::Closed,
-            generation: 0,
             jump: ChatSearchJump::None,
             jump_serial: 0,
             typed: Default::default(),
@@ -161,10 +166,10 @@ impl Default for ChatSearchState {
 }
 
 impl ChatSearchState {
-    /// A new generation: the answers asked before it are dropped, and a
-    /// typed query still waiting its quiet window with them.
-    fn bump_generation(&mut self) {
-        self.generation = self.generation.saturating_add(1);
+    /// The stage is replaced: a typed query still waiting its quiet window
+    /// goes with it (the requests of the old stage find no stage that waits
+    /// for them).
+    fn drop_typed(&mut self) {
         self.typed.cancel();
     }
 
@@ -278,10 +283,10 @@ impl ChatSearchState {
         }
     }
 
-    /// The page from `from` goes out.
-    pub(crate) fn begin_more(&mut self, from: MessageId) {
+    /// The page from `from` goes out as `request`.
+    pub(crate) fn begin_more(&mut self, from: MessageId, request: RequestId) {
         if let Some(open) = self.open_mut() {
-            open.paging = ChatSearchPaging::Loading { from };
+            open.paging = ChatSearchPaging::Loading { from, request };
         }
     }
 
@@ -289,7 +294,7 @@ impl ChatSearchState {
     /// for the user's Retry.
     pub(crate) fn fail_more(&mut self) {
         if let Some(open) = self.open_mut()
-            && let ChatSearchPaging::Loading { from } = open.paging
+            && let ChatSearchPaging::Loading { from, .. } = open.paging
         {
             open.paging = ChatSearchPaging::Failed { from };
         }
@@ -307,9 +312,11 @@ impl ChatSearchState {
             .is_some_and(|open| matches!(open.paging, ChatSearchPaging::Failed { .. }))
     }
 
-    /// Append an older page (deduped; `selected` stays on its message).
+    /// Append the older page `request` brought (deduped; `selected` stays on
+    /// its message). Another request's page changes nothing.
     pub(crate) fn append_hits(
         &mut self,
+        request: RequestId,
         hits: Vec<SearchMessageHit>,
         total_count: i32,
         next_from_message_id: MessageId,
@@ -317,6 +324,15 @@ impl ChatSearchState {
         let Some(open) = self.open_mut() else {
             return;
         };
+        let ChatSearchPaging::Loading {
+            request: waiting, ..
+        } = open.paging
+        else {
+            return;
+        };
+        if waiting != request {
+            return;
+        }
         for hit in hits {
             if !open.hits.iter().any(|h| h.message_id == hit.message_id) {
                 open.hits.push(hit);
@@ -332,29 +348,43 @@ impl ChatSearchState {
             return;
         }
         self.surface = ChatSearchSurface::Open(OpenChatSearch::new(chat_id));
-        self.bump_generation();
+        self.drop_typed();
         self.jump = ChatSearchJump::None;
     }
 
     pub fn close(&mut self) {
         self.surface = ChatSearchSurface::Closed;
-        self.bump_generation();
+        self.drop_typed();
         self.jump = ChatSearchJump::None;
     }
 
-    pub fn begin_query(&mut self, query: &str) -> u64 {
-        self.bump_generation();
+    /// The query changed: the results go and the search waits for its
+    /// request ([`Self::search_sent`]). The answers of the query before it
+    /// find no stage that waits for them.
+    pub fn begin_query(&mut self, query: &str) {
+        self.drop_typed();
         self.jump = ChatSearchJump::None;
         if let Some(open) = self.open_mut() {
             open.query = query.to_string();
-            open.phase = ChatSearchPhase::Searching;
+            open.phase = ChatSearchPhase::Typing;
             open.clear_results();
         }
-        self.generation
+    }
+
+    /// `searchChatMessages` for the typed query went out as `request`.
+    pub(crate) fn search_sent(&mut self, request: RequestId) {
+        if let Some(open) = self.open_mut()
+            && matches!(
+                open.phase,
+                ChatSearchPhase::Typing | ChatSearchPhase::Searching { .. }
+            )
+        {
+            open.phase = ChatSearchPhase::Searching { request };
+        }
     }
 
     pub fn clear_query(&mut self) {
-        self.bump_generation();
+        self.drop_typed();
         self.jump = ChatSearchJump::None;
         if let Some(open) = self.open_mut() {
             open.query.clear();
@@ -363,12 +393,24 @@ impl ChatSearchState {
         }
     }
 
-    pub(crate) fn matches_generation(&self, pending: Option<&PendingRequest>) -> bool {
-        pending
-            .and_then(|p| p.search_generation())
-            .is_some_and(|search_gen| search_gen == self.generation)
-            && self.is_open()
-            && pending.and_then(|p| p.chat_id) == self.chat_id()
+    /// The bar is open on the chat of `pending` and its search waits for
+    /// that request.
+    pub(crate) fn search_waits_for(&self, pending: Option<&PendingRequest>) -> bool {
+        let (Some(pending), Some(open)) = (pending, self.open()) else {
+            return false;
+        };
+        pending.chat_id == Some(open.chat_id)
+            && matches!(open.phase, ChatSearchPhase::Searching { request } if request == pending.id)
+    }
+
+    /// The bar is open on the chat of `pending` and its older page waits for
+    /// that request.
+    pub(crate) fn more_waits_for(&self, pending: Option<&PendingRequest>) -> bool {
+        let (Some(pending), Some(open)) = (pending, self.open()) else {
+            return false;
+        };
+        pending.chat_id == Some(open.chat_id)
+            && matches!(open.paging, ChatSearchPaging::Loading { request, .. } if request == pending.id)
     }
 
     pub(crate) fn accept_hits(
