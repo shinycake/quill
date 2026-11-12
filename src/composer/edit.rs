@@ -33,6 +33,21 @@ pub struct ComposerEdit {
     pub link_preview: LinkPreviewChoice,
 }
 
+impl ComposerEdit {
+    /// What the edit bar keeps and draws while it slides in and out: this
+    /// edit without its render job, so a cancelled edit cancels the render
+    /// at once and not when the bar's exit slide ends.
+    pub fn for_display(&self) -> Self {
+        Self {
+            media_edit: MediaEdit {
+                render: EditRender::Idle,
+                ..self.media_edit.clone()
+            },
+            ..self.clone()
+        }
+    }
+}
+
 /// B5: the media currently on an edited message, as far as tdesktop's
 /// `Media::allowsEditMedia` + `ComputeAlbumType` care.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -153,25 +168,21 @@ impl EditMediaReplacement {
 }
 
 /// Where the photo editor's Done for this message edit stands. The render
-/// that lands is applied only while the edit still waits for its number; a
-/// cancelled edit takes the stage, and with it the render, away.
+/// that lands is applied only while the edit still holds its job; a
+/// cancelled edit or a later Done drops the job, which cancels the render.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum EditRender {
     #[default]
     Idle,
-    /// The render numbered so goes off the UI thread, its work owned by
-    /// `hold`; a later Done replaces the stage, which cancels the older
-    /// render, so only the latest one lands.
-    Rendering {
-        number: u64,
-        hold: crate::task_hold::TaskHold,
-    },
+    /// The render goes off the UI thread; the job owns its task, so only
+    /// the latest render lands.
+    Rendering { job: super::RenderJob },
 }
 
 impl EditRender {
-    /// The render `number` is the one this edit waits for.
-    pub fn waits_for(&self, number: u64) -> bool {
-        matches!(self, Self::Rendering { number: waiting, .. } if *waiting == number)
+    /// Whether the render named `token` is the one this edit waits for.
+    pub fn waits_for(&self, token: &super::RenderToken) -> bool {
+        matches!(self, Self::Rendering { job } if job.token() == token)
     }
 }
 
@@ -536,6 +547,21 @@ mod tests {
         let path = dir.join(name);
         std::fs::write(&path, [1u8]).unwrap();
         path
+    }
+
+    #[test]
+    fn the_edit_bar_copy_does_not_keep_the_render_alive() {
+        let token = crate::composer::RenderToken::new();
+        let mut edit = edit_with(Some(EditableMedia::Photo), false);
+        edit.media_edit.render = EditRender::Rendering {
+            job: crate::composer::RenderJob::new(token.clone(), ()),
+        };
+        let bar_copy = edit.for_display();
+        assert_eq!(bar_copy.media_edit.media, edit.media_edit.media);
+        // The edit is cancelled while the bar still slides shut.
+        drop(edit);
+        assert!(token.is_cancelled());
+        assert_eq!(bar_copy.media_edit.render, EditRender::Idle);
     }
 
     #[test]

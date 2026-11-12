@@ -142,7 +142,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .request(RequestPurpose::GetPaidReactionSenders, Some(chat_id));
         let json = get_chat_available_paid_message_reaction_senders(extra, chat_id);
         self.send_json_request(extra, &json)?;
-        self.session.payments.paid.senders_asked(chat_id.0);
+        self.session.payments.paid.senders_asked(chat_id.0, extra);
         Ok(Some(extra))
     }
 

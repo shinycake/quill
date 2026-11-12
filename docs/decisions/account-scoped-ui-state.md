@@ -10047,3 +10047,35 @@ Tests: `connect/tests/group_type.rs`, `connect/tests/profile_panels.rs`, `connec
 At the round 3 merge, `unkeyed:EditorStage::Encoding` left the stage
 baseline (r3-12's 23-001 gave the stage its `_job: Task<()>`), and so did
 `rawid:Chooser::Listing` (20-009 dropped its generation).
+
+### Sweep fixes (r3-01)
+
+| ids | fix |
+| --- | --- |
+| 01-001 | `StyleList::recent` holds `Recent::Unlisted(name)` / `Recent::Listed(name)`. A name becomes `Listed` when a server list names it; `set_server` prunes only a `Listed` name a new list lacks (or lists as built-in). A created, edited or added style (`promote_front`, `promote_name`) stays `Unlisted`, so it keeps its front place across lists that do not carry it yet, however it was promoted. |
+| 02-001, 02-002 | `quill::composer::RenderJob { token, task }` (an opaque, droppable owner of the render's task) replaces the `NEXT_RENDER` counter. `EditRender::Rendering { job }` and `PhotoPrep::Rendering { job, before }` hold it, so a cancelled edit, a removed photo or a later Done drops the job and cancels the render. The identity others keep (the held Send's `waiting`, the deferred editor open) is the `RenderToken`, matched at landing (`EditRender::waits_for`, `end_render`, `take_deferred_for`). The edit bar follows `ComposerEdit::for_display` (the edit without its render job), so the stage is the only holder and a cancelled edit cancels the render at once, not when the bar's exit slide ends. Dropping the job marks its token cancelled (`RenderToken::is_cancelled`): a render already running off-thread checks it before and after writing and deletes its PNG (`a_photo_gone_from_the_tray_leaves_no_png`). |
+| 03-001 | `OwnerClaim::Unsaved { user, retry_at }`: a failed owner-file write is retried by the first ingest at or after `retry_at` (`OWNER_RETRY`, 30 s), not on every update; `claim_account_owner` takes `now`, so the test drives it without a clock. |
+| 03-002 | The Share Folder `links` list records its request (`sent`) and takes its answer and error by it (`answered`/`failed`), like `chats`. A link created, edited or deleted while the list loads outdates it (`ChatListState::outdate_loading_links`), so the in-flight answer, which predates the edit, is dropped; the list is fetched again once (`fetch_folder_share` dedupes on the list's own stage, not on the old request still in `requests`): every refetch goes out from the post-ingest hook `refetch_open_folder_links`, and `refetch_outdated_folder_links` holds it back while a `deleteChatFolderInviteLink` for the folder is in flight (MTProto does not order parallel queries, so a list read before the delete lands could bring the link back); a refused delete ends the list in the error with a Retry. |
+| 03-003 | The welcome pack and the group picker's installed sticker and emoji lists record their request after `begin()`; the pack's error and the emoji answer are matched by it. The sticker list's data is taken only when the load that waits for it answers (`installed_wanted` in `apply_stickers_payload`; every sender already goes through `sticker_request` or `begin()`+`sent()`, the demo seed now records its request too), and a sticker-set change outdates the list so the load it dropped is asked again whether or not the panel is open. `accept_installed_sticker_sets` left the baseline. |
+| new-01 | `PaidReactions::senders_asked(chat, request)` records the request; `set_senders` and `senders_failed` take the answer and error by it. Both lines left the request-match baseline. |
+| 03-004 | `StyleReply::Running { request }`; the style lookup and example answers and errors are taken only from the request the stage holds, and `SearchStyle`/`GetExample` are sweepable (`is_style_preview_lookup`), so a lost request fails the stage. The UI token stays: it names which preview asked, not which request answers. |
+| 03-005, 03-006 | The Star packs list, the sign-in app config and the wearable gifts list record their request and take answer and error by it. |
+| 04-001 | `send_web_app_custom_request` records the `custom_requests` entry after the send went out; a refused send leaves none. |
+| 04-002 | A refused `getMessagePublicForwards` send ends the list in `Failed` (`forwards_send_failed`); the page draws Retry when the first page failed (nothing to page from). |
+| 04-003 | A release that times out in the section path is a leftover (`Err(Tdlib)` is ignored), as in the chat path; only `Cancelled` and `Io` end the export. |
+| 04-004 | Skipped. `ExportView` is the user's show/hide choice and the worker's progress is the export's stage: they are written by different parties, every combination is valid, and nothing resets one when the other moves (the poll reads both once). It is not a stage kept in step by hand. |
+
+Guard: `check-request-match.py` has a third rule, `unsent`: a `Fetch::begin()` with no `.sent(..)` after it in the same function. The 21 hits in the tree are in its baseline; the senders of this bundle are off it.
+
+Tests: `composer::render_job`, `connect/tests/sweep_r3_01.rs` (late links answer, requests held, style lookup by request and lost, refused forwards, refused custom request), `connect/tests/sweep_r2_03.rs` (owner retry deadline), `ai_compose::style`, `export/account/tests.rs` (a release that never answers), `ui/composer_sends_tests.rs` (the tray photo owns its job).
+
+At the round 3 merge, r3-11's 19-008 and r3-01's 02-001/02-002 owned the
+same renders. The stages hold r3-01's `RenderJob` (its token replaces the
+render number, and the edit bar keeps `for_display`), and the job keeps its
+task in r3-11's `TaskHold`; the worker still returns r3-11's `TempFile`, so a
+PNG whose landing task was dropped after it wrote is removed as well.
+`check-stage-enums.py` accepts a `RenderJob` as what ends a `Rendering`
+variant. r3-04's 08-017 already gated every sticker list on
+`answered(Some(pending.id))`, so 03-003's `installed_wanted` is that same
+`current` check and was folded into it; the wearable gifts and Star pack
+options fixes (08-015 and 03-005/03-006) were the same change.

@@ -362,12 +362,25 @@ fn the_senders_of_a_chat_are_asked_again_only_after_a_failure() {
     use crate::telegram::envelope::MessageSender;
     let mut paid = PaidReactions::default();
     assert!(paid.can_ask_senders(5));
-    paid.senders_asked(5);
+    paid.senders_asked(5, RequestId(1));
     assert!(!paid.can_ask_senders(5), "in flight");
-    paid.senders_failed(5);
+    paid.senders_failed(5, Some(RequestId(1)));
     assert!(paid.can_ask_senders(5), "failed: asked again");
-    paid.senders_asked(5);
-    paid.set_senders(5, &[MessageSender::Chat { chat_id: -9 }]);
+    paid.senders_asked(5, RequestId(2));
+    // An older ask's late answer and error change nothing.
+    paid.set_senders(
+        5,
+        Some(RequestId(1)),
+        &[MessageSender::Chat { chat_id: -1 }],
+    );
+    paid.senders_failed(5, Some(RequestId(1)));
+    assert!(!paid.can_ask_senders(5), "still waiting for the newer ask");
+    assert!(paid.channels_for(5).is_empty());
+    paid.set_senders(
+        5,
+        Some(RequestId(2)),
+        &[MessageSender::Chat { chat_id: -9 }],
+    );
     assert!(!paid.can_ask_senders(5), "answered");
     assert_eq!(paid.channels_for(5), &[-9]);
     assert!(paid.channels_for(6).is_empty());

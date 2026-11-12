@@ -417,6 +417,17 @@ impl QuillApp {
         true
     }
 
+    /// A link edit landed while the open Share Folder box was still loading
+    /// its list: the list is fetched again (its old answer was dropped).
+    pub(in crate::ui) fn refetch_open_folder_links(&mut self) {
+        let Some(folder_id) = self.folders.share.as_ref().map(|d| d.folder_id) else {
+            return;
+        };
+        if let Some(live) = self.live.as_mut() {
+            live.driver.refetch_outdated_folder_links(folder_id);
+        }
+    }
+
     /// The Retry of a share box whose folder or links failed to load.
     fn retry_folder_share(&mut self, cx: &mut Context<Self>) {
         let Some(folder_id) = self.folders.share.as_ref().map(|d| d.folder_id) else {

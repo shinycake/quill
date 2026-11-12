@@ -25,6 +25,10 @@ the re-sweep of 2026-11-11), and this check counts both:
   deep links and chat-search jumps all carried one). Hold the `RequestId`
   in the stage instead (`Loading { request }`; `LanguageSwitch` holds one
   per ask) and compare the answer's.
+- `unsent`: a call to `Fetch::begin()` with no `.sent(request)` after it in
+  the same function. The stage reads Loading but holds no request, so
+  `answered` and `failed` can never take its own answer and every answer is
+  matched by purpose instead (round 3 found it again in six senders).
 
 Screenshot-demo and fixture files seed state this way and are not checked.
 
@@ -67,6 +71,9 @@ PURPOSE = re.compile(r"\.\s*(?:has_purpose|take_purpose|has_auth_submit)\s*\(")
 # is not an answer match.
 PURPOSE_FOR_CHAT = re.compile(r"\.\s*(?:has_purpose|take_purpose)_for_chat\s*\(")
 SUCCEED = re.compile(r"\.\s*succeed\s*\(")
+BEGIN = re.compile(r"\.\s*begin\s*\(\s*\)")
+SENT = re.compile(r"\.\s*sent\s*\(")
+AFTER = 400
 PURPOSE_ENUM = re.compile(r"\benum\s+(\w*Purpose)\b[^{;]*\{")
 VARIANT = re.compile(r"\b([A-Z]\w*)\s*[{(]")
 COUNTER = re.compile(
@@ -96,7 +103,8 @@ def hits(root):
         purpose = "_purpose" in text or "has_auth_submit" in text
         succeed = ".succeed" in text
         counter = "Purpose" in text and COUNTER.search(text)
-        if not purpose and not succeed and not counter:
+        begin = ".begin(" in text
+        if not purpose and not succeed and not counter and not begin:
             continue
         scopes = shape_guard.Scopes(path, text)
         if counter:
@@ -114,6 +122,12 @@ def hits(root):
             for match in SUCCEED.finditer(text):
                 line = shape_guard.line_of(text, match.start())
                 yield f"unmatched:{scopes.at(match.start())}", path, line
+        if begin:
+            for match in BEGIN.finditer(text):
+                if SENT.search(text, match.end(), match.end() + AFTER):
+                    continue
+                line = shape_guard.line_of(text, match.start())
+                yield f"unsent:{scopes.at(match.start())}", path, line
 
 
 def self_test():

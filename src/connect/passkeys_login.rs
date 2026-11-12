@@ -131,7 +131,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let json = crate::telegram::requests::get_application_config(extra);
         // A send that failed leaves the ask open for the next ingest.
         if self.send_json_request(extra, &json).is_ok() {
-            self.session.settings.passkeys.login.config.begin();
+            let config = &mut self.session.settings.passkeys.login.config;
+            config.begin();
+            config.sent(extra);
         }
     }
 }

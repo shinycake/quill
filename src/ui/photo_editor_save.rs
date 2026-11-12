@@ -8,15 +8,29 @@ use super::photo_editor::{EditorPurpose, PhotoEditor};
 use super::send_box_media_check::check_photo;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
-use quill::composer::EditRender;
+use quill::composer::RenderJob as OwnedRender;
+use quill::composer::{EditRender, RenderToken};
 use quill::lang::{keys, tr};
 use quill::scratch::TempFile;
-use quill::task_hold::TaskHold;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 
-/// Numbers each attachment render, so the latest Done of a photo wins.
-static NEXT_RENDER: AtomicU64 = AtomicU64::new(1);
+/// Render and write the edit, unless its job was dropped already; a PNG
+/// written by a render that was cancelled meanwhile goes at once. The PNG
+/// comes back as a `TempFile`, so a result nobody takes (the landing task
+/// was dropped with its job after the render finished) removes it too.
+fn render_unless_cancelled(
+    token: &RenderToken,
+    job: super::photo_edit::RenderJob,
+) -> Option<TempFile> {
+    if token.is_cancelled() {
+        return None;
+    }
+    let saved = TempFile::new(super::edit_media_tools::write_edited_png(&job.render())?);
+    if token.is_cancelled() {
+        return None;
+    }
+    Some(saved)
+}
 
 impl QuillApp {
     /// The editor's Masks strip is wanted while some window's editor is in
@@ -55,14 +69,12 @@ impl QuillApp {
                 if self.edited_message() != Some(edit_of) {
                     return;
                 }
-                let number = NEXT_RENDER.fetch_add(1, Ordering::Relaxed);
+                let token = RenderToken::new();
+                let landing = token.clone();
                 let job = editor.into_render_job();
-                let render = cx.background_spawn(async move {
-                    super::edit_media_tools::write_edited_png(&job.render()).map(TempFile::new)
-                });
-                // The stage owns the task: a newer Done, a cancelled edit or
-                // a screen change drops it, which cancels the render, and a
-                // file it already wrote goes with the dropped result.
+                let cancel = token.clone();
+                let render =
+                    cx.background_spawn(async move { render_unless_cancelled(&cancel, job) });
                 let task = self.spawn_scoped(cx, async move |app, cx| {
                     let saved = render.await.map(TempFile::claim);
                     let kept = saved.clone();
@@ -71,7 +83,7 @@ impl QuillApp {
                             && this
                                 .chat_ui
                                 .pending_edit()
-                                .is_some_and(|edit| edit.media_edit.render.waits_for(number))
+                                .is_some_and(|edit| edit.media_edit.render.waits_for(&landing))
                         {
                             if let Some(edit) = this.chat_ui.pending_edit_mut() {
                                 edit.media_edit.render = EditRender::Idle;
@@ -87,10 +99,12 @@ impl QuillApp {
                         let _ = std::fs::remove_file(kept);
                     }
                 });
+                // The edit owns the render: ending it (or a later Done)
+                // drops the task, and a file it already wrote goes with the
+                // dropped result.
                 if let Some(edit) = self.chat_ui.pending_edit_mut() {
                     edit.media_edit.render = EditRender::Rendering {
-                        number,
-                        hold: TaskHold::new(task),
+                        job: OwnedRender::new(token, task),
                     };
                 }
             }
@@ -113,17 +127,20 @@ impl QuillApp {
         window: &Window,
         cx: &mut Context<Self>,
     ) {
-        let render = NEXT_RENDER.fetch_add(1, Ordering::Relaxed);
+        if !self.composer_sends.holds_item(&item) {
+            return;
+        }
+        let token = RenderToken::new();
+        let landing = token.clone();
+        let tray_item = item.clone();
         let job = editor.into_render_job();
-        let task = cx.background_spawn(async move {
-            super::edit_media_tools::write_edited_png(&job.render()).map(TempFile::new)
-        });
-        let item_slot = item.clone();
-        let landing = self.spawn_scoped_in(window, cx, async move |app, cx| {
+        let cancel = token.clone();
+        let task = cx.background_spawn(async move { render_unless_cancelled(&cancel, job) });
+        let render_task = self.spawn_scoped_in(window, cx, async move |app, cx| {
             let saved = task.await.map(TempFile::claim);
             let kept = saved.clone();
             let landed = app.update_in(cx, |this, window, cx| {
-                let landed = this.land_attachment_edit(&item.slot, render, saved, cx);
+                let landed = this.land_attachment_edit(&item.slot, &landing, saved, cx);
                 let here = this.send_slot().as_ref() == Some(&item.slot);
                 let view = this
                     .session()
@@ -132,7 +149,7 @@ impl QuillApp {
                 let opens = this
                     .viewer
                     .photo_editor
-                    .take_deferred_for(render)
+                    .take_deferred_for(&landing)
                     .is_some_and(|open| open.view == view);
                 match landed.held {
                     // The tray goes now, so no editor opens on it.
@@ -159,9 +176,9 @@ impl QuillApp {
                 && app
                     .app()
                     .update(cx, |this, cx| {
-                        this.viewer.photo_editor.take_deferred_for(render);
+                        this.viewer.photo_editor.take_deferred_for(&landing);
                         let landed =
-                            this.land_attachment_edit(&item.slot, render, kept.clone(), cx);
+                            this.land_attachment_edit(&item.slot, &landing, kept.clone(), cx);
                         if landed.held.is_some() {
                             this.note_held_send_dropped();
                         }
@@ -172,14 +189,11 @@ impl QuillApp {
                 let _ = std::fs::remove_file(kept);
             }
         });
-        // The item owns the render: a newer Done, the card going or the tray
-        // going drops the task, which cancels the render.
-        // A card already gone takes nothing: the task is dropped here, before
-        // it ever ran.
-        let _ = self.composer_sends.update_item(&item_slot, |attachment| {
-            attachment
-                .extras
-                .begin_render(render, TaskHold::new(landing));
+        // The tray item owns the render: removing the photo, or a later
+        // Done, drops the task.
+        let job = OwnedRender::new(token, render_task);
+        self.composer_sends.update_item(&tray_item, |attachment| {
+            attachment.extras.begin_render(job);
         });
     }
 
@@ -200,12 +214,12 @@ impl QuillApp {
     /// Render `render` in the tray of `slot` finished. Its PNG replaces
     /// the photo that render was started for while that photo is still in
     /// the tray and no later Done started; otherwise the PNG goes. The
-    /// render number finds the photo, so cards removed or moved meanwhile
+    /// render token finds the photo, so cards removed or moved meanwhile
     /// do not matter.
     fn land_attachment_edit(
         &mut self,
         slot: &SendSlot,
-        render: u64,
+        render: &RenderToken,
         saved: Option<PathBuf>,
         cx: &mut Context<Self>,
     ) -> super::composer_sends::Landed {

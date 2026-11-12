@@ -186,8 +186,14 @@ impl PaidReactions {
     }
 
     /// Keeps the channel senders of `chat_id` (the account itself is the
-    /// regular choice and is not listed).
-    pub fn set_senders(&mut self, chat_id: i64, senders: &[MessageSender]) {
+    /// regular choice and is not listed). Taken only by the ask that waits
+    /// for `request`.
+    pub fn set_senders(
+        &mut self,
+        chat_id: i64,
+        request: Option<RequestId>,
+        senders: &[MessageSender],
+    ) {
         let channels = senders
             .iter()
             .filter_map(|sender| match sender {
@@ -195,7 +201,10 @@ impl PaidReactions {
                 MessageSender::User { .. } => None,
             })
             .collect();
-        self.senders.entry(chat_id).or_default().succeed(channels);
+        self.senders
+            .entry(chat_id)
+            .or_default()
+            .answered(request, channels);
     }
 
     /// Whether the senders of `chat_id` may be asked for: never asked, or
@@ -204,17 +213,20 @@ impl PaidReactions {
         self.senders.get(&chat_id).is_none_or(Fetch::can_ask)
     }
 
-    /// The senders of `chat_id` were asked for.
-    pub fn senders_asked(&mut self, chat_id: i64) {
-        self.senders.entry(chat_id).or_default().begin();
+    /// The senders of `chat_id` were asked for under `request`.
+    pub fn senders_asked(&mut self, chat_id: i64, request: RequestId) {
+        let fetch = self.senders.entry(chat_id).or_default();
+        fetch.begin();
+        fetch.sent(request);
     }
 
-    /// The ask for the senders of `chat_id` failed: it may be tried again.
-    pub fn senders_failed(&mut self, chat_id: i64) {
+    /// The ask `request` for the senders of `chat_id` failed: it may be
+    /// tried again. Another ask's late error changes nothing.
+    pub fn senders_failed(&mut self, chat_id: i64, request: Option<RequestId>) {
         self.senders
             .entry(chat_id)
             .or_default()
-            .fail("senders unavailable");
+            .failed(request, "senders unavailable", false);
     }
 
     /// Channels to send as in `chat_id`.

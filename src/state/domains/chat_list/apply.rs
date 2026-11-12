@@ -152,6 +152,7 @@ impl Session {
                             None => links.push(link),
                         }
                     }
+                    self.chat_list.outdate_loading_links(folder_id);
                     if let Some(info) = self
                         .chat_list
                         .chat_folders
@@ -170,7 +171,7 @@ impl Session {
                         .entry(folder_id)
                         .or_default()
                         .links
-                        .succeed(links);
+                        .answered(pending.map(|p| p.id), links);
                 }
             }
             ChatListPayload::PremiumLimit {

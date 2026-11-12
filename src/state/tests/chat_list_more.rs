@@ -421,6 +421,9 @@ fn folder_invite_links_list_create_edit_and_errors() {
     );
     // getChatFolderInviteLinks fills the folder's list.
     let extra = session.request_for_folder(RequestPurpose::GetChatFolderInviteLinks, 3);
+    let links_fetch = &mut session.chat_list.folder_shares.entry(3).or_default().links;
+    links_fetch.begin();
+    links_fetch.sent(extra);
     apply_json(
         &mut session,
         &seq,

@@ -52,7 +52,14 @@ impl Files<'_> {
         match fetch_file(tdlib, self.files_root, file, limit)? {
             Ok(source) => {
                 let placed = place_into(tdlib, self.root, relative, &source);
-                source.release(tdlib)?;
+                // The file is in the export by now. A release that TDLib
+                // does not answer leaves the cache copy listed as a
+                // leftover for the next cleanup (as for a chat's files); it
+                // does not end the export.
+                match source.release(tdlib) {
+                    Ok(()) | Err(ExportError::Tdlib(_)) => {}
+                    Err(other) => return Err(other),
+                }
                 placed?;
                 self.loaded.save(file_id, relative.to_string());
                 Ok(saved(relative.to_string()))

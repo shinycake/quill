@@ -76,7 +76,7 @@ IN_FLIGHT = set(
     "Building Cutting Encoding Activating Rendering Listing Jumping Capturing".split()
 )
 CARRIER = re.compile(
-    r"\b(?:RequestId|Task|TaskHold|JoinHandle|Subscription|Receiver|Sender|Instant|SystemTime)\b"
+    r"\b(?:RequestId|Task|TaskHold|RenderJob|JoinHandle|Subscription|Receiver|Sender|Instant|SystemTime)\b"
 )
 OPTIONAL_REQUEST = re.compile(r"Option\s*<\s*(?:[\w:]*::)?RequestId\s*>")
 # Enums that name a message, a reason or a derived view, not a stored stage.

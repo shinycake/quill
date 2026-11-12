@@ -460,8 +460,11 @@ pub(crate) enum ToggleSessionKind {
     Calls,
 }
 
+/// How long a failed owner-file write waits before the next attempt.
+pub(crate) const OWNER_RETRY: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// The account folder's owner file, from this client's side: one value, so
-/// a failed save is retried on the next ingest.
+/// a failed save is retried on the first ingest after its deadline.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum OwnerClaim {
     /// Nobody checked yet (the user id is not known).
@@ -470,6 +473,11 @@ pub(crate) enum OwnerClaim {
     /// The folder's owner is this user and the file says so.
     Saved(i64),
     /// The folder was checked for this user but the owner file could not be
-    /// written: only the write is retried.
-    Unsaved(i64),
+    /// written: only the write is retried, by the first ingest at or after
+    /// `retry_at`, so a folder that stays unwritable costs one attempt per
+    /// [`OWNER_RETRY`], not one per update.
+    Unsaved {
+        user: i64,
+        retry_at: std::time::Instant,
+    },
 }

@@ -92,6 +92,8 @@ impl Session {
             .extend(sets.into_iter().filter(|set| ids.insert(set.id)));
     }
 
+    /// The installed sets the load that waits for them answered (the
+    /// caller checked the request, so an older answer never gets here).
     pub fn accept_installed_sticker_sets(&mut self, sets: Vec<StickerSetInfo>) {
         self.stickers.stickers.sets = sets;
         if self.stickers.stickers.tab != StickerTab::Installed {

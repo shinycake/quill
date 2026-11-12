@@ -568,9 +568,10 @@ fn a_send_cancels_a_tap_on_a_rendering_card(cx: &mut TestAppContext) {
         app.save_photo_editor(window, cx);
         // The second card's Done is still rendering when the first lands.
         app.update_pending_attachments(|tray| {
+            let token = quill::composer::RenderToken::new();
             tray[1]
                 .extras
-                .begin_render(u64::MAX, quill::task_hold::TaskHold::new(()))
+                .begin_render(quill::composer::RenderJob::new(token, ()))
         })
         .expect("an open chat");
         app.open_photo_editor(0, cx);

@@ -327,6 +327,14 @@ impl StatsState {
         }
     }
 
+    /// The page's send was refused: the list ends in the error the page
+    /// draws with a Retry, not in a blank section.
+    pub(crate) fn forwards_send_failed(&mut self, chat_id: i64, message_id: i64, error: String) {
+        if let Some(state) = self.message_mut(chat_id, message_id) {
+            state.forwards.list.send_failed(error);
+        }
+    }
+
     /// A `messageStatistics` answer of `pending`, when it is one of ours.
     pub(crate) fn accept_message_statistics_for(
         &mut self,

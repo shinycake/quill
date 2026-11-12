@@ -65,6 +65,10 @@ struct Account {
     fail_history: Option<i64>,
     /// `getFile` of this file id times out.
     time_out_file: Option<i64>,
+    /// Every file is held by nothing until the export downloads it, and
+    /// `deleteFile` (the release of its cache copy) times out.
+    release_times_out: bool,
+    file_looks: HashMap<i64, u32>,
     cancel_after: Option<usize>,
     calls: Vec<String>,
 }
@@ -169,6 +173,8 @@ impl Account {
             saved_contacts: true,
             fail_history: None,
             time_out_file: None,
+            release_times_out: false,
+            file_looks: HashMap::new(),
             cancel_after: None,
             calls: Vec::new(),
         }
@@ -355,8 +361,26 @@ impl Tdlib for Account {
                 if self.time_out_file == request["file_id"].as_i64() {
                     return Err(ExportError::Tdlib("the request timed out".into()));
                 }
+                let id = request["file_id"].as_i64().unwrap();
+                let looks = self.file_looks.entry(id).or_default();
+                *looks += 1;
+                if self.release_times_out && *looks == 1 {
+                    return Ok(json!({"@type": "file", "id": id,
+                        "local": {"is_downloading_completed": false,
+                            "is_downloading_active": false, "downloaded_size": 0},
+                        "remote": {"id": "remote"}}));
+                }
+                if let (true, Some(path)) = (self.release_times_out, self.files.get(&id)) {
+                    return Ok(json!({"@type": "file", "id": id,
+                        "local": {"path": path.to_string_lossy(),
+                            "is_downloading_completed": true,
+                            "is_downloading_active": false}}));
+                }
                 json!({"@type": "file", "id": request["file_id"],
                     "local": {"is_downloading_completed": true}})
+            }
+            "deleteFile" => {
+                return Err(ExportError::Tdlib("the request timed out".into()));
             }
             "downloadFile" => {
                 let id = request["file_id"].as_i64().unwrap();
@@ -678,6 +702,21 @@ fn a_chat_telegram_refuses_does_not_end_the_export() {
     assert!(run.root.join("chats/chat_4/messages.html").exists());
     let result: Value = serde_json::from_str(&read(&run.root.join("result.json"))).unwrap();
     assert_eq!(result["chats"]["list"].as_array().unwrap().len(), 7);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A release TDLib never answers leaves the cache copy listed as a leftover,
+/// as for a chat's files: the section file is already in the export, and the
+/// export goes on instead of ending as failed.
+#[test]
+fn a_release_tdlib_never_answers_does_not_end_the_account_export() {
+    let (dir, td, mut account) = setup("section-release-timeout");
+    account.release_times_out = true;
+    let settings = everything(&dir);
+    let run = export(&mut account, &settings, &td);
+    assert!(run.result.is_ok(), "{:?}", run.result);
+    assert!(account.count("deleteFile") >= 1);
+    assert!(run.root.join("profile_pictures").exists());
     let _ = std::fs::remove_dir_all(&dir);
 }
 

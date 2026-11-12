@@ -933,6 +933,9 @@ fn g2_welcome_fetch_error_marks_failed() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::LoadChatWelcomeMessages, Some(ChatId(13)));
+    let pack = session.groups.welcome_messages.entry(13).or_default();
+    pack.begin();
+    pack.sent(extra);
     apply_json(
         &mut session,
         &seq,
