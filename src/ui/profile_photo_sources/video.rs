@@ -56,7 +56,7 @@ impl QuillApp {
         };
         let edits = editor.edits();
         let input = editor.source.to_string_lossy().into_owned();
-        let Some((_, serial)) = editor.begin_encode() else {
+        let Some(serial) = editor.encode_serial() else {
             return false;
         };
         // Removed unless the profile photo request takes it, also when the
@@ -66,7 +66,7 @@ impl QuillApp {
         let args = encode_args(&input, &output.path().to_string_lossy(), &edits, &info);
         let log = work_dir().join("encode.log");
         let worker = cx.background_spawn(async move { run_ffmpeg(&args, &log) });
-        self.spawn_scoped_in(window, cx, async move |this, cx| {
+        let job = self.spawn_scoped_in(window, cx, async move |this, cx| {
             let result = worker.await;
             let _ = this.update_in(cx, |this, window, cx| {
                 let current = this
@@ -107,8 +107,10 @@ impl QuillApp {
                 }
                 cx.notify();
             });
-        })
-        .detach();
+        });
+        if let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() {
+            editor.start_encode(serial, info, job);
+        }
         cx.notify();
         false
     }
