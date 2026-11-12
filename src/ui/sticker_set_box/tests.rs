@@ -375,7 +375,7 @@ fn a_video_sticker_adapts_through_the_video_editor(cx: &mut TestAppContext) {
             // The stub isn't a video: the real probe's answer is stale
             // (the test answers the probe itself below).
             if let Some(editor) = app.composer_ui.send_box.video_editor.as_mut() {
-                editor.make_probe_stale();
+                editor.stop_probe();
             }
         });
     });
@@ -390,12 +390,6 @@ fn a_video_sticker_adapts_through_the_video_editor(cx: &mut TestAppContext) {
     // or GIF choice.
     vcx.update(|window, cx| {
         app.update(cx, |app, cx| {
-            let serial = app
-                .composer_ui
-                .send_box
-                .video_editor
-                .as_ref()
-                .map_or(0, |editor| editor.serial());
             let info = quill::video_edit::VideoSource {
                 duration_ms: 10_000,
                 width: 640,
@@ -403,7 +397,7 @@ fn a_video_sticker_adapts_through_the_video_editor(cx: &mut TestAppContext) {
                 has_audio: true,
                 ..Default::default()
             };
-            app.video_editor_probed(serial, Some(info), None, window, cx);
+            app.video_editor_probed(Some(info), None, window, cx);
         });
     });
     frames(vcx);
@@ -694,7 +688,7 @@ fn a_chosen_video_still_downloading_opens_the_editor_when_it_arrives(cx: &mut Te
     vcx.update(|window, cx| window.render_frame(cx));
     app.update(vcx, |app, _| {
         if let Some(editor) = app.composer_ui.send_box.video_editor.as_mut() {
-            editor.make_probe_stale();
+            editor.stop_probe();
         }
     });
     frames(vcx);

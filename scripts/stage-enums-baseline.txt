@@ -51,7 +51,6 @@ bare:PaneMode::Connecting 1
 bare:PasscodeJob::Running 1
 bare:Phase::Loading 1
 bare:Phase::Requested 1
-bare:Phase::Waiting 1
 bare:PhoneFlow::Asking 1
 bare:Picture::Loading 1
 bare:PictureState::Waiting 1
@@ -102,8 +101,6 @@ optional:LiveJoin::Joining 1
 optional:SetStage::Resolving 1
 optional:TrendingSets::Loading 1
 rawid:BotUsernameCheck::Checking 1
-rawid:EditorStage::Encoding 1
-rawid:EditorStage::Reading 1
 rawid:LimitNotice::Box 1
 unkeyed:AccentRead::Reading 1
 unkeyed:AddressStage::Resolving 1

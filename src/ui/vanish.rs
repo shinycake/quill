@@ -385,8 +385,8 @@ pub(super) struct Vanishing {
 /// the rows change when this does, never while the animation runs on.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 enum Phase {
-    /// Deletion requested, not landed yet.
-    Waiting,
+    /// Deletion requested, not landed yet: the message is still whole.
+    Intact,
     /// The message (cut away, then its gap closing) is among the rows.
     InRows,
     /// Only dust is left, painted over the history.
@@ -411,7 +411,7 @@ impl Vanishing {
                 .checked_duration_since(requested)
                 .unwrap_or(Duration::ZERO);
             return if waited < VANISH_WAIT {
-                Phase::Waiting
+                Phase::Intact
             } else {
                 Phase::Done
             };
