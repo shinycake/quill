@@ -7,9 +7,9 @@ use super::super::image_budget::{
     take_unshowable,
 };
 use super::display::{WindowDisplay, display_of, set_display};
+use super::opening::OPEN_GIVE_UP;
 use super::{
-    CLOSE_AFTER, ClipSpec, HEAD_TTL, HeadId, Leaving, OPEN_GIVE_UP, OPENING_FPS, Part, Place,
-    Player, ViewAsk,
+    CLOSE_AFTER, ClipSpec, HEAD_TTL, HeadId, Leaving, OPENING_FPS, Part, Place, Player, ViewAsk,
 };
 use gpui_kit::EntityId;
 use quill::ids::{ChatId, FileId};
@@ -679,7 +679,7 @@ fn an_open_nobody_answers_stops_asking_for_ticks_after_the_give_up() {
         "opening: ticks at the opening rate"
     );
     assert!(view.changes_in(draw));
-    view.player.skip(OPEN_GIVE_UP - ms(1));
+    view.player.skip(OPEN_GIVE_UP.saturating_sub(ms(1)));
     assert_eq!(view.fps(), OPENING_FPS, "still inside the give-up");
     view.player.skip(ms(1));
     assert_eq!(view.fps(), 0, "given up: it rests");

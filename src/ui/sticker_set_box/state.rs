@@ -633,7 +633,7 @@ mod confirm_tests {
             t0,
         );
         let editing = SetEditing::Waiting(wait);
-        let early = t0 + DOWNLOAD_GIVE_UP - std::time::Duration::from_secs(1);
+        let early = t0 + DOWNLOAD_GIVE_UP.saturating_sub(std::time::Duration::from_secs(1));
         assert!(!editing.download_gave_up(early));
         assert!(editing.download_gave_up(t0 + DOWNLOAD_GIVE_UP));
         assert!(!SetEditing::Idle.download_gave_up(t0 + DOWNLOAD_GIVE_UP));

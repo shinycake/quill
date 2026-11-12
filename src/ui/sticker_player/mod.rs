@@ -29,7 +29,7 @@ pub(super) use app::{EmojiSide, PreviewEmoji, ViewAsk, mirrors, panel_sticker_he
 pub(super) use display::note_display;
 use display::{display_of, forget_display};
 pub(in crate::ui) use opening::Leaving;
-use opening::{OPEN_GIVE_UP, Opening, open_gave_up};
+use opening::{Opening, open_gave_up};
 pub(super) use spec::{ClipSpec, HeadId, Part};
 pub(super) use view::StickerView;
 
