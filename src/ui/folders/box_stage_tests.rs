@@ -902,3 +902,80 @@ mod queued_invite {
         });
     }
 }
+
+/// A dialog whose add is out, with `next` queued behind it.
+fn adding(link: &str, request: RequestId, next: Option<&str>) -> FolderInviteDialog {
+    let info = Box::new(quill::telegram::envelope::ChatFolderInviteLinkInfo {
+        folder: quill::telegram::envelope::ChatFolderInfo {
+            id: 0,
+            name: "Work".into(),
+            icon_name: String::new(),
+            color_id: -1,
+            is_shareable: false,
+            has_my_invite_links: false,
+        },
+        missing_chat_ids: vec![],
+        added_chat_ids: vec![],
+    });
+    FolderInviteDialog::new(
+        link.into(),
+        InviteStage::Adding {
+            request,
+            info,
+            next: next.map(String::from),
+        },
+    )
+}
+
+/// Sweep r4-08 review: a link queued behind a closed add gives way to a
+/// box the user opened since, and with two closed adds the newest link wins.
+#[gpui_kit::test]
+fn a_link_queued_behind_a_closed_add_does_not_replace_a_newer_box(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx);
+    app.update_in(&mut vcx, |app, _, cx| {
+        let request = sent(app, RequestPurpose::AddChatFolderByInviteLink, None);
+        app.folders.invite = Some(adding("one", request, Some("two")));
+        app.close_folder_invite(cx);
+        // Link three opens its own box meanwhile.
+        app.open_folder_invite("three".into(), cx);
+        answer(app, request, REFUSED);
+        assert!(app.settle_folder_share(cx));
+        let dialog = app.folders.invite.as_ref().expect("link three's box");
+        assert_eq!(dialog.link, "three", "the older queued link is dropped");
+    });
+}
+
+#[gpui_kit::test]
+fn the_newest_queued_link_opens_when_closed_adds_settle_together(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx);
+    app.update_in(&mut vcx, |app, _, cx| {
+        let first = sent(app, RequestPurpose::AddChatFolderByInviteLink, None);
+        app.folders.invite = Some(adding("a", first, Some("older")));
+        app.close_folder_invite(cx);
+        let second = sent(app, RequestPurpose::AddChatFolderByInviteLink, None);
+        app.folders.invite = Some(adding("b", second, Some("newer")));
+        app.close_folder_invite(cx);
+        answer(app, first, REFUSED);
+        answer(app, second, REFUSED);
+        assert!(app.settle_folder_share(cx));
+        let dialog = app.folders.invite.as_ref().expect("a box opens");
+        assert_eq!(dialog.link, "newer");
+    });
+}
+
+/// A closed add whose answer the ring evicted still opens its queued link.
+#[gpui_kit::test]
+fn an_evicted_closed_add_still_opens_its_queued_link(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx);
+    app.update_in(&mut vcx, |app, _, cx| {
+        let request = sent(app, RequestPurpose::AddChatFolderByInviteLink, None);
+        app.folders.invite = Some(adding("one", request, Some("two")));
+        app.close_folder_invite(cx);
+        answer(app, request, REFUSED);
+        let demo = app.demo_session.as_mut().expect("demo session");
+        assert!(demo.chat_list.dialog_answers.take(request).is_some());
+        app.settle_folder_share(cx);
+        let dialog = app.folders.invite.as_ref().expect("a box opens");
+        assert_eq!(dialog.link, "two");
+    });
+}

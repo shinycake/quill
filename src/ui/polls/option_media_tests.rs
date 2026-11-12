@@ -87,3 +87,35 @@ fn a_photo_opens_in_the_viewer_without_the_message_actions(cx: &mut TestAppConte
         assert!(app.message_ui.open_link_confirm.is_none());
     });
 }
+
+/// Sweep r4-08 round 3: a refusal is dropped by the next Add, so it does
+/// not stay under the field once the text was fixed.
+#[gpui_kit::test]
+fn a_new_add_clears_the_last_refusal(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        let (chat, message) = poll_with_media(app, [photo(), photo()]);
+        app.open_poll_add_option(chat, message, window, cx);
+        app.submit_poll_add_option(cx);
+        let refused = |app: &QuillApp| {
+            app.message_ui
+                .poll_add_option
+                .as_ref()
+                .and_then(|panel| panel.error())
+        };
+        assert!(refused(app).is_some(), "an empty option is refused");
+        let Some(input) = app
+            .message_ui
+            .poll_add_option
+            .as_ref()
+            .map(|p| p.input.clone())
+        else {
+            return;
+        };
+        input.update(cx, |input, cx| {
+            input.set_value("A brand new option", window, cx)
+        });
+        app.submit_poll_add_option(cx);
+        assert!(refused(app).is_none(), "the fixed text is judged anew");
+    });
+}

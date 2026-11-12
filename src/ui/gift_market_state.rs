@@ -94,6 +94,15 @@ pub(crate) struct CustomBidUi {
     pub(super) error: Option<String>,
 }
 
+/// Where an auction open was asked from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OpeningFrom {
+    /// The send-gift box: the bid is for its recipient.
+    SendBox,
+    /// A link or another box: the bid is for the user.
+    Elsewhere,
+}
+
 /// What the open boxes share: who a bid or a purchase is for, "Hide My
 /// Name", and whether an auction's state is being asked for to open its
 /// box. One value for the whole stack, so it goes with the stack
@@ -112,9 +121,9 @@ pub(crate) enum MarketFlow {
     /// one's.
     Opening {
         request: quill::ids::RequestId,
-        /// Asked from the send-gift box, whose recipient the bid uses: the
-        /// answer is dropped once that box is gone.
-        from_send_box: bool,
+        /// Where the ask came from: from the send-gift box, whose recipient
+        /// the bid uses, the answer is dropped once that box is gone.
+        from: OpeningFrom,
         recipient: Option<GiftRecipient>,
         hide_name: bool,
     },
@@ -167,14 +176,14 @@ impl MarketFlow {
     /// The auction state was asked as `request`: its box opens on the
     /// answer. A new ask replaces the one before (the session keeps only
     /// the newest fetch).
-    pub(super) fn begin_opening(&mut self, request: quill::ids::RequestId) {
+    pub(super) fn begin_opening(&mut self, request: quill::ids::RequestId, from: OpeningFrom) {
         let (recipient, hide_name) = {
             let (recipient, hide_name) = self.names();
             (recipient.take(), *hide_name)
         };
         *self = Self::Opening {
             request,
-            from_send_box: recipient.is_some(),
+            from,
             recipient,
             hide_name,
         };
@@ -196,14 +205,10 @@ impl MarketFlow {
         }
     }
 
-    /// The request of the pending open and whether the send-gift box asked.
-    pub(super) fn opening(&self) -> Option<(quill::ids::RequestId, bool)> {
+    /// The request of the pending open and where it was asked from.
+    pub(super) fn opening(&self) -> Option<(quill::ids::RequestId, OpeningFrom)> {
         match self {
-            Self::Opening {
-                request,
-                from_send_box,
-                ..
-            } => Some((*request, *from_send_box)),
+            Self::Opening { request, from, .. } => Some((*request, *from)),
             Self::Boxes { .. } => None,
         }
     }

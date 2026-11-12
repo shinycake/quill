@@ -503,17 +503,28 @@ impl QuillApp {
 
     /// Why the grid is empty. Nothing while the first answer is on its way
     /// (the field's spinner says so).
-    fn gif_panel_status(
+    /// The line a GIF tab with nothing to draw shows, if any. A section
+    /// missing after its second ask is spent has no answer on its way and
+    /// waits for a press, so it says so instead of drawing blank.
+    pub(super) fn gif_status_text(
         &self,
         panel: &GifPanel,
         shown: GifShown<'_>,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let text = if let GifShown::Saved(_) = shown {
+    ) -> Option<&'static str> {
+        if let GifShown::Saved(_) = shown {
             Some(tr(keys::Q_MISC_NO_SAVED_GIFS_YET_RIGHT))
         } else if let GifShown::Found(_) = shown {
             Some(tr(keys::Q_MISC_NO_GIFS_FOUND))
-        } else if matches!(shown, GifShown::Missing) || gifs_on_their_way(panel) {
+        } else if matches!(shown, GifShown::Missing) {
+            let spent = matches!(
+                self.pickers.gif_tab,
+                GifTab::Asked {
+                    round: AskRound::Again,
+                    ..
+                }
+            );
+            (spent && !gifs_on_their_way(panel)).then(|| tr(keys::Q_MISC_COULD_NOT_UPDATE_GIFS_TRY))
+        } else if gifs_on_their_way(panel) {
             None
         } else if panel.search_failed() && panel.search_bot_username.is_empty() {
             Some(tr(keys::Q_MISC_GIF_SEARCH_IS_NOT_AVAILABLE))
@@ -523,7 +534,16 @@ impl QuillApp {
             Some(tr(keys::Q_MISC_NO_GIFS_FOUND))
         } else {
             Some(tr(keys::Q_MISC_NO_SAVED_GIFS_YET_RIGHT))
-        };
+        }
+    }
+
+    fn gif_panel_status(
+        &self,
+        panel: &GifPanel,
+        shown: GifShown<'_>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let text = self.gif_status_text(panel, shown);
         div()
             .id("gif-panel-status")
             .flex_1()

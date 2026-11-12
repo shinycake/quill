@@ -31,7 +31,9 @@ impl QuillApp {
         if self.folders.closed_asks.is_empty() {
             return false;
         }
-        let waiting: Vec<RequestId> = self.folders.closed_asks.keys().copied().collect();
+        let mut waiting: Vec<RequestId> = self.folders.closed_asks.keys().copied().collect();
+        // Request order: the newest queued link wins below.
+        waiting.sort_by_key(|request| request.0);
         let mut changed = false;
         let mut queued: Option<String> = None;
         for request in waiting {
@@ -42,8 +44,12 @@ impl QuillApp {
                 // Out of the session's requests with no answer kept (the
                 // ring of answers dropped it): nothing will come, the
                 // entry ends without a toast.
-                if session.requests.get(request).is_none() {
-                    self.folders.closed_asks.remove(&request);
+                if session.requests.get(request).is_none()
+                    && let Some(ClosedAsk::FolderAdded { next, .. }) =
+                        self.folders.closed_asks.remove(&request)
+                {
+                    // The queued link still opens.
+                    queued = next.or(queued);
                 }
                 continue;
             };
@@ -53,10 +59,10 @@ impl QuillApp {
             match (ask, answer) {
                 (ClosedAsk::FolderAdded { next, .. }, DialogAnswer::Failed(line)) => {
                     self.set_note(StatusNote::error(line));
-                    queued = queued.or(next);
+                    queued = next.or(queued);
                 }
                 (ClosedAsk::FolderAdded { next, .. }, DialogAnswer::LimitHit) => {
-                    queued = queued.or(next);
+                    queued = next.or(queued);
                 }
                 (_, DialogAnswer::Failed(line)) => self.set_note(StatusNote::error(line)),
                 // The limit box says it; no toast on top.
@@ -70,7 +76,7 @@ impl QuillApp {
                     _,
                 ) => {
                     self.set_note(folder_added_note(&folder, joined));
-                    queued = queued.or(next);
+                    queued = next.or(queued);
                 }
                 // The delete or save landed: a box reopened meanwhile held its
                 // list back for it (`fetch_folder_share`) and asks it now.
@@ -78,7 +84,11 @@ impl QuillApp {
             }
             changed = true;
         }
-        if let Some(link) = queued {
+        // A link queued behind a closed add gives way to anything newer: a
+        // box the user opened since stays as it is.
+        if let Some(link) = queued
+            && self.folders.invite.is_none()
+        {
             self.open_folder_invite(link, cx);
         }
         if changed {

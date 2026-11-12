@@ -150,7 +150,10 @@ fn a_chat_windows_gift_box_goes_on_without_the_main_window(cx: &mut TestAppConte
         app.windows.last_press = Some(OTHER);
         app.windows
             .dialog_opened_in(crate::ui::shell::DialogKind::GiftMarket, Some(OTHER));
-        app.gift_market.flow.begin_opening(quill::ids::RequestId(7));
+        app.gift_market.flow.begin_opening(
+            quill::ids::RequestId(7),
+            crate::ui::gift_market_state::OpeningFrom::Elsewhere,
+        );
         if let Some(session) = app.demo_session.as_mut() {
             session.payments.gift_market.auction = quill::gift_market::AuctionFetch::Ready {
                 gift_id: 5,

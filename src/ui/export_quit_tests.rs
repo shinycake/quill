@@ -513,3 +513,31 @@ fn a_quit_from_the_lock_screen_stops_the_export_and_quits(cx: &mut TestAppContex
     drop(export);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Sweep r4-08 round 3: the exports ending closes the "Stop and quit?"
+/// alert itself, not a box that opened on top of it since.
+#[gpui_kit::test]
+fn the_exports_ending_closes_the_alert_not_the_box_above(cx: &mut TestAppContext) {
+    use gpui_kit::component::WindowExt as _;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let dir = scratch("alert-id");
+    let export = running_chat_export(&dir);
+    app.update(vcx, |app, _| {
+        app.demo_session.as_mut().unwrap().settings.chat_export = Some(export);
+    });
+    assert!(!ask(&app, vcx).get(), "held back");
+    let above = vcx.update(|window, cx| {
+        window.open_dialog(cx, |dialog, _, _| dialog.title("Other"));
+        window.last_dialog_id(cx)
+    });
+    app.update(vcx, |app, _| {
+        app.demo_session.as_mut().unwrap().settings.chat_export = None;
+    });
+    app.update_in(vcx, |app, window, cx| app.quit_gate_upkeep(window, cx));
+    settle(vcx);
+    assert!(!box_open(&app, vcx), "the hold is over");
+    let top = vcx.update(|window, cx| window.last_dialog_id(cx));
+    assert!(above.is_some() && top == above, "the box above stays");
+    let _ = std::fs::remove_dir_all(&dir);
+}

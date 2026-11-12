@@ -12,6 +12,7 @@ use super::gift_manage_ui::{hint, panel, stars};
 use super::payments_state::SendGiftInputs;
 use super::premium_ui::sticker_tile;
 use super::shell::{DialogKind, QuillShell};
+use crate::ui::gift_market_state::OpeningFrom;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
@@ -463,7 +464,7 @@ fn gift_tile(
         .tab_index(0)
         .on_click(cx.listener(move |this, _, window, cx| {
             if let Some(auction_id) = auction_id.as_deref() {
-                this.open_gift_auction(id, auction_id, cx);
+                this.open_gift_auction(id, auction_id, OpeningFrom::SendBox, cx);
             } else if resale {
                 this.open_gift_resale(id, &title, cx);
             } else {

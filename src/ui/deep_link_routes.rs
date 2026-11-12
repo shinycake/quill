@@ -8,6 +8,7 @@ use super::links_state::PendingOpen;
 use super::navigation::NavigationAction;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::gift_market_state::OpeningFrom;
 use crate::ui::playback_state::MediaSeek;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
@@ -104,7 +105,7 @@ impl QuillApp {
             }
             DeepLinkUi::GiftCode { code } => self.open_gift_code_link(code, cx),
             DeepLinkUi::GiftAuction { auction_id } => {
-                self.open_gift_auction(0, &auction_id, cx);
+                self.open_gift_auction(0, &auction_id, OpeningFrom::Elsewhere, cx);
             }
             DeepLinkUi::LanguagePack { id } => self.open_language_pack_link(id, cx),
             DeepLinkUi::Invoice { name } => self.open_invoice_link(&name, window, cx),

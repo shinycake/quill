@@ -277,6 +277,11 @@ impl PollAddOption {
     pub(crate) fn refuse(&mut self, reason: &'static str) {
         self.error = Some(reason);
     }
+
+    /// Forget the last refusal: a new Add is judged on its own text.
+    pub(crate) fn clear_refusal(&mut self) {
+        self.error = None;
+    }
 }
 
 impl PollDialog {

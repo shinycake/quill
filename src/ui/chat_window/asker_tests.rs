@@ -951,3 +951,33 @@ fn a_spent_gif_ask_waits_for_a_press(cx: &mut TestAppContext) {
         );
     });
 }
+
+/// Sweep r4-08 round 3 (16-008): a section missing once its re-ask is spent
+/// says the list could not be updated, not a blank tab.
+#[gpui_kit::test]
+fn a_spent_gif_ask_shows_a_line_not_a_blank_tab(cx: &mut TestAppContext) {
+    use crate::ui::gifs_ui::{AskRound, GifShown, GifTab, GifWanted};
+    let h = new_app(cx);
+    h.app.update(cx, |app, _| {
+        let Some(panel) = app.session().map(|s| s.stickers.gifs.clone()) else {
+            return;
+        };
+        let wanted = GifWanted::Search("no such kept search".into());
+        app.pickers.gif_tab = GifTab::Asked {
+            wanted: wanted.clone(),
+            round: AskRound::Again,
+        };
+        assert!(matches!(app.gif_shown(&panel), GifShown::Missing));
+        assert_eq!(
+            app.gif_status_text(&panel, GifShown::Missing),
+            Some(quill::lang::tr(
+                quill::lang::keys::Q_MISC_COULD_NOT_UPDATE_GIFS_TRY
+            ))
+        );
+        app.pickers.gif_tab = GifTab::Asked {
+            wanted,
+            round: AskRound::First,
+        };
+        assert_eq!(app.gif_status_text(&panel, GifShown::Missing), None);
+    });
+}
