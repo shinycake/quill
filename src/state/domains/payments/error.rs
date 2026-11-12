@@ -265,7 +265,7 @@ impl Session {
                 .apply_ton_wallet_error(
                     err,
                     purpose,
-                    pending.and_then(|p| p.user_id),
+                    pending.and_then(|p| p.user_id()),
                     pending.map(|p| p.id),
                 ),
             Some(RequestPurpose::Payments(PaymentsPurpose::Earn(purpose))) => {

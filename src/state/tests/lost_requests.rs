@@ -29,11 +29,12 @@ fn sweeping_a_shared_media_page_allows_the_next_page_request() {
     let state = media.tab_state(tab);
     state.status = SharedMediaTabStatus::ready();
     state.next_from = MessageId(40);
-    let (generation, _) = media.begin_fetch_more(tab).expect("page starts");
-    session.request(
-        RequestPurpose::Media(MediaPurpose::GetSharedMediaMore { tab, generation }),
+    assert!(media.more_from(tab).is_some(), "page starts");
+    let request = session.request(
+        RequestPurpose::Media(MediaPurpose::GetSharedMediaMore { tab }),
         Some(chat),
     );
+    session.media.shared_media.begin_fetch_more(tab, request);
     assert!(!session.media.shared_media.tab_state(tab).can_load_more());
 
     assert!(sweep(&mut session));
@@ -80,11 +81,9 @@ fn every_sweepable_purpose_leaves_the_registry_and_the_session_alive() {
         RequestPurpose::SearchPublicChats,
         RequestPurpose::GetSharedMedia {
             tab: SharedMediaTab::default(),
-            generation: 0,
         },
         RequestPurpose::Media(MediaPurpose::GetSharedMediaMore {
             tab: SharedMediaTab::default(),
-            generation: 0,
         }),
         RequestPurpose::GetPinnedMessages,
         RequestPurpose::GetUserFullInfo,

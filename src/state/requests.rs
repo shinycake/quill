@@ -419,61 +419,9 @@ pub struct PendingRequest {
     pub purpose: RequestPurpose,
     pub chat_id: Option<ChatId>,
     pub view_generation: Option<ViewGeneration>,
-    /// For a history page: the epoch of the chat's window it was asked for
-    /// ([`HistoryState::window_epoch`]). An answer for another epoch asks
-    /// about a window that has since been replaced.
-    pub window_epoch: Option<u64>,
-    pub file_id: Option<i32>,
-    pub search_generation: Option<u64>,
-    pub around_message_id: Option<MessageId>,
-    /// Phase 5.1: `forum_topic_id` for `GetTopicHistory` requests so the
-    /// `foundChatMessages` response lands in the right topic history.
-    pub forum_topic_id: Option<i32>,
-    /// Phase 6: `user_id` for `GetUserFullInfo` (panel opened from the
-    /// contacts list, where there is no chat) and `AddContact` requests so
-    /// id-less responses (`userFullInfo`) land on the right user.
-    pub user_id: Option<i64>,
-    /// Phase 6: `supergroup_id` for `GetSupergroupFullInfo` requests so the
-    /// id-less `supergroupFullInfo` response lands on the right group.
-    pub supergroup_id: Option<i64>,
-    /// Slice (communities backend core): `community_id` for
-    /// `GetCommunityFullInfo` / `SetCommunityName` correlation and
-    /// per-community in-flight dedupe.
-    pub community_id: Option<i64>,
-    /// Phase 9.1: `story_id` for `GetStory` requests so in-flight
-    /// per-story dedupe distinguishes stories of the same chat.
-    pub story_id: Option<i32>,
-    /// Phase 9.7: `story_ids` for `SetChatPinnedStories` (the sent pinned
-    /// story ids) and `ReorderStoryAlbums` (the sent album id order) so
-    /// the id-less `ok` response applies to the right list.
-    pub story_ids: Option<Vec<i32>>,
-    /// `user_ids` for `SetCloseFriends` (the sent list), so its `ok`
-    /// applies the list this request sent and not a later one.
-    pub user_ids: Option<Vec<i64>>,
-    /// Phase 9.7: `story_album_id` for `DeleteStoryAlbum` so the `ok`
-    /// response drops the right album from `Session::story_albums`.
-    pub story_album_id: Option<i32>,
-    /// Parity slice: `folder_id` for folder-scoped requests
-    /// (`GetChatFolder`, `EditChatFolder`, `DeleteChatFolder`,
-    /// `LoadFolderChats`) so responses correlate to the folder.
-    pub folder_id: Option<i32>,
-    /// Parity slice: `scope` for `GetScopeNotificationSettings` /
-    /// `SetScopeNotificationSettings` /
-    /// `GetChatNotificationSettingsExceptions` so the id-less
-    /// `scopeNotificationSettings` / `chats` response lands on the right
-    /// scope.
-    pub scope: Option<NotificationSettingsScope>,
-    /// Phase B1: `secret_chat_id` for `GetSecretChat` /
-    /// `CloseSecretChat` so the id-less `secretChat` response and
-    /// purpose-gating correlate to the right secret chat.
-    pub secret_chat_id: Option<i32>,
-    /// The invite link a `ProcessLinkJoinRequests` acts on.
-    pub invite_link: Option<String>,
-    /// The string id of the thing an id-less `ok` is for (the terms an
-    /// `AcceptTermsOfService` accepts, the received gift a `SellGift`
-    /// sells), so the answer settles that one and not what the user picked
-    /// or was sent meanwhile.
-    pub subject_id: Option<String>,
+    /// What the answer needs besides the purpose and chat: the one thing the
+    /// request was about.
+    pub correlation: Correlation,
     /// Slice G1: rollback for requests the driver applies optimistically
     /// at send time (`setChatPermissions`,
     /// `toggleSupergroupJoinByRequest`, `setSupergroupUsername`). On a
@@ -516,10 +464,10 @@ impl RequestRegistry {
     ) -> bool {
         self.pending
             .values()
-            .any(|p| p.purpose == purpose && p.secret_chat_id == Some(secret_chat_id))
+            .any(|p| p.purpose == purpose && p.secret_chat_id() == Some(secret_chat_id))
     }
 
-    /// A request with every correlation field empty, under the next id.
+    /// A request with no correlation, under the next id.
     fn blank(
         &mut self,
         account_generation: AccountGeneration,
@@ -532,23 +480,7 @@ impl RequestRegistry {
             purpose,
             chat_id: None,
             view_generation: None,
-            window_epoch: None,
-            file_id: None,
-            search_generation: None,
-            around_message_id: None,
-            forum_topic_id: None,
-            user_id: None,
-            supergroup_id: None,
-            community_id: None,
-            story_id: None,
-            story_ids: None,
-            user_ids: None,
-            story_album_id: None,
-            folder_id: None,
-            scope: None,
-            secret_chat_id: None,
-            invite_link: None,
-            subject_id: None,
+            correlation: Correlation::None,
             rollback: None,
             asked_in: self.view,
             created_at: Instant::now(),
@@ -610,7 +542,7 @@ impl RequestRegistry {
     ) -> RequestId {
         let blank = self.blank(account_generation, purpose);
         self.insert(PendingRequest {
-            search_generation: Some(search_generation),
+            correlation: Correlation::Search(search_generation),
             ..blank
         })
     }
@@ -625,7 +557,7 @@ impl RequestRegistry {
         let blank = self.blank(account_generation, purpose);
         self.insert(PendingRequest {
             chat_id: Some(chat_id),
-            search_generation: Some(search_generation),
+            correlation: Correlation::Search(search_generation),
             ..blank
         })
     }
@@ -641,7 +573,10 @@ impl RequestRegistry {
         self.insert(PendingRequest {
             chat_id: Some(chat_id),
             view_generation: Some(view_generation),
-            around_message_id: Some(around_message_id),
+            correlation: Correlation::HistoryPage {
+                window_epoch: 0,
+                from: Some(around_message_id),
+            },
             ..blank
         })
     }
@@ -653,7 +588,7 @@ impl RequestRegistry {
     ) -> RequestId {
         let blank = self.blank(account_generation, RequestPurpose::DownloadFile);
         self.insert(PendingRequest {
-            file_id: Some(file_id.0),
+            correlation: Correlation::File(file_id.0),
             ..blank
         })
     }
@@ -686,7 +621,7 @@ impl RequestRegistry {
         let keys: Vec<u64> = self
             .pending
             .iter()
-            .filter(|(_, req)| req.purpose == purpose && req.community_id == Some(community_id))
+            .filter(|(_, req)| req.purpose == purpose && req.community_id() == Some(community_id))
             .map(|(key, _)| *key)
             .collect();
         for key in keys {
@@ -856,15 +791,21 @@ impl RequestRegistry {
             .find(|p| {
                 p.purpose == purpose
                     && p.chat_id == Some(chat_id)
-                    && p.around_message_id == Some(message_id)
+                    && p.around_message_id() == Some(message_id)
             })
             .map(|p| p.id)
     }
 
-    /// Mutable access to a pending request (parity slice: stamping
-    /// `PendingRequest::scope` after `register`).
+    /// Mutable access to a pending request.
     pub fn pending_mut(&mut self, id: RequestId) -> Option<&mut PendingRequest> {
         self.pending.get_mut(&id.0)
+    }
+
+    /// Record what `id`'s answer is about, right after it was registered.
+    pub fn correlate(&mut self, id: RequestId, correlation: Correlation) {
+        if let Some(pending) = self.pending.get_mut(&id.0) {
+            pending.correlation = correlation;
+        }
     }
 
     /// Parity slice: per-scope in-flight check for
@@ -877,7 +818,7 @@ impl RequestRegistry {
     ) -> bool {
         self.pending
             .values()
-            .any(|p| p.purpose == purpose && p.scope == Some(scope))
+            .any(|p| p.purpose == purpose && p.scope() == Some(scope))
     }
 
     /// Phase 6: an in-flight request for a purpose/user pair (user-scoped
@@ -885,7 +826,7 @@ impl RequestRegistry {
     pub fn has_purpose_for_user(&self, purpose: RequestPurpose, user_id: i64) -> bool {
         self.pending
             .values()
-            .any(|p| p.purpose == purpose && p.user_id == Some(user_id))
+            .any(|p| p.purpose == purpose && p.user_id() == Some(user_id))
     }
 
     /// Phase 6: an in-flight request for a purpose/supergroup pair
@@ -893,7 +834,7 @@ impl RequestRegistry {
     pub fn has_purpose_for_supergroup(&self, purpose: RequestPurpose, supergroup_id: i64) -> bool {
         self.pending
             .values()
-            .any(|p| p.purpose == purpose && p.supergroup_id == Some(supergroup_id))
+            .any(|p| p.purpose == purpose && p.supergroup_id() == Some(supergroup_id))
     }
 
     /// Slice (communities backend core): an in-flight request for a
@@ -902,7 +843,7 @@ impl RequestRegistry {
     pub fn has_purpose_for_community(&self, purpose: RequestPurpose, community_id: i64) -> bool {
         self.pending
             .values()
-            .any(|p| p.purpose == purpose && p.community_id == Some(community_id))
+            .any(|p| p.purpose == purpose && p.community_id() == Some(community_id))
     }
 
     /// Phase 9.1: an in-flight request for a purpose/chat/story triple
@@ -914,7 +855,7 @@ impl RequestRegistry {
         story_id: i32,
     ) -> bool {
         self.pending.values().any(|p| {
-            p.purpose == purpose && p.chat_id == Some(chat_id) && p.story_id == Some(story_id)
+            p.purpose == purpose && p.chat_id == Some(chat_id) && p.story_id() == Some(story_id)
         })
     }
 
@@ -928,7 +869,7 @@ impl RequestRegistry {
         self.pending
             .values()
             .find(|p| {
-                p.purpose == purpose && p.chat_id == Some(chat_id) && p.story_id == Some(story_id)
+                p.purpose == purpose && p.chat_id == Some(chat_id) && p.story_id() == Some(story_id)
             })
             .map(|p| p.id)
     }
@@ -944,7 +885,7 @@ impl RequestRegistry {
         self.pending.values().any(|p| {
             p.purpose == purpose
                 && p.chat_id == Some(chat_id)
-                && p.story_album_id == Some(story_album_id)
+                && p.story_album_id() == Some(story_album_id)
         })
     }
     /// Parity slice: an in-flight request for a purpose/folder pair
@@ -952,12 +893,12 @@ impl RequestRegistry {
     pub fn has_purpose_for_folder(&self, purpose: RequestPurpose, folder_id: i32) -> bool {
         self.pending
             .values()
-            .any(|p| p.purpose == purpose && p.folder_id == Some(folder_id))
+            .any(|p| p.purpose == purpose && p.folder_id() == Some(folder_id))
     }
 
     /// Parity slice: the folder id stamped on an in-flight request, if any.
     pub fn folder_id_for(&self, id: RequestId) -> Option<i32> {
-        self.pending.get(&id.0).and_then(|p| p.folder_id)
+        self.pending.get(&id.0).and_then(|p| p.folder_id())
     }
 
     /// The in-flight request id for a purpose/chat pair (test hook; the live
@@ -983,7 +924,7 @@ impl RequestRegistry {
     ) -> Option<RequestId> {
         self.pending
             .values()
-            .find(|p| p.purpose == purpose && p.folder_id == Some(folder_id))
+            .find(|p| p.purpose == purpose && p.folder_id() == Some(folder_id))
             .map(|p| p.id)
     }
 
@@ -994,6 +935,6 @@ impl RequestRegistry {
 
 fn download_file_id(pending: &PendingRequest) -> Option<i32> {
     (pending.purpose == RequestPurpose::DownloadFile)
-        .then_some(pending.file_id)
+        .then(|| pending.file_id())
         .flatten()
 }

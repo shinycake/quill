@@ -23,7 +23,7 @@ impl Session {
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetUserFullInfo)
             && let Some(pending) = pending
         {
-            let user_id = pending.user_id.or_else(|| {
+            let user_id = pending.user_id().or_else(|| {
                 pending
                     .chat_id
                     .and_then(|chat_id| self.private_chat_user_id(chat_id))
@@ -52,7 +52,7 @@ impl Session {
                     .and_then(|chat_id| self.bot_user_id_for_chat(chat_id))
                 {
                     self.bots.bot_info.insert(bot_id, bot_info);
-                } else if pending.user_id.is_some() && self.bots.bot_user_ids.contains(&user_id) {
+                } else if pending.user_id().is_some() && self.bots.bot_user_ids.contains(&user_id) {
                     self.bots.bot_info.insert(user_id, bot_info);
                 }
             }

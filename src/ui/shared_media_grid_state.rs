@@ -21,9 +21,9 @@ pub(crate) struct PageKey {
     pub anchor_day: Option<i64>,
     /// The search query, hashed (empty for the plain list).
     pub query: u64,
-    /// The tab's stamp: a gallery closed and opened again, or a fetch that
-    /// starts the list over, is a new page even for the same chat.
-    pub generation: u64,
+    /// The tab's list epoch: a gallery closed and opened again, or a fetch
+    /// that starts the list over, is a new page even for the same chat.
+    pub epoch: u64,
 }
 
 impl PageKey {
@@ -35,7 +35,7 @@ impl PageKey {
             chat: chat.map_or(0, |chat| chat.0),
             anchor_day: state.anchor_day,
             query: query.finish(),
-            generation: state.generation,
+            epoch: state.list_epoch,
         }
     }
 }
@@ -132,7 +132,7 @@ mod tests {
             chat,
             anchor_day: None,
             query: 0,
-            generation: 0,
+            epoch: 0,
         }
     }
 
@@ -176,7 +176,7 @@ mod tests {
             panic!("the Files tab has a list");
         };
         scroll.set_offset(Point::new(px(0.), px(-300.)));
-        state.generation += 1;
+        state.list_epoch += 1;
         let Some(scroll) = ui.list_scroll(tab, PageKey::of(chat, &state)) else {
             panic!("the Files tab has a list");
         };

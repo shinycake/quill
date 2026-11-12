@@ -62,15 +62,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(SharedMediaJump::Stale);
         };
         self.session.search.history_calendar = None;
-        let generation = self
+        let extra = self
             .session
+            .request(RequestPurpose::GetSharedMedia { tab }, Some(chat_id));
+        self.session
             .media
             .shared_media
-            .begin_fetch_at_day(tab, target);
-        let extra = self.session.request(
-            RequestPurpose::GetSharedMedia { tab, generation },
-            Some(chat_id),
-        );
+            .begin_fetch_at_day(tab, target, extra);
         let filter = search_messages_filter_json(filter);
         match self.sender.send_json(&search_chat_messages(
             extra,
@@ -88,7 +86,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session.media.shared_media.fail(
                     chat_id,
                     tab,
-                    generation,
+                    extra,
                     "Could not send the shared-media request.".to_string(),
                 );
                 Err(err)

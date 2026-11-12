@@ -60,12 +60,9 @@ impl SharedMediaState {
     }
 
     fn discard_search(&mut self, tab: SharedMediaTab) {
-        // A late answer for the dropped search is told apart by a fresh stamp.
-        self.generation = self.generation.saturating_add(1);
-        let stamp = self.generation;
-        let state = self.tab_state(tab);
-        state.clear();
-        state.generation = stamp;
+        // Clearing the tab leaves it waiting for no request, so a late
+        // answer for the dropped search finds nothing.
+        self.tab_state(tab).clear();
     }
 }
 
@@ -140,7 +137,8 @@ mod tests {
     fn leaving_the_tab_clears_the_query_and_its_late_answer() {
         let mut gallery = open_gallery();
         assert!(gallery.begin_search(SharedMediaTab::Files, "report"));
-        let generation = gallery.begin_fetch(SharedMediaTab::Files);
+        let request = RequestId(7);
+        gallery.begin_fetch(SharedMediaTab::Files, request);
         assert!(gallery.select_tab_dropping_search(SharedMediaTab::Links));
         assert_eq!(gallery.active_tab, SharedMediaTab::Links);
         assert_eq!(files_state(&gallery).query, "");
@@ -148,7 +146,7 @@ mod tests {
         gallery.accept(
             ChatId(5),
             SharedMediaTab::Files,
-            generation,
+            request,
             Vec::new(),
             0,
             MessageId(0),

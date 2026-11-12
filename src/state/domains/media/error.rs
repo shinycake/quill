@@ -44,13 +44,14 @@ impl Session {
         // Slice media-shared-gallery: failed gallery-tab fetch — the
         // tab shows the failed state with Retry, never the spinner
         // or the empty state.
-        if let Some(RequestPurpose::GetSharedMedia { tab, generation }) = pending.map(|p| p.purpose)
+        if let Some(RequestPurpose::GetSharedMedia { tab }) = pending.map(|p| p.purpose)
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+            && let Some(request) = pending.map(|p| p.id)
         {
             self.media.shared_media.fail(
                 chat_id,
                 tab,
-                generation,
+                request,
                 call_request_error_line(err, "Could not load shared media"),
             );
         }
@@ -59,24 +60,22 @@ impl Session {
         if let Some(purpose) = pending.map(|p| p.purpose)
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
         {
-            let tab = match purpose {
-                RequestPurpose::Media(MediaPurpose::GetProfileGifts { generation, .. }) => {
-                    Some((SharedMediaTab::Gifts, generation))
-                }
-                _ => None,
-            };
-            if let Some((tab, generation)) = tab {
+            if matches!(
+                purpose,
+                RequestPurpose::Media(MediaPurpose::GetProfileGifts { .. })
+            ) && let Some(request) = pending.map(|p| p.id)
+            {
                 self.fail_profile_tab(
                     chat_id,
-                    tab,
-                    generation,
+                    SharedMediaTab::Gifts,
+                    request,
                     call_request_error_line(err, "Could not load this tab"),
                 );
             }
         }
         if let Some(RequestPurpose::Media(MediaPurpose::GetProfileAudios { .. })) =
             pending.map(|p| p.purpose)
-            && let Some(user_id) = pending.and_then(|p| p.user_id)
+            && let Some(user_id) = pending.and_then(|p| p.user_id())
         {
             self.fail_profile_audios(
                 user_id,
@@ -84,14 +83,15 @@ impl Session {
                 call_request_error_line(err, "Could not load the playlist"),
             );
         }
-        if let Some(RequestPurpose::Media(MediaPurpose::GetSharedMediaMore { tab, generation })) =
+        if let Some(RequestPurpose::Media(MediaPurpose::GetSharedMediaMore { tab })) =
             pending.map(|p| p.purpose)
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+            && let Some(request) = pending.map(|p| p.id)
         {
             self.media.shared_media.fail_more(
                 chat_id,
                 tab,
-                generation,
+                request,
                 call_request_error_line(
                     err,
                     crate::lang::tr(crate::lang::keys::Q_MEDIA_COULD_NOT_LOAD_MORE_MEDIA),

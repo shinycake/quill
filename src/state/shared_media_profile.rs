@@ -200,40 +200,45 @@ impl SharedMediaState {
         Some((target, needs_fetch))
     }
 
-    /// A first page of a profile tab is on its way: the tab gets a new
-    /// stamp, which the request carries so an older page (an append from
-    /// before the gallery was closed and reopened) is dropped. The other
-    /// tabs keep theirs, so they load side by side.
-    pub fn begin_profile_fetch(&mut self, tab: SharedMediaTab) -> u64 {
-        let stamp = self.next_generation();
+    /// A first page of a profile tab went out as `request`: the tab waits
+    /// for it alone, so an older page (an append from before the gallery was
+    /// closed and reopened) is dropped. The other tabs keep their requests,
+    /// so they load side by side.
+    pub fn begin_profile_fetch(&mut self, tab: SharedMediaTab, request: RequestId) {
         let state = self.tab_state(tab);
-        state.status = SharedMediaTabStatus::Loading;
-        state.generation = stamp;
-        stamp
+        state.list_epoch = state.list_epoch.saturating_add(1);
+        state.status = SharedMediaTabStatus::Loading { request };
     }
 
-    /// The next page of a profile tab is on its way, carrying the tab's
-    /// current stamp; `None` when there is nothing more or a page is
-    /// already loading.
-    pub fn begin_profile_more(&mut self, tab: SharedMediaTab) -> Option<u64> {
-        let state = self.tab_state(tab);
-        if !state.start_more() {
-            return None;
-        }
-        Some(state.generation)
+    /// Whether the tab has a next page to ask for and none is in flight.
+    pub fn profile_more_askable(&self, tab: SharedMediaTab) -> bool {
+        self.tab_at(tab).is_some_and(|state| state.more_askable())
+    }
+
+    /// The next page of a profile tab went out as `request`; `false`,
+    /// changing nothing, when there is nothing more or a page is already
+    /// loading.
+    pub fn begin_profile_more(&mut self, tab: SharedMediaTab, request: RequestId) -> bool {
+        self.tab_state(tab).start_more(request)
+    }
+
+    /// Whether `request` is a page (first or older) the open gallery's `tab`
+    /// of `chat_id` waits for.
+    pub(crate) fn accepts_profile(&self, chat_id: ChatId, tab: SharedMediaTab, request: RequestId) -> bool {
+        self.accepts_first(chat_id, tab, request) || self.accepts_more(chat_id, tab, request)
     }
 
     /// A page of a profile tab landed. `append` adds to the loaded items.
-    /// `false` when the page was for a chat that is not the open gallery's,
-    /// so it changed nothing.
+    /// `false` when `request` is not a page the open gallery's tab waits
+    /// for, so it changed nothing.
     pub fn accept_profile(
         &mut self,
         chat_id: ChatId,
         tab: SharedMediaTab,
-        generation: u64,
+        request: RequestId,
         page: ProfilePage,
     ) -> bool {
-        if !self.accepts(chat_id, tab, generation) {
+        if !self.accepts_profile(chat_id, tab, request) {
             return false;
         }
         let ProfilePage {
@@ -260,22 +265,34 @@ impl SharedMediaState {
         true
     }
 
-    /// A profile tab failed to load.
+    /// A page of `tab` could not be sent: the tab shows the failure with its
+    /// Retry (a first page), or the list its retry row (an `append`ed one).
+    pub fn fail_profile_unsent(&mut self, tab: SharedMediaTab, append: bool, error: String) {
+        let state = self.tab_state(tab);
+        if append && state.status.is_ready() {
+            state.fail_more_unsent(error);
+            return;
+        }
+        state.items.clear();
+        state.total_count = 0;
+        state.status = SharedMediaTabStatus::Failed(error);
+    }
+
     /// A load of `tab` failed; `true` when the tab itself failed (a failed
     /// further page keeps a loaded tab as it is).
     pub fn fail_profile(
         &mut self,
         chat_id: ChatId,
         tab: SharedMediaTab,
-        generation: u64,
+        request: RequestId,
         error: String,
     ) -> bool {
-        if !self.accepts(chat_id, tab, generation) {
+        if !self.accepts_profile(chat_id, tab, request) {
             return false;
         }
         let state = self.tab_state(tab);
         if state.status.is_ready() {
-            state.fail_more_page(error);
+            state.fail_more_page(request, error);
             return false;
         }
         state.items.clear();
@@ -530,7 +547,7 @@ impl Session {
     pub(crate) fn apply_profile_stories(
         &mut self,
         chat_id: ChatId,
-        generation: Option<u64>,
+        request: RequestId,
         total_count: i32,
     ) {
         let ids = self
@@ -553,22 +570,19 @@ impl Session {
         self.want_profile_thumbs(thumbs);
         let has_more = (items.len() as i32) < total_count;
         self.set_profile_count(chat_id, COUNT_KEY_STORIES, total_count);
-        // Only the gallery's own request (it carries the tab's stamp) fills
-        // the tab: a page the stories page asked for has no stamp and never
-        // answers a tab that waits for its own.
-        if let Some(generation) = generation {
-            self.media.shared_media.accept_profile(
-                chat_id,
-                SharedMediaTab::Stories,
-                generation,
-                ProfilePage {
-                    items,
-                    total_count,
-                    has_more,
-                    append: false,
-                },
-            );
-        }
+        // Only the gallery's own request fills the tab: a page the stories
+        // page asked for is not the request the tab waits for.
+        self.media.shared_media.accept_profile(
+            chat_id,
+            SharedMediaTab::Stories,
+            request,
+            ProfilePage {
+                items,
+                total_count,
+                has_more,
+                append: false,
+            },
+        );
     }
 
     /// A `receivedGifts` page asked for by the gallery's Gifts tab.
@@ -576,7 +590,7 @@ impl Session {
         let Some(chat_id) = pending.chat_id else {
             return;
         };
-        let RequestPurpose::Media(MediaPurpose::GetProfileGifts { append, generation }) =
+        let RequestPurpose::Media(MediaPurpose::GetProfileGifts { append }) =
             pending.purpose
         else {
             return;
@@ -593,7 +607,7 @@ impl Session {
         let accepted = self.media.shared_media.accept_profile(
             chat_id,
             SharedMediaTab::Gifts,
-            generation,
+            pending.id,
             ProfilePage {
                 items,
                 total_count: page.total_count,
@@ -613,7 +627,7 @@ impl Session {
         page: ProfileAudiosPage,
         pending: Option<&PendingRequest>,
     ) {
-        let Some(user_id) = pending.and_then(|p| p.user_id) else {
+        let Some(user_id) = pending.and_then(|p| p.user_id()) else {
             return;
         };
         self.remember_files(&page.files);
@@ -657,13 +671,13 @@ impl Session {
         &mut self,
         chat_id: ChatId,
         tab: SharedMediaTab,
-        generation: u64,
+        request: RequestId,
         error: String,
     ) {
         // The count stays unknown: the tab is kept for its Retry.
         self.media
             .shared_media
-            .fail_profile(chat_id, tab, generation, error);
+            .fail_profile(chat_id, tab, request, error);
     }
 }
 
@@ -851,11 +865,12 @@ mod tests {
             file: FileId(0),
         };
         let tab = SharedMediaTab::Gifts;
-        let stamp = gallery.begin_profile_fetch(tab);
+        let first = RequestId(1);
+        gallery.begin_profile_fetch(tab, first);
         gallery.accept_profile(
             ChatId(1),
             tab,
-            stamp,
+            first,
             ProfilePage {
                 items: vec![row("a")],
                 total_count: 2,
@@ -864,12 +879,13 @@ mod tests {
             },
         );
         assert!(gallery.tabs[tab.index()].status.is_ready());
-        assert!(gallery.begin_profile_more(tab).is_some());
-        assert!(gallery.begin_profile_more(tab).is_none());
+        let more = RequestId(2);
+        assert!(gallery.begin_profile_more(tab, more));
+        assert!(!gallery.begin_profile_more(tab, RequestId(3)));
         gallery.accept_profile(
             ChatId(1),
             tab,
-            stamp,
+            more,
             ProfilePage {
                 items: vec![row("b")],
                 total_count: 2,
@@ -880,12 +896,12 @@ mod tests {
         assert_eq!(gallery.tabs[tab.index()].items.len(), 2);
         assert!(!gallery.tabs[tab.index()].can_load_more());
         // A late failure keeps the list; another chat's answer is ignored.
-        gallery.fail_profile(ChatId(1), tab, stamp, "boom".into());
+        gallery.fail_profile(ChatId(1), tab, more, "boom".into());
         assert!(gallery.tabs[tab.index()].status.is_ready());
         gallery.accept_profile(
             ChatId(2),
             tab,
-            stamp,
+            more,
             ProfilePage {
                 items: vec![],
                 total_count: 0,
@@ -912,7 +928,8 @@ mod tests {
             meta: SharedMediaMeta::None,
             file: FileId(0),
         };
-        let first = gallery.begin_profile_fetch(tab);
+        let first = RequestId(1);
+        gallery.begin_profile_fetch(tab, first);
         gallery.accept_profile(
             ChatId(1),
             tab,
@@ -924,12 +941,12 @@ mod tests {
                 append: false,
             },
         );
-        let more = gallery.begin_profile_more(tab).unwrap_or_default();
-        assert_eq!(more, first);
+        let more = RequestId(2);
+        assert!(gallery.begin_profile_more(tab, more));
         gallery.close();
         gallery.open_for(ChatId(1));
-        let fresh = gallery.begin_profile_fetch(tab);
-        assert_ne!(fresh, first);
+        let fresh = RequestId(3);
+        gallery.begin_profile_fetch(tab, fresh);
         assert!(!gallery.accept_profile(
             ChatId(1),
             tab,
@@ -943,7 +960,7 @@ mod tests {
         ));
         assert_eq!(
             gallery.tabs[tab.index()].status,
-            SharedMediaTabStatus::Loading
+            SharedMediaTabStatus::Loading { request: fresh }
         );
         assert!(!gallery.fail_profile(ChatId(1), tab, more, "late".into()));
         assert!(gallery.accept_profile(

@@ -9,7 +9,7 @@ use crate::telegram::envelope::BotsPayload;
 fn widget_key(pending: &PendingRequest) -> Option<WidgetKey> {
     Some(WidgetKey {
         chat_id: pending.chat_id?,
-        message_id: pending.around_message_id?,
+        message_id: pending.around_message_id()?,
     })
 }
 

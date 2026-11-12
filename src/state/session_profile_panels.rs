@@ -97,7 +97,7 @@ impl Session {
             return None;
         };
         let id = match kind {
-            ProfileChatsKind::GroupsInCommon => pending.user_id?,
+            ProfileChatsKind::GroupsInCommon => pending.user_id()?,
             ProfileChatsKind::SimilarChats => pending.chat_id?.0,
             ProfileChatsKind::SuitablePersonalChats
             | ProfileChatsKind::SuitableDiscussionChats
@@ -180,7 +180,7 @@ impl Session {
                 _ => {}
             }
         } else if pending.purpose == RequestPurpose::GetUserProfilePhotos
-            && let Some(user_id) = pending.user_id
+            && let Some(user_id) = pending.user_id()
         {
             // A failed later page keeps the photos already listed; a fetch
             // the list no longer waits for changes nothing.
@@ -225,7 +225,7 @@ impl Session {
         photos: Vec<ParsedProfilePhoto>,
         pending: &PendingRequest,
     ) {
-        let Some(user_id) = pending.user_id else {
+        let Some(user_id) = pending.user_id() else {
             return;
         };
         let mut page = Vec::with_capacity(photos.len());

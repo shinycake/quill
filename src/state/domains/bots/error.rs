@@ -19,7 +19,7 @@ impl Session {
             // commands arrive it is asked again.
             Some(RequestPurpose::Bots(BotsPurpose::GroupBotUser)) => {
                 if let Some(pending) = pending
-                    && let Some(bot) = pending.user_id
+                    && let Some(bot) = pending.user_id()
                     && let Some(fetch) = self.bots.bot_users.get_mut(&bot)
                 {
                     fetch.failed(Some(pending.id), "could not load the bot", true);
@@ -45,7 +45,7 @@ impl Session {
                 // The section shows the reason beside its button, so it can
                 // ask again; only the request it waits for fails it.
                 if let Some(pending) = pending
-                    && let Some(bot) = pending.user_id
+                    && let Some(bot) = pending.user_id()
                     && let Some(fetch) = self.bots.similar_bots.get_mut(&bot)
                 {
                     fetch.failed(
@@ -156,7 +156,7 @@ impl Session {
             // and surfaces as a status note via the callback-answer channel.
             if let Some(pending) = pending
                 && let (Some(chat_id), Some(message_id)) =
-                    (pending.chat_id, pending.around_message_id)
+                    (pending.chat_id, pending.around_message_id())
                 && let Some(scores) = self.bots.game_scores.get_mut(&(chat_id.0, message_id.0))
             {
                 scores.failed(

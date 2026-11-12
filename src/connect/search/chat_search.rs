@@ -73,11 +73,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         };
         let query = self.shared_media_query(tab);
-        let generation = self.session.media.shared_media.begin_fetch(tab);
-        let extra = self.session.request(
-            RequestPurpose::GetSharedMedia { tab, generation },
-            Some(chat_id),
-        );
+        let extra = self
+            .session
+            .request(RequestPurpose::GetSharedMedia { tab }, Some(chat_id));
+        self.session.media.shared_media.begin_fetch(tab, extra);
         let filter = search_messages_filter_json(filter);
         match self.sender.send_json(&search_chat_messages(
             extra,
@@ -95,7 +94,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session.media.shared_media.fail(
                     chat_id,
                     tab,
-                    generation,
+                    extra,
                     "Could not send the shared-media request.".to_string(),
                 );
                 Err(err)
@@ -117,16 +116,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(chat_id) = self.session.media.shared_media.chat_id() else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        let Some((generation, from_message_id)) =
-            self.session.media.shared_media.begin_fetch_more(tab)
-        else {
+        let Some(from_message_id) = self.session.media.shared_media.more_from(tab) else {
             return Ok(());
         };
         let query = self.shared_media_query(tab);
         let extra = self.session.request(
-            RequestPurpose::Media(MediaPurpose::GetSharedMediaMore { tab, generation }),
+            RequestPurpose::Media(MediaPurpose::GetSharedMediaMore { tab }),
             Some(chat_id),
         );
+        self.session
+            .media
+            .shared_media
+            .begin_fetch_more(tab, extra);
         let filter = search_messages_filter_json(filter);
         match self.sender.send_json(&search_chat_messages(
             extra,
@@ -144,7 +145,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session.media.shared_media.fail_more(
                     chat_id,
                     tab,
-                    generation,
+                    extra,
                     crate::lang::tr(crate::lang::keys::Q_MEDIA_COULD_NOT_LOAD_MORE_MEDIA)
                         .to_string(),
                 );

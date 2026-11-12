@@ -11,7 +11,7 @@ use crate::ui::demo::demo_thumb_png_path;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use quill::diagnostics::DiagnosticSink;
 use quill::ids::ChatId;
-use quill::state::{RequestPurpose, SelectedMedia, Session, SharedMediaTab};
+use quill::state::{MediaPurpose, RequestPurpose, SelectedMedia, Session, SharedMediaTab};
 use quill::telegram::client::copy_and_parse;
 use serde_json::{Value, json};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -253,12 +253,9 @@ fn fill_tab(
     tab: SharedMediaTab,
     messages: Vec<Value>,
 ) {
-    let generation = session.media.shared_media.begin_fetch(tab);
     let next_from = i64::from(std::env::var_os("QUILL_DEMO_SHARED_MEDIA_LOADING_MORE").is_some());
-    let extra = session.request(
-        RequestPurpose::GetSharedMedia { tab, generation },
-        Some(ChatId(CHAT)),
-    );
+    let extra = session.request(RequestPurpose::GetSharedMedia { tab }, Some(ChatId(CHAT)));
+    session.media.shared_media.begin_fetch(tab, extra);
     let answer = json!({ "@type": "foundChatMessages", "@extra": extra.0,
         "total_count": messages.len(), "next_from_message_id": next_from, "messages": messages });
     if let Some(owned) = copy_and_parse(&answer.to_string(), seq, sink) {
@@ -274,11 +271,8 @@ fn fail_tab(
     seq: &AtomicU64,
     tab: SharedMediaTab,
 ) {
-    let generation = session.media.shared_media.begin_fetch(tab);
-    let extra = session.request(
-        RequestPurpose::GetSharedMedia { tab, generation },
-        Some(ChatId(CHAT)),
-    );
+    let extra = session.request(RequestPurpose::GetSharedMedia { tab }, Some(ChatId(CHAT)));
+    session.media.shared_media.begin_fetch(tab, extra);
     let answer = json!({ "@type": "error", "@extra": extra.0, "code": 500,
         "message": "Request timeout" });
     if let Some(owned) = copy_and_parse(&answer.to_string(), seq, sink) {
@@ -311,7 +305,9 @@ impl QuillApp {
             // its way; =failed answers it with an error; =empty finds nothing.
             match std::env::var("QUILL_DEMO_SHARED_MEDIA_STATE").as_deref() {
                 Ok("loading") => {
-                    let _ = session.media.shared_media.begin_fetch(tab);
+                    let request = session
+                        .request(RequestPurpose::GetSharedMedia { tab }, Some(ChatId(CHAT)));
+                    session.media.shared_media.begin_fetch(tab, request);
                 }
                 Ok("failed") => fail_tab(session, &sink, &seq, tab),
                 Ok("empty") => fill_tab(session, &sink, &seq, tab, Vec::new()),
@@ -319,7 +315,11 @@ impl QuillApp {
             }
             // QUILL_DEMO_SHARED_MEDIA_LOADING_MORE=1 shows the next page on its way.
             if std::env::var_os("QUILL_DEMO_SHARED_MEDIA_LOADING_MORE").is_some() {
-                let _ = session.media.shared_media.begin_fetch_more(tab);
+                let request = session.request(
+                    RequestPurpose::Media(MediaPurpose::GetSharedMediaMore { tab }),
+                    Some(ChatId(CHAT)),
+                );
+                session.media.shared_media.begin_fetch_more(tab, request);
             }
             // QUILL_DEMO_SHARED_MEDIA_SELECT=2 ticks the first two rows.
             let ticked: usize = std::env::var("QUILL_DEMO_SHARED_MEDIA_SELECT")

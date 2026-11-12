@@ -365,7 +365,7 @@ impl ChatSearchState {
 
     pub(crate) fn matches_generation(&self, pending: Option<&PendingRequest>) -> bool {
         pending
-            .and_then(|p| p.search_generation)
+            .and_then(|p| p.search_generation())
             .is_some_and(|search_gen| search_gen == self.generation)
             && self.is_open()
             && pending.and_then(|p| p.chat_id) == self.chat_id()

@@ -234,7 +234,7 @@ impl Session {
     }
 
     fn insights_for(&mut self, pending: &PendingRequest) -> Option<&mut StoryInsightsState> {
-        let (chat_id, story_id) = (pending.chat_id?, pending.story_id?);
+        let (chat_id, story_id) = (pending.chat_id?, pending.story_id()?);
         self.stories
             .insights
             .as_mut()

@@ -97,14 +97,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(owner) = self.profile_owner(chat_id) else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        let generation = if append {
-            let Some(generation) = self.session.media.shared_media.begin_profile_more(tab) else {
-                return Ok(());
-            };
-            generation
-        } else {
-            self.session.media.shared_media.begin_profile_fetch(tab)
-        };
+        if append && !self.session.media.shared_media.profile_more_askable(tab) {
+            return Ok(());
+        }
         let next_offset = self
             .session
             .media
@@ -125,19 +120,20 @@ impl<S: JsonSender> ConnectDriver<S> {
                 } else {
                     0
                 };
-                self.get_chat_posted_to_chat_page_stories(
-                    chat_id,
-                    from,
-                    PROFILE_PAGE,
-                    Some(generation),
-                )
-                .map(|_| ())
+                self.fetch_gallery_stories_page(chat_id, from, PROFILE_PAGE, append)
+                    .map(|_| ())
             }
             SharedMediaTab::Gifts => {
                 let extra = self.session.request(
-                    RequestPurpose::Media(MediaPurpose::GetProfileGifts { append, generation }),
+                    RequestPurpose::Media(MediaPurpose::GetProfileGifts { append }),
                     Some(chat_id),
                 );
+                let gallery = &mut self.session.media.shared_media;
+                if append {
+                    gallery.begin_profile_more(tab, extra);
+                } else {
+                    gallery.begin_profile_fetch(tab, extra);
+                }
                 let offset = if append { next_offset.as_str() } else { "" };
                 let json = get_received_gifts(extra, owner, offset, PROFILE_PAGE);
                 self.send_profile_request(extra, &json)
@@ -145,10 +141,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             _ => Err(ConnectSendError::InvalidRequest),
         };
         if result.is_err() {
-            self.session.fail_profile_tab(
-                chat_id,
+            self.session.media.shared_media.fail_profile_unsent(
                 tab,
-                generation,
+                append,
                 "Could not send the request.".to_string(),
             );
         }

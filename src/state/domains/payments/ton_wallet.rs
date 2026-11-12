@@ -94,7 +94,7 @@ impl Session {
                     }
                 }
                 // TDLib leaves out a user without a wallet.
-                if let Some(user_id) = pending.and_then(|p| p.user_id)
+                if let Some(user_id) = pending.and_then(|p| p.user_id())
                     && waits(wallet, &user_id)
                 {
                     wallet
