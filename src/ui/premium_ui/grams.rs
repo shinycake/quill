@@ -318,6 +318,13 @@ fn overview(
             tr(keys::CREDITS_CURRENCY_SUMMARY_IN_SUBTITLE),
             cx,
         ));
+    if let Some(line) = grams
+        .revenue
+        .error()
+        .filter(|_| grams.withdrawable().is_none())
+    {
+        body = body.child(muted_note(line.to_string(), cx));
+    }
     if let Some(revenue) = grams.withdrawable() {
         body = body.child(
             div()

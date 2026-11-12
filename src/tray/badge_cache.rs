@@ -46,19 +46,19 @@ impl SessionCountKey {
 }
 
 #[derive(Debug, Default)]
-pub struct BadgeCache {
-    key: Option<SessionCountKey>,
-    count: u32,
-}
+pub struct BadgeCache(Option<(SessionCountKey, u32)>);
 
 impl BadgeCache {
     /// [`badge_count`], recomputed only when the account, the unread
     /// revision, the chat count or the preferences changed.
     pub fn get(&mut self, session: &Session, prefs: &BadgePrefs) -> u32 {
-        if !SessionCountKey::holds(self.key.as_ref(), session, prefs) {
-            self.count = badge_count(session, prefs);
-            self.key = Some(SessionCountKey::of(session, prefs));
+        if let Some((key, count)) = &self.0
+            && SessionCountKey::holds(Some(key), session, prefs)
+        {
+            return *count;
         }
-        self.count
+        let count = badge_count(session, prefs);
+        self.0 = Some((SessionCountKey::of(session, prefs), count));
+        count
     }
 }

@@ -215,19 +215,19 @@ thread_local! {
 /// it (`ChatListState::unread_revision`), the badge preferences change, or
 /// another account is asked about.
 #[derive(Debug, Default)]
-pub struct UnreadMemo {
-    key: Option<SessionCountKey>,
-    unread: AccountUnread,
-}
+pub struct UnreadMemo(Option<(SessionCountKey, AccountUnread)>);
 
 impl UnreadMemo {
     pub fn get(&mut self, session: &Session) -> AccountUnread {
         let prefs = &session.settings.badge_prefs;
-        if !SessionCountKey::holds(self.key.as_ref(), session, prefs) {
-            self.unread = AccountUnread::of(session);
-            self.key = Some(SessionCountKey::of(session, prefs));
+        if let Some((key, unread)) = &self.0
+            && SessionCountKey::holds(Some(key), session, prefs)
+        {
+            return *unread;
         }
-        self.unread
+        let unread = AccountUnread::of(session);
+        self.0 = Some((SessionCountKey::of(session, prefs), unread));
+        unread
     }
 }
 

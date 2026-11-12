@@ -349,12 +349,14 @@ impl SendGiftState {
 
     /// Whether `pending` is the gift list request of this dialog.
     pub(crate) fn asked_gifts(&self, pending: Option<&crate::state::PendingRequest>) -> bool {
-        self.gifts_fetch().is_some_and(|fetch| fetch.asked_by(pending))
+        self.gifts_fetch()
+            .is_some_and(|fetch| fetch.asked_by(pending))
     }
 
     /// Whether `pending` is the Premium options request of this dialog.
     pub(crate) fn asked_premium(&self, pending: Option<&crate::state::PendingRequest>) -> bool {
-        self.premium_fetch().is_some_and(|fetch| fetch.asked_by(pending))
+        self.premium_fetch()
+            .is_some_and(|fetch| fetch.asked_by(pending))
     }
 
     pub fn selected_gift(&self) -> Option<&AvailableGift> {

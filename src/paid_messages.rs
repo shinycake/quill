@@ -490,116 +490,9 @@ pub struct PaidMessages {
     pub save: PaidSave,
 }
 
-/// The trusted prices file of the account: read once, written when the
-/// prices change.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub enum TrustFile {
-    /// Not read yet.
-    #[default]
-    NotLoaded,
-    /// Read, and the prices match the file.
-    Clean,
-    /// The prices changed and are not written yet.
-    Dirty,
-    /// The last write failed `tries` times in a row (the reason, for the
-    /// person to see); the next change writes again, and so does the first
-    /// tick after `retry_at_ms` (unix milliseconds).
-    SaveFailed {
-        reason: String,
-        retry_at_ms: u64,
-        tries: u8,
-    },
-}
-
-/// How long a failed write of the trusted prices waits before the next try;
-/// each further failure doubles the wait, up to [`TRUST_RETRY_MAX_MS`].
-pub const TRUST_RETRY_MS: u64 = 30_000;
-
-/// The longest wait between two tries of a failing write.
-pub const TRUST_RETRY_MAX_MS: u64 = 15 * 60_000;
-
-/// The wait after `tries` failed writes in a row.
-fn trust_retry_after(tries: u8) -> u64 {
-    TRUST_RETRY_MS
-        .saturating_mul(1 << tries.saturating_sub(1).min(10))
-        .min(TRUST_RETRY_MAX_MS)
-}
-
-impl PaidMessages {
-    /// The user agreed to `stars` per message in `chat_id`: remembered, and
-    /// the file is behind.
-    pub fn remember_trust(&mut self, chat_id: i64, stars: i64) {
-        self.trust.trust(chat_id, stars);
-        self.trust_file = TrustFile::Dirty;
-    }
-
-    /// Whether a send of `per_message` Stars to `chat_id` needs the
-    /// confirmation box.
-    pub fn needs_confirmation(&self, chat_id: i64, per_message: i64) -> bool {
-        needs_confirmation(&self.trust, chat_id, per_message)
-    }
-
-    /// The trusted prices, per chat, for the send guard.
-    pub fn trusted_prices(&self) -> HashMap<i64, i64> {
-        self.trust.entries()
-    }
-
-    /// The file's text when the prices changed since it was written, or the
-    /// last write failed and its wait is over at `now_ms`.
-    pub fn trust_to_write(&self, now_ms: u64) -> Option<String> {
-        let due = match &self.trust_file {
-            TrustFile::Dirty => true,
-            TrustFile::SaveFailed { retry_at_ms, .. } => now_ms >= *retry_at_ms,
-            TrustFile::NotLoaded | TrustFile::Clean => false,
-        };
-        due.then(|| self.trust.to_json())
-    }
-
-    /// Whether the file has not been read yet.
-    pub fn trust_unread(&self) -> bool {
-        self.trust_file == TrustFile::NotLoaded
-    }
-
-    /// The file was read (`None`: there is none): its prices are the
-    /// trusted ones, once.
-    pub fn trust_loaded(&mut self, text: Option<&str>) {
-        if !self.trust_unread() {
-            return;
-        }
-        self.trust_file = TrustFile::Clean;
-        if let Some(text) = text {
-            self.trust = PaidTrust::from_json(text);
-        }
-    }
-
-    /// The write of [`Self::trust_to_write`] ended: the file is clean, or
-    /// the reason it failed.
-    pub fn trust_written(&mut self, result: Result<(), String>, now_ms: u64) {
-        let failed_before = match &self.trust_file {
-            TrustFile::SaveFailed { tries, .. } => *tries,
-            _ => 0,
-        };
-        self.trust_file = match result {
-            Ok(()) => TrustFile::Clean,
-            Err(reason) => {
-                let tries = failed_before.saturating_add(1);
-                TrustFile::SaveFailed {
-                    reason,
-                    retry_at_ms: now_ms.saturating_add(trust_retry_after(tries)),
-                    tries,
-                }
-            }
-        };
-    }
-
-    /// The reason the last write of the trusted prices failed.
-    pub fn trust_save_error(&self) -> Option<&str> {
-        match &self.trust_file {
-            TrustFile::SaveFailed { reason, .. } => Some(reason),
-            _ => None,
-        }
-    }
-}
+#[path = "paid_messages_trust.rs"]
+mod trust;
+pub use trust::*;
 
 /// Whom a paid-message save is for: its failure shows there only, never
 /// in another chat's bar or another channel's box.
@@ -833,7 +726,7 @@ impl PaidMessages {
         if !matches!(answer, CanSend::HasPaidMessages { stars } if stars > 0)
             && self.trust.forget(user_id)
         {
-            self.trust_file = TrustFile::Dirty;
+            self.trust_changed();
         }
     }
 

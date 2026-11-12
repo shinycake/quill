@@ -382,7 +382,10 @@ fn a_failed_collections_fetch_is_failed_not_loaded() {
     let mut fetch = CollectionsFetch::Ready(vec![collection(1)]);
     fetch.begin(RequestId(4));
     fetch.failed(Some(RequestId(9)));
-    assert!(fetch.is_loading(), "another request's error changes nothing");
+    assert!(
+        fetch.is_loading(),
+        "another request's error changes nothing"
+    );
     fetch.failed(Some(RequestId(4)));
     assert!(fetch.is_failed() && !fetch.is_loading());
     assert_eq!(fetch.list().len(), 1, "the tabs stay");

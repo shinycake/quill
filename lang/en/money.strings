@@ -471,6 +471,7 @@
 "qll_money_could_not_open_gift_stars" = "Couldn't open Gift Stars";
 "qll_money_could_not_open_money" = "Couldn't open Money";
 "qll_money_could_not_load_the_collections" = "Couldn't load the collections.";
+"qll_money_could_not_undo_the_reaction" = "Couldn't undo the Star reaction.";
 "qll_money_could_not_open_the_collection" = "could not open the collection";
 "qll_money_could_not_re_enable_the" = "Couldn't re-enable the subscription";
 "qll_money_could_not_reassign_the_boost" = "Couldn't reassign the boost";

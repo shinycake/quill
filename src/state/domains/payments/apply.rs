@@ -160,14 +160,7 @@ impl Session {
                     && let Some(gift) = self.payments.marketplace_gift.as_mut()
                     && let Some(answer) = gift.accept_result(p.id, result)
                 {
-                    let kind = if answer.sent {
-                        NoticeKind::Info
-                    } else {
-                        NoticeKind::Error
-                    };
-                    self.payments
-                        .notices
-                        .push(PaymentNotice::new(kind, answer.line));
+                    self.payments.notices.push(boxless_notice(answer));
                 }
             }
             PaymentsPayload::PaymentReceipt(receipt) => {

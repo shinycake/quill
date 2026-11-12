@@ -121,7 +121,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if self.fetch_gift_collections(owner).is_err() {
             // A refused send keeps the wish: the next ingest asks again.
-            self.session.payments.gifts_manage.collections_fetch.unsent();
+            self.session
+                .payments
+                .gifts_manage
+                .collections_fetch
+                .unsent();
         }
     }
 
@@ -665,9 +669,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json_request(extra, &rq::get_premium_gift_payment_options(extra))
             .is_err()
         {
-            self.session.payments.gifts_manage.send.set_premium_fetch(GiftListFetch::Failed(
-                "Couldn't load the Premium options.".into(),
-            ));
+            self.session
+                .payments
+                .gifts_manage
+                .send
+                .set_premium_fetch(GiftListFetch::Failed(
+                    "Couldn't load the Premium options.".into(),
+                ));
         }
     }
 

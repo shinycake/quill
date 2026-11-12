@@ -410,7 +410,10 @@ impl Watcher {
             },
             Err(error) => {
                 eprintln!("quill: no network watcher: {error}");
-                Watcher::Refused { at: now, quick_ends }
+                Watcher::Refused {
+                    at: now,
+                    quick_ends,
+                }
             }
         };
     }

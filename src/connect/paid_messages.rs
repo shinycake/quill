@@ -55,19 +55,23 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Writes the trusted prices again when the last write failed and its
     /// wait is over. Per tick, in the background too.
     pub(crate) fn paid_trust_tick(&mut self, now_ms: u64) {
+        self.load_paid_trust(now_ms);
         self.save_paid_trust(now_ms);
     }
 
-    /// Reads the account's trusted prices once.
-    fn load_paid_trust(&mut self) {
-        if !self.session.payments.paid_messages.trust_unread() {
+    /// Reads the account's trusted prices once. Only a missing file means
+    /// there are none; a file that cannot be read is kept as it is and read
+    /// again after a wait.
+    fn load_paid_trust(&mut self, now_ms: u64) {
+        if !self.session.payments.paid_messages.trust_read_due(now_ms) {
             return;
         }
-        let text = std::fs::read_to_string(self.paths.root.join(TRUST_FILE)).ok();
-        self.session
-            .payments
-            .paid_messages
-            .trust_loaded(text.as_deref());
+        let paid = &mut self.session.payments.paid_messages;
+        match std::fs::read_to_string(self.paths.root.join(TRUST_FILE)) {
+            Ok(text) => paid.trust_loaded(Some(&text)),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => paid.trust_loaded(None),
+            Err(_) => paid.trust_load_failed(now_ms),
+        }
         self.sync_paid_guard();
     }
 
@@ -90,7 +94,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// "Don't ask me again": trusts `stars` per message in a chat and
     /// keeps it across restarts.
     pub fn remember_paid_trust(&mut self, chat_id: ChatId, stars: i64) {
-        self.load_paid_trust();
+        self.load_paid_trust(crate::state::unix_ms_now());
         self.session
             .payments
             .paid_messages
@@ -144,7 +148,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Ok(());
         }
-        self.load_paid_trust();
+        self.load_paid_trust(crate::state::unix_ms_now());
         let Some(chat_id) = self.session.open_chat_id() else {
             return Ok(());
         };

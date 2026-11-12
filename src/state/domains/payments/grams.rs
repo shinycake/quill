@@ -35,14 +35,24 @@ impl Session {
                 }
             }
             GramsPayload::Revenue(revenue) => {
-                if matches!(purpose, Some((GramsPurpose::Revenue, _))) {
-                    self.payments.hub.grams.revenue = Some(revenue);
+                if let Some((GramsPurpose::Revenue, request)) = purpose {
+                    self.payments
+                        .hub
+                        .grams
+                        .revenue
+                        .answered(Some(request), revenue);
                 }
             }
             GramsPayload::RevenueStatus(status) => {
                 let grams = &mut self.payments.hub.grams;
-                let usd_rate = grams.revenue.map_or(0.0, |known| known.usd_rate);
-                grams.revenue = Some(crate::premium_hub::ton::GramRevenue { usd_rate, ..status });
+                // A pushed update keeps the rate and leaves a request in
+                // flight alone.
+                let usd_rate = grams.revenue.data().map_or(0.0, |known| known.usd_rate);
+                let updated = crate::premium_hub::ton::GramRevenue { usd_rate, ..status };
+                match grams.revenue.data_mut() {
+                    Some(known) => *known = updated,
+                    None => grams.revenue.insert_data_if_missing(|| updated),
+                }
             }
         }
     }
@@ -63,7 +73,13 @@ impl Session {
             GramsPurpose::Probe => {
                 grams.probe.failed(request, error_reason(err), false);
             }
-            GramsPurpose::Revenue => {}
+            GramsPurpose::Revenue => {
+                grams.revenue.failed(
+                    request,
+                    crate::lang::tr(crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_REVENUE),
+                    false,
+                );
+            }
             GramsPurpose::PeerUser | GramsPurpose::PeerChat => {
                 if let Some(request) = request {
                     grams.peer_refused(request);

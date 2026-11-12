@@ -574,7 +574,9 @@ pub struct GramsHub {
     /// tabs only when both directions exist).
     pub has_in: bool,
     pub has_out: bool,
-    pub revenue: Option<GramRevenue>,
+    /// `getGramRevenueStatistics` for the withdrawal section: only the
+    /// answer of the request named in the stage lands; a failure says so.
+    pub revenue: Fetch<GramRevenue>,
     /// Users and chats the history names that the session did not know:
     /// each asked once per session, then refused or learned.
     pub peers: BTreeMap<PeerKey, PeerAsk>,
@@ -761,7 +763,7 @@ impl GramsHub {
     /// The withdrawal section shows while revenue is available
     /// (tdesktop `BuildCurrencyWithdrawalSection`).
     pub fn withdrawable(&self) -> Option<&GramRevenue> {
-        self.revenue.as_ref().filter(|r| r.available_nano > 0)
+        self.revenue.data().filter(|r| r.available_nano > 0)
     }
 }
 

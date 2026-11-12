@@ -142,9 +142,17 @@ impl<S: JsonSender> ConnectDriver<S> {
                 return Err(err);
             }
         };
-        let _ = self.send_grams(GramsPurpose::Revenue, |extra| {
+        let sent = self.send_grams(GramsPurpose::Revenue, |extra| {
             get_gram_revenue_statistics(extra, is_dark)
         });
+        let revenue = &mut self.session.payments.hub.grams.revenue;
+        revenue.begin();
+        match sent {
+            Ok(request) => revenue.sent(request),
+            Err(_) => revenue.fail(crate::lang::tr(
+                crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_REVENUE,
+            )),
+        }
         let _ = self.fetch_ton_explorer_url();
         Ok(page)
     }

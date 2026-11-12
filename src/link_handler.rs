@@ -541,6 +541,22 @@ impl Cell {
         waker
     }
 
+    /// The answer `state` was read on the caller's thread at `now` (macOS):
+    /// it is as fresh as any, so it replaces what was known and settles a
+    /// read in flight (which is let go), and every earlier [`invalidate`]
+    /// is answered by it. Returns the watcher to wake.
+    fn answered(&mut self, state: LinkHandlerState, now: Instant) -> Option<Waker> {
+        let waker = match std::mem::replace(&mut self.stage, Stage::Empty) {
+            Stage::Reading { waker, .. } => waker,
+            Stage::Known { .. } | Stage::Empty => None,
+        };
+        self.stage = Stage::Known {
+            cached: Cached { at: now, state },
+            stale: false,
+        };
+        waker
+    }
+
     /// Marks the answer, or the read in flight, stale.
     fn invalidate(&mut self) {
         match &mut self.stage {
@@ -603,13 +619,12 @@ pub fn state() -> Option<LinkHandlerState> {
 /// [`READ_ON_CALLER`]).
 fn read_on_caller() -> LinkHandlerState {
     let fresh = query_state();
-    CELL.lock_or_recover().stage = Stage::Known {
-        cached: Cached {
-            at: Instant::now(),
-            state: fresh.clone(),
-        },
-        stale: false,
-    };
+    let waker = CELL
+        .lock_or_recover()
+        .answered(fresh.clone(), Instant::now());
+    if let Some(wake) = waker {
+        wake();
+    }
     fresh
 }
 
@@ -808,6 +823,37 @@ mod tests {
         let (answer, stale) = cell.lookup();
         assert_eq!(answer, Some(LinkHandlerState::Ours));
         assert!(!stale);
+    }
+
+    /// Sweep r4-04 fix 3: an answer read on the caller's thread goes through
+    /// the cell's transitions: it settles a read in flight and wakes its
+    /// watcher, and answers an earlier invalidate.
+    #[test]
+    fn an_answer_read_on_the_caller_settles_a_read_in_flight() {
+        let mut cell = super::Cell::new();
+        let last = cell.take_for_read().expect("a read starts");
+        cell.reading_on(last, finished_thread());
+        let woken = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = woken.clone();
+        if let super::Stage::Reading { waker, .. } = &mut cell.stage {
+            *waker = Some(Box::new(move || {
+                flag.store(true, std::sync::atomic::Ordering::SeqCst)
+            }));
+        }
+        cell.invalidate();
+        let wake = cell.answered(LinkHandlerState::Ours, Instant::now());
+        assert!(!cell.reading(), "the read in flight is settled");
+        assert_eq!(cell.lookup(), (Some(LinkHandlerState::Ours), false));
+        wake.expect("its watcher is handed back")();
+        assert!(woken.load(std::sync::atomic::Ordering::SeqCst));
+        // Over a known answer marked stale: fresh again.
+        cell.invalidate();
+        assert_eq!(cell.lookup(), (Some(LinkHandlerState::Ours), true));
+        assert!(
+            cell.answered(LinkHandlerState::Unset, Instant::now())
+                .is_none()
+        );
+        assert_eq!(cell.lookup(), (Some(LinkHandlerState::Unset), false));
     }
 
     #[test]

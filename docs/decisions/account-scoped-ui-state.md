@@ -10239,7 +10239,7 @@ orders), `deep_link_routes_tests` (seek stays with its account).
 | 05-004 | `Presses` is `Idle` / `Held(over)` / `Handled(over)`. |
 | 05-007 | `EffectWatch` keys are `ChatMessage`. |
 | g-453 | `MediaFile` is `MediaFileView`: read from the downloads table and the disk when the menu is built. |
-| 06-005, g-469..g-471 | `Lifecycle::Waiting { streak, since }`: the widget holds its place in the queue (`since` orders `start_waiting_widgets`, the one waiting longest starts first) and no work; the pool it waits on gives no ticket. The guard counts a field typed by one of the enum's own generic parameters as the owned handle (`Loading { runtime: R }`, `Running(R)`). |
+| 06-005, g-469..g-471 | `Lifecycle::Due { streak }` (was `Waiting { streak, since }`): the widget is due to start on the next present and holds no work; the `Instant` ordered nothing (every shown due widget starts in the same pass, the capacity grows with the shown ones), so it is gone. The guard counts a field typed by one of the enum's own generic parameters as the owned handle (`Loading { runtime: R }`, `Running(R)`). |
 | 06-010, g-472 | `Neighbour::Asking { gateway, since }`: a gateway that never answers is asked again after `RESOLVE_AGAIN_AFTER`. |
 | 06-011, g-447 | `BackgroundStatus::Connecting { since }`: a start that stays there past `CONNECT_GIVE_UP` is `Failed` and started again. |
 | g-460, 06-008 | `new_chat::ViewState` is `StepView` (a view worked out on each draw; `TypeSaveStage::Saving(requests)` and `NewChatStage::Creating` own the requests). `GiftsLayout` is `GiftsLayoutView`, `OwnLinkState` is `OwnLinkView` (both are worked out on each draw). |
@@ -10274,8 +10274,29 @@ Tests: `location_picker::picker_tests` (typing before a place, a new place stops
 | `location_picker` | `VenueView::Failed` derives from `AskStage::Failed` (`ListData::Failed` gone); the ask holds the query as typed (`initial_query` gone); the nearby place to return to lives in `SearchInput::{Typing, Settled} { back }` (`no_search_location` gone). A query typed before the first fix is sent around the fix (05-002). |
 | `gift_manage` | `GiftListFetch<T>::Answered(Vec<T>)` holds the list (`gifts()` and `premium_options()` read it); `SendStage::Open { recipient, step: SendStep }` holds the recipient. |
 | `main.rs` | The wake subscription, the first window open, the macOS menu install and the tray/chrome loop are held in globals (`WakeWatch`, `OpeningMainWindow`, `InstallingMenus`, `ChromeLoop`), like `DemoDriver`. |
-| `Lifecycle::Waiting` | Documented above: it holds its queue place, no work. |
+| `Lifecycle::Due` | Documented above: due to start, no work in flight; not an in-flight name. |
 | `collapsed_keyboards` | Keyed by `ChatMessage`, like `dismissed_keyboards`. |
 | `paid_messages` | `SaveFailed { retry_at_ms, tries }`: the wait doubles per failure up to `TRUST_RETRY_MAX_MS`. |
 | `background_accounts::switch` | A hand-off stamps `Connecting` with `LiveConnect::started`, so the give-up clock keeps running. |
 | `marketplace` | `accept_quote`, `accept_result` and `fail` take the `RequestId` and check it themselves. |
+
+#### Fix round 3 (r4-04)
+
+| Review item | Change |
+|---|---|
+| `location_picker` venue list | `ListData` keeps answered data only (`Option<ListData>`); `venues()` derives Loading (still locating) or WaitingForLocation from `here`. A settled query with no ask made for it (`unasked_query`) is sent from `request_venues_for_fix` and from `move_ended`. |
+| `ThemeGifts::fail` | A failed first page is `FirstFailed` (Retry), not a whole empty list. A failed next page waits `GIFTS_RETRY_SECS` doubled per failure in a row, up to `GIFTS_RETRY_MAX_SECS` (`failures` rides through `Loading`/`Waiting`). |
+| `GiftPurchase` | `SendingClosed { .. }` stage: closing the box moves `Sending` to it, reopening back; `accept_result` and `fail` return a `BoxlessAnswer` when no box shows the answer, which pushes a `PaymentNotice`. |
+| `CollectionsFetch` | Holds the list (`Ready`, `Loading { held, request }`, `LoadingStale`, `Stale`, `Failed`); a failure is `Failed` with a Retry under the tabs (`retry_gift_collections`). |
+| `SendGiftState` | `gifts_fetch`, `premium_fetch` and `selected` live in `SendStage::Open`. |
+| `passcode::idle` sampler | `note_read` treats a finished `Running` thread as not running, so the next read starts a new one. |
+| `proxy_ops` | `ProxyFetch::{LoadingStale, Failed { at }, FailedStale { at }}`: a failed refetch keeps the stale mark (busy), and a failure is asked again after `FAILED_RETRY_AFTER`. A rotation round forgets only `Unavailable` verdicts. |
+| `net_watch` | The listener rereads the route once it is subscribed (on its own thread, never under `WATCHER`). Starts back off: `quick_ends` doubles the wait up to `WATCH_RESTART_MAX`; `Watcher::Refused` covers a thread that would not start. |
+| `GramsHub::revenue` | `Fetch<GramRevenue>` settled by `RequestId`; an error shows "Couldn't load the revenue". |
+| `paid_messages` trust file | Only `NotFound` means no file; other read errors are `TrustFile::LoadFailed { retry_at_ms }`, nothing is written over the file, and prices agreed to meanwhile join it on the next good read. |
+| `undo_paid_reaction` | A refused undo send shows "Couldn't undo the Star reaction." |
+| `settle_new_chat_stage` | A settled type Save is let go (`forget_new_chat_type_save`). |
+| `Lifecycle::Due { streak }` | `Waiting`'s `since` is gone (it ordered nothing); the variant is renamed to what it is: due to start, no work in flight. |
+| `UnreadMemo`, `BadgeCache` | `Option<(SessionCountKey, value)>`: no value without its key. |
+| `link_handler::read_on_caller` | Goes through `Cell::answered`, which settles a read in flight and wakes its watcher. |
+

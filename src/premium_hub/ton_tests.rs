@@ -333,7 +333,7 @@ fn revenue_and_its_updates_parse() {
     );
     let mut hub = GramsHub::default();
     assert!(hub.withdrawable().is_none());
-    hub.revenue = Some(revenue);
+    hub.revenue.succeed(revenue);
     assert!(hub.withdrawable().is_some());
 }
 

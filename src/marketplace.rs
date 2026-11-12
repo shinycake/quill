@@ -135,10 +135,11 @@ pub enum GiftPurchaseStage {
 /// The outcome of a purchase whose box was closed while it was out: Stars
 /// may have moved, so the user is told.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BoxlessAnswer {
-    /// The gift was sent (else it was refused, failed or repriced).
-    pub sent: bool,
-    pub line: String,
+pub enum BoxlessAnswer {
+    /// The gift was bought: the line says so.
+    Bought(String),
+    /// It was refused, failed or repriced: the line says why.
+    Refused(String),
 }
 
 #[derive(Debug, Clone)]
@@ -182,34 +183,36 @@ impl GiftPurchase {
 
     /// The box was closed: a send in flight carries on without it.
     pub fn close(&mut self) {
-        self.stage = match std::mem::replace(&mut self.stage, GiftPurchaseStage::Failed(String::new())) {
-            GiftPurchaseStage::Sending {
-                quote,
-                price,
-                request,
-            } => GiftPurchaseStage::SendingClosed {
-                quote,
-                price,
-                request,
-            },
-            other => other,
-        };
+        self.stage =
+            match std::mem::replace(&mut self.stage, GiftPurchaseStage::Failed(String::new())) {
+                GiftPurchaseStage::Sending {
+                    quote,
+                    price,
+                    request,
+                } => GiftPurchaseStage::SendingClosed {
+                    quote,
+                    price,
+                    request,
+                },
+                other => other,
+            };
     }
 
     /// The box is shown again over the send it closed on.
     pub fn reopen(&mut self) {
-        self.stage = match std::mem::replace(&mut self.stage, GiftPurchaseStage::Failed(String::new())) {
-            GiftPurchaseStage::SendingClosed {
-                quote,
-                price,
-                request,
-            } => GiftPurchaseStage::Sending {
-                quote,
-                price,
-                request,
-            },
-            other => other,
-        };
+        self.stage =
+            match std::mem::replace(&mut self.stage, GiftPurchaseStage::Failed(String::new())) {
+                GiftPurchaseStage::SendingClosed {
+                    quote,
+                    price,
+                    request,
+                } => GiftPurchaseStage::Sending {
+                    quote,
+                    price,
+                    request,
+                },
+                other => other,
+            };
     }
 
     /// A request of this purchase is out.
@@ -347,9 +350,11 @@ impl GiftPurchase {
     }
 
     fn boxless_answer(&self) -> BoxlessAnswer {
-        BoxlessAnswer {
-            sent: self.is_completed(),
-            line: self.note().unwrap_or_default(),
+        let line = self.note().unwrap_or_default();
+        if self.is_completed() {
+            BoxlessAnswer::Bought(line)
+        } else {
+            BoxlessAnswer::Refused(line)
         }
     }
 
@@ -486,13 +491,14 @@ mod stage_tests {
         let answer = gift
             .accept_result(RequestId(2), GiftPurchaseResult::Sent(String::new()))
             .expect("nobody shows it");
-        assert!(answer.sent);
-        assert_eq!(answer.line, "Gift sent successfully.");
+        assert_eq!(
+            answer,
+            BoxlessAnswer::Bought("Gift sent successfully.".into())
+        );
         let mut gift = sending();
         gift.close();
         let answer = gift.fail(RequestId(2), "refused".into()).expect("told");
-        assert!(!answer.sent);
-        assert_eq!(answer.line, "refused");
+        assert_eq!(answer, BoxlessAnswer::Refused("refused".into()));
         // A box shown again over the send shows the answer itself.
         let mut gift = sending();
         gift.close();

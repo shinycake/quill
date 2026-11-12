@@ -69,6 +69,18 @@ impl PaymentNotice {
     }
 }
 
+/// The notice for a Marketplace purchase answered with its box closed.
+pub(crate) fn boxless_notice(answer: crate::marketplace::BoxlessAnswer) -> PaymentNotice {
+    match answer {
+        crate::marketplace::BoxlessAnswer::Bought(line) => {
+            PaymentNotice::new(NoticeKind::Info, line)
+        }
+        crate::marketplace::BoxlessAnswer::Refused(line) => {
+            PaymentNotice::new(NoticeKind::Error, line)
+        }
+    }
+}
+
 /// The receipt dialog's stage.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub enum ReceiptStage {
