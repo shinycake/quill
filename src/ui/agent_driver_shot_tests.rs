@@ -37,7 +37,7 @@ fn drive_shot(
             return Ok(reply);
         }
     }
-    ticket.wait(Duration::from_millis(10))
+    ticket.give_up()
 }
 
 fn take(

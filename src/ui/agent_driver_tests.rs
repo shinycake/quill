@@ -78,7 +78,7 @@ pub(super) fn drive(
             return Ok(reply);
         }
     }
-    ticket.wait(Duration::from_millis(10))
+    ticket.give_up()
 }
 
 /// Access and the driver on, no grants.
@@ -620,7 +620,7 @@ fn a_tool_that_gave_up_gets_nothing_injected(cx: &mut TestAppContext) {
     )
     .unwrap_or_else(|_| panic!("posted"));
     assert_eq!(
-        ticket.wait(Duration::from_millis(1)),
+        ticket.give_up(),
         Err(BridgeError::Timeout)
     );
     // Withdrawn from the queue: nothing to start.
@@ -640,7 +640,7 @@ fn a_tool_that_gave_up_gets_nothing_injected(cx: &mut TestAppContext) {
         })
     });
     assert_eq!(
-        ticket.wait(Duration::from_millis(1)),
+        ticket.give_up(),
         Err(BridgeError::Timeout)
     );
     settle(vcx);

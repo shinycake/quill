@@ -15,7 +15,6 @@ use quill::agent::ui_driver::keys::parse_sequence;
 use quill::agent::ui_driver::takeover::{self, Phase};
 use quill::ids::AccountKey;
 use std::sync::mpsc::Receiver;
-use std::time::Duration;
 
 const TEXT: &str = "hi there";
 
@@ -124,7 +123,7 @@ fn a_real_press_on_confirm_clears_the_box_and_never_pauses(cx: &mut TestAppConte
     let (id, rx) = ask_confirm(vcx);
     press_confirm(vcx);
     assert_eq!(
-        prompts::wait(id, &rx, Duration::ZERO),
+        rx.try_recv().ok(),
         Some(Decision::Allowed)
     );
     assert!(!takeover::paused(), "Confirm answered the agent's prompt");
@@ -161,7 +160,7 @@ fn stop_while_the_confirm_is_open_still_clears_a_confirmed_send(cx: &mut TestApp
     );
     press_confirm(vcx);
     assert_eq!(
-        prompts::wait(id, &rx, Duration::ZERO),
+        rx.try_recv().ok(),
         Some(Decision::Allowed)
     );
     composer_sent(&app, vcx, TEXT);
