@@ -2,7 +2,7 @@
 //! stages. One value each, so a launch never waits on two things at once
 //! and a reply is matched to the request that asked.
 
-use super::{Awaited, WebAppConfirm};
+use super::{Awaited, PopupId, WebAppConfirm};
 use quill::ids::RequestId;
 
 /// The launch in progress: waiting on one answer, or on the person's box.
@@ -29,6 +29,31 @@ impl LaunchFlow {
             self,
             Self::Searching(_) | Self::FetchingAttachBot(_) | Self::Adding(_)
         )
+    }
+
+    /// The request the flow waits on, if it waits on one.
+    pub(super) fn awaited_request(&self) -> Option<RequestId> {
+        match self {
+            Self::Searching(awaited) | Self::FetchingAttachBot(awaited) | Self::Adding(awaited) => {
+                Some(awaited.request)
+            }
+            Self::Idle | Self::Confirming(_) => None,
+        }
+    }
+
+    /// The wait ends with no answer (its request left flight: dropped by
+    /// the stale sweep or a reconnect): the awaited launch comes back and
+    /// the flow is idle.
+    pub(super) fn take_lost(&mut self) -> Option<Awaited> {
+        match std::mem::take(self) {
+            Self::Searching(awaited) | Self::FetchingAttachBot(awaited) | Self::Adding(awaited) => {
+                Some(awaited)
+            }
+            other => {
+                *self = other;
+                None
+            }
+        }
     }
 
     pub(super) fn confirm(&self) -> Option<&WebAppConfirm> {
@@ -147,8 +172,9 @@ pub(super) enum WriteAccess {
     Idle,
     /// `canBotSendMessages` is out.
     Checking(quill::ids::RequestId),
-    /// The person has the consent popup.
-    Asking,
+    /// The person has the consent popup with this id; only its answer
+    /// moves the stage.
+    Asking { popup: PopupId },
     /// `allowBotToSendMessages` is out, after the person said yes.
     Allowing(quill::ids::RequestId),
 }
@@ -215,6 +241,24 @@ mod tests {
         flow.add(waiting(2, 9));
         assert!(flow.take_search_for(RequestId(1)).is_none());
         assert!(flow.take_add_for(RequestId(2)).is_some());
+    }
+
+    #[test]
+    fn a_wait_whose_request_left_flight_is_given_up() {
+        let mut flow = LaunchFlow::default();
+        flow.search(waiting(1, 7));
+        assert_eq!(flow.awaited_request(), Some(RequestId(1)));
+        let lost = flow.take_lost();
+        assert_eq!(lost.map(|awaited| awaited.request), Some(RequestId(1)));
+        assert!(!flow.is_waiting());
+        // A box waiting for the person is not a request.
+        flow.ask(WebAppConfirm::RemoveFromMenu {
+            bot_id: 7,
+            name: String::new(),
+        });
+        assert_eq!(flow.awaited_request(), None);
+        assert!(flow.take_lost().is_none());
+        assert!(flow.confirm().is_some());
     }
 
     #[test]

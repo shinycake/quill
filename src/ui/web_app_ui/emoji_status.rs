@@ -35,8 +35,9 @@ pub(super) struct EmojiStatusFlow {
 enum AccessStage {
     #[default]
     Idle,
-    /// The access prompt is up.
-    Asking,
+    /// The access prompt with this id is up; only its answer moves the
+    /// stage.
+    Asking { popup: PopupId },
     /// "Allow" was pressed and `toggleBotCanManageEmojiStatus` is in flight
     /// as this request. Its answer or error ends it, and so does the
     /// request leaving flight with neither (dropped by the stale sweep or a
@@ -50,7 +51,9 @@ impl EmojiStatusFlow {
     pub(super) fn is_active(&self) -> bool {
         self.set
             .as_ref()
-            .is_some_and(|request| matches!(request.stage, SetStage::Resolving { .. }))
+            .is_some_and(|request| {
+                matches!(request.stage, SetStage::Deferred | SetStage::Resolving { .. })
+            })
     }
 
     #[cfg(test)]
@@ -68,13 +71,15 @@ struct SetRequest {
 }
 
 enum SetStage {
-    /// Looking the emoji up; `request` is this lookup's `getCustomEmojiStickers`
-    /// once it is on its way (`None` while the shared lookup is busy).
-    Resolving {
-        request: Option<quill::ids::RequestId>,
-    },
-    /// The prompt is up, with the emoji's character.
-    Confirming { alt: String },
+    /// The shared lookup is busy with another batch: asked again on each
+    /// tick until the lookup goes out or [`RESOLVE_TIMEOUT`] passes.
+    Deferred,
+    /// Looking the emoji up; `request` is this lookup's
+    /// `getCustomEmojiStickers`, on its way.
+    Resolving { request: quill::ids::RequestId },
+    /// The prompt with this id is up, with the emoji's character; only its
+    /// answer moves the stage.
+    Confirming { alt: String, popup: PopupId },
 }
 
 fn access_popup(bot_name: &str) -> Popup {
@@ -144,18 +149,24 @@ impl QuillApp {
             return;
         }
         self.with_window(|window| {
-            window.emoji.access = AccessStage::Asking;
-            window.show_popup(PopupPurpose::EmojiStatusAccess, access_popup(&bot_name));
+            let popup = window.show_popup(PopupPurpose::EmojiStatusAccess, access_popup(&bot_name));
+            window.emoji.access = AccessStage::Asking { popup };
         });
         cx.notify();
     }
 
     /// The access prompt was answered.
-    pub(super) fn answer_emoji_status_access(&mut self, button: &str, cx: &mut Context<Self>) {
+    pub(super) fn answer_emoji_status_access(
+        &mut self,
+        popup: PopupId,
+        button: &str,
+        cx: &mut Context<Self>,
+    ) {
         let Some((bot_id, bot_name)) = self
             .mini_apps
             .window
             .as_ref()
+            .filter(|window| window.emoji.access == AccessStage::Asking { popup })
             .map(|window| (window.launch.bot_user_id, window.launch.bot_name.clone()))
         else {
             return;
@@ -171,7 +182,9 @@ impl QuillApp {
             // tdesktop shows the Premium preview and leaves the box open.
             self.open_premium_at(quill::premium_hub::PremiumFeature::EmojiStatus, cx);
             self.with_window(|window| {
-                window.show_popup(PopupPurpose::EmojiStatusAccess, access_popup(&bot_name));
+                let popup =
+                    window.show_popup(PopupPurpose::EmojiStatusAccess, access_popup(&bot_name));
+                window.emoji.access = AccessStage::Asking { popup };
             });
             return;
         }
@@ -213,14 +226,19 @@ impl QuillApp {
                 custom_emoji_id,
                 duration_secs,
                 since: Instant::now(),
-                stage: SetStage::Resolving { request: None },
+                stage: SetStage::Deferred,
             });
         });
         self.poll_emoji_status(cx);
     }
 
     /// The confirmation prompt was answered.
-    pub(super) fn answer_set_emoji_status(&mut self, button: &str, cx: &mut Context<Self>) {
+    pub(super) fn answer_set_emoji_status(
+        &mut self,
+        popup: PopupId,
+        button: &str,
+        cx: &mut Context<Self>,
+    ) {
         let Some(bot_name) = self
             .mini_apps
             .window
@@ -229,7 +247,16 @@ impl QuillApp {
         else {
             return;
         };
-        let Some(request) = self
+        // Only the popup the stage opened answers it.
+        let asked = self.mini_apps.window.as_ref().is_some_and(|window| {
+            window.emoji.set.as_ref().is_some_and(|request| {
+                matches!(request.stage, SetStage::Confirming { popup: shown, .. } if shown == popup)
+            })
+        });
+        if !asked {
+            return;
+        }
+        let Some(mut request) = self
             .mini_apps
             .window
             .as_mut()
@@ -237,7 +264,7 @@ impl QuillApp {
         else {
             return;
         };
-        let SetStage::Confirming { alt } = &request.stage else {
+        let SetStage::Confirming { alt, .. } = &request.stage else {
             return;
         };
         if button != "confirm" {
@@ -249,9 +276,12 @@ impl QuillApp {
         if !self.premium_for_emoji_status() {
             // The prompt stays, behind the Premium preview.
             self.open_premium_at(quill::premium_hub::PremiumFeature::EmojiStatus, cx);
-            let popup = confirm_popup(&bot_name, alt);
+            let prompt = confirm_popup(&bot_name, alt);
             self.with_window(|window| {
-                window.show_popup(PopupPurpose::EmojiStatus, popup);
+                let popup = window.show_popup(PopupPurpose::EmojiStatus, prompt);
+                if let SetStage::Confirming { popup: shown, .. } = &mut request.stage {
+                    *shown = popup;
+                }
                 window.emoji.set = Some(request);
             });
             return;
@@ -317,11 +347,12 @@ impl QuillApp {
     }
 
     fn resolve_suggested_emoji(&mut self, cx: &mut Context<Self>) {
-        let Some((id, asked, since)) = self.mini_apps.window.as_ref().and_then(|window| {
+        let Some((id, stage, since)) = self.mini_apps.window.as_ref().and_then(|window| {
             let request = window.emoji.set.as_ref()?;
             match request.stage {
+                SetStage::Deferred => Some((request.custom_emoji_id, None, request.since)),
                 SetStage::Resolving { request: asked } => {
-                    Some((request.custom_emoji_id, asked, request.since))
+                    Some((request.custom_emoji_id, Some(asked), request.since))
                 }
                 SetStage::Confirming { .. } => None,
             }
@@ -345,43 +376,46 @@ impl QuillApp {
                 .map(|window| window.launch.bot_name.clone())
                 .unwrap_or_default();
             self.with_window(|window| {
-                if let Some(request) = window.emoji.set.as_mut() {
+                if window.emoji.set.is_some() {
                     let prompt = confirm_popup(&bot_name, &alt);
-                    request.stage = SetStage::Confirming { alt };
-                    window.show_popup(PopupPurpose::EmojiStatus, prompt);
+                    let popup = window.show_popup(PopupPurpose::EmojiStatus, prompt);
+                    if let Some(request) = window.emoji.set.as_mut() {
+                        request.stage = SetStage::Confirming { alt, popup };
+                    }
                 }
             });
             cx.notify();
             return;
         }
-        // This request's own lookup, not any other batch's.
-        let in_flight = asked.is_some_and(|request| {
-            self.session()
-                .is_some_and(|session| session.requests.get(request).is_some())
-        });
         let mut failed = since.elapsed() > RESOLVE_TIMEOUT;
-        if !failed && asked.is_none() {
+        match stage {
             // The shared lookup may be busy with another batch: try again
             // on the next tick.
-            match self
-                .live
-                .as_mut()
-                .map(|live| live.driver.resolve_custom_emoji(id))
-            {
-                Some(Ok(Some(lookup))) => self.with_window(|window| {
-                    if let Some(request) = window.emoji.set.as_mut() {
-                        request.stage = SetStage::Resolving {
-                            request: Some(lookup),
-                        };
-                    }
-                }),
-                Some(Ok(None)) => {}
-                _ => failed = true,
+            None if !failed => {
+                match self
+                    .live
+                    .as_mut()
+                    .map(|live| live.driver.resolve_custom_emoji(id))
+                {
+                    Some(Ok(Some(lookup))) => self.with_window(|window| {
+                        if let Some(request) = window.emoji.set.as_mut() {
+                            request.stage = SetStage::Resolving { request: lookup };
+                        }
+                    }),
+                    Some(Ok(None)) => {}
+                    _ => failed = true,
+                }
             }
-        } else if !failed && asked.is_some() && !in_flight {
-            // Answered, and the emoji is not an emoji-set sticker (or does
-            // not exist): tdesktop's `SUGGESTED_EMOJI_INVALID`.
-            failed = true;
+            // This request's own lookup, not any other batch's: answered
+            // (it left flight) and the emoji is not an emoji-set sticker
+            // (or does not exist): tdesktop's `SUGGESTED_EMOJI_INVALID`.
+            Some(asked) if !failed => {
+                let in_flight = self
+                    .session()
+                    .is_some_and(|session| session.requests.get(asked).is_some());
+                failed = !in_flight;
+            }
+            None | Some(_) => {}
         }
         if failed {
             self.with_window(|window| {

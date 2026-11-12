@@ -231,7 +231,10 @@ fn new_content_replaces_what_was_bound_to_the_old() {
         streak: 2,
     };
     entry.polled = Some("{}".into());
-    entry.poll = super::Poll::Asking(quill::ids::RequestId(1));
+    entry.poll = super::Poll::Asking {
+        request: quill::ids::RequestId(1),
+        asked: std::time::Instant::now(),
+    };
     entry.replace_content(identity("new"), 150.0);
     assert_eq!(
         entry.identity.as_ref().map(|i| i.html.as_str()),

@@ -116,6 +116,24 @@ pub(super) enum WebAppConfirm {
     RemoveFromMenu { bot_id: i64, name: String },
 }
 
+/// One popup shown to the helper. A stage that waits for the person holds
+/// the id of the popup it opened and acts only on that popup's answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) struct PopupId(u64);
+
+impl PopupId {
+    /// The id the helper knows the popup by.
+    fn wire(self) -> String {
+        format!("p{}", self.0)
+    }
+
+    /// The popup a helper answer names; `None` for an id this host never
+    /// made.
+    fn from_wire(wire: &str) -> Option<Self> {
+        wire.strip_prefix('p')?.parse().ok().map(Self)
+    }
+}
+
 /// What a shell popup was for, so its answer can be acted on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum PopupPurpose {
@@ -159,7 +177,7 @@ pub(super) struct MiniAppWindow {
     /// The app asked to confirm before it closes (`setup_closing_behavior`).
     closing_confirmation: bool,
     settings_button: bool,
-    popups: HashMap<String, PopupPurpose>,
+    popups: HashMap<PopupId, PopupPurpose>,
     popup_seq: u64,
     write_access: launch_flow::WriteAccess,
     privacy_policy_url: Option<String>,
@@ -192,7 +210,7 @@ impl MiniAppWindow {
     }
 
     fn send(&mut self, command: &HostCommand) {
-        if self.writer.send(encode(command).into_bytes()) == helper_pipe::Sent::Queued
+        if self.writer.send(encode(command).into_bytes()) == helper_pipe::SendResult::Queued
             || self.helper == launch_flow::HelperState::Wedged
         {
             return;
@@ -211,16 +229,18 @@ impl MiniAppWindow {
         });
     }
 
-    fn show_popup(&mut self, purpose: PopupPurpose, popup_without_id: Popup) {
+    /// Show a popup; the stage that waits for its answer holds the id.
+    fn show_popup(&mut self, purpose: PopupPurpose, popup_without_id: Popup) -> PopupId {
         self.popup_seq += 1;
-        let id = format!("p{}", self.popup_seq);
-        self.popups.insert(id.clone(), purpose);
+        let popup_id = PopupId(self.popup_seq);
+        self.popups.insert(popup_id, purpose);
         self.send(&HostCommand::ShowPopup {
             popup: Popup {
-                id,
+                id: popup_id.wire(),
                 ..popup_without_id
             },
         });
+        popup_id
     }
 
     fn menu(&self) -> Vec<MenuItem> {
@@ -288,7 +308,6 @@ pub(super) struct MiniApps {
     /// window): the poll's answers and the helper's events open their
     /// boxes and links there, not in the main window the poll runs in.
     from_window: Option<quill::ids::ChatId>,
-    generation: u64,
 }
 
 impl QuillApp {

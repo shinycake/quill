@@ -134,7 +134,7 @@ fn the_phone_prompt_asks_and_cancel_answers_cancelled(cx: &mut TestAppContext) {
             [("cancel", "Cancel"), ("share", "Share")]
         );
         assert!(matches!(
-            app.mini_apps.window.as_ref().unwrap().popups.get(&popup.id),
+            app.mini_apps.window.as_ref().unwrap().popups.get(&super::PopupId::from_wire(&popup.id).unwrap()),
             Some(PopupPurpose::Phone)
         ));
         // A second request while the prompt is up is refused.
@@ -348,7 +348,7 @@ fn a_popup_replaced_by_another_is_answered(cx: &mut TestAppContext) {
             .mini_apps
             .window
             .as_ref()
-            .map(|window| window.popups.keys().cloned().collect())
+            .map(|window| window.popups.keys().map(|id| id.wire()).collect())
             .unwrap_or_default();
         assert_eq!(open, std::slice::from_ref(&confirm.id));
         answer(app, &confirm.id, "cancel", cx);
@@ -406,11 +406,12 @@ fn a_write_access_answer_must_be_for_the_request_the_window_waits_on(cx: &mut Te
         // Its own answer asks the person.
         let consent = WriteAnswer::new(RequestId(5), BOT, WriteAccessResult::NeedsConsent);
         app.finish_write_access(consent, cx);
-        assert_eq!(state(app), Some(WriteAccess::Asking));
+        assert!(matches!(state(app), Some(WriteAccess::Asking { .. })));
+        let asking = state(app);
         prompt(&received);
         // A late answer does nothing while the person decides.
         app.finish_write_access(consent, cx);
-        assert_eq!(state(app), Some(WriteAccess::Asking));
+        assert_eq!(state(app), asking);
         // The grant being asked for answers only to its own request.
         app.with_window(|w| w.write_access = WriteAccess::Allowing(RequestId(7)));
         let late = WriteAnswer::new(RequestId(5), BOT, WriteAccessResult::Granted);

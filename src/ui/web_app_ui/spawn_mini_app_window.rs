@@ -319,6 +319,26 @@ impl QuillApp {
                 self.as_asked_by(window, |this| this.found_web_app_answer(then, result, cx));
             }
         }
+        // A wait whose request left flight with no answer was dropped: the
+        // launch cannot happen, and the poll would wait for it for good.
+        let out = self
+            .mini_apps
+            .flow
+            .awaited_request()
+            .map(|request| {
+                self.session()
+                    .is_some_and(|session| session.requests.get(request).is_some())
+            });
+        if out == Some(false)
+            && let Some(Awaited { window, .. }) = self.mini_apps.flow.take_lost()
+        {
+            self.as_asked_by(window, |this| {
+                this.set_status_note(
+                    StatusNote::error(tr(keys::Q_MEDIA_THE_MINI_APP_WINDOW_COULDNT)),
+                    cx,
+                )
+            });
+        }
         for sent in data_sent {
             let sends = &mut self.mini_apps.data_sends;
             let Some(at) = sends.iter().position(|request| *request == sent.request) else {
@@ -380,7 +400,7 @@ impl QuillApp {
         // Only the answer to the request this window is waiting on counts.
         let waiting = match window.write_access {
             launch_flow::WriteAccess::Checking(id) | launch_flow::WriteAccess::Allowing(id) => id,
-            launch_flow::WriteAccess::Idle | launch_flow::WriteAccess::Asking => return,
+            launch_flow::WriteAccess::Idle | launch_flow::WriteAccess::Asking { .. } => return,
         };
         if window.launch.bot_user_id != answer.bot_user_id || waiting != answer.request {
             return;
@@ -401,9 +421,8 @@ impl QuillApp {
                 window.emit(BridgeReply::write_access_requested(false));
             }
             WriteAccessResult::NeedsConsent => {
-                window.write_access = launch_flow::WriteAccess::Asking;
                 let name = window.launch.bot_name.clone();
-                window.show_popup(
+                let popup = window.show_popup(
                     PopupPurpose::WriteAccess,
                     popup(
                         tr(keys::Q_MEDIA_ALLOW_MESSAGING),
@@ -417,6 +436,7 @@ impl QuillApp {
                         ],
                     ),
                 );
+                window.write_access = launch_flow::WriteAccess::Asking { popup };
             }
         }
         cx.notify();
@@ -486,12 +506,12 @@ impl QuillApp {
             .window
             .as_ref()
             .map(|window| {
-                let newest = format!("p{}", window.popup_seq);
+                let newest = PopupId(window.popup_seq);
                 window
                     .popups
                     .keys()
                     .filter(|id| **id != newest)
-                    .cloned()
+                    .map(|id| id.wire())
                     .collect()
             })
             .unwrap_or_default();
@@ -807,11 +827,14 @@ impl QuillApp {
                 _ => {}
             },
             ShellEvent::PopupClosed { id, button } => {
+                let Some(popup) = PopupId::from_wire(&id) else {
+                    return;
+                };
                 let Some(purpose) = self
                     .mini_apps
                     .window
                     .as_mut()
-                    .and_then(|window| window.popups.remove(&id))
+                    .and_then(|window| window.popups.remove(&popup))
                 else {
                     return;
                 };
@@ -820,6 +843,13 @@ impl QuillApp {
                         window.emit(BridgeReply::popup_closed(&button));
                     }),
                     PopupPurpose::WriteAccess => {
+                        // Only the popup the stage opened answers it.
+                        let asked = self.mini_apps.window.as_ref().is_some_and(|window| {
+                            window.write_access == launch_flow::WriteAccess::Asking { popup }
+                        });
+                        if !asked {
+                            return;
+                        }
                         let sent = (button == "allow")
                             .then(|| {
                                 self.live
@@ -854,10 +884,10 @@ impl QuillApp {
                         }
                     }
                     PopupPurpose::EmojiStatusAccess => {
-                        self.answer_emoji_status_access(&button, cx);
+                        self.answer_emoji_status_access(popup, &button, cx);
                     }
-                    PopupPurpose::EmojiStatus => self.answer_set_emoji_status(&button, cx),
-                    PopupPurpose::Phone => self.answer_phone_prompt(&button, cx),
+                    PopupPurpose::EmojiStatus => self.answer_set_emoji_status(popup, &button, cx),
+                    PopupPurpose::Phone => self.answer_phone_prompt(popup, &button, cx),
                 }
             }
         }

@@ -6,7 +6,7 @@
 #[derive(Default, Debug, Clone, PartialEq)]
 pub(super) enum Decoding {
     #[default]
-    Running,
+    Active,
     /// A seek to this second waits for the thread (it clears the queue's
     /// end and any failure: reading goes on from there).
     Seeking(f64),
@@ -43,7 +43,7 @@ impl Decoding {
     pub(super) fn take_seek(&mut self) -> Option<f64> {
         match *self {
             Self::Seeking(target) => {
-                *self = Self::Running;
+                *self = Self::Active;
                 Some(target)
             }
             _ => None,
@@ -64,7 +64,7 @@ impl Decoding {
 
     /// The file ran out; a failure stays one.
     pub(super) fn end(&mut self) {
-        if matches!(self, Self::Running) {
+        if matches!(self, Self::Active) {
             *self = Self::Ended;
         }
     }

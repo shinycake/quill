@@ -466,7 +466,7 @@ pub(super) enum LookStage {
     /// The picture is ready and was shown before.
     Settled,
     /// A newer image is on its way.
-    Rendering,
+    Coming,
     /// The picture is new: one more frame lets the idle trim schedule.
     JustMade,
     /// A crossfade started: the history must render its overlay.
@@ -524,7 +524,7 @@ fn lookup(
         let Ok(mut cache) = cache.try_borrow_mut() else {
             return Lookup {
                 composite: None,
-                stage: LookStage::Rendering,
+                stage: LookStage::Coming,
             };
         };
         if let Some(found) = cache.get(key, window) {
@@ -579,7 +579,7 @@ fn lookup(
         shared.wake.notify_one();
         Lookup {
             composite: stale,
-            stage: LookStage::Rendering,
+            stage: LookStage::Coming,
         }
     })
 }

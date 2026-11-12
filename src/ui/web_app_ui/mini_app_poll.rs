@@ -28,27 +28,24 @@ impl QuillApp {
         if self.mini_apps.poll.is_some() {
             return;
         }
-        self.mini_apps.generation += 1;
-        let generation = self.mini_apps.generation;
         // window-scope: the mini app is the screen's; a step aimed at a chat names its chat.
         let task = self.spawn_screen(cx, async move |this, cx| {
             let executor = cx.background_executor().clone();
             let hold = backlog_hold(&executor);
             run_poll_loop(executor, &quill::wake::MINI_APPS, POLL_PACE, hold, || {
                 this.update(cx, |this, cx| {
-                    let keep = this.mini_apps.generation == generation
-                        && this.as_asked_by(this.mini_apps.from_window, |this| {
-                            this.poll_mini_apps(cx)
-                        });
+                    let keep = this.as_asked_by(this.mini_apps.from_window, |this| {
+                        this.poll_mini_apps(cx)
+                    });
                     if keep {
                         return Some(PassEnd {
                             work_left: false,
                             due: this.mini_app_watch_due(),
                         });
                     }
-                    if this.mini_apps.generation == generation {
-                        this.mini_apps.poll = None;
-                    }
+                    // Nothing is left to wait for: the task held here ends
+                    // with this pass, and a later start makes a new one.
+                    this.mini_apps.poll = None;
                     None
                 })
                 .ok()

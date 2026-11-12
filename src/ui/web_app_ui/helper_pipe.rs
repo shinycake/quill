@@ -15,7 +15,7 @@ const QUEUE_LEN: usize = 64;
 
 /// What happened to a message handed to [`HelperWriter::send`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Sent {
+pub(super) enum SendResult {
     Queued,
     /// The queue is full or the writer is gone: the helper is not reading.
     /// The message was dropped.
@@ -51,10 +51,10 @@ impl HelperWriter {
     }
 
     /// Queue `message` without waiting for the helper.
-    pub(super) fn send(&self, message: Vec<u8>) -> Sent {
+    pub(super) fn send(&self, message: Vec<u8>) -> SendResult {
         match self.queue.as_ref().map(|queue| queue.try_send(message)) {
-            Some(Ok(())) => Sent::Queued,
-            Some(Err(TrySendError::Full(_) | TrySendError::Disconnected(_))) | None => Sent::Wedged,
+            Some(Ok(())) => SendResult::Queued,
+            Some(Err(TrySendError::Full(_) | TrySendError::Disconnected(_))) | None => SendResult::Wedged,
         }
     }
 }
@@ -63,7 +63,7 @@ pub(super) use quill_webview_protocol::lines::{Line, read_bounded_line};
 
 #[cfg(test)]
 mod tests {
-    use super::{HelperWriter, Sent};
+    use super::{HelperWriter, SendResult};
     use std::io::{self, Write};
     use std::sync::mpsc;
     use std::time::Duration;
@@ -98,13 +98,13 @@ mod tests {
             release: release_rx,
         };
         let writer = HelperWriter::spawn_with_capacity(pipe, 4);
-        assert_eq!(writer.send(b"first\n".to_vec()), Sent::Queued);
+        assert_eq!(writer.send(b"first\n".to_vec()), SendResult::Queued);
         // The writer took the first message and is stuck writing it.
         assert!(entered.recv().is_ok());
-        let queued: Vec<Sent> = (0..4).map(|_| writer.send(b"x\n".to_vec())).collect();
-        assert_eq!(queued, vec![Sent::Queued; 4], "the queue holds four");
-        let dropped: Vec<Sent> = (0..16).map(|_| writer.send(b"x\n".to_vec())).collect();
-        assert_eq!(dropped, vec![Sent::Wedged; 16], "a full queue drops");
+        let queued: Vec<SendResult> = (0..4).map(|_| writer.send(b"x\n".to_vec())).collect();
+        assert_eq!(queued, vec![SendResult::Queued; 4], "the queue holds four");
+        let dropped: Vec<SendResult> = (0..16).map(|_| writer.send(b"x\n".to_vec())).collect();
+        assert_eq!(dropped, vec![SendResult::Wedged; 16], "a full queue drops");
         // Dropping the writer does not wait for the stuck thread.
         drop(writer);
         drop(release);
@@ -124,8 +124,8 @@ mod tests {
         }
         let (tx, rx) = mpsc::channel();
         let writer = HelperWriter::spawn(Collect(tx));
-        assert_eq!(writer.send(b"one\n".to_vec()), Sent::Queued);
-        assert_eq!(writer.send(b"two\n".to_vec()), Sent::Queued);
+        assert_eq!(writer.send(b"one\n".to_vec()), SendResult::Queued);
+        assert_eq!(writer.send(b"two\n".to_vec()), SendResult::Queued);
         assert_eq!(
             rx.recv_timeout(Duration::from_secs(5)).ok(),
             Some(b"one\n".to_vec())
@@ -151,7 +151,7 @@ mod tests {
         let _ = writer.send(b"a\n".to_vec());
         let wedged = (0..200).any(|_| {
             std::thread::sleep(Duration::from_millis(10));
-            writer.send(b"b\n".to_vec()) == Sent::Wedged
+            writer.send(b"b\n".to_vec()) == SendResult::Wedged
         });
         assert!(wedged);
     }

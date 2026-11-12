@@ -29,7 +29,9 @@ enum Stage {
         job: Job,
         order: u64,
     },
-    Running {
+    /// Handed to the worker, which ends it with `finish` (a render that
+    /// panics still finishes, `render_guarded`).
+    Claimed {
         slot: u64,
     },
     /// Finished, with its slot, until a lookup takes it.
@@ -43,7 +45,7 @@ impl Stage {
     fn slot(&self) -> u64 {
         match self {
             Self::Queued { job, .. } => job.slot,
-            Self::Running { slot } | Self::Done { slot, .. } => *slot,
+            Self::Claimed { slot } | Self::Done { slot, .. } => *slot,
         }
     }
 }
@@ -92,7 +94,7 @@ impl Board {
             && let Some(Stage::Queued { job, .. }) = self.stages.remove(&key)
         {
             self.stages
-                .insert(job.key, Stage::Running { slot: job.slot });
+                .insert(job.key, Stage::Claimed { slot: job.slot });
             return Ok(job);
         }
         Err(self
@@ -110,7 +112,7 @@ impl Board {
         // A replaced render is no longer here and its result is dropped.
         if matches!(
             self.stages.get(&key),
-            Some(Stage::Queued { .. } | Stage::Running { .. })
+            Some(Stage::Queued { .. } | Stage::Claimed { .. })
         ) {
             if self.done() >= DONE_CAP {
                 self.stages
@@ -151,7 +153,7 @@ impl Board {
     pub(super) fn wants(&self, key: u64) -> bool {
         matches!(
             self.stages.get(&key),
-            Some(Stage::Queued { .. } | Stage::Running { .. })
+            Some(Stage::Queued { .. } | Stage::Claimed { .. })
         )
     }
 

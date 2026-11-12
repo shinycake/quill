@@ -229,7 +229,7 @@ fn a_suggested_emoji_is_confirmed_and_a_decline_says_so(cx: &mut TestAppContext)
             "the emoji is named in the prompt"
         );
         assert!(matches!(
-            app.mini_apps.window.as_ref().unwrap().popups.get(&popup.id),
+            app.mini_apps.window.as_ref().unwrap().popups.get(&super::PopupId::from_wire(&popup.id).unwrap()),
             Some(PopupPurpose::EmojiStatus)
         ));
         answer(app, &popup.id, "cancel", cx);
@@ -313,5 +313,25 @@ fn another_switchs_answer_does_not_answer_the_grant(cx: &mut TestAppContext) {
         let (event, data) = reply(&received);
         assert_eq!(event, "emoji_status_access_requested");
         assert_eq!(data["status"], "allowed");
+    });
+}
+
+/// An answer is matched to the popup the stage opened: another popup's
+/// answer leaves the prompt standing.
+#[gpui_kit::test]
+fn an_access_answer_from_another_popup_leaves_the_stage(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, _, cx| {
+        let _received = open_window(app, false, cx);
+        app.request_emoji_status_access(cx);
+        let access = |app: &QuillApp| app.mini_apps.window.as_ref().unwrap().emoji.access;
+        let AccessStage::Asking { popup } = access(app) else {
+            panic!("the prompt is up");
+        };
+        let other = super::PopupId::from_wire("p999").unwrap();
+        app.answer_emoji_status_access(other, "cancel", cx);
+        assert_eq!(access(app), AccessStage::Asking { popup });
+        app.answer_emoji_status_access(popup, "cancel", cx);
+        assert_eq!(access(app), AccessStage::Idle);
     });
 }
