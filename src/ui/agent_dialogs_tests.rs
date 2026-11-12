@@ -51,7 +51,7 @@ fn settle(vcx: &mut VisualTestContext) {
 }
 
 fn open_kind(shell: &Entity<QuillShell>, vcx: &mut VisualTestContext) -> Option<DialogKind> {
-    shell.read_with(vcx, |shell, _| shell.open_dialog)
+    shell.read_with(vcx, |shell, _| shell.open_dialog.kind())
 }
 
 fn ask_chat(scope: Scope) -> Ask {
@@ -281,10 +281,11 @@ fn turning_access_off_closes_requests_and_the_consent(cx: &mut TestAppContext) {
 
     // A consent left over from before can't show while access is off.
     app.update(vcx, |app, cx| {
-        app.agent_ui.consent = Some(crate::ui::agent_state::AllChatsConsent {
-            account: AccountKey::primary(),
-            scope: Scope::Read,
-        });
+        app.agent_ui.shown =
+            crate::ui::agent_state::AgentBox::Consent(crate::ui::agent_state::AllChatsConsent {
+                account: AccountKey::primary(),
+                scope: Scope::Read,
+            });
         cx.notify();
     });
     settle(vcx);
@@ -295,7 +296,19 @@ fn turning_access_off_closes_requests_and_the_consent(cx: &mut TestAppContext) {
     quill::agent::access::set_enabled(false);
     settle(vcx);
     assert_eq!(open_kind(&shell, vcx), None, "off closes the consent");
-    app.update(vcx, |app, _| app.agent_ui.consent = None);
+    app.update(vcx, |app, _| {
+        app.agent_ui.shown = crate::ui::agent_state::AgentBox::None
+    });
+}
+
+fn both_boxes() -> [crate::ui::agent_state::AgentBox; 2] {
+    [
+        crate::ui::agent_state::AgentBox::Consent(crate::ui::agent_state::AllChatsConsent {
+            account: AccountKey::primary(),
+            scope: Scope::Read,
+        }),
+        crate::ui::agent_state::AgentBox::ResetToken,
+    ]
 }
 
 /// Revoke in the connected strip is the other way access goes off (its
@@ -311,24 +324,21 @@ fn revoke_ends_the_consent_and_the_reset_question(cx: &mut TestAppContext) {
     let _agent = quill::agent::activity::connect("Claude Code");
     settle(vcx);
     assert!(quill::agent::access::enabled());
-    app.update(vcx, |app, cx| {
-        app.agent_ui.consent = Some(crate::ui::agent_state::AllChatsConsent {
-            account: AccountKey::primary(),
-            scope: Scope::Read,
+    for open in both_boxes() {
+        app.update(vcx, |app, cx| {
+            app.agent_ui.shown = open;
+            app.turn_agent_access_off(cx);
+            cx.notify();
         });
-        app.agent_ui.page.reset_confirm = true;
-        app.turn_agent_access_off(cx);
-        cx.notify();
-    });
-    settle(vcx);
-    assert!(!quill::agent::access::enabled());
-    app.update(vcx, |app, cx| app.set_agent_access(true, cx));
-    settle(vcx);
-    assert_eq!(open_kind(&shell, vcx), None, "no consent or reset box");
-    app.read_with(vcx, |app, _| {
-        assert!(app.agent_ui.consent.is_none());
-        assert!(!app.agent_ui.page.reset_confirm);
-    });
+        settle(vcx);
+        assert!(!quill::agent::access::enabled());
+        app.update(vcx, |app, cx| app.set_agent_access(true, cx));
+        settle(vcx);
+        assert_eq!(open_kind(&shell, vcx), None, "no consent or reset box");
+        app.read_with(vcx, |app, _| {
+            assert_eq!(app.agent_ui.shown, crate::ui::agent_state::AgentBox::None);
+        });
+    }
     quill::agent::access::set_enabled(false);
 }
 
@@ -339,24 +349,21 @@ fn the_master_switch_ends_the_consent_and_the_reset_question(cx: &mut TestAppCon
     let vcx = &mut vcx;
     reset_for_test(&AccountKey::primary());
     settle(vcx);
-    app.update(vcx, |app, cx| {
-        app.agent_ui.consent = Some(crate::ui::agent_state::AllChatsConsent {
-            account: AccountKey::primary(),
-            scope: Scope::Read,
+    for open in both_boxes() {
+        app.update(vcx, |app, cx| {
+            app.agent_ui.shown = open;
+            cx.notify();
         });
-        app.agent_ui.page.reset_confirm = true;
-        cx.notify();
-    });
-    settle(vcx);
-    app.update(vcx, |app, cx| app.set_agent_access(false, cx));
-    settle(vcx);
-    // Turned on again, nothing asked before comes back.
-    app.update(vcx, |app, cx| app.set_agent_access(true, cx));
-    settle(vcx);
-    assert_eq!(open_kind(&shell, vcx), None, "no consent or reset box");
-    app.read_with(vcx, |app, _| {
-        assert!(app.agent_ui.consent.is_none());
-        assert!(!app.agent_ui.page.reset_confirm);
-    });
+        settle(vcx);
+        app.update(vcx, |app, cx| app.set_agent_access(false, cx));
+        settle(vcx);
+        // Turned on again, nothing asked before comes back.
+        app.update(vcx, |app, cx| app.set_agent_access(true, cx));
+        settle(vcx);
+        assert_eq!(open_kind(&shell, vcx), None, "no consent or reset box");
+        app.read_with(vcx, |app, _| {
+            assert_eq!(app.agent_ui.shown, crate::ui::agent_state::AgentBox::None);
+        });
+    }
     quill::agent::access::set_enabled(false);
 }

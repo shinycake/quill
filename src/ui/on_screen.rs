@@ -594,7 +594,7 @@ impl QuillApp {
         } else {
             let _ = main.update(cx, |_, window, cx| window.close_all_dialogs(cx));
         }
-        self.main_window.dialogs_closed.mark(main.window_id());
+        self.main_window.shown_dialogs.close(main.window_id());
     }
 }
 

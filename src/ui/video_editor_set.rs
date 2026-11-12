@@ -70,8 +70,7 @@ impl QuillApp {
             None => None,
         };
         let emoji = editor.set_emoji.clone();
-        self.sticker_box.discard_create();
-        self.sticker_box.create = Some(CreateSticker {
+        self.sticker_box.editing.begin_create(CreateSticker {
             set_id,
             kind,
             path: job.source.clone(),

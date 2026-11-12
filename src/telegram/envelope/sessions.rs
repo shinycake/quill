@@ -69,7 +69,7 @@ pub enum SessionKind {
 }
 
 impl SessionKind {
-    fn from_flags(is_current: bool, is_password_pending: bool) -> Self {
+    pub fn from_flags(is_current: bool, is_password_pending: bool) -> Self {
         if is_current {
             Self::Current
         } else if is_password_pending {

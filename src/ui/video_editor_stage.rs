@@ -35,6 +35,9 @@ pub(super) enum EditorStage {
         look: Look,
         timeline: Timeline,
         serial: u64,
+        /// The encode's task: leaving the stage (the editor closes, the
+        /// screen is replaced) stops waiting for it.
+        _job: Task<()>,
     },
 }
 
@@ -283,26 +286,25 @@ impl VideoEditorDialog {
         };
     }
 
-    /// Start encoding: drops the player and returns the info and the new
-    /// serial that the answer must carry. `None` unless ready.
-    pub(super) fn begin_encode(&mut self) -> Option<(VideoSource, u64)> {
-        let EditorStage::Ready {
-            info,
-            look,
-            timeline,
-            ..
-        } = self.stage
-        else {
-            return None;
+    /// The serial an encode started now would carry. `None` unless ready.
+    pub(super) fn encode_serial(&self) -> Option<u64> {
+        matches!(self.stage, EditorStage::Ready { .. }).then(next_editor_serial)
+    }
+
+    /// Start encoding: drops the player; the stage holds `job` and the
+    /// serial its answer must carry (`encode_serial`). A job handed to an
+    /// editor that is not ready is dropped, which cancels it.
+    pub(super) fn start_encode(&mut self, serial: u64, info: VideoSource, job: Task<()>) {
+        let EditorStage::Ready { look, timeline, .. } = self.stage else {
+            return;
         };
-        let serial = next_editor_serial();
         self.stage = EditorStage::Encoding {
             info,
             look,
             timeline,
             serial,
+            _job: job,
         };
-        Some((info, serial))
     }
 
     /// The encode failed: back to ready with the edits it tried, and its

@@ -145,8 +145,23 @@ fn a_failed_avatar_encode_returns_the_editor_with_its_line(cx: &mut TestAppConte
             .send_box
             .video_editor
             .as_mut()
-            .and_then(|editor| editor.begin_encode());
-        assert!(started.is_some(), "a ready editor starts encoding");
+            .map(|editor| {
+                let serial = editor.encode_serial();
+                if let Some(serial) = serial {
+                    editor.start_encode(serial, VideoSource::default(), gpui_kit::Task::ready(()));
+                }
+                serial
+            });
+        assert!(
+            started.flatten().is_some()
+                && app
+                    .composer_ui
+                    .send_box
+                    .video_editor
+                    .as_ref()
+                    .is_some_and(|editor| editor.busy()),
+            "a ready editor starts encoding"
+        );
         app.video_encode_failed("ffmpeg said no".into(), cx);
         app.composer_ui
             .send_box
@@ -155,4 +170,43 @@ fn a_failed_avatar_encode_returns_the_editor_with_its_line(cx: &mut TestAppConte
             .and_then(|editor| editor.note())
     });
     assert_eq!(note.as_deref(), Some("ffmpeg said no"));
+}
+
+/// The encode's task belongs to the editor's stage: closing the editor
+/// while it runs stops the wait for its answer, instead of leaving a
+/// detached task that lands on whatever is open later.
+#[gpui_kit::test]
+fn closing_the_editor_stops_the_encode_it_waits_for(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    let clip = VideoSource {
+        duration_ms: 20_000,
+        width: 1280,
+        height: 720,
+        has_audio: true,
+        ..VideoSource::default()
+    };
+    for close in [false, true] {
+        edit_avatar(&app, vcx, clip);
+        let answered = std::rc::Rc::new(std::cell::Cell::new(false));
+        let flag = answered.clone();
+        app.update(vcx, |app, cx| {
+            let job = cx.spawn(async move |_, _| flag.set(true));
+            if let Some(editor) = app.composer_ui.send_box.video_editor.as_mut()
+                && let Some(serial) = editor.encode_serial()
+            {
+                editor.start_encode(serial, clip, job);
+            }
+            if close {
+                app.close_video_editor(cx);
+            }
+        });
+        vcx.run_until_parked();
+        assert_eq!(
+            answered.get(),
+            !close,
+            "the job runs while the editor holds it and goes with it when it closes"
+        );
+        app.update(vcx, |app, cx| app.close_video_editor(cx));
+    }
 }

@@ -93,22 +93,28 @@ fn all_other_chats_ask_first(cx: &mut TestAppContext) {
     settle(vcx);
     assert_eq!(now().all_chats, None, "not before the user agrees");
     assert_eq!(
-        shell.read_with(vcx, |shell, _| shell.open_dialog),
+        shell.read_with(vcx, |shell, _| shell.open_dialog.kind()),
         Some(DialogKind::AgentConsent)
     );
 
     vcx.update(|window, cx| window.click("agent-consent-cancel", cx));
     settle(vcx);
     assert_eq!(now().all_chats, None);
-    assert!(app.read_with(vcx, |app, _| app.agent_ui.consent.is_none()));
-    assert_eq!(shell.read_with(vcx, |shell, _| shell.open_dialog), None);
+    assert!(app.read_with(vcx, |app, _| app.agent_ui.consent().is_none()));
+    assert_eq!(
+        shell.read_with(vcx, |shell, _| shell.open_dialog.kind()),
+        None
+    );
 
     vcx.update(|window, cx| window.click("agent-grant-all-chats-read", cx));
     settle(vcx);
     vcx.update(|window, cx| window.click("agent-consent-allow", cx));
     settle(vcx);
     assert_eq!(now().all_chats, Some(Scope::Read));
-    assert_eq!(shell.read_with(vcx, |shell, _| shell.open_dialog), None);
+    assert_eq!(
+        shell.read_with(vcx, |shell, _| shell.open_dialog.kind()),
+        None
+    );
 
     // Widening asks again; narrowing and switching off do not.
     vcx.update(|window, cx| window.click("agent-grant-all-chats-read-write", cx));
@@ -123,7 +129,10 @@ fn all_other_chats_ask_first(cx: &mut TestAppContext) {
     vcx.update(|window, cx| window.click("agent-grant-all-chats-off", cx));
     settle(vcx);
     assert_eq!(now().all_chats, None);
-    assert_eq!(shell.read_with(vcx, |shell, _| shell.open_dialog), None);
+    assert_eq!(
+        shell.read_with(vcx, |shell, _| shell.open_dialog.kind()),
+        None
+    );
 }
 
 #[gpui_kit::test]

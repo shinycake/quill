@@ -26,6 +26,9 @@ impl Session {
                     .failed(extra, error_reason(err), false);
             }
             Some(RequestPurpose::GetUserFullInfo) => {
+                if let Some(request) = pending.map(|p| p.id) {
+                    self.userpic_full_info_failed(request, std::time::Instant::now());
+                }
                 let user = pending.and_then(|p| {
                     p.user_id().or_else(|| {
                         p.chat_id

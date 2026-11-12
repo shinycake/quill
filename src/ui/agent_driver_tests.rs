@@ -786,16 +786,18 @@ fn the_forced_tree_builds_on_every_screen(cx: &mut TestAppContext) {
     tree_on(vcx, "Settings > Agent access");
     vcx.update(|_, cx| {
         app.update(cx, |app, _| {
-            app.agent_ui.consent = Some(crate::ui::agent_state::AllChatsConsent {
-                account: crate::ui::agent_state::active_account(),
-                scope: Scope::Read,
-            });
+            app.agent_ui.shown = crate::ui::agent_state::AgentBox::Consent(
+                crate::ui::agent_state::AllChatsConsent {
+                    account: crate::ui::agent_state::active_account(),
+                    scope: Scope::Read,
+                },
+            );
         })
     });
     tree_on(vcx, "the All chats consent");
     vcx.update(|_, cx| {
         app.update(cx, |app, _| {
-            app.agent_ui.consent = None;
+            app.agent_ui.shown = crate::ui::agent_state::AgentBox::None;
             app.close_settings();
         })
     });

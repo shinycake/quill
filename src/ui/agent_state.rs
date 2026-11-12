@@ -21,6 +21,18 @@ pub(super) struct AllChatsConsent {
     pub(super) scope: Scope,
 }
 
+/// The question Settings > Agent access has open, if any. One value, so a
+/// close or an access-off replaces it whole.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) enum AgentBox {
+    #[default]
+    None,
+    /// "All other chats" waiting for the user to say yes.
+    Consent(AllChatsConsent),
+    /// "Reset the agent token?".
+    ResetToken,
+}
+
 /// What a grant row changes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum GrantTarget {
@@ -36,13 +48,43 @@ pub(super) enum GrantTarget {
 pub(crate) struct AgentUi {
     /// The account Settings edits; `None` follows the active account.
     pub(super) picked: Option<AccountKey>,
-    /// Set while the consent dialog for "All other chats" is open.
-    pub(super) consent: Option<AllChatsConsent>,
+    /// The consent or token-reset question that is open.
+    pub(super) shown: AgentBox,
     /// The Agent access page's scroll, focus chat, filters and picker.
     pub(super) page: super::settings_window::AgentPageUi,
 }
 
 impl AgentUi {
+    pub(super) fn consent(&self) -> Option<&AllChatsConsent> {
+        match &self.shown {
+            AgentBox::Consent(consent) => Some(consent),
+            AgentBox::None | AgentBox::ResetToken => None,
+        }
+    }
+
+    /// Ends the consent question and hands back what it asked. Any other
+    /// open question stays.
+    pub(super) fn take_consent(&mut self) -> Option<AllChatsConsent> {
+        match std::mem::take(&mut self.shown) {
+            AgentBox::Consent(consent) => Some(consent),
+            other => {
+                self.shown = other;
+                None
+            }
+        }
+    }
+
+    pub(super) fn reset_open(&self) -> bool {
+        self.shown == AgentBox::ResetToken
+    }
+
+    /// Ends the token-reset question; a consent opened since stays.
+    pub(super) fn close_reset(&mut self) {
+        if self.reset_open() {
+            self.shown = AgentBox::None;
+        }
+    }
+
     /// Settings now edits `account` (`None` follows the active one). The
     /// activity filter names the old account's agents, chats and tools, so
     /// another account starts unfiltered.
@@ -56,7 +98,7 @@ impl AgentUi {
     pub(super) fn new() -> Self {
         Self {
             picked: None,
-            consent: None,
+            shown: AgentBox::None,
             page: super::settings_window::AgentPageUi::new(),
         }
     }
@@ -291,7 +333,7 @@ impl QuillApp {
             && let Some(next) = scope
             && widens(grants::for_account(&account).all_chats, scope)
         {
-            self.agent_ui.consent = Some(AllChatsConsent {
+            self.agent_ui.shown = AgentBox::Consent(AllChatsConsent {
                 account,
                 scope: next,
             });
@@ -309,7 +351,7 @@ impl QuillApp {
         if quill::agent::ui_driver::guard::refuse_if_injecting("allow agents in all chats") {
             return;
         }
-        if let Some(consent) = self.agent_ui.consent.take() {
+        if let Some(consent) = self.agent_ui.take_consent() {
             self.update_grants(&consent.account, |g| g.all_chats = Some(consent.scope));
         }
         note_prompt_answered();
@@ -317,7 +359,7 @@ impl QuillApp {
     }
 
     pub(super) fn cancel_all_chats(&mut self, cx: &mut Context<Self>) {
-        self.agent_ui.consent = None;
+        self.agent_ui.take_consent();
         note_prompt_answered();
         cx.notify();
     }

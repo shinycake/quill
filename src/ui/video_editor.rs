@@ -130,13 +130,13 @@ pub(super) mod palette {
 }
 
 /// The still cutter: one cut runs at a time and the latest wish follows it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum StillCut {
     Idle,
-    /// A cut with this token is running; `next` is the time wanted after it.
+    /// A cut is running, held here so closing the editor stops waiting for
+    /// it; `next` is the time wanted after it.
     Cutting {
-        token: u64,
         next: Option<i64>,
+        _cut: Task<()>,
     },
 }
 
@@ -162,8 +162,7 @@ pub(super) struct VideoEditorDialog {
     /// The still frame at the cover: the picture when the video can't play
     /// here, and the cover bubble.
     pub(super) cover: Option<CoverFrame>,
-    /// The cover still's cutter, matched by its own token so an encode's
-    /// serial bump does not orphan a cut.
+    /// The cover still's cutter: the stage holds the cut's task.
     pub(super) still_cut: StillCut,
     /// Drags, animations and the measured layout.
     pub(super) motion: EditorMotion,
@@ -379,35 +378,26 @@ impl QuillApp {
         let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() else {
             return;
         };
-        if let StillCut::Cutting { token, .. } = editor.still_cut {
-            editor.still_cut = StillCut::Cutting {
-                token,
-                next: Some(at_ms),
-            };
+        if let StillCut::Cutting { next, .. } = &mut editor.still_cut {
+            *next = Some(at_ms);
             return;
         }
-        let token = next_editor_serial();
-        editor.still_cut = StillCut::Cutting { token, next: None };
         let source = editor.source.clone();
         let (turns, flipped) = (editor.edits().turns, editor.edits().flipped);
+        // The frame is owned from the worker on: a cut whose editor went
+        // before the answer removes its file with the answer.
         let worker = cx.background_spawn(async move {
-            let frame = render_frame(&source, at_ms, turns, flipped)?;
-            let still = load_still(&frame);
+            let frame =
+                quill::scratch::OwnedFile::new(render_frame(&source, at_ms, turns, flipped)?);
+            let still = load_still(frame.path());
             Ok::<_, String>((frame, still))
         });
-        self.spawn_scoped(cx, async move |this, cx| {
+        let cut = self.spawn_scoped(cx, async move |this, cx| {
             let result = worker.await;
             let _ = this.update(cx, |this, cx| {
-                let Some(editor) = this
-                    .composer_ui
-                    .send_box
-                    .video_editor
-                    .as_mut()
-                    .filter(|editor| matches!(editor.still_cut, StillCut::Cutting { token: t, .. } if t == token))
-                else {
-                    if let Ok((frame, _)) = result {
-                        let _ = std::fs::remove_file(frame);
-                    }
+                // Leaving the stage cancels this task, so the editor that
+                // runs it is the one that started it.
+                let Some(editor) = this.composer_ui.send_box.video_editor.as_mut() else {
                     return;
                 };
                 let next = match std::mem::replace(&mut editor.still_cut, StillCut::Idle) {
@@ -418,7 +408,7 @@ impl QuillApp {
                     Ok((frame, still)) => {
                         let cut = CoverFrame {
                             at_ms,
-                            path: frame,
+                            path: frame.keep(),
                             still: still.map(Into::into),
                         };
                         if let Some(old) = editor.cover.replace(cut) {
@@ -432,8 +422,13 @@ impl QuillApp {
                 }
                 cx.notify();
             });
-        })
-        .detach();
+        });
+        if let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() {
+            editor.still_cut = StillCut::Cutting {
+                next: None,
+                _cut: cut,
+            };
+        }
     }
 
     pub(super) fn close_video_editor(&mut self, cx: &mut Context<Self>) {
@@ -488,13 +483,16 @@ impl QuillApp {
             self.close_video_editor(cx);
             return true;
         }
-        let Some((_, serial)) = editor.begin_encode() else {
+        let Some(serial) = editor.encode_serial() else {
             return false;
         };
         let encode_source = source.clone();
-        let worker =
-            cx.background_spawn(async move { render_edited(&encode_source, &effective, &info) });
-        self.spawn_scoped_in(window, cx, async move |this, cx| {
+        // Owned from the worker on: an encode whose editor went before the
+        // answer removes its file with the answer.
+        let worker = cx.background_spawn(async move {
+            render_edited(&encode_source, &effective, &info).map(quill::scratch::OwnedFile::new)
+        });
+        let job = self.spawn_scoped_in(window, cx, async move |this, cx| {
             let result = worker.await;
             let _ = this.update_in(cx, |this, window, cx| {
                 let current = this
@@ -505,13 +503,12 @@ impl QuillApp {
                     .is_some_and(|editor| editor.is_encoding(serial));
                 match result {
                     Ok(output) if current => {
-                        this.apply_video_edit(output, source, edits, info, cx);
+                        this.apply_video_edit(output.keep(), source, edits, info, cx);
                         this.close_video_editor(cx);
                         this.close_kit_dialog_if_done(DialogKind::VideoEditor, window, cx);
                     }
-                    Ok(output) => {
-                        let _ = std::fs::remove_file(output);
-                    }
+                    // Nobody's: dropping it removes it.
+                    Ok(_) => {}
                     Err(note) if current => {
                         this.video_encode_failed(note, cx);
                         cx.notify();
@@ -519,8 +516,10 @@ impl QuillApp {
                     Err(_) => {}
                 }
             });
-        })
-        .detach();
+        });
+        if let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() {
+            editor.start_encode(serial, info, job);
+        }
         cx.notify();
         false
     }

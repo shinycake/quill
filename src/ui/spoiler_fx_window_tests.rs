@@ -2,7 +2,9 @@
 //! chat window's spoilers keep moving while the main window is not drawn
 //! (round 12, area B, the paint-state sweep).
 
-use super::{paint_media_specks, paint_text_specks, take_text_painted, tile_is_idle};
+use super::{
+    paint_media_specks, paint_text_specks, take_text_painted, tile_is_idle, tile_is_ready,
+};
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
     AnyWindowHandle, AppContext, Context, IntoElement, ParentElement, Render, Styled,
@@ -84,4 +86,21 @@ fn a_window_that_closes_before_its_next_frame_does_not_strand_the_tile_build(
     cx.run_until_parked();
     // Nothing started the build, so the next window to paint asks again.
     assert!(tile_is_idle());
+}
+
+#[gpui_kit::test]
+fn the_tile_build_ends_in_a_ready_tile(cx: &mut TestAppContext) {
+    let handle = cx.open_window(size(px(200.), px(100.)), |_, _| MediaSpecks);
+    let handle: AnyWindowHandle = handle.into();
+    cx.update_window(handle, |_, window, cx| window.render_frame(cx))
+        .expect("the window");
+    // The next frame runs the callback that claims the build.
+    cx.update_window(handle, |_, window, cx| {
+        window.simulate_next_frame(cx);
+    })
+    .expect("the window");
+    assert!(!tile_is_idle(), "the frame callback claimed the build");
+    assert!(!tile_is_ready(), "the build has not answered yet");
+    cx.run_until_parked();
+    assert!(tile_is_ready(), "the answer replaced the stage");
 }

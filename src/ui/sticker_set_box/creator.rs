@@ -35,13 +35,13 @@ fn already_note(kind: SetKind) -> &'static str {
 impl QuillApp {
     /// "Edit Stickers" / "Reorder": cells drag to a new place.
     pub(super) fn begin_edit_stickers(&mut self, cx: &mut Context<Self>) {
-        self.sticker_box.reordering = true;
+        self.sticker_box.editing.begin_reordering();
         cx.notify();
     }
 
     /// "Done" in reorder mode.
     pub(super) fn finish_edit_stickers(&mut self, cx: &mut Context<Self>) {
-        self.sticker_box.reordering = false;
+        self.sticker_box.editing.finish_reordering();
         cx.notify();
     }
 
@@ -258,8 +258,7 @@ impl QuillApp {
                         let _ = std::fs::remove_file(path);
                     }
                     Some(path) => {
-                        this.sticker_box.discard_create();
-                        this.sticker_box.create = Some(CreateSticker {
+                        this.sticker_box.editing.begin_create(CreateSticker {
                             set_id,
                             kind,
                             preview: Some(path.clone()),
@@ -281,7 +280,7 @@ impl QuillApp {
 
     /// An emoji in the "New Sticker" box toggles on or off (at most seven).
     pub(super) fn toggle_create_emoji(&mut self, emoji: &str, cx: &mut Context<Self>) {
-        if let Some(create) = self.sticker_box.create.as_mut() {
+        if let Some(create) = self.sticker_box.editing.create_mut() {
             if let Some(index) = create.emojis.iter().position(|e| e == emoji) {
                 create.emojis.remove(index);
             } else if create.emojis.len() < MAX_EMOJIS {
@@ -298,7 +297,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(create) = self.sticker_box.create.clone() else {
+        let Some(create) = self.sticker_box.editing.create().cloned() else {
             return false;
         };
         if create.emojis.is_empty() {
@@ -340,8 +339,7 @@ impl QuillApp {
                 keys::Q_MEDIA_DEMO_STICKERS_UPLOAD_WITH_LIVE,
             )));
         }
-        self.sticker_box.create = None;
-        self.sticker_box.encoding = super::state::Encoding::Idle;
+        self.sticker_box.editing.finish_upload();
         create.uploaded();
         cx.notify();
         true
@@ -355,11 +353,13 @@ impl QuillApp {
         adapt: bool,
         cx: &mut Context<Self>,
     ) {
-        self.sticker_box.pick = Some(PickExisting {
-            set_id,
-            kind,
-            adapt,
-        });
+        self.sticker_box
+            .editing
+            .enter(super::state::SetEditing::Picking(PickExisting {
+                set_id,
+                kind,
+                adapt,
+            }));
         cx.notify();
     }
 
@@ -406,20 +406,21 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(pick) = self.sticker_box.pick else {
+        let Some(pick) = self.sticker_box.editing.pick() else {
             return;
         };
-        // This pick replaces any earlier one still decoding or downloading.
-        self.sticker_box.pending = crate::ui::sticker_set_box::state::PickWait::None;
+        // The chooser closes with the pick, which also ends any earlier
+        // one still decoding or downloading.
+        self.sticker_box
+            .editing
+            .enter(super::state::SetEditing::Idle);
         if !pick.adapt {
-            self.sticker_box.pick = None;
             self.add_existing_to_owned_set(pick.set_id, pick.kind, item, cx);
             return;
         }
         match item.format {
             // Animated stickers become emoji as they are.
             StickerFormat::Tgs => {
-                self.sticker_box.pick = None;
                 self.add_existing_to_owned_set(pick.set_id, pick.kind, item, cx);
             }
             // A video sticker goes through the video editor; the chooser
@@ -429,7 +430,6 @@ impl QuillApp {
                 self.pick_video_for_set(pick, item.file_id, Some(emoji), window, cx);
             }
             StickerFormat::Webp | StickerFormat::Unknown => {
-                self.sticker_box.pick = None;
                 let file_id = item.file_id;
                 // A sticker not downloaded yet is fetched, and decoded
                 // when it arrives (`sticker_box_window_upkeep`).
@@ -437,16 +437,15 @@ impl QuillApp {
                     if !self.ask_pick_file(file_id, cx) {
                         return;
                     }
-                    self.sticker_box.pending =
-                        crate::ui::sticker_set_box::state::PickWait::Downloading(
-                            super::state::PendingVideo {
-                                pick,
-                                file_id,
-                                file: super::state::PickedFile::Still(item.format),
-                                emoji: None,
-                                window: self.windows.scope,
-                            },
-                        );
+                    self.sticker_box.editing = super::state::SetEditing::Waiting(
+                        super::state::PickWait::Downloading(super::state::PendingVideo {
+                            pick,
+                            file_id,
+                            file: super::state::PickedFile::Still(item.format),
+                            emoji: None,
+                            window: self.windows.scope,
+                        }),
+                    );
                     cx.notify();
                     return;
                 }
@@ -464,9 +463,8 @@ impl QuillApp {
         format: StickerFormat,
         cx: &mut Context<Self>,
     ) {
-        self.sticker_box.pending = super::state::PickWait::Decoding(pick, file_id);
         let path = self.local_media_path(file_id);
-        self.run_off_ui_scoped_then(
+        let job = self.run_off_ui_scoped_task(
             move || {
                 path.and_then(|path| {
                     super::super::editor_art::sticker_pixels(std::path::Path::new(&path), format)
@@ -475,6 +473,12 @@ impl QuillApp {
             move |this, pixels, cx| this.land_still_pick(pick, file_id, pixels, cx),
             cx,
         );
+        self.sticker_box.editing =
+            super::state::SetEditing::Waiting(super::state::PickWait::Decoding {
+                pick,
+                file_id,
+                _job: job,
+            });
     }
 
     /// A picked still sticker is decoded: open the editor on it, unless the
@@ -486,7 +490,7 @@ impl QuillApp {
         pixels: Option<image::RgbaImage>,
         cx: &mut Context<Self>,
     ) {
-        if !self.sticker_box.pending.finish_decoding(pick, file_id) {
+        if !self.sticker_box.editing.finish_decoding(pick, file_id) {
             return;
         }
         self.edit_pixels_for_set(pick.set_id, pick.kind, pixels, cx);
@@ -635,6 +639,6 @@ impl QuillApp {
 
     /// The still picture a "New Sticker" box shows.
     pub(super) fn create_preview_path(&self) -> Option<PathBuf> {
-        self.sticker_box.create.as_ref()?.preview.clone()
+        self.sticker_box.editing.create()?.preview.clone()
     }
 }

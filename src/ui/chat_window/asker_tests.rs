@@ -43,7 +43,7 @@ fn chat_window_shell(h: &Harness, cx: &mut TestAppContext) -> Entity<QuillShell>
 }
 
 fn shown(shell: &Entity<QuillShell>, cx: &mut TestAppContext) -> Option<DialogKind> {
-    shell.read_with(cx, |shell, _| shell.open_dialog)
+    shell.read_with(cx, |shell, _| shell.open_dialog.kind())
 }
 
 /// The window whose state is in place asks; inside `as_asked_by` the

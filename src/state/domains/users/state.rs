@@ -158,9 +158,10 @@ pub struct UsersState {
     /// ask is kept so `ensure_user_full_info` (the ask a render makes) does
     /// not repeat it; an explicit `fetch_user_full_info` does.
     pub user_full_infos: UserFullInfos,
-    /// `(user id, photo id)` whose full info was asked for to learn the
-    /// clips of a video userpic (`Session::take_userpic_full_info_ask`).
-    pub userpic_full_info_asked: std::collections::HashSet<(i64, i64)>,
+    /// Where each user's ask for the clips of their video userpic stands
+    /// (`Session::userpic_full_info_due`): one entry per user, replaced
+    /// when their photo changes, so it is as large as the users known.
+    pub userpic_full_info: std::collections::HashMap<i64, super::userpic_video::UserpicInfoAsk>,
     /// A5: the `checkChatUsername` of the edit-profile dialog: the
     /// request in flight with the text it checks, and the latest verdict.
     /// The dialog shows a verdict only when it matches the current input
@@ -342,7 +343,7 @@ impl UsersState {
             replies_blocked: Vec::new(),
             replies_bot_chat_id: None,
             user_full_infos: UserFullInfos::default(),
-            userpic_full_info_asked: Default::default(),
+            userpic_full_info: Default::default(),
             username_check: ProfileUsernameCheck::Idle,
             my_id_probe: Fetch::Idle,
             bio_length_max: 70,

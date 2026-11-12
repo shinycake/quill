@@ -36,7 +36,7 @@ fn chat_window_shell(h: &Harness, cx: &mut TestAppContext) -> Entity<QuillShell>
 }
 
 fn shown(shell: &Entity<QuillShell>, cx: &mut TestAppContext) -> Option<DialogKind> {
-    shell.read_with(cx, |shell, _| shell.open_dialog)
+    shell.read_with(cx, |shell, _| shell.open_dialog.kind())
 }
 
 /// Close the chat window from inside it (its title bar close), so its own

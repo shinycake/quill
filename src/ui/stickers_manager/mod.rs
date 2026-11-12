@@ -179,7 +179,6 @@ impl QuillApp {
             .session()
             .map(|s| s.stickers.stickers.tab)
             .unwrap_or_default();
-        self.settings.sticker_manager.stickers.clear();
         self.settings
             .sticker_manager
             .scroll
@@ -249,7 +248,10 @@ impl QuillApp {
             .map(|set| set.id)
             .collect();
         let (removed, order) = self.manager_edits(kind).changes(&installed);
-        self.manager_edits(kind).clear();
+        // The edits are the box's until the commit is queued: one that
+        // could not be sent at all keeps them, so opening the box again
+        // shows the user's removals and order for another try.
+        let mut sent = true;
         if let Some(live) = self.live.as_mut() {
             if kind == Kind::Stickers {
                 let _ = live.driver.view_shown_trending_stickers();
@@ -259,17 +261,19 @@ impl QuillApp {
                 .commit_sticker_manager(kind == Kind::Masks, removed, order)
                 .is_err()
             {
+                sent = false;
                 self.screen.connection.set_note_for(
                     &self.screen.windows,
                     StatusNote::error(tr(keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN)),
                 );
-                // Said here: not again from the drain.
-                live.driver.session.stickers.manager.take_failure();
             }
             live.driver.set_sticker_manager_open(false);
         } else if let Some(session) = self.demo_session.as_mut() {
             session.stickers.manager.open = false;
             apply_demo_commit(session, kind, &removed, order.as_deref());
+        }
+        if sent {
+            self.manager_edits(kind).clear();
         }
     }
 

@@ -1,11 +1,11 @@
 //! The dialogs of Agent access: the request an agent files with
 //! `request_access`, the consent for "All other chats" in Settings, and
 //! "Reset the agent token?". The request is derived from
-//! `quill::agent::prompts::current`, the consent from `AgentUi::consent`,
-//! the reset from `AgentPageUi::reset_confirm`.
+//! `quill::agent::prompts::current`, the consent and the reset
+//! from `AgentUi::shown`.
 #![deny(clippy::indexing_slicing)]
 
-use super::agent_state::{AllChatsConsent, is_secret_chat_id};
+use super::agent_state::{AgentBox, AllChatsConsent, is_secret_chat_id};
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
 use gpui_kit::component::alert::Alert;
@@ -113,22 +113,22 @@ impl QuillApp {
 
     /// The consent for "All other chats" is open (never with access off).
     pub(super) fn agent_consent_open(&self) -> bool {
-        self.agent_ui.consent.is_some() && quill::agent::access::enabled()
+        self.agent_ui.consent().is_some() && quill::agent::access::enabled()
     }
 
     /// "Reset the agent token?" is open (never with access off).
     fn agent_reset_open(&self) -> bool {
-        self.agent_ui.page.reset_confirm && quill::agent::access::enabled()
+        self.agent_ui.reset_open() && quill::agent::access::enabled()
     }
 
     /// The master switch was turned off: the consent and the token reset
     /// question end with it (the checks above only hide them meanwhile), so turning it on again does not bring back a question
     /// asked before (the consent would widen grants the user saw earlier).
     pub(in crate::ui) fn close_agent_boxes_for_access_off(&mut self, cx: &mut Context<Self>) {
-        if self.agent_ui.consent.is_some() {
+        if self.agent_ui.consent().is_some() {
             self.cancel_all_chats(cx);
         }
-        self.agent_ui.page.reset_confirm = false;
+        self.agent_ui.shown = AgentBox::None;
     }
 
     pub(super) fn build_agent_request_dialog(
@@ -286,11 +286,10 @@ impl QuillApp {
                 cx.listener(move |this, _, window, cx| {
                     this.answer_agent_request(&prompt, allow, cx);
                     // The next request, if any, gets a dialog of its own.
-                    shell.update(cx, |shell, _| {
-                        if shell.open_dialog == Some(DialogKind::AgentRequest) {
-                            shell.open_dialog = None;
-                        }
-                    });
+                    shell
+                        .read(cx)
+                        .open_dialog
+                        .close_kind(DialogKind::AgentRequest);
                     window.close_dialog(cx);
                 })
             };
@@ -320,8 +319,7 @@ impl QuillApp {
         let scope = app
             .read(cx)
             .agent_ui
-            .consent
-            .as_ref()
+            .consent()
             .map_or(Scope::Read, |AllChatsConsent { scope, .. }| *scope);
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::AgentConsent, |this, _, cx| {
@@ -389,7 +387,7 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::AgentResetToken, |this, _, cx| {
-                this.agent_ui.page.reset_confirm = false;
+                this.agent_ui.close_reset();
                 cx.notify();
             });
         let body = div()
@@ -404,7 +402,7 @@ impl QuillApp {
                         .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
-                            this.agent_ui.page.reset_confirm = false;
+                            this.agent_ui.close_reset();
                             this.close_kit_dialog_if_done(DialogKind::AgentResetToken, window, cx);
                             cx.notify();
                         })),
@@ -452,7 +450,7 @@ crate::ui::shell::register_dialogs! {
         QuillApp::build_agent_reset_dialog,
     )
     .close(|app, _, cx| {
-        app.agent_ui.page.reset_confirm = false;
+        app.agent_ui.close_reset();
         cx.notify();
     }),
 }

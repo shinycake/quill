@@ -14,4 +14,4 @@ pub use save_watch::{SaveAnswer, SaveOutcome, SaveWatch};
 
 pub use full_infos::UserFullInfos;
 pub use state::*;
-pub use userpic_video::UserpicVideo;
+pub use userpic_video::{USERPIC_INFO_RETRY, UserpicInfoAsk, UserpicInfoStage, UserpicVideo};

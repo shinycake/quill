@@ -461,13 +461,7 @@ pub(crate) fn sessions_driver() -> SessionsDriverHarness {
 pub(crate) fn session_fixture(id: i64, current: bool, pending: bool) -> ParsedSession {
     ParsedSession {
         id,
-        kind: if current {
-            SessionKind::Current
-        } else if pending {
-            SessionKind::PasswordPending
-        } else {
-            SessionKind::Other
-        },
+        kind: SessionKind::from_flags(current, pending),
         is_unconfirmed: false,
         can_accept_secret_chats: false,
         can_accept_calls: true,

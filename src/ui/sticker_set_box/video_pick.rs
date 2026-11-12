@@ -51,7 +51,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(pick) = self.sticker_box.pick else {
+        let Some(pick) = self.sticker_box.editing.pick() else {
             return;
         };
         self.pick_video_for_set(pick, animation.file_id, None, window, cx);
@@ -85,20 +85,22 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.sticker_box.pick = None;
-        self.sticker_box.pending = crate::ui::sticker_set_box::state::PickWait::None;
+        self.sticker_box
+            .editing
+            .enter(super::state::SetEditing::Idle);
         let Some(path) = self.local_media_path(file_id) else {
             if !self.ask_pick_file(file_id, cx) {
                 return;
             }
-            self.sticker_box.pending =
-                crate::ui::sticker_set_box::state::PickWait::Downloading(PendingVideo {
+            self.sticker_box.editing = super::state::SetEditing::Waiting(
+                super::state::PickWait::Downloading(PendingVideo {
                     pick,
                     file_id,
                     file: PickedFile::Video,
                     emoji,
                     window: self.windows.scope,
-                });
+                }),
+            );
             cx.notify();
             return;
         };

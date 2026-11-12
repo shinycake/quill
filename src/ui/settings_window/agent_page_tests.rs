@@ -171,19 +171,25 @@ fn reset_token_asks_first_and_cancel_keeps_the_token(cx: &mut TestAppContext) {
     vcx.update(|window, cx| window.click("agent-reset-token", cx));
     settle(vcx);
     assert_eq!(
-        shell.read_with(vcx, |shell, _| shell.open_dialog),
+        shell.read_with(vcx, |shell, _| shell.open_dialog.kind()),
         Some(DialogKind::AgentResetToken)
     );
     vcx.update(|window, cx| window.click("agent-reset-cancel", cx));
     settle(vcx);
-    assert_eq!(shell.read_with(vcx, |shell, _| shell.open_dialog), None);
+    assert_eq!(
+        shell.read_with(vcx, |shell, _| shell.open_dialog.kind()),
+        None
+    );
     assert_eq!(access::generation(), before, "cancel changes nothing");
 
     vcx.update(|window, cx| window.click("agent-reset-token", cx));
     settle(vcx);
     vcx.update(|window, cx| window.click("agent-reset-confirm", cx));
     settle(vcx);
-    assert_eq!(shell.read_with(vcx, |shell, _| shell.open_dialog), None);
+    assert_eq!(
+        shell.read_with(vcx, |shell, _| shell.open_dialog.kind()),
+        None
+    );
     assert!(access::generation() > before, "connections end");
     assert!(access::enabled(), "access stays on");
 }

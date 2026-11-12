@@ -108,7 +108,7 @@ fn edit_stickers_reorders_by_drag_and_done_leaves_the_mode(cx: &mut TestAppConte
     );
     vcx.update(|window, cx| window.click("sticker-set-edit", cx));
     frames(vcx);
-    assert!(app.read_with(vcx, |app, _| app.sticker_box.reordering));
+    assert!(app.read_with(vcx, |app, _| app.sticker_box.editing.is_reordering()));
     assert!(vcx.update(|window, _| window.try_find("sticker-set-reorder-done").is_some()));
     assert!(
         vcx.update(|window, _| window.try_find("sticker-set-add").is_none()),
@@ -124,7 +124,7 @@ fn edit_stickers_reorders_by_drag_and_done_leaves_the_mode(cx: &mut TestAppConte
     );
     vcx.update(|window, cx| window.click("sticker-set-reorder-done", cx));
     frames(vcx);
-    assert!(!app.read_with(vcx, |app, _| app.sticker_box.reordering));
+    assert!(!app.read_with(vcx, |app, _| app.sticker_box.editing.is_reordering()));
     assert!(vcx.update(|window, _| window.try_find("sticker-set-edit").is_some()));
 }
 
@@ -236,7 +236,7 @@ fn a_set_image_is_padded_to_a_square_and_the_corners_cut(cx: &mut TestAppContext
     vcx.update(|window, cx| window.click("photo-editor-done", cx));
     frames(vcx);
     let create = app
-        .read_with(vcx, |app, _| app.sticker_box.create.clone())
+        .read_with(vcx, |app, _| app.sticker_box.editing.create().cloned())
         .expect("create");
     assert_eq!(
         create.format,
@@ -328,7 +328,7 @@ fn the_photo_editor_takes_the_box_aside_until_it_closes(cx: &mut TestAppContext)
     assert!(shell.read_with(vcx, |shell, _| shell.open_dialog
         == Some(DialogKind::StickerCreate)));
     let path = app
-        .read_with(vcx, |app, _| app.sticker_box.create.clone())
+        .read_with(vcx, |app, _| app.sticker_box.editing.create().cloned())
         .map(|c| c.path);
     if let Some(path) = path {
         let _ = std::fs::remove_file(path);
@@ -348,7 +348,9 @@ fn a_video_sticker_adapts_through_the_video_editor(cx: &mut TestAppContext) {
         adapt: true,
     };
     app.update(vcx, |app, cx| {
-        app.sticker_box.pick = Some(pick);
+        app.sticker_box
+            .editing
+            .enter(crate::ui::sticker_set_box::state::SetEditing::Picking(pick));
         cx.notify();
     });
     frames(vcx);
@@ -380,7 +382,7 @@ fn a_video_sticker_adapts_through_the_video_editor(cx: &mut TestAppContext) {
     frames(vcx);
     // The video editor (tdesktop `RunVideoEditorAndCreate`) replaces the
     // chooser and sits over the set box.
-    assert!(app.read_with(vcx, |app, _| app.sticker_box.pick.is_none()));
+    assert!(app.read_with(vcx, |app, _| app.sticker_box.editing.pick().is_none()));
     assert!(app.read_with(vcx, |app, _| app.video_editor_for_set()));
     assert!(shell.read_with(vcx, |shell, _| shell.open_dialog
         == Some(DialogKind::VideoEditor)));
@@ -428,7 +430,7 @@ fn a_video_sticker_adapts_through_the_video_editor(cx: &mut TestAppContext) {
     assert!(shell.read_with(vcx, |shell, _| shell.open_dialog
         == Some(DialogKind::StickerCreate)));
     let create = app
-        .read_with(vcx, |app, _| app.sticker_box.create.clone())
+        .read_with(vcx, |app, _| app.sticker_box.editing.create().cloned())
         .expect("create");
     assert_eq!(create.format, StickerFormat::Webm);
     assert_eq!(create.emojis, vec!["🔥".to_string()]);
@@ -438,8 +440,10 @@ fn a_video_sticker_adapts_through_the_video_editor(cx: &mut TestAppContext) {
     // Cancel in the box drops it and returns to the set box.
     vcx.update(|window, cx| window.click("sticker-create-cancel", cx));
     frames(vcx);
-    assert!(app.read_with(vcx, |app, _| app.sticker_box.create.is_none()
-        && !app.sticker_box.encoding.is_running()));
+    assert!(
+        app.read_with(vcx, |app, _| app.sticker_box.editing.create().is_none()
+            && !app.sticker_box.editing.encoding_running())
+    );
     assert!(shell.read_with(vcx, |shell, _| shell.open_dialog
         == Some(DialogKind::StickerSet)));
 }
@@ -455,11 +459,15 @@ fn a_still_sticker_decodes_off_the_ui_thread_before_the_editor_opens(cx: &mut Te
     let (app, _shell, mut vcx) = open_demo(cx);
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
-        app.sticker_box.pick = Some(PickExisting {
-            set_id: 78,
-            kind: SetKind::Emoji,
-            adapt: true,
-        });
+        app.sticker_box
+            .editing
+            .enter(crate::ui::sticker_set_box::state::SetEditing::Picking(
+                PickExisting {
+                    set_id: 78,
+                    kind: SetKind::Emoji,
+                    adapt: true,
+                },
+            ));
         cx.notify();
     });
     frames(vcx);
@@ -479,7 +487,7 @@ fn a_still_sticker_decodes_off_the_ui_thread_before_the_editor_opens(cx: &mut Te
         })
     });
     assert!(!opened_at_pick, "the decode waits for the worker");
-    assert!(app.read_with(vcx, |app, _| app.sticker_box.pick.is_none()));
+    assert!(app.read_with(vcx, |app, _| app.sticker_box.editing.pick().is_none()));
     frames(vcx);
     assert!(app.read_with(vcx, |app, _| app.viewer.photo_editor.is_some()));
 }
@@ -525,7 +533,9 @@ fn choose(
 ) {
     vcx.update(|window, cx| {
         app.update(cx, |app, cx| {
-            app.sticker_box.pick = Some(pick);
+            app.sticker_box
+                .editing
+                .enter(crate::ui::sticker_set_box::state::SetEditing::Picking(pick));
             app.pick_existing_sticker(item, window, cx);
         })
     });
@@ -541,7 +551,9 @@ fn a_sticker_picked_then_closed_opens_no_editor(cx: &mut TestAppContext) {
     let item = &items[0];
     vcx.update(|window, cx| {
         app.update(cx, |app, cx| {
-            app.sticker_box.pick = Some(pick);
+            app.sticker_box
+                .editing
+                .enter(crate::ui::sticker_set_box::state::SetEditing::Picking(pick));
             app.pick_existing_sticker(item, window, cx);
             app.close_sticker_set_dialog(cx);
         })
@@ -604,18 +616,19 @@ fn a_still_decoding_behind_a_later_animated_pick_opens_no_editor(cx: &mut TestAp
 
     // A video still downloading gives way to a later pick in the same way.
     app.update(vcx, |app, _| {
-        app.sticker_box.pending =
+        app.sticker_box.editing = crate::ui::sticker_set_box::state::SetEditing::Waiting(
             crate::ui::sticker_set_box::state::PickWait::Downloading(PendingVideo {
                 pick,
                 file_id: still.file_id,
                 file: PickedFile::Video,
                 emoji: None,
                 window: None,
-            });
+            }),
+        );
     });
     choose(&app, vcx, pick, &animated);
     assert!(app.read_with(vcx, |app, _| {
-        app.sticker_box.pending.downloading().is_none()
+        app.sticker_box.editing.downloading().is_none()
     }));
 }
 
@@ -665,14 +678,15 @@ fn a_chosen_video_still_downloading_opens_the_editor_when_it_arrives(cx: &mut Te
         })
         .expect("a demo sticker");
     app.update(vcx, |app, cx| {
-        app.sticker_box.pending =
+        app.sticker_box.editing = crate::ui::sticker_set_box::state::SetEditing::Waiting(
             crate::ui::sticker_set_box::state::PickWait::Downloading(PendingVideo {
                 pick,
                 file_id,
                 file: PickedFile::Video,
                 emoji: Some("🎉".into()),
                 window: None,
-            });
+            }),
+        );
         cx.notify();
     });
     // The next frame opens the editor; the stub isn't a video, so the
@@ -685,7 +699,7 @@ fn a_chosen_video_still_downloading_opens_the_editor_when_it_arrives(cx: &mut Te
     });
     frames(vcx);
     assert!(app.read_with(vcx, |app, _| {
-        app.sticker_box.pending.downloading().is_none()
+        app.sticker_box.editing.downloading().is_none()
     }));
     assert!(app.read_with(vcx, |app, _| app.video_editor_for_set()));
     assert!(shell.read_with(vcx, |shell, _| shell.open_dialog
@@ -724,11 +738,15 @@ fn the_chooser_lists_saved_gifs_except_when_adapting(cx: &mut TestAppContext) {
                 minithumbnail: None,
             }]);
         }
-        app.sticker_box.pick = Some(PickExisting {
-            set_id: 78,
-            kind: SetKind::Stickers,
-            adapt: false,
-        });
+        app.sticker_box
+            .editing
+            .enter(crate::ui::sticker_set_box::state::SetEditing::Picking(
+                PickExisting {
+                    set_id: 78,
+                    kind: SetKind::Stickers,
+                    adapt: false,
+                },
+            ));
         cx.notify();
     });
     frames(vcx);
@@ -736,7 +754,8 @@ fn the_chooser_lists_saved_gifs_except_when_adapting(cx: &mut TestAppContext) {
         == Some(DialogKind::StickerPick)));
     let offered = app.read_with(vcx, |app, _| {
         app.sticker_box
-            .pick
+            .editing
+            .pick()
             .map(|pick| app.pick_gif_candidates(pick).len())
     });
     assert_eq!(offered, Some(1));
@@ -752,7 +771,8 @@ fn the_chooser_lists_saved_gifs_except_when_adapting(cx: &mut TestAppContext) {
     let animation = app
         .read_with(vcx, |app, _| {
             app.sticker_box
-                .pick
+                .editing
+                .pick()
                 .and_then(|pick| app.pick_gif_candidates(pick).into_iter().next())
         })
         .expect("the GIF");
@@ -761,10 +781,10 @@ fn the_chooser_lists_saved_gifs_except_when_adapting(cx: &mut TestAppContext) {
     });
     frames(vcx);
     assert!(app.read_with(vcx, |app, _| {
-        app.sticker_box.pick.is_none()
+        app.sticker_box.editing.pick().is_none()
             && app
                 .sticker_box
-                .pending
+                .editing
                 .downloading()
                 .is_some_and(|pending| pending.file_id == FileId(9_001))
     }));
@@ -777,15 +797,17 @@ fn the_new_sticker_box_needs_an_emoji_and_takes_at_most_seven(cx: &mut TestAppCo
     let (app, shell, mut vcx) = open_demo(cx);
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
-        app.sticker_box.create = Some(super::state::CreateSticker {
-            video: None,
-            set_id: 78,
-            kind: quill::sticker_set_box::SetKind::Stickers,
-            path: std::path::PathBuf::from(crate::ui::demo::demo_thumb_png_path()),
-            format: quill::telegram::envelope::StickerFormat::Webp,
-            preview: None,
-            emojis: Vec::new(),
-        });
+        app.sticker_box
+            .editing
+            .begin_create(super::state::CreateSticker {
+                video: None,
+                set_id: 78,
+                kind: quill::sticker_set_box::SetKind::Stickers,
+                path: std::path::PathBuf::from(crate::ui::demo::demo_thumb_png_path()),
+                format: quill::telegram::envelope::StickerFormat::Webp,
+                preview: None,
+                emojis: Vec::new(),
+            });
         cx.notify();
     });
     frames(vcx);
@@ -795,7 +817,7 @@ fn the_new_sticker_box_needs_an_emoji_and_takes_at_most_seven(cx: &mut TestAppCo
     // box stays.
     vcx.update(|window, cx| window.click("sticker-create-done", cx));
     frames(vcx);
-    assert!(app.read_with(vcx, |app, _| app.sticker_box.create.is_some()));
+    assert!(app.read_with(vcx, |app, _| app.sticker_box.editing.create().is_some()));
     assert_eq!(
         app.read_with(vcx, |app, _| app.connection.status_note().to_string()),
         quill::sticker_set_box::EMOJI_REQUIRED_NOTE
@@ -806,8 +828,8 @@ fn the_new_sticker_box_needs_an_emoji_and_takes_at_most_seven(cx: &mut TestAppCo
     assert_eq!(
         app.read_with(vcx, |app, _| app
             .sticker_box
-            .create
-            .as_ref()
+            .editing
+            .create()
             .map(|c| c.emojis.len())),
         Some(1)
     );
@@ -816,8 +838,8 @@ fn the_new_sticker_box_needs_an_emoji_and_takes_at_most_seven(cx: &mut TestAppCo
     assert_eq!(
         app.read_with(vcx, |app, _| app
             .sticker_box
-            .create
-            .as_ref()
+            .editing
+            .create()
             .map(|c| c.emojis.len())),
         Some(0)
     );
@@ -830,15 +852,15 @@ fn the_new_sticker_box_needs_an_emoji_and_takes_at_most_seven(cx: &mut TestAppCo
     assert_eq!(
         app.read_with(vcx, |app, _| app
             .sticker_box
-            .create
-            .as_ref()
+            .editing
+            .create()
             .map(|c| c.emojis.len())),
         Some(quill::sticker_set_box::MAX_EMOJIS)
     );
     frames(vcx);
     vcx.update(|window, cx| window.click("sticker-create-done", cx));
     frames(vcx);
-    assert!(app.read_with(vcx, |app, _| app.sticker_box.create.is_none()));
+    assert!(app.read_with(vcx, |app, _| app.sticker_box.editing.create().is_none()));
     assert!(shell.read_with(vcx, |shell, _| shell.open_dialog
         == Some(DialogKind::StickerSet)));
 }
@@ -864,7 +886,7 @@ fn add_an_existing_sticker_opens_the_chooser_and_cancel_returns(cx: &mut TestApp
     assert!(candidates.iter().all(|item| item.set_id != 78));
     vcx.update(|window, cx| window.click("sticker-pick-cancel", cx));
     frames(vcx);
-    assert!(app.read_with(vcx, |app, _| app.sticker_box.pick.is_none()));
+    assert!(app.read_with(vcx, |app, _| app.sticker_box.editing.pick().is_none()));
     assert!(shell.read_with(vcx, |shell, _| shell.open_dialog
         == Some(DialogKind::StickerSet)));
 }

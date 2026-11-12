@@ -99,14 +99,42 @@ pub(crate) struct StoryViewerUi {
     pub(super) page_op: Option<quill::ids::RequestId>,
     /// The copy of the story's file to Downloads (`save_story_media`).
     pub(super) notice: Option<String>,
-    /// The ⋯ menu is open: the story holds still under it, and its entries
-    /// act on the story it was opened for (`MenuAct` carries it). It
-    /// mirrors the kit menu's own visibility (`on_open_change`) and can be
-    /// up over any panel, so it is not a panel.
-    pub(super) menu_open: bool,
+    /// The ⋯ menu: while it is open the story it was opened for holds
+    /// still under it, and its entries act on that story (`MenuAct` carries
+    /// it). It can be up over any panel, so it is not a panel.
+    pub(super) menu: StoryMenu,
     /// The "Stealth mode on" toast over this viewer until its deadline;
     /// it goes with the viewer (`release_story_viewer`).
     pub(super) stealth_toast: Option<super::story_stealth_ui::ShownStealthToast>,
+}
+
+/// The ⋯ menu of the story viewer. An open menu names its story, so one
+/// whose close the kit never reported (the trigger was rebuilt for another
+/// story) holds nothing still on the story shown now.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) enum StoryMenu {
+    #[default]
+    Closed,
+    Open {
+        story: (quill::ids::ChatId, i32),
+    },
+}
+
+impl StoryMenu {
+    /// The menu of `story` is open.
+    pub(super) fn holds(self, story: Option<(quill::ids::ChatId, i32)>) -> bool {
+        matches!(self, Self::Open { story: open } if Some(open) == story)
+    }
+
+    /// The kit reported the menu of `story` open or closed. A close for a
+    /// story whose menu is not the open one changes nothing.
+    pub(super) fn set(&mut self, story: (quill::ids::ChatId, i32), open: bool) {
+        if open {
+            *self = Self::Open { story };
+        } else if matches!(self, Self::Open { story: held } if *held == story) {
+            *self = Self::Closed;
+        }
+    }
 }
 
 static NO_CLOSE_FRIENDS: quill::story_extras::CloseFriendsStage =

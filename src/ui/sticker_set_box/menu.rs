@@ -15,6 +15,7 @@ impl QuillApp {
         link: String,
         archivable: bool,
         is_owned: bool,
+        idle: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let owner = cx.entity().downgrade();
@@ -55,13 +56,14 @@ impl QuillApp {
                                 });
                             },
                         ))
-                        .item(PopupMenuItem::new(tr(keys::Q_MEDIA_REORDER)).on_click(
-                            move |_, _, cx| {
-                                let _ = reorder.update(cx, |this, cx| {
-                                    this.begin_edit_stickers(cx);
-                                });
-                            },
-                        ));
+                        .item(PopupMenuItem::new(tr(keys::Q_MEDIA_REORDER))
+                                .disabled(!idle)
+                                .on_click(move |_, _, cx| {
+                                    let _ = reorder.update(cx, |this, cx| {
+                                        this.begin_edit_stickers(cx);
+                                    });
+                                }),
+                        );
                 }
                 if archivable {
                     let archive = owner.clone();
@@ -123,6 +125,7 @@ impl QuillApp {
         &self,
         set_id: i64,
         kind: SetKind,
+        enabled: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let owner = cx.entity().downgrade();
@@ -146,6 +149,7 @@ impl QuillApp {
                         Button::new("sticker-set-add")
                             .icon(IconName::Plus)
                             .ghost()
+                            .disabled(!enabled)
                             .rounded(ButtonRounded::Size(px(28.)))
                             .tooltip(AddEntry::CreateNew.label(kind))
                             .accessibility_label(AddEntry::CreateNew.label(kind))

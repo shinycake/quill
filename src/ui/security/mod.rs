@@ -19,7 +19,9 @@ use gpui_kit::*;
 use quill::key_fingerprint;
 use quill::lang::{keys, tr, tr_with};
 use quill::state::fetch::Fetch;
-use quill::telegram::envelope::{ParsedSecretChat, ParsedSession, ParsedWebsite, PasswordState};
+use quill::telegram::envelope::{
+    ParsedSecretChat, ParsedSession, ParsedWebsite, PasswordState, SessionKind,
+};
 use std::cell::Cell;
 use std::rc::Rc;
 use zeroize::Zeroize;
@@ -134,12 +136,12 @@ impl QuillApp {
             let current = sessions.iter().find(|s| s.is_current());
             let mut incomplete: Vec<&ParsedSession> = sessions
                 .iter()
-                .filter(|s| !s.is_current() && s.is_password_pending())
+                .filter(|s| s.kind == SessionKind::PasswordPending)
                 .collect();
             incomplete.sort_by_key(|a| std::cmp::Reverse(a.last_active_date));
             let mut others: Vec<&ParsedSession> = sessions
                 .iter()
-                .filter(|s| !s.is_current() && !s.is_password_pending())
+                .filter(|s| s.kind == SessionKind::Other)
                 .collect();
             others.sort_by_key(|a| std::cmp::Reverse(a.last_active_date));
 

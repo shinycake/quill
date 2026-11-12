@@ -314,7 +314,7 @@ fn a_set_video_pick_goes_with_its_window(cx: &mut TestAppContext) {
     use crate::ui::sticker_set_box::state::{PendingVideo, PickExisting, PickedFile};
     let (app, main, chat_window) = new_app(cx);
     app.update(cx, |app, _| {
-        app.sticker_box.pending =
+        app.sticker_box.editing = crate::ui::sticker_set_box::state::SetEditing::Waiting(
             crate::ui::sticker_set_box::state::PickWait::Downloading(PendingVideo {
                 pick: PickExisting {
                     set_id: 78,
@@ -325,7 +325,8 @@ fn a_set_video_pick_goes_with_its_window(cx: &mut TestAppContext) {
                 file: PickedFile::Video,
                 emoji: None,
                 window: Some(OTHER),
-            });
+            }),
+        );
     });
     cx.update_window(chat_window, |_, window, _| window.remove_window())
         .expect("the chat window");
@@ -334,7 +335,7 @@ fn a_set_video_pick_goes_with_its_window(cx: &mut TestAppContext) {
         .expect("the main window");
     cx.run_until_parked();
     app.read_with(cx, |app, _| {
-        assert!(app.sticker_box.pending.downloading().is_none());
+        assert!(app.sticker_box.editing.downloading().is_none());
         assert!(app.composer_ui.send_box.video_editor.is_none());
     });
 }

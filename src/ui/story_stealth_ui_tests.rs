@@ -50,7 +50,7 @@ fn click(vcx: &mut VisualTestContext, selector: &'static str) {
 }
 
 fn dialog(shell: &Entity<QuillShell>, vcx: &mut VisualTestContext) -> Option<DialogKind> {
-    shell.read_with(vcx, |shell, _| shell.open_dialog)
+    shell.read_with(vcx, |shell, _| shell.open_dialog.kind())
 }
 
 fn now() -> i32 {
@@ -301,22 +301,38 @@ fn a_refused_activation_shows_its_reason_and_asks_again(cx: &mut TestAppContext)
     open_box(&app, vcx, None);
     assert_eq!(dialog(&shell, vcx), Some(DialogKind::StoryStealth));
     app.update(vcx, |app, cx| {
+        // Its request is out: only an answer to it moves the box.
+        let request = app
+            .demo_session
+            .as_mut()
+            .map(|session| {
+                let generation = session.account_generation;
+                session.requests.register(
+                    generation,
+                    quill::state::RequestPurpose::ActivateStoryStealthMode,
+                    None,
+                    None,
+                )
+            })
+            .expect("the demo session");
         if let Some(stealth_box) = app.stories.stealth_box.as_mut() {
-            stealth_box.stage = StealthStage::Activating(RequestId(70));
+            stealth_box.stage = StealthStage::Activating(request);
         }
         if let Some(session) = app.demo_session.as_mut() {
-            session.stories.stealth_refusal =
-                Some((RequestId(69), "Could not enable Stealth Mode: old".into()));
+            session.stories.stealth_refusal = Some((
+                RequestId(request.0 + 1000),
+                "Could not enable Stealth Mode: old".into(),
+            ));
         }
         assert!(!app.drain_story_stealth(cx));
         assert_eq!(
             app.stories.stealth_box.as_ref().map(|b| b.stage.clone()),
-            Some(StealthStage::Activating(RequestId(70))),
+            Some(StealthStage::Activating(request)),
             "an older request's refusal is not this box's"
         );
         if let Some(session) = app.demo_session.as_mut() {
             session.stories.stealth_refusal =
-                Some((RequestId(70), "Could not enable Stealth Mode: FLOOD".into()));
+                Some((request, "Could not enable Stealth Mode: FLOOD".into()));
         }
         assert!(!app.drain_story_stealth(cx));
         assert_eq!(
@@ -325,6 +341,37 @@ fn a_refused_activation_shows_its_reason_and_asks_again(cx: &mut TestAppContext)
                 "Could not enable Stealth Mode: FLOOD".into()
             ))
         );
+    });
+    frames(vcx);
+    assert!(box_open(&app, vcx), "the box stays open");
+    assert!(find(vcx, "story-stealth-failure"), "and says why");
+    assert!(
+        find(vcx, "story-stealth-button"),
+        "with the button to retry"
+    );
+}
+
+/// The activation's request is gone with no answer (the client restarted,
+/// the continuation was dropped): the box leaves Activating for a failure
+/// whose button asks again, instead of waiting for good.
+#[gpui_kit::test]
+fn a_lost_activation_request_leaves_activating(cx: &mut TestAppContext) {
+    use crate::ui::story_stealth_ui::StealthStage;
+    use quill::ids::RequestId;
+    let (app, shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    seed(&app, vcx, true, StoryStealthMode::default());
+    open_box(&app, vcx, None);
+    assert_eq!(dialog(&shell, vcx), Some(DialogKind::StoryStealth));
+    app.update(vcx, |app, cx| {
+        if let Some(stealth_box) = app.stories.stealth_box.as_mut() {
+            stealth_box.stage = StealthStage::Activating(RequestId(70));
+        }
+        assert!(!app.drain_story_stealth(cx));
+        assert!(matches!(
+            app.stories.stealth_box.as_ref().map(|b| b.stage.clone()),
+            Some(StealthStage::Failed(_))
+        ));
     });
     frames(vcx);
     assert!(box_open(&app, vcx), "the box stays open");
