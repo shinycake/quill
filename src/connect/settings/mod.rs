@@ -186,10 +186,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .send_json(&get_blocked_message_senders(extra, offset as i32, 100))
         {
             self.session.requests.take(extra);
-            self.session
-                .settings
-                .blocked_senders
-                .fail("The blocked users request was not sent.");
+            self.session.settings.blocked_senders.failed(
+                Some(extra),
+                "The blocked users request was not sent.",
+                false,
+            );
             return Err(err);
         }
         Ok(())
@@ -217,7 +218,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session
                 .settings
                 .blocked_senders
-                .fail("The unblock request was not sent.");
+                .fail_unless_loading("The unblock request was not sent.");
             return Err(err);
         }
         if let Some(list) = self.session.settings.blocked_senders.data_mut() {
@@ -250,7 +251,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session
                 .settings
                 .blocked_senders
-                .fail("The block request was not sent.");
+                .fail_unless_loading("The block request was not sent.");
             return Err(err);
         }
         let blocked = &mut self.session.settings.blocked_senders;

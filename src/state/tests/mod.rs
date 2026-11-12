@@ -67,6 +67,7 @@ mod search_upgrades;
 mod send_permissions;
 mod service_preview;
 mod sessions;
+mod sweep_r4_05_fix2;
 mod shared_media;
 mod shared_media_profile;
 mod similar_strip;

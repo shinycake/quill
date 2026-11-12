@@ -475,6 +475,24 @@ impl SettingsState {
         self.account_ttl.is_loading() || self.account_delete.is_loading()
     }
 
+    /// A refused block or unblock: the optimistic change of `user_id`
+    /// goes back, and nothing else in the list moves.
+    pub fn undo_block_change(&mut self, user_id: i64, block: bool) {
+        let Some(list) = self.blocked_senders.data_mut() else {
+            return;
+        };
+        if block {
+            let before = list.len();
+            list.retain(|id| *id != user_id);
+            if list.len() < before {
+                self.blocked_total = self.blocked_total.saturating_sub(1);
+            }
+        } else if !list.contains(&user_id) {
+            list.push(user_id);
+            self.blocked_total = self.blocked_total.saturating_add(1);
+        }
+    }
+
     /// One blocked-senders page, taken only by the fetch that waits for
     /// `request`: a page asked before the list restarted (the fetch was
     /// replaced or failed since) is dropped and changes nothing, not even

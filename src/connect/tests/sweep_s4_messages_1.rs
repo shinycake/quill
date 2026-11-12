@@ -209,7 +209,9 @@ fn a_mask_list_asked_before_a_change_does_not_land_after_it() {
         archived: false,
     });
     session.stickers.masks.installed.begin_with(list);
-    session.finish_mask_mutation(Some(change));
+    let changed = session.request(change, None);
+    let pending = session.requests.pending.get(&changed.0).cloned();
+    session.finish_mask_mutation(pending.as_ref());
     // The fetch forgot the request it waited for: the refetch may go out,
     // and the late answer below finds nothing to land on.
     assert!(session.stickers.masks.installed.is_idle());

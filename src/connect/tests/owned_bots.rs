@@ -192,6 +192,24 @@ fn a_new_photo_goes_out_as_a_local_file() {
 }
 
 #[test]
+fn a_confirmed_photo_only_save_reads_as_saved() {
+    let (mut driver, recorder, sink, seq) = driver_parts();
+    driver.begin_bot_edit(21).unwrap();
+    driver.set_bot_photo(21, "/tmp/a.png").unwrap();
+    let request = sent_request(&recorder, "setBotProfilePhoto");
+    let edit = driver.session.bots.owned.edit.clone().unwrap();
+    assert_eq!((edit.saving(), edit.has_saved()), (1, false));
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        &answer(&extra_of(&request), r#"{"@type":"ok"}"#),
+    );
+    let edit = driver.session.bots.owned.edit.clone().unwrap();
+    assert_eq!((edit.saving(), edit.has_saved()), (0, true));
+}
+
+#[test]
 fn the_username_verdict_answers_only_the_latest_check() {
     let (mut driver, recorder, sink, seq) = driver_parts();
     driver.check_new_bot_username("firstbot").unwrap();

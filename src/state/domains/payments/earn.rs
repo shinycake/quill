@@ -519,7 +519,7 @@ impl Session {
             }
             EarnPurpose::StarStats { peer } => {
                 if self.my_user_id.is_some_and(|me| peer == EarnPeer::User(me)) {
-                    earn.self_stats.fail(reason.clone());
+                    earn.self_stats.failed(request, reason.clone(), false);
                 }
                 if let Some(page) = earn
                     .page

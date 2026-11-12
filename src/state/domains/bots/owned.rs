@@ -50,6 +50,9 @@ pub enum BotSave {
     /// Sent as `request` and not yet confirmed by `ok`; `text` is what the
     /// server holds once it is (empty for the photo).
     Saving { request: RequestId, text: String },
+    /// `request` was confirmed by `ok` (the end state a photo save has: it
+    /// holds no text).
+    Saved(RequestId),
     /// Why the last try failed.
     Failed(String),
 }
@@ -195,7 +198,11 @@ impl BotEditTexts {
 
     /// The server confirmed a save since the dialog opened.
     pub fn has_saved(&self) -> bool {
-        matches!(self.name, BotText::Saved { .. }) || matches!(self.about, BotText::Saved { .. })
+        matches!(self.name, BotText::Saved { .. })
+            || matches!(self.about, BotText::Saved { .. })
+            || [&self.name_save, &self.about_save, &self.photo_save]
+                .into_iter()
+                .any(|save| matches!(save, BotSave::Saved(_)))
     }
 
     /// Saves sent and not yet answered.
@@ -291,6 +298,7 @@ impl Session {
         let BotSave::Saving { request, text } = std::mem::take(save) else {
             return;
         };
+        *save = BotSave::Saved(request);
         match purpose {
             BotsPurpose::SetBotName { .. } => edit.name = BotText::Saved { text, request },
             BotsPurpose::SetBotAbout { .. } => edit.about = BotText::Saved { text, request },

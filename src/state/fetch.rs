@@ -279,7 +279,7 @@ impl<T> Fetch<T> {
     }
 
     /// An answer that names no request: a pushed update, or a fetch whose
-    /// sender does not record its request ([`Fetch::sent`]). An older request's
+    /// sender does not record its request ([`Fetch::begin_with`]). An older request's
     /// late answer lands on a newer ask through this, so a sender prefers
     /// [`Fetch::answered`]; `scripts/check-request-match.py` counts the callers
     /// that remain in its baseline and fails a new one.
@@ -303,6 +303,18 @@ impl<T> Fetch<T> {
             error: error.into(),
             stale,
         };
+    }
+
+    /// A refusal of a change to the list (not of the list's own fetch): it
+    /// is parked as the error line, unless a fetch is in flight, whose
+    /// answer would then be dropped. That answer shows the truth anyway.
+    /// `false` when a fetch was left alone.
+    pub fn fail_unless_loading(&mut self, error: impl Into<String>) -> bool {
+        if self.is_loading() {
+            return false;
+        }
+        self.fail(error);
+        true
     }
 
     /// The request failed and what was held is wrong now.

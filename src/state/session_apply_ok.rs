@@ -378,7 +378,7 @@ impl Session {
                 self.stickers.stickers.selection = StickerSelection::default();
             }
         }
-        self.finish_mask_mutation(pending.map(|p| p.purpose));
+        self.finish_mask_mutation(pending);
         // Slice S10: emoji mutations invalidate emoji caches (see emoji.rs).
         self.invalidate_emoji_caches(pending.map(|p| p.purpose), pending.map(|p| p.id));
         // Slice S9: a saved-GIF mutation (`addSavedAnimation` /

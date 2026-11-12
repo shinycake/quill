@@ -3,7 +3,7 @@
 //! tdesktop's separate `StickersType::Masks` lists.
 use super::*;
 use crate::ids::RequestId;
-use crate::state::{MasksTab, RequestPurpose, StickersPurpose};
+use crate::state::{MaskChangeTarget, MasksTab, RequestPurpose, StickersPurpose};
 use crate::telegram::requests::{
     change_sticker_set, get_archived_mask_sets, get_installed_mask_sets, get_sticker_set,
     reorder_installed_mask_sets,
@@ -15,7 +15,7 @@ const STRIP_SETS: usize = 4;
 const STRIP_STICKERS: usize = 24;
 
 impl<S: JsonSender> ConnectDriver<S> {
-    /// Send one mask request unless the same one is already in flight.
+    /// Send one mask request (the caller says whether one is already out).
     pub(super) fn mask_request(
         &mut self,
         purpose: RequestPurpose,
@@ -23,9 +23,6 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
-        }
-        if self.session.requests.has_purpose(purpose) {
-            return Ok(None);
         }
         let extra = self.session.request(purpose, None);
         if let Err(err) = self.sender.send_json(&build(extra)) {
@@ -39,16 +36,23 @@ impl<S: JsonSender> ConnectDriver<S> {
     fn note_mask_send_failed(&mut self, purpose: StickersPurpose) {
         let masks = &mut self.session.stickers.masks;
         match purpose {
-            StickersPurpose::GetInstalledMaskSets => masks.installed.fail("not sent"),
-            StickersPurpose::GetArchivedMaskSets { .. } => masks.archived.fail("not sent"),
+            StickersPurpose::GetInstalledMaskSets => {
+                masks.installed.fail_unless_loading("not sent");
+            }
+            StickersPurpose::GetArchivedMaskSets { .. } => {
+                masks.archived.fail_unless_loading("not sent");
+            }
             _ => {
-                masks.installed.fail("not sent");
-                masks.archived.fail("not sent");
+                masks.installed.fail_unless_loading("not sent");
+                masks.archived.fail_unless_loading("not sent");
             }
         }
     }
 
     fn request_installed_masks(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if self.session.stickers.masks.installed.is_loading() {
+            return Ok(None);
+        }
         let sent = self.mask_request(
             StickersPurpose::GetInstalledMaskSets.into(),
             get_installed_mask_sets,
@@ -77,6 +81,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         } else {
             0
         };
+        if masks.archived.is_loading() {
+            return Ok(None);
+        }
         let purpose = StickersPurpose::GetArchivedMaskSets { first_page: !more };
         let sent = self.mask_request(purpose.into(), |id| get_archived_mask_sets(id, offset));
         match &sent {
@@ -128,7 +135,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || set_id <= 0 || installed && archived {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.mask_set_change_pending(set_id) {
+        if self.session.stickers.masks.set_change_pending(set_id) {
             return Ok(None);
         }
         let purpose = StickersPurpose::ChangeMaskSet {
@@ -139,8 +146,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         let sent = self.mask_request(purpose.into(), |id| {
             change_sticker_set(id, set_id, installed, archived)
         });
-        if sent.is_err() {
-            self.note_mask_send_failed(purpose);
+        match &sent {
+            Ok(Some(id)) => {
+                let masks = &mut self.session.stickers.masks;
+                masks.begin_change(*id, MaskChangeTarget::Set(set_id));
+            }
+            Err(_) => self.note_mask_send_failed(purpose),
+            Ok(None) => {}
         }
         sent
     }
@@ -170,16 +182,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         ) else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        let busy = self.session.requests.pending.values().any(|pending| {
-            matches!(
-                pending.purpose,
-                RequestPurpose::Stickers(
-                    StickersPurpose::ChangeMaskSet { .. }
-                        | StickersPurpose::ReorderInstalledMaskSets
-                        | StickersPurpose::GetInstalledMaskSets
-                )
-            )
-        });
+        let masks = &self.session.stickers.masks;
+        let busy = masks.change_pending() || masks.installed.is_loading();
         if from == to || busy {
             return Ok(None);
         }
@@ -188,8 +192,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         let sent = self.mask_request(StickersPurpose::ReorderInstalledMaskSets.into(), |id| {
             reorder_installed_mask_sets(id, &ids)
         });
-        if sent.is_err() {
-            self.note_mask_send_failed(StickersPurpose::ReorderInstalledMaskSets);
+        match &sent {
+            Ok(Some(id)) => {
+                let masks = &mut self.session.stickers.masks;
+                masks.begin_change(*id, MaskChangeTarget::Reorder);
+            }
+            Err(_) => self.note_mask_send_failed(StickersPurpose::ReorderInstalledMaskSets),
+            Ok(None) => {}
         }
         sent
     }
@@ -225,7 +234,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !open && !strip {
             return Ok(());
         }
-        if self.session.mask_change_pending() {
+        if self.session.stickers.masks.change_pending() {
             return Ok(());
         }
         let masks = &self.session.stickers.masks;
@@ -248,7 +257,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .iter()
             .take(STRIP_SETS)
             .map(|set| set.id)
-            .filter(|id| !self.session.stickers.masks.sets.contains_key(id))
+            .filter(|id| self.session.stickers.masks.set_wanted(*id))
             .collect();
         for set_id in wanted {
             match self.mask_request(StickersPurpose::GetMaskSet { set_id }.into(), |id| {

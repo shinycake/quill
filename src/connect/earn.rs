@@ -89,7 +89,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         };
         let peer = EarnPeer::User(me);
-        if !self.session.payments.earn.self_stats.is_idle()
+        if !self.session.payments.earn.self_stats.can_ask()
             || self.earn_in_flight(EarnPurpose::StarStats { peer })
         {
             return Ok(());
