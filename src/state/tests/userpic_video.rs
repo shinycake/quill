@@ -3,6 +3,8 @@
 //! info names it; everyone else, and every still photo, keeps the still.
 use super::common::*;
 use super::*;
+use crate::state::USERPIC_INFO_RETRY;
+use std::time::{Duration, Instant};
 
 const USER: i64 = 8301;
 
@@ -73,8 +75,8 @@ fn a_premium_users_video_photo_plays_its_small_clip() {
     let user = session.user(USER).expect("known");
     assert_eq!((user.photo_id, user.photo_has_animation), (901, true));
     assert_eq!(session.userpic_video(USER), UserpicVideo::Unknown);
-    assert!(session.take_userpic_full_info_ask(USER));
-    assert!(!session.take_userpic_full_info_ask(USER));
+    assert!(ask(&mut session));
+    assert!(!ask(&mut session));
 
     full_info(
         &mut session,
@@ -84,7 +86,7 @@ fn a_premium_users_video_photo_plays_its_small_clip() {
     );
     assert_eq!(session.userpic_video(USER), UserpicVideo::Clip(FileId(89)));
     assert!(session.media.files.contains_key(&89));
-    assert!(!session.take_userpic_full_info_ask(USER));
+    assert!(!ask(&mut session));
 
     full_info(
         &mut session,
@@ -106,13 +108,13 @@ fn a_new_photo_asks_for_the_full_info_again_once() {
         &sink,
         &format!(r#","photo":{}"#, chat_photo(901, true)),
     );
-    assert!(!session.take_userpic_full_info_ask(USER));
+    assert!(!ask(&mut session));
     update_user(&mut session, &seq, &sink, &profile_photo(902, true));
     assert_eq!(session.userpic_video(USER), UserpicVideo::Unknown);
-    assert!(session.take_userpic_full_info_ask(USER));
+    assert!(ask(&mut session));
     full_info(&mut session, &seq, &sink, "");
     assert_eq!(session.userpic_video(USER), UserpicVideo::Unknown);
-    assert!(!session.take_userpic_full_info_ask(USER));
+    assert!(!ask(&mut session));
 }
 
 #[test]
@@ -127,7 +129,7 @@ fn stills_stay_still() {
         &format!(r#","photo":{}"#, chat_photo(901, true)),
     );
     assert_eq!(session.userpic_video(USER), UserpicVideo::Still);
-    assert!(!session.take_userpic_full_info_ask(USER));
+    assert!(!ask(&mut session));
     update_user(&mut session, &seq, &sink, &profile_photo(903, false));
     assert_eq!(session.userpic_video(USER), UserpicVideo::Still);
     update_user(&mut session, &seq, &sink, "null");
@@ -151,7 +153,7 @@ fn autoplay_off_or_data_saver_keeps_the_still() {
     session.settings.media_prefs.autoplay_gifs = true;
     session.settings.media_prefs.data_saver = true;
     assert_eq!(session.userpic_video(USER), UserpicVideo::Still);
-    assert!(!session.take_userpic_full_info_ask(USER));
+    assert!(!ask(&mut session));
 }
 
 #[test]
@@ -173,12 +175,83 @@ fn a_personal_photo_is_the_one_matched() {
 }
 
 #[test]
-fn a_userpic_ask_that_was_not_sent_is_asked_again() {
+fn a_refused_ask_waits_out_the_retry_and_is_then_asked_again() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     update_user(&mut session, &seq, &sink, &profile_photo(901, true));
-    assert!(session.take_userpic_full_info_ask(USER));
-    session.release_userpic_full_info_ask(USER);
-    assert!(session.take_userpic_full_info_ask(USER));
-    assert!(!session.take_userpic_full_info_ask(USER));
+    let now = Instant::now();
+    assert!(session.userpic_full_info_due(USER, now));
+    let request = session.request_for_user(RequestPurpose::GetUserFullInfo, USER);
+    session.userpic_full_info_sent(USER, request);
+    assert!(!session.userpic_full_info_due(USER, now), "out");
+    session.userpic_full_info_failed(request, now);
+    assert!(!session.userpic_full_info_due(USER, now), "refused: not on every draw");
+    assert!(
+        !session.userpic_full_info_due(USER, now + USERPIC_INFO_RETRY - Duration::from_secs(1)),
+        "still waiting"
+    );
+    assert!(
+        session.userpic_full_info_due(USER, now + USERPIC_INFO_RETRY),
+        "waited out"
+    );
+}
+
+#[test]
+fn an_error_answer_to_the_ask_starts_the_wait() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    update_user(&mut session, &seq, &sink, &profile_photo(901, true));
+    assert!(ask(&mut session));
+    let request = session
+        .requests
+        .pending_ids()
+        .into_iter()
+        .next()
+        .expect("the ask is out");
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":429,"message":"Too Many Requests: retry after 5"}}"#,
+            request.0
+        ),
+    );
+    assert!(!ask(&mut session), "not again on the next draw");
+}
+
+#[test]
+fn an_ask_whose_request_is_gone_is_asked_again() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    update_user(&mut session, &seq, &sink, &profile_photo(901, true));
+    assert!(ask(&mut session));
+    let request = session
+        .requests
+        .pending_ids()
+        .into_iter()
+        .next()
+        .expect("the ask is out");
+    session.requests.take(request);
+    assert!(ask(&mut session), "no answer is coming");
+}
+
+#[test]
+fn a_users_ask_is_replaced_with_their_photo_not_added_to() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    for photo in [901, 902, 903] {
+        update_user(&mut session, &seq, &sink, &profile_photo(photo, true));
+        assert!(ask(&mut session));
+    }
+    assert_eq!(session.users_state.userpic_full_info.len(), 1);
+}
+
+fn ask(session: &mut Session) -> bool {
+    if !session.userpic_full_info_due(USER, Instant::now()) {
+        return false;
+    }
+    let request = session.request_for_user(RequestPurpose::GetUserFullInfo, USER);
+    session.userpic_full_info_sent(USER, request);
+    true
 }

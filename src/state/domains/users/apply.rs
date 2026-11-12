@@ -187,6 +187,9 @@ impl Session {
                 ratings,
                 voice_notes_restricted,
             } => {
+                if let Some(request) = pending.map(|p| p.id) {
+                    self.userpic_full_info_answered(request);
+                }
                 // The answer names no user: the request does (as in
                 // `apply_user_full_info`).
                 let user_id = pending

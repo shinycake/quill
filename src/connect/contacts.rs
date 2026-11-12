@@ -149,6 +149,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         user_id: i64,
     ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.fetch_userpic_full_info_at(user_id, std::time::Instant::now())
+    }
+
+    /// [`Self::fetch_userpic_full_info`] at `now`. The ask is recorded once
+    /// it is out, so a send that failed leaves nothing to release.
+    pub fn fetch_userpic_full_info_at(
+        &mut self,
+        user_id: i64,
+        now: std::time::Instant,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -156,7 +166,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .requests
             .has_purpose_for_user(RequestPurpose::GetUserFullInfo, user_id)
-            || !self.session.take_userpic_full_info_ask(user_id)
+            || !self.session.userpic_full_info_due(user_id, now)
         {
             return Ok(None);
         }
@@ -165,9 +175,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             .request_for_user(RequestPurpose::GetUserFullInfo, user_id);
         if let Err(err) = self.sender.send_json(&get_user_full_info(extra, user_id)) {
             self.session.requests.take(extra);
-            self.session.release_userpic_full_info_ask(user_id);
             return Err(err);
         }
+        self.session.userpic_full_info_sent(user_id, extra);
         Ok(Some(extra))
     }
 
