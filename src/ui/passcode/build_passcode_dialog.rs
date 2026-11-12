@@ -67,7 +67,6 @@ impl QuillApp {
     pub(super) fn passcode_body(&mut self, cx: &mut Context<Self>) -> Div {
         let muted = cx.theme().muted_foreground;
         let ui = &self.account.passcode;
-        let busy = ui.job.is_running();
         let mut body = div().flex().flex_col().gap_3().w_full();
         if let Some(error) = ui.error().map(str::to_string) {
             body = body.child(
@@ -142,7 +141,6 @@ impl QuillApp {
                     ));
             }
         }
-        let _ = busy;
         body
     }
 
@@ -175,6 +173,7 @@ impl QuillApp {
                 Button::new("passcode-cancel")
                     .label(tr(keys::CANCEL))
                     .ghost()
+                    .disabled(busy)
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.goto_passcode_view(PasscodeView::Status, window, cx)
                     })),
@@ -185,6 +184,9 @@ impl QuillApp {
     pub(super) fn passcode_enabled_section(&mut self, cx: &mut Context<Self>) -> Div {
         let muted = cx.theme().muted_foreground;
         let secs = self.account.passcode.autolock_secs;
+        // The settings wait for a running job (it saves the config it
+        // loaded before hashing).
+        let busy = self.account.passcode.job.is_running();
         let mut section = div().flex().flex_col().gap_3().child(
             div()
                 .flex()
@@ -223,6 +225,7 @@ impl QuillApp {
                     .label(passcode::autolock_label(preset))
                     .outline()
                     .selected(preset == secs)
+                    .disabled(busy)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.account.passcode.set_error(None);
                         this.set_autolock_secs(preset, cx)
@@ -249,6 +252,7 @@ impl QuillApp {
                         .child(
                             div().w(px(96.)).child(
                                 Input::new(&self.account.passcode.custom_time)
+                                    .disabled(busy)
                                     .aria_label(tr(keys::Q_PREFS_CUSTOM_AUTO_LOCK_TIME_HOURS))
                                     .h(px(32.)),
                             ),
@@ -258,6 +262,7 @@ impl QuillApp {
                                 .label(tr(keys::Q_PREFS_SET_CUSTOM_TIME))
                                 .outline()
                                 .selected(custom)
+                                .disabled(busy)
                                 .on_click(
                                     cx.listener(|this, _, _, cx| this.apply_custom_autolock(cx)),
                                 ),
@@ -299,6 +304,7 @@ impl QuillApp {
                     .child(
                         Switch::new("passcode-system-unlock")
                             .checked(self.account.passcode.system_unlock.is_on())
+                            .disabled(busy)
                             .accessibility_label(super::system_unlock::label())
                             .on_click(cx.listener(|this, &on, _, cx| {
                                 this.set_system_unlock(on, cx);

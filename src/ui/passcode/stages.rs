@@ -6,6 +6,49 @@
 use super::PasscodeView;
 use gpui_kit::Task;
 use quill::passcode::MasterKey;
+use std::time::{Duration, Instant};
+
+/// How long the wrong-passcode shake runs.
+const SHAKE_MS: u64 = 420;
+
+/// The wrong-passcode shake: still, or running since an instant. A frame
+/// that finds it over settles it (`settle`), so no stale start is left.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Shake {
+    Still,
+    Running { since: Instant },
+}
+
+impl Shake {
+    pub(super) fn start(&mut self) {
+        *self = Self::Running {
+            since: Instant::now(),
+        };
+    }
+
+    /// A shake that ran its time is over.
+    pub(super) fn settle(&mut self) {
+        if !self.running() {
+            *self = Self::Still;
+        }
+    }
+
+    pub(super) fn running(self) -> bool {
+        matches!(self, Self::Running { since } if since.elapsed() < Duration::from_millis(SHAKE_MS))
+    }
+
+    /// The field's horizontal offset in px.
+    pub(super) fn offset(self) -> f32 {
+        let Self::Running { since } = self else {
+            return 0.0;
+        };
+        let t = since.elapsed().as_millis() as f32 / SHAKE_MS as f32;
+        if t >= 1.0 {
+            return 0.0;
+        }
+        (t * std::f32::consts::PI * 6.0).sin() * 12.0 * (1.0 - t)
+    }
+}
 
 /// Touch ID / system-prompt unlock: off, or on with the master key kept
 /// while locked so the prompt can unlock again without the passcode

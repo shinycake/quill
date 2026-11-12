@@ -79,27 +79,36 @@ mod mac {
     }
 }
 
-/// Whether the platform has a system unlock prompt.
+/// Whether the platform has a system unlock prompt. Asked of the OS once
+/// (each ask makes an `LAContext`), not on every lock-screen frame or
+/// Settings build.
 pub fn available() -> bool {
-    #[cfg(target_os = "macos")]
-    {
-        mac::available()
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        false
-    }
+    static AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *AVAILABLE.get_or_init(|| {
+        #[cfg(target_os = "macos")]
+        {
+            mac::available()
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            false
+        }
+    })
 }
 
-/// Switch label: "Unlock with Touch ID" where biometrics exist.
+/// Switch label: "Unlock with Touch ID" where biometrics exist; asked of
+/// the OS once, like [`available`].
 pub fn label() -> &'static str {
-    #[cfg(target_os = "macos")]
-    {
-        if mac::biometrics() {
-            return tr(keys::SETTINGS_USE_TOUCHID);
+    static LABEL: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+    LABEL.get_or_init(|| {
+        #[cfg(target_os = "macos")]
+        {
+            if mac::biometrics() {
+                return tr(keys::SETTINGS_USE_TOUCHID);
+            }
         }
-    }
-    tr(keys::SETTINGS_USE_SYSTEMPWD)
+        tr(keys::SETTINGS_USE_SYSTEMPWD)
+    })
 }
 
 /// Closes the OS prompt when dropped (macOS: `LAContext invalidate`), so a

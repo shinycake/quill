@@ -227,6 +227,57 @@ fn closing_the_passcode_box_keeps_a_lock_waiting_for_the_job(cx: &mut TestAppCon
 }
 
 #[gpui_kit::test]
+fn a_refused_job_whose_box_closed_says_so_in_a_note(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    // Turn off, Esc at once, and the passcode was wrong.
+    app.update_in(vcx, |app, window, cx| {
+        app.account.passcode.enabled = true;
+        app.open_passcode(cx);
+        app.run_passcode_job(
+            || (),
+            |app, (), _, cx| app.passcode_job_failed(&quill::passcode::PasscodeError::Wrong, cx),
+            window,
+            cx,
+        );
+        app.close_passcode(window, cx);
+    });
+    frame(vcx);
+    app.read_with(vcx, |app, _| {
+        assert!(!app.account.passcode.is_open(), "the box stayed closed");
+        assert_eq!(
+            app.connection.status_note(),
+            quill::passcode::PasscodeError::Wrong.to_string(),
+            "the refusal is not lost"
+        );
+    });
+}
+
+#[gpui_kit::test]
+fn the_auto_lock_and_touch_id_settings_wait_for_a_running_job(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, window, cx| {
+        app.account.passcode.enabled = true;
+        // A fixture: settings write nowhere, so only the guard can refuse.
+        app.account.passcode.demo = true;
+        let before = app.account.passcode.autolock_secs;
+        app.run_passcode_job(|| (), |_, (), _, _| {}, window, cx);
+        // A write now would be put back by the job's own save.
+        app.set_autolock_secs(before + 3_600, cx);
+        assert_eq!(app.account.passcode.autolock_secs, before);
+        app.set_system_unlock(true, cx);
+        assert!(!app.account.passcode.system_unlock.is_on());
+    });
+    frame(vcx);
+    app.update(vcx, |app, cx| {
+        let before = app.account.passcode.autolock_secs;
+        app.set_autolock_secs(before + 3_600, cx);
+        assert_eq!(app.account.passcode.autolock_secs, before + 3_600);
+    });
+}
+
+#[gpui_kit::test]
 fn the_lock_closes_the_call_windows_boxes_and_refuses_new_ones(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, "ready-chats");
     let vcx = &mut vcx;
