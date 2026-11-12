@@ -84,7 +84,7 @@ fn a_chat_windows_box_closes_with_it_and_does_not_move(cx: &mut TestAppContext) 
         "the box did not move to the main window"
     );
     h.app.read_with(cx, |app, _| {
-        assert!(app.notify.mute_box.is_none(), "its own close ran");
+        assert!(app.notify.mute_box().is_none(), "its own close ran");
     });
 }
 

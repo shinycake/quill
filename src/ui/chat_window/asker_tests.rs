@@ -439,13 +439,13 @@ fn the_auto_delete_picker_closes_with_its_own_chat_only(cx: &mut TestAppContext)
         app.note_window_press(None);
         app.enter_chat_ui(crate::ui::chat_window::tests::CHANNEL, cx);
         assert_eq!(
-            app.notify.ttl_picker,
+            app.notify.ttl_picker(),
             Some(OTHER),
             "another window's chat change"
         );
         app.set_window_scope(Some(OTHER));
         app.close_ttl_picker_of_left_chat(None);
-        assert_eq!(app.notify.ttl_picker, None, "its own chat left");
+        assert_eq!(app.notify.ttl_picker(), None, "its own chat left");
     });
 }
 

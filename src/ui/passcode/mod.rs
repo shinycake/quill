@@ -24,7 +24,7 @@ use quill::passcode::{
 use quill::platform::{MemorySecretStore, SecretStore, os_secret_store};
 use quill::settings::{list_accounts, safe_app_root};
 use stages::LockState;
-pub(crate) use stages::{AutoLock, PasscodeBox, SystemUnlock};
+pub(crate) use stages::{AutoLock, JobFate, JobKind, PasscodeBox, PasscodeJob, SystemUnlock};
 use std::cell::Cell;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -38,110 +38,6 @@ pub(crate) enum PasscodeView {
     Create,
     Change,
     Remove,
-}
-
-/// A slow passcode job (PBKDF2, the system prompt). It belongs to the job,
-/// not to the box: closing the box leaves it running, so a lock asked
-/// meanwhile still waits for the answer (a Turn off cannot land under it).
-/// The stage holds the task that waits for the answer, so the answer is
-/// always the held job's; replacing the stage drops the wait.
-#[derive(Default)]
-pub(crate) enum PasscodeJob {
-    #[default]
-    Idle,
-    Running {
-        kind: JobKind,
-        fate: JobFate,
-        task: Task<()>,
-    },
-}
-
-/// What a running job is.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum JobKind {
-    /// PBKDF2 on a background thread: it must answer, its result sets or
-    /// clears the master key.
-    Hashing,
-    /// The OS prompt (Touch ID, system password): the user can leave it by
-    /// typing the passcode instead.
-    SystemPrompt,
-}
-
-/// What happens with a running job's answer.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum JobFate {
-    /// The answer lands.
-    Counts,
-    /// A lock was asked while it ran: it lands with the answer.
-    ThenLock,
-    /// The lock screen's Log out ran meanwhile: the job's thread still
-    /// runs, and its answer is dropped (`run_passcode_job`,
-    /// `spawn_system_unlock_wait`).
-    Cancelled,
-}
-
-impl PasscodeJob {
-    pub(crate) fn is_running(&self) -> bool {
-        matches!(self, Self::Running { .. })
-    }
-
-    /// A passcode check is out: it cannot be left, and the unlock waits.
-    pub(crate) fn is_hashing(&self) -> bool {
-        matches!(
-            self,
-            Self::Running {
-                kind: JobKind::Hashing,
-                ..
-            }
-        )
-    }
-
-    /// The job ends with its answer. Returns what the answer does; an idle
-    /// stage answers like a job that counts.
-    pub(crate) fn finish(&mut self) -> JobFate {
-        match std::mem::take(self) {
-            Self::Idle => JobFate::Counts,
-            Self::Running { fate, task, .. } => {
-                // The task is the caller: let it finish the update it is in.
-                task.detach();
-                fate
-            }
-        }
-    }
-
-    /// Leave a system prompt that is still out (the user types the
-    /// passcode instead): its task and channel are dropped, so a late
-    /// answer lands nowhere. A passcode check cannot be left.
-    pub(crate) fn leave_system_prompt(&mut self) -> bool {
-        let leaves = matches!(
-            self,
-            Self::Running {
-                kind: JobKind::SystemPrompt,
-                fate: JobFate::Counts,
-                ..
-            }
-        );
-        if leaves {
-            *self = Self::Idle;
-        }
-        leaves
-    }
-
-    /// A lock asked while the job runs lands with its answer.
-    pub(crate) fn hold_lock(&mut self) {
-        if let Self::Running { fate, .. } = self
-            && *fate == JobFate::Counts
-        {
-            *fate = JobFate::ThenLock;
-        }
-    }
-
-    /// Log out from the lock screen: the answer is dropped.
-    pub(crate) fn cancel(&mut self) {
-        if let Self::Running { fate, .. } = self {
-            *fate = JobFate::Cancelled;
-        }
-    }
 }
 
 /// How long the wrong-passcode shake runs.

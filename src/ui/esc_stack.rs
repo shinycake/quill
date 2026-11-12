@@ -220,13 +220,13 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     ),
     layer!(
         "mute-menu",
-        |app| app.notify.mute_box.is_some(),
+        |app| app.notify.mute_box().is_some(),
         |app, _, cx| app.close_mute_menu(cx)
     ),
     // Phase B4: the TTL picker.
     layer!(
         "ttl-picker",
-        |app| app.notify.ttl_picker.is_some(),
+        |app| app.notify.ttl_picker().is_some(),
         |app, _, cx| {
             app.close_ttl_picker();
             cx.notify();

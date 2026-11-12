@@ -229,7 +229,7 @@ fn custom_mute_applies_the_total_and_closes_the_panel(cx: &mut TestAppContext) {
     vcx.update(|window, cx| window.click("mute-custom-apply", cx));
     frames(vcx);
     app.read_with(vcx, |app, _| {
-        assert!(app.notify.mute_box.is_none());
+        assert!(app.notify.mute_box().is_none());
         let Some(chat) = app.session().and_then(|s| s.chats.get(&chat_id.0)) else {
             panic!("chat missing");
         };

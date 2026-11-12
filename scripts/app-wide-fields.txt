@@ -19,7 +19,6 @@ players.speed | the playback speed preference
 players.volume * | the playback volume preference, and the level the unmute click comes back to
 delivery.notify_clicks | OS notification clicks; each `ChatClick` names its account
 delivery.notify_inflight | how many notification previews are being built, for the process
-delivery.next_preview_wait | the delay before the next preview build, for the process
 delivery.avatar_decodes | avatar decodes in flight by photo path; each waiting notification names its account
 delivery.avatar_decodes._job | the decode's task, owned by its entry: dropping the entry ends the wait
 delivery.avatar_decodes.waiting | the notifications waiting on the decode, each with its own account

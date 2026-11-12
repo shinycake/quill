@@ -6,7 +6,7 @@ use quill::lang::{keys, tr, tr_with, trn};
 
 impl QuillApp {
     pub(in crate::ui) fn close_mute_menu(&mut self, cx: &mut Context<Self>) {
-        self.notify.mute_box = None;
+        self.notify.close_mute();
         cx.notify();
     }
 
@@ -20,7 +20,7 @@ impl QuillApp {
     ) {
         self.open_mute_menu(cx);
         // box-host: `open_mute_menu` above opened the box; this retargets it.
-        self.notify.mute_box = Some(MuteBox {
+        self.notify.open_mute(MuteBox {
             chat: Some(chat_id),
             section: if custom {
                 MuteSection::Custom
@@ -37,13 +37,11 @@ impl QuillApp {
     /// window) does not retarget it.
     pub(in crate::ui) fn open_mute_menu(&mut self, cx: &mut Context<Self>) {
         let chat = self.session().and_then(|session| session.open_chat_id());
-        self.notify.mute_box = Some(MuteBox {
+        self.notify.open_mute(MuteBox {
             chat,
             section: MuteSection::Collapsed,
         });
         self.open_box(crate::ui::shell::DialogKind::MuteMenu);
-        self.notify.ttl_picker = None;
-        self.folders.menu_chat = None;
         self.queue_mute_time_inputs(cx);
         if let Some(chat_id) = chat {
             self.ensure_chat_volume_slider(chat_id, cx);

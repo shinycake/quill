@@ -301,3 +301,62 @@ fn the_unlock_connects_only_the_account_that_waited(cx: &mut TestAppContext) {
         assert!(app.account.passcode.connect_at_unlock.is_none());
     });
 }
+
+/// A system prompt nobody answers does not hold the lock screen: the
+/// passcode typed instead leaves it, and its late answer lands nowhere.
+#[gpui_kit::test]
+fn an_unanswered_system_prompt_is_left_by_typing_the_passcode(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    lock(&app, vcx);
+    let (answer, receiver) = futures_channel::oneshot::channel();
+    app.update_in(vcx, |app, window, cx| {
+        let master = quill::passcode::MasterKey::from_bytes([7; 32]);
+        app.spawn_system_unlock_wait(receiver, master, window, cx);
+        assert!(app.account.passcode.job.is_running());
+        assert!(
+            !app.account.passcode.job.is_hashing(),
+            "the prompt is not a passcode check: the field stays usable"
+        );
+        // The passcode is submitted: the prompt is left.
+        app.submit_unlock(window, cx);
+    });
+    frame(vcx);
+    assert!(
+        !app.read_with(vcx, |app, _| app.account.passcode.job.is_running()),
+        "the wait is dropped with its receiver"
+    );
+    // The OS finally says yes: nobody is waiting, so nothing unlocks.
+    assert!(answer.send(true).is_err());
+    frame(vcx);
+    assert!(app.read_with(vcx, |app, _| app.account.passcode.is_locked()));
+}
+
+/// A lock asked while a passcode check runs lands with its answer; a
+/// log-out from the lock screen cancels the answer instead.
+#[gpui_kit::test]
+fn a_running_job_holds_a_lock_and_a_logout_cancels_it(cx: &mut TestAppContext) {
+    use crate::ui::passcode::JobFate;
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, window, cx| {
+        app.account.passcode.enabled = true;
+        app.run_passcode_job(|| (), |_, (), _, _| {}, window, cx);
+        app.lock_by_passcode(cx);
+        let fate = |app: &QuillApp| match &app.account.passcode.job {
+            crate::ui::passcode::PasscodeJob::Running { fate, .. } => Some(*fate),
+            crate::ui::passcode::PasscodeJob::Idle => None,
+        };
+        assert_eq!(fate(app), Some(JobFate::ThenLock));
+        app.account.passcode.job.cancel();
+        assert_eq!(fate(app), Some(JobFate::Cancelled));
+        // A lock asked now does not un-cancel it.
+        app.lock_by_passcode(cx);
+        assert_eq!(fate(app), Some(JobFate::Cancelled));
+    });
+    frame(vcx);
+    assert!(
+        !app.read_with(vcx, |app, _| app.account.passcode.is_locked()),
+        "a cancelled job's answer locks nothing"
+    );
+}

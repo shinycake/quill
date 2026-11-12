@@ -502,6 +502,10 @@ fn an_older_presses_clear_leaves_a_newer_snapshot(cx: &mut TestAppContext) {
     // must not drop the second press's snapshot.
     let held = app.update_in(&mut vcx, |app, window, cx| {
         app.card_field_before_delete(CardField::Number, true, window, cx);
+        let older = app
+            .card_form_mut()
+            .and_then(|form| form.input_mut(CardField::Number))
+            .and_then(|input| input.delete_cycle());
         app.card_field_before_delete(CardField::Number, true, window, cx);
         let Some(input) = app
             .card_form_mut()
@@ -509,9 +513,12 @@ fn an_older_presses_clear_leaves_a_newer_snapshot(cx: &mut TestAppContext) {
         else {
             return (false, false);
         };
-        input.expire_delete(1);
+        let (Some(older), Some(newer)) = (older, input.delete_cycle()) else {
+            return (false, false);
+        };
+        input.expire_delete(&older);
         let after_older = input.has_delete_snapshot();
-        input.expire_delete(2);
+        input.expire_delete(&newer);
         (after_older, input.has_delete_snapshot())
     });
     assert_eq!(held, (true, false));

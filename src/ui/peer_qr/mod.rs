@@ -616,36 +616,31 @@ impl QuillApp {
         if open.clock.is_running() {
             return;
         }
-        let id = open.state.id;
-        self.arm_qr_clock(id, cx);
+        self.arm_qr_clock(cx);
     }
 
-    /// One tick of box `id`'s clock after [`CLOCK`]; a tick that finds a
-    /// countdown still showing arms the next. The box holds the one task, so
-    /// each tick replaces the task that ran it.
-    fn arm_qr_clock(&mut self, id: u64, cx: &mut Context<Self>) {
+    /// One tick of the open box's clock after [`CLOCK`]; a tick that finds a
+    /// countdown still showing arms the next. The box holds the one task
+    /// (a box that closed or was replaced drops it with its clock), and each
+    /// tick replaces the task that ran it.
+    fn arm_qr_clock(&mut self, cx: &mut Context<Self>) {
         let clock = self.spawn_screen(cx, async move |this, cx| {
             cx.background_executor().timer(CLOCK).await;
             let _ = this.update(cx, |this, cx| {
-                if this.qr_clock(id, cx) {
-                    this.arm_qr_clock(id, cx);
+                if this.qr_clock(cx) {
+                    this.arm_qr_clock(cx);
                 }
             });
         });
-        if let Some(open) = self
-            .peer_qr
-            .open
-            .as_mut()
-            .filter(|open| open.state.id == id)
-        {
+        if let Some(open) = self.peer_qr.open.as_mut() {
             open.clock = QrClock::Running { _task: clock };
         }
     }
 
-    /// One clock tick for box `id`: a code may have run out, a countdown
+    /// One clock tick of the open box: a code may have run out, a countdown
     /// moved. `false` once nothing counts down or the box is gone.
-    fn qr_clock(&mut self, id: u64, cx: &mut Context<Self>) -> bool {
-        if self.peer_qr.open.as_ref().map(|open| open.state.id) != Some(id) {
+    fn qr_clock(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.peer_qr.open.is_none() {
             return false;
         }
         // The box stays open under the lock, but nothing is asked or run

@@ -33,16 +33,28 @@ pub(crate) struct MuteBox {
     pub(super) section: MuteSection,
 }
 
+/// The per-chat settings box open from a menu: the Mute panel, the
+/// auto-delete picker or the Add to folder box, one at a time. One value,
+/// so opening one is the other closing and a fourth box has nothing to
+/// remember to clear.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum ChatSettingsBox {
+    #[default]
+    None,
+    Mute(MuteBox),
+    /// Self-destruct / auto-delete timer picker (`setChatMessageAutoDeleteTime`),
+    /// open for this chat.
+    Ttl(ChatId),
+    /// The Add to folder box, with the chat it was opened for.
+    Folders(ChatId),
+}
+
 pub(crate) struct NotifyUi {
-    /// The Mute panel, while it is open.
-    pub(super) mute_box: Option<MuteBox>,
+    /// The chat settings box that is open, if any.
+    pub(super) chat_box: ChatSettingsBox,
     /// The days / hours / minutes fields of the custom mute duration
     /// (tdesktop `ChooseTimeWidget`), made when the panel opens.
     pub(super) mute_time: Option<super::notification_settings::MuteTimeInputs>,
-    /// Phase B4: self-destruct / auto-delete timer picker below the
-    /// conversation header (`setChatMessageAutoDeleteTime`), open for
-    /// this chat.
-    pub(super) ttl_picker: Option<ChatId>,
     /// Parity slice: which defaults-dialog section's sound picker is
     /// expanded (`None` = all collapsed).
     pub(super) defaults_sound_picker: Option<SoundPickerTarget>,
@@ -81,18 +93,79 @@ impl NotifyUi {
         ) || self.defaults_sound_picker.is_some()
     }
 
+    /// The open Mute panel.
+    pub(super) fn mute_box(&self) -> Option<MuteBox> {
+        match self.chat_box {
+            ChatSettingsBox::Mute(open) => Some(open),
+            _ => None,
+        }
+    }
+
+    /// The chat the auto-delete picker is open for.
+    pub(super) fn ttl_picker(&self) -> Option<ChatId> {
+        match self.chat_box {
+            ChatSettingsBox::Ttl(chat) => Some(chat),
+            _ => None,
+        }
+    }
+
+    /// The chat the Add to folder box is open for.
+    pub(super) fn folder_menu_chat(&self) -> Option<ChatId> {
+        match self.chat_box {
+            ChatSettingsBox::Folders(chat) => Some(chat),
+            _ => None,
+        }
+    }
+
+    /// Open the Mute panel (the others close).
+    pub(super) fn open_mute(&mut self, open: MuteBox) {
+        self.chat_box = ChatSettingsBox::Mute(open);
+    }
+
+    /// Open the auto-delete picker (the others close).
+    pub(super) fn open_ttl(&mut self, chat: ChatId) {
+        self.chat_box = ChatSettingsBox::Ttl(chat);
+    }
+
+    /// Open the Add to folder box (the others close).
+    pub(super) fn open_folder_menu(&mut self, chat: ChatId) {
+        self.chat_box = ChatSettingsBox::Folders(chat);
+    }
+
+    /// Close the Mute panel; another box that is open stays.
+    pub(super) fn close_mute(&mut self) {
+        if self.mute_box().is_some() {
+            self.chat_box = ChatSettingsBox::None;
+        }
+    }
+
+    /// Close the auto-delete picker; another box that is open stays.
+    pub(super) fn close_ttl(&mut self) {
+        if self.ttl_picker().is_some() {
+            self.chat_box = ChatSettingsBox::None;
+        }
+    }
+
+    /// Close the Add to folder box; another box that is open stays.
+    pub(super) fn close_folder_menu(&mut self) {
+        if self.folder_menu_chat().is_some() {
+            self.chat_box = ChatSettingsBox::None;
+        }
+    }
+
     /// The chat the open Mute panel is for.
     pub(super) fn mute_chat(&self) -> Option<ChatId> {
-        self.mute_box.and_then(|b| b.chat)
+        self.mute_box().and_then(|b| b.chat)
     }
 
     pub(super) fn mute_section(&self) -> MuteSection {
-        self.mute_box.map_or(MuteSection::Collapsed, |b| b.section)
+        self.mute_box()
+            .map_or(MuteSection::Collapsed, |b| b.section)
     }
 
     /// Expand one section of the open Mute panel (no-op when it is closed).
     pub(super) fn set_mute_section(&mut self, section: MuteSection) {
-        if let Some(open) = self.mute_box.as_mut() {
+        if let ChatSettingsBox::Mute(open) = &mut self.chat_box {
             open.section = section;
         }
     }
@@ -117,9 +190,8 @@ impl NotifyUi {
 
     pub(super) fn new() -> Self {
         Self {
-            mute_box: None,
+            chat_box: ChatSettingsBox::None,
             mute_time: None,
-            ttl_picker: None,
             defaults_sound_picker: None,
             defaults_exceptions_scope: None,
             notifications_confirm: None,

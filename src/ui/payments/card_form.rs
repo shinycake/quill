@@ -35,9 +35,6 @@ pub(crate) struct CardInput {
     pub(crate) check: FieldCheck,
     /// A Backspace or Delete whose edit has not landed yet (`field_edit`).
     delete: DeleteEdit,
-    /// Number of the last Backspace or Delete press, so only the press that
-    /// took a snapshot can clear it.
-    presses: u64,
 }
 
 /// What the last check of a field found, tied to the text it judged: the
@@ -61,17 +58,26 @@ impl FieldCheck {
 }
 
 impl CardInput {
-    fn next_press(&mut self) -> u64 {
-        self.presses = self.presses.wrapping_add(1);
-        self.presses
-    }
-
-    /// The effect cycle of `press` is over: drop its snapshot, unless the
-    /// edit already took it or a newer press replaced it.
-    pub(crate) fn expire_delete(&mut self, press: u64) {
-        if matches!(self.delete, DeleteEdit::Snapshot { press: held, .. } if held == press) {
+    /// The effect cycle that took a snapshot is over: drop it, unless the
+    /// edit already took it or a newer press replaced it (then `cycle`
+    /// names a snapshot nobody holds any more).
+    pub(crate) fn expire_delete(&mut self, cycle: &std::rc::Weak<()>) {
+        if cycle.strong_count() > 0 {
             self.delete = DeleteEdit::None;
         }
+    }
+
+    /// Start a snapshot for a Backspace or Delete press; the handle ends
+    /// its effect cycle (`expire_delete`). A snapshot it replaces is gone,
+    /// so its own handle expires nothing.
+    fn hold_delete(&mut self, before: EditSnapshot) -> std::rc::Weak<()> {
+        let cycle = std::rc::Rc::new(());
+        let handle = std::rc::Rc::downgrade(&cycle);
+        self.delete = DeleteEdit::Snapshot {
+            before,
+            _cycle: cycle,
+        };
+        handle
     }
 
     /// The field is marked as an error: its text is the rejected text.
@@ -81,11 +87,16 @@ impl CardInput {
 }
 
 /// The text just before a Backspace or Delete, until the edit it belongs
-/// to has been read or the effect cycle it was taken in is over. The press
-/// number lets the end-of-cycle clear leave a newer press's snapshot alone.
+/// to has been read or the effect cycle it was taken in is over. The
+/// snapshot owns its cycle token: the end-of-cycle clear holds only a weak
+/// handle, so a newer press (or the edit taking the snapshot) leaves it
+/// with nothing to clear.
 pub(crate) enum DeleteEdit {
     None,
-    Snapshot { before: EditSnapshot, press: u64 },
+    Snapshot {
+        before: EditSnapshot,
+        _cycle: std::rc::Rc<()>,
+    },
 }
 
 impl DeleteEdit {
@@ -103,6 +114,14 @@ impl DeleteEdit {
 impl CardInput {
     pub(crate) fn has_delete_snapshot(&self) -> bool {
         matches!(self.delete, DeleteEdit::Snapshot { .. })
+    }
+
+    /// The handle that ends the held snapshot's effect cycle.
+    pub(crate) fn delete_cycle(&self) -> Option<std::rc::Weak<()>> {
+        match &self.delete {
+            DeleteEdit::Snapshot { _cycle, .. } => Some(std::rc::Rc::downgrade(_cycle)),
+            DeleteEdit::None => None,
+        }
     }
 }
 
@@ -279,7 +298,6 @@ impl QuillApp {
                 state,
                 check: FieldCheck::Fine,
                 delete: DeleteEdit::None,
-                presses: 0,
             });
         }
         let card_form = CardForm {
@@ -432,15 +450,11 @@ impl QuillApp {
         let Some(input) = self.card_form_mut().and_then(|form| form.input_mut(field)) else {
             return;
         };
-        let press = input.next_press();
-        input.delete = DeleteEdit::Snapshot {
-            before: snapshot,
-            press,
-        };
+        let cycle = input.hold_delete(snapshot);
         self.defer_screen_in(window, cx, move |this, window, cx| {
             this.defer_screen_in(window, cx, move |this, _, _| {
                 if let Some(input) = this.card_form_mut().and_then(|form| form.input_mut(field)) {
-                    input.expire_delete(press);
+                    input.expire_delete(&cycle);
                 }
             });
         });

@@ -10220,3 +10220,47 @@ add and closed link save), `composer_sends_tests` (an ack never takes a
 neighbour's clear), `chat_window::asker_tests` (gif ask settles; two
 windows keep their own link text), `forum_extras::tests` (both answer
 orders), `deep_link_routes_tests` (seek stays with its account).
+
+### Sweep fixes (r4-09)
+
+| Ids | What changed |
+| --- | --- |
+| 19-005, g-328, 19-007, g-339, g-334, g-361, g-362, g-363, g-364 | `PasscodeJob` is `Idle` or `Running { kind, fate, task }`. The stage holds the task that waits for the answer (`run_passcode_job`, `spawn_system_unlock_wait`), so the answer is the held job's by construction, a replaced stage drops the wait, and `finish()` is the one exit. `fate` is `Counts`, `ThenLock` (a lock asked while it ran) or `Cancelled` (the lock screen's Log out); a lock asked after a Log out no longer turns `Cancelled` back into `ThenLock`. The OS prompt wait is a `futures_channel::oneshot` receiver awaited by the held task, not a 100 ms timer loop; `submit_unlock` calls `leave_system_prompt`, so typing the passcode (or pressing Unlock) drops an unanswered prompt, and the Unlock button is only busy for a passcode check (`is_hashing`). The `RefCell` cells carrying the answer and the master key are `Cell`s (`take`). Tests `an_unanswered_system_prompt_is_left_by_typing_the_passcode`, `a_running_job_holds_a_lock_and_a_logout_cancels_it`. |
+| 19-006, g-333 | `spawn_passcode_tick` returns its task into `PasscodeUi::autolock` (`AutoLock::Watching { _task }`), so the lock owner drops the watcher; no `.detach()`. |
+| g-384, g-342, g-346, g-355, g-347, g-348 | The six dialog bodies that were `Rc<RefCell<Option<_>>>` with `borrow_mut().take()` are `Rc<Cell<Option<_>>>` with `take()`. |
+| g-385, g-386, g-387, g-365 | `Surfaces::media_panel` is a plain `Presence` (the reveal has `&mut self`); `char_width` keeps its cache in a thread-local `Cell` taken while in use (a re-entrant call measures again); `peer_qr::card::fit` takes `&Window` (the measure only reads the text system) so the `RefCell<&mut Window>` is gone. |
+| 17-001 | `CallBox::Share(ShareStage)`: `Choosing(ShareLink)` or `Copied(ShareLink)`. Choosing the other link leaves `Copied`; the notice is tied to the link it copied. |
+| 17-002 | The in-call composer is `CallView::composer`, made when the call window first draws it (`sync_group_call_composer`) and gone with the view, so no `composer_call` stamp or hand clear remains. Enter finds the call window through `group_call.window`, so a reopened window shows the same composer. `GroupCallScreen` has no composer. |
+| 17-004 | `StreamPhoto::Blurred { image }` holds the picture; a failed read is `StreamPhoto::Failed { path }`, not retried by a frame. |
+| 17-005 | `send_group_call_join` sets the self-mute mark only after `join_video_chat` returned `Ok`; a refused join changes nothing. |
+| 17-003 | `settle_group_edit_box` turns a failed `Saving` into `SaveStage::Refused(reason)` as it already did for `Exiting`, so 64 later refusals cannot make the box close as saved. Test `a_refused_toggle_save_stays_refused_after_the_registry_forgets_it`. |
+| g-369 | `CallWindow::Opening { _open: Task<()> }`: the open is a task the stage owns instead of a bare marker plus `cx.defer`. |
+| g-378 | `arm_stream_hide_timer` is one wake-up per task (`stream_hide_wake`); a moved deadline replaces the task (`rearm_timer` on the full-screen fade) instead of a loop. |
+| g-370, g-376 | `EntryStage` holds the entry's `Load` in every variant (settled with the result, by remove and insert), and `SizedState::Loading { views, task }` holds the decode task. |
+| g-374, g-371, g-373, g-375, g-372, g-325, g-326 | Not in-flight stages: `DemandStage::ForRow { pass }` (a click waiting for its row's history pass), `Refire::InCallback` (a synchronous re-entry guard), `Capture::Rebinding(id)` (the row being rebound), `FileView` (the file card's derived view), `VideoFullscreen::GoingBack` (toggled by the next frame), `DeliveryView` (the footer's derived view). Renamed for what they are; none waits on a request or task. |
+| 19-012, g-331 | `TitleCheck` is `Fine` or `Judged(text)`. The error shows while the field holds the judged text and the dialog's own check (`title_refused`, recomputed from the text) or TDLib's `NO_CHAT_TITLE` refused it, so the sent text is no longer a variant. |
+| 19-014 | A Create the driver declines (`Ok(None)`) with a live connection sets the error note instead of leaving a dead button. |
+| g-368 | The topic editor's icon wait is `TopicEditor::icons_request`, the request the editor sent; it waits only while the session still holds that request. |
+| g-322, 19-011 | `onboarding` reads `auth_submit_busy()`. The purpose check now lives in `auth_ui.rs` (owned by another bundle): the sign-in busy flag is still `has_auth_submit()` there. |
+| g-377 | `hide_main_window`'s fallback no longer detaches the leave-full-screen poll; with no `MainWindow` global there is no stage to finish, so the poll is dropped. |
+| g-379 | `ensure_live_location_tick` arms one wake-up per task (`arm_live_location_wake`), held in `live_location_tick`. |
+| g-383 | The location answer is a oneshot (`geolocation::Answer` / `Receiver`) awaited by the picker's task and raced against one timer (`race_answer`); a limit that ends while the permission prompt is open starts again. `WaitBudget` and the 100 ms poll are gone. |
+| g-338, g-332, 19-002 | `NotifyDelivery::preview_waits` holds `PreviewWait` entries that own their deadline task; the poll's drain shows the ones whose photo landed (`settle_preview_waits`). No id counter, no poll loop. |
+| g-336, 19-003 | `ensure_notify_clock` arms one step per task (`arm_notify_clock`); `notify_windows_tick` stops the clock itself. |
+| g-341, g-335 | The macOS menu sync task is held in a `MenuSyncTask` global; the burst gap is `sleep_or_wake_paced`. (macOS only: not built in the Linux gate.) |
+| g-382 | The voice tick is one wake-up per task (`arm_voice_tick`), held in `recording.tick`. |
+| g-381, g-380 | The viewer clip's session tick (`arm_viewer_session_tick`) and the HDR headroom poll (`poll_viewer_headroom(.., tick)`) are one wake-up per task, replacing the task their stage holds. Both were on the allow list; the lines are gone. |
+| g-340, 19-008 | `OpenQr::clock` is `QrClock::{Stopped, Running { _task }}`, one tick per task; the clock no longer carries the box id. |
+| 19-009, g-329, g-330 | `Slot::Loading { _job: Task<()> }` in `Art` and `GiftArt` (`run_off_ui_held`): clearing the art or leaving the screen cancels the job. |
+| 19-010, g-324 | `ApplyStage::Applied` (the finished result) replaces `Sent`. |
+| 18-006 | `LanguageWrites` keeps one `WriteStage::Writing { task }` per file; a write awaits the task of the one before it, so writes of a file land in order with no counters or detached tasks. |
+| 18-003 | `close_gift_code_box` keeps the box while `applyPremiumGiftCode` is out, the Close button is disabled meanwhile, and a second link does not check over it. Test `close_keeps_a_gift_code_that_is_applying_and_closes_one_that_is_not`. tdesktop reports the answer even if the box is gone; Quill keeps the box instead (the smallest safe choice). |
+| 18-001 | The box draws only a quote for its own chat (`gift.chat_id` against the box's chat), so a purchase of another chat never shows in it. |
+| 18-002 | `fetch_sticker_categories` marks the strip `Failed` when the send never left, so a render does not ask again; reopening the panel retries (`clear_error`). Test `a_category_ask_that_cannot_be_sent_fails_instead_of_staying_idle`. |
+| 18-005 | `MediaPanel::show(tab, category)` is the one writer of tab, category, rows key and section; the tab change, the category choice and the selector open call it. |
+| 18-007 | `ViewerExtra::copy` is `PhotoCopy::{Idle, Encoding { task }}`, reset by `ViewerUi::new_item` and `closed`. |
+| 18-004 | `ViewerCaption` has no key and no render-time reset: `new_item` resets it (the item's own transition). |
+| 19-004 | `NotifyUi::chat_box` is `ChatSettingsBox::{None, Mute, Ttl, Folders}`; opening one is the others closing, and each close only closes its own variant. `FolderUi::menu_chat` and the two `NotifyUi` options are gone. |
+| 19-001 | Not a bug: `send_scope_notification_settings` shows the save at once (`show_scope_save`) with a rollback on refusal, so the second change starts from the first (test `a_second_scope_change_keeps_the_first_one_that_has_not_been_answered`; reactions use `show_reaction_save`). |
+| 19-015 | `PolledRedraw::owed: Owed` holds the three owed slots with `clear`, `take_list` and `take_conversation` as their only writers. |
+| 19-013 | `DeleteEdit::Snapshot { before, _cycle: Rc<()> }`; the end-of-cycle clear holds a `Weak` and clears only a snapshot that is still held. The `presses` counter is gone. |

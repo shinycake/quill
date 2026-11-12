@@ -864,9 +864,15 @@ impl QuillApp {
             };
             let state = state.clone();
             let app = cx.weak_entity();
+            // screen-scope: the composer is the on-screen account's tracked call's;
+            // the closure sends only while it is still that call's composer.
             cx.defer(move |cx| {
                 let _ = handle.update(cx, |_, window, cx| {
                     let _ = app.update(cx, |this, cx| {
+                        if this.call_view().and_then(|view| view.composer.as_ref()) != Some(&state)
+                        {
+                            return;
+                        }
                         let marked =
                             state.update(cx, |input, cx| input.marked_text_range(window, cx));
                         if quill::composer::should_send_on_enter(
