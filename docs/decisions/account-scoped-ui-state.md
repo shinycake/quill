@@ -10284,3 +10284,13 @@ sweep_r2_13}`, `ui::ai_compose::dialog_tests`, `ui::agent_driver_tests`
 | omarchy | A failed read keeps the generation it looked at (`note_stamp`). |
 | Docs and tests | `RETRY_AFTER` and `STORY_PAGE_OPS_CAP` docs, "still sending" docs, `agent_bridge` docs, `agent_bridge.ui_send` line, `profile_music` no-ops. |
 
+
+Round 3 of r4-06: the bundle adds no allow or baseline line (the `pushed` guard
+rule and its three allows are gone; `WorkerTicket` is the stage-enums carrier
+for the thread that ends a sticker clip's `Opening` / `Decoding`). A failed
+history date lookup is a status note, and a chat window's "no media" note is
+its own. The poll option menu, edit, delete-account and ban answers match the
+request their stage holds; the story lists, the trending sticker sets and the
+mini-app launch are one value each with the request in the stage; the invite
+results live in the conference call. The sidebar peek and the agent takeover
+tests run on clocks the test moves.
