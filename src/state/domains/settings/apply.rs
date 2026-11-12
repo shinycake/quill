@@ -194,7 +194,7 @@ impl Session {
                     self.settings
                         .data_storage
                         .seed_from_presets(low, medium, high);
-                    self.settings.data_storage_dirty = true;
+                    self.settings.data_storage_disk = DataStorageDisk::Due;
                 }
             }
             SettingsPayload::UpdateUnconfirmedSession { session, count } => {

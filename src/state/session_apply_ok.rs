@@ -261,7 +261,7 @@ impl Session {
         {
             *self.settings.data_storage.for_network_mut(network) = settings;
             self.settings.data_storage.seeded = crate::data_settings::PresetsSeed::Seeded;
-            self.settings.data_storage_dirty = true;
+            self.settings.data_storage_disk = DataStorageDisk::Due;
         }
         // Batch 4: a `confirmSession` / `terminateSession` for the
         // new-login alert succeeded.

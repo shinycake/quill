@@ -1,7 +1,7 @@
 //! Connect driver: storage statistics, auto-download presets and storage limits.
 use super::*;
 use crate::data_settings::PresetsSeed;
-use crate::state::{StorageClear, StorageSaveKind};
+use crate::state::{DataStorageDisk, StorageClear, StorageSaveKind};
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Phase S2: `getStorageStatistics` for the storage-usage overlay —
@@ -98,7 +98,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// only on the confirmed `ok` (the `ok` carries none, so they ride
     /// the request purpose — the setAccountTtl precedent, state.rs:8383,
     /// which applies on `ok` too), and the driver persists via
-    /// `data_storage_dirty` on the next ingest. A send failure or
+    /// `data_storage_disk` on the next ingest. A send failure or
     /// TDLib error leaves the local prefs untouched.
     pub fn set_auto_download_settings(
         &mut self,
@@ -302,17 +302,23 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// said on the Data & Storage page and tried again when the settings
     /// change next, not on every ingest.
     pub(crate) fn persist_data_storage_if_dirty(&mut self) {
-        if !std::mem::take(&mut self.session.settings.data_storage_dirty) {
+        if self.session.settings.data_storage_disk != DataStorageDisk::Due {
             return;
         }
         let written = self.save_data_storage_prefs();
-        let save = &mut self.session.settings.data_storage_save;
+        let settings = &mut self.session.settings;
         match written {
-            Ok(()) => save.begin(StorageSaveKind::Persist),
-            Err(_) => save.fail(
-                StorageSaveKind::Persist,
-                "Couldn't save the Data and Storage settings.",
-            ),
+            Ok(()) => {
+                settings.data_storage_disk = DataStorageDisk::Saved;
+                settings.data_storage_save.begin(StorageSaveKind::Persist);
+            }
+            Err(_) => {
+                settings.data_storage_disk = DataStorageDisk::Unsaved;
+                settings.data_storage_save.fail(
+                    StorageSaveKind::Persist,
+                    "Couldn't save the Data and Storage settings.",
+                );
+            }
         }
     }
 

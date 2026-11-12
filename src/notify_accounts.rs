@@ -230,7 +230,9 @@ pub fn drain_on_screen(session: &mut Session) -> NotifyDrain {
         notifications: std::mem::take(&mut settings.pending_notifications),
         clears: settings.notified.take_clears(),
         sound_plays: std::mem::take(&mut settings.pending_sound_plays),
-        attention: std::mem::take(&mut settings.pending_attention),
+        attention: settings
+            .take_alerts()
+            .contains(&crate::state::OsAlert::Attention),
     }
 }
 

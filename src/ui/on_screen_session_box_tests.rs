@@ -60,8 +60,10 @@ fn a_switch_closes_the_boxes_whose_flag_is_the_sessions(cx: &mut TestAppContext)
                     .into_lookup(LookupStage::Loading(quill::ids::RequestId(1))),
             );
         }
-        app.settings
-            .set_box(crate::ui::settings_state::SettingsBox::ArchiveSettings, true);
+        app.settings.set_box(
+            crate::ui::settings_state::SettingsBox::ArchiveSettings,
+            true,
+        );
         app.open_location_picker(cx);
     });
     frames(vcx);

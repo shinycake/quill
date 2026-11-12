@@ -69,7 +69,10 @@ fn set_auto_download_settings_ok_applies_confirmed_settings() {
             .is_auto_download_enabled
     );
     assert!(session.settings.data_storage.seeded.is_seeded());
-    assert!(session.settings.data_storage_dirty);
+    assert_eq!(
+        session.settings.data_storage_disk,
+        quill::state::DataStorageDisk::Due
+    );
     assert!(session.settings.data_storage_error().is_none());
 }
 

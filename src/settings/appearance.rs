@@ -9,6 +9,36 @@ use super::*;
 /// server-side as `setChatBackground`, schema 1.8.67 :13473, but this
 /// slice paints local solid colors only — see DECISIONS.md).
 ///
+/// What the system battery saver does to the animation switches (tdesktop
+/// `ignoreBatterySaving`). Stored in the settings file as the bool it was.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(from = "bool", into = "bool")]
+pub enum BatterySaver {
+    /// The animation switches yield while the battery saver is on.
+    #[default]
+    Follow,
+    /// The animation switches stay as set even while it is on.
+    Ignore,
+}
+
+impl From<bool> for BatterySaver {
+    fn from(ignore: bool) -> Self {
+        if ignore { Self::Ignore } else { Self::Follow }
+    }
+}
+
+impl From<BatterySaver> for bool {
+    fn from(saver: BatterySaver) -> Self {
+        saver == BatterySaver::Ignore
+    }
+}
+
+impl BatterySaver {
+    pub fn ignores(self) -> bool {
+        self == Self::Ignore
+    }
+}
+
 /// TGX reference (`Settings.java`, `SettingsThemeController.java`):
 /// night modes None/Auto(lux)/Scheduled/System, per-theme accent color
 /// ids, solid wallpapers via the backgrounds API, a text-size slider,
@@ -166,8 +196,8 @@ pub struct AppearancePrefs {
     pub power_saving: u32,
     /// tdesktop `ignoreBatterySaving`: keep the animation switches as set
     /// even while the system battery saver is on.
-    #[serde(default)]
-    pub ignore_battery_saving: bool,
+    #[serde(default, rename = "ignore_battery_saving")]
+    pub battery_saver: BatterySaver,
     /// Chat wallpaper: the theme background, a preset colour or the
     /// account's Telegram wallpaper.
     #[serde(flatten, default)]
@@ -288,7 +318,7 @@ impl Default for AppearancePrefs {
             system_accent: false,
             font_family: String::new(),
             power_saving: 0,
-            ignore_battery_saving: false,
+            battery_saver: BatterySaver::Follow,
             wallpaper: WallpaperSource::Theme,
             wallpaper_tile_day: false,
             wallpaper_tile_night: false,
@@ -495,7 +525,7 @@ mod tests {
             system_accent: true,
             font_family: "Avenir".into(),
             power_saving: crate::power_saving::Flag::StickersChat.bit(),
-            ignore_battery_saving: true,
+            battery_saver: BatterySaver::Ignore,
             wallpaper: WallpaperSource::Telegram,
             wallpaper_tile_day: true,
             wallpaper_tile_night: false,

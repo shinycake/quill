@@ -315,16 +315,17 @@ fn a_failed_write_keeps_the_refetch_that_went_stale_meanwhile() {
 
 #[test]
 fn a_failed_website_write_keeps_the_refetch_that_went_stale_meanwhile() {
-    let mut edit = crate::state::ListEdit::Idle;
-    edit.begin_write();
+    use crate::ids::RequestId;
+    let mut edit = crate::state::fetch::ListOp::Idle;
+    edit.begin(RequestId(1));
     edit.mark_stale();
-    edit.write_failed();
-    assert!(edit.needs_refetch());
+    edit.failed(Some(RequestId(1)));
+    assert!(edit.is_stale());
     // With nothing stale, a failed write goes back to idle.
     edit.refetched();
-    edit.begin_write();
-    edit.write_failed();
-    assert_eq!(edit, crate::state::ListEdit::Idle);
+    edit.begin(RequestId(2));
+    edit.failed(Some(RequestId(2)));
+    assert_eq!(edit, crate::state::fetch::ListOp::Idle);
 }
 
 #[test]

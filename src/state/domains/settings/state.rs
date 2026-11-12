@@ -100,72 +100,6 @@ impl ReadDate {
     }
 }
 
-/// A write against a fetched list (sessions, connected websites).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum ListEdit {
-    /// No write in flight and the list is current.
-    #[default]
-    Idle,
-    /// A write is in flight: its buttons stay disabled. `refetch` is set
-    /// when the list went stale before or while the write was out, so a
-    /// failed write still leaves the refetch owed.
-    InFlight { refetch: bool },
-    /// A write succeeded: the cache stays visible and is refetched from
-    /// the authoritative answer on the next ingest (never an optimistic
-    /// change). Also set when an update says the list changed elsewhere.
-    Refetch,
-}
-
-impl ListEdit {
-    pub fn in_flight(self) -> bool {
-        matches!(self, Self::InFlight { .. })
-    }
-
-    /// The list is out of date and should be asked for again.
-    pub fn needs_refetch(self) -> bool {
-        self == Self::Refetch
-    }
-
-    /// A write went out. A refetch owed before it stays owed.
-    pub fn begin_write(&mut self) {
-        *self = Self::InFlight {
-            refetch: matches!(self, Self::Refetch | Self::InFlight { refetch: true }),
-        };
-    }
-
-    /// The write succeeded: the list is refetched from the answer.
-    pub fn write_succeeded(&mut self) {
-        *self = Self::Refetch;
-    }
-
-    /// The write failed or never left: back to where the list stood, so a
-    /// refetch owed meanwhile is still asked for.
-    pub fn write_failed(&mut self) {
-        *self = match *self {
-            Self::InFlight { refetch: true } | Self::Refetch => Self::Refetch,
-            _ => Self::Idle,
-        };
-    }
-
-    /// The refetch answered or failed: the list is current again (or the
-    /// user refreshes by hand). A write in flight stays in flight.
-    pub fn refetched(&mut self) {
-        if *self == Self::Refetch {
-            *self = Self::Idle;
-        }
-    }
-
-    /// Something changed elsewhere: ask again. A write that is out keeps
-    /// the need, so its failure does not forget it.
-    pub fn mark_stale(&mut self) {
-        match self {
-            Self::Idle => *self = Self::Refetch,
-            Self::InFlight { refetch } => *refetch = true,
-            Self::Refetch => {}
-        }
-    }
-}
-
 /// The device-link round trip (`confirmQrCodeAuthentication`). The page
 /// lock is `sessions_op`'s; this holds the request the screen that sent it
 /// waits for and then how it ended. `Waiting` leaves on that request's
@@ -293,12 +227,13 @@ pub struct SettingsState {
     /// Phase 8.1: notifications decided by the reducer, drained by the UI for
     /// OS dispatch. Same-chat bursts coalesce into one entry ("N new messages").
     pub pending_notifications: Vec<QueuedNotification>,
-    /// A notification-worthy message arrived: the UI bounces the Dock icon /
-    /// flashes the taskbar (when the user wants it and the OS is not in
-    /// Do Not Disturb). Set independently of the "Desktop notifications"
-    /// switch, like tdesktop's alert. An event the notifier takes, not a
-    /// stage: nothing is asked and nothing answers it.
-    pub pending_attention: bool,
+    /// OS alerts queued for the notifier, oldest first, each once: a
+    /// notification-worthy message arrived and the UI bounces the Dock icon
+    /// / flashes the taskbar (when the user wants it and the OS is not in
+    /// Do Not Disturb). Queued independently of the "Desktop notifications"
+    /// switch, like tdesktop's alert. Events the notifier takes, not a
+    /// stage: nothing is asked and nothing answers them.
+    pub pending_alerts: Vec<OsAlert>,
     /// TDLib option `disable_contact_registered_notifications`: the inverse
     /// of tdesktop's "Contact joined Telegram" event switch.
     pub disable_contact_registered_notifications: bool,
@@ -353,10 +288,12 @@ pub struct SettingsState {
     /// `data_storage.json` at session setup; seeded once from
     /// `getAutoDownloadSettingsPresets` when unseeded.
     pub data_storage: DataStoragePrefs,
-    /// Slice S4: the presets answer seeded `data_storage` — the driver
-    /// persists it on the next ingest (the reducer cannot touch the
-    /// filesystem).
-    pub data_storage_dirty: bool,
+    /// Slice S4: whether `data_storage` is on disk. The reducer marks it
+    /// `Due` (a presets answer seeded it, a save was confirmed) and the
+    /// driver writes it on the next ingest (the reducer cannot touch the
+    /// filesystem); a write that failed leaves it `Unsaved` until the
+    /// next change marks it due again.
+    pub data_storage_disk: DataStorageDisk,
     /// Slice S4: last Data & Storage failure, shown on the screen
     /// (failures surface there, never as toasts — the S3 pattern).
     /// Slice S4: the failure line of each kind of Data & Storage save; it
@@ -494,7 +431,39 @@ pub struct SettingsState {
     pub business_extra: BusinessExtraState,
 }
 
+/// Where the Data & Storage settings stand against `data_storage.json`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum DataStorageDisk {
+    /// What the file holds is what the session holds.
+    #[default]
+    Saved,
+    /// The session changed them: the driver writes on its next ingest.
+    Due,
+    /// The last write failed (a read-only folder, a full disk): the page
+    /// said so, and the next change marks them due again.
+    Unsaved,
+}
+
+/// What the notifier does for the OS beside showing notifications.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OsAlert {
+    /// Bounce the Dock icon / flash the taskbar for a new message.
+    Attention,
+}
+
 impl SettingsState {
+    /// Queue `alert` for the notifier, once until it is taken.
+    pub(crate) fn queue_alert(&mut self, alert: OsAlert) {
+        if !self.pending_alerts.contains(&alert) {
+            self.pending_alerts.push(alert);
+        }
+    }
+
+    /// The alerts queued so far, leaving none.
+    pub fn take_alerts(&mut self) -> Vec<OsAlert> {
+        std::mem::take(&mut self.pending_alerts)
+    }
+
     /// The failure line of the last account-lifecycle op.
     pub fn account_error(&self) -> Option<&str> {
         self.account_ttl.error().or(self.account_delete.error())
@@ -575,7 +544,7 @@ impl SettingsState {
             inapp_sounds_enabled: true,
             desktop_notifications: true,
             pending_notifications: Vec::new(),
-            pending_attention: false,
+            pending_alerts: Vec::new(),
             disable_contact_registered_notifications: false,
             notified: ShownNotifications::default(),
             default_auto_delete: Fetch::Idle,
@@ -588,7 +557,7 @@ impl SettingsState {
             reaction_saves: Default::default(),
             storage_stats: Fetch::Idle,
             data_storage: DataStoragePrefs::default(),
-            data_storage_dirty: false,
+            data_storage_disk: DataStorageDisk::default(),
             data_storage_save: StorageSaveFailures::default(),
             storage_clear: StorageClear::Idle,
             storage_limits: Default::default(),
