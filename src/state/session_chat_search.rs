@@ -54,7 +54,7 @@ impl Session {
             self.search.chat_search.clear_query();
             return;
         }
-        let _ = self.search.chat_search.begin_query(trimmed);
+        self.search.chat_search.begin_query(trimmed);
         let needle = trimmed.to_lowercase();
         let hits: Vec<SearchMessageHit> = self
             .histories

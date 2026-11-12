@@ -25,7 +25,7 @@ pub struct ChatSearchState {
 pub enum ChatSearchSurface {
     #[default]
     Closed,
-    Open(OpenChatSearch),
+    Open(Box<OpenChatSearch>),
 }
 
 /// Where the open bar stands.
@@ -343,7 +343,7 @@ impl ChatSearchState {
         if self.chat_id() == Some(chat_id) {
             return;
         }
-        self.surface = ChatSearchSurface::Open(OpenChatSearch::new(chat_id));
+        self.surface = ChatSearchSurface::Open(Box::new(OpenChatSearch::new(chat_id)));
         self.typed.cancel();
         self.jump = ChatSearchJump::None;
     }

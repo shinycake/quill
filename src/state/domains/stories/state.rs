@@ -245,6 +245,51 @@ impl CustomEmojiFetch {
     }
 }
 
+/// The story asks in flight, by what they ask for.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct StoryAsks {
+    chats: HashMap<i64, RequestId>,
+    stories: HashMap<(i64, i32), RequestId>,
+}
+
+impl StoryAsks {
+    /// The active-stories ask for `chat_id` is still out.
+    pub fn chat_out(&self, chat_id: i64, requests: &crate::state::RequestRegistry) -> bool {
+        self.chats
+            .get(&chat_id)
+            .is_some_and(|id| requests.get(*id).is_some())
+    }
+
+    /// The `getStory` for `story` is still out.
+    pub fn story_out(&self, story: (i64, i32), requests: &crate::state::RequestRegistry) -> bool {
+        self.stories
+            .get(&story)
+            .is_some_and(|id| requests.get(*id).is_some())
+    }
+
+    /// The active-stories ask for `chat_id` went out as `request`.
+    pub fn chat_sent(
+        &mut self,
+        chat_id: i64,
+        request: RequestId,
+        requests: &crate::state::RequestRegistry,
+    ) {
+        self.chats.retain(|_, id| requests.get(*id).is_some());
+        self.chats.insert(chat_id, request);
+    }
+
+    /// The `getStory` for `story` went out as `request`.
+    pub fn story_sent(
+        &mut self,
+        story: (i64, i32),
+        request: RequestId,
+        requests: &crate::state::RequestRegistry,
+    ) {
+        self.stories.retain(|_, id| requests.get(*id).is_some());
+        self.stories.insert(story, request);
+    }
+}
+
 pub struct StoriesState {
     /// Phase 9.1: active stories per chat from `updateChatActiveStories` /
     /// `getChatActiveStories` (TDLib 1.8.67, `schema/td_api.tl:6776-6783`),
@@ -339,6 +384,11 @@ pub struct StoriesState {
     /// that may pass. A user opening the story drops its wait and asks at
     /// once.
     pub story_fetch: StoryFetches,
+    /// The `getChatActiveStories` asked for each chat and the `getStory`
+    /// asked for each story: an ask is out while its own request is still
+    /// registered (an answer, an error or a sweep removes it), so a second
+    /// ask for the same chat or story waits instead of going out twice.
+    pub asks: StoryAsks,
     /// The live story the viewer is watching.
     pub live: Option<LiveStoryState>,
     /// Paid live story comment levels from `updateGroupCallMessageLevels`,
@@ -385,6 +435,7 @@ impl StoriesState {
             hidden_paging: ActiveStoriesPaging::default(),
             custom_emoji_fetch: CustomEmojiFetch::Idle,
             story_fetch: StoryFetches::default(),
+            asks: StoryAsks::default(),
             live: None,
             live_levels: Vec::new(),
             live_max_stars: None,

@@ -159,11 +159,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             Some(state) => matches!(state.page, crate::state::PageFetch::Loading { request }
                 if self.session.requests.get(request).is_some()),
-            None => self.session.requests.has_purpose_for_story(
-                RequestPurpose::GetStoryInteractions,
-                chat_id,
-                story_id,
-            ),
+            // No panel state yet: the first page is the one that opens it
+            // (`story_viewers_sent`), so nothing is out to wait for.
+            None => false,
         };
         if waiting {
             return Ok(None);

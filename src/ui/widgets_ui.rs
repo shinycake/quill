@@ -611,14 +611,15 @@ impl QuillApp {
             RuntimeEvent::Request { token, data } => {
                 // A runtime that is gone (stopped or failed earlier in this
                 // batch) has nobody to answer: nothing goes to TDLib.
-                let Some(live) = self
+                if self
                     .widgets
                     .entries
                     .get_mut(&key)
                     .and_then(|entry| entry.live_mut())
-                else {
+                    .is_none()
+                {
                     return;
-                };
+                }
                 // The query is known by the request it went out as; a send
                 // that failed answers the widget at once.
                 let sent = self
