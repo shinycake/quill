@@ -229,7 +229,10 @@ fn image_tile(window: &mut Window) -> Option<Arc<RenderImage>> {
 /// Idle to `Building`, for the one frame callback that finds it idle: the
 /// tile is built on the background executor and installed when it answers.
 fn start_build(cx: &mut App) {
-    if !TILE.with(|tile| matches!(&*tile.borrow(), TileState::Idle)) {
+    if !TILE.with(|tile| {
+        tile.try_borrow()
+            .is_ok_and(|tile| matches!(&*tile, TileState::Idle))
+    }) {
         return;
     }
     let image = cx.background_spawn(async move { build_image_tile() });
@@ -240,16 +243,22 @@ fn start_build(cx: &mut App) {
         let image = image.await;
         cx.update(|cx| {
             TILE.with(|tile| {
-                *tile.borrow_mut() = TileState::Ready(MediaTile {
-                    image,
-                    painted: Instant::now(),
-                    stamp: super::image_budget::paint_stamp(),
-                });
+                if let Ok(mut tile) = tile.try_borrow_mut() {
+                    *tile = TileState::Ready(MediaTile {
+                        image,
+                        painted: Instant::now(),
+                        stamp: super::image_budget::paint_stamp(),
+                    });
+                }
             });
             cx.refresh_windows();
         });
     });
-    TILE.with(|tile| *tile.borrow_mut() = TileState::Building { _build: build });
+    TILE.with(|tile| {
+        if let Ok(mut tile) = tile.try_borrow_mut() {
+            *tile = TileState::Building { _build: build };
+        }
+    });
 }
 
 /// Drop the media tile (and its atlas copy) once media spoilers have been

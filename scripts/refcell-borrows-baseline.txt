@@ -50,10 +50,8 @@ anchor_tracker::anchors.borrow_mut 1
 begin_pass::anchors.borrow_mut 1
 build_community_hub_dialog::body.borrow_mut 1
 build_create_community_dialog::body.borrow_mut 1
-build_tile_in_background::tile.borrow_mut 1
 char_width::cache.borrow 1
 char_width::cache.borrow_mut 1
-claim_build::tile.borrow_mut 1
 current::current.borrow 1
 current_agent::agent.borrow 1
 display_of::displays.borrow 1
