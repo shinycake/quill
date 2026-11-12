@@ -183,14 +183,15 @@ impl QuillApp {
         {
             session.groups.info_edit_errors.insert(
                 BASIC,
-                quill::state::GroupInfoEditError {
+                vec![quill::state::GroupInfoEditError {
+                    request: quill::ids::RequestId(1),
                     field: quill::state::GroupInfoField::Settings,
                     reason: "CHAT_NOT_MODIFIED".into(),
-                },
+                }],
             );
-            // A Save went out and every request answered.
+            // A Save went out as that request, and it was answered.
             if let Some(edit) = self.group_edit_box_mut() {
-                edit.saving = super::SaveStage::Saving(Vec::new());
+                edit.saving = super::SaveStage::Saving(vec![quill::ids::RequestId(1)]);
             }
         }
     }

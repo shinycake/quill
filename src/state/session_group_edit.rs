@@ -125,7 +125,13 @@ impl Session {
         if let Some(chat_id) = pending.chat_id {
             self.groups
                 .info_edit_errors
-                .insert(chat_id.0, GroupInfoEditError { field, reason });
+                .entry(chat_id.0)
+                .or_default()
+                .push(GroupInfoEditError {
+                    request: pending.id,
+                    field,
+                    reason,
+                });
         }
     }
 }

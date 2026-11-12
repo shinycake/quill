@@ -258,7 +258,7 @@ pub struct GroupsState {
     /// The last refused `setChatTitle` / `setChatDescription` /
     /// `setChatPhoto` of the Edit box, keyed by chat id; cleared when the
     /// box saves again.
-    pub info_edit_errors: HashMap<i64, GroupInfoEditError>,
+    pub info_edit_errors: HashMap<i64, Vec<GroupInfoEditError>>,
     /// The Type box: link checks, the public links limit and its list.
     pub group_type: GroupTypeState,
     /// New Group / New Channel creations, by their create request.
@@ -391,6 +391,9 @@ impl GroupsState {
 /// Which Edit box request TDLib refused, and why.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GroupInfoEditError {
+    /// The refused request: a box reads only the errors of the requests its
+    /// own Save sent.
+    pub request: crate::ids::RequestId,
     pub field: GroupInfoField,
     /// TDLib's error class, readable (`error_reason`).
     pub reason: String,

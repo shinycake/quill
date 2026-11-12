@@ -177,12 +177,23 @@ impl GroupEditBox {
         if sent.iter().any(|id| session.requests.get(*id).is_some()) {
             return EditBoxView::Saving;
         }
-        match session.groups.info_edit_errors.get(&self.chat_id.0) {
-            Some(error) if error.field != GroupInfoField::Photo => EditBoxView::Failed {
+        // Only the refusals of the requests this Save sent: another Save's
+        // late answer (a title left out by Cancel) is not this one's.
+        let own = session
+            .groups
+            .info_edit_errors
+            .get(&self.chat_id.0)
+            .and_then(|errors| {
+                errors
+                    .iter()
+                    .find(|error| error.field != GroupInfoField::Photo && sent.contains(&error.request))
+            });
+        match own {
+            Some(error) => EditBoxView::Failed {
                 field: error.field,
                 reason: error.reason.clone(),
             },
-            _ => match sent.iter().find_map(|id| session.requests.failure(*id)) {
+            None => match sent.iter().find_map(|id| session.requests.failure(*id)) {
                 Some(reason) => EditBoxView::Failed {
                     field: GroupInfoField::Settings,
                     reason: reason.to_string(),

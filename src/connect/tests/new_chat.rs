@@ -408,10 +408,11 @@ fn a_lost_type_save_request_lands_in_refused() {
     rig.driver.watch_new_chat_type_save(&sent);
     rig.driver.session.groups.info_edit_errors.insert(
         chat.0,
-        crate::state::GroupInfoEditError {
+        vec![crate::state::GroupInfoEditError {
+            request: crate::ids::RequestId(u64::MAX),
             field: crate::state::GroupInfoField::Username,
             reason: "old".into(),
-        },
+        }],
     );
     for id in &sent {
         rig.ingest(&format!(r#"{{"@type":"ok","@extra":"{}"}}"#, id.0));
