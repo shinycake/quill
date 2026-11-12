@@ -356,6 +356,18 @@ impl QuillApp {
     }
 }
 
+/// The call the window shows: its id is the account's own, so the account
+/// is part of it.
+pub(super) type ShownCall = (quill::ids::AccountKey, i32);
+
+impl QuillApp {
+    /// The call the call window shows, with its account.
+    pub(super) fn shown_call(&self) -> Option<ShownCall> {
+        let id = self.call_window_target().id()?;
+        Some((self.session()?.account.clone(), id))
+    }
+}
+
 /// The call window's panel: everything over the pictures.
 pub(crate) struct CallPanel {
     owner: WeakEntity<QuillApp>,
@@ -364,8 +376,9 @@ pub(crate) struct CallPanel {
     pinned_on_top: bool,
     /// The open device menu (`call_panel_devices`) and the call it was
     /// opened in: the window is reused, and another call's menu is not
-    /// this one's.
-    devices_menu: Option<(i32, DeviceMenuTarget)>,
+    /// this one's. TDLib numbers calls per account, so the call is named
+    /// with its account.
+    devices_menu: Option<(ShownCall, DeviceMenuTarget)>,
 }
 
 impl CallPanel {
@@ -381,10 +394,10 @@ impl CallPanel {
 
 /// `QUILL_DEMO_DEVICES=1` (demo-capture only): the call window opens with
 /// the audio device menu showing.
-fn demo_devices_menu(app: &QuillApp) -> Option<(i32, DeviceMenuTarget)> {
+fn demo_devices_menu(app: &QuillApp) -> Option<(ShownCall, DeviceMenuTarget)> {
     #[cfg(feature = "demo-capture")]
     if std::env::var_os("QUILL_DEMO_DEVICES").is_some() {
-        return Some((app.call_window_target().id()?, DeviceMenuTarget::Audio));
+        return Some((app.shown_call()?, DeviceMenuTarget::Audio));
     }
     let _ = app;
     None
@@ -419,30 +432,30 @@ impl Render for CallPanel {
 
         // The menu of this call's active phase only: another call's (the
         // window is reused), or one left from the phase before, is dead.
-        let shown_call = owner.read(cx).call_window_target().id();
+        let shown_call = owner.read(cx).shown_call();
         let menu_open = self
             .devices_menu
-            .filter(|(call, _)| Some(*call) == shown_call && snap.phase == CallPhase::Active)
-            .map(|(_, target)| target);
+            .as_ref()
+            .filter(|(call, _)| {
+                Some(call) == shown_call.as_ref() && snap.phase == CallPhase::Active
+            })
+            .map(|(_, target)| *target);
         let corner = |button: AnyElement,
                       id: &'static str,
                       target: DeviceMenuTarget,
                       cx: &mut Context<Self>| {
-            devices::with_corner(
-                button,
-                id,
-                target,
-                menu_open == Some(target),
-                cx,
+            devices::with_corner(button, id, target, menu_open == Some(target), cx, {
+                let shown_call = shown_call.clone();
                 move |this, target, _, cx| {
                     let open = this
                         .devices_menu
-                        .filter(|(call, _)| Some(*call) == shown_call)
-                        .map(|(_, open)| open);
-                    this.devices_menu = shown_call.zip(devices::toggled(open, target));
+                        .as_ref()
+                        .filter(|(call, _)| Some(call) == shown_call.as_ref())
+                        .map(|(_, open)| *open);
+                    this.devices_menu = shown_call.clone().zip(devices::toggled(open, target));
                     cx.notify();
-                },
-            )
+                }
+            })
         };
         // The buttons for this moment of the call.
         let buttons: Vec<AnyElement> = match snap.phase {

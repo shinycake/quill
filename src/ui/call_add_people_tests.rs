@@ -304,3 +304,23 @@ fn a_summary_seen_first_by_a_new_screen_opens_no_window(cx: &mut TestAppContext)
         });
     }
 }
+
+/// TDLib numbers calls per account: the call a device menu was opened for
+/// is named with its account, so another account's call of the same id
+/// (the window is reused across a switch) is not the same call.
+#[gpui_kit::test]
+fn the_shown_call_is_named_with_its_account(cx: &mut TestAppContext) {
+    let (app, mut call) = open_box(cx);
+    let call = &mut call;
+    app.update(call, |app, _| {
+        let first = app.shown_call().expect("a call shows");
+        let (account, id) = first.clone();
+        assert_eq!(Some(&account), app.session().map(|s| &s.account));
+        if let Some(session) = app.session_mut() {
+            session.account = quill::ids::AccountKey("other".to_string());
+        }
+        let second = app.shown_call().expect("a call shows");
+        assert_eq!(second.1, id, "the same call id");
+        assert_ne!(second, first, "another account's call is another call");
+    });
+}

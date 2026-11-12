@@ -362,8 +362,12 @@ fn the_mute_submenu_stays_inside_the_window_near_its_edge(cx: &mut TestAppContex
     );
 }
 
+/// Ungroup is not held by another surface's toggle: it has no request of
+/// its own to wait on until it sends one (with a live client the driver
+/// declines a second toggle while one is out, and the box stays to press
+/// again; the demo has no client to send through and closes).
 #[gpui_kit::test]
-fn ungroup_waits_while_show_as_one_chat_is_changing(cx: &mut TestAppContext) {
+fn ungroup_is_not_busy_for_another_surfaces_toggle(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     frames(&mut vcx);
     app.update(&mut vcx, |app, cx| {
@@ -378,22 +382,21 @@ fn ungroup_waits_while_show_as_one_chat_is_changing(cx: &mut TestAppContext) {
         app.show_community_box(
             CommunityBox::Ungroup {
                 community_id: RUSTACEANS,
+                ask: super::Ask::Idle,
             },
             cx,
         );
+        assert!(matches!(
+            app.admin.community.flow.open,
+            Some(CommunityBox::Ungroup {
+                ask: super::Ask::Idle,
+                ..
+            })
+        ));
         app.confirm_community_box(cx);
     });
     frames(&mut vcx);
-    let open = app.read_with(&vcx, |app, _| {
-        matches!(
-            app.admin.community.flow.open,
-            Some(CommunityBox::Ungroup { .. })
-        )
-    });
-    assert!(
-        open,
-        "Enter on Ungroup does nothing while the toggle is in flight"
-    );
+    assert!(app.read_with(&vcx, |app, _| app.admin.community.flow.open.is_none()));
 }
 
 #[gpui_kit::test]
@@ -672,4 +675,102 @@ fn the_chooser_reads_failed_for_a_list_that_was_not_sent(cx: &mut TestAppContext
         }
     });
     assert!(matches!(status(&app, &vcx), CandidateView::Failed(_)));
+}
+
+/// A box that stays for its answer is busy while its own request is out,
+/// not while some request of the community is: another surface's request
+/// does not disable it, and its own answer (or loss) ends the wait.
+#[gpui_kit::test]
+fn a_confirm_box_is_busy_only_while_its_own_request_is_out(cx: &mut TestAppContext) {
+    use super::{Ask, CommunityBox};
+    use quill::state::{CommunitiesPurpose, RequestPurpose};
+    let (app, mut vcx) = new_app(cx);
+    frames(&mut vcx);
+    app.update(&mut vcx, |app, cx| {
+        app.show_community_box(
+            CommunityBox::ConfirmAdd {
+                community_id: RUSTACEANS,
+                chat_id: OWN_CHANNEL,
+                hidden: false,
+                ask: Ask::Idle,
+            },
+            cx,
+        );
+        let ask_of = |app: &QuillApp| match app.admin.community.flow.open {
+            Some(CommunityBox::ConfirmAdd { ask, .. }) => ask,
+            _ => Ask::Idle,
+        };
+        // Another surface's request of the same community is out.
+        let other = app.demo_session.as_mut().map(|session| {
+            session.request_for_community(
+                RequestPurpose::Communities(CommunitiesPurpose::AddChat {
+                    chat_id: OWN_CHANNEL,
+                    is_hidden: false,
+                }),
+                RUSTACEANS,
+            )
+        });
+        assert!(other.is_some());
+        assert!(!ask_of(app).busy(app.session()), "not this box's request");
+        // The box's own request.
+        let own = app.demo_session.as_mut().map(|session| {
+            session.request_for_community(
+                RequestPurpose::Communities(CommunitiesPurpose::AddChat {
+                    chat_id: OWN_CHANNEL,
+                    is_hidden: true,
+                }),
+                RUSTACEANS,
+            )
+        });
+        if let Some(own) = own {
+            app.hold_community_ask(own);
+            assert!(ask_of(app).busy(app.session()), "its own request is out");
+            if let Some(session) = app.demo_session.as_mut() {
+                session.requests.take(own);
+            }
+            assert!(
+                !ask_of(app).busy(app.session()),
+                "answered or lost: the box is free again"
+            );
+        }
+    });
+}
+
+/// The Ungroup box waits for its own toggle and closes when it is
+/// answered, whichever way (a refusal is a toast of its own).
+#[gpui_kit::test]
+fn the_ungroup_box_closes_when_its_own_toggle_is_answered(cx: &mut TestAppContext) {
+    use super::{Ask, CommunityBox};
+    use quill::state::{CommunitiesPurpose, RequestPurpose};
+    let (app, mut vcx) = new_app(cx);
+    frames(&mut vcx);
+    app.update(&mut vcx, |app, cx| {
+        app.show_community_box(
+            CommunityBox::Ungroup {
+                community_id: RUSTACEANS,
+                ask: Ask::Idle,
+            },
+            cx,
+        );
+        assert!(!app.close_answered_ungroup(cx), "nothing was asked yet");
+        let own = app.demo_session.as_mut().map(|session| {
+            session.request_for_community(
+                RequestPurpose::Communities(CommunitiesPurpose::ToggleCollapsed {
+                    collapsed: false,
+                }),
+                RUSTACEANS,
+            )
+        });
+        let Some(own) = own else {
+            return;
+        };
+        app.hold_community_ask(own);
+        assert!(!app.close_answered_ungroup(cx), "still waiting");
+        assert!(app.admin.community.flow.open.is_some());
+        if let Some(session) = app.demo_session.as_mut() {
+            session.requests.take(own);
+        }
+        assert!(app.close_answered_ungroup(cx), "answered: it closes");
+        assert!(app.admin.community.flow.open.is_none());
+    });
 }

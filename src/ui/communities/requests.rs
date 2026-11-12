@@ -198,6 +198,7 @@ impl QuillApp {
                 community_id,
                 approve,
                 count,
+                ask: super::Ask::Idle,
             },
             cx,
         );
@@ -208,16 +209,20 @@ impl QuillApp {
             community_id,
             approve,
             count,
+            ..
         }) = self.admin.community.flow.open
         else {
             return;
         };
-        if let Some(live) = self.live.as_mut()
-            && let Err(err) =
-                live.driver
-                    .process_community_add_chat_requests(community_id, approve, count)
-        {
-            self.set_note(StatusNote::error(user_error(&err)));
+        if let Some(live) = self.live.as_mut() {
+            match live
+                .driver
+                .process_community_add_chat_requests(community_id, approve, count)
+            {
+                Ok(Some(request)) => self.hold_community_ask(request),
+                Ok(None) => {}
+                Err(err) => self.set_note(StatusNote::error(user_error(&err))),
+            }
         }
         cx.notify();
     }
