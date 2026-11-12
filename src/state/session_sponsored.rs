@@ -341,30 +341,33 @@ impl Session {
     }
 
     /// Whether ads are off for this account: a Premium account whose own
-    /// full info says `has_sponsored_messages_enabled` is false. Derived, so
-    /// an `updateUserFullInfo` that turns ads back on, or a Premium lapse,
-    /// shows them again with nothing to reset. Without the own full info the
-    /// server decides (ads are asked for).
+    /// full info says `has_sponsored_messages_enabled` is false, or whose
+    /// hiding was confirmed and whose own full info is on its way. Derived,
+    /// so an `updateUserFullInfo` that turns ads back on, or a Premium
+    /// lapse, shows them again with nothing to reset. Without the own full
+    /// info the server decides (ads are asked for).
     pub fn sponsored_hidden(&self) -> bool {
-        self.my_is_premium()
-            && self
-                .my_user_id
-                .and_then(|me| self.users_state.user_full_infos.get(&me))
-                .is_some_and(|info| !info.extras.sponsored_enabled)
+        let Some(me) = self.my_user_id.filter(|_| self.my_is_premium()) else {
+            return false;
+        };
+        match self.users_state.user_full_infos.get(&me) {
+            Some(info) => !info.extras.sponsored_enabled,
+            None => self.users_state.user_full_infos.is_wanted(&me),
+        }
     }
 
     /// Records the confirmed hiding in the own cached full info, where
-    /// [`Self::sponsored_hidden`] reads it.
+    /// [`Self::sponsored_hidden`] reads it. Without one cached, the own
+    /// full info is wanted: the driver asks for it, and its answer carries
+    /// the new setting. No placeholder is stored, so the real info is
+    /// still fetched.
     fn hide_own_sponsored(&mut self) {
         let Some(me) = self.my_user_id else {
             return;
         };
-        if let Some(info) = self.users_state.user_full_infos.get_mut(&me) {
-            info.extras.sponsored_enabled = false;
-        } else {
-            let mut info = crate::state::UserFullInfoData::default();
-            info.extras.sponsored_enabled = false;
-            self.users_state.user_full_infos.insert(me, info);
+        match self.users_state.user_full_infos.get_mut(&me) {
+            Some(info) => info.extras.sponsored_enabled = false,
+            None => self.users_state.user_full_infos.want(me),
         }
     }
 

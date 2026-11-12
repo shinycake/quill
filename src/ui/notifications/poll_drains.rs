@@ -29,6 +29,7 @@ impl QuillApp {
         }
         if let Some(live) = self.live.as_mut() {
             live.driver.pump_psa_labels();
+            live.driver.pump_wanted_full_infos();
         }
         // M1: a `messageLink` response lands here (`getMessageLink`) —
         // copy the link to the clipboard, exactly like tdesktop's "Copy

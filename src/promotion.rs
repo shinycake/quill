@@ -288,16 +288,17 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-
-    /// A pump that asked: its request (ids count up) and the keys.
+    /// A pump that asked: its request (ids count up from the test's own
+    /// counter) and the keys.
     fn ask<'a>(
         labels: &mut PsaLabels,
+        next: &mut u64,
         pack: &str,
         kinds: impl IntoIterator<Item = &'a str>,
     ) -> (crate::ids::RequestId, Vec<String>) {
         let plan = labels.plan(pack, kinds);
-        let id = crate::ids::RequestId(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+        *next += 1;
+        let id = crate::ids::RequestId(*next);
         labels.begin(&plan, id);
         (id, plan.keys)
     }
@@ -333,10 +334,11 @@ mod tests {
     #[test]
     fn labels_prefer_the_servers_text() {
         let mut labels = PsaLabels::default();
+        let mut next = 0;
         let covid = psa("covid", "");
         assert_eq!(labels.row(&covid).label, "PSA");
         assert_eq!(labels.row(&Promotion::MtprotoProxy).label, "Proxy sponsor");
-        let (id, _) = ask(&mut labels, "en", ["covid"]);
+        let (id, _) = ask(&mut labels, &mut next, "en", ["covid"]);
         labels.store(
             Some(id),
             vec![
@@ -360,7 +362,8 @@ mod tests {
     #[test]
     fn each_type_is_asked_for_once_per_pack() {
         let mut labels = PsaLabels::default();
-        let (_, keys) = ask(&mut labels, "en", ["covid", "covid", "war"]);
+        let mut next = 0;
+        let (_, keys) = ask(&mut labels, &mut next, "en", ["covid", "covid", "war"]);
         assert_eq!(
             keys,
             vec![
@@ -371,7 +374,7 @@ mod tests {
             ]
         );
         assert!(labels.plan("en", ["covid", "war"]).keys.is_empty());
-        let (_, keys) = ask(&mut labels, "ru", ["covid"]);
+        let (_, keys) = ask(&mut labels, &mut next, "ru", ["covid"]);
         assert_eq!(
             keys,
             vec!["cloud_lng_badge_psa_covid", "cloud_lng_about_psa_covid"]
@@ -381,13 +384,14 @@ mod tests {
     #[test]
     fn the_box_text_follows_the_type() {
         let mut labels = PsaLabels::default();
+        let mut next = 0;
         let covid = psa("covid", "");
         let proxy = tr(keys::PROXY_SPONSOR_ABOUT);
         let default = tr(keys::ABOUT_PSA_DEFAULT);
         assert_eq!(labels.about(&Promotion::MtprotoProxy), proxy);
         assert_eq!(labels.about(&psa("", "text")), proxy, "no type");
         assert_eq!(labels.about(&covid), default, "unknown to the server");
-        let (id, _) = ask(&mut labels, "en", ["covid", "empty"]);
+        let (id, _) = ask(&mut labels, &mut next, "en", ["covid", "empty"]);
         labels.store(
             Some(id),
             vec![
@@ -485,8 +489,9 @@ mod tests {
     #[test]
     fn a_new_pack_drops_the_old_text_and_late_answers() {
         let mut labels = PsaLabels::default();
+        let mut next = 0;
         let covid = psa("covid", "");
-        let (old_id, _) = ask(&mut labels, "en", ["covid"]);
+        let (old_id, _) = ask(&mut labels, &mut next, "en", ["covid"]);
         let answer = || {
             vec![(
                 "cloud_lng_badge_psa_covid".to_string(),
@@ -495,7 +500,7 @@ mod tests {
         };
         labels.store(Some(old_id), answer());
         assert_eq!(labels.row(&covid).label, "COVID-19 Info");
-        let (new_id, _) = ask(&mut labels, "ru", ["covid"]);
+        let (new_id, _) = ask(&mut labels, &mut next, "ru", ["covid"]);
         assert_eq!(labels.row(&covid).label, "PSA");
         // The English answer arrives late: ignored.
         labels.store(Some(old_id), answer());
