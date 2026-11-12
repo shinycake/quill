@@ -31,6 +31,10 @@ pub(crate) struct MessageUi {
     /// What the latest right-press was over (a link, a task or a poll
     /// option), until the press ends.
     pub(super) right_press: RightPress,
+    /// TDLib's info / error text for a deep link, shown in this window's
+    /// box (`DialogKind::DeepLinkInfo`): each window has its own, so a
+    /// second link's text never replaces the first window's.
+    pub(super) deep_link_info: Option<String>,
     /// The "Open this link?" box (`DialogKind::OpenLink`).
     pub(super) open_link_confirm: Option<super::entity_links::OpenLinkConfirm>,
     /// A clicked message entity (mention, hashtag, link…) waiting for
@@ -84,6 +88,7 @@ impl MessageUi {
             menu: Default::default(),
             menu_ui: super::message_menu_ui::MessageMenuUi::new(window, cx),
             right_press: RightPress::None,
+            deep_link_info: None,
             open_link_confirm: None,
             pending_link: None,
             selection_drag: Default::default(),

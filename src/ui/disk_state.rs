@@ -32,10 +32,12 @@ pub(crate) struct DiskUi {
     floors: DiskFloors,
     /// The wait before the last reading, to measure how fast the disk falls.
     waited: Duration,
-    /// The on-screen client was refused below the open floor. The screen
-    /// says so, while clients already running keep going until a reading
-    /// falls below close.
-    screen_refused: bool,
+    /// Which clients were refused below the open floor, one value: the
+    /// on-screen client (the screen says so, while clients already running
+    /// keep going until a reading falls below close) and the background
+    /// accounts' starts. Each leaves on its own retry; `refused_start` and
+    /// `refuse_screen_open` are the only ways in.
+    refused: Refused,
     /// How many times this run the full-disk screen went up, each with one
     /// system notification.
     full_notices: u32,
@@ -48,9 +50,60 @@ pub(crate) struct DiskUi {
     /// any switch: the reading's own account is the one on screen.
     on_screen: Option<quill::ids::AccountKey>,
     main_window: AnyWindowHandle,
-    start_refused: bool,
     /// The poll of the disk, which ends with this value.
     _watcher: Option<Task<()>>,
+}
+
+/// The clients the open floor turned away, waiting for a reading with room.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum Refused {
+    #[default]
+    Nobody,
+    Screen,
+    Starts,
+    ScreenAndStarts,
+}
+
+impl Refused {
+    fn screen(self) -> bool {
+        matches!(self, Self::Screen | Self::ScreenAndStarts)
+    }
+
+    fn starts(self) -> bool {
+        matches!(self, Self::Starts | Self::ScreenAndStarts)
+    }
+
+    fn with_screen(self) -> Self {
+        if self.starts() {
+            Self::ScreenAndStarts
+        } else {
+            Self::Screen
+        }
+    }
+
+    fn with_starts(self) -> Self {
+        if self.screen() {
+            Self::ScreenAndStarts
+        } else {
+            Self::Starts
+        }
+    }
+
+    fn without_screen(self) -> Self {
+        if self.starts() {
+            Self::Starts
+        } else {
+            Self::Nobody
+        }
+    }
+
+    fn without_starts(self) -> Self {
+        if self.screen() {
+            Self::Screen
+        } else {
+            Self::Nobody
+        }
+    }
 }
 
 /// What a reading found, as the screen and the notice read it.
@@ -84,13 +137,12 @@ impl DiskUi {
             seen: Seen::default(),
             floors: FLOORS,
             waited: Duration::ZERO,
-            screen_refused: false,
+            refused: Refused::Nobody,
             full_notices: 0,
             cache_folder: None,
             database_bytes: None,
             on_screen: None,
             main_window: window.window_handle(),
-            start_refused: false,
             _watcher: watcher,
         }
     }
@@ -108,7 +160,7 @@ impl DiskUi {
     /// The full-disk screen is up: the disk is full, or the on-screen
     /// client was refused.
     pub(super) fn shows_screen(&self) -> bool {
-        (self.is_full() && !self.held_for_call()) || self.screen_refused
+        (self.is_full() && !self.held_for_call()) || self.refused.screen()
     }
 
     pub(super) fn holds_auto_downloads(&self) -> bool {
@@ -125,7 +177,7 @@ impl DiskUi {
     }
 
     pub(super) fn refused_start(&mut self) {
-        self.start_refused = true;
+        self.refused = self.refused.with_starts();
     }
 }
 
@@ -320,8 +372,8 @@ impl QuillApp {
             self.set_note(StatusNote::silent(tr(keys::Q_DISK_DOWNLOAD_NO_ROOM)));
         }
         let room = free.is_some_and(|free| free >= floors.open);
-        let retry_starts = self.disk.start_refused && room;
-        let retry_screen = self.disk.screen_refused && room && after != DiskState::Full;
+        let retry_starts = self.disk.refused.starts() && room;
+        let retry_screen = self.disk.refused.screen() && room && after != DiskState::Full;
         let screen_held = self.disk.held_for_call();
         let before = self.enter_disk_state(after, next, cx);
         let step = before.step(
@@ -337,11 +389,11 @@ impl QuillApp {
             DiskStep::Close => self.close_clients_for_full_disk(cx),
             DiskStep::Reconnect => self.reconnect_after_disk(cx),
             DiskStep::ReconnectBackground => {
-                self.disk.start_refused = false;
+                self.disk.refused = self.disk.refused.without_starts();
                 self.ensure_background_accounts(cx);
             }
             DiskStep::RetryStarts => {
-                self.disk.start_refused = false;
+                self.disk.refused = self.disk.refused.without_starts();
                 self.ensure_background_accounts(cx);
             }
         }
@@ -357,7 +409,7 @@ impl QuillApp {
     }
 
     fn reconnect_after_disk(&mut self, cx: &mut Context<Self>) {
-        self.disk.screen_refused = false;
+        self.disk.refused = self.disk.refused.without_screen();
         if self.account.passcode.is_locked() {
             self.account.passcode.connect_at_unlock = self.current_account();
         } else {
@@ -372,7 +424,7 @@ impl QuillApp {
         if !self.disk.shows_screen() {
             self.announce_full_disk(cx);
         }
-        self.disk.screen_refused = true;
+        self.disk.refused = self.disk.refused.with_screen();
         cx.notify();
     }
 
@@ -384,7 +436,7 @@ impl QuillApp {
     ) -> DiskState {
         let before = self.disk.stage.state();
         self.disk.stage = next;
-        if after == DiskState::Full && before != DiskState::Full && !self.disk.screen_refused {
+        if after == DiskState::Full && before != DiskState::Full && !self.disk.refused.screen() {
             self.announce_full_disk(cx);
         }
         if after == DiskState::Healthy && before != DiskState::Healthy {

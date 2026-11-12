@@ -18,6 +18,13 @@ pub(crate) struct FolderUi {
     /// request of each, by the recommendation's name. A second tap on the
     /// same one waits for the first; the answer ends it either way.
     pub(super) recommended_adds: std::collections::HashMap<String, quill::ids::RequestId>,
+    /// Requests of the folder-link boxes whose box closed before the
+    /// answer: the answer is still the only word on whether the folder was
+    /// added or the link changed, so each ends in a toast
+    /// (`settle_closed_folder_asks`). The map lives in this account's
+    /// `OnScreen`, so a switch drops it with the screen.
+    pub(super) closed_asks:
+        std::collections::HashMap<quill::ids::RequestId, super::folder_share::ClosedAsk>,
     /// The `deleteChatFolder` requests out. Each toast waits for its own
     /// answer, which ends its entry either way; a second delete of the same
     /// folder is a second entry. The set lives in this account's `OnScreen`,
@@ -41,6 +48,7 @@ impl FolderUi {
             menu_chat: None,
             new_chats_dialog: None,
             recommended_adds: std::collections::HashMap::new(),
+            closed_asks: std::collections::HashMap::new(),
             deletes: std::collections::HashSet::new(),
             limit_box: None,
             tabs_scroll: gpui_kit::ScrollHandle::new(),

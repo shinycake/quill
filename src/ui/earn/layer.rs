@@ -78,26 +78,40 @@ impl LayerFade {
     }
 }
 
-/// The earn layer: closed, or open with the pages it stacked, the info
-/// panel it covered, its fade and the page whose first send was refused.
-/// Closing the layer replaces the whole value, so none of these outlives
-/// it.
-pub(crate) enum EarnLayer {
-    Closed,
-    Open {
-        /// The earn pages the open one was opened from (tdesktop's back
-        /// arrow).
-        back: Vec<InfoPanelTarget>,
-        /// The info panel the layer covered; it comes back on close.
-        restore: Option<InfoPanelTarget>,
-        fade: LayerFade,
-        /// The page whose load was refused before it left (the client
-        /// could not send), shown with a Retry. The next open replaces it.
-        refused: Option<EarnPanel>,
-    },
+/// What the earn layer keeps while a page is open: the pages it stacked,
+/// the info panel it covered, its fade and the page whose first send was
+/// refused. Whether the layer is open is the session's info column
+/// (`earn_layer_open`), never a second copy here; leaving the layer or
+/// opening it over another panel replaces the whole value, so none of
+/// these outlives the page that set it.
+pub(crate) struct EarnLayer {
+    /// The earn pages the open one was opened from (tdesktop's back
+    /// arrow).
+    back: Vec<InfoPanelTarget>,
+    /// The info panel the layer covered; it comes back on close.
+    restore: Option<InfoPanelTarget>,
+    fade: LayerFade,
+    /// The page whose load was refused before it left (the client
+    /// could not send), shown with a Retry. The next open replaces it.
+    refused: Option<EarnPanel>,
 }
 
 impl EarnLayer {
+    /// A layer with nothing stacked, covering nothing: what no page
+    /// is open leaves.
+    pub(crate) fn idle() -> Self {
+        Self::covering(None, false, Instant::now())
+    }
+
+    fn covering(restore: Option<InfoPanelTarget>, animate: bool, now: Instant) -> Self {
+        Self {
+            back: Vec::new(),
+            restore,
+            fade: LayerFade::fresh(animate, now),
+            refused: None,
+        }
+    }
+
     /// A page opens in the layer while the info panel shows `current`.
     /// Pages opened from another earn page stack for the back arrow; any
     /// other panel is what the layer covers and gives back.
@@ -108,81 +122,45 @@ impl EarnLayer {
         animate: bool,
         now: Instant,
     ) {
-        let fresh = |restore| EarnLayer::Open {
-            back: Vec::new(),
-            restore,
-            fade: LayerFade::fresh(animate, now),
-            refused: None,
-        };
-        let previous = std::mem::replace(self, EarnLayer::Closed);
-        *self = match (current, previous) {
-            (Some(InfoPanelTarget::Earn(open)), previous) => {
-                let mut layer = match previous {
-                    EarnLayer::Closed => fresh(None),
-                    open_layer => open_layer,
-                };
-                if let EarnLayer::Open { back, fade, .. } = &mut layer {
-                    if open != panel {
-                        back.push(InfoPanelTarget::Earn(open));
-                    }
-                    fade.show(animate, now);
+        match current {
+            Some(InfoPanelTarget::Earn(open)) => {
+                if open != panel {
+                    self.back.push(InfoPanelTarget::Earn(open));
                 }
-                layer
+                self.fade.show(animate, now);
             }
             // A layer replaced without closing starts afresh.
-            (other, _) => fresh(other),
-        };
-        if let EarnLayer::Open { refused, .. } = self {
-            *refused = None;
+            other => *self = Self::covering(other, animate, now),
         }
+        self.refused = None;
     }
 
     pub(super) fn back_is_empty(&self) -> bool {
-        match self {
-            EarnLayer::Closed => true,
-            EarnLayer::Open { back, .. } => back.is_empty(),
-        }
+        self.back.is_empty()
     }
 
     pub(super) fn back_pop(&mut self) -> Option<InfoPanelTarget> {
-        match self {
-            EarnLayer::Closed => None,
-            EarnLayer::Open { back, .. } => back.pop(),
-        }
-    }
-
-    fn fade(&self) -> Option<&LayerFade> {
-        match self {
-            EarnLayer::Closed => None,
-            EarnLayer::Open { fade, .. } => Some(fade),
-        }
+        self.back.pop()
     }
 
     /// Leave the layer, giving back the info panel it covered.
     fn leave(&mut self) -> Option<InfoPanelTarget> {
-        match std::mem::replace(self, EarnLayer::Closed) {
-            EarnLayer::Closed => None,
-            EarnLayer::Open { restore, .. } => restore,
-        }
+        std::mem::replace(self, Self::idle()).restore
     }
 
     /// Whether `panel`'s first send was refused.
     pub(super) fn refused(&self, panel: EarnPanel) -> bool {
-        matches!(self, EarnLayer::Open { refused: Some(p), .. } if *p == panel)
+        self.refused == Some(panel)
     }
 
     /// `panel`'s first send was refused: its page shows the error.
     pub(super) fn refuse(&mut self, panel: EarnPanel) {
-        if let EarnLayer::Open { refused, .. } = self {
-            *refused = Some(panel);
-        }
+        self.refused = Some(panel);
     }
 
     /// A retry of the refused page starts over.
     pub(super) fn retry(&mut self) {
-        if let EarnLayer::Open { refused, .. } = self {
-            *refused = None;
-        }
+        self.refused = None;
     }
 }
 
@@ -226,10 +204,11 @@ impl QuillApp {
     pub(in crate::ui) fn close_earn_layer(&mut self, cx: &mut Context<Self>) {
         let animate = self.frame.window_active.get();
         let now = Instant::now();
-        let EarnLayer::Open { fade, .. } = &mut self.earn.layer else {
+        if !self.earn_layer_open() {
             self.drop_earn_layer(cx);
             return;
-        };
+        }
+        let fade = &mut self.earn.layer.fade;
         if fade.is_closing() {
             return;
         }
@@ -242,9 +221,7 @@ impl QuillApp {
             cx.background_executor().timer(CLOSE_FADE).await;
             this.update(cx, |this, cx| this.drop_earn_layer(cx)).ok();
         });
-        if let EarnLayer::Open { fade, .. } = &mut self.earn.layer {
-            fade.stage = FadeStage::Closing { _timer: timer };
-        }
+        self.earn.layer.fade.stage = FadeStage::Closing { _timer: timer };
         cx.notify();
     }
 
@@ -284,17 +261,9 @@ impl QuillApp {
             return None;
         };
         let now = Instant::now();
-        let shown = self
-            .earn
-            .layer
-            .fade()
-            .map_or(1., |fade| fade.glide().value(now).clamp(0., 1.));
-        if self
-            .earn
-            .layer
-            .fade()
-            .is_some_and(|fade| fade.glide().animating(now))
-        {
+        let fade = &self.earn.layer.fade;
+        let shown = fade.glide().value(now).clamp(0., 1.);
+        if fade.glide().animating(now) {
             self.request_animation_tick(60, cx);
         }
         let viewport = window.viewport_size();
@@ -395,7 +364,7 @@ mod unit {
     #[test]
     fn a_page_opened_from_a_page_stacks_and_a_close_gives_the_panel_back() {
         let now = Instant::now();
-        let mut layer = EarnLayer::Closed;
+        let mut layer = EarnLayer::idle();
         let covered = Some(InfoPanelTarget::User(7));
         layer.enter(covered, setup(1), false, now);
         assert!(layer.back_is_empty());
@@ -413,7 +382,7 @@ mod unit {
     #[test]
     fn a_layer_replaced_without_closing_starts_afresh() {
         let now = Instant::now();
-        let mut layer = EarnLayer::Closed;
+        let mut layer = EarnLayer::idle();
         layer.enter(Some(InfoPanelTarget::User(7)), setup(1), false, now);
         layer.enter(Some(InfoPanelTarget::Earn(setup(1))), setup(2), false, now);
         assert!(!layer.back_is_empty());
@@ -426,7 +395,7 @@ mod unit {
     #[test]
     fn a_refused_page_is_the_pages_own_and_the_next_open_clears_it() {
         let now = Instant::now();
-        let mut layer = EarnLayer::Closed;
+        let mut layer = EarnLayer::idle();
         layer.enter(None, setup(1), false, now);
         layer.refuse(setup(1));
         assert!(layer.refused(setup(1)));

@@ -890,3 +890,41 @@ fn a_failed_render_drops_the_held_send() {
     assert!(landed.held.is_none());
     assert!(!send.send_is_held());
 }
+
+/// A slot of chat 7's forum topic `topic`, for the draft-clear test.
+fn forum_slot(topic: i32) -> SendSlot {
+    SendSlot {
+        account: AccountKey("a".into()),
+        draft: quill::composer::DraftKey {
+            chat_id: 7,
+            topic: quill::composer::DraftTopic::Forum(topic),
+        },
+    }
+}
+
+/// Sweep r3-08 (14-004): an ack takes its own slot's pending clear and
+/// never a neighbouring topic's.
+#[test]
+fn an_ack_takes_its_own_topics_clear_and_never_a_neighbours() {
+    use crate::ui::composer_state::DraftClear;
+    let chat = ChatId(7);
+    let mut sends = crate::ui::composer_sends::ComposerSends::default();
+    let (first, second) = (forum_slot(1), forum_slot(2));
+    sends.set_draft_clear(&first, Some(DraftClear::of_text(chat, "one")));
+    sends.set_draft_clear(&second, Some(DraftClear::of_text(chat, "two")));
+    let account = first.account.clone();
+    // A third topic's send set no clear: its ack finds none, and the other
+    // two stay for their own acks.
+    assert_eq!(sends.take_draft_clear(&account, forum_slot(3).draft), None);
+    assert!(sends.has_draft_clear(&first));
+    assert!(sends.has_draft_clear(&second));
+    assert_eq!(
+        sends.take_draft_clear(&account, second.draft),
+        Some(DraftClear::of_text(chat, "two"))
+    );
+    assert_eq!(
+        sends.take_draft_clear(&account, first.draft),
+        Some(DraftClear::of_text(chat, "one"))
+    );
+    assert!(!sends.has_draft_clear(&first));
+}

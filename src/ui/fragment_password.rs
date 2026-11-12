@@ -234,21 +234,12 @@ pub(super) enum ShowingView {
     Idle,
 }
 
-/// A password box's input and where its field stands: one value. It reads
-/// as the input (`Deref`).
+/// A password box's input and the view it showed last frame: the field
+/// takes the keyboard on the frame the box turns idle, not on every idle
+/// frame. It reads as the input (`Deref`).
 pub(super) struct PasswordField {
     input: Entity<InputState>,
-    stage: FieldStage,
-}
-
-/// The field's stage. `Typing` is the idle phase after the field took the
-/// keyboard, so it takes it once per phase and not on every frame.
-enum FieldStage {
-    /// The box is off screen or a try is out (the field is disabled until
-    /// its answer): the keyboard is taken again when the box is idle.
-    Away,
-    /// Idle, and the field has taken the keyboard.
-    Typing,
+    last: ShowingView,
 }
 
 impl std::ops::Deref for PasswordField {
@@ -262,7 +253,7 @@ impl PasswordField {
     pub(super) fn new(input: Entity<InputState>) -> Self {
         Self {
             input,
-            stage: FieldStage::Away,
+            last: ShowingView::Off,
         }
     }
 
@@ -270,14 +261,11 @@ impl PasswordField {
     /// after each answer (tdesktop `PasscodeBox` focuses the field), and is
     /// emptied whenever the box is not on screen.
     pub(super) fn keep(&mut self, showing: ShowingView, window: &mut Window, cx: &mut App) {
-        self.stage = match (showing, &self.stage) {
-            (ShowingView::Idle, FieldStage::Typing) => FieldStage::Typing,
-            (ShowingView::Idle, _) => {
-                self.input.update(cx, |input, cx| input.focus(window, cx));
-                FieldStage::Typing
-            }
-            (ShowingView::Sending | ShowingView::Off, _) => FieldStage::Away,
-        };
+        let turned_idle = showing == ShowingView::Idle && self.last != ShowingView::Idle;
+        self.last = showing;
+        if turned_idle {
+            self.input.update(cx, |input, cx| input.focus(window, cx));
+        }
         if showing == ShowingView::Off && !self.input.read(cx).value().is_empty() {
             self.input
                 .update(cx, |input, cx| input.set_value("", window, cx));

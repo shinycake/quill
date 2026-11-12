@@ -214,7 +214,8 @@ fn a_save_after_the_folder_changed_goes_onto_the_fresh_folder(cx: &mut TestAppCo
         let mut dialog = FolderEditorDialog::new(window, cx, Some(5), FolderLoad::ready());
         dialog.prefill_from_spec(&base, window, cx);
         dialog.editor.toggle_included(5);
-        dialog.load = FolderLoad::Merging;
+        let request = sent(app, RequestPurpose::GetChatFolder, Some(5));
+        dialog.load = FolderLoad::Merging(request);
         app.folders.editor = Some(dialog);
         app.maybe_prefill_folder_editor(window, cx);
         assert!(
@@ -222,7 +223,6 @@ fn a_save_after_the_folder_changed_goes_onto_the_fresh_folder(cx: &mut TestAppCo
             "still waiting for the fresh folder"
         );
         // Elsewhere chat 1 was pinned and chat 7 added.
-        let request = sent(app, RequestPurpose::GetChatFolder, Some(5));
         answer(
             app,
             request,
@@ -307,14 +307,14 @@ fn a_save_waiting_for_the_fresh_folder_never_spins_without_a_request(cx: &mut Te
     let (app, mut vcx) = open(cx);
     app.update_in(&mut vcx, |app, window, cx| {
         let mut dialog = FolderEditorDialog::new(window, cx, Some(5), FolderLoad::ready());
-        dialog.load = FolderLoad::Merging;
-        app.folders.editor = Some(dialog);
         // The fetch is in flight: the stage waits and asks nothing more.
         let request = sent(app, RequestPurpose::GetChatFolder, Some(5));
+        dialog.load = FolderLoad::Merging(request);
+        app.folders.editor = Some(dialog);
         app.maybe_prefill_folder_editor(window, cx);
         assert_eq!(
             app.folders.editor.as_ref().map(|d| d.load.clone()),
-            Some(FolderLoad::Merging)
+            Some(FolderLoad::Merging(request))
         );
         // It failed: back to the form with the error, edits kept.
         answer(app, request, REFUSED);
@@ -322,6 +322,27 @@ fn a_save_waiting_for_the_fresh_folder_never_spins_without_a_request(cx: &mut Te
         let dialog = app.folders.editor.as_ref().expect("still open");
         assert!(dialog.load.is_ready());
         assert!(dialog.load.error().is_some(), "the form says why");
+    });
+}
+
+#[gpui_kit::test]
+fn a_save_waiting_for_the_fresh_folder_ends_when_its_own_request_is_gone(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        let mut dialog = FolderEditorDialog::new(window, cx, Some(5), FolderLoad::ready());
+        // Its own request is no longer out (swept), while another box's
+        // fetch of the same folder is: that one is not ours to wait for.
+        let own = sent(app, RequestPurpose::GetChatFolder, Some(5));
+        if let Some(s) = app.demo_session.as_mut() {
+            s.requests.take(own);
+        }
+        let _other = sent(app, RequestPurpose::GetChatFolder, Some(5));
+        dialog.load = FolderLoad::Merging(own);
+        app.folders.editor = Some(dialog);
+        app.maybe_prefill_folder_editor(window, cx);
+        let dialog = app.folders.editor.as_ref().expect("still open");
+        assert!(dialog.load.is_ready(), "back on the form");
+        assert!(dialog.load.error().is_some(), "with the reason");
     });
 }
 
@@ -545,6 +566,73 @@ fn another_link_does_not_replace_an_add_in_flight(cx: &mut TestAppContext) {
             dialog.stage,
             InviteStage::Adding { request: kept, .. } if kept == request
         ));
+    });
+}
+
+/// Sweep r3-08 (16-002): closing the Add folder box while the add is out
+/// hands the request on, and its answer is taken and told.
+#[gpui_kit::test]
+fn closing_the_add_folder_box_keeps_the_adds_answer(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx);
+    app.update_in(&mut vcx, |app, _, cx| {
+        let request = sent(app, RequestPurpose::AddChatFolderByInviteLink, None);
+        let info = Box::new(quill::telegram::envelope::ChatFolderInviteLinkInfo {
+            folder: quill::telegram::envelope::ChatFolderInfo {
+                id: 0,
+                name: "Work".into(),
+                icon_name: String::new(),
+                color_id: -1,
+                is_shareable: false,
+                has_my_invite_links: false,
+            },
+            missing_chat_ids: vec![],
+            added_chat_ids: vec![],
+        });
+        app.folders.invite = Some(FolderInviteDialog::new(
+            "first".into(),
+            InviteStage::Adding { request, info },
+        ));
+        app.close_folder_invite(cx);
+        assert!(app.folders.invite.is_none(), "the box is gone");
+        assert!(app.folders.closed_asks.contains_key(&request));
+        // Another request's answer is not its own.
+        let other = sent(app, RequestPurpose::AddChatFolderByInviteLink, None);
+        answer(app, other, REFUSED);
+        assert!(!app.settle_folder_share(cx));
+        assert!(app.folders.closed_asks.contains_key(&request));
+        // Its own answer is taken, and the entry ends.
+        answer(app, request, REFUSED);
+        assert!(app.settle_folder_share(cx));
+        assert!(app.folders.closed_asks.is_empty());
+        let demo = app.demo_session.as_mut().expect("demo session");
+        assert!(demo.chat_list.dialog_answers.take(request).is_none());
+    });
+}
+
+/// Sweep r3-08 (16-003): closing the Share folder box during a link save
+/// hands the request on, so a refusal is still told.
+#[gpui_kit::test]
+fn closing_the_share_box_keeps_a_link_saves_answer(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        let request = sent(app, RequestPurpose::CreateChatFolderInviteLink, Some(5));
+        let mut dialog = FolderShareDialog::new(5);
+        dialog.view = FolderShareView::edit(
+            None,
+            LinkForm::new(window, cx, String::new(), Default::default()),
+        );
+        dialog.view.set_op(LinkOp::Saving(request));
+        app.folders.share = Some(dialog);
+        app.close_folder_share(cx);
+        assert!(app.folders.share.is_none());
+        assert!(app.folders.closed_asks.contains_key(&request));
+        answer(app, request, REFUSED);
+        assert!(app.settle_folder_share(cx));
+        assert!(app.folders.closed_asks.is_empty());
+        // A box closed with nothing out leaves nothing behind.
+        app.folders.share = Some(FolderShareDialog::new(5));
+        app.close_folder_share(cx);
+        assert!(app.folders.closed_asks.is_empty());
     });
 }
 

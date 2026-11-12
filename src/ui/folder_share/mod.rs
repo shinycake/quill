@@ -125,8 +125,16 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Closing the box while a link save or delete is out hands that
+    /// request to `closed_asks`, so a failure still shows as a toast.
     pub(super) fn close_folder_share(&mut self, cx: &mut Context<Self>) {
-        self.folders.share = None;
+        if let Some(dialog) = self.folders.share.take()
+            && let LinkOp::Saving(request) = dialog.view.op()
+        {
+            self.folders
+                .closed_asks
+                .insert(*request, ClosedAsk::LinkChange);
+        }
         cx.notify();
     }
 
@@ -388,6 +396,11 @@ impl QuillApp {
     /// the error shows in the box when it failed. Returns whether anything
     /// changed.
     pub(super) fn settle_folder_share(&mut self, cx: &mut Context<Self>) -> bool {
+        let closed = self.settle_closed_folder_asks(cx);
+        closed | self.settle_open_folder_share(cx)
+    }
+
+    fn settle_open_folder_share(&mut self, cx: &mut Context<Self>) -> bool {
         let Some(LinkOp::Saving(request)) =
             self.folders.share.as_ref().map(|d| d.view.op().clone())
         else {
@@ -924,6 +937,8 @@ crate::ui::shell::register_dialogs! {
 }
 
 mod build_folder_invite_dialog;
+mod closed;
+pub(crate) use closed::ClosedAsk;
 mod invite;
 
 #[cfg(test)]

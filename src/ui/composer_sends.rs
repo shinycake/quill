@@ -479,25 +479,21 @@ impl ComposerSends {
         }
     }
 
-    /// The pending clear for an ack of `draft` in `account`: the slot's own,
-    /// else the one of another topic of the same chat (the ack names the
-    /// message's topic, which can differ from the composer's slot).
+    /// The pending clear for an ack of `draft` in `account`: the slot's
+    /// own and no other. The ack names the slot its message went to
+    /// (`Session::draft_slot_of_message`), the same one the composer sent
+    /// from; another topic's pending clear is not this ack's to take, so a
+    /// send that set none (a menu command) cannot clear a neighbour's
+    /// draft.
     pub(super) fn take_draft_clear(
         &mut self,
         account: &AccountKey,
         draft: DraftKey,
     ) -> Option<DraftClear> {
-        let sends = self.accounts.get_mut(account)?;
-        let key = if sends.draft_clears.contains_key(&draft) {
-            Some(draft)
-        } else {
-            sends
-                .draft_clears
-                .keys()
-                .find(|key| key.chat_id == draft.chat_id)
-                .copied()
-        };
-        let clear = key.and_then(|key| sends.draft_clears.remove(&key));
+        let clear = self
+            .accounts
+            .get_mut(account)
+            .and_then(|sends| sends.draft_clears.remove(&draft));
         self.drop_if_empty(account);
         clear
     }
