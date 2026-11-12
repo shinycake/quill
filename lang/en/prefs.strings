@@ -249,7 +249,6 @@
 "qll_prefs_attach_file" = "Attach file";
 "qll_prefs_auto_delete_messages" = "Auto-delete messages";
 "qll_prefs_auto_delete_timer" = "Auto-delete timer";
-"qll_prefs_auto_download" = "Auto-download";
 "qll_prefs_auto_lock_if_away_for" = "Auto-lock if away for";
 "qll_prefs_auto_lock_if_inactive_for" = "Auto-lock if inactive for";
 "qll_prefs_auto_night" = "Auto-night";
@@ -356,7 +355,6 @@
 "qll_prefs_custom_time_is_hours_minutes" = "Custom time is hours:minutes, like 0:30.";
 "qll_prefs_cut" = "Cut";
 "qll_prefs_danger_this_is_the_last" = "Danger: this is the last confirmation prompt. Once you press the button below, all data will be erased from Telegram servers. Using the same phone number will create a new empty account.";
-"qll_prefs_data_saver" = "Data saver";
 "qll_prefs_date_selected_text" = "Date (selected text)";
 "qll_prefs_default" = "Default";
 "qll_prefs_default_mention_notifications_updated" = "Default mention notifications updated…";
@@ -424,7 +422,6 @@
 "qll_prefs_failed_to_send_tdlib_request" = "Couldn't reach Telegram.";
 "qll_prefs_file_open_confirmations" = "File open confirmations";
 "qll_prefs_file_open_settings_saved" = "File open settings saved";
-"qll_prefs_files" = "Files";
 "qll_prefs_find_in_chat" = "Find in chat";
 "qll_prefs_find_in_chat_2" = "Find in Chat";
 "qll_prefs_first_chat" = "First chat";
@@ -445,7 +442,6 @@
 "qll_prefs_from" = "From";
 "qll_prefs_from_file" = "From file…";
 "qll_prefs_general" = "General";
-"qll_prefs_gifs" = "GIFs";
 "qll_prefs_group" = "Group {chat_id}";
 "qll_prefs_hide" = "Hide";
 "qll_prefs_hint" = "Hint: {password_hint}";
@@ -459,7 +455,6 @@
 "qll_prefs_import" = "Import";
 "qll_prefs_import_contacts" = "Import contacts…";
 "qll_prefs_in_app_sounds" = "In-app sounds";
-"qll_prefs_in_chats" = "{label} in {kind} chats";
 "qll_prefs_include_archived_chats" = "Include archived chats";
 "qll_prefs_include_muted_chats" = "Include muted chats";
 "qll_prefs_incomplete_login_attempts" = "Incomplete Login Attempts";
@@ -514,7 +509,6 @@
 "qll_prefs_minimize" = "Minimize";
 "qll_prefs_minimize_window" = "Minimize window";
 "qll_prefs_monospace" = "Monospace";
-"qll_prefs_music" = "Music";
 "qll_prefs_mute_for_2" = "Mute for";
 "qll_prefs_mute_story_notifications" = "Mute story notifications";
 "qll_prefs_muted_forever" = "Muted forever";
@@ -580,7 +574,6 @@
 "qll_prefs_password_reset_canceled" = "Password reset canceled.";
 "qll_prefs_paste" = "Paste";
 "qll_prefs_paste_as_plain_text" = "Paste as plain text";
-"qll_prefs_pause_all_automatic_media_downloads" = "Pause all automatic media downloads";
 "qll_prefs_pause_or_resume_story" = "Pause or resume story";
 "qll_prefs_payments" = "Payments";
 "qll_prefs_pdf_txt_log" = "pdf txt log";
@@ -588,7 +581,6 @@
 "qll_prefs_perfect" = "Perfect!";
 "qll_prefs_permanently_delete_account" = "Permanently delete account";
 "qll_prefs_permanently_delete_the_account_and" = "Permanently delete the account, and all associated information from Telegram servers.";
-"qll_prefs_photos" = "Photos";
 "qll_prefs_place_quill_in_send_to" = "Place Quill in \"Send to\" menu";
 "qll_prefs_place_quill_in_the_send" = "Place Quill in the Send to menu";
 "qll_prefs_plain" = "📄 Plain";
@@ -604,7 +596,6 @@
 "qll_prefs_previous_media" = "Previous media";
 "qll_prefs_previous_search_result" = "Previous search result";
 "qll_prefs_privacy_policy" = "Privacy Policy";
-"qll_prefs_private" = "Private";
 "qll_prefs_proxy_enabled" = "Proxy enabled";
 "qll_prefs_quick_switch" = "Quick Switch";
 "qll_prefs_quick_switch_chats" = "Quick switch chats";
@@ -779,9 +770,6 @@
 "qll_prefs_used_when_a_chat_keeps" = "Used when a chat keeps the default setting.";
 "qll_prefs_user" = "User {user_id}";
 "qll_prefs_username_optional" = "Username (optional)";
-"qll_prefs_video_messages" = "Video messages";
-"qll_prefs_videos" = "Videos";
-"qll_prefs_voice_messages" = "Voice messages";
 "qll_prefs_web_proxies_arent_supported_yet" = "Web proxies aren't supported in this version yet.";
 "qll_prefs_well_send_a_code_to" = "We'll send a code to your recovery email. It is the only way to recover a forgotten password.";
 "qll_prefs_whats_new" = "What's new";

@@ -20,6 +20,8 @@ pub(super) const ENTRIES: &[Entry] = &[
     Entry::new("calls.ptt_delay", P, keys::Q_SETTINGS_CALLS_PTT_DELAY)
         .section(keys::Q_AV_PUSH_TO_TALK)
         .keywords(&["tail", "cut off"]),
+    Entry::new("calls.less_data", P, keys::Q_PREFS_USE_LESS_DATA_FOR_CALLS)
+        .keywords(&["bandwidth", "traffic"]),
     Entry::new("calls.mic_test", P, keys::Q_OPS_TEST_MICROPHONE)
         .keywords(&["level", "input check"]),
     Entry::new(

@@ -1,26 +1,5 @@
-//! Media preferences: auto-download flags and limits, grouping, instant view.
+//! Media preferences: auto-download settings, grouping, instant view.
 use super::*;
-
-/// MED3: auto-download bitflags per media type, mirroring TGX
-/// `TdlibFilesManager` (`settings_autodownload` key, per-chat-type shifts):
-/// PHOTO=0x01, VOICE=0x02, VIDEO=0x04, FILE=0x08, MUSIC=0x10, GIF=0x20,
-/// VIDEO_NOTE=0x40. TGX defaults: PHOTO|VOICE|GIF|VIDEO_NOTE in every
-/// chat kind.
-pub const AUTO_DOWNLOAD_PHOTO: u8 = 0x01;
-pub const AUTO_DOWNLOAD_VOICE: u8 = 0x02;
-pub const AUTO_DOWNLOAD_VIDEO: u8 = 0x04;
-pub const AUTO_DOWNLOAD_FILE: u8 = 0x08;
-pub const AUTO_DOWNLOAD_MUSIC: u8 = 0x10;
-pub const AUTO_DOWNLOAD_GIF: u8 = 0x20;
-pub const AUTO_DOWNLOAD_VIDEO_NOTE: u8 = 0x40;
-pub const AUTO_DOWNLOAD_DEFAULT: u8 =
-    AUTO_DOWNLOAD_PHOTO | AUTO_DOWNLOAD_VOICE | AUTO_DOWNLOAD_GIF | AUTO_DOWNLOAD_VIDEO_NOTE;
-
-/// MED3: TGX `canAutomaticallyDownload` rejects files above the download
-/// limit (default 50 MiB on WiFi, steps 1/5/15/50/100/500 MiB/None). Quill
-/// honors the WiFi default as a fixed cap; per-type configurable limits are
-/// future work.
-pub const AUTO_DOWNLOAD_MAX_BYTES: i64 = 50 * 1024 * 1024;
 
 /// MED1: local-only media preferences, persisted as JSON next to the
 /// account root (`media_prefs.json`). Client-side only (no TDLib setting):
@@ -33,12 +12,9 @@ pub const AUTO_DOWNLOAD_MAX_BYTES: i64 = 50 * 1024 * 1024;
 ///   `preferVideoMode`); right-click on the record button flips it.
 /// - `data_saver`: MED3 — pause-all auto-downloads (TGX `settings_datasaver`
 ///   master bit). User-initiated downloads are unaffected.
-/// - `auto_download_private` / `auto_download_groups` /
-///   `auto_download_channels`: MED3 — per-chat-kind media-type bitfields
-///   (TGX `settings_autodownload` per-chat-type shifts 8/16/24). Desktop
-///   has no mobile/wifi/roaming distinction, so TGX's per-connection
-///   limits collapse to this single per-kind grid (Telegram Desktop's
-///   own auto-download dialog is the same grid).
+/// - `auto_download`: Telegram Desktop's automatic media download, the
+///   byte limits per chat source and the chat exceptions
+///   ([`AutoDownloadSettings`]).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MediaPrefs {
     #[serde(default = "default_true")]
@@ -82,12 +58,8 @@ pub struct MediaPrefs {
     pub prefer_video_mode: bool,
     #[serde(default)]
     pub data_saver: bool,
-    #[serde(default = "auto_download_default")]
-    pub auto_download_private: u8,
-    #[serde(default = "auto_download_default")]
-    pub auto_download_groups: u8,
-    #[serde(default = "auto_download_default")]
-    pub auto_download_channels: u8,
+    #[serde(flatten)]
+    pub auto_download: AutoDownloadPrefs,
     /// MED4: Instant View mode (TGX `Settings.INSTANT_VIEW_MODE`:
     /// None / Telegram-internal / All, `Settings.java:796-798`).
     /// Default `Telegram` — the reader opens for links TDLib flagged
@@ -125,10 +97,6 @@ pub enum InstantViewMode {
     All,
 }
 
-fn auto_download_default() -> u8 {
-    AUTO_DOWNLOAD_DEFAULT
-}
-
 impl Default for MediaPrefs {
     fn default() -> Self {
         Self {
@@ -148,9 +116,7 @@ impl Default for MediaPrefs {
             hq_round_videos: false,
             prefer_video_mode: false,
             data_saver: false,
-            auto_download_private: AUTO_DOWNLOAD_DEFAULT,
-            auto_download_groups: AUTO_DOWNLOAD_DEFAULT,
-            auto_download_channels: AUTO_DOWNLOAD_DEFAULT,
+            auto_download: AutoDownloadPrefs::default(),
             instant_view_mode: InstantViewMode::default(),
             sticker_suggest_mode: StickerSuggestMode::default(),
             subsection_tabs_modes: std::collections::BTreeMap::new(),
@@ -326,14 +292,11 @@ mod tests {
     }
 
     #[test]
-    fn auto_download_defaults_match_tgx_and_old_files_still_load() {
-        // MED3: TGX defaults (PHOTO|VOICE|GIF|VIDEO_NOTE) in every chat
-        // kind; data saver off.
+    fn auto_download_defaults_match_tdesktop_and_old_files_still_load() {
+        // Telegram Desktop's defaults; data saver off.
         let defaults = MediaPrefs::default();
         assert!(!defaults.data_saver);
-        assert_eq!(defaults.auto_download_private, AUTO_DOWNLOAD_DEFAULT);
-        assert_eq!(defaults.auto_download_groups, AUTO_DOWNLOAD_DEFAULT);
-        assert_eq!(defaults.auto_download_channels, AUTO_DOWNLOAD_DEFAULT);
+        assert_eq!(*defaults.auto_download, AutoDownloadSettings::default());
         // A media_prefs.json written before MED3 (no new fields) loads
         // with the new fields defaulted — old prefs are preserved.
         let dir =
@@ -358,7 +321,7 @@ mod tests {
         assert_eq!(json["group_media"], true);
         assert!(loaded.hq_round_videos);
         assert!(!loaded.data_saver);
-        assert_eq!(loaded.auto_download_private, AUTO_DOWNLOAD_DEFAULT);
+        assert_eq!(*loaded.auto_download, AutoDownloadSettings::default());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

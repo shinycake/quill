@@ -15,12 +15,9 @@ use gpui_kit::component::table::TableCell;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::data_settings::NetworkKind;
-use quill::lang::{keys, tr, tr_with};
+use quill::lang::{keys, tr};
 use quill::privacy::PrivacyKeyState;
-use quill::settings::{
-    AUTO_DOWNLOAD_FILE, AUTO_DOWNLOAD_GIF, AUTO_DOWNLOAD_MUSIC, AUTO_DOWNLOAD_PHOTO,
-    AUTO_DOWNLOAD_VIDEO, AUTO_DOWNLOAD_VIDEO_NOTE, AUTO_DOWNLOAD_VOICE, CallPrefs,
-};
+use quill::settings::CallPrefs;
 use quill::telegram::requests::{ArchiveChatListSettings, PrivacyWho};
 use quill::telegram::requests_privacy::PrivacySettingKey;
 use std::cell::RefCell;
@@ -421,7 +418,7 @@ impl QuillApp {
                                 .use_less_data_for_calls
                         })
                 });
-                div()
+                let row = div()
                     .id("call-pref-less-data")
                     .flex()
                     .items_center()
@@ -470,7 +467,8 @@ impl QuillApp {
                                     .text_color(cx.theme().muted_foreground)
                                     .child(tr(keys::Q_PREFS_LOWER_DATA_USAGE_DURING_TELEGRAM)),
                             ),
-                    )
+                    );
+                self.setting_spot(&["calls.less_data"], row, cx)
             })
             .child(ptt_section)
             .child(mic_test_section)
@@ -700,145 +698,6 @@ impl QuillApp {
                     cx,
                 ),
             )
-            // MED3: auto-download settings below the media prefs.
-            .child(self.auto_download_settings_section(cx))
-    }
-
-    /// MED3: auto-download settings — data-saver master toggle plus the
-    /// per-chat-kind × media-type grid. The bit model mirrors TGX
-    /// `settings_autodownload` (private/group/channel shifts); desktop has
-    /// no mobile/wifi/roaming distinction, so TGX's per-connection grids
-    /// collapse into this one (Telegram Desktop's own dialog is the same
-    /// grid). Persisted client-side in `media_prefs.json`.
-    pub(super) fn auto_download_settings_section(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let prefs = self
-            .session()
-            .map(|s| s.settings.media_prefs.clone())
-            .unwrap_or_default();
-        let section = div()
-            .flex()
-            .flex_col()
-            .gap_1()
-            .mt_2()
-            .child(
-                div()
-                    .text_sm()
-                    .font_semibold()
-                    .px_1()
-                    .child(tr(keys::Q_PREFS_AUTO_DOWNLOAD)),
-            )
-            .child(
-                self.setting_spot(
-                    &["chats.data_saver"],
-                    // Phase 6: kit Switch (was: clickable row with a ●/○ bullet).
-                    div()
-                        .id("media-pref-data-saver")
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .px_2()
-                        .py_1()
-                        .rounded_md()
-                        .child(
-                            Switch::new("media-pref-data-saver-switch")
-                                .checked(prefs.data_saver)
-                                .accessibility_label(tr(keys::Q_PREFS_DATA_SAVER))
-                                .on_click(cx.listener(|this, &on, _, cx| {
-                                    this.set_media_pref(|prefs| prefs.data_saver = on, cx);
-                                })),
-                        )
-                        .child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .child(div().text_sm().child(tr(keys::Q_PREFS_DATA_SAVER)))
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child(tr(
-                                            keys::Q_PREFS_PAUSE_ALL_AUTOMATIC_MEDIA_DOWNLOADS,
-                                        )),
-                                ),
-                        ),
-                    cx,
-                ),
-            );
-        const ROWS: [(quill::lang::Key, u8); 7] = [
-            (keys::Q_PREFS_PHOTOS, AUTO_DOWNLOAD_PHOTO),
-            (keys::Q_PREFS_VOICE_MESSAGES, AUTO_DOWNLOAD_VOICE),
-            (keys::Q_PREFS_VIDEO_MESSAGES, AUTO_DOWNLOAD_VIDEO_NOTE),
-            (keys::Q_PREFS_VIDEOS, AUTO_DOWNLOAD_VIDEO),
-            (keys::Q_PREFS_FILES, AUTO_DOWNLOAD_FILE),
-            (keys::Q_PREFS_MUSIC, AUTO_DOWNLOAD_MUSIC),
-            (keys::Q_PREFS_GIFS, AUTO_DOWNLOAD_GIF),
-        ];
-        let kinds = [
-            (tr(keys::Q_PREFS_PRIVATE), prefs.auto_download_private),
-            (tr(keys::MEDIA_TYPE_GROUPS), prefs.auto_download_groups),
-            (tr(keys::RECENT_CHANNELS), prefs.auto_download_channels),
-        ];
-        let mut grid = div().flex().flex_col().gap_1().px_2().mt_1();
-        let mut header = div().flex().items_center().gap_2();
-        header = header.child(div().w(px(110.)).child(""));
-        for (kind, _) in &kinds {
-            header = header.child(
-                div()
-                    .flex_1()
-                    .text_xs()
-                    .text_center()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(*kind),
-            );
-        }
-        grid = grid.child(header);
-        for (row_idx, (label, flag)) in ROWS.iter().enumerate() {
-            let mut row = div().flex().items_center().gap_2();
-            row = row.child(div().w(px(110.)).text_sm().child(tr(*label)));
-            for (kind_idx, (kind, bits)) in kinds.iter().enumerate() {
-                let on = bits & flag != 0;
-                let flag = *flag;
-                // Phase 6: kit Checkbox (was: clickable ●/○ cells).
-                // Controlled: the requested value sets/clears the bit.
-                row = row.child(
-                    div()
-                        .id(format!("auto-dl-{row_idx}-{kind_idx}"))
-                        .flex_1()
-                        .flex()
-                        .justify_center()
-                        .child(
-                            Checkbox::new(format!("auto-dl-check-{row_idx}-{kind_idx}"))
-                                .checked(on)
-                                .accessibility_label(tr_with(
-                                    keys::Q_PREFS_IN_CHATS,
-                                    &[("label", tr(*label)), ("kind", kind)],
-                                ))
-                                .on_click(cx.listener(move |this, &on, _, cx| {
-                                    this.set_media_pref(
-                                        move |prefs| {
-                                            let bits = match kind_idx {
-                                                0 => &mut prefs.auto_download_private,
-                                                1 => &mut prefs.auto_download_groups,
-                                                _ => &mut prefs.auto_download_channels,
-                                            };
-                                            if on {
-                                                *bits |= flag;
-                                            } else {
-                                                *bits &= !flag;
-                                            }
-                                        },
-                                        cx,
-                                    );
-                                })),
-                        ),
-                );
-            }
-            grid = grid.child(row);
-        }
-        section.child(self.setting_spot(&["chats.auto_download_chat_types"], grid, cx))
     }
 }
 

@@ -33,9 +33,6 @@
 "qll_settings_chats_sec_emoji" = "Emoji and stickers";
 "qll_settings_chats_spellcheck_languages" = "Spelling languages";
 "qll_settings_connection_proxy_list" = "Proxy list";
-"qll_settings_data_auto_download_mobile" = "Mobile data";
-"qll_settings_data_auto_download_roaming" = "Roaming";
-"qll_settings_data_auto_download_wifi" = "Wi-Fi";
 "qll_settings_data_clear_cache" = "Clear cached files";
 "qll_settings_devices_accept_calls" = "Accept calls on a session";
 "qll_settings_devices_accept_secret_chats" = "Accept secret chats on a session";

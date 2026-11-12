@@ -4,7 +4,7 @@
 
 use crate::connect::{STORY_PRELOAD_PRIORITIES, THUMB_DOWNLOAD_PRIORITY};
 use crate::ids::FileId;
-use crate::settings::AUTO_DOWNLOAD_PHOTO;
+use crate::settings::AutoDownloadKind;
 use crate::state::Session;
 use crate::story_viewer::{StoryViewer, StoryViewerKind};
 use crate::telegram::envelope::StoryContentView;
@@ -53,7 +53,11 @@ pub fn plan(session: &Session, viewer: &StoryViewer) -> Vec<PreloadRequest> {
             .unwrap_or(THUMB_DOWNLOAD_PRIORITY);
         match item.kind {
             StoryViewerKind::Photo => {
-                if session.auto_download_allowed(item.chat_id, AUTO_DOWNLOAD_PHOTO) {
+                if session.auto_download_file_allowed(
+                    item.chat_id,
+                    AutoDownloadKind::Photo,
+                    item.download_file_id,
+                ) {
                     out.push(PreloadRequest {
                         file_id: item.download_file_id,
                         priority,
@@ -167,7 +171,9 @@ mod tests {
     #[test]
     fn plan_orders_next_before_previous_below_the_current_priority() {
         let mut session = session();
-        session.settings.media_prefs.auto_download_private = AUTO_DOWNLOAD_PHOTO;
+        let private = &mut session.settings.media_prefs.auto_download.private;
+        *private = crate::settings::SourceLimits::DISABLED;
+        private.photo = crate::settings::DEFAULT_DOWNLOAD_LIMIT;
         let plan = plan(&session, &viewer());
         let files: Vec<_> = plan.iter().map(|r| r.file_id.0).collect();
         // Story 3 (thumb, clip prefix), story 4, story 1.

@@ -2,6 +2,7 @@
 pub(crate) mod account_notices;
 pub(crate) mod add_special;
 pub(crate) mod admin;
+pub(crate) mod auto_download;
 pub(crate) mod call_rating;
 pub(crate) mod callback_password;
 pub(crate) mod checklist;
@@ -30,7 +31,6 @@ pub(crate) mod profile_panels;
 pub(crate) mod restrict;
 pub(crate) mod rtmp_stream;
 pub(crate) mod share_content;
-pub(crate) mod storage_editor;
 pub(crate) mod username;
 pub(crate) mod welcome;
 

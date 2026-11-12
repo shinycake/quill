@@ -77,7 +77,6 @@
 "qll_leftovers_allow_microphone" = "Allow Quill to use the microphone.";
 "qll_leftovers_also_pay_for_upgrade" = "Also pay for the upgrade ({price})";
 "qll_leftovers_audio_start_failed" = "Couldn't start audio: {error}. The call is up but carries no sound.";
-"qll_leftovers_auto_download_on" = "Download media automatically on {network}";
 "qll_leftovers_call_connected_for" = "Connected for {duration}";
 "qll_leftovers_call_problem_distorted_speech" = "Distorted speech";
 "qll_leftovers_call_problem_distorted_video" = "Distorted video";
@@ -107,7 +106,6 @@
 "qll_leftovers_loading_older_messages" = "Loading older messages";
 "qll_leftovers_logout_warning" = "Remember, logging out kills all your Secret Chats. Downloaded media will be erased from this device.";
 "qll_leftovers_mark_option_correct" = "Mark option {number} as the correct answer";
-"qll_leftovers_mb" = "{cap} MB";
 "qll_leftovers_messages_selected" = "{n} messages selected";
 "qll_leftovers_missed_calls_busy#one" = "Missed call from {names} — declined because another call was active.";
 "qll_leftovers_missed_calls_busy#other" = "Missed calls from {names} — declined because another call was active.";

@@ -555,13 +555,11 @@ impl Session {
         ids
     }
 
-    /// MED3: full media files in the open chat eligible for automatic
-    /// download under the user's per-chat-kind × media-type prefs (TGX
-    /// `settings_autodownload`). Unlike the thumbnail pass, each media type
-    /// is gated on its own flag; secret and spoiler content is never
-    /// auto-downloaded (same safeguard as the thumb hook), and files known
-    /// to exceed `AUTO_DOWNLOAD_MAX_BYTES` are skipped (TGX
-    /// `canAutomaticallyDownload` download limit).
+    /// Full media files in the open chat that download by themselves under
+    /// the automatic media download settings (`auto_download_allowed`).
+    /// Unlike the thumbnail pass, each media kind has its own size limit;
+    /// secret and spoiler content is never downloaded by itself (same
+    /// safeguard as the thumb hook).
     pub fn auto_download_media_file_ids(&self) -> Vec<FileId> {
         let Some(chat_id) = self.open_chat_id() else {
             return Vec::new();
@@ -573,26 +571,12 @@ impl Session {
             return Vec::new();
         };
         let mut ids = Vec::new();
-        let push = |flag: u8, file_id: FileId, ids: &mut Vec<FileId>| {
-            // MED3 review: skip files known to exceed the auto-download cap
-            // (TGX `canAutomaticallyDownload` download limit, WiFi default
-            // 50 MiB); an unknown size (`display_size() == 0`) is not a
-            // reason to block.
-            let oversized = self
-                .media
-                .files
-                .get(&file_id.0)
-                .is_some_and(|file| file.display_size() > AUTO_DOWNLOAD_MAX_BYTES);
-            if !oversized
-                && self.auto_download_allowed(chat_id, flag)
+        for message in history.messages.values() {
+            if let Some((kind, file_id)) = auto_download_target(&message.content)
+                && self.auto_download_file_allowed(chat_id, kind, file_id)
                 && self.should_download(file_id)
             {
                 ids.push(file_id);
-            }
-        };
-        for message in history.messages.values() {
-            if let Some((flag, file_id)) = auto_download_target(&message.content) {
-                push(flag, file_id, &mut ids);
             }
         }
         ids.sort_by_key(|id| id.0);
@@ -600,35 +584,54 @@ impl Session {
         ids
     }
 
-    /// MED3: auto-download gate for automatic (non-user-initiated) downloads
-    /// in a chat. `flag` is one of the `settings::AUTO_DOWNLOAD_*` media-type
-    /// bits. Data saver pauses every automatic download (TGX
-    /// `settings_datasaver`); otherwise the chat kind selects the per-kind
-    /// bitfield (TGX `settings_autodownload` private/group/channel shifts).
-    /// Secret chats use the private bucket.
-    pub fn auto_download_allowed(&self, chat_id: ChatId, flag: u8) -> bool {
+    /// Whether a `size`-byte file of `kind` in `chat_id` downloads by
+    /// itself: Telegram Desktop's automatic media download settings for the
+    /// chat's source and exceptions. Data saver, and a full disk, pause
+    /// every automatic download; secret chats count as private.
+    pub fn auto_download_allowed(
+        &self,
+        chat_id: ChatId,
+        kind: AutoDownloadKind,
+        size: i64,
+    ) -> bool {
         if self.settings.media_prefs.data_saver || self.media.disk.holds_auto_downloads() {
             return false;
         }
-        let bits = match self.chats.get(&chat_id.0).map(|chat| &chat.kind) {
-            Some(ChatKind::Supergroup {
-                is_channel: true, ..
-            }) => self.settings.media_prefs.auto_download_channels,
-            Some(ChatKind::BasicGroup { .. }) | Some(ChatKind::Supergroup { .. }) => {
-                self.settings.media_prefs.auto_download_groups
-            }
-            _ => self.settings.media_prefs.auto_download_private,
-        };
-        bits & flag != 0
+        let source = self
+            .chats
+            .get(&chat_id.0)
+            .map_or(AutoDownloadSource::Private, |chat| {
+                AutoDownloadSource::of_chat(&chat.kind)
+            });
+        self.settings
+            .media_prefs
+            .auto_download
+            .allows(chat_id, source, kind, size)
+    }
+
+    /// [`Self::auto_download_allowed`] for a file whose size the session
+    /// knows (an unknown size does not block).
+    pub fn auto_download_file_allowed(
+        &self,
+        chat_id: ChatId,
+        kind: AutoDownloadKind,
+        file_id: FileId,
+    ) -> bool {
+        let size = self
+            .media
+            .files
+            .get(&file_id.0)
+            .map_or(0, |file| file.display_size());
+        self.auto_download_allowed(chat_id, kind, size)
     }
 }
 
 /// The file automatic download fetches for `content`, with the media-type
 /// bit that allows it.
-pub(super) fn auto_download_target(content: &MessageContent) -> Option<(u8, FileId)> {
+pub(super) fn auto_download_target(content: &MessageContent) -> Option<(AutoDownloadKind, FileId)> {
     match content {
         MessageContent::Photo(photo) if !photo.is_secret && !photo.has_spoiler => {
-            Some((AUTO_DOWNLOAD_PHOTO, photo.largest_size()?.file_id))
+            Some((AutoDownloadKind::Photo, photo.largest_size()?.file_id))
         }
         // A picture file that shows as a photo loads like one.
         MessageContent::Document(doc)
@@ -636,20 +639,20 @@ pub(super) fn auto_download_target(content: &MessageContent) -> Option<(u8, File
                 && (1..=crate::media_viewer::PICTURE_FILE_AUTO_DOWNLOAD_MAX)
                     .contains(&doc.size) =>
         {
-            Some((AUTO_DOWNLOAD_PHOTO, doc.file_id))
+            Some((AutoDownloadKind::Photo, doc.file_id))
         }
-        MessageContent::Document(doc) => Some((AUTO_DOWNLOAD_FILE, doc.file_id)),
+        MessageContent::Document(doc) => Some((AutoDownloadKind::File, doc.file_id)),
         MessageContent::Animation(animation) if !animation.is_secret && !animation.has_spoiler => {
-            Some((AUTO_DOWNLOAD_GIF, animation.file_id))
+            Some((AutoDownloadKind::Gif, animation.file_id))
         }
         MessageContent::Video(video) if !video.is_secret && !video.has_spoiler => {
-            Some((AUTO_DOWNLOAD_VIDEO, video.file_id))
+            Some((AutoDownloadKind::Video, video.file_id))
         }
         MessageContent::VideoNote(note) if !note.is_secret => {
-            Some((AUTO_DOWNLOAD_VIDEO_NOTE, note.file_id))
+            Some((AutoDownloadKind::VideoMessage, note.file_id))
         }
-        MessageContent::VoiceNote(voice) => Some((AUTO_DOWNLOAD_VOICE, voice.file_id)),
-        MessageContent::Audio(audio) => Some((AUTO_DOWNLOAD_MUSIC, audio.file_id)),
+        MessageContent::VoiceNote(voice) => Some((AutoDownloadKind::Voice, voice.file_id)),
+        MessageContent::Audio(audio) => Some((AutoDownloadKind::Music, audio.file_id)),
         _ => None,
     }
 }

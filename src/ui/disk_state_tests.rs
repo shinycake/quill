@@ -480,44 +480,6 @@ fn the_full_screen_links_to_the_cached_files(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn the_storage_list_stays_in_view_when_rows_above_arrive(cx: &mut TestAppContext) {
-    let (app, mut vcx) = new_demo_app(cx, "ready-chats", 320.);
-    vcx.run_until_parked();
-    let frames = |vcx: &mut VisualTestContext| {
-        for _ in 0..3 {
-            vcx.run_until_parked();
-            vcx.update(|window, cx| window.render_frame(cx));
-            vcx.update(|window, cx| window.simulate_next_frame(cx));
-        }
-    };
-    let rows = |app: &mut QuillApp, arrived: bool| {
-        if let Some(demo) = app.demo_session.as_mut() {
-            demo.settings.data_storage.seeded = if arrived {
-                quill::data_settings::PresetsSeed::Seeded
-            } else {
-                quill::data_settings::PresetsSeed::Loading(quill::ids::RequestId(1))
-            };
-        }
-    };
-    app.update_in(&mut vcx, |app, _, cx| {
-        app.open_local_storage(cx);
-        rows(app, false);
-    });
-    frames(&mut vcx);
-    let before = app.read_with(&vcx, |app, _| app.settings.storage_scroll.page.offset().y);
-    app.update_in(&mut vcx, |app, _, cx| {
-        rows(app, true);
-        cx.notify();
-    });
-    frames(&mut vcx);
-    let after = app.read_with(&vcx, |app, _| app.settings.storage_scroll.page.offset().y);
-    assert!(
-        after < before,
-        "the rows pushed the list down and the page followed: {before:?} -> {after:?}"
-    );
-}
-
-#[gpui_kit::test]
 fn manage_local_storage_shows_the_message_database_size(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     vcx.run_until_parked();
