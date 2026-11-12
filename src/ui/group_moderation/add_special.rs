@@ -5,7 +5,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::super::app::QuillApp;
-use super::super::dialogs::AddSpecialDialog;
+use super::super::dialogs::{AddSpecialDialog, SpecialStage};
 use super::super::pressable::action_row;
 use super::super::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
@@ -126,9 +126,10 @@ impl QuillApp {
         let Some(dialog) = self.admin.add_special.as_mut() else {
             return;
         };
-        let Some((user_id, question)) = dialog.confirm.take() else {
+        let SpecialStage::Confirming { user_id, question } = dialog.stage else {
             return;
         };
+        dialog.stage = SpecialStage::Picking;
         match confirmed_step(dialog.role, question) {
             Some(step) => self.run_special_step(user_id, step, window, cx),
             None => cx.notify(),
@@ -146,8 +147,14 @@ impl QuillApp {
             return;
         };
         let chat_id = dialog.chat_id;
+        // A ban is out: nothing else is picked until it answers.
+        if matches!(dialog.stage, SpecialStage::Kicking { .. }) {
+            return;
+        }
         match step {
-            SpecialStep::Ask(question) => dialog.confirm = Some((user_id, question)),
+            SpecialStep::Ask(question) => {
+                dialog.stage = SpecialStage::Confirming { user_id, question }
+            }
             SpecialStep::Restrict => self.open_restrict_dialog(chat_id, user_id, false, window, cx),
             SpecialStep::Kick => self.kick_from_add_special(chat_id, user_id, cx),
         }
@@ -165,6 +172,9 @@ impl QuillApp {
                         request,
                         kind: super::MemberChangeKind::Kick,
                     });
+                    if let Some(dialog) = self.admin.add_special.as_mut() {
+                        dialog.stage = SpecialStage::Kicking { request };
+                    }
                     cx.notify();
                     return;
                 }
@@ -205,11 +215,13 @@ impl QuillApp {
                 SpecialRole::Kicked => tr(keys::CHANNEL_ADD_REMOVED),
             };
             let dialog = dialog.title(crate::ui::shell::dialog_title(title));
-            let (body, footer) = match state.confirm {
-                Some((user_id, question)) => {
+            let (body, footer) = match state.stage {
+                SpecialStage::Confirming { user_id, question } => {
                     this.add_special_question(state, user_id, question, cx)
                 }
-                None => (this.add_special_list(state, cx), None),
+                SpecialStage::Picking | SpecialStage::Kicking { .. } => {
+                    (this.add_special_list(state, cx), None)
+                }
             };
             let dialog = match footer {
                 Some(footer) => dialog.footer(footer),
@@ -352,7 +364,7 @@ impl QuillApp {
         };
         let back = cx.listener(|this, _, _, cx| {
             if let Some(dialog) = this.admin.add_special.as_mut() {
-                dialog.confirm = None;
+                dialog.stage = SpecialStage::Picking;
             }
             cx.notify();
         });

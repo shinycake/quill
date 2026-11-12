@@ -430,8 +430,19 @@ impl QuillApp {
         }
         match restrict {
             Some(SubmitView::Done) => {
-                let ban = self.admin.restrict_dialog.take().is_some_and(|d| d.ban);
-                self.admin.add_special = None;
+                let done = self.admin.restrict_dialog.take();
+                let ban = done.as_ref().is_some_and(|d| d.ban);
+                // The picker the restriction came from closes with it; the
+                // picker of another group stays.
+                if let Some(done) = done
+                    && self
+                        .admin
+                        .add_special
+                        .as_ref()
+                        .is_some_and(|picker| picker.chat_id == done.chat_id)
+                {
+                    self.admin.add_special = None;
+                }
                 self.set_note(StatusNote::silent(tr(if ban {
                     keys::Q_PEOPLE_MEMBER_BANNED
                 } else {
@@ -494,28 +505,52 @@ impl QuillApp {
             if view == SubmitView::Sending {
                 waiting.push(change);
             } else {
-                settled.push((change.kind, view));
+                settled.push((change, view));
             }
         }
         self.admin.member_changes = waiting;
-        for (kind, view) in settled {
+        for (change, view) in settled {
+            let kind = change.kind;
             let note = match (kind, view) {
                 (MemberChangeKind::Unban, SubmitView::Failed(_)) => {
                     StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_UNBAN_MEMBER))
                 }
                 (MemberChangeKind::Kick, SubmitView::Failed(_)) => {
+                    self.reopen_special_picker(change.request);
                     StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_UPDATE_MEMBER_STATUS))
                 }
                 (MemberChangeKind::Unban, _) => {
                     StatusNote::silent(tr(keys::Q_PEOPLE_MEMBER_UNBANNED))
                 }
                 (MemberChangeKind::Kick, _) => {
-                    self.admin.add_special = None;
+                    self.close_special_picker_of(change.request);
                     StatusNote::silent(tr(keys::Q_PEOPLE_MEMBER_BANNED))
                 }
             };
             self.set_note(note);
             cx.notify();
+        }
+    }
+
+    /// The ban `request` was answered: the "Remove user" picker that sent
+    /// it closes, and no other picker does.
+    pub(in crate::ui) fn close_special_picker_of(&mut self, request: quill::ids::RequestId) {
+        use crate::ui::dialogs::SpecialStage;
+        if self.admin.add_special.as_ref().is_some_and(|picker| {
+            matches!(picker.stage, SpecialStage::Kicking { request: sent } if sent == request)
+        }) {
+            self.admin.add_special = None;
+        }
+    }
+
+    /// The ban `request` was refused: its picker is open for a new pick.
+    pub(in crate::ui) fn reopen_special_picker(&mut self, request: quill::ids::RequestId) {
+        use crate::ui::dialogs::SpecialStage;
+        let Some(picker) = self.admin.add_special.as_mut() else {
+            return;
+        };
+        if matches!(picker.stage, SpecialStage::Kicking { request: sent } if sent == request) {
+            picker.stage = SpecialStage::Picking;
         }
     }
 

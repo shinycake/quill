@@ -110,7 +110,13 @@ fn adding_an_exception_opens_the_restrict_box_after_the_admin_question(cx: &mut 
     click(vcx, "add-special-1");
     app.read_with(vcx, |app, _| {
         let picker = app.admin.add_special.as_ref().expect("the picker");
-        assert_eq!(picker.confirm, Some((1, SpecialConfirm::SureBanAdmin)));
+        assert_eq!(
+            picker.stage,
+            crate::ui::dialogs::SpecialStage::Confirming {
+                user_id: 1,
+                question: SpecialConfirm::SureBanAdmin
+            }
+        );
         assert!(app.admin.restrict_dialog.is_none());
     });
     click(vcx, "add-special-back");
@@ -145,5 +151,39 @@ fn the_custom_end_opens_a_day_after_the_installed_clock(cx: &mut TestAppContext)
             picked_unix(&restrict.custom, quill::moderation::MIN_RESTRICT_SECS, cx),
             Some(tomorrow)
         );
+    });
+}
+
+#[gpui_kit::test]
+fn a_ban_answer_closes_only_the_picker_that_sent_it(cx: &mut TestAppContext) {
+    use crate::ui::dialogs::SpecialStage;
+    use quill::ids::RequestId;
+    let (app, mut vcx) = new_app(cx, "group-add-exception");
+    let vcx = &mut vcx;
+    click(vcx, "add-special-1");
+    click(vcx, "add-special-back");
+    app.update(vcx, |app, _| {
+        if let Some(picker) = app.admin.add_special.as_mut() {
+            picker.stage = SpecialStage::Kicking {
+                request: RequestId(7),
+            };
+        }
+        // The answer of another group's ban finds this picker waiting for a
+        // different request: it stays.
+        app.close_special_picker_of(RequestId(8));
+        assert!(app.admin.add_special.is_some());
+        // A refused ban reopens the picker for a new pick.
+        app.reopen_special_picker(RequestId(7));
+        assert_eq!(
+            app.admin.add_special.as_ref().map(|picker| picker.stage),
+            Some(SpecialStage::Picking)
+        );
+        if let Some(picker) = app.admin.add_special.as_mut() {
+            picker.stage = SpecialStage::Kicking {
+                request: RequestId(7),
+            };
+        }
+        app.close_special_picker_of(RequestId(7));
+        assert!(app.admin.add_special.is_none());
     });
 }
