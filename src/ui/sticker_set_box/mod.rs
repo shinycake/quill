@@ -137,7 +137,10 @@ impl QuillApp {
             match live.driver.manage_sticker_set(set_id, install, false) {
                 // Asked: the box waits for TDLib's answer, then closes
                 // (`sticker_set_box_tick`).
-                Ok(Some(_)) => live.driver.session.begin_set_change(set_id, change),
+                Ok(Some(request)) => live
+                    .driver
+                    .session
+                    .begin_set_change(set_id, change, request),
                 // Skipped as busy (another change of the set is still on
                 // its way): nothing was sent, so nothing is reported done.
                 Ok(None) | Err(_) => self.set_note(StatusNote::error(tr(
@@ -191,10 +194,11 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             match live.driver.manage_sticker_set(set_id, false, true) {
                 // Asked: the box closes once TDLib archived it.
-                Ok(Some(_)) => live
-                    .driver
-                    .session
-                    .begin_set_change(set_id, SetChange::Archive),
+                Ok(Some(request)) => {
+                    live.driver
+                        .session
+                        .begin_set_change(set_id, SetChange::Archive, request)
+                }
                 Ok(None) | Err(_) => self.set_note(StatusNote::error(tr(
                     keys::Q_MEDIA_COULD_NOT_ARCHIVE_THE_STICKER,
                 ))),
@@ -429,7 +433,7 @@ impl QuillApp {
                     let reordering = this.sticker_box.editing.is_reordering();
                     // Add / Remove / Archive asked, answer not here yet:
                     // the button waits instead of asking twice.
-                    let change_working = matches!(view.change, SetChangeStage::Working(_));
+                    let change_working = matches!(view.change, SetChangeStage::Working { .. });
                     let mut grid = div().flex().flex_wrap().gap_1().w(px(380.)).max_w_full();
                     for (index, item) in stickers.iter().enumerate() {
                         grid = grid

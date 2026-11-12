@@ -2,9 +2,12 @@
 use super::*;
 
 impl Session {
-    pub fn request_search(&mut self, purpose: RequestPurpose, search_generation: u64) -> RequestId {
-        self.requests
-            .register_search(self.account_generation, purpose, search_generation)
+    /// A request of the open global search: the leg (or the supplement) it
+    /// belongs to waits for exactly this request.
+    pub fn request_search(&mut self, purpose: RequestPurpose) -> RequestId {
+        let id = self.request(purpose, None);
+        self.search.search.leg_sent(purpose, id);
+        id
     }
 
     pub fn request_chat_search(

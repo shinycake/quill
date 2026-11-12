@@ -479,9 +479,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             || self
                 .session
                 .groups
-                .supergroup_is_broadcast
-                .get(&supergroup_id)
-                .is_some_and(|b| *b)
+                .supergroup(supergroup_id)
+                .is_broadcast_group
         {
             return Ok(None);
         }
@@ -503,12 +502,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         let previous = self
             .session
             .groups
-            .supergroup_is_broadcast
-            .insert(supergroup_id, true);
+            .supergroup(supergroup_id)
+            .is_broadcast_group;
+        self.session
+            .groups
+            .edit_supergroup(supergroup_id, |facts| facts.is_broadcast_group = true);
         if let Some(pending) = self.session.requests.pending_mut(extra) {
             pending.rollback = Some(crate::state::RequestRollback::BroadcastGroup {
                 supergroup_id,
-                previous,
+                previous: Some(previous),
             });
         }
         Ok(Some(extra))

@@ -11,7 +11,9 @@ pub(in crate::ui) fn seed_reaction_options(
     message_id: MessageId,
 ) {
     let emoji = |e: &&str| ReactionChoice::Emoji((*e).to_string());
-    session.stickers.message_reaction_options =
+    session.stickers.message_reaction_options.set(
+        chat_id,
+        message_id,
         MessageReactionsState::Ready(MessageReactionOptions {
             chat_id,
             message_id,
@@ -29,5 +31,6 @@ pub(in crate::ui) fn seed_reaction_options(
             allow_custom_emoji: false,
             premium_locked: Vec::new(),
             paid_offered: false,
-        });
+        }),
+    );
 }

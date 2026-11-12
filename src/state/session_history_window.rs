@@ -391,7 +391,7 @@ impl Session {
             history.clear_load_failed();
         }
         let keep = !has_newer
-            && match history.unread_anchor {
+            && match history.unread_anchor() {
                 // A tail window that reaches back to the boundary shows the
                 // unread run as is.
                 Some(anchor) => {
@@ -422,7 +422,7 @@ impl Session {
         {
             thread.unread_anchor = None;
         } else if let Some(history) = self.histories.get_mut(&chat_id.0) {
-            history.unread_anchor = None;
+            history.unread_open.drop_bar();
         }
     }
 
@@ -438,7 +438,7 @@ impl Session {
             .get(&chat_id.0)
             .and_then(ChatSummary::unread_anchor)?;
         let history = self.histories.entry(chat_id.0).or_default();
-        history.unread_anchor = Some(anchor);
+        history.unread_open.show_bar(anchor);
         let covered = history.unread_bar_message().is_some()
             && (history.loaded_complete()
                 || history

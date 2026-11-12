@@ -141,7 +141,9 @@ impl Session {
                         };
                         self.apply_users_payload(update, None, extra, seq);
                     }
-                    self.accept_message_author(chat_id, message_id, user_id);
+                    if let Some(request) = pending.map(|p| p.id) {
+                        self.accept_message_author(request, chat_id, message_id, user_id);
+                    }
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetMe) {
                     self.my_user_id = Some(user_id);
                     self.users_state.my_id_probe.answered(extra, ());

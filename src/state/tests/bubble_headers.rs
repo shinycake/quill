@@ -158,20 +158,7 @@ fn reply_outside_the_window_is_fetched_and_filled_in() {
         vec![(ChatId(GROUP), MessageId(500))]
     );
 
-    let extra = session.request(
-        RequestPurpose::GetRepliedMessage {
-            chat_id: ChatId(GROUP),
-            message_id: MessageId(500),
-        },
-        Some(ChatId(GROUP)),
-    );
-    session.messages.reply_targets.insert(
-        (GROUP, 500),
-        ReplyTarget::Loading {
-            request: RequestId(1),
-            attempts: 0,
-        },
-    );
+    let extra = session.begin_reply_fetch(ChatId(GROUP), MessageId(500));
     assert!(session.reply_fetch_candidates().is_empty());
     apply_json(
         &mut session,
@@ -205,13 +192,7 @@ fn reply_to_a_deleted_message_reads_deleted_message() {
             r#","reply_to":{"@type":"messageReplyToMessage","chat_id":-1001,"message_id":3,"quote":null,"checklist_task_id":0,"poll_option_id":"","origin":null,"origin_send_date":0,"content":null}"#,
         ),
     );
-    let extra = session.request(
-        RequestPurpose::GetRepliedMessage {
-            chat_id: ChatId(GROUP),
-            message_id: MessageId(500),
-        },
-        Some(ChatId(GROUP)),
-    );
+    let extra = session.begin_reply_fetch(ChatId(GROUP), MessageId(500));
     apply_json(
         &mut session,
         &seq,
@@ -462,13 +443,7 @@ fn an_edited_original_fetched_for_a_reply_updates_the_strip() {
             r#","reply_to":{"@type":"messageReplyToMessage","chat_id":-1001,"message_id":3,"quote":null,"checklist_task_id":0,"poll_option_id":"","origin":null,"origin_send_date":0,"content":null}"#,
         ),
     );
-    let extra = session.request(
-        RequestPurpose::GetRepliedMessage {
-            chat_id: ChatId(GROUP),
-            message_id: MessageId(500),
-        },
-        Some(ChatId(GROUP)),
-    );
+    let extra = session.begin_reply_fetch(ChatId(GROUP), MessageId(500));
     apply_json(
         &mut session,
         &seq,
@@ -497,13 +472,13 @@ fn a_failed_replied_message_fetch_that_may_pass_is_asked_again_after_a_wait() {
     let mut session = Session::new(AccountKey::primary(), Arc::new(MemorySink::new()));
     let now = Instant::now();
     // A rate limit: the strip keeps loading, and the row waits out the clock.
-    session.reject_replied_message(ChatId(GROUP), MessageId(500), 429, now);
+    reject_reply(&mut session, ChatId(GROUP), MessageId(500), 429, now);
     assert!(matches!(
         session.messages.reply_targets.get(&(GROUP, 500)),
         Some(ReplyTarget::Retry { .. })
     ));
     // Only a not-found or invalid answer is "Deleted message".
-    session.reject_replied_message(ChatId(GROUP), MessageId(501), 404, now);
+    reject_reply(&mut session, ChatId(GROUP), MessageId(501), 404, now);
     assert_eq!(
         session.messages.reply_targets.get(&(GROUP, 501)),
         Some(&ReplyTarget::Missing)
@@ -521,8 +496,8 @@ fn a_replied_message_fetch_that_keeps_failing_gives_up() {
     let now = Instant::now();
     let key = (GROUP, 500);
     for ask in 1..MAX_REPLY_ATTEMPTS {
-        session.begin_reply_fetch(ChatId(GROUP), MessageId(500));
-        session.reject_replied_message(ChatId(GROUP), MessageId(500), 500, now);
+        let request = session.begin_reply_fetch(ChatId(GROUP), MessageId(500));
+        session.reject_replied_message(request, ChatId(GROUP), MessageId(500), 500, now);
         assert!(
             matches!(
                 session.messages.reply_targets.get(&key),
@@ -540,10 +515,69 @@ fn a_replied_message_fetch_that_keeps_failing_gives_up() {
         ),
         "a refused send keeps the count"
     );
-    session.begin_reply_fetch(ChatId(GROUP), MessageId(500));
-    session.reject_replied_message(ChatId(GROUP), MessageId(500), 500, now);
+    let last = session.begin_reply_fetch(ChatId(GROUP), MessageId(500));
+    session.reject_replied_message(last, ChatId(GROUP), MessageId(500), 500, now);
     assert_eq!(
         session.messages.reply_targets.get(&key),
         Some(&ReplyTarget::Missing)
     );
+}
+
+/// r3-05 09-007: a late answer or error of an older ask never overwrites
+/// the newer ask the row now waits for.
+#[test]
+fn an_older_replied_message_ask_cannot_settle_the_newer_one() {
+    use std::time::Instant;
+    let mut session = Session::new(AccountKey::primary(), Arc::new(MemorySink::new()));
+    let now = Instant::now();
+    let key = (GROUP, 500);
+    let first = session.begin_reply_fetch(ChatId(GROUP), MessageId(500));
+    session.reject_replied_message(first, ChatId(GROUP), MessageId(500), 500, now);
+    // The retry elapsed: the row is asked again.
+    let second = session.begin_reply_fetch(ChatId(GROUP), MessageId(500));
+    assert_ne!(first, second);
+    // The first ask's late error does not count against the second ...
+    session.reject_replied_message(first, ChatId(GROUP), MessageId(500), 404, now);
+    assert!(matches!(
+        session.messages.reply_targets.get(&key),
+        Some(ReplyTarget::Loading { request, attempts: 1 }) if *request == second
+    ));
+    // ... and its late answer does not fill the row.
+    let message = replied_message(GROUP, 500);
+    session.accept_replied_message(first, ChatId(GROUP), MessageId(500), message);
+    assert!(matches!(
+        session.messages.reply_targets.get(&key),
+        Some(ReplyTarget::Loading { .. })
+    ));
+    // The second ask's own error settles it.
+    session.reject_replied_message(second, ChatId(GROUP), MessageId(500), 404, now);
+    assert_eq!(
+        session.messages.reply_targets.get(&key),
+        Some(&ReplyTarget::Missing)
+    );
+}
+
+fn replied_message(chat: i64, id: i64) -> ParsedMessage {
+    ParsedMessage {
+        sender: None,
+        id: MessageId(id),
+        chat_id: ChatId(chat),
+        date: 0,
+        is_outgoing: false,
+        is_pinned: false,
+        ephemeral: None,
+        media_album_id: 0,
+        author_signature: None,
+        scheduling_state: None,
+        send_state: Default::default(),
+        content: MessageContent::Text("original".into()),
+        files: Vec::new(),
+        reply_to: None,
+        forward_info: None,
+        extras: Default::default(),
+        interaction_info: None,
+        reply_markup: None,
+        self_destruct: None,
+        auto_delete: None,
+    }
 }

@@ -135,6 +135,7 @@ mod session_video_chat_caps;
 mod sponsored_state;
 mod sponsored_types;
 mod submit;
+mod supergroup_facts;
 mod topic_history;
 mod unread_revision;
 mod view_book;
@@ -226,7 +227,8 @@ pub use map_thumbs::{
     MAP_THUMB_HEIGHT, MAP_THUMB_SCALE, MAP_THUMB_WIDTH, MAP_THUMB_ZOOM, MapKey, MapThumbs,
 };
 pub use media_library::{
-    MAX_LIBRARY_LOADS, MediaLibrary, MessageReactionOptions, MessageReactionsState, ReactionChoice,
+    MAX_LIBRARY_LOADS, MediaLibrary, MessageReactionBook, MessageReactionOptions,
+    MessageReactionsState, ReactionChoice,
 };
 pub use member_fetch_types::*;
 pub use member_list::*;
@@ -289,6 +291,7 @@ pub use sticker_gif_types::*;
 pub use story_insights::*;
 pub use story_types::*;
 pub use submit::{Submit, SubmitView};
+pub use supergroup_facts::*;
 pub use thread_types::*;
 pub use topic_history::*;
 pub use updates_sync::*;

@@ -29,7 +29,9 @@ impl Session {
         match payload {
             StickersPayload::UpdateActiveEmojiReactions { emojis } => {
                 self.stickers.active_reactions = emojis;
-                self.stickers.message_reaction_options.mark_stale();
+                self.stickers
+                    .message_reaction_options
+                    .mark_stale(|_, _| true);
             }
             StickersPayload::StickerSets { sets, .. } => {
                 for set in &sets {

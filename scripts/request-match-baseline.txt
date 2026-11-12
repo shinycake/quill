@@ -6,6 +6,8 @@ counter:BotsPurpose::GetWidgetQueryAnswer 1
 counter:SearchPurpose::GetChatMessageCalendar 1
 counter:SettingsPurpose::GetBlockedSenders 1
 counter:SettingsPurpose::LookupBusinessBot 1
+generation:Session::apply_found_chat_messages 2
+generation:Session::apply_search_error 2
 purpose:ConnectDriver::ask_gift_text_limit 1
 purpose:ConnectDriver::begin_login 1
 purpose:ConnectDriver::buy_marketplace_gift 1
@@ -34,7 +36,6 @@ purpose:ConnectDriver::import_contacts 1
 purpose:ConnectDriver::leave_live_story 1
 purpose:ConnectDriver::load_forum_topic_icons 1
 purpose:ConnectDriver::load_saved_tags 1
-purpose:ConnectDriver::load_saved_topics 1
 purpose:ConnectDriver::login_request 1
 purpose:ConnectDriver::manage_sticker_set 2
 purpose:ConnectDriver::mark_all_chats_as_read 1
@@ -86,7 +87,6 @@ purpose:QuillApp::manager_view 3
 purpose:QuillApp::onboarding 1
 purpose:QuillApp::pump_saved_messages 1
 purpose:QuillApp::registration_form 1
-purpose:QuillApp::saved_topics_in_flight 1
 purpose:QuillApp::set_sticker_suggest_mode 1
 purpose:QuillApp::sidebar_auth 1
 purpose:QuillApp::sticker_set_action 1

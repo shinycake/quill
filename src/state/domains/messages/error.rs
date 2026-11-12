@@ -36,12 +36,19 @@ impl Session {
                 false,
             );
         }
-        if let Some(RequestPurpose::GetRepliedMessage {
-            chat_id,
-            message_id,
-        }) = pending.map(|p| p.purpose)
+        if let Some(pending) = pending
+            && let RequestPurpose::GetRepliedMessage {
+                chat_id,
+                message_id,
+            } = pending.purpose
         {
-            self.reject_replied_message(chat_id, message_id, err.code, std::time::Instant::now());
+            self.reject_replied_message(
+                pending.id,
+                chat_id,
+                message_id,
+                err.code,
+                std::time::Instant::now(),
+            );
         }
         if let Some(p) = pending
             && let RequestPurpose::Messages(MessagesPurpose::GetComposerReplyTarget {
@@ -100,12 +107,13 @@ impl Session {
                 );
             }
         }
-        if let Some(RequestPurpose::Messages(MessagesPurpose::GetMessageAvailableReactions {
-            message_id,
-        })) = pending.map(|p| p.purpose)
-            && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+        if let Some(pending) = pending
+            && let RequestPurpose::Messages(MessagesPurpose::GetMessageAvailableReactions {
+                message_id,
+            }) = pending.purpose
+            && let Some(chat_id) = pending.chat_id
         {
-            self.fail_message_reaction_options(chat_id, MessageId(message_id));
+            self.fail_message_reaction_options(pending.id, chat_id, MessageId(message_id));
         }
         if let Some(pending) = pending
             && matches!(
@@ -132,13 +140,15 @@ impl Session {
                 }
             }
             Some(
-                purpose @ (RequestPurpose::Messages(MessagesPurpose::GetMessageViewers { .. })
+                RequestPurpose::Messages(MessagesPurpose::GetMessageViewers { .. })
                 | RequestPurpose::Messages(MessagesPurpose::GetMessageReadDate { .. })
                 | RequestPurpose::Messages(MessagesPurpose::GetMessageAuthor { .. })
-                | RequestPurpose::Messages(MessagesPurpose::GetMessageAddedReactions {
-                    ..
-                })),
-            ) => self.fail_audience(purpose),
+                | RequestPurpose::Messages(MessagesPurpose::GetMessageAddedReactions { .. }),
+            ) => {
+                if let Some(pending) = pending {
+                    self.fail_audience(pending);
+                }
+            }
             Some(RequestPurpose::GetChatAvailableMessageSenders) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
                     self.fail_message_senders(chat_id, pending.map(|p| p.id), error_reason(err));

@@ -23,7 +23,7 @@ use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with, trn};
 use quill::local_path::sandboxed_display_path;
-use quill::state::{RequestPurpose, SAVED_TAG_LABEL_MAX, clean_tag_label};
+use quill::state::{SAVED_TAG_LABEL_MAX, clean_tag_label};
 use quill::telegram::envelope::{
     ReactionType, SavedMessagesTag, SavedMessagesTopic, SavedTopicKind,
 };
@@ -439,9 +439,7 @@ impl QuillApp {
     }
 
     fn saved_topics_in_flight(session: &quill::state::Session) -> bool {
-        session
-            .requests
-            .has_purpose(RequestPurpose::LoadSavedMessagesTopics)
+        session.threads.saved.topics_load.is_loading()
     }
 
     /// The next page of sublists, once the list is scrolled near its end or

@@ -367,8 +367,7 @@ fn sweeping_a_lost_panel_request_ends_its_loading_stage() {
     );
     session
         .groups
-        .set_event_log_fetch(13, ChatEventLogFetch::Loading);
-    session.groups.event_logs.entry(13).or_default().wait.page = Some(log);
+        .set_event_log_fetch(13, ChatEventLogFetch::Loading { request: log });
     let owner = asked(&mut session, RequestPurpose::GetChatOwnerAfterLeaving);
     session.begin_owner_lookup(13, owner);
     let voters = asked(

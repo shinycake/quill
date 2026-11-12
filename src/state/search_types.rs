@@ -119,8 +119,10 @@ pub enum Leg {
     Idle,
     /// This search does not make the request.
     Skipped,
-    /// Asked, no answer yet.
-    Pending,
+    /// Asked as `request`; only its answer or failure leaves the stage.
+    Pending {
+        request: RequestId,
+    },
     /// The paid public-posts search, confirmed for `price` Stars, is on its
     /// way as `request`. Only its answer (or its failure) leaves it.
     Paying {
@@ -142,7 +144,15 @@ impl Leg {
 
     /// Asked, no answer yet.
     fn waiting(self) -> bool {
-        matches!(self, Self::Pending | Self::Paying { .. })
+        matches!(self, Self::Pending { .. } | Self::Paying { .. })
+    }
+
+    /// The request this leg waits for.
+    fn request(self) -> Option<RequestId> {
+        match self {
+            Self::Pending { request } | Self::Paying { request, .. } => Some(request),
+            _ => None,
+        }
     }
 }
 
@@ -155,7 +165,10 @@ pub struct SearchState {
     /// the empty-field Recent list, or the results of a query.
     pub surface: SearchSurface,
     pub query: String,
-    pub generation: u64,
+    /// Bumped when a new query, tab or filter starts the list over: the UI
+    /// scrolls to the top. It does not match answers; every request is
+    /// matched by the `RequestId` its stage holds.
+    pub epoch: u64,
     pub chat_ids: Vec<ChatId>,
     pub messages: Vec<SearchMessageHit>,
     /// Phase 7.2: `searchPublicChats` results (username/title lookup across
@@ -174,7 +187,7 @@ pub struct SearchState {
     /// `searchChatsOnServer` results, merged behind the offline
     /// `searchChats` hits (see [`Self::merged_chat_ids`]). They never gate
     /// the status: the server answer is a supplement, not a requirement.
-    pub server_chat_ids: Vec<ChatId>,
+    pub server_chats: crate::state::fetch::Fetch<Vec<ChatId>>,
     /// "Frequent contacts" (`getTopChats` users), shown on an empty search.
     pub top_chats: Vec<ChatId>,
     /// TDLib option `disable_top_chats` (tdesktop "Suggest frequent
@@ -193,7 +206,7 @@ pub struct SearchState {
     pub(crate) messages_leg: Leg,
     /// `searchPublicChats`.
     pub(crate) public: Leg,
-    /// The typed query waiting out its quiet window. A new generation
+    /// The typed query waiting out its quiet window. A new list
     /// (close, clear, filters, a query started) makes it stale, so it is
     /// dropped there and cannot outlive the search it belongs to.
     pub(crate) typed: super::debounce::Debounce<String>,
@@ -204,13 +217,13 @@ impl Default for SearchState {
         Self {
             surface: SearchSurface::Closed,
             query: String::new(),
-            generation: 0,
+            epoch: 0,
             chat_ids: Vec::new(),
             messages: Vec::new(),
             public_chat_ids: Vec::new(),
             community_filter: None,
             filters: crate::search_filters::GlobalSearchFilters::default(),
-            server_chat_ids: Vec::new(),
+            server_chats: Default::default(),
             top_chats: Vec::new(),
             top_chats_disabled: false,
             confirm: None,
@@ -225,11 +238,40 @@ impl Default for SearchState {
 }
 
 impl SearchState {
-    /// A new generation: the answers asked before it are dropped, and a
-    /// typed query still waiting its quiet window with them.
-    fn bump_generation(&mut self) {
-        self.generation = self.generation.saturating_add(1);
+    /// A new list: the answers asked before it find no stage that waits for
+    /// them (the legs are reset by the caller), and a typed query still
+    /// waiting its quiet window goes with them.
+    fn bump_epoch(&mut self) {
+        self.epoch = self.epoch.saturating_add(1);
         self.typed.cancel();
+    }
+
+    /// The typed query's quiet window is cancelled: it is not asked after
+    /// all.
+    pub fn cancel_typed(&mut self) {
+        self.typed.cancel();
+    }
+
+    /// The request for `purpose` went out as `request`: the leg it belongs
+    /// to waits for it. A request outside the legs (the supplement, the
+    /// quota, a page) is held by its own stage.
+    pub(crate) fn leg_sent(&mut self, purpose: RequestPurpose, request: RequestId) {
+        let leg = match purpose {
+            RequestPurpose::SearchChats | RequestPurpose::SearchRecentlyFoundChats => {
+                &mut self.chats
+            }
+            RequestPurpose::SearchMessages
+            | RequestPurpose::SearchPublicPosts
+            | RequestPurpose::SearchPublicMessagesByTag => &mut self.messages_leg,
+            RequestPurpose::SearchPublicChats => &mut self.public,
+            RequestPurpose::SearchChatsOnServer => {
+                self.server_chats.begin();
+                self.server_chats.sent(request);
+                return;
+            }
+            _ => return,
+        };
+        *leg = Leg::Pending { request };
     }
 
     /// The global search is open.
@@ -259,7 +301,7 @@ impl SearchState {
         self.filters = Default::default();
         self.confirm = None;
         self.top_view = Default::default();
-        self.bump_generation();
+        self.bump_epoch();
         self.clear_results();
     }
 
@@ -270,7 +312,7 @@ impl SearchState {
         }
         self.community_filter = None;
         self.filters = Default::default();
-        self.bump_generation();
+        self.bump_epoch();
         self.clear_results();
     }
 
@@ -281,11 +323,13 @@ impl SearchState {
             return SearchStatus::Closed;
         }
         let legs = [self.chats, self.messages_leg, self.public];
-        if legs.iter().any(|leg| leg.waiting()) {
+        // A typed query waits out its quiet window (`typed`) before its
+        // requests go out: the panel already searches.
+        if self.typed.armed().is_some() || legs.iter().any(|leg| leg.waiting()) {
             return SearchStatus::Searching;
         }
         let any = !self.chat_ids.is_empty()
-            || !self.server_chat_ids.is_empty()
+            || !self.server_chats.items().is_empty()
             || !self.messages.is_empty()
             || !self.public_chat_ids.is_empty();
         if any {
@@ -302,57 +346,45 @@ impl SearchState {
     }
 
     /// Empty search field: wait only for `searchRecentlyFoundChats`.
-    pub fn begin_recents(&mut self) -> u64 {
+    pub fn begin_recents(&mut self) {
         self.surface = SearchSurface::Recents;
         self.query.clear();
-        self.bump_generation();
+        self.bump_epoch();
         self.clear_results();
-        self.chats = Leg::Pending;
         self.messages_leg = Leg::Skipped;
         self.public = Leg::Skipped;
-        self.generation
     }
 
     /// A media tab that ignores the typed text (Photos, Videos, Voice):
     /// the query stays in the field's mirror, the list restarts.
-    pub fn begin_browse(&mut self) -> u64 {
+    pub fn begin_browse(&mut self) {
         self.surface = SearchSurface::Query;
-        self.bump_generation();
+        self.bump_epoch();
         self.clear_results();
-        self.mark_all_pending();
-        self.generation
     }
 
     /// The filter bar changed: what was asked under the old tab is no
-    /// longer wanted, and its answers are dropped by the new generation.
+    /// longer wanted, and its answers find no stage that waits for them.
     pub fn restart_for_filters(&mut self) {
-        self.bump_generation();
+        self.bump_epoch();
         self.clear_results();
         if self.is_recents() {
             self.surface = SearchSurface::Query;
         }
     }
 
-    fn mark_all_pending(&mut self) {
-        self.chats = Leg::Pending;
-        self.messages_leg = Leg::Pending;
-        self.public = Leg::Pending;
-    }
-
-    pub fn begin_query(&mut self, query: &str) -> u64 {
+    pub fn begin_query(&mut self, query: &str) {
         self.surface = SearchSurface::Query;
         self.query = query.to_string();
-        self.bump_generation();
+        self.bump_epoch();
         self.clear_results();
-        self.mark_all_pending();
-        self.generation
     }
 
     pub(crate) fn clear_results(&mut self) {
         self.chat_ids.clear();
         self.messages.clear();
         self.public_chat_ids.clear();
-        self.server_chat_ids.clear();
+        self.server_chats = Default::default();
         self.tabs.reset_paging();
         self.chats = Leg::Idle;
         self.messages_leg = Leg::Idle;
@@ -364,11 +396,37 @@ impl SearchState {
         }
     }
 
-    pub(crate) fn matches_generation(&self, pending: Option<&PendingRequest>) -> bool {
-        pending
-            .and_then(|p| p.search_generation())
-            .is_some_and(|search_gen| search_gen == self.generation)
-            && self.is_open()
+    /// The answer of `pending` is the one a stage of the open search waits
+    /// for: a leg of its purpose holding this request, or the page now out.
+    /// An older query's request finds its stage reset or holding another id.
+    pub(crate) fn awaits(&self, pending: Option<&PendingRequest>) -> bool {
+        let Some(pending) = pending else {
+            return false;
+        };
+        if !self.is_open() {
+            return false;
+        }
+        let leg = match pending.purpose {
+            RequestPurpose::SearchChats | RequestPurpose::SearchRecentlyFoundChats => self.chats,
+            RequestPurpose::SearchMessages
+            | RequestPurpose::SearchPublicPosts
+            | RequestPurpose::SearchPublicMessagesByTag => self.messages_leg,
+            RequestPurpose::SearchPublicChats => self.public,
+            RequestPurpose::SearchChatsOnServer => {
+                return self.server_chats.waits_for(pending.id);
+            }
+            RequestPurpose::GetPublicPostSearchLimits => {
+                return self.tabs.limits.waits_for(pending.id);
+            }
+            RequestPurpose::SearchMessagesMore | RequestPurpose::SearchPublicPostsMore => {
+                return self.tabs.paging
+                    == (SearchPaging::Loading {
+                        request: pending.id,
+                    });
+            }
+            _ => return false,
+        };
+        leg.request() == Some(pending.id)
     }
 
     pub fn accept_chats(&mut self, chat_ids: Vec<ChatId>, error: bool) {
@@ -417,7 +475,7 @@ impl SearchState {
     /// knew (no duplicates).
     pub fn merged_chat_ids(&self) -> Vec<ChatId> {
         let mut merged = self.chat_ids.clone();
-        for id in &self.server_chat_ids {
+        for id in self.server_chats.items() {
             if !merged.contains(id) {
                 merged.push(*id);
             }
@@ -437,8 +495,8 @@ impl SearchState {
 
     /// `searchChatsOnServer` answer: late hits can turn "no results" into
     /// results, never the other way round.
-    pub(crate) fn accept_server_chats(&mut self, chat_ids: Vec<ChatId>) {
-        self.server_chat_ids = chat_ids;
+    pub(crate) fn accept_server_chats(&mut self, request: RequestId, chat_ids: Vec<ChatId>) {
+        self.server_chats.answered(Some(request), chat_ids);
     }
 
     /// Public-posts scope: only one request is in flight; the chat sections

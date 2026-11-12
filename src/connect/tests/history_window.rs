@@ -102,7 +102,7 @@ fn unread_chat_opens_around_the_read_boundary_without_marking_read() {
     let request = h.last_history_request();
     assert_eq!(request["from_message_id"], 30);
     assert_eq!(request["offset"], HISTORY_AROUND_OFFSET);
-    assert_eq!(h.history().unread_anchor, Some(MessageId(30)));
+    assert_eq!(h.history().unread_anchor(), Some(MessageId(30)));
 
     h.answer(extra, &[20, 30, 40]);
     let history = h.history();
@@ -167,7 +167,7 @@ fn sending_from_the_middle_moves_the_window_to_the_latest_run() {
     assert!(history.contains(MessageId(80)));
     assert!(!history.contains(MessageId(40)));
     assert!(!h.driver.session.history_has_newer(ChatId(7)));
-    assert_eq!(history.unread_anchor, None);
+    assert_eq!(history.unread_anchor(), None);
     assert_ne!(history.window_epoch, epoch);
 }
 
@@ -182,7 +182,7 @@ fn jump_to_latest_replaces_the_window_and_drops_its_stale_pages() {
     let request = h.last_history_request();
     assert_eq!(request["from_message_id"], 0);
     assert!(h.history().messages.is_empty());
-    assert_eq!(h.history().unread_anchor, None);
+    assert_eq!(h.history().unread_anchor(), None);
 
     // The newer page for the old window answers late: dropped.
     h.answer(newer, &[40, 50]);
@@ -199,7 +199,7 @@ fn chat_without_unread_opens_at_the_latest_page() {
     h.ingest(r#"{"@type":"updateChatReadInbox","chat_id":7,"last_read_inbox_message_id":60,"unread_count":0}"#);
     h.driver.select_chat(ChatId(7)).unwrap();
     assert_eq!(h.last_history_request()["from_message_id"], 0);
-    assert_eq!(h.history().unread_anchor, None);
+    assert_eq!(h.history().unread_anchor(), None);
 }
 
 #[test]
@@ -390,13 +390,13 @@ fn deleting_the_message_under_the_unread_bar_removes_the_bar() {
     let mut h = Harness::with_unread_chat();
     let first = h.driver.select_chat(ChatId(7)).unwrap().unwrap();
     h.answer(first, &[20, 30, 40, 50]);
-    assert!(h.history().unread_anchor.is_some());
+    assert!(h.history().unread_anchor().is_some());
     let bar = h.history().unread_bar_message().expect("bar message");
     // A later message going away leaves the bar where it is.
     h.ingest(r#"{"@type":"updateDeleteMessages","chat_id":7,"message_ids":[50],"is_permanent":true,"from_cache":false}"#);
     assert_eq!(h.history().unread_bar_message(), Some(bar));
     h.ingest(&format!(r#"{{"@type":"updateDeleteMessages","chat_id":7,"message_ids":[{}],"is_permanent":true,"from_cache":false}}"#, bar.0));
-    assert_eq!(h.history().unread_anchor, None);
+    assert_eq!(h.history().unread_anchor(), None);
     assert_eq!(h.history().unread_bar_message(), None);
 }
 
@@ -407,7 +407,7 @@ fn deleting_the_bar_message_before_the_ui_reports_reads_nothing() {
     h.answer(first, &[20, 30, 40, 50]);
     let bar = h.history().unread_bar_message().expect("bar message");
     h.ingest(&format!(r#"{{"@type":"updateDeleteMessages","chat_id":7,"message_ids":[{}],"is_permanent":true,"from_cache":false}}"#, bar.0));
-    assert_eq!(h.history().unread_anchor, None);
+    assert_eq!(h.history().unread_anchor(), None);
     assert!(h.driver.session.message_ids_to_view(ChatId(7)).is_empty());
 }
 
@@ -422,7 +422,7 @@ fn trimming_the_bar_message_away_removes_the_bar() {
     assert!(history.trim_to_tail(kept) > 0);
     assert!(!history.contains(bar));
     assert_eq!(history.unread_bar_message(), None);
-    assert_eq!(history.unread_anchor, None);
+    assert_eq!(history.unread_anchor(), None);
 }
 
 fn sent_json(h: &Harness, ty: &str) -> Option<Value> {
@@ -535,7 +535,7 @@ fn jump_down_shows_the_first_unread_message_in_the_window() {
     let sent = h.recorder.snapshot().len();
 
     assert_eq!(h.driver.jump_down().unwrap(), None);
-    assert_eq!(h.history().unread_anchor, Some(MessageId(30)));
+    assert_eq!(h.history().unread_anchor(), Some(MessageId(30)));
     assert_eq!(h.history().unread_bar_message(), Some(MessageId(40)));
     // The UI re-anchors at the bar; nothing is loaded.
     assert_eq!(h.history().window_epoch, epoch.wrapping_add(1));
@@ -570,7 +570,7 @@ fn jump_down_without_unread_messages_jumps_to_the_latest() {
 
     h.driver.jump_down().unwrap().expect("latest page");
     assert_eq!(h.last_history_request()["from_message_id"], 0);
-    assert_eq!(h.history().unread_anchor, None);
+    assert_eq!(h.history().unread_anchor(), None);
 }
 
 #[test]
@@ -579,8 +579,8 @@ fn hiding_the_bar_keeps_reads_held_back() {
     let first = h.driver.select_chat(ChatId(7)).unwrap().unwrap();
     h.answer(first, &[20, 30, 40]);
     h.driver.session.hide_unread_bar(ChatId(7));
-    assert_eq!(h.history().unread_anchor, None);
-    assert!(h.history().opened_with_unread);
+    assert_eq!(h.history().unread_anchor(), None);
+    assert!(h.history().opened_with_unread());
     assert!(h.driver.session.message_ids_to_view(ChatId(7)).is_empty());
 }
 

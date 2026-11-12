@@ -4,8 +4,8 @@
 docs/contributing/state-machines.md, rule 3. A stage that waits for an
 answer holds the `RequestId` of its request and takes only that answer
 (`Fetch::sent` / `answered` / `failed`, `ListOp::begin`, `RequestAcks`).
-Two shortcuts kept coming back in the state sweeps (about 175 entries in
-the re-sweep of 2026-11-11), and this check counts both:
+Six shortcuts kept coming back in the state sweeps (about 175 entries in
+the re-sweep of 2026-11-11, more in round 3), and this check counts them:
 
 - `purpose`: a call to `Requests::has_purpose*`, `take_purpose*` or
   `has_auth_submit` outside src/state/requests.rs. "Some request with
@@ -29,6 +29,16 @@ the re-sweep of 2026-11-11), and this check counts both:
   the same function. The stage reads Loading but holds no request, so
   `answered` and `failed` can never take its own answer and every answer is
   matched by purpose instead (round 3 found it again in six senders).
+- `generation`: a call to `matches_generation`, which takes an answer
+  because it carries the generation counter (`u64`) of the query on screen
+  instead of the `RequestId` its stage holds. A second ask inside one
+  generation (a retry, a paged answer, a supplement) is taken for the first.
+- `stamped`: a `Correlation::` or `.correlate(` outside the request
+  constructors (src/state/requests.rs, src/state/session_requests.rs,
+  src/state/request_correlation.rs), counted once per line. What an id-less
+  answer is about is recorded by `Session::request_for_*`, one correlation
+  per request; a sender that stamps its own (or forgets to) leaves the
+  answer to be dropped silently.
 
 Screenshot-demo and fixture files seed state this way and are not checked.
 
@@ -61,7 +71,9 @@ HEADER = (
 ADVICE = (
     "Match the answer to its request: hold the RequestId in the stage and compare it "
     "(Fetch::sent + answered/failed/waits_for), instead of asking whether any request "
-    "with that purpose is in flight (docs/contributing/state-machines.md, rule 3)."
+    "with that purpose is in flight or whether it carries the query's generation "
+    "(docs/contributing/state-machines.md, rule 3). A request's key is set only by "
+    "Session::request_for_*."
 )
 OWNER = "src/state/requests.rs"
 PURPOSE = re.compile(r"\.\s*(?:has_purpose|take_purpose|has_auth_submit)\s*\(")
@@ -79,6 +91,26 @@ VARIANT = re.compile(r"\b([A-Z]\w*)\s*[{(]")
 COUNTER = re.compile(
     r"\b(?:generation|epoch|token|ticket|seq)\s*:\s*(?:Option\s*<\s*)?u(?:8|16|32|64)\b"
 )
+
+GENERATION = re.compile(r"\.\s*matches_generation\s*\(")
+# The request constructors (`Session::request_for_*`) and the type itself.
+KEY_OWNERS = {
+    "src/state/requests.rs",
+    "src/state/session_requests.rs",
+    "src/state/request_correlation.rs",
+}
+STAMP = re.compile(r"\bCorrelation\s*::|\.\s*correlate\s*\(")
+
+
+def stamp_hits(text):
+    """Offset of each stamp, one per line: `.correlate(id, Correlation::X)`
+    is one stamp, not two."""
+    seen = set()
+    for match in STAMP.finditer(text):
+        line = shape_guard.line_of(text, match.start())
+        if line not in seen:
+            seen.add(line)
+            yield match.start()
 
 
 def counter_hits(text):
@@ -104,7 +136,9 @@ def hits(root):
         succeed = ".succeed" in text
         counter = "Purpose" in text and COUNTER.search(text)
         begin = ".begin(" in text
-        if not purpose and not succeed and not counter and not begin:
+        generation = "matches_generation" in text
+        stamped = path not in KEY_OWNERS and ("Correlation" in text or ".correlate" in text)
+        if not (purpose or succeed or counter or begin or generation or stamped):
             continue
         scopes = shape_guard.Scopes(path, text)
         if counter:
@@ -128,6 +162,14 @@ def hits(root):
                     continue
                 line = shape_guard.line_of(text, match.start())
                 yield f"unsent:{scopes.at(match.start())}", path, line
+        if generation:
+            for match in GENERATION.finditer(text):
+                line = shape_guard.line_of(text, match.start())
+                yield f"generation:{scopes.at(match.start())}", path, line
+        if stamped:
+            for offset in stamp_hits(text):
+                line = shape_guard.line_of(text, offset)
+                yield f"stamped:{scopes.at(offset)}", path, line
 
 
 def self_test():
@@ -147,6 +189,13 @@ def self_test():
     ]
     assert not found("    Plain { request: u64 },\n    Id(u64),\n    Unit,\n")
     assert not list(counter_hits("pub enum Stage { Jump { generation: u64 } }\n"))
+
+    def stamps(text):
+        return [shape_guard.line_of(text, o) for o in stamp_hits(text)]
+
+    assert stamps("requests.correlate(id, Correlation::User(7));\n") == [1]
+    assert stamps("let c = Correlation::GalleryTab;\nrequests.correlate(id, c);\n") == [1, 2]
+    assert not stamps("pending.user_id() == Some(7);\nself.request_for_user(p, 7);\n")
 
 
 if __name__ == "__main__":

@@ -41,11 +41,8 @@ fn ask_gifts(session: &mut Session, append: bool, chat: i64) -> RequestId {
 
 /// The gallery's Stories tab asks for its first page.
 fn ask_gallery_stories(session: &mut Session, chat: i64) -> RequestId {
-    let request = session.request(
-        RequestPurpose::GetChatPostedToChatPageStories,
-        Some(ChatId(chat)),
-    );
-    session.requests.correlate(request, Correlation::GalleryTab);
+    let request = session
+        .request_for_gallery_tab(RequestPurpose::GetChatPostedToChatPageStories, ChatId(chat));
     session
         .media
         .shared_media

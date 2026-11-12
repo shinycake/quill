@@ -167,8 +167,8 @@ impl QuillApp {
         let messages_empty = messages.is_empty();
         // A new query, tab or filter starts the list from its top.
         if let Some(search) = session.map(|s| &s.search.search) {
-            if self.search_ui.seen_generation.get() != search.generation {
-                self.search_ui.seen_generation.set(search.generation);
+            if self.search_ui.seen_generation.get() != search.epoch {
+                self.search_ui.seen_generation.set(search.epoch);
                 self.search_ui
                     .results_scroll
                     .set_offset(point(px(0.), px(0.)));

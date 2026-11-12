@@ -2,11 +2,11 @@
 //! requests, the boosts list and boost link, and supergroup usernames.
 use super::*;
 use crate::ids::{ChatId, RequestId};
+use crate::state::GroupsPurpose;
 use crate::state::{
     AdminLinksState, BOOSTS_PAGE_SIZE, BoostsListState, INVITE_ADMIN_PAGE_SIZE, InviteLinkFetch,
     LinkRequestsState, PageStage, RequestPurpose,
 };
-use crate::state::{Correlation, GroupsPurpose};
 use crate::telegram::requests::{
     delete_all_revoked_chat_invite_links, get_chat_boost_link, get_chat_boosts,
     get_chat_invite_links, get_chat_join_requests_page, process_chat_join_requests,
@@ -133,10 +133,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
             return Ok(None);
         }
-        let extra = self.session.request(purpose, Some(chat_id));
-        self.session
-            .requests
-            .correlate(extra, Correlation::User(creator));
+        let extra = self
+            .session
+            .request_for_user_in_chat(purpose, chat_id, creator);
         let payload = delete_all_revoked_chat_invite_links(extra, chat_id.0, creator);
         self.links_boosts_send(extra, &payload)
     }

@@ -87,8 +87,7 @@ impl Fixture {
             self.driver
                 .session
                 .groups
-                .supergroup_manage_topics_right
-                .insert(16, true);
+                .edit_supergroup(16, |facts| facts.can_manage_topics = true);
         }
     }
 }

@@ -86,7 +86,7 @@ fn bar_anchor(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<i64
         app.demo_session
             .as_ref()
             .and_then(|s| s.histories.get(&A.0))
-            .and_then(|h| h.unread_anchor)
+            .and_then(|h| h.unread_anchor())
             .map(|id| id.0)
     })
 }
@@ -119,7 +119,7 @@ fn an_unread_run_that_fits_opens_at_the_bottom_without_a_bar(cx: &mut TestAppCon
             app.demo_session
                 .as_ref()
                 .and_then(|s| s.histories.get(&A.0))
-                .is_some_and(|h| h.opened_with_unread),
+                .is_some_and(|h| h.opened_with_unread()),
         )
     });
     assert!(!divider);

@@ -94,7 +94,9 @@ fn visible_custom_emoji_survives_overflow() {
     use crate::state::{MessageReactionOptions, MessageReactionsState, ReactionChoice};
     let mut session = session();
     session.accept_custom_emoji_stickers(vec![resolved_emoji(Some(1), 1)]);
-    session.stickers.message_reaction_options =
+    session.stickers.message_reaction_options.set(
+        crate::ids::ChatId(1),
+        crate::ids::MessageId(1),
         MessageReactionsState::Ready(MessageReactionOptions {
             chat_id: crate::ids::ChatId(1),
             message_id: crate::ids::MessageId(1),
@@ -104,7 +106,8 @@ fn visible_custom_emoji_survives_overflow() {
             allow_custom_emoji: true,
             premium_locked: Vec::new(),
             paid_offered: false,
-        });
+        }),
+    );
     let total = CUSTOM_EMOJI_CACHE_CAP as i64 + 5;
     session.accept_custom_emoji_stickers(
         (2..=total)

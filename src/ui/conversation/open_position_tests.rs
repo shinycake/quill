@@ -139,7 +139,7 @@ impl Sim {
             if !history.messages.is_empty() {
                 return None;
             }
-            Some(match history.unread_anchor {
+            Some(match history.unread_anchor() {
                 Some(anchor) => session.request_history_around(A, anchor),
                 None => session.request_for_message(RequestPurpose::GetHistory, A, MessageId(0)),
             })
@@ -187,7 +187,7 @@ impl Sim {
         self.session(|s| {
             s.histories
                 .get(&A.0)
-                .is_some_and(|h| h.unread_anchor.is_some())
+                .is_some_and(|h| h.unread_anchor().is_some())
         })
     }
 

@@ -10125,3 +10125,70 @@ inline members match draws a `Stale` list like a refetch: its last page
 stays up, an empty one reads Loading, and the poll asks again. The `ticket`
 rule is folded into `counter` (its `ticket` and `seq` names joined
 `counter`'s; every `ticket:` hit was already a `counter:` key or gone).
+
+### Sweep fixes (r3-05)
+
+| Id | Fix |
+| --- | --- |
+| 08-027 | `SaveWatch` is a map keyed by `RequestId` (`entries`), not one slot: the profile box in a chat window, the main window's box and the proxy editor each watch their own request, so a second Save no longer makes the first box's outcome `Unknown`. Each box still ends its watch when it closes or is replaced (`forget`). |
+| 08-028 | `HistoryState::unread_open: UnreadOpen { Closed, Bar(anchor), Opened { bar } }` replaces `unread_anchor` + `opened_with_unread`. `unread_anchor()` and `opened_with_unread()` read it; deleting the bar's message (`drop_bar`) keeps reads held in `Opened`, jumping to the latest or sending (`end_unread_open`) closes both, and the jump-down button (`show_bar`) brings the bar back without holding reads. |
+| 08-029 | `EventLog::wait` and `EventLogWait` are gone. `ChatEventLogFetch::Loading { request }` holds the first page's request; the loaded page holds the older page in `OlderEvents::Loading { request }` and the poll in `LogPoll::Polling { request }`. A page or poll lands only when the stage still holds its id, so a refresh (`reset_event_log_fetch`) drops everything in flight with the stage. A failed older page keeps the list with Retry; a failed poll changes nothing shown. |
+| 08-024 | `MessageReactionBook` (`StickersState::message_reaction_options`) keeps one `MessageReactionsState` per message, so the main window's menu and a chat window's menu no longer replace each other's strip. `Loading { request }` is settled only by that request's answer or error; an older ask for the same message (a lost reply asked again) finds another id. A lost request is asked again (`fetch_message_reactions` skips only a request still in flight). Every exit of a menu forgets its message's entry through `QuillApp::close_message_menu` (`reset_message_reactions(chat, message)`): the close, a menu opened in another window (`close_message_menus_of_other_windows`) and the window closing (`forget_chat_window`). The book has no size cap, so a missing exit shows as a leftover entry in the test. |
+| 08-026 | `RequestRollback::ChatPinOrder` and `ArchiveChatListSettings` carry `shown` like the other rollbacks: a refusal puts back a chat's order, or the archive settings, only while the cached value is still the one the request showed. |
+| 08-025 | The fifteen correlation `Option`s of `PendingRequest` (file, message, topic, user, supergroup, community, story, story ids, user ids, album, folder, scope, secret chat, invite link, subject) are one value, set by exactly one `Session::request_for_*` constructor and read through typed accessors (`pending.user_id()`...). A request cannot carry two or half-stamp one, and `check-request-match.py` (rule `stamped`) fails any `Correlation::` or `.correlate(` outside the constructors (counted once per line). r3-05 named the enum `RequestKey`; at the merge it became r3-06's `Correlation` (`state/request_correlation.rs`), which also holds the history page's window epoch and `from` (`HistoryPage`), the search generation of the in-chat search and the shared-media tabs (`Search`) and the gallery's Stories page (`GalleryTab`, now asked through `request_for_gallery_tab`). `chat_id` and the view stamp stay fields. |
+| 09-001 | `SavedTopicsLoad::Loading { request }` (and `Loaded` between pages) replaces `Started`. `page_sent` / `page_answered` / `page_failed` take the request: the `ok` settles in `apply_ok`, the 404 and the error in the threads error arm, each only for the request held. The dedupe and the pane's spinner read the stage, not `has_purpose`. |
+| 09-002 | `SearchPaging::Loading { request }`; `begin_more` only reads the offset and the sender records the page with `page_sent` once it went out. A page's answer or error acts only when the stage holds its id (`SearchState::awaits`), so a page of a list that started over is dropped. |
+| 09-003 | `Leg::Pending { request }`; `Session::request_search(purpose)` registers the request and records it in the leg it belongs to (`leg_sent`). `matches_generation` is gone from the global search: answers of the legs, the paging, the server supplement (`server_chats: Fetch`) and the quota (`tabs.limits: Fetch`) are matched by id. `SearchState::generation` is now `epoch`, only the UI's scroll reset. A typed query waiting out its quiet window is `typed.armed()`; the panel reads `Searching` from it, so no stage of a leg waits for the debounce (and a cancelled debounce leaves none behind). `begin_query`, `begin_recents` and `begin_browse` return nothing. |
+| 09-004 | `GroupsState::supergroups: HashMap<id, SupergroupFacts>` holds the seven rights and four flags (`join_by_request`, `is_broadcast_group`, `sign_messages`, `show_message_sender`) of an `updateSupergroup` / `getSupergroup`, replaced whole by one `SupergroupFacts::from_update` in both appliers; `anti_spam: HashMap<id, SupergroupAntiSpam>` is the `supergroupFullInfo` pair, replaced whole in both appliers. The thirteen per-flag maps are gone. Quill never removes a chat summary before the account goes, so there is no earlier owner exit; the next update resets every right at once (test: a demotion). |
+| 09-005 | `Audience<T>::Loading { request }` and `Paging { page, request }`. The viewers, read date, author and each reactions tab take an answer or an error only from the request they hold (`fill`, `accept_added_reactions`, `fail_audience(&PendingRequest)`), and a failed next page returns to `Ready`. |
+| 09-006 | `SetChangeStage::Working { change, request }`; `finish_set_change(request, set_id, success)` settles only that request, so the first answer no longer ends the second change of the same kind. |
+| 09-007 | `accept_replied_message` and `reject_replied_message` take the request and act only on `ReplyTarget::Loading { request }` of that id: a late error of an older ask neither bumps the attempts nor makes the row Missing, a late answer neither fills it, and a row pruned meanwhile is not brought back. |
+
+Second round (08-024): the reaction selector is the other exit that keeps a
+message's options. `set_media_panel_mode` forgets them (`forget_message_reactions`,
+shared with `close_message_menu`) when it leaves `PanelMode::Reaction(target)` for
+anything but the same target, so a pick, a close and a mode change all end the
+entry; `forget_chat_window` closes a selector open in that window. Test:
+`window_menu_tests.rs` (open the selector from a menu, close it, the book holds
+no entry).
+
+Third round (08-024): `react_from_panel` reacts first and closes the selector
+after, because `toggle_reaction` reads the message's `premium_locked` options for the
+Premium gate and closing forgets them. A free account picking a locked reaction in the
+selector opens the Premium preview and sends nothing. Test:
+`reaction_rows_tests.rs` (`a_locked_reaction_in_the_selector_opens_the_premium_preview`,
+which also finds no book entry afterwards).
+
+Merged after r3-06 and r3-04: `RequestRollback::BroadcastGroup` (r3-06, 08-006)
+reads and restores `SupergroupFacts::is_broadcast_group` (09-004) instead of the
+removed `supergroup_is_broadcast` map, so the error arm for
+`ToggleBroadcastGroup` stays gone. The around-page jump keeps r3-06's
+`ChatSearchJump::Loading { request }` matching; the global search drops
+`matches_generation` (09-003) while the in-chat search keeps its baselined calls.
+
+Shared file touched: `src/state/session_apply_error.rs` reads `file_id()` where it read the
+field (08-025); nothing else of it changed.
+
+Guards: `check-request-match.py` gains `generation` (a call to
+`matches_generation`: an answer taken because it carries the query's counter,
+not the `RequestId` its stage holds; the in-chat search's four calls are
+baselined) and `stamped` (a `Correlation::` or `.correlate(` outside the request
+constructors).
+`check-stage-enums.py`'s baseline lost the six stages that now hold a request
+(`ChatEventLogFetch::Loading`, `MessageReactionsState::Loading`,
+`SetChangeStage::Working`, `SavedTopicsLoad::Started`, `SearchPaging::Loading`,
+`Leg::Pending`).
+
+Tests: `state/tests/event_log_poll.rs` (a refresh drops the page and poll
+asked before it; a poll and an older page settle on their own request),
+`connect/tests/media_library.rs` (two menus on two messages; an older request
+for the same message cannot settle the newer ask), `state/tests/rollback_shown.rs`
+(a newer position update and a newer fetch survive a refused rollback),
+`state/tests/forum_saved.rs` (an older page cannot settle the page now out),
+`state/tests/search_upgrades.rs` (a leg settles only on its request; a page of
+a closed list is dropped), `state/tests/bubble_headers.rs` (an older reply
+ask cannot settle the newer one), `state/tests/messages_more.rs` (the reactions
+tab pages with the older ask's failure ignored), `connect/tests/set_box_change.rs`
+(another request naming the same change), `state/tests/groups_more.rs` (a
+demotion resets rights and flags together),
+`state/domains/users/save_watch.rs` (two boxes save at once).

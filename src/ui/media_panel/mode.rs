@@ -124,6 +124,14 @@ impl QuillApp {
         {
             session.stickers.emoji.sticker_categories.clear_error();
         }
+        // The reaction selector was the last user of the options it asked
+        // for: it ends on a pick, a close, or the window going away.
+        if let PanelMode::Reaction(target) = old
+            && !matches!(mode, PanelMode::Reaction(next)
+                if next.chat_id == target.chat_id && next.message_id == target.message_id)
+        {
+            self.forget_message_reactions(target.chat_id, target.message_id);
+        }
         if old.selector() && std::mem::discriminant(&old) != std::mem::discriminant(&mode) {
             self.pickers.media_panel.key = None;
         }

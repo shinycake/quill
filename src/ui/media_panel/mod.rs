@@ -330,7 +330,7 @@ impl QuillApp {
     }
 
     /// In reaction mode a cell reacts (and closes) instead of inserting.
-    fn react_from_panel(
+    pub(super) fn react_from_panel(
         &mut self,
         choice: quill::state::ReactionChoice,
         cx: &mut Context<Self>,
@@ -338,8 +338,10 @@ impl QuillApp {
         let Some(target) = self.pickers.media_panel.reaction() else {
             return false;
         };
-        self.close_media_panel(cx);
+        // React first: the Premium gate reads the message's options, which
+        // closing the panel forgets.
         self.toggle_reaction(target.chat_id, target.message_id, choice, cx);
+        self.close_media_panel(cx);
         true
     }
 

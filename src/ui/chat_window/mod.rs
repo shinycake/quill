@@ -741,7 +741,13 @@ impl QuillApp {
     fn forget_chat_window(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         // What its state says as it goes (its Picture-in-Picture), with
         // that state in place.
-        self.in_window_scope(Some(chat_id), cx, |app, cx| app.farewell_window(cx));
+        self.in_window_scope(Some(chat_id), cx, |app, cx| {
+            // Its open message menu forgets the reaction options it asked for.
+            app.close_message_menu();
+            // A reaction selector open in it ends the same way.
+            app.close_media_panel(cx);
+            app.farewell_window(cx);
+        });
         // Its state must not stay in the app's place.
         if self.windows.scope == Some(chat_id) {
             self.set_window_scope(None);

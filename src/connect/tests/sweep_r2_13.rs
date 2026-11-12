@@ -385,7 +385,7 @@ fn a_refused_audience_list_does_not_strand_the_others() {
     );
     let audience = t.driver.session.messages.message_audience.as_ref().unwrap();
     assert_eq!(audience.viewers, Audience::Failed);
-    assert_eq!(audience.author, Audience::Loading);
+    assert!(audience.author.is_loading());
     assert_eq!(t.sender.count("getMessageAuthor"), 1);
 }
 

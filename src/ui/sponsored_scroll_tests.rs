@@ -72,7 +72,9 @@ fn new_ads(
     app.update(vcx, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {
             if let Some(history) = session.histories.get_mut(&13) {
-                history.unread_anchor = unread_after.map(MessageId);
+                history.unread_open = unread_after
+                    .map(MessageId)
+                    .map_or(quill::state::UnreadOpen::Closed, quill::state::UnreadOpen::Bar);
             }
             let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
             let seq = AtomicU64::new(session.last_seq);

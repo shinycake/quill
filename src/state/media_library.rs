@@ -7,6 +7,7 @@ use crate::premium_hub::PremiumFeature;
 use crate::telegram::envelope::{
     ReactionType, StoryAvailableReactionKind, StoryAvailableReactionView,
 };
+use std::collections::HashMap;
 
 /// At most this many `getStickerSet` requests for the library in flight.
 pub const MAX_LIBRARY_LOADS: usize = 4;
@@ -146,19 +147,17 @@ pub struct MessageReactionOptions {
     pub paid_offered: bool,
 }
 
-/// Where the open message menu's reaction options stand. tdesktop reads
-/// them from its local cache and skips the strip when there are none
-/// (`AttachSelectorToMenu`, `reactions.recent.empty()`); Quill asks TDLib, so
-/// the wait and a failed or empty answer are states of their own.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+/// Where one message's reaction options stand. tdesktop reads them from its
+/// local cache and skips the strip when there are none (`AttachSelectorToMenu`,
+/// `reactions.recent.empty()`); Quill asks TDLib, so the wait and a failed or
+/// empty answer are states of their own. A message with no entry in the
+/// [`MessageReactionBook`] was not asked for.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MessageReactionsState {
-    /// Nothing was asked for.
-    #[default]
-    Idle,
-    /// `getMessageAvailableReactions` is in flight for this message.
+    /// `getMessageAvailableReactions` is in flight; only that request's
+    /// answer or failure settles it.
     Loading {
-        chat_id: ChatId,
-        message_id: MessageId,
+        request: RequestId,
     },
     Ready(MessageReactionOptions),
     /// The options shown are out of date (the chat's or the account's
@@ -166,32 +165,85 @@ pub enum MessageReactionsState {
     /// the new answer replaces it.
     Stale(MessageReactionOptions),
     /// The request failed or the answer held no reaction: no strip.
-    Unavailable {
-        chat_id: ChatId,
-        message_id: MessageId,
-    },
+    Unavailable,
 }
 
-impl MessageReactionsState {
-    /// The options, whichever message they belong to.
-    pub fn ready(&self) -> Option<&MessageReactionOptions> {
-        match self {
-            Self::Ready(options) | Self::Stale(options) => Some(options),
+/// The reaction options of every message a menu is open on, keyed by
+/// message: the main window and each chat window ask for their own, so a
+/// second menu never replaces the first's state. A menu closing forgets its
+/// message's entry.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct MessageReactionBook {
+    by_message: HashMap<(ChatId, MessageId), MessageReactionsState>,
+}
+
+impl MessageReactionBook {
+    /// `request` was sent for this message: it waits for that request.
+    pub fn begin(&mut self, chat_id: ChatId, message_id: MessageId, request: RequestId) {
+        self.by_message.insert(
+            (chat_id, message_id),
+            MessageReactionsState::Loading { request },
+        );
+    }
+
+    /// Put a settled state in place (a fixture or a restored answer).
+    pub fn set(&mut self, chat_id: ChatId, message_id: MessageId, state: MessageReactionsState) {
+        self.by_message.insert((chat_id, message_id), state);
+    }
+
+    /// The menu of this message closed: its entry goes, and an answer still
+    /// on its way is ignored.
+    pub fn forget(&mut self, chat_id: ChatId, message_id: MessageId) {
+        self.by_message.remove(&(chat_id, message_id));
+    }
+
+    pub fn state(&self, chat_id: ChatId, message_id: MessageId) -> Option<&MessageReactionsState> {
+        self.by_message.get(&(chat_id, message_id))
+    }
+
+    /// Every message's options that are loaded.
+    pub fn ready_options(&self) -> impl Iterator<Item = &MessageReactionOptions> {
+        self.by_message.values().filter_map(|state| match state {
+            MessageReactionsState::Ready(options) | MessageReactionsState::Stale(options) => {
+                Some(options)
+            }
+            _ => None,
+        })
+    }
+
+    /// Something changed the options of open menus (for the messages `of`
+    /// accepts): they are asked for again.
+    pub fn mark_stale(&mut self, mut of: impl FnMut(ChatId, MessageId) -> bool) {
+        for ((chat_id, message_id), state) in &mut self.by_message {
+            if let MessageReactionsState::Ready(options) = state
+                && of(*chat_id, *message_id)
+            {
+                *state = MessageReactionsState::Stale(options.clone());
+            }
+        }
+    }
+
+    /// The messages whose options are out of date.
+    pub fn stale_messages(&self) -> Vec<(ChatId, MessageId)> {
+        self.by_message
+            .iter()
+            .filter(|(_, state)| matches!(state, MessageReactionsState::Stale(_)))
+            .map(|(key, _)| *key)
+            .collect()
+    }
+
+    /// The loaded options of this message, to edit (fixtures).
+    pub fn ready_mut(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) -> Option<&mut MessageReactionOptions> {
+        match self.by_message.get_mut(&(chat_id, message_id))? {
+            MessageReactionsState::Ready(options) | MessageReactionsState::Stale(options) => {
+                Some(options)
+            }
             _ => None,
         }
-    }
-
-    /// Something changed the options of the picker that is open: they are
-    /// asked for again.
-    pub fn mark_stale(&mut self) {
-        if let Self::Ready(options) = self {
-            *self = Self::Stale(options.clone());
-        }
-    }
-
-    /// The picker's options are out of date.
-    pub fn is_stale(&self) -> bool {
-        matches!(self, Self::Stale(_))
     }
 
     /// The options when they belong to this message.
@@ -200,8 +252,12 @@ impl MessageReactionsState {
         chat_id: ChatId,
         message_id: MessageId,
     ) -> Option<&MessageReactionOptions> {
-        self.ready()
-            .filter(|o| o.chat_id == chat_id && o.message_id == message_id)
+        match self.state(chat_id, message_id)? {
+            MessageReactionsState::Ready(options) | MessageReactionsState::Stale(options) => {
+                Some(options)
+            }
+            _ => None,
+        }
     }
 
     /// The picker of this message offers the Star reaction.
@@ -211,34 +267,41 @@ impl MessageReactionsState {
     }
 
     pub fn is_loading_for(&self, chat_id: ChatId, message_id: MessageId) -> bool {
-        matches!(self, Self::Loading { chat_id: c, message_id: m } if *c == chat_id && *m == message_id)
+        self.loading_request(chat_id, message_id).is_some()
     }
 
-    pub fn is_unavailable_for(&self, chat_id: ChatId, message_id: MessageId) -> bool {
-        matches!(self, Self::Unavailable { chat_id: c, message_id: m } if *c == chat_id && *m == message_id)
-    }
-
-    /// The message the state is about, if any.
-    pub fn target(&self) -> Option<(ChatId, MessageId)> {
-        match self {
-            Self::Idle => None,
-            Self::Loading {
-                chat_id,
-                message_id,
-            }
-            | Self::Unavailable {
-                chat_id,
-                message_id,
-            } => Some((*chat_id, *message_id)),
-            Self::Ready(o) | Self::Stale(o) => Some((o.chat_id, o.message_id)),
+    /// The request this message's entry waits for.
+    pub fn loading_request(&self, chat_id: ChatId, message_id: MessageId) -> Option<RequestId> {
+        match self.state(chat_id, message_id)? {
+            MessageReactionsState::Loading { request } => Some(*request),
+            _ => None,
         }
     }
 
-    /// The state already holds the answer for this message. A wait does not
+    pub fn is_unavailable_for(&self, chat_id: ChatId, message_id: MessageId) -> bool {
+        matches!(
+            self.state(chat_id, message_id),
+            Some(MessageReactionsState::Unavailable)
+        )
+    }
+
+    /// The book already holds the answer for this message. A wait does not
     /// count (its request may be gone), nor does a failed or empty answer:
     /// reopening the menu asks again unless a request is really pending.
     pub fn covers(&self, chat_id: ChatId, message_id: MessageId) -> bool {
-        matches!(self, Self::Ready(_)) && self.ready_for(chat_id, message_id).is_some()
+        matches!(
+            self.state(chat_id, message_id),
+            Some(MessageReactionsState::Ready(_))
+        )
+    }
+
+    /// `request` settles this message's wait: true while the entry still
+    /// waits for exactly that request.
+    fn waits_for(&self, chat_id: ChatId, message_id: MessageId, request: RequestId) -> bool {
+        matches!(
+            self.state(chat_id, message_id),
+            Some(MessageReactionsState::Loading { request: waiting }) if *waiting == request
+        )
     }
 }
 
@@ -284,6 +347,7 @@ impl Session {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn accept_message_reaction_options(
         &mut self,
+        request: RequestId,
         chat_id: ChatId,
         message_id: MessageId,
         top: Vec<StoryAvailableReactionView>,
@@ -291,12 +355,12 @@ impl Session {
         popular: Vec<StoryAvailableReactionView>,
         allow_custom_emoji: bool,
     ) {
-        // Only the answer this menu waits for counts; a late one for a
-        // message the menu left must not touch the current state.
+        // Only the answer of the request this message waits for counts; a
+        // late one of an older ask, or for a menu that closed, is dropped.
         if !self
             .stickers
             .message_reaction_options
-            .is_loading_for(chat_id, message_id)
+            .waits_for(chat_id, message_id, request)
         {
             return;
         }
@@ -333,14 +397,14 @@ impl Session {
         // tdesktop adds the paid reaction to `recent` when paid is enabled
         // (data_message_reactions.cpp), so an offer of Stars alone still
         // earns the strip.
-        self.stickers.message_reaction_options = if options.all().is_empty() && !paid_offered {
-            MessageReactionsState::Unavailable {
-                chat_id,
-                message_id,
-            }
+        let state = if options.all().is_empty() && !paid_offered {
+            MessageReactionsState::Unavailable
         } else {
             MessageReactionsState::Ready(options)
         };
+        self.stickers
+            .message_reaction_options
+            .set(chat_id, message_id, state);
     }
 
     /// Whether the picker for this message offers the Star reaction.
@@ -351,24 +415,32 @@ impl Session {
             .is_some_and(|options| options.paid_offered)
     }
 
-    /// The message menu closed: nothing is asked for, and an answer still on
-    /// its way is ignored.
-    pub fn reset_message_reactions(&mut self) {
-        self.stickers.message_reaction_options = MessageReactionsState::Idle;
+    /// The message menu on this message closed: nothing is asked for, and an
+    /// answer still on its way is ignored.
+    pub fn reset_message_reactions(&mut self, chat_id: ChatId, message_id: MessageId) {
+        self.stickers
+            .message_reaction_options
+            .forget(chat_id, message_id);
     }
 
     /// `getMessageAvailableReactions` failed: the strip stays away, unless
-    /// the menu moved on to another message meanwhile.
-    pub(crate) fn fail_message_reaction_options(&mut self, chat_id: ChatId, message_id: MessageId) {
+    /// the menu closed or asked again (another request) meanwhile.
+    pub(crate) fn fail_message_reaction_options(
+        &mut self,
+        request: RequestId,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) {
         if self
             .stickers
             .message_reaction_options
-            .is_loading_for(chat_id, message_id)
+            .waits_for(chat_id, message_id, request)
         {
-            self.stickers.message_reaction_options = MessageReactionsState::Unavailable {
+            self.stickers.message_reaction_options.set(
                 chat_id,
                 message_id,
-            };
+                MessageReactionsState::Unavailable,
+            );
         }
     }
 

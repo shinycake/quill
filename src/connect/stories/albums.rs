@@ -284,11 +284,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        let extra = self.session.request(purpose, Some(chat_id));
+        let extra = match gallery {
+            Some(_) => self.session.request_for_gallery_tab(purpose, chat_id),
+            None => self.session.request(purpose, Some(chat_id)),
+        };
         if let Some(append) = gallery {
-            self.session
-                .requests
-                .correlate(extra, crate::state::Correlation::GalleryTab);
             let tab = &mut self.session.media.shared_media;
             if append {
                 tab.begin_profile_more(crate::state::SharedMediaTab::Stories, extra);

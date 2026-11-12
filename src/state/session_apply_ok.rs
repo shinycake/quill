@@ -21,6 +21,11 @@ impl Session {
         {
             self.finish_pending_bot_stop(chat_id, topic_id, draft_id);
         }
+        if let Some(pending) = pending
+            && pending.purpose == RequestPurpose::LoadSavedMessagesTopics
+        {
+            self.threads.saved.page_answered(pending.id);
+        }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::RemoveSavedNotificationSound) {
             self.mark_saved_sounds_stale();
         }
@@ -343,13 +348,13 @@ impl Session {
         if let Some(RequestPurpose::Stickers(StickersPurpose::ManageStickerSet {
             set_id,
             installed,
-            archived,
+            ..
         })) = pending.map(|p| p.purpose)
         {
             if let Some(request) = pending.map(|p| p.id) {
                 self.finish_sticker_batch_item(request, true);
+                self.finish_set_change(request, set_id, true);
             }
-            self.finish_set_change(set_id, SetChange::of(installed, archived), true);
             for sets in [
                 &mut self.stickers.stickers.trending,
                 &mut self.stickers.stickers.search.sets,

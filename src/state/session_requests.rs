@@ -23,6 +23,20 @@ impl Session {
         id
     }
 
+    /// A request whose answer names nothing it is for: it records
+    /// `correlation` when it is registered, so the answer is read against
+    /// what asked.
+    fn request_correlated(
+        &mut self,
+        purpose: RequestPurpose,
+        chat_id: Option<ChatId>,
+        correlation: Correlation,
+    ) -> RequestId {
+        let id = self.request(purpose, chat_id);
+        self.requests.correlate(id, correlation);
+        id
+    }
+
     /// A history page asked for `chat_id` belongs to the window it has now.
     pub(crate) fn stamp_window_epoch(&mut self, id: RequestId, chat_id: Option<ChatId>) {
         let window_epoch = chat_id
@@ -65,9 +79,7 @@ impl Session {
         purpose: RequestPurpose,
         scope: NotificationSettingsScope,
     ) -> RequestId {
-        let extra = self.request(purpose, None);
-        self.requests.correlate(extra, Correlation::Scope(scope));
-        extra
+        self.request_correlated(purpose, None, Correlation::Scope(scope))
     }
 
     /// Phase 5.1: like `request`, but also stamps the forum topic id for
@@ -78,19 +90,24 @@ impl Session {
         chat_id: Option<ChatId>,
         forum_topic_id: i32,
     ) -> RequestId {
-        let id = self.request(purpose, chat_id);
-        self.requests
-            .correlate(id, Correlation::ForumTopic(forum_topic_id));
-        id
+        self.request_correlated(purpose, chat_id, Correlation::ForumTopic(forum_topic_id))
     }
 
     /// Phase 6: like `request`, but stamps the user id for user-scoped
     /// requests (`GetUserFullInfo` from the contacts panel, `AddContact`)
     /// so id-less responses correlate (`Correlation::user_id`).
     pub fn request_for_user(&mut self, purpose: RequestPurpose, user_id: i64) -> RequestId {
-        let id = self.request(purpose, None);
-        self.requests.correlate(id, Correlation::User(user_id));
-        id
+        self.request_correlated(purpose, None, Correlation::User(user_id))
+    }
+
+    /// Like [`Self::request_for_user`] for a request that also names its chat.
+    pub fn request_for_user_in_chat(
+        &mut self,
+        purpose: RequestPurpose,
+        chat_id: ChatId,
+        user_id: i64,
+    ) -> RequestId {
+        self.request_correlated(purpose, Some(chat_id), Correlation::User(user_id))
     }
 
     /// Phase 6: like `request`, but stamps the supergroup id for
@@ -101,10 +118,7 @@ impl Session {
         purpose: RequestPurpose,
         supergroup_id: i64,
     ) -> RequestId {
-        let id = self.request(purpose, None);
-        self.requests
-            .correlate(id, Correlation::Supergroup(supergroup_id));
-        id
+        self.request_correlated(purpose, None, Correlation::Supergroup(supergroup_id))
     }
 
     /// Slice (communities backend core): like `request`, but stamps the
@@ -115,10 +129,7 @@ impl Session {
         purpose: RequestPurpose,
         community_id: i64,
     ) -> RequestId {
-        let id = self.request(purpose, None);
-        self.requests
-            .correlate(id, Correlation::Community(community_id));
-        id
+        self.request_correlated(purpose, None, Correlation::Community(community_id))
     }
 
     /// Phase 9.1: like `request`, but stamps the chat id and story id for
@@ -130,9 +141,7 @@ impl Session {
         chat_id: ChatId,
         story_id: i32,
     ) -> RequestId {
-        let id = self.request(purpose, Some(chat_id));
-        self.requests.correlate(id, Correlation::Story(story_id));
-        id
+        self.request_correlated(purpose, Some(chat_id), Correlation::Story(story_id))
     }
 
     /// Phase 9.7: like `request`, but stamps the sent id lists for album
@@ -147,24 +156,20 @@ impl Session {
         story_ids: Option<Vec<i32>>,
         story_album_id: Option<i32>,
     ) -> RequestId {
-        let id = self.request(purpose, Some(chat_id));
-        self.requests.correlate(
-            id,
+        self.request_correlated(
+            purpose,
+            Some(chat_id),
             Correlation::StoryAlbum {
                 story_ids,
                 album_id: story_album_id,
             },
-        );
-        id
+        )
     }
 
     /// Like `request`, but stamps the user ids a `setCloseFriends` sent
     /// (`Correlation::user_ids`); its `ok` carries none.
     pub fn request_for_user_ids(&mut self, purpose: RequestPurpose, user_ids: &[i64]) -> RequestId {
-        let id = self.request(purpose, None);
-        self.requests
-            .correlate(id, Correlation::UserIds(user_ids.to_vec()));
-        id
+        self.request_correlated(purpose, None, Correlation::UserIds(user_ids.to_vec()))
     }
 
     /// Like `request`, but stamps the invite link a link-scoped request
@@ -175,20 +180,32 @@ impl Session {
         chat_id: ChatId,
         invite_link: &str,
     ) -> RequestId {
-        let id = self.request(purpose, Some(chat_id));
-        self.requests
-            .correlate(id, Correlation::InviteLink(invite_link.to_owned()));
-        id
+        self.request_correlated(
+            purpose,
+            Some(chat_id),
+            Correlation::InviteLink(invite_link.to_owned()),
+        )
     }
 
     /// Like `request`, but stamps the string id of what it acts on
     /// (`Correlation::subject_id`: the terms `acceptTermsOfService`
     /// accepts, the gift `sellGift` sells); its `ok` carries none.
     pub fn request_for_subject(&mut self, purpose: RequestPurpose, subject_id: &str) -> RequestId {
-        let id = self.request(purpose, None);
-        self.requests
-            .correlate(id, Correlation::Subject(subject_id.to_owned()));
-        id
+        self.request_for_subject_in(purpose, None, subject_id)
+    }
+
+    /// Like [`Self::request_for_subject`] for a request that may name a chat.
+    pub fn request_for_subject_in(
+        &mut self,
+        purpose: RequestPurpose,
+        chat_id: Option<ChatId>,
+        subject_id: &str,
+    ) -> RequestId {
+        self.request_correlated(
+            purpose,
+            chat_id,
+            Correlation::Subject(subject_id.to_owned()),
+        )
     }
 
     /// Phase B1: like `request`, but stamps the secret chat id for
@@ -200,10 +217,18 @@ impl Session {
         purpose: RequestPurpose,
         secret_chat_id: i32,
     ) -> RequestId {
-        let id = self.request(purpose, None);
-        self.requests
-            .correlate(id, Correlation::SecretChat(secret_chat_id));
-        id
+        self.request_correlated(purpose, None, Correlation::SecretChat(secret_chat_id))
+    }
+
+    /// A page the shared-media gallery's Stories tab asks for
+    /// (`Correlation::GalleryTab`); the stories page asks for the same
+    /// purpose without it.
+    pub fn request_for_gallery_tab(
+        &mut self,
+        purpose: RequestPurpose,
+        chat_id: ChatId,
+    ) -> RequestId {
+        self.request_correlated(purpose, Some(chat_id), Correlation::GalleryTab)
     }
 
     /// Parity slice: like `request`, but stamps the folder id for
@@ -211,8 +236,6 @@ impl Session {
     /// `DeleteChatFolder`, `LoadFolderChats`) so responses correlate
     /// (`Correlation::folder_id`).
     pub fn request_for_folder(&mut self, purpose: RequestPurpose, folder_id: i32) -> RequestId {
-        let id = self.request(purpose, None);
-        self.requests.correlate(id, Correlation::Folder(folder_id));
-        id
+        self.request_correlated(purpose, None, Correlation::Folder(folder_id))
     }
 }

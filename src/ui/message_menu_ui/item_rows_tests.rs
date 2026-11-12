@@ -324,7 +324,9 @@ fn the_author_row_waits_for_the_answer_and_hides_on_failure(cx: &mut TestAppCont
             .as_mut()
             .and_then(|session| session.messages.message_audience.as_mut())
         {
-            audience.author = quill::state::Audience::Loading;
+            audience.author = quill::state::Audience::Loading {
+                request: quill::ids::RequestId(1),
+            };
         }
     });
     open_menu_on(&app, vcx, CHANNEL, POST);

@@ -248,12 +248,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Ask for more sublists (`loadSavedMessagesTopics`); deduped, and
     /// silent once TDLib said everything is loaded.
     pub fn load_saved_topics(&mut self) -> Sent {
-        if self.session.threads.saved.topics_exhausted()
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::LoadSavedMessagesTopics)
-        {
+        let saved = &self.session.threads.saved;
+        if saved.topics_exhausted() || saved.topics_load.is_loading() {
             return Ok(None);
         }
         let sent = self.send_purpose(RequestPurpose::LoadSavedMessagesTopics, None, |extra| {
@@ -262,9 +258,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // A page that never left waits for the connection like a failed one.
         let saved = &mut self.session.threads.saved;
         match &sent {
-            Ok(Some(_)) if saved.topics_load != SavedTopicsLoad::Exhausted => {
-                saved.topics_load = SavedTopicsLoad::Started;
-            }
+            Ok(Some(request)) => saved.page_sent(*request),
             Err(_) => saved.topics_load = SavedTopicsLoad::Retry,
             _ => {}
         }

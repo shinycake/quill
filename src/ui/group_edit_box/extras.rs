@@ -227,11 +227,7 @@ impl QuillApp {
         self.session()
             .and_then(|session| {
                 let supergroup = session.chat_supergroup(chat_id)?;
-                session
-                    .groups
-                    .supergroup_anti_spam_enabled
-                    .get(&supergroup)
-                    .copied()
+                Some(session.groups.supergroup_anti_spam(supergroup).enabled)
             })
             .unwrap_or(false)
     }

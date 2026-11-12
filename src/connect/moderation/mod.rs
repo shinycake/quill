@@ -263,10 +263,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self
             .session
             .groups
-            .supergroup_is_broadcast
-            .get(&supergroup_id)
-            .copied()
-            .unwrap_or(false)
+            .supergroup(supergroup_id)
+            .is_broadcast_group
         {
             return Ok(None);
         }
@@ -292,13 +290,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         let previous = self
             .session
             .groups
-            .supergroup_join_by_request
+            .supergroups
             .get(&supergroup_id)
-            .copied();
-        self.session
-            .groups
-            .supergroup_join_by_request
-            .insert(supergroup_id, join_by_request);
+            .map(|facts| facts.join_by_request);
+        self.session.groups.edit_supergroup(supergroup_id, |facts| {
+            facts.join_by_request = join_by_request
+        });
         if let Some(pending) = self.session.requests.pending_mut(extra) {
             pending.rollback = Some(RequestRollback::JoinByRequest {
                 supergroup_id,

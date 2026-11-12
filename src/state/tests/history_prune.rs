@@ -1,6 +1,6 @@
 //! State reducer tests: histories of chats nobody is looking at are
 //! bounded (`state::history_prune`).
-use super::common::{AtomicU64, MemorySink, apply_json, session};
+use super::common::{AtomicU64, MemorySink, accept_reply, apply_json, reject_reply, session};
 use super::{
     Arc, CLOSED_CHATS_MAX, CLOSED_TAIL_CAP, CLOSED_TAIL_KEEP, CLOSED_TOPICS_MAX,
     ChannelMemberStatus, ChatId, HashMap, InfoPanelTarget, MemberListFilter, MessageContent,
@@ -225,9 +225,15 @@ fn a_kept_tail_keeps_the_replied_messages_of_rows_paged_out() {
     feed(&mut session, 7, 200);
     // Rows 10 and 190 reply to messages outside the window; 50's original
     // is gone.
-    session.accept_replied_message(ChatId(7), MessageId(10), live(7, 3));
-    session.accept_replied_message(ChatId(7), MessageId(190), live(7, 4));
-    session.reject_replied_message(ChatId(7), MessageId(50), 400, std::time::Instant::now());
+    accept_reply(&mut session, ChatId(7), MessageId(10), live(7, 3));
+    accept_reply(&mut session, ChatId(7), MessageId(190), live(7, 4));
+    reject_reply(
+        &mut session,
+        ChatId(7),
+        MessageId(50),
+        400,
+        std::time::Instant::now(),
+    );
     switch(&mut session, 8);
     assert_eq!(len(&session, 7), CLOSED_TAIL_KEEP);
     // Coming back scrolled up pages rows 10 and 50 in again: their strips
@@ -248,8 +254,8 @@ fn a_dropped_chat_forgets_its_pinned_list_and_replied_messages() {
         switch(&mut session, chat);
         feed(&mut session, chat, 80);
         // Row 5 leaves with the tail trim, row 80 stays in the tail.
-        session.accept_replied_message(ChatId(chat), MessageId(5), live(chat, 1));
-        session.accept_replied_message(ChatId(chat), MessageId(80), live(chat, 2));
+        accept_reply(&mut session, ChatId(chat), MessageId(5), live(chat, 1));
+        accept_reply(&mut session, ChatId(chat), MessageId(80), live(chat, 2));
         let pinned = session.histories[&chat].messages[&80].clone();
         session
             .messages
@@ -323,7 +329,7 @@ fn a_forum_keeps_its_replied_messages_until_its_last_topic_goes() {
     let (mut session, _sink) = session();
     session.topic_history_entry(ChatId(70), 1);
     session.topic_history_entry(ChatId(70), 2);
-    session.accept_replied_message(ChatId(70), MessageId(5), live(70, 1));
+    accept_reply(&mut session, ChatId(70), MessageId(5), live(70, 1));
     // Topics of other chats push chat 70's topics out of the LRU, oldest
     // first.
     session.topic_history_entry(ChatId(71), 1);

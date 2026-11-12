@@ -246,12 +246,7 @@ impl Session {
                 supergroup_id,
                 is_channel: false,
             } => {
-                let broadcast = self
-                    .groups
-                    .supergroup_is_broadcast
-                    .get(&supergroup_id)
-                    .copied()
-                    .unwrap_or(false);
+                let broadcast = self.groups.supergroup(supergroup_id).is_broadcast_group;
                 let full = self.groups.supergroup_full_infos.get(&supergroup_id);
                 let linked = self.chat_linked_chat(chat_id);
                 let is_forum = chat.is_forum_chat();

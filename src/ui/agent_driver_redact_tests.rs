@@ -83,7 +83,7 @@ fn show_search_tab(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, tab: Sea
         search.messages = vec![hit(12, 1, "top secret post"), hit(11, 2, "granted hit")];
         search.accept_messages(search.messages.clone(), false);
         search.note_public_limits(true);
-        search.tabs.limits = Some(PublicPostLimits {
+        search.tabs.limits.succeed(PublicPostLimits {
             daily_free: 3,
             remaining_free: 0,
             next_free_in: 3600,

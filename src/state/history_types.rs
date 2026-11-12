@@ -557,6 +557,60 @@ pub struct WindowLoad {
     pub newer: NewerLoad,
 }
 
+/// How the chat's history was opened with respect to its unread messages.
+/// Separate from the bar alone, like tdesktop's `_firstUnreadView` versus
+/// `_unreadBarView`: deleting the bar's message drops the bar but the chat
+/// is still not read unseen.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum UnreadOpen {
+    /// Opened with nothing unread, or the open ended (jumping to the latest
+    /// or sending): no bar, reads are not held.
+    #[default]
+    Closed,
+    /// The bar is brought back for the jump-down button on a history whose
+    /// open already ended: reads are not held.
+    Bar(MessageId),
+    /// Opened at the first unread message and the UI has not shown anything
+    /// yet: reads are held back. `bar` is the divider's anchor until the
+    /// bar's message goes or the view cannot place it.
+    Opened { bar: Option<MessageId> },
+}
+
+impl UnreadOpen {
+    /// The message the bar sits after, while it is shown.
+    pub fn anchor(self) -> Option<MessageId> {
+        match self {
+            Self::Closed => None,
+            Self::Bar(anchor) => Some(anchor),
+            Self::Opened { bar } => bar,
+        }
+    }
+
+    /// The chat opens at `anchor`: reads are held while there is one.
+    pub fn opened_at(anchor: Option<MessageId>) -> Self {
+        match anchor {
+            Some(anchor) => Self::Opened { bar: Some(anchor) },
+            None => Self::Closed,
+        }
+    }
+
+    /// Only the bar goes; held reads stay held.
+    pub fn drop_bar(&mut self) {
+        *self = match *self {
+            Self::Closed | Self::Bar(_) => Self::Closed,
+            Self::Opened { .. } => Self::Opened { bar: None },
+        };
+    }
+
+    /// Show the bar after `anchor`; held reads stay as they were.
+    pub fn show_bar(&mut self, anchor: MessageId) {
+        *self = match *self {
+            Self::Closed | Self::Bar(_) => Self::Bar(anchor),
+            Self::Opened { .. } => Self::Opened { bar: Some(anchor) },
+        };
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct HistoryState {
     pub messages: HistoryMessages,
@@ -568,16 +622,10 @@ pub struct HistoryState {
     /// generation, which are on their way (each answer settles the ids of
     /// its own request only), and which the UI reported as shown.
     pub views: ViewBook,
-    /// The chat's last read incoming message when it was opened with unread
-    /// messages: the window loads around it and the UI draws the "Unread
-    /// messages" divider after it. Cleared by jumping to the latest.
-    pub unread_anchor: Option<MessageId>,
-    /// The chat was opened with unread messages and the UI has not shown
-    /// anything yet. Separate from `unread_anchor` (the bar), like
-    /// tdesktop's `_firstUnreadView` versus `_unreadBarView`: deleting the
-    /// bar's message drops the bar but the chat is still not read unseen.
-    /// Cleared with the anchor by jumping to the latest or sending.
-    pub opened_with_unread: bool,
+    /// Whether the chat was opened at its first unread message, and where
+    /// the "Unread messages" bar sits. One value, so the bar and the held
+    /// reads cannot drift apart.
+    pub unread_open: UnreadOpen,
     /// Bumped whenever the window is replaced, so the UI re-anchors its
     /// scroll position (unread divider, jump target, or bottom).
     pub window_epoch: u64,
@@ -757,7 +805,7 @@ impl HistoryState {
     /// The message the "Unread messages" bar sits above: the first
     /// incoming one after `unread_anchor` (the rule the rows are built by).
     pub fn unread_bar_message(&self) -> Option<MessageId> {
-        let anchor = self.unread_anchor?;
+        let anchor = self.unread_anchor()?;
         self.messages
             .values()
             .find(|message| !message.is_outgoing && message.id.0 > anchor.0)
@@ -767,22 +815,33 @@ impl HistoryState {
     /// Drop the bar when it sits above one of `doomed` (about to be removed
     /// by delete, window trim or prune). Call before removing them.
     pub(crate) fn drop_unread_bar_for(&mut self, doomed: &[i64]) {
-        if self.unread_anchor.is_none() || doomed.is_empty() {
+        if self.unread_anchor().is_none() || doomed.is_empty() {
             return;
         }
         if self
             .unread_bar_message()
             .is_some_and(|bar| doomed.contains(&bar.0))
         {
-            self.unread_anchor = None;
+            self.unread_open.drop_bar();
         }
     }
 
     /// End the opened-with-unread state: the bar goes and reads are no
     /// longer held back.
     pub fn end_unread_open(&mut self) {
-        self.unread_anchor = None;
-        self.opened_with_unread = false;
+        self.unread_open = UnreadOpen::Closed;
+    }
+
+    /// The chat's last read incoming message while the bar is shown: the
+    /// window loads around it and the UI draws the divider after it.
+    pub fn unread_anchor(&self) -> Option<MessageId> {
+        self.unread_open.anchor()
+    }
+
+    /// The chat was opened with unread messages and the UI has not shown
+    /// anything yet, so reads are held back.
+    pub fn opened_with_unread(&self) -> bool {
+        matches!(self.unread_open, UnreadOpen::Opened { .. })
     }
 
     /// Remove a message. The bar belongs to its message (tdesktop

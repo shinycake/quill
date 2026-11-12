@@ -33,12 +33,40 @@ impl GroupsState {
         self.event_log_filter(chat).is_some() || !self.event_log_users(chat).is_empty()
     }
 
-    /// `chat`'s log forgets its fetch and the requests it waits for (a
-    /// refresh): what it is asked with stays.
+    /// `chat`'s log forgets its fetch, and with it every request it waits
+    /// for (a refresh): what it is asked with stays.
     pub(crate) fn reset_event_log_fetch(&mut self, chat: i64) {
         if let Some(log) = self.event_logs.get_mut(&chat) {
             log.fetch = ChatEventLogFetch::Idle;
-            log.wait = EventLogWait::default();
+        }
+    }
+
+    /// The `getChatEventLog` request `request` was sent for `chat`: the stage
+    /// that asked now holds it (the first page: `Loading`; an older page and
+    /// the poll: inside the loaded page).
+    pub fn event_log_sent(
+        &mut self,
+        chat: i64,
+        request: RequestId,
+        polling: bool,
+        first_page: bool,
+    ) {
+        if first_page {
+            self.set_event_log_fetch(chat, ChatEventLogFetch::Loading { request });
+        } else if let Some(page) = self.loaded_event_log_mut(chat) {
+            if polling {
+                page.poll = LogPoll::Polling { request };
+            } else {
+                page.older = OlderEvents::Loading { request };
+            }
+        }
+    }
+
+    /// `chat`'s loaded page, when there is one.
+    pub(crate) fn loaded_event_log_mut(&mut self, chat: i64) -> Option<&mut ChatEventLogPage> {
+        match &mut self.event_logs.get_mut(&chat)?.fetch {
+            ChatEventLogFetch::Loaded(page) => Some(page),
+            _ => None,
         }
     }
 
@@ -143,30 +171,6 @@ pub struct GroupsState {
     /// search, the filters (schema 1.8.67, lines 7956 and 15252), the fetch
     /// stage and the page and poll requests it waits for.
     pub event_logs: HashMap<i64, EventLog>,
-    /// Slice G2: `supergroup.sign_messages` (schema 1.8.67, line 2746),
-    /// keyed by supergroup id. Drives the channel "Sign messages" toggle.
-    pub supergroup_sign_messages: HashMap<i64, bool>,
-    /// Slice G2: `supergroup.show_message_sender` (schema 1.8.67, line
-    /// 2746), keyed by supergroup id. Drives the "Show authors" toggle.
-    pub supergroup_show_message_sender: HashMap<i64, bool>,
-    /// Slice G2: `supergroupFullInfo.has_aggressive_anti_spam_enabled`
-    /// (schema 1.8.67, line 2792), keyed by supergroup id.
-    pub supergroup_anti_spam_enabled: HashMap<i64, bool>,
-    /// Slice G2: `supergroupFullInfo.can_toggle_aggressive_anti_spam`
-    /// (schema 1.8.67, line 2792), keyed by supergroup id. Gates the
-    /// anti-spam toggle.
-    pub supergroup_can_toggle_anti_spam: HashMap<i64, bool>,
-    /// Slice G2: the viewer's `rights.can_manage_topics` per supergroup
-    /// (schema 1.8.67, line 1092). Gates forum topic management.
-    pub supergroup_manage_topics_right: HashMap<i64, bool>,
-    /// Slice G2: the viewer's `rights.can_change_info` per supergroup
-    /// (schema 1.8.67, line 1092). `toggleSupergroupSignMessages`
-    /// requires this right.
-    pub supergroup_change_info_right: HashMap<i64, bool>,
-    /// Slice G2: the viewer's `rights.can_send_welcome_messages` per
-    /// supergroup (schema 1.8.67, line 1090). Gates welcome-message
-    /// management.
-    pub supergroup_send_welcome_right: HashMap<i64, bool>,
     /// The viewer posts as the group in this supergroup (own status,
     /// `rights.is_anonymous` or the owner's `is_anonymous`), kept current by
     /// `updateSupergroup`.
@@ -229,16 +233,13 @@ pub struct GroupsState {
     /// Drives the slow-mode bypass (admins/creators are exempt) and gates
     /// the admin slow-mode control. Absent = unknown (gated, no bypass).
     pub supergroup_member_status: HashMap<i64, ChannelMemberStatus>,
-    /// Phase A1: the viewer's `rights.can_restrict_members` per supergroup
-    /// from own `chatMemberStatusAdministrator` (schema 1.8.67, lines
-    /// 2500/`chatAdministratorRights` 1092). `setChatSlowModeDelay` requires
-    /// 13551). Absent = unknown, treated as lacking the right.
-    pub supergroup_restrict_right: HashMap<i64, bool>,
-    /// Phase D3a: the viewer's `rights.can_invite_users` per supergroup
-    /// from own `chatMemberStatusAdministrator` (schema 1.8.67, line
-    /// 1092). Invite-link management requires this right (or creator
-    /// status). Absent = unknown, treated as lacking the right.
-    pub supergroup_invite_right: HashMap<i64, bool>,
+    /// The viewer's rights and the group's flags per supergroup, replaced
+    /// whole by each `updateSupergroup` / `getSupergroup` (see
+    /// [`SupergroupFacts`]).
+    pub supergroups: HashMap<i64, SupergroupFacts>,
+    /// Anti-spam state per supergroup, replaced whole by each
+    /// `supergroupFullInfo` (see [`SupergroupAntiSpam`]).
+    pub anti_spam: HashMap<i64, SupergroupAntiSpam>,
     /// Phase D3b: `getChatAdministrators` fetch state, keyed by chat id.
     pub admin_lists: HashMap<i64, AdminListFetch>,
     /// Phase D3b / slice G1: `getSupergroupMembers` fetch state for the
@@ -262,10 +263,6 @@ pub struct GroupsState {
     pub group_type: GroupTypeState,
     /// New Group / New Channel creations, by their create request.
     pub new_chats: NewChatState,
-    /// Slice G1: `supergroup.join_by_request` (schema 1.8.67, lines
-    /// 2733/2746), keyed by supergroup id. Drives the "Approve new
-    /// members" toggle.
-    pub supergroup_join_by_request: HashMap<i64, bool>,
     /// B7: `supergroup.join_to_send_messages` (schema 1.8.67, line 2746),
     /// keyed by supergroup id.
     pub supergroup_join_to_send: HashMap<i64, bool>,
@@ -287,10 +284,6 @@ pub struct GroupsState {
     pub basic_group_active: HashMap<i64, bool>,
     /// B7: steps waiting for a group-admin request to succeed.
     pub admin_followups: Vec<(RequestId, AdminFollowup)>,
-    /// Slice G1: `supergroup.is_broadcast_group` (schema 1.8.67, lines
-    /// 2736/2746), keyed by supergroup id. Set by
-    /// `toggleSupergroupIsBroadcastGroup` (one-way upgrade).
-    pub supergroup_is_broadcast: HashMap<i64, bool>,
     /// Slice G1: `addChatMembers` failure count from the last add
     /// attempt — `failedToAddMembers.failed_to_add_members.len()` for the
     /// bulk path (schema 1.8.67, line 3640), or the accumulated per-user
@@ -309,14 +302,6 @@ pub struct GroupsState {
     /// fetch state, keyed by (chat_id, user_id). Filled by `getChatMember`
     /// (purpose `GetAdminRights`); drives the edit-rights dialog.
     pub admin_rights: HashMap<(i64, i64), AdminRightsFetch>,
-    /// Phase D3b: the viewer's `rights.can_promote_members` per supergroup
-    /// from own `chatMemberStatusAdministrator` (schema 1.8.67, line
-    /// 1092). Admin management requires this right (or creator status).
-    /// Absent = unknown, treated as lacking the right.
-    pub supergroup_promote_right: HashMap<i64, bool>,
-    /// Slice G1: own `rights.can_manage_tags` per supergroup (schema
-    /// 1.8.67, line 1092) — gates custom-title changes for others.
-    pub supergroup_manage_tags_right: HashMap<i64, bool>,
     pub private_sharing: PrivateSharingState,
 }
 
@@ -361,13 +346,6 @@ impl GroupsState {
             pending_join_request_counts: HashMap::new(),
             pending_join_request_users: HashMap::new(),
             event_logs: HashMap::new(),
-            supergroup_sign_messages: HashMap::new(),
-            supergroup_show_message_sender: HashMap::new(),
-            supergroup_anti_spam_enabled: HashMap::new(),
-            supergroup_can_toggle_anti_spam: HashMap::new(),
-            supergroup_manage_topics_right: HashMap::new(),
-            supergroup_change_info_right: HashMap::new(),
-            supergroup_send_welcome_right: HashMap::new(),
             supergroup_anonymous: HashMap::new(),
             supergroup_manage_video_chats_right: HashMap::new(),
             chat_has_welcome_messages: HashMap::new(),
@@ -385,8 +363,8 @@ impl GroupsState {
             supergroup_boost_levels: HashMap::new(),
             supergroup_chat_ids: HashMap::new(),
             supergroup_member_status: HashMap::new(),
-            supergroup_restrict_right: HashMap::new(),
-            supergroup_invite_right: HashMap::new(),
+            supergroups: HashMap::new(),
+            anti_spam: HashMap::new(),
             admin_lists: HashMap::new(),
             supergroup_members: HashMap::new(),
             basic_group_members: HashMap::new(),
@@ -394,7 +372,6 @@ impl GroupsState {
             info_edit_errors: HashMap::new(),
             group_type: GroupTypeState::default(),
             new_chats: NewChatState::default(),
-            supergroup_join_by_request: HashMap::new(),
             supergroup_join_to_send: HashMap::new(),
             supergroup_restricted: HashSet::new(),
             supergroup_direct_messages: HashMap::new(),
@@ -403,12 +380,9 @@ impl GroupsState {
             basic_group_manage_video_chats_right: HashMap::new(),
             basic_group_active: HashMap::new(),
             admin_followups: Vec::new(),
-            supergroup_is_broadcast: HashMap::new(),
             add_members_failed: HashMap::new(),
             member_action_error: HashMap::new(),
             admin_rights: HashMap::new(),
-            supergroup_promote_right: HashMap::new(),
-            supergroup_manage_tags_right: HashMap::new(),
             private_sharing: PrivateSharingState::default(),
         }
     }

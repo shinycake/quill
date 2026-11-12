@@ -602,38 +602,16 @@ impl Session {
             // spinning forever. A failed "load more" keeps the
             // already-loaded page so the button stays retryable.
             // A failed poll changes nothing shown; the next tick asks again.
-            Some(RequestPurpose::Groups(GroupsPurpose::PollChatEventLog)) => {
+            Some(
+                RequestPurpose::Groups(GroupsPurpose::PollChatEventLog)
+                | RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { .. }),
+            ) => {
                 if let Some(pending) = pending {
-                    self.take_event_log_wait(pending);
-                }
-            }
-            Some(RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { from_event_id })) => {
-                // Only the page the log waits for; one asked under an
-                // earlier query or filter changes nothing.
-                if let Some(chat_id) = pending
-                    .filter(|pending| self.take_event_log_wait(pending))
-                    .and_then(|p| p.chat_id)
-                {
-                    if from_event_id == 0
-                        || !matches!(
-                            self.groups.event_log_fetch(chat_id.0),
-                            Some(ChatEventLogFetch::Loaded(_))
-                        )
-                    {
-                        self.groups.set_event_log_fetch(
-                            chat_id.0,
-                            ChatEventLogFetch::Failed(call_request_error_line(
-                                err,
-                                "Could not load recent actions",
-                            )),
-                        );
-                    } else {
-                        // An older page: the loaded log stays, with Retry.
-                        self.fail_older_events(
-                            chat_id.0,
-                            call_request_error_line(err, "Could not load earlier actions"),
-                        );
-                    }
+                    self.fail_event_log_request(
+                        pending,
+                        || call_request_error_line(err, "Could not load recent actions"),
+                        || call_request_error_line(err, "Could not load earlier actions"),
+                    );
                 }
             }
             Some(RequestPurpose::Groups(GroupsPurpose::GetDirectMessagesMember { user_id })) => {
