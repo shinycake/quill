@@ -170,6 +170,12 @@ impl Session {
         {
             self.stickers.emoji.status_change = crate::emoji::StatusChange::Idle;
         }
+        if emoji_purpose == Some(RequestPurpose::GetTrendingStickerSets) {
+            self.stickers
+                .stickers
+                .trending
+                .failed(pending.map(|p| p.id));
+        }
         if emoji_purpose == Some(RequestPurpose::GetTrendingEmojiSets) {
             self.stickers.emoji.lists.trending.failed_request(
                 pending.map(|p| p.id),

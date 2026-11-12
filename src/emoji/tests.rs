@@ -435,7 +435,7 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
     );
     assert_eq!(with_purpose.stickers.emoji.lists.trending.sets().len(), 1);
     assert!(with_purpose.stickers.emoji.lists.trending.is_premium());
-    assert!(with_purpose.stickers.stickers.trending.is_empty());
+    assert!(with_purpose.stickers.stickers.trending.sets.is_empty());
 
     // A clearRecentEmojiStatuses `ok` drops the recent statuses.
     let extra = with_purpose.request(RequestPurpose::ClearRecentEmojiStatuses, None);

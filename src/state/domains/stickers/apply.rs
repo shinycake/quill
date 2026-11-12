@@ -154,8 +154,12 @@ impl Session {
                 }
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetTrendingStickerSets) {
                     if current {
-                        self.stickers.stickers.trending_total = total_count.max(0) as usize;
-                        self.accept_trending_sticker_sets(sets, is_premium);
+                        self.accept_trending_sticker_sets(
+                            pending.map(|p| p.id),
+                            sets,
+                            is_premium,
+                            total_count.max(0) as usize,
+                        );
                     }
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetTrendingEmojiSets) {
                     // Slice S10: emoji `trendingStickerSets` land in the emoji panel (see emoji.rs).

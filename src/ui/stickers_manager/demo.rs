@@ -139,9 +139,11 @@ impl QuillApp {
         let stickers = &mut session.stickers.stickers;
         stickers.sets = installed;
         stickers.lists.installed.succeed(());
-        stickers.trending_total = trending.len();
-        stickers.trending_next_offset = trending.len();
-        stickers.trending = trending;
+        stickers.trending = quill::state::TrendingSets {
+            sets: trending,
+            is_premium: false,
+            page: quill::state::TrendingPage::End,
+        };
         stickers.archived.sets = archived;
         stickers.open = true;
         stickers.tab = StickerTab::Installed;

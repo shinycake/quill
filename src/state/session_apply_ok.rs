@@ -348,7 +348,7 @@ impl Session {
                 self.finish_set_change(request, set_id, true);
             }
             for sets in [
-                &mut self.stickers.stickers.trending,
+                &mut self.stickers.stickers.trending.sets,
                 &mut self.stickers.stickers.search.sets,
             ] {
                 for set in sets.iter_mut().filter(|set| set.id == set_id) {

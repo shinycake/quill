@@ -105,29 +105,20 @@ impl Session {
         }
     }
 
-    /// Replace the first trending page; append later pages without duplicate sets.
-    pub fn accept_trending_sticker_sets(&mut self, sets: Vec<StickerSetInfo>, is_premium: bool) {
-        self.stickers.stickers.trending_next_offset =
-            self.stickers.stickers.trending_offset + sets.len();
-        if sets.is_empty() {
-            self.stickers.stickers.trending_total = self.stickers.stickers.trending_next_offset;
-        }
-        if self.stickers.stickers.trending_offset == 0 {
-            self.stickers.stickers.trending = sets;
-        } else {
-            let mut ids: HashSet<_> = self
-                .stickers
-                .stickers
-                .trending
-                .iter()
-                .map(|set| set.id)
-                .collect();
-            self.stickers
-                .stickers
-                .trending
-                .extend(sets.into_iter().filter(|set| ids.insert(set.id)));
-        }
-        self.stickers.stickers.trending_is_premium = is_premium;
+    /// A trending page answered as `request`: the first replaces the list,
+    /// a later one adds the sets it does not have; only the page asked last
+    /// lands.
+    pub fn accept_trending_sticker_sets(
+        &mut self,
+        request: Option<RequestId>,
+        sets: Vec<StickerSetInfo>,
+        is_premium: bool,
+        total: usize,
+    ) {
+        self.stickers
+            .stickers
+            .trending
+            .accept(request, sets, is_premium, total);
     }
 
     /// Slice S8: store a `getFavoriteStickers` answer.

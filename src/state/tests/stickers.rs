@@ -11,6 +11,7 @@ fn s8_sticker_backend_purpose_gated_dispatch() {
     let extra = with_purpose.request(RequestPurpose::GetTrendingStickerSets, None);
     with_purpose.stickers.stickers.lists.trending.begin();
     with_purpose.stickers.stickers.lists.trending.sent(extra);
+    with_purpose.stickers.stickers.trending.ask(extra, 0);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -20,9 +21,9 @@ fn s8_sticker_backend_purpose_gated_dispatch() {
             extra.0
         ),
     );
-    assert_eq!(with_purpose.stickers.stickers.trending.len(), 1);
-    assert_eq!(with_purpose.stickers.stickers.trending[0].id, 77);
-    assert!(with_purpose.stickers.stickers.trending_is_premium);
+    assert_eq!(with_purpose.stickers.stickers.trending.sets.len(), 1);
+    assert_eq!(with_purpose.stickers.stickers.trending.sets[0].id, 77);
+    assert!(with_purpose.stickers.stickers.trending.is_premium);
 
     // A stray trendingStickerSets (no matching purpose) is ignored.
     let (mut without_purpose, sink2) = session();
@@ -33,7 +34,7 @@ fn s8_sticker_backend_purpose_gated_dispatch() {
         &sink2,
         r#"{"@type":"trendingStickerSets","total_count":1,"is_premium":false,"sets":[]}"#,
     );
-    assert!(without_purpose.stickers.stickers.trending.is_empty());
+    assert!(without_purpose.stickers.stickers.trending.sets.is_empty());
 
     // Favorites arrive as the bare `stickers` type under
     // GetFavoriteStickers.
@@ -82,7 +83,8 @@ fn s8_sticker_backend_purpose_gated_dispatch() {
 
     // A changeStickerSet `ok` drops the installed-sets cache so the
     // panel refetches the authoritative list.
-    with_purpose.stickers.stickers.sets = vec![with_purpose.stickers.stickers.trending[0].clone()];
+    with_purpose.stickers.stickers.sets =
+        vec![with_purpose.stickers.stickers.trending.sets[0].clone()];
     let extra = with_purpose.request(RequestPurpose::ChangeStickerSet, None);
     apply_json(
         &mut with_purpose,
@@ -539,4 +541,41 @@ fn a_new_gif_search_starts_with_no_results_or_paging() {
     // Back on the saved GIFs there is no search to page.
     gifs.search_left();
     assert!(gifs.search_results().is_empty());
+}
+
+#[test]
+fn only_the_trending_page_asked_last_lands() {
+    use crate::state::{TrendingPage, TrendingSets};
+    let set = |id: i64| StickerSetInfo {
+        id,
+        title: String::new(),
+        name: String::new(),
+        size: 1,
+        is_installed: false,
+        is_official: false,
+        is_owned: false,
+        covers: Vec::new(),
+        cover_files: Vec::new(),
+        is_viewed: false,
+    };
+    let mut trending = TrendingSets::default();
+    trending.ask(RequestId(1), 0);
+    assert!(trending.accept(Some(RequestId(1)), vec![set(1), set(2)], false, 5));
+    assert_eq!(trending.page, TrendingPage::More { next: 2 });
+    // The next page is asked, then a restart replaces it: the older page's
+    // answer lands nowhere, and the restart replaces the list.
+    trending.ask(RequestId(2), 2);
+    trending.ask(RequestId(3), 0);
+    assert!(!trending.accept(Some(RequestId(2)), vec![set(3), set(4)], false, 5));
+    assert_eq!(trending.sets.len(), 2);
+    assert!(trending.accept(Some(RequestId(3)), vec![set(7)], true, 1));
+    assert_eq!(trending.sets.len(), 1);
+    assert!(trending.is_premium);
+    assert_eq!(trending.page, TrendingPage::End);
+    // A failed page can be asked again from where it was.
+    trending.ask(RequestId(4), 1);
+    trending.failed(Some(RequestId(9)));
+    assert!(matches!(trending.page, TrendingPage::Asking { .. }));
+    trending.failed(Some(RequestId(4)));
+    assert_eq!(trending.page, TrendingPage::More { next: 1 });
 }

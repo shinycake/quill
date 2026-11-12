@@ -381,6 +381,107 @@ pub enum ArchivedPage {
     End,
 }
 
+/// The trending sets, the premium-row flag and the paging of the list, one
+/// value: the offset of the page asked rides in the stage, so a restart
+/// leaves everything at once and only the page asked last lands.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TrendingSets {
+    pub sets: Vec<StickerSetInfo>,
+    pub is_premium: bool,
+    pub page: TrendingPage,
+}
+
+/// Where the trending sets' paging stands.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum TrendingPage {
+    /// The first page is not in: its answer replaces the list.
+    #[default]
+    First,
+    /// The page from set `from` is out as `request`. Leaves with its
+    /// answer or its error; a page asked later replaces it.
+    Asking { request: RequestId, from: usize },
+    /// More sets follow: the next page starts at `next`.
+    More { next: usize },
+    /// The last page reached the server's total.
+    End,
+}
+
+impl TrendingSets {
+    /// The next page's offset, when there is one.
+    pub fn next_offset(&self) -> Option<usize> {
+        match self.page {
+            TrendingPage::More { next } => Some(next),
+            _ => None,
+        }
+    }
+
+    /// More sets exist than are loaded.
+    pub fn has_more(&self) -> bool {
+        matches!(self.page, TrendingPage::More { .. })
+    }
+
+    /// A page went out as `request`, from set `from` (0: the first page).
+    pub fn ask(&mut self, request: RequestId, from: usize) {
+        self.page = TrendingPage::Asking { request, from };
+    }
+
+    /// `request` answered: only the page asked last lands. The first page
+    /// replaces the list, a later one adds the sets it does not have yet.
+    /// Whether it landed.
+    pub fn accept(
+        &mut self,
+        request: Option<RequestId>,
+        page: Vec<StickerSetInfo>,
+        is_premium: bool,
+        total: usize,
+    ) -> bool {
+        let TrendingPage::Asking {
+            request: asked,
+            from,
+        } = self.page
+        else {
+            return false;
+        };
+        if Some(asked) != request {
+            return false;
+        }
+        let next = from + page.len();
+        // An empty page ends the list whatever the server's total says.
+        let total = if page.is_empty() { next } else { total };
+        if from == 0 {
+            self.sets = page;
+        } else {
+            let mut ids: std::collections::HashSet<_> =
+                self.sets.iter().map(|set| set.id).collect();
+            self.sets
+                .extend(page.into_iter().filter(|set| ids.insert(set.id)));
+        }
+        self.is_premium = is_premium;
+        self.page = if next < total {
+            TrendingPage::More { next }
+        } else {
+            TrendingPage::End
+        };
+        true
+    }
+
+    /// `request` failed: the page can be asked again.
+    pub fn failed(&mut self, request: Option<RequestId>) {
+        if let TrendingPage::Asking {
+            request: asked,
+            from,
+        } = self.page
+            && Some(asked) == request
+        {
+            self.page = if from == 0 {
+                TrendingPage::First
+            } else {
+                TrendingPage::More { next: from }
+            };
+        }
+    }
+}
+
 impl ArchivedSets {
     /// The next page's offset, when there is one.
     pub fn next_offset(&self) -> Option<i64> {
@@ -428,12 +529,9 @@ pub struct StickerPanel {
     pub lists: StickerLists,
     /// The batch of set changes (install / archive many) and how far it got.
     pub batch: StickerBatch,
-    /// Slice S8: trending sets (`getTrendingStickerSets`) + premium-row flag.
-    pub trending: Vec<StickerSetInfo>,
-    pub trending_total: usize,
-    pub trending_offset: usize,
-    pub trending_next_offset: usize,
-    pub trending_is_premium: bool,
+    /// Slice S8: trending sets (`getTrendingStickerSets`), the premium-row
+    /// flag and how far their paging got, one value.
+    pub trending: TrendingSets,
     /// `getGreetingStickers`: hello stickers for empty private chats.
     /// Asked once per session from `Idle`; a failure stays `Failed`, so a
     /// redraw never asks again.

@@ -589,7 +589,7 @@ impl QuillApp {
         let mut seen = std::collections::HashSet::new();
         let visible_sets: Vec<_> = match panel.tab {
             StickerTab::Installed => panel.sets.iter().collect(),
-            StickerTab::Trending => panel.trending.iter().collect(),
+            StickerTab::Trending => panel.trending.sets.iter().collect(),
             StickerTab::Search => panel
                 .search
                 .sets
@@ -623,7 +623,7 @@ impl QuillApp {
                     ),
             );
         }
-        if panel.tab == StickerTab::Trending && panel.trending_next_offset < panel.trending_total {
+        if panel.tab == StickerTab::Trending && panel.trending.has_more() {
             sets = sets.child(
                 Button::new("sticker-trending-more")
                     .label(tr(keys::Q_MEDIA_MORE_TRENDING_SETS))
@@ -733,7 +733,7 @@ impl QuillApp {
                 StickerTab::Favorites if panel.favorites.is_empty() => {
                     Some(tr(keys::Q_MEDIA_RIGHT_CLICK_A_STICKER_TO).into())
                 }
-                StickerTab::Trending if panel.trending.is_empty() => {
+                StickerTab::Trending if panel.trending.sets.is_empty() => {
                     Some(tr(keys::Q_MEDIA_NO_TRENDING_STICKER_SETS).into())
                 }
                 StickerTab::Search if panel.search.query.typed().is_empty() => {

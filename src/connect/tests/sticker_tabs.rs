@@ -131,11 +131,11 @@ fn sticker_tabs_requests_failures_and_confirmed_mutations() {
         sent_request(&recorder, "getTrendingStickerSets")["offset"],
         0
     );
-    let sets = json!({"@type":"trendingStickerSets","@extra":trending.as_extra(),"total_count":1,"is_premium":false,"sets":[{"@type":"stickerSetInfo","id":"77","title":"Discover","name":"Discover","size":2}]});
+    let sets = json!({"@type":"trendingStickerSets","@extra":trending.as_extra(),"total_count":2,"is_premium":false,"sets":[{"@type":"stickerSetInfo","id":"77","title":"Discover","name":"Discover","size":2}]});
     driver
         .ingest(copy_and_parse(&sets.to_string(), &seq, &sink).unwrap())
         .unwrap();
-    assert_eq!(driver.session.stickers.stickers.trending.len(), 1);
+    assert_eq!(driver.session.stickers.stickers.trending.sets.len(), 1);
     assert_eq!(
         sent_request(&recorder, "viewTrendingStickerSets")["sticker_set_ids"],
         json!([77])
@@ -149,8 +149,11 @@ fn sticker_tabs_requests_failures_and_confirmed_mutations() {
     driver
         .ingest(copy_and_parse(&sets.to_string(), &seq, &sink).unwrap())
         .unwrap();
-    assert_eq!(driver.session.stickers.stickers.trending.len(), 2);
-    assert_eq!(driver.session.stickers.stickers.trending_next_offset, 3);
+    assert_eq!(driver.session.stickers.stickers.trending.sets.len(), 2);
+    assert_eq!(
+        driver.session.stickers.stickers.trending.page,
+        crate::state::TrendingPage::End
+    );
     assert_eq!(
         sent_request(&recorder, "viewTrendingStickerSets")["sticker_set_ids"],
         json!([77, 88])

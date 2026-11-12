@@ -511,14 +511,22 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let offset = if more {
-            self.session.stickers.stickers.trending_next_offset
+            let Some(next) = self.session.stickers.stickers.trending.next_offset() else {
+                return Ok(None);
+            };
+            next
         } else {
             0
         };
-        self.session.stickers.stickers.trending_offset = offset;
-        self.sticker_request(RequestPurpose::GetTrendingStickerSets, |id| {
+        let sent = self.sticker_request(RequestPurpose::GetTrendingStickerSets, |id| {
             get_trending_sticker_sets(id, offset as i32, 100)
-        })
+        });
+        // The list waits for this page: the answer lands only while it is
+        // the page asked last.
+        if let Ok(Some(request)) = sent {
+            self.session.stickers.stickers.trending.ask(request, offset);
+        }
+        sent
     }
 
     pub(crate) fn sticker_request_favorites(
@@ -585,6 +593,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .stickers
             .stickers
             .trending
+            .sets
             .iter()
             .map(|set| set.id)
             .collect();
