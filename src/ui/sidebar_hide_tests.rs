@@ -61,7 +61,7 @@ fn toggle(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
         app.composer.update(cx, |input, cx| input.focus(window, cx));
     });
     vcx.simulate_keystrokes(SIDEBAR_CHORD);
-    slide(&app, vcx);
+    slide(app, vcx);
 }
 
 fn chat(vcx: &mut VisualTestContext) -> Bounds<Pixels> {
