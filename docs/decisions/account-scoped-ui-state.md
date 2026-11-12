@@ -10256,3 +10256,31 @@ Tests: `state::profile_music`, `state::session_date_jump`, `state::submit`,
 `state::tests::{gif_panel_stages, topic_load}`, `connect::tests::{privacy_data,
 sweep_r2_13}`, `ui::ai_compose::dialog_tests`, `ui::agent_driver_tests`
 (`read_tree` checks the read left the bridge), `sticker_playback::webm_ffi`.
+
+#### Fix round 2 (r4-06)
+
+| Ids | What changed |
+| --- | --- |
+| 09-001, date lookups | `DateAsks` and the single `date_jump` slot are one per-window `JumpLookups` (`JumpLookup::{Asking { request, chat }, Resolved(ViewJump), NotFound(note)}`). The main window leaving chat `c` forgets the main window's lookup for `c` (not the ask of `c`'s own window); a chat window closing forgets its own (`close_window_chat`); `None` clears all. The corner buttons' `JumpToUnread` shares it (`unread_jump` is gone): the older ask answering after a newer one began, or after an error, changes nothing. Tests in `state::session_date_jump`. |
+| `saved_failed`, `saved_answered` while outdated | `Fetch::Outdated { held, asked }` keeps the request that was out when the change landed; `saved_failed(request)` acts only on the fetch the list waits for, `saved_answered` takes an outdated list's answer only from `asked`. A refused send begins and fails the request it took. Test `an_older_saved_error_or_answer_leaves_the_newer_ask_alone`. |
+| `ResetNetworkStatistics` error | `PrivacyData::network_reset` is `NetworkReset::{Idle, Sending(request), Failed(line)}`, matched by `pending.id`; `network` keeps its own fetch. Test `a_refused_reset_leaves_the_refetch_asked_after_it` (both orders). |
+| g-078 | `Stage::Opening { worker }` holds the draw worker that took the clip; the open lands only for that worker (`Job::Open { worker }`). The `allow` line is the same reason as `Decoding { opener }`. |
+| g-086 | `AccentRead::Reading { read, .. }`: `ReadDone` and `finish` carry the read's token, so a lost read's late end settles nothing; `pending()` is false past the deadline. |
+| g-388 | `Fetch::set_local` for the demo's request-less value; `check-request-match.py` counts `.pushed(` callers (`pushed:` rule) and the three real ones (ton wallet update, `explorer_answered`, `apply_saved_tags`) are in its allow list. |
+| 12-001 | `ai_apply_in_flight` also holds while the answer waits in `apply_answers` (`Replies::has`). |
+| 12-004 | The poll tick that finds the page closed sets `EventLogPoll::Stopped`. |
+| 12-002 | `refresh_ai_compose_styles` drops `select_on_arrival` when the list changed without the name. |
+| `CheckPhoneNumberCode` ok | `ChangeNumber::checked(request)` acts only for the check the flow waits for. |
+| `ManageStickerSet` ok | `lists.installed.outdate()` instead of `Idle`; the archived sets are one `ArchivedSets { sets, page: ArchivedPage::{First, More { next }, End} }`. |
+| `GetChatScheduledMessages` | `ScheduledMessages { rows, asks }`: a chat's rows are replaced only by the ask it waits for; an error ends the ask. |
+| g-059 | `ActiveGroupCall::mute_toggles` (`MessageSender -> RequestId`), removed by the toggle's `ok`, error or sweep; `ParticipantMuteToggles` is gone. |
+| `takes_page_of` | A thread's older and first pages are `OlderEnd::Asking(request)` (`thread_older_asked` after the send), settled by `pending.id` in apply and fail; `reset_window` forgets the ask through `forget_older` / `reopen_older`. |
+| `fail_topic_page` | The `!asking_older()` fallback is gone. |
+| `accept_sticker_set_view` | `StickerSetEdits::Refreshing { refresh, out }`: the box takes the load it waits for or the refresh it asked, and no other answer. |
+| `apply_saved_tags` | `topic_tags` is a `Fetch` per topic, begun and `sent` by `load_saved_tags`, answered and failed by its request. |
+| hub | A timed-out `stop_within` puts the join handle back; the `allow` reason says `Joined` is the one stage with no handle. |
+| `CloseFriendsStage::Awaiting` | `get_close_friends` that cannot start fails a never-loaded list (`CloseFriendsList::refused`), so the panel offers Retry. |
+| `forgotten_through` | The registry keeps the set of forgotten failure ids (bounded), not the highest. Test `newer_failures_do_not_flag_an_older_confirmed_request`. |
+| omarchy | A failed read keeps the generation it looked at (`note_stamp`). |
+| Docs and tests | `RETRY_AFTER` and `STORY_PAGE_OPS_CAP` docs, "still sending" docs, `agent_bridge` docs, `agent_bridge.ui_send` line, `profile_music` no-ops. |
+

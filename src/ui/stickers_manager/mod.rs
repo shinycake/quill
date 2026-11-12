@@ -110,7 +110,7 @@ impl QuillApp {
                     tab,
                     panel.sets.clone(),
                     panel.trending.clone(),
-                    panel.archived.clone(),
+                    panel.archived.sets.clone(),
                     loading,
                     panel.lists.tab_error(panel.tab).is_some(),
                 )
