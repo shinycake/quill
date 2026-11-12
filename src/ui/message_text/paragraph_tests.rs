@@ -50,8 +50,8 @@ fn zalgo_marks_and_stray_tags_go_and_ranges_stay_on_their_text() {
     let bold_text = bold_range.and_then(|r| shaped.text.get(r));
     assert_eq!(bold_text, Some("bo\u{0301}\u{0302}ld"));
     let link_text = shaped
-        .click_ranges
+        .targets
         .first()
-        .and_then(|r| shaped.text.get(r.clone()));
+        .and_then(|t| shaped.text.get(t.range.clone()));
     assert_eq!(link_text, Some(" go\u{200D}"));
 }

@@ -97,21 +97,39 @@ impl super::app::QuillApp {
     }
 }
 
-/// Counts the clients put on screen, so a poll loop or a "connection
-/// closed" note of an older one stops. The process's: a `QuillApp` field
-/// (`connect`), bumped by `start_connection` and `adopt_live`.
+/// Counts the clients put on screen, so a "connection closed" note of an
+/// older one stops, and owns the poll loop of the one on screen. The
+/// process's: a `QuillApp` field (`connect`), replaced by `start_connection`
+/// and `adopt_live`.
 pub(crate) struct ConnectGeneration {
     pub(super) generation: u64,
+    /// The poll loop draining the client on screen. A new client, a wipe
+    /// or a restart replaces it, which ends the old loop at once.
+    pub(super) poll: PollLoop,
     /// The connection generation whose lost bridge already posted the
     /// "connection closed" note. A new connection bumps `generation`, which
     /// re-arms it; other notes cannot, so they are never overwritten again.
     closed_noted: Option<u64>,
 }
 
+/// Whether a poll loop runs for the client on screen.
+pub(crate) enum PollLoop {
+    Stopped,
+    Running { _task: gpui_kit::Task<()> },
+}
+
 impl ConnectGeneration {
+    /// A client is about to be replaced (or dropped): count it, and end the
+    /// old client's poll loop.
+    pub(super) fn replace_client(&mut self) {
+        self.generation += 1;
+        self.poll = PollLoop::Stopped;
+    }
+
     pub(super) fn new() -> Self {
         Self {
             generation: 0,
+            poll: PollLoop::Stopped,
             closed_noted: None,
         }
     }
@@ -179,7 +197,7 @@ mod tests {
         let mut g = ConnectGeneration::new();
         assert!(g.claim_closed_note(true, false));
         assert!(!g.claim_closed_note(true, false));
-        g.generation += 1;
+        g.replace_client();
         assert!(g.claim_closed_note(true, false));
     }
 

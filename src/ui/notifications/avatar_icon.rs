@@ -12,8 +12,6 @@ use quill::ids::AccountKey;
 use quill::notify::avatar::{
     ICON_SIZE, apply_circle_mask, existing_icon, icon_cache_dir, icon_cache_path,
 };
-use std::cell::RefCell;
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
@@ -62,18 +60,34 @@ fn cached_icon_for(source: &Path) -> Option<PathBuf> {
 }
 
 /// A notification held back until its avatar finishes decoding.
-struct Waiting {
+pub(in crate::ui) struct Waiting {
     account: Option<AccountKey>,
     notification: quill::notify::OsNotification,
     preview: Option<PathBuf>,
     locked: bool,
 }
 
-thread_local! {
-    /// Decodes in flight on the main thread, by photo path, with the
-    /// notifications waiting on each in arrival order. One decode serves
-    /// every notification for that avatar.
-    static DECODING: RefCell<HashMap<PathBuf, Vec<Waiting>>> = RefCell::new(HashMap::new());
+/// A decode in flight for one photo path, with the notifications waiting on
+/// it in arrival order. One decode serves every notification for that
+/// avatar. It lives in `NotifyDelivery::avatar_decodes`: dropping the entry
+/// drops the task, so the wait ends and nothing is shown.
+pub(in crate::ui) struct AvatarDecode {
+    _job: gpui_kit::Task<()>,
+    waiting: Vec<Waiting>,
+}
+
+impl AvatarDecode {
+    #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
+    pub(in crate::ui) fn waiting_len(&self) -> usize {
+        self.waiting.len()
+    }
+
+    /// `account` logged out: what it was waiting to show goes with it.
+    pub(in crate::ui) fn forget_account(&mut self, account: &AccountKey) {
+        self.waiting
+            .retain(|item| item.account.as_ref() != Some(account));
+    }
 }
 
 impl QuillApp {
@@ -115,37 +129,22 @@ impl QuillApp {
             locked,
         };
         // A decode for this avatar is already running: queue behind it.
-        let queued = DECODING.with(|map| {
-            let mut map = map.try_borrow_mut().ok()?;
-            match map.get_mut(&photo) {
-                Some(list) => {
-                    list.push(waiting);
-                    None
-                }
-                None => {
-                    map.insert(photo.clone(), Vec::new());
-                    Some(waiting)
-                }
-            }
-        });
-        let Some(first) = queued else {
+        if let Some(running) = self.delivery.avatar_decodes.get_mut(&photo) {
+            running.waiting.push(waiting);
             return;
-        };
+        }
         let key = photo.clone();
+        let inserted_at = photo.clone();
         let job = cx.background_spawn(async move { circular_icon_for(&photo) });
         // screen-scope: each queued notification names the account it was made for,
         // and show_notification_as shows it for that account whichever is on screen.
-        Self::spawn_app(cx, async move |this, cx| {
+        let task = Self::spawn_app(cx, async move |this, cx| {
             let icon = job.await;
-            let rest = DECODING
-                .with(|map| {
-                    map.try_borrow_mut()
-                        .ok()
-                        .and_then(|mut map| map.remove(&key))
-                })
-                .unwrap_or_default();
             let _ = this.update(cx, |app, cx| {
-                for item in std::iter::once(first).chain(rest) {
+                let Some(done) = app.delivery.avatar_decodes.remove(&key) else {
+                    return;
+                };
+                for item in done.waiting {
                     // The lock may have engaged during the decode: what was
                     // built while unlocked (sender, text, picture) is not
                     // shown, the locked form is.
@@ -171,8 +170,14 @@ impl QuillApp {
                     );
                 }
             });
-        })
-        .detach();
+        });
+        self.delivery.avatar_decodes.insert(
+            inserted_at,
+            AvatarDecode {
+                _job: task,
+                waiting: vec![waiting],
+            },
+        );
     }
 }
 

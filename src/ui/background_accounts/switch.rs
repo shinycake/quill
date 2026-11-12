@@ -81,7 +81,7 @@ impl QuillApp {
     /// its client exists, minus the restart. The chat list, folders and
     /// counters are there at once.
     pub(in crate::ui) fn adopt_live(&mut self, mut live: LiveConnect, cx: &mut Context<Self>) {
-        self.connect.generation += 1;
+        self.connect.replace_client();
         self.connection.presence.reset();
         let auth = live.driver.session.auth.clone();
         self.set_note(StatusNote::silent(live_status_for(&auth)));

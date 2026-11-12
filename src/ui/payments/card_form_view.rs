@@ -283,7 +283,7 @@ impl QuillApp {
     /// The billing country: focusable on its own (Enter or Space opens the
     /// box), marked when Done finds it empty.
     fn card_country_field(&self, form: &CardForm, cx: &mut Context<Self>) -> AnyElement {
-        let border = if form.country_invalid {
+        let border = if form.country_invalid() {
             cx.theme().danger
         } else {
             gpui_kit::transparent_black()
@@ -295,7 +295,7 @@ impl QuillApp {
             .rounded(cx.theme().radius)
             .border_1()
             .border_color(border)
-            .when(!form.country_invalid, |field| {
+            .when(!form.country_invalid(), |field| {
                 field.focus(move |style| style.border_color(ring))
             })
             .on_action(cx.listener(|this, _: &Confirm, window, cx| {
@@ -332,7 +332,7 @@ fn card_field(input: &CardInput, cx: &mut Context<QuillApp>) -> AnyElement {
         .child(
             Input::new(&input.state)
                 .aria_label(placeholder(field))
-                .when(input.invalid, |input| {
+                .when(input.shows_error(cx), |input| {
                     input.border_color(danger).focus_bordered(false)
                 }),
         )

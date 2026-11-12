@@ -9945,3 +9945,27 @@ request), `connect/tests/web_apps.rs` (two write-access answers survive),
 (back on a post whose statistics are out), `state/tests/threads.rs` (reopened
 thread), `state/tests/deep_link_flow.rs`, `state/tests/premium_limit.rs`,
 `connect/tests/deep_links.rs`, `envelope/giveaway.rs`, `envelope/sessions_tests.rs`.
+
+### Sweep fixes (r3-10)
+
+| Id | Fix |
+| --- | --- |
+| 18-003 | `Locating` holds a `oneshot::Sender<()>`; the Linux lookup selects on the receiver beside its timer and fix wait, so closing the picker (or switching account) ends the wait at once and the GeoClue client is stopped and deleted instead of staying started for up to 20 s. The Windows lookup checks the receiver between its calls and waits on `GetGeopositionAsync` beside it (`position_unless_dropped`, a std-only park loop over the operation's future and the receiver); the drop calls `Cancel` on the operation in flight. `IAsyncOperation` comes from `windows-future` 0.3 (added under the Windows dependencies; `windows` 0.62 does not re-export it). The file type-checks for `x86_64-pc-windows-msvc` against windows 0.62.2 and windows-future 0.3.2 in a scratch crate (a full `cargo check` stops at the native `lib.exe` build step on Linux). macOS keeps its own `cancel`. |
+| 18-005 | `chat_preview_overlay` draws its skeleton from the `chat_preview_fetch` `Fetch` it already reads (`is_loading`), not from `has_purpose_for_chat`. |
+| 18-006 | `send_message_report_text` clears the details field only when the send was accepted; a refused send keeps the typed text and shows the note. |
+| 18-004 | `MessageUi`'s `Farewell` closes the Instant View reader (`messages.instant_view`) like its sibling session-held boxes, so it does not come back after switching accounts and back. |
+| 18-007 | `ParagraphText::targets: Vec<ClickTarget { range, action }>` replaces the three parallel vectors; `ClickTarget::is_link` is derived from the action, so there is no flag to forget. The consumer builds the click ranges, actions and underline flags from it in one place. |
+| 19-001 | Already fixed by 2ca5a1835: `show_scope_save` / `show_reaction_save` write the sent object into the snapshot, so a second toggle merges into the first (`state/tests/notification_saves.rs`, `two_quick_edits_do_not_revert_each_other`). |
+| 19-003 | `NotifyDelivery::avatar_decodes: HashMap<path, AvatarDecode { _job: Task, waiting }>` replaces the `DECODING` thread-local and its detached task. Notifications queue behind the entry; the task takes the entry when the decode lands; dropping the entry (or `forget_account`) ends the wait. |
+| 19-010 | `Shown::sending` is keyed by a per-call `Ticket`; `withdraw_sending(key)` marks every call of the chat, and each `land` consumes its own ticket, so two `Notify` calls for one chat both close when it was read. |
+| 19-011 | The capability probe is `Probe { Idle, Asking { thread, last }, Answered { service, at } }` (an `Asking` whose thread has finished without answering, because it panicked, is due again), started by the question (the Notifications page or a notification) and asked again by a question after `REPROBE` while the daemon is missing; no thread loops on a clock. `check-owned-timers.py` now counts a `thread::sleep` loop in `src/ui` as a poll (two existing sites baselined). |
+| 19-004 | `ConnectGeneration::poll: PollLoop { Stopped, Running { _task } }` owns the poll loop; `replace_client` (the one place the generation is bumped) drops it, so replacing the client ends the loop at once. The generation compare and the `detached:spawn_poll_loop` baseline line are gone. |
+| 19-002 | Pay passes the agreed `(chat, price)` as an argument: `confirm_paid_send` calls `submit_composer_agreed(.., Some(agreed))` (`submit_composer` is the `None` wrapper) down to `paid_send_waits`, which lets a send at that price through. No stage variant or slot holds it, so nothing is left to clear (the review's one-shot `Agreed` is gone). Pay without the "Don't ask me again" tick no longer reopens the same box. |
+| 19-007 | `CardInput::check` and `CardForm::country_check` are `FieldCheck { Fine, Rejected { judged } }`; the field shows the error only while it still holds the judged text, so the mark goes with the next edit without a reset. |
+| 19-006 | `DeleteEdit::Snapshot { before, press }`: the press number (`CardInput::presses`) names the press that took the snapshot. The clear runs inside the second nested defer (a defer queued from a defer runs after the input's Change in the same effect cycle), so it lands before any queued key; it clears only if the field still holds that press, so a newer press or the Change that took the snapshot is left alone. No task or oneshot outlives the press. Test: `an_older_presses_clear_leaves_a_newer_snapshot`. |
+
+Tests: `demos/code_highlight` (the farewell closes the reader),
+`paid_messages_tests` (the agreed price covers only its own resubmit; Pay on a priced chat sends and asks again next time),
+`payments/card_form_tests` (a rejected number is unmarked by its own edit),
+`notifications/reply_after_switch_tests` (a decode is held and queues),
+`notifications/linux_dbus` (two calls for one chat, probe schedule).

@@ -554,7 +554,7 @@ fn pay_sends_only_in_the_chat_and_account_it_was_asked_in(cx: &mut TestAppContex
             false,
         );
         // Another chat by the time Pay is pressed: nothing is sent there.
-        assert!(app.paid_send_waits(A, "hello", Default::default(), cx));
+        assert!(app.paid_send_waits(A, "hello", Default::default(), None, cx));
         app.select_listed_chat(B, window, cx);
         let before = history_len(app, B);
         app.confirm_paid_send(window, cx);
@@ -563,14 +563,14 @@ fn pay_sends_only_in_the_chat_and_account_it_was_asked_in(cx: &mut TestAppContex
         // Another account with the same chat id open: nothing either.
         app.select_listed_chat(A, window, cx);
         let first = app.session().expect("demo").account.clone();
-        assert!(app.paid_send_waits(A, "hello", Default::default(), cx));
+        assert!(app.paid_send_waits(A, "hello", Default::default(), None, cx));
         become_account(app, &second_account());
         let before = history_len(app, A);
         app.confirm_paid_send(window, cx);
         assert_eq!(history_len(app, A), before);
         // In the chat it was asked in, Pay sends.
         become_account(app, &first);
-        assert!(app.paid_send_waits(A, "hello", Default::default(), cx));
+        assert!(app.paid_send_waits(A, "hello", Default::default(), None, cx));
         app.confirm_paid_send(window, cx);
         assert_eq!(history_len(app, A), before + 1);
     });

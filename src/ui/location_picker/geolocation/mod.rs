@@ -32,6 +32,9 @@ use windows as platform;
 pub(in crate::ui) struct Locating {
     pub(in crate::ui) answer: Receiver<GeoOutcome>,
     pub(in crate::ui) permission_prompt: Arc<AtomicBool>,
+    /// Dropping it (with the `Locating`) ends the Linux and Windows
+    /// lookup thread's wait; macOS stops its manager in `cancel`.
+    _cancel: futures_channel::oneshot::Sender<()>,
 }
 
 impl Drop for Locating {
@@ -46,10 +49,12 @@ impl Drop for Locating {
 /// the run loop of the thread that asked).
 pub(in crate::ui) fn locate() -> Locating {
     let permission_prompt = Arc::new(AtomicBool::new(false));
-    let answer = platform::locate(&permission_prompt);
+    let (cancel, cancelled) = futures_channel::oneshot::channel();
+    let answer = platform::locate(&permission_prompt, cancelled);
     Locating {
         answer,
         permission_prompt,
+        _cancel: cancel,
     }
 }
 

@@ -217,7 +217,7 @@ impl super::app::QuillApp {
             return;
         }
         quill::startup_trace::mark("connect_start");
-        self.connect.generation += 1;
+        self.connect.replace_client();
         let credentials = self.credentials.clone();
         // A connection already being made ends with its stage.
         self.auth_demo.stage = ConnectStage::Idle;

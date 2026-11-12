@@ -9,13 +9,24 @@ pub(super) struct ParagraphText {
     pub(super) text: String,
     pub(super) highlights: Vec<(std::ops::Range<usize>, HighlightStyle)>,
     pub(super) mono: Vec<(std::ops::Range<usize>, SharedString)>,
-    pub(super) click_ranges: Vec<std::ops::Range<usize>>,
-    pub(super) actions: Vec<InlineAction>,
-    pub(super) link_flags: Vec<bool>,
+    pub(super) targets: Vec<ClickTarget>,
     pub(super) spoilers: Vec<(std::ops::Range<usize>, f32)>,
     pub(super) inline_emoji: Vec<super::super::selectable_text::InlineEmoji>,
     /// What `text` dropped from the message, for copy and quote.
     pub(super) source: quill::display_text::SourceMap,
+}
+
+/// One clickable range of the paragraph and what a click on it does.
+pub(super) struct ClickTarget {
+    pub(super) range: std::ops::Range<usize>,
+    pub(super) action: InlineAction,
+}
+
+impl ClickTarget {
+    /// Links underline on hover; spoilers and code do not.
+    pub(super) fn is_link(&self) -> bool {
+        matches!(self.action, InlineAction::Link(_))
+    }
 }
 
 pub(super) fn paragraph_text(
@@ -30,10 +41,7 @@ pub(super) fn paragraph_text(
     let mut text = String::new();
     let mut highlights: Vec<(std::ops::Range<usize>, HighlightStyle)> = Vec::new();
     let mut mono: Vec<(std::ops::Range<usize>, SharedString)> = Vec::new();
-    let mut click_ranges = Vec::new();
-    let mut actions = Vec::new();
-    // Per click range: whether it is a link (underlined on hover).
-    let mut link_flags: Vec<bool> = Vec::new();
+    let mut targets: Vec<ClickTarget> = Vec::new();
     let mut spoilers: Vec<(std::ops::Range<usize>, f32)> = Vec::new();
     let mut inline_emoji: Vec<super::super::selectable_text::InlineEmoji> = Vec::new();
     let mut filter = quill::display_text::FilterState::default();
@@ -69,9 +77,10 @@ pub(super) fn paragraph_text(
             // The picture carries no text styling; a link around it keeps
             // its click target.
             if let Some(link) = &run.link {
-                click_ranges.push(range.clone());
-                actions.push(InlineAction::Link(link.clone()));
-                link_flags.push(true);
+                targets.push(ClickTarget {
+                    range: range.clone(),
+                    action: InlineAction::Link(link.clone()),
+                });
             }
             inline_emoji.push(super::super::selectable_text::InlineEmoji {
                 range,
@@ -99,9 +108,10 @@ pub(super) fn paragraph_text(
                 let range = at..text.len();
                 let range_for_specks = range.clone();
                 if let Some(link) = &run.link {
-                    click_ranges.push(range.clone());
-                    actions.push(InlineAction::Link(link.clone()));
-                    link_flags.push(true);
+                    targets.push(ClickTarget {
+                        range: range.clone(),
+                        action: InlineAction::Link(link.clone()),
+                    });
                 }
                 inline_emoji.push(super::super::selectable_text::InlineEmoji {
                     range,
@@ -160,18 +170,21 @@ pub(super) fn paragraph_text(
                 highlight.color = None;
                 highlight.fade_out = Some(1.);
                 highlight.background_color = None;
-                click_ranges.push(range.clone());
-                actions.push(InlineAction::RevealSpoiler(key));
-                link_flags.push(false);
+                targets.push(ClickTarget {
+                    range: range.clone(),
+                    action: InlineAction::RevealSpoiler(key),
+                });
             } else if let Some(link) = &run.link {
                 highlight.color = Some(accent_info().into());
-                click_ranges.push(range.clone());
-                actions.push(InlineAction::Link(link.clone()));
-                link_flags.push(true);
+                targets.push(ClickTarget {
+                    range: range.clone(),
+                    action: InlineAction::Link(link.clone()),
+                });
             } else if style.code && !style.pre {
-                click_ranges.push(range.clone());
-                actions.push(InlineAction::CopyCode(run.text.clone()));
-                link_flags.push(false);
+                targets.push(ClickTarget {
+                    range: range.clone(),
+                    action: InlineAction::CopyCode(run.text.clone()),
+                });
             }
             if highlight != HighlightStyle::default() {
                 highlights.push((range, highlight));
@@ -182,9 +195,7 @@ pub(super) fn paragraph_text(
         text,
         highlights,
         mono,
-        click_ranges,
-        actions,
-        link_flags,
+        targets,
         spoilers,
         inline_emoji,
         source,

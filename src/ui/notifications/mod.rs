@@ -197,18 +197,14 @@ impl PolledRedraw {
 
 impl QuillApp {
     pub(super) fn spawn_poll_loop(&mut self, cx: &mut Context<Self>) {
-        let generation = self.connect.generation;
-        // screen-scope: the poll loop drains whichever client is on screen; its
-        // generation guard ends it when the client is replaced.
+        // screen-scope: the poll loop drains whichever client is on screen; the
+        // `connect` field owns it, so replacing the client ends it.
         // window-scope: `poll_live` puts the main window's state in place itself.
-        cx.spawn(async move |this, cx| {
+        let task = cx.spawn(async move |this, cx| {
             let executor = cx.background_executor().clone();
             let hold = backlog_hold(&executor);
             run_poll_loop(executor, &quill::wake::UPDATES, POLL_PACE, hold, || {
                 this.update(cx, |this, cx| {
-                    if generation != this.connect.generation {
-                        return None;
-                    }
                     let work_left = this.poll_pass(cx);
                     let now = std::time::Instant::now();
                     let active = this.frame.window_active.get();
@@ -225,8 +221,8 @@ impl QuillApp {
                 .flatten()
             })
             .await;
-        })
-        .detach();
+        });
+        self.connect.poll = super::connection_state::PollLoop::Running { _task: task };
     }
 
     pub(super) fn reload_account_keybindings(&mut self, cx: &mut Context<Self>) {
@@ -605,7 +601,7 @@ fn logout_restart_trigger(saw_logging_out: bool, new_auth: &AuthorizationState) 
 
 mod account_notifications;
 mod avatar_icon;
-pub(in crate::ui) use avatar_icon::forget_cached_icons;
+pub(in crate::ui) use avatar_icon::{AvatarDecode, forget_cached_icons};
 mod debug_notification;
 mod deliver;
 mod inline_reply;

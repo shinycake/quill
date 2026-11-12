@@ -36,6 +36,10 @@ pub(crate) struct NotifyDelivery {
     /// without showing.
     pub(super) preview_waits: std::collections::HashMap<(quill::ids::AccountKey, ChatId), u64>,
     pub(super) next_preview_wait: u64,
+    /// Avatar decodes in flight, by photo path, each holding its task and
+    /// the notifications waiting on it (`notifications::avatar_icon`).
+    pub(super) avatar_decodes:
+        std::collections::HashMap<std::path::PathBuf, super::notifications::AvatarDecode>,
     pub(super) notification_sounds: super::audio::NotificationSounds,
     /// Redraws the TDLib poll asked for, batched by urgency
     /// (`notifications::PolledRedraw`).
@@ -51,6 +55,9 @@ impl NotifyDelivery {
         self.reply_targets.retain(|(owner, _), _| owner != account);
         self.unsent_replies.retain(|(owner, _), _| owner != account);
         self.preview_waits.retain(|(owner, _), _| owner != account);
+        for decode in self.avatar_decodes.values_mut() {
+            decode.forget_account(account);
+        }
     }
 
     pub(super) fn new(audio_output: &super::audio::SharedOutput) -> Self {
@@ -61,6 +68,7 @@ impl NotifyDelivery {
             unsent_replies: std::collections::HashMap::new(),
             preview_waits: std::collections::HashMap::new(),
             next_preview_wait: 0,
+            avatar_decodes: std::collections::HashMap::new(),
             notification_sounds: super::audio::NotificationSounds::new(audio_output.clone()),
             polled_redraw: super::notifications::PolledRedraw::new(std::time::Instant::now()),
             windows: super::notify_windows::NotifyWindows::new(),

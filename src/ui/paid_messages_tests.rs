@@ -49,7 +49,7 @@ fn a_paid_chat_asks_once_then_sends_with_the_price(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     app.update_in(vcx, |app, _, cx| {
         charge_in_chat(app, 25);
-        assert!(app.paid_send_waits(ChatId(11), "hello", Default::default(), cx));
+        assert!(app.paid_send_waits(ChatId(11), "hello", Default::default(), None, cx));
     });
     app.read_with(vcx, |app, _| {
         let confirm = &app
@@ -69,14 +69,56 @@ fn a_paid_chat_asks_once_then_sends_with_the_price(cx: &mut TestAppContext) {
         app.paid_messages.confirm = PaidConfirmStage::None;
     });
     app.update_in(vcx, |app, _, cx| {
-        assert!(!app.paid_send_waits(ChatId(11), "again", Default::default(), cx));
+        assert!(!app.paid_send_waits(ChatId(11), "again", Default::default(), None, cx));
     });
     // A lower price is covered, a higher one asks again.
     app.update_in(vcx, |app, _, cx| {
         charge_in_chat(app, 10);
-        assert!(!app.paid_send_waits(ChatId(11), "x", Default::default(), cx));
+        assert!(!app.paid_send_waits(ChatId(11), "x", Default::default(), None, cx));
         charge_in_chat(app, 30);
-        assert!(app.paid_send_waits(ChatId(11), "x", Default::default(), cx));
+        assert!(app.paid_send_waits(ChatId(11), "x", Default::default(), None, cx));
+    });
+}
+
+/// The agreement a resubmit carries covers its own price only: the guard lets
+/// it through at that price, and asks again for another price or without it.
+#[gpui_kit::test]
+fn the_agreed_price_covers_only_its_own_resubmit(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, _, cx| {
+        charge_in_chat(app, 25);
+        let agreed = Some((11, 25));
+        assert!(!app.paid_send_waits(ChatId(11), "hello", Default::default(), agreed, cx));
+        assert!(
+            app.paid_send_waits(ChatId(11), "again", Default::default(), None, cx),
+            "the next send asks again: nothing was left behind"
+        );
+        app.cancel_paid_confirm(cx);
+        let other_price = Some((11, 10));
+        assert!(app.paid_send_waits(ChatId(11), "x", Default::default(), other_price, cx));
+    });
+}
+
+/// Pay on a priced chat sends the text once, opens no second box, and the
+/// next send asks again.
+#[gpui_kit::test]
+fn pay_sends_the_composer_text_and_asks_again_next_time(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, window, cx| {
+        charge_in_chat(app, 25);
+        assert!(app.paid_send_waits(ChatId(11), "hello", Default::default(), None, cx));
+        assert!(app.paid_messages.confirm.composer().is_some(), "asked");
+        app.confirm_paid_send(window, cx);
+        assert!(
+            matches!(app.paid_messages.confirm, PaidConfirmStage::None),
+            "Pay did not reopen the box"
+        );
+        assert!(
+            app.paid_send_waits(ChatId(11), "again", Default::default(), None, cx),
+            "the next send asks again"
+        );
     });
 }
 
@@ -89,19 +131,19 @@ fn dont_ask_again_stays_with_its_confirmation(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     app.update_in(vcx, |app, _, cx| {
         charge_in_chat(app, 25);
-        assert!(app.paid_send_waits(ChatId(11), "hello", Default::default(), cx));
+        assert!(app.paid_send_waits(ChatId(11), "hello", Default::default(), None, cx));
         app.set_paid_confirm_trust(true, (11, 25));
         assert!(app.paid_confirm_trusted());
         app.cancel_paid_confirm(cx);
         assert!(matches!(app.paid_messages.confirm, PaidConfirmStage::None));
-        assert!(app.paid_send_waits(ChatId(11), "hello", Default::default(), cx));
+        assert!(app.paid_send_waits(ChatId(11), "hello", Default::default(), None, cx));
         assert!(!app.paid_confirm_trusted(), "the next box opens unticked");
         // Ticked for 25, then the price on screen becomes 30: the new
         // confirmation is a new stage, unticked.
         app.set_paid_confirm_trust(true, (11, 25));
         app.paid_messages.confirm = PaidConfirmStage::None;
         charge_in_chat(app, 30);
-        assert!(app.paid_send_waits(ChatId(11), "hello", Default::default(), cx));
+        assert!(app.paid_send_waits(ChatId(11), "hello", Default::default(), None, cx));
         assert!(
             !app.paid_confirm_trusted(),
             "another confirmation is unticked"
@@ -123,7 +165,7 @@ fn free_chats_never_wait(cx: &mut TestAppContext) {
     app.update_in(vcx, |app, _, cx| {
         let session = app.demo_session.as_mut().unwrap();
         session.open_chat(ChatId(11));
-        assert!(!app.paid_send_waits(ChatId(11), "hi", Default::default(), cx));
+        assert!(!app.paid_send_waits(ChatId(11), "hi", Default::default(), None, cx));
         assert!(app.paid_messages.confirm.composer().is_none());
     });
 }
