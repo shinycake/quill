@@ -37,6 +37,18 @@ impl Worker {
         run: fn(Receiver<Option<NowPlaying>>),
         info: Option<&NowPlaying>,
     ) {
+        self.send_with(
+            |rx| crate::thread_guard::spawn_guarded(name, move || run(rx)),
+            info,
+        );
+    }
+
+    /// [`Self::send`] with `spawn` as the way a worker is started.
+    fn send_with(
+        &self,
+        mut spawn: impl FnMut(Receiver<Option<NowPlaying>>) -> std::io::Result<JoinHandle<Option<()>>>,
+        info: Option<&NowPlaying>,
+    ) {
         let mut stage = self.0.lock_or_recover();
         let mut payload = info.cloned();
         // A dead worker is replaced once per state.
@@ -51,8 +63,7 @@ impl Worker {
                 },
                 Stage::Stopped => {
                     let (tx, rx) = channel::<Option<NowPlaying>>();
-                    let Ok(thread) = crate::thread_guard::spawn_guarded(name, move || run(rx))
-                    else {
+                    let Ok(thread) = spawn(rx) else {
                         // No thread: the next state tries again.
                         return;
                     };
@@ -69,39 +80,57 @@ impl Worker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::cell::Cell;
 
-    static STARTS: AtomicUsize = AtomicUsize::new(0);
-
-    fn dies(_rx: Receiver<Option<NowPlaying>>) {
-        STARTS.fetch_add(1, Ordering::SeqCst);
+    fn gone() -> Stage {
+        let (tx, rx) = channel::<Option<NowPlaying>>();
+        drop(rx);
+        Stage::Running {
+            tx,
+            _thread: std::thread::spawn(|| Some(())),
+        }
     }
 
-    fn serves(rx: Receiver<Option<NowPlaying>>) {
-        STARTS.fetch_add(1, Ordering::SeqCst);
-        while rx.recv().is_ok() {}
+    /// A spawn that counts its starts and keeps the receiver in its thread.
+    fn counting(
+        starts: &Cell<usize>,
+    ) -> impl FnMut(Receiver<Option<NowPlaying>>) -> std::io::Result<JoinHandle<Option<()>>> + '_
+    {
+        |rx| {
+            starts.set(starts.get() + 1);
+            Ok(std::thread::spawn(move || {
+                while rx.recv().is_ok() {}
+                Some(())
+            }))
+        }
     }
 
     #[test]
     fn a_worker_that_is_gone_is_replaced_by_the_next_state() {
+        let starts = Cell::new(0);
+        let worker = Worker(Mutex::new(gone()));
+        worker.send_with(counting(&starts), None);
+        assert_eq!(starts.get(), 1, "the next state starts a fresh worker");
+        // That worker keeps running: it is not replaced.
+        worker.send_with(counting(&starts), None);
+        worker.send_with(counting(&starts), None);
+        assert_eq!(starts.get(), 1);
+    }
+
+    #[test]
+    fn a_worker_that_cannot_start_is_tried_again_by_the_next_state() {
         let worker = Worker::new();
-        STARTS.store(0, Ordering::SeqCst);
-        worker.send("t-dies", dies, None);
-        // The first worker returned at once and dropped its receiver; spin
-        // until a send sees that, which starts the second.
-        loop {
-            worker.send("t-dies", dies, None);
-            if STARTS.load(Ordering::SeqCst) >= 2 {
-                break;
-            }
-            std::thread::yield_now();
-        }
-        // A worker that keeps running is not replaced.
-        let steady = Worker::new();
-        let before = STARTS.load(Ordering::SeqCst);
-        steady.send("t-serves", serves, None);
-        steady.send("t-serves", serves, None);
-        steady.send("t-serves", serves, None);
-        assert_eq!(STARTS.load(Ordering::SeqCst), before + 1);
+        let refused = Cell::new(0);
+        worker.send_with(
+            |_| {
+                refused.set(refused.get() + 1);
+                Err(std::io::Error::other("no thread"))
+            },
+            None,
+        );
+        assert_eq!(refused.get(), 1);
+        let starts = Cell::new(0);
+        worker.send_with(counting(&starts), None);
+        assert_eq!(starts.get(), 1);
     }
 }

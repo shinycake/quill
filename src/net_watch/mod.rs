@@ -23,6 +23,7 @@ use crate::locks::lock_or_recover;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, UdpSocket};
 use std::sync::{Mutex, OnceLock};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 const TELEGRAM_V4: SocketAddr =
@@ -314,14 +315,70 @@ impl Tracker {
     }
 }
 
+/// The thread that listens to the OS (`platform::watch`). The stage holds
+/// it: on Linux and macOS the listener runs for as long as Quill does, so a
+/// finished thread (the socket closed, or the listener panicked) is replaced
+/// by the next [`tracker`] call, no sooner than [`WATCH_RESTART_AFTER`] after
+/// the last start. On Windows the listener hands over to system threads and
+/// returns, which is not a loss.
+enum Watcher {
+    Stopped,
+    Running {
+        _thread: JoinHandle<Option<()>>,
+        since: Instant,
+    },
+}
+
+/// How soon a lost listener is started again.
+const WATCH_RESTART_AFTER: Duration = Duration::from_secs(5);
+
+/// Whether a finished listener thread means the listener was lost.
+const WATCH_RUNS_FOR_GOOD: bool = cfg!(any(target_os = "linux", target_os = "macos"));
+
+impl Watcher {
+    /// Starts the listener when none runs or the last one is lost.
+    fn ensure(
+        &mut self,
+        now: Instant,
+        spawn: impl FnOnce() -> io::Result<JoinHandle<Option<()>>>,
+    ) {
+        self.ensure_with(now, JoinHandle::is_finished, spawn);
+    }
+
+    /// [`Self::ensure`], with `finished` as the way a thread is told lost.
+    fn ensure_with(
+        &mut self,
+        now: Instant,
+        finished: impl FnOnce(&JoinHandle<Option<()>>) -> bool,
+        spawn: impl FnOnce() -> io::Result<JoinHandle<Option<()>>>,
+    ) {
+        if let Watcher::Running { _thread, since } = self
+            && (!WATCH_RUNS_FOR_GOOD
+                || !finished(_thread)
+                || now.saturating_duration_since(*since) < WATCH_RESTART_AFTER)
+        {
+            return;
+        }
+        *self = match spawn() {
+            Ok(thread) => Watcher::Running {
+                _thread: thread,
+                since: now,
+            },
+            Err(error) => {
+                eprintln!("quill: no network watcher: {error}");
+                Watcher::Stopped
+            }
+        };
+    }
+}
+
 fn tracker() -> &'static Mutex<Tracker> {
     static TRACKER: OnceLock<Mutex<Tracker>> = OnceLock::new();
-    TRACKER.get_or_init(|| {
-        if let Err(error) = crate::thread_guard::spawn_guarded("quill-net-watch", platform::watch) {
-            eprintln!("quill: no network watcher: {error}");
-        }
-        Mutex::new(Tracker::new(route_now()))
-    })
+    static WATCHER: Mutex<Watcher> = Mutex::new(Watcher::Stopped);
+    lock_or_recover(&WATCHER).ensure(Instant::now(), || {
+        crate::thread_guard::spawn_guarded("quill-net-watch", platform::watch)
+    });
+    TRACKER.get_or_init(|| Mutex::new(Tracker::new(route_now())))
 }
 
 /// The network as last seen. The first call starts the watcher.

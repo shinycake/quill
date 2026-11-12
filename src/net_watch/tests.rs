@@ -249,3 +249,29 @@ fn a_router_that_never_answers_is_asked_again_after_the_wait() {
         "the wait ran out"
     );
 }
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn a_lost_listener_is_started_again_but_not_in_a_rush() {
+    use super::{WATCH_RESTART_AFTER, Watcher};
+    use std::cell::Cell;
+    let starts = Cell::new(0);
+    let spawn = || {
+        starts.set(starts.get() + 1);
+        Ok(std::thread::spawn(|| Some(())))
+    };
+    let start = Instant::now();
+    let mut watcher = Watcher::Stopped;
+    watcher.ensure_with(start, |_| false, spawn);
+    assert_eq!(starts.get(), 1, "the first call starts it");
+    watcher.ensure_with(start + WATCH_RESTART_AFTER, |_| false, spawn);
+    assert_eq!(starts.get(), 1, "a listener that runs is left alone");
+    watcher.ensure_with(start + WATCH_RESTART_AFTER / 2, |_| true, spawn);
+    assert_eq!(starts.get(), 1, "a lost one is not started in a rush");
+    watcher.ensure_with(start + WATCH_RESTART_AFTER, |_| true, spawn);
+    assert_eq!(starts.get(), 2, "a lost one is replaced");
+    let mut refused = Watcher::Stopped;
+    refused.ensure_with(start, |_| true, || Err(io::Error::other("no thread")));
+    refused.ensure_with(start, |_| true, spawn);
+    assert_eq!(starts.get(), 3, "a refused start is tried by the next call");
+}
