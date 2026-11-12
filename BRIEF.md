@@ -164,3 +164,31 @@ look for the same shape in the rest of the file and in its callers, and when the
 `u64` standing in for a `RequestId`; a `Vec`/queue of in-flight requests beside a stage; a detached task or timer the
 stage does not own), extend the matching guard in `scripts/` (check-request-match.py, check-owned-timers.py,
 check-stage-enums.py, check-implicit-state.py) so CI rejects it. Name each guard change in your final message.
+
+## Round 4 bundles (r4-NN), 2026-11-12
+
+From the fourth full read of every file (`register-r4.jsonl`, 205 entries), on main at 858368ab5 after round 3 merged
+(#1455). Base and integration branch: `claude/sweep-r4` (use it in place of `claude/sweep-r3` in Setup above). The
+file-complete rule applies with `register-r4.jsonl`, and the fresh-reviewer pass uses `RESWEEP-BRIEF.md` on branch
+`sweep/resweep4-plan`.
+
+Why the sweep still is not clean, and what changes this round:
+
+1. **Skipped or half-fixed entries come back.** 16 of the 34 confirmed non-S4 entries had been reported in an earlier
+   round and were skipped, left as a "leftover", or turned into a rename. This round, a `confirmed` entry may be
+   skipped only with a test that proves the described trigger does not produce the effect. No other skip reason.
+2. **Readers miss shapes; guards do not.** The other 18 were never seen by three full reads. The shapes the guards know
+   are caught every time, but the guard baselines grandfather 500 of them (generation counters, bare stages,
+   detached timers, RefCell borrows). A sweep cannot come out clean while those exist. So every bundle also carries
+   `"kind":"guard-baseline"` lines: one per baseline hit in its files, from
+   `python3 scripts/check-<guard>.py --list`. For each, remove the shape (counter -> the `RequestId` in the stage;
+   bare stage -> a variant that carries its request or data; detached task -> the `Task` held in the stage that owns
+   it; RefCell borrow -> `try_borrow*` with a handled `Err`, or no cell), then delete its line from
+   `scripts/<guard>-baseline.txt` (for implicit-state, `scripts/implicit-state-baseline.txt`). When you finish, run each
+   guard's `--list` and confirm no hit is left in any file your bundle names. Never add a baseline or allow line.
+3. **When you fix a shape, fix it everywhere in your files.** Search your bundle's files for the same shape before you
+   move on (for example every `generation`/`gen`/`version`/`seq`/`ticket` counter, every `Option<RequestId>`,
+   every answer matched by a purpose or chat id). If a guard could catch it and does not, extend the guard.
+
+Bundles are cut by shard so no two share a file. The baseline files are shared: keep your deletions to your own lines,
+and the merge will combine them.
