@@ -37,27 +37,19 @@ impl GroupsState {
 
     /// `chat`'s members changed (a member joined, left or was changed,
     /// ownership moved): its member pages and administrators go `Stale`
-    /// (a page stays drawn, a list that was only asked goes) and ask again
+    /// (a page stays drawn, a list on its first load has none yet) and ask again
     /// when something shows them.
     pub fn members_changed(&mut self, chat: i64) {
-        self.supergroup_members.retain(|(id, _), list| {
+        for ((id, _), list) in self.supergroup_members.iter_mut() {
             if *id != chat {
-                return true;
+                continue;
             }
             let placeholder = SupergroupMembersFetch::Failed(String::new());
-            match std::mem::replace(&mut list.fetch, placeholder).made_stale() {
-                Some(stale) => {
-                    list.fetch = stale;
-                    list.more = MoreMembers::Idle;
-                    true
-                }
-                None => false,
-            }
-        });
-        if let Some(fetch) = self.basic_group_members.remove(&chat)
-            && let Some(stale) = fetch.made_stale()
-        {
-            self.basic_group_members.insert(chat, stale);
+            list.fetch = std::mem::replace(&mut list.fetch, placeholder).made_stale();
+            list.more = MoreMembers::Idle;
+        }
+        if let Some(fetch) = self.basic_group_members.remove(&chat) {
+            self.basic_group_members.insert(chat, fetch.made_stale());
         }
         if let Some(admins) = self.admin_lists.get_mut(&chat) {
             *admins = AdminListFetch::Stale;

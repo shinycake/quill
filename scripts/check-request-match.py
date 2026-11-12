@@ -16,7 +16,7 @@ the re-sweep of 2026-11-11), and this check counts both:
 - `unmatched`: a call to `Fetch::succeed`, which sets the answer whatever
   request it came from. An older request's late answer overwrites a newer
   one.
-- `ticket`: a request purpose that carries a `u64` counter (`token`,
+- `ticket`: a request purpose (any `enum *Purpose` under src/) that carries a `u64` counter (`token`,
   `generation`) to tell its answer from an older one. The counter stands
   in for the `RequestId`: every start path must remember to bump it, and
   nothing ties it to the request that is out. The stage that waits holds
@@ -75,20 +75,31 @@ def variant_of(text, at):
     return f"{enum.group(1)}::{variant.group(1) if variant else '?'}"
 
 
+def purpose_enum_bodies(text):
+    """`(start, end)` of the body of every `enum <Name>Purpose { ... }`."""
+    for head in re.finditer(r"\benum\s+\w*Purpose\b[^{;]*\{", text):
+        depth, at = 1, head.end()
+        while at < len(text) and depth:
+            depth += {"{": 1, "}": -1}.get(text[at], 0)
+            at += 1
+        yield head.end(), at
+
+
 def hits(root):
     for path, text in shape_guard.source(root):
         if path == OWNER or shape_guard.is_seeder(path):
             continue
         purpose = "_purpose" in text or "has_auth_submit" in text
         succeed = ".succeed" in text
-        ticket = "purpose" in path and path.startswith("src/state/")
+        ticket = path.startswith("src/") and bool(re.search(r"\benum\s+\w*Purpose\b", text))
         if not purpose and not succeed and not ticket:
             continue
         scopes = shape_guard.Scopes(path, text)
-        if "purpose" in path and path.startswith("src/state/"):
-            for match in TICKET.finditer(text):
-                line = shape_guard.line_of(text, match.start())
-                yield f"ticket:{variant_of(text, match.start())}", path, line
+        if ticket:
+            for start, end in purpose_enum_bodies(text):
+                for match in TICKET.finditer(text, start, end):
+                    line = shape_guard.line_of(text, match.start())
+                    yield f"ticket:{variant_of(text, match.start())}", path, line
         if purpose:
             for match in PURPOSE.finditer(text):
                 line = shape_guard.line_of(text, match.start())

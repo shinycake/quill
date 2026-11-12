@@ -99,6 +99,7 @@ purpose:Session::suggested_post_busy 1
 ticket:BotsPurpose::CheckBotUsername 1
 ticket:BotsPurpose::CreateBot 1
 ticket:BotsPurpose::GetWidgetQueryAnswer 1
+ticket:LocationPickerPurpose::SearchVenues 1
 ticket:MediaPurpose::GetProfileGifts 1
 ticket:MediaPurpose::GetSharedMediaMore 1
 ticket:RequestPurpose::GetSharedMedia 1

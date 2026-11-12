@@ -216,7 +216,7 @@ impl QuillApp {
                     request: Some(*request),
                 },
             ),
-            Some(SupergroupMembersFetch::Stale { last }) if !admins_only => (
+            Some(SupergroupMembersFetch::Stale { last: Some(last) }) if !admins_only => (
                 last.members.clone(),
                 last.total_count,
                 MembersStage::Loading { request: None },

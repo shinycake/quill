@@ -9823,7 +9823,7 @@ retry; no wall clock), `state/tests/history_prune.rs` (translations pruned).
 | Id | Fix |
 | --- | --- |
 | 08-001, 08-003 | One `MemberList { query, fetch, more }` per (chat, filter) replaces `supergroup_members` + `member_asks.first/more`. The first-page request lives in `SupergroupMembersFetch::Loading { request }` (not an `Option`), the next page in `MoreMembers::Asking { request }`, and a new first page replaces the whole value. A first page answers or fails only a list that is `Loading` as that very request (`answer_member_first` / `fail_member_first`), so a search refused at send (`NotSent` under the new query, no request) is never filled by an older search's answer. A send that is refused puts back the list as it was (`restore_member_list`), except a stale one, which becomes `NotSent`. |
-| 08-002 | `members_added` and the one-shot `member_list_stale` queue are gone. `GroupsState::members_changed(chat)` makes the member pages `SupergroupMembersFetch::Stale { last }` (the page stays drawn; no request is out, so no answer can land on it) and an asked administrators list `AdminListFetch::Stale`. Whoever shows the list asks: the fetch functions no longer treat an older request of the same purpose as the list being asked, the poll refetches only the dialog's and the panel's stale list and the stale administrators, and a stale list that cannot be asked goes (`drop_stale_*`) or becomes `NotSent` so the poll does not repeat it. |
+| 08-002 | `members_added` and the one-shot `member_list_stale` queue are gone. `GroupsState::members_changed(chat)` makes every member list `SupergroupMembersFetch::Stale { last: Option<MembersPage> }` (a page stays drawn; a first load still out has no page yet; no request is out, so no answer can land on it; `Failed`/`NotSent` keep their Retry; nothing is deleted, so the poll and the readers always have a list to ask again). The poll refreshes exactly the key the dialog shows (`shown_filter`: without the restrict right, Restricted and Banned show Recent) and an asked administrators list `AdminListFetch::Stale`. Whoever shows the list asks: the fetch functions no longer treat an older request of the same purpose as the list being asked, the poll refetches only the dialog's and the panel's stale list and the stale administrators, and a stale list that cannot be asked goes (`drop_stale_*`) or becomes `NotSent` so the poll does not repeat it. |
 | 08-004 | `DeepLinkState::ResolvingChat { action, request }` and `ResolvingInfo { request, original }` hold the request they wait for; `DeepLinkState::waits_for` / `resolving_action` compare it with `pending.id` (join, check, resolve, lookups, the sticker/user/chat answers and the error arm). The purposes lost their `generation`. The invite box is identified by a generation minted when the preview appears, and the Premium `/start` is tied to the follow-up's request (`PremiumAutoStart::request`). |
 | 08-005 | A missing `admin_lists` / `invite_links` entry no longer counts as waiting: an answer or error lands only on a list that is `Loading` as that request (every sender writes `Loading` first). |
 | 08-006 | `ToggleBroadcastGroup` rolls back through `RequestRollback::BroadcastGroup { previous }`, restoring the known flag instead of removing the entry. |
@@ -9835,7 +9835,9 @@ retry; no wall clock), `state/tests/history_prune.rs` (translations pruned).
 
 Guard: `check-request-match.py` has a third rule, `ticket`: a purpose
 variant carrying a `u64` `token`/`generation`/`seq` stands in for the
-`RequestId` (the existing ones are baselined).
+`RequestId` (the existing ones are baselined). It scans the body of every
+`enum *Purpose` under `src/`, not only files named `purpose` (the location
+picker's `SearchVenues { generation }` is now baselined).
 
 Tests: `state/tests/sweep_r3_03.rs`, `connect/tests/sweep_r3_03.rs`
 (stale lists asked again while an older request is out, a refused search

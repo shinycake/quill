@@ -17,7 +17,8 @@ pub enum SupergroupMembersFetch {
     /// yet: the page stays drawn, and whoever shows the list (or the
     /// poll, for the lists on screen) asks, which moves it to `Loading`.
     /// No request is out, so no answer can land on it.
-    Stale { last: MembersPage },
+    /// `last` is `None` when the list was still on its first load.
+    Stale { last: Option<MembersPage> },
     Loaded {
         members: Vec<ParsedChatMember>,
         total_count: i32,
@@ -50,7 +51,7 @@ impl SupergroupMembersFetch {
                 total_count,
             }),
             Some(Self::Loading { last, .. }) => last,
-            Some(Self::Stale { last }) => Some(last),
+            Some(Self::Stale { last }) => last,
             Some(Self::Failed(_) | Self::NotSent(_)) | None => None,
         };
         Self::Loading { request, last }
@@ -66,24 +67,22 @@ impl SupergroupMembersFetch {
         matches!(self, Self::Loading { request: asked, .. } if *asked == request)
     }
 
-    /// A membership change made this out of date: a page stays drawn
-    /// as `Stale` (its refetch owed); anything else goes (`None`).
-    pub fn made_stale(self) -> Option<Self> {
+    /// A membership change made this out of date: a page, or a first load
+    /// that was still out, becomes `Stale` (its ask owed, so the poll and
+    /// the next reader ask again); a failed list keeps its Retry.
+    pub fn made_stale(self) -> Self {
         match self {
             Self::Loaded {
                 members,
                 total_count,
-            } => Some(Self::Stale {
-                last: MembersPage {
+            } => Self::Stale {
+                last: Some(MembersPage {
                     members,
                     total_count,
-                },
-            }),
-            Self::Loading {
-                last: Some(last), ..
-            } => Some(Self::Stale { last }),
-            stale @ Self::Stale { .. } => Some(stale),
-            Self::Loading { last: None, .. } | Self::Failed(_) | Self::NotSent(_) => None,
+                }),
+            },
+            Self::Loading { last, .. } => Self::Stale { last },
+            other @ (Self::Stale { .. } | Self::Failed(_) | Self::NotSent(_)) => other,
         }
     }
 }

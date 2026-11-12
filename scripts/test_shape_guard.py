@@ -278,10 +278,23 @@ class Requests(unittest.TestCase):
                 "}\n"
             ),
             "src/state/domains/a/state.rs": "pub struct S { pub token: u64 }\n",
+            # A purpose enum in a file whose name has no "purpose" in it.
+            "src/feature/mod.rs": (
+                "pub struct Own { pub generation: u64 }\n"
+                "pub enum PickerPurpose {\n"
+                "    Search { generation: u64 },\n"
+                "    Tile,\n"
+                "}\n"
+                "pub enum Plain { Go { token: u64 } }\n"
+            ),
         }
         self.assertEqual(
             keys(requests, files),
-            ["ticket:APurpose::Box", "ticket:APurpose::Lookup"],
+            [
+                "ticket:APurpose::Box",
+                "ticket:APurpose::Lookup",
+                "ticket:PickerPurpose::Search",
+            ],
         )
 
 

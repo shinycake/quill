@@ -94,6 +94,43 @@ fn a_membership_change_leaves_stale_lists_that_ask_again() {
     ));
 }
 
+/// A membership change must not delete a list that is on its first load
+/// or failed: the first goes `Stale` (the poll and readers ask again), the
+/// second keeps its Retry. Basic groups the same.
+#[test]
+fn a_membership_change_keeps_first_loads_and_failures_to_ask_again() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let loading = (14, MemberListFilter::Recent);
+    let failed = (14, MemberListFilter::Search);
+    let first = session.request(RECENT, Some(ChatId(14)));
+    session.groups.note_member_first(loading, first, "");
+    let second = session.request(MEMBERS, Some(ChatId(14)));
+    session.groups.note_member_first(failed, second, "x");
+    apply_json(&mut session, &seq, &sink, &error(second));
+    session.groups.members_changed(14);
+    assert!(session.groups.member_list_is_stale(loading));
+    assert!(matches!(
+        session.groups.member_fetch(failed),
+        Some(SupergroupMembersFetch::Failed(_))
+    ));
+    // The stale first load asks again under its own request.
+    let again = session.request(RECENT, Some(ChatId(14)));
+    session.groups.note_member_first(loading, again, "");
+    apply_json(&mut session, &seq, &sink, &members(again, &[4]));
+    assert!(matches!(
+        session.groups.member_fetch(loading),
+        Some(SupergroupMembersFetch::Loaded { members, .. }) if members.len() == 1
+    ));
+    // A basic group still loading goes stale, not missing.
+    session
+        .groups
+        .basic_group_members
+        .insert(15, SupergroupMembersFetch::asked(None, RequestId(900)));
+    session.groups.members_changed(15);
+    assert!(session.groups.basic_members_are_stale(15));
+}
+
 /// 07-005: the wallpaper failure line leaves with the next success.
 #[test]
 fn a_wallpaper_failure_line_goes_with_the_next_successful_delete() {

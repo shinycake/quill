@@ -191,7 +191,7 @@ fn a_membership_change_keeps_the_last_page_until_the_refetch_answers() {
     session.groups.members_changed(13);
     assert!(matches!(
         session.groups.member_fetch(key),
-        Some(SupergroupMembersFetch::Stale { last }) if last.members.len() == 2 && last.total_count == 2
+        Some(SupergroupMembersFetch::Stale { last: Some(last) }) if last.members.len() == 2 && last.total_count == 2
     ));
     assert!(
         !session
@@ -200,11 +200,8 @@ fn a_membership_change_keeps_the_last_page_until_the_refetch_answers() {
             .is_some_and(SupergroupMembersFetch::in_flight)
     );
     assert!(
-        !session
-            .groups
-            .supergroup_members
-            .contains_key(&(13, MemberListFilter::Search)),
-        "a list that was not loaded goes"
+        session.groups.member_list_is_stale((13, MemberListFilter::Search)),
+        "a list on its first load owes its ask, it does not vanish"
     );
     // Dropped again before the refetch: still the same page.
     session.groups.members_changed(13);

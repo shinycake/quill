@@ -113,7 +113,11 @@ impl QuillApp {
                 .refresh_supergroup_members(chat_id, MemberListFilter::Search, &query)
                 .map(|_| ())
         } else {
-            let filter = tab.filter().unwrap_or(MemberListFilter::Recent);
+            let can_restrict = live.driver.session.chat_can_restrict_members(chat_id);
+            let filter = shown_filter(
+                tab.filter().unwrap_or(MemberListFilter::Recent),
+                can_restrict,
+            );
             live.driver
                 .refresh_supergroup_members(chat_id, filter, &query)
                 .map(|_| ())
@@ -647,15 +651,10 @@ impl QuillApp {
             None if query.trim().is_empty() => MemberListFilter::Recent,
             None => MemberListFilter::Search,
         };
-        if !session.chat_can_restrict_members(dialog.chat_id)
-            && matches!(
-                filter,
-                MemberListFilter::Restricted | MemberListFilter::Banned
-            )
-        {
-            return Some(MemberListFilter::Recent);
-        }
-        Some(filter)
+        Some(shown_filter(
+            filter,
+            session.chat_can_restrict_members(dialog.chat_id),
+        ))
     }
 
     /// The member dialog scrolled: near the end of the list, ask for the
@@ -825,4 +824,31 @@ crate::ui::shell::register_dialogs! {
         QuillApp::build_member_dialog,
     )
     .close(|app, _, cx| app.close_member_dialog(cx)),
+}
+
+/// The list a tab shows: without the right to restrict, Restricted and
+/// Banned show Recent. The poll checks, and the refresh asks, this key.
+fn shown_filter(filter: MemberListFilter, can_restrict: bool) -> MemberListFilter {
+    if filter.requires_restrict_right() && !can_restrict {
+        MemberListFilter::Recent
+    } else {
+        filter
+    }
+}
+
+#[cfg(test)]
+mod shown_filter_tests {
+    use super::*;
+
+    #[test]
+    fn a_viewer_without_the_right_refreshes_the_list_the_tab_shows() {
+        for filter in [MemberListFilter::Restricted, MemberListFilter::Banned] {
+            assert_eq!(shown_filter(filter, false), MemberListFilter::Recent);
+            assert_eq!(shown_filter(filter, true), filter);
+        }
+        assert_eq!(
+            shown_filter(MemberListFilter::Search, false),
+            MemberListFilter::Search
+        );
+    }
 }
