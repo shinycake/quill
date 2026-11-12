@@ -10,7 +10,6 @@ use super::inline_video::InlineTile;
 use super::message_media::MediaFrameKind;
 use super::play_intent::{PlayKind, PlayTarget};
 use super::playback_state::{ChatMessage, GifPlayback, GifRun, PlayingGif};
-use super::recording_state::RECORD_STEP;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::ids::{ChatId, FileId, MessageId};
@@ -402,17 +401,25 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// A recording or its preview started: step it at once, then every
-    /// [`RECORD_STEP`] from a timer the recording holds (not from a
-    /// window's frame, which stops while Quill is behind another app).
+    /// A recording or its preview started: step it at once, then on every
+    /// whole 100 ms step after this instant, from a timer the recording
+    /// holds (not from a window's frame, which stops while Quill is behind
+    /// another app).
     pub(super) fn begin_record_tick(&mut self, cx: &mut Context<Self>) {
-        self.arm_record_tick(cx.background_executor().now(), cx);
+        let started = cx.background_executor().now();
+        self.arm_record_tick(started, started, cx);
     }
 
-    /// One step at `due`; a step that finds the recording still running
-    /// arms the next, and one that finds nothing recording ends the chain.
-    /// Each step replaces the task that ran it.
-    fn arm_record_tick(&mut self, due: std::time::Instant, cx: &mut Context<Self>) {
+    /// One step at `due`, a whole step after `started`; a step that finds
+    /// the recording still running arms the next whole step, and one that
+    /// finds nothing recording ends the chain. Each step replaces the task
+    /// that ran it.
+    fn arm_record_tick(
+        &mut self,
+        started: std::time::Instant,
+        due: std::time::Instant,
+        cx: &mut Context<Self>,
+    ) {
         // window-scope: the step runs as the window the recording was made in (`recording_tick_in_window`).
         // screen-scope: the recording is the app's alone and ends with the account switch (its farewell cancels it).
         let task = cx.spawn(async move |this, cx| {
@@ -420,14 +427,17 @@ impl QuillApp {
             cx.background_executor().timer(wait).await;
             let _ = this.update(cx, |app, cx| {
                 if app.recording_tick_in_window(cx) {
-                    let next = cx.background_executor().now() + RECORD_STEP;
-                    app.arm_record_tick(next, cx);
+                    let now = cx.background_executor().now();
+                    match app.recording.next_step(now) {
+                        Some((started, due)) => app.arm_record_tick(started, due, cx),
+                        None => app.recording.stop_tick(),
+                    }
                 } else {
                     app.recording.stop_tick();
                 }
             });
         });
-        self.recording.set_tick(due, task);
+        self.recording.set_tick(started, due, task);
     }
 }
 

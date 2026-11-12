@@ -212,8 +212,8 @@ impl QuillApp {
                 ) {
                     return;
                 }
-                let wait = app.schedule_countdown_wait(cx);
-                let next = app.schedule_refresh_timer(Instant::now() + wait, cx);
+                let due = app.schedule_countdown_due(cx);
+                let next = app.schedule_refresh_timer(due, cx);
                 if let Some(GroupCallCreate {
                     step: CreateStep::Schedule(step),
                     ..
@@ -226,8 +226,8 @@ impl QuillApp {
         })
     }
 
-    /// The nap to the picked time's next countdown change.
-    fn schedule_countdown_wait(&self, cx: &App) -> Duration {
+    /// When the picked time's countdown line next changes.
+    fn schedule_countdown_due(&self, cx: &App) -> Instant {
         let now = WallClock::of(cx).now();
         let picked = match self.group_call_boxes.start_dialog.as_ref().map(|f| &f.step) {
             Some(CreateStep::Schedule(step)) => {
@@ -235,7 +235,7 @@ impl QuillApp {
             }
             _ => None,
         };
-        countdown_nap(picked.unwrap_or(now), now)
+        Instant::now() + countdown_nap(picked.unwrap_or(now), now)
     }
 
     fn close_group_call_create(&mut self, cx: &mut Context<Self>) {

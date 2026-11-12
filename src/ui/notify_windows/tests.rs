@@ -363,27 +363,57 @@ fn a_cleared_window_does_not_count_as_replying(cx: &mut TestAppContext) {
     });
 }
 
-/// A notification that waits for the user ends its wait at the cap even when
-/// no input is ever seen: the clock is armed to that deadline, not to a look
-/// at the idle clock every few hundred milliseconds.
+/// tdesktop `checkLastInput`: a notification that waits for the user looks
+/// at the OS idle clock every `INPUT_CHECK_MS` with nothing else to wake it,
+/// so input after it appeared starts the hide within one check, however long
+/// the wait has been.
 #[gpui_kit::test]
-fn a_wait_for_the_user_ends_at_its_deadline(cx: &mut TestAppContext) {
+fn a_waiting_notification_sees_the_next_input_within_one_check(cx: &mut TestAppContext) {
+    use quill::notify::custom::INPUT_CHECK_MS;
+    use std::time::Duration;
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     let me = app.read_with(vcx, |app, _| app.notification_account(None));
     app.update(vcx, |app, cx| {
         app.delivery.windows.platform = NotifyPlatform::Windows;
+        // Nobody has touched the computer for ages.
+        app.delivery.windows.idle_ms = || Some(u64::MAX >> 20);
         app.show_custom_notification(&me, message(7), None, None, false, false, cx);
-        let cap = std::time::Duration::from_millis(quill::notify::custom::INPUT_WAIT_CAP_MS);
-        let Some(shown) = app.delivery.windows.shown.first_mut() else {
-            panic!("a window shows");
-        };
-        shown.hold = super::hold::Hold::WaitingForInput { hide_at: None };
-        let started = shown.started;
-        app.notify_check_input(started + cap);
-        let Some(shown) = app.delivery.windows.shown.first() else {
-            panic!("a window shows");
-        };
-        assert!(!shown.hold.waiting(), "the wait ended at the cap");
     });
+    let waiting = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| {
+            app.delivery.windows.shown.first().map(|s| s.hold.waiting())
+        })
+    };
+    // A long wait with no input: it keeps waiting, and the clock goes on.
+    let frame = Duration::from_millis(16);
+    for _ in 0..(120_000 / 16) {
+        vcx.executor().advance_clock(frame);
+        vcx.run_until_parked();
+    }
+    assert_eq!(waiting(&app, vcx), Some(true), "no cap ends the wait");
+    // The user types in another app; nothing else wakes the clock.
+    app.update(vcx, |app, _| app.delivery.windows.idle_ms = || Some(0));
+    let mut spent = Duration::ZERO;
+    while waiting(&app, vcx) == Some(true) && spent < Duration::from_secs(5) {
+        vcx.executor().advance_clock(frame);
+        vcx.run_until_parked();
+        spent += frame;
+    }
+    assert_eq!(waiting(&app, vcx), Some(false), "the input was seen");
+    assert!(
+        spent <= Duration::from_millis(INPUT_CHECK_MS) + frame,
+        "within one check period: {spent:?}"
+    );
+}
+
+impl super::NotifyWindows {
+    /// The (account, chat) of every notification shown and not unlinked.
+    pub(in crate::ui) fn shown_keys(&self) -> Vec<(quill::ids::AccountKey, ChatId)> {
+        self.shown
+            .iter()
+            .filter(|s| !s.unlinked())
+            .map(|s| s.key.clone())
+            .collect()
+    }
 }

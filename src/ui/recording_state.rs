@@ -133,11 +133,27 @@ pub(crate) struct RecordingUi {
 enum RecordTick {
     Stopped,
     Running {
+        /// When the capture began: every step falls on a whole
+        /// [`RECORD_STEP`] after it, however late the last one ran.
+        started: std::time::Instant,
         /// Read by the tests that watch the chain re-arm.
         #[cfg_attr(not(test), allow(dead_code))]
         due: std::time::Instant,
         _task: gpui_kit::Task<()>,
     },
+}
+
+/// The next whole [`RECORD_STEP`] after `started` that is later than `now`.
+pub(super) fn step_after(
+    started: std::time::Instant,
+    now: std::time::Instant,
+) -> std::time::Instant {
+    let steps = now.saturating_duration_since(started).as_millis() / RECORD_STEP.as_millis() + 1;
+    u32::try_from(steps)
+        .ok()
+        .and_then(|steps| RECORD_STEP.checked_mul(steps))
+        .and_then(|after| started.checked_add(after))
+        .unwrap_or(now)
 }
 
 /// How often the record bar steps while it draws.
@@ -275,14 +291,36 @@ impl RecordingUi {
         self.capture.is_some()
     }
 
-    /// The recording's next step is the task `task`, due at `due`; the one
-    /// that ran before is dropped. `false` when nothing records.
-    pub(super) fn set_tick(&mut self, due: std::time::Instant, task: gpui_kit::Task<()>) -> bool {
+    /// The recording's next step is the task `task`, due at `due` on the
+    /// steps counted from `started`; the one that ran before is dropped.
+    /// `false` when nothing records.
+    pub(super) fn set_tick(
+        &mut self,
+        started: std::time::Instant,
+        due: std::time::Instant,
+        task: gpui_kit::Task<()>,
+    ) -> bool {
         let Some(capture) = self.capture.as_mut() else {
             return false;
         };
-        capture.tick = RecordTick::Running { due, _task: task };
+        capture.tick = RecordTick::Running {
+            started,
+            due,
+            _task: task,
+        };
         true
+    }
+
+    /// The capture's start and the next whole step after `now`, counted
+    /// from the start the stage holds; `None` when no step is armed.
+    pub(super) fn next_step(
+        &self,
+        now: std::time::Instant,
+    ) -> Option<(std::time::Instant, std::time::Instant)> {
+        match &self.capture.as_ref()?.tick {
+            RecordTick::Running { started, .. } => Some((*started, step_after(*started, now))),
+            RecordTick::Stopped => None,
+        }
     }
 
     /// The step ended: no next one is armed.
@@ -454,5 +492,27 @@ impl QuillApp {
             round: Default::default(),
             tick: RecordTick::Stopped,
         });
+    }
+}
+
+#[cfg(test)]
+mod step_tests {
+    use super::{RECORD_STEP, step_after};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn steps_fall_on_whole_steps_after_the_start_however_late_one_ran() {
+        let started = Instant::now();
+        let ms = Duration::from_millis;
+        assert_eq!(step_after(started, started), started + ms(100));
+        assert_eq!(step_after(started, started + ms(99)), started + ms(100));
+        // A late step does not move the grid: the next is still a whole 100 ms.
+        assert_eq!(step_after(started, started + ms(100)), started + ms(200));
+        assert_eq!(step_after(started, started + ms(250)), started + ms(300));
+        assert_eq!(
+            step_after(started, started + ms(10_050)),
+            started + ms(10_100)
+        );
+        assert_eq!(RECORD_STEP, ms(100));
     }
 }

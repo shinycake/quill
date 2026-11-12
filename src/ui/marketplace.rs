@@ -41,7 +41,15 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        if self.payments.marketplace.open_for(chat, running.is_some()) {
+        // The kept draft resumes when the session's purchase is the one it
+        // asked for, whatever stage that is in and however the box closed
+        // (the window, the chat left or blocked): a failure that landed
+        // meanwhile shows.
+        let resume = self.payments.marketplace.resumes(
+            self.session()
+                .and_then(|s| s.payments.marketplace_gift.as_ref()),
+        );
+        if self.payments.marketplace.open_for(chat, resume) {
             self.reset_marketplace_inputs(window, cx);
         }
         self.open_box(DialogKind::Marketplace);

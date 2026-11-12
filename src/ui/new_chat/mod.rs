@@ -91,9 +91,59 @@ pub(crate) struct NewChatDialog {
 }
 
 /// What a stage that was left no longer waits for.
+#[derive(Debug, PartialEq, Eq)]
 enum Release {
     Create(RequestId),
     TypeSave(Vec<RequestId>),
+}
+
+impl Release {
+    /// What `left` waited for that `now` does not: the create's request, or
+    /// the type Saves' entries (a stage that is the same wait again keeps it).
+    fn between(left: NewChatStage, now: &NewChatStage) -> Option<Self> {
+        match left {
+            NewChatStage::Creating { request, .. } if !matches!(now, NewChatStage::Creating { request: now, .. } if *now == request) => {
+                Some(Self::Create(request))
+            }
+            NewChatStage::Type {
+                save: TypeSaveStage::Saving(sent),
+                ..
+            } if !matches!(
+                now,
+                NewChatStage::Type { save: TypeSaveStage::Saving(now), .. } if *now == sent
+            ) =>
+            {
+                Some(Self::TypeSave(sent))
+            }
+            _ => None,
+        }
+    }
+
+    fn apply<S: quill::connect::JsonSender>(self, driver: &mut quill::connect::ConnectDriver<S>) {
+        match self {
+            Self::Create(request) => driver.abandon_new_chat(request),
+            Self::TypeSave(sent) => driver.forget_new_chat_type_save(&sent),
+        }
+    }
+}
+
+/// What a create's send says to the dialog: the request it waits on, or the
+/// note to show (a create of this kind still out, or the send's own error).
+fn created(
+    result: Result<Option<RequestId>, quill::connect::ConnectSendError>,
+) -> Result<RequestId, StatusNote> {
+    match result {
+        Ok(Some(request)) => Ok(request),
+        // A create of this kind is still out (the dialog's own was let go,
+        // TDLib cannot cancel it): say so rather than do nothing.
+        Ok(None) => Err(StatusNote::info(tr(
+            keys::Q_PEOPLE_CHAT_STILL_BEING_CREATED,
+        ))),
+        Err(err) => Err(StatusNote::error(user_error_for(
+            keys::Q_NEW_CHAT_FAILED,
+            &err,
+        ))),
+    }
 }
 
 impl QuillApp {
@@ -320,31 +370,12 @@ impl QuillApp {
             return;
         };
         let left = std::mem::replace(&mut dialog.stage, settled);
-        // What the stage waited for is let go once it has left it: the
-        // create's request, or the type Saves' entries.
-        let release = match left {
-            NewChatStage::Creating { request, .. } if !matches!(&dialog.stage, NewChatStage::Creating { request: now, .. } if *now == request) => {
-                Some(Release::Create(request))
-            }
-            NewChatStage::Type {
-                save: TypeSaveStage::Saving(sent),
-                ..
-            } if !matches!(
-                &dialog.stage,
-                NewChatStage::Type { save: TypeSaveStage::Saving(now), .. } if *now == sent
-            ) =>
-            {
-                Some(Release::TypeSave(sent))
-            }
-            _ => None,
-        };
+        // What the stage waited for is let go once it has left it.
+        let release = Release::between(left, &dialog.stage);
         let (Some(release), Some(live)) = (release, self.live.as_mut()) else {
             return;
         };
-        match release {
-            Release::Create(request) => live.driver.abandon_new_chat(request),
-            Release::TypeSave(sent) => live.driver.forget_new_chat_type_save(&sent),
-        }
+        release.apply(&mut live.driver);
     }
 
     fn set_new_chat_stage(&mut self, stage: NewChatStage, cx: &mut Context<Self>) {
@@ -429,8 +460,8 @@ impl QuillApp {
             cx.notify();
             return;
         };
-        match live.driver.create_new_chat(&request, photo) {
-            Ok(Some(request)) => {
+        match created(live.driver.create_new_chat(&request, photo)) {
+            Ok(request) => {
                 self.set_new_chat_stage(
                     NewChatStage::Creating {
                         request,
@@ -440,19 +471,8 @@ impl QuillApp {
                     cx,
                 );
             }
-            // A create of this kind is still out (the dialog's own was let
-            // go, TDLib cannot cancel it): say so rather than do nothing.
-            Ok(None) => {
-                self.set_note(StatusNote::info(tr(
-                    keys::Q_PEOPLE_CHAT_STILL_BEING_CREATED,
-                )));
-                cx.notify();
-            }
-            Err(err) => {
-                self.set_note(StatusNote::error(user_error_for(
-                    keys::Q_NEW_CHAT_FAILED,
-                    &err,
-                )));
+            Err(note) => {
+                self.set_note(note);
                 cx.notify();
             }
         }
@@ -670,6 +690,8 @@ crate::ui::shell::register_dialogs! {
 
 mod demo;
 
+#[cfg(test)]
+mod release_tests;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod ui_tests;

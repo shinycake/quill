@@ -325,6 +325,71 @@ class Timers(unittest.TestCase):
             keys(timers, files), ["poll:App::clock", "poll:App::idle", "poll:App::walk"]
         )
 
+    def test_a_rearm_must_hand_on_a_stored_deadline(self):
+        def wake(name, delay, rearm, lets=""):
+            return (
+                f"    fn {name}(&mut self, due: Instant, cx: &mut Cx) {{\n"
+                f"{lets}"
+                "        let task = cx.spawn(async move |this, cx| {\n"
+                f"            cx.background_executor().timer({delay}).await;\n"
+                f"            this.update(cx, |this, cx| this.{name}({rearm}, cx)).ok();\n"
+                "        });\n"
+                "        self.task = Some(task);\n"
+                "    }\n"
+            )
+
+        stored = "due.saturating_duration_since(Instant::now())"
+        files = {
+            "src/ui/a.rs": (
+                "impl App {\n"
+                # The delay is a deadline, but the next one is now + a period.
+                + wake("fixed_next", stored, "Instant::now() + STEP")
+                + wake(
+                    "bound_next",
+                    stored,
+                    "next",
+                    "        let next = Instant::now() + Duration::from_millis(100);\n",
+                )
+                # A `let` constant period read inside a compound expression.
+                + wake(
+                    "period",
+                    "period.saturating_sub(started.elapsed())",
+                    "due",
+                    "        let period = Duration::from_secs(10);\n",
+                )
+                # A field that only has the word in its name.
+                + wake("remaining", "self.remaining", "due")
+                # A constant floor turns the wait into a period.
+                + wake("floor", stored + ".max(Duration::from_secs(10))", "due")
+                # Passing: the next deadline comes from the stage; a frame floor.
+                + wake("stage", stored, "self.stage.next_due(Instant::now())")
+                + wake("frame", stored + ".max(Duration::from_millis(16))", "due")
+                + "}\n"
+            )
+        }
+        self.assertEqual(
+            keys(timers, files),
+            [
+                "poll:App::bound_next",
+                "poll:App::fixed_next",
+                "poll:App::floor",
+                "poll:App::period",
+                "poll:App::remaining",
+            ],
+        )
+
+    def test_a_loop_that_sleeps_a_computed_wait_is_still_a_poll(self):
+        files = {
+            "src/ui/a.rs": (
+                "async fn watch(spent: Duration) {\n"
+                "    loop {\n"
+                "        cx.background_executor().timer(PERIOD.saturating_sub(spent)).await;\n"
+                "    }\n"
+                "}\n"
+            )
+        }
+        self.assertEqual(keys(timers, files), ["poll:watch"])
+
 
 class Requests(unittest.TestCase):
     def test_purpose_checks_and_unmatched_answers_fail(self):

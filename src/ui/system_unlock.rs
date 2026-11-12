@@ -96,19 +96,57 @@ pub fn available() -> bool {
     })
 }
 
-/// Switch label: "Unlock with Touch ID" where biometrics exist; asked of
-/// the OS once, like [`available`].
+/// Switch label: "Unlock with Touch ID" where biometrics exist, in the
+/// language in use now (the pack can change at run time). Only whether the
+/// Mac has biometrics is asked of the OS once, like [`available`].
 pub fn label() -> &'static str {
-    static LABEL: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
-    LABEL.get_or_init(|| {
+    static BIOMETRICS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    label_for(*BIOMETRICS.get_or_init(|| {
         #[cfg(target_os = "macos")]
         {
-            if mac::biometrics() {
-                return tr(keys::SETTINGS_USE_TOUCHID);
-            }
+            mac::biometrics()
         }
+        #[cfg(not(target_os = "macos"))]
+        {
+            false
+        }
+    }))
+}
+
+fn label_for(biometrics: bool) -> &'static str {
+    if biometrics {
+        tr(keys::SETTINGS_USE_TOUCHID)
+    } else {
         tr(keys::SETTINGS_USE_SYSTEMPWD)
-    })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::label_for;
+    use quill::lang::{PackValue, Snapshot};
+
+    #[test]
+    fn the_label_follows_a_language_change() {
+        quill::lang::isolate_thread();
+        assert_eq!(label_for(false), "Unlock with System Password");
+        let mut pack = Snapshot::new("pt-br", "pt", false);
+        pack.layer([
+            (
+                "lng_settings_use_systempwd",
+                &PackValue::Ordinary("Senha do sistema".into()),
+            ),
+            (
+                "lng_settings_use_touchid",
+                &PackValue::Ordinary("Touch ID".into()),
+            ),
+        ]);
+        quill::lang::install(Some(pack));
+        assert_eq!(label_for(false), "Senha do sistema");
+        assert_eq!(label_for(true), "Touch ID");
+        quill::lang::install(None);
+        assert_eq!(label_for(false), "Unlock with System Password");
+    }
 }
 
 /// Closes the OS prompt when dropped (macOS: `LAContext invalidate`), so a

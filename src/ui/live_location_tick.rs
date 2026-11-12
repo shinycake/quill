@@ -55,14 +55,14 @@ impl QuillApp {
             let wait = due.saturating_duration_since(Instant::now());
             cx.background_executor().timer(wait).await;
             let _ = this.update(cx, |this, cx| {
-                match this.live_location_wait(chat_id) {
+                match this.live_location_due(chat_id) {
                     Some(next) => {
                         // A window behind another app catches up when it
                         // is activated again.
                         if this.frame.window_active.get() {
                             cx.notify();
                         }
-                        this.arm_live_location_wake(chat_id, Instant::now() + next, cx);
+                        this.arm_live_location_wake(chat_id, next, cx);
                     }
                     None => {
                         if this
@@ -83,16 +83,16 @@ impl QuillApp {
         self.history.live_location_tick = Some((chat_id, task));
     }
 
-    /// How long to wait before `chat_id`'s next refresh, or `None` when
-    /// it is no longer the open chat or shows no running live location.
-    fn live_location_wait(&self, chat_id: ChatId) -> Option<Duration> {
+    /// When `chat_id`'s next refresh is due, or `None` when it is no longer
+    /// the open chat or shows no running live location.
+    fn live_location_due(&self, chat_id: ChatId) -> Option<Instant> {
         let session = self.session()?;
         if session.open_chat_id() != Some(chat_id) {
             return None;
         }
         session
             .open_chat_live_location_refresh(quill::local_time::now_unix())
-            .map(wait_for)
+            .map(|refresh_in| Instant::now() + wait_for(refresh_in))
     }
 }
 

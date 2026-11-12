@@ -68,3 +68,54 @@ fn a_wait_keeps_its_account_through_a_switch(cx: &mut TestAppContext) {
         );
     });
 }
+
+/// The trigger of the above: a wait queued for the account on screen, an
+/// account switch, then the wait settles. The notification shows under the
+/// account it was queued for, not the one on screen now and not dropped.
+#[gpui_kit::test]
+fn a_wait_settled_after_a_switch_shows_under_its_own_account(cx: &mut TestAppContext) {
+    use quill::diagnostics::{DiagnosticSink, MemorySink};
+    use quill::notify::custom::NotifyPlatform;
+    use quill::state::Session;
+    let (app, mut vcx) = open_app(cx, "ready-voice-playing");
+    let other = AccountKey::new("account-2").expect("a key");
+    let queued_for = app.update(&mut vcx, |app, _| {
+        app.delivery.windows.platform = NotifyPlatform::Windows;
+        app.notification_account(None)
+    });
+    let key = (queued_for.clone(), ChatId(5));
+    app.update(&mut vcx, |app, cx| {
+        app.arm_preview_wait(
+            key.clone(),
+            |deadline| PreviewWait {
+                account: queued_for.clone(),
+                file: FileId(1),
+                locked: false,
+                notification: quill::notify::OsNotification {
+                    chat_id: ChatId(5),
+                    message_id: None,
+                    topic_id: None,
+                    title: "Ada".into(),
+                    body: "Hello".into(),
+                },
+                photo: None,
+                _deadline: deadline,
+            },
+            cx,
+        );
+        // The other account comes on screen while the photo is awaited.
+        let sink: std::sync::Arc<dyn DiagnosticSink> = std::sync::Arc::new(MemorySink::new());
+        app.demo_session = Some(Box::new(Session::new(other.clone(), sink)));
+        assert_ne!(app.notification_account(None), queued_for);
+        app.settle_preview_wait(&key, cx);
+    });
+    assert!(!waiting(&app, &vcx, &key), "the wait settled");
+    let shown = app.read_with(&vcx, |app, _| {
+        app.delivery
+            .windows
+            .shown_keys()
+            .into_iter()
+            .collect::<Vec<_>>()
+    });
+    assert_eq!(shown, vec![key], "shown under its own account, not dropped");
+}

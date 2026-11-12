@@ -73,6 +73,15 @@ impl MarketplaceBox {
         }
     }
 
+    /// Whether a reopen resumes the kept draft: the session's `purchase` is
+    /// the one it asked for, in whatever stage it is.
+    pub(super) fn resumes(&self, purchase: Option<&quill::marketplace::GiftPurchase>) -> bool {
+        match (self.draft(), purchase) {
+            (Some(draft), Some(purchase)) => draft.shows(purchase),
+            _ => false,
+        }
+    }
+
     /// Open for `chat`: with the kept draft when it is for that chat and
     /// `resume`, otherwise a fresh one. `true` when the draft is fresh: its
     /// inputs start empty (`reset_marketplace_inputs`).
@@ -170,6 +179,34 @@ mod tests {
         state.close();
         assert!(state.open_for(ChatId(5), false));
         assert!(!shown(&state, 7), "fresh: the old quote hides");
+    }
+
+    #[test]
+    fn a_failure_after_any_close_shows_on_reopen() {
+        use quill::marketplace::{GiftPurchase, GiftPurchaseStage};
+        let failed = |request| GiftPurchase {
+            chat_id: ChatId(5),
+            recipient: quill::telegram::envelope::MessageSender::User { user_id: 5 },
+            recipient_name: "Ada".into(),
+            requested_name: "PlushPepe-1".into(),
+            asked: RequestId(request),
+            stage: GiftPurchaseStage::Failed("not enough Stars".into()),
+        };
+        let mut state = MarketplaceBox::default();
+        state.open_for(ChatId(5), false);
+        state.asked(RequestId(7));
+        // The box closes by a path that is not the user's close (its chat
+        // window closed) while the purchase was on its way, and it fails.
+        state.close();
+        let purchase = failed(7);
+        let resume = state.resumes(Some(&purchase));
+        assert!(resume, "the purchase it asked for resumes it");
+        assert!(!state.open_for(ChatId(5), resume), "the draft is kept");
+        assert!(state.draft().is_some_and(|d| d.shows(&purchase)));
+        // Another request's purchase, or none, does not.
+        state.close();
+        assert!(!state.resumes(Some(&failed(8))));
+        assert!(!state.resumes(None));
     }
 
     #[test]

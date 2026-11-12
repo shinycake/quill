@@ -992,3 +992,6 @@ mod lock_layer_tests;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod lock_waits_tests;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod offer_tests;
