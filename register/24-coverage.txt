@@ -35,3 +35,16 @@ src/updater.rs 551 read
 src/updater/control.rs 259 read
 src/vcard_import.rs 191 read
 src/version.rs 18 read
+src/video/mod.rs 817 read
+src/video_decode/bgra.rs 101 read
+src/video_decode/clock.rs 128 read
+src/video_decode/decode_loop.rs 199 read
+src/video_decode/decoding.rs 84 read
+src/video_decode/ffi.rs 727 read
+src/video_decode/mod.rs 969 read
+src/video_decode/nv12.rs 321 read
+src/video_decode/present.rs 132 read
+src/video_decode/presenting.rs 55 read
+src/video_decode/reattach.rs 72 read
+src/video_edit.rs 902 read
+src/video_encoder.rs 309 read
