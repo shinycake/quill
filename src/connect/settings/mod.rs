@@ -150,10 +150,28 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(extra)
     }
 
-    /// Slice S3: fetch the blocked-senders list
-    /// (`getBlockedMessageSenders`, schema 1.8.67, :14505). Pages of
-    /// 100; a later page continues from the loaded list length.
+    /// Slice S3: fetch the blocked-senders list from its first page
+    /// (`getBlockedMessageSenders`, schema 1.8.67, :14505). What the privacy
+    /// page does on every open: the loaded list stays on screen and the
+    /// first page replaces it when it arrives, so a user blocked on another
+    /// device shows up. Pages of 100.
     pub fn fetch_blocked_senders(&mut self) -> Result<(), ConnectSendError> {
+        self.ask_blocked_page(0)
+    }
+
+    /// The next page of the blocked-senders list, continuing from the
+    /// loaded length (the first page when nothing is loaded).
+    pub fn fetch_more_blocked_senders(&mut self) -> Result<(), ConnectSendError> {
+        let offset = self
+            .session
+            .settings
+            .blocked_senders
+            .data()
+            .map_or(0, Vec::len);
+        self.ask_blocked_page(offset)
+    }
+
+    fn ask_blocked_page(&mut self, offset: usize) -> Result<(), ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -161,17 +179,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.settings.blocked_senders.is_loading() {
             return Ok(());
         }
-        let offset = self
-            .session
-            .settings
-            .blocked_senders
-            .data()
-            .map(|list| list.len())
-            .unwrap_or(0);
         if offset == 0 {
             self.session.settings.restart_blocked_list();
         }
-        self.session.settings.blocked_senders.begin();
         let extra = self.session.request(
             RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders {
                 offset: offset as i32,
@@ -190,6 +200,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .fail("The blocked users request was not sent.");
             return Err(err);
         }
+        // Only a page that went out is waited for, under its own request.
+        let blocked = &mut self.session.settings.blocked_senders;
+        blocked.begin();
+        blocked.sent(extra);
         Ok(())
     }
 

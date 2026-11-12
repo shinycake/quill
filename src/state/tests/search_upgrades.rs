@@ -152,7 +152,13 @@ fn frequent_contacts_load_and_the_option_hides_them() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetTopChats, None);
+    // An answer of a request the strip did not ask for fills nothing.
     apply_json(&mut session, &seq, &sink, &chats_json(extra, "[11,12]"));
+    assert!(session.search.search.top_chats.is_empty());
+    let extra = session.request(RequestPurpose::GetTopChats, None);
+    session.search.search.top_chats_asked = Some(extra);
+    apply_json(&mut session, &seq, &sink, &chats_json(extra, "[11,12]"));
+    assert!(session.search.search.top_chats_asked.is_none());
     assert_eq!(
         session.search.search.top_chats,
         vec![ChatId(11), ChatId(12)]

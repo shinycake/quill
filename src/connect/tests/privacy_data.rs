@@ -768,3 +768,78 @@ fn an_older_new_chat_save_failing_does_not_roll_back_a_newer_one() {
     ));
     cleanup(f);
 }
+
+fn blocked_page(f: &Fixture, total: i32, ids: &[i64]) -> String {
+    let request = last_request(f);
+    let senders: Vec<String> = ids
+        .iter()
+        .map(|id| format!(r#"{{"@type":"messageSenderUser","user_id":{id}}}"#))
+        .collect();
+    format!(
+        r#"{{"@type":"messageSenders","total_count":{total},"senders":[{}],"@extra":"{}"}}"#,
+        senders.join(","),
+        extra_of(&request)
+    )
+}
+
+/// Sweep r4-03 04-005: opening the privacy page asks for the first page
+/// again, whatever is loaded, and the page replaces the list when it comes.
+#[test]
+fn opening_privacy_refetches_the_first_blocked_page() {
+    let mut f = fixture();
+    f.1.fetch_blocked_senders().unwrap();
+    assert_eq!(last_request(&f)["offset"], 0);
+    let page = blocked_page(&f, 3, &[61, 62]);
+    ingest(&mut f, &page);
+    assert_eq!(
+        f.1.session.settings.blocked_senders.data(),
+        Some(&vec![61, 62])
+    );
+    // Scrolling asks for the next page from the loaded length.
+    f.1.fetch_more_blocked_senders().unwrap();
+    assert_eq!(last_request(&f)["offset"], 2);
+    let page = blocked_page(&f, 3, &[63]);
+    ingest(&mut f, &page);
+    assert_eq!(
+        f.1.session.settings.blocked_senders.data(),
+        Some(&vec![61, 62, 63])
+    );
+    // The next open asks for page 0 again and keeps the list meanwhile.
+    f.1.fetch_blocked_senders().unwrap();
+    assert_eq!(last_request(&f)["offset"], 0);
+    assert_eq!(
+        f.1.session.settings.blocked_senders.data().map(Vec::len),
+        Some(3)
+    );
+    let page = blocked_page(&f, 2, &[61, 64]);
+    ingest(&mut f, &page);
+    assert_eq!(
+        f.1.session.settings.blocked_senders.data(),
+        Some(&vec![61, 64])
+    );
+    cleanup(f);
+}
+
+/// Sweep r4-03: the network usage fetch holds its own request, so an older
+/// request's answer never fills it.
+#[test]
+fn network_usage_takes_only_its_own_answer() {
+    let mut f = fixture();
+    f.1.fetch_network_statistics().unwrap();
+    let request = last_request(&f);
+    ingest(
+        &mut f,
+        r#"{"@type":"networkStatistics","since_date":1,"entries":[],"@extra":"999999"}"#,
+    );
+    assert!(f.1.session.settings.privacy_data.network.is_loading());
+    ingest(
+        &mut f,
+        &format!(
+            r#"{{"@type":"networkStatistics","since_date":1,"entries":[],"@extra":"{}"}}"#,
+            extra_of(&request)
+        ),
+    );
+    assert!(!f.1.session.settings.privacy_data.network.is_loading());
+    assert!(f.1.session.settings.privacy_data.network.data().is_some());
+    cleanup(f);
+}

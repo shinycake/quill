@@ -50,9 +50,8 @@ fn sweeping_an_in_chat_search_page_clears_its_loading_flag() {
     let mut session = ready_session();
     let chat = ChatId(5);
     session.search.chat_search.open_for(chat);
-    let generation = session.search.chat_search.generation;
-    session.search.chat_search.begin_more(MessageId(9));
-    session.request_chat_search(RequestPurpose::SearchChatMessagesMore, chat, generation);
+    let request = session.request_chat_search(RequestPurpose::SearchChatMessagesMore, chat);
+    session.search.chat_search.begin_more(MessageId(9), request);
 
     assert!(sweep(&mut session));
 
@@ -103,8 +102,9 @@ fn every_sweepable_purpose_leaves_the_registry_and_the_session_alive() {
 #[test]
 fn account_loss_resets_the_loading_flags_of_pending_lookups() {
     let mut session = ready_session();
+    let network = session.request(RequestPurpose::GetNetworkStatistics, None);
     session.settings.privacy_data.network.begin();
-    session.request(RequestPurpose::GetNetworkStatistics, None);
+    session.settings.privacy_data.network.sent(network);
     let subscriptions = session.request(
         RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions { append: false }),
         None,
@@ -228,8 +228,9 @@ fn sweeping_a_lost_transfer_check_lets_the_next_open_ask_again() {
 #[test]
 fn sweeping_lost_recommended_channels_clears_their_loading_flag() {
     let mut session = ready_session();
+    let request = session.request(RequestPurpose::GetRecommendedChats, None);
     session.search.search.tabs.recommended.begin();
-    session.request(RequestPurpose::GetRecommendedChats, None);
+    session.search.search.tabs.recommended.sent(request);
 
     assert!(sweep(&mut session));
 

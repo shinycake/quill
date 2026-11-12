@@ -405,12 +405,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.search.search.top_chats_disabled
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetTopChats)
-        {
+        let search = &self.session.search.search;
+        if search.top_chats_disabled || search.top_chats_asked.is_some() {
             return Ok(None);
         }
         let extra = self.session.request(RequestPurpose::GetTopChats, None);
@@ -421,6 +417,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        self.session.search.search.top_chats_asked = Some(extra);
         Ok(Some(extra))
     }
 

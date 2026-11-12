@@ -60,8 +60,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             qr::load_shortcuts_request,
         );
         // A send that did not leave stays unasked: the next look asks again.
-        if sent.is_ok() {
-            self.session.settings.quick_replies.shortcuts_load.begin();
+        if let Ok(Some(request)) = sent {
+            let load = &mut self.session.settings.quick_replies.shortcuts_load;
+            load.begin();
+            load.sent(request);
         }
         sent.map(|_| ())
     }

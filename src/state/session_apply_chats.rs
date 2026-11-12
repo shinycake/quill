@@ -679,16 +679,22 @@ impl Session {
         {
             self.calls.add_people_search.accept(pending.id, &chat_ids);
         }
-        // `getTopChats`: not tied to a query generation, only to the strip.
+        // `getTopChats`: tied to the strip's ask, not to a query.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetTopChats) {
-            if !self.search.search.top_chats_disabled {
-                self.search.search.top_chats = chat_ids;
+            let search = &mut self.search.search;
+            if search.top_chats_asked.is_some() && search.top_chats_asked == pending.map(|p| p.id) {
+                search.top_chats_asked = None;
+                if !search.top_chats_disabled {
+                    search.top_chats = chat_ids;
+                }
             }
             return;
         }
         // `getRecommendedChats`: the Channels tab's list, not a query answer.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetRecommendedChats) {
-            self.search.search.accept_recommended(chat_ids);
+            self.search
+                .search
+                .accept_recommended(pending.map(|p| p.id), chat_ids);
             return;
         }
         if self.search.search.awaits(pending) {

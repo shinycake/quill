@@ -161,12 +161,9 @@ fn replay_chat_search_generation_jump_and_empty() {
     );
     session.open_chat(quill::ids::ChatId(7));
     assert!(session.open_chat_search());
-    let search_gen = session.search.chat_search.begin_query("hello");
-    let extra = session.request_chat_search(
-        RequestPurpose::SearchChatMessages,
-        quill::ids::ChatId(7),
-        search_gen,
-    );
+    session.search.chat_search.begin_query("hello");
+    let extra =
+        session.request_chat_search(RequestPurpose::SearchChatMessages, quill::ids::ChatId(7));
     apply_all_seq(
         &mut session,
         &sink,
@@ -214,18 +211,12 @@ fn replay_chat_search_generation_jump_and_empty() {
             .contains(quill::ids::MessageId(39))
     );
 
-    let stale = session.search.chat_search.begin_query("old");
-    let stale_extra = session.request_chat_search(
-        RequestPurpose::SearchChatMessages,
-        quill::ids::ChatId(7),
-        stale,
-    );
-    let fresh = session.search.chat_search.begin_query("new");
-    let _fresh_extra = session.request_chat_search(
-        RequestPurpose::SearchChatMessages,
-        quill::ids::ChatId(7),
-        fresh,
-    );
+    session.search.chat_search.begin_query("old");
+    let stale_extra =
+        session.request_chat_search(RequestPurpose::SearchChatMessages, quill::ids::ChatId(7));
+    session.search.chat_search.begin_query("new");
+    let _fresh_extra =
+        session.request_chat_search(RequestPurpose::SearchChatMessages, quill::ids::ChatId(7));
     apply_all_seq(
         &mut session,
         &sink,
@@ -241,12 +232,9 @@ fn replay_chat_search_generation_jump_and_empty() {
     );
     assert!(session.search.chat_search.hits().is_empty());
 
-    let empty_gen = session.search.chat_search.begin_query("zzz");
-    let empty_extra = session.request_chat_search(
-        RequestPurpose::SearchChatMessages,
-        quill::ids::ChatId(7),
-        empty_gen,
-    );
+    session.search.chat_search.begin_query("zzz");
+    let empty_extra =
+        session.request_chat_search(RequestPurpose::SearchChatMessages, quill::ids::ChatId(7));
     apply_all_seq(
         &mut session,
         &sink,

@@ -70,6 +70,16 @@ impl ProxyFetch {
     }
 }
 
+/// Where the `prefer_ipv6` option's write is.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Ipv6Set {
+    #[default]
+    Idle,
+    /// `setOption("prefer_ipv6", on)` is in flight as `request`; only its
+    /// answer or error leaves the stage.
+    Setting { on: bool, request: RequestId },
+}
+
 /// The proxy list's two requests: the `getProxies` its list waits for and
 /// the one change (`addProxy`, `editProxy`, `enableProxy`, ...) in flight.
 /// They are one value because a change's success outdates any fetch still
@@ -79,6 +89,7 @@ impl ProxyFetch {
 pub struct ProxyListOps {
     fetch: ProxyFetch,
     change: Option<RequestId>,
+    ipv6: Ipv6Set,
 }
 
 impl ProxyListOps {
@@ -188,6 +199,27 @@ impl ProxyListOps {
         self.change_ended(request);
     }
 
+    /// Writing the IPv6 option to `on` went out as `request`.
+    pub fn ipv6_sent(&mut self, on: bool, request: RequestId) {
+        self.ipv6 = Ipv6Set::Setting { on, request };
+    }
+
+    /// A write of the IPv6 option to `on` is in flight.
+    pub fn ipv6_setting(&self, on: bool) -> bool {
+        matches!(self.ipv6, Ipv6Set::Setting { on: asked, .. } if asked == on)
+    }
+
+    /// The IPv6 write `request` came back (answer or error; `None`: an
+    /// answer with no request record frees the stage). Only the write in
+    /// flight leaves it.
+    pub fn ipv6_ended(&mut self, request: Option<RequestId>) {
+        if let Ipv6Set::Setting { request: asked, .. } = self.ipv6
+            && request.is_none_or(|id| id == asked)
+        {
+            self.ipv6 = Ipv6Set::Idle;
+        }
+    }
+
     fn change_ended(&mut self, request: Option<RequestId>) {
         if request.is_none() || self.change == request {
             self.change = None;
@@ -228,6 +260,17 @@ mod tests {
             !ops.refetch_due(now + UNSENT_RETRY_AFTER * 9),
             "an error answer waits for Refresh"
         );
+    }
+
+    #[test]
+    fn an_ipv6_write_is_one_stage_left_by_its_own_answer() {
+        let mut ops = ProxyListOps::default();
+        ops.ipv6_sent(true, RequestId(4));
+        assert!(ops.ipv6_setting(true) && !ops.ipv6_setting(false));
+        ops.ipv6_ended(Some(RequestId(3)));
+        assert!(ops.ipv6_setting(true), "an older answer leaves it");
+        ops.ipv6_ended(Some(RequestId(4)));
+        assert!(!ops.ipv6_setting(true));
     }
 
     #[test]

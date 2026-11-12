@@ -190,6 +190,9 @@ pub struct SearchState {
     pub server_chats: crate::state::fetch::Fetch<Vec<ChatId>>,
     /// "Frequent contacts" (`getTopChats` users), shown on an empty search.
     pub top_chats: Vec<ChatId>,
+    /// The `getTopChats` the strip waits for: only its answer fills
+    /// `top_chats`, and its error (or the owner going away) frees the slot.
+    pub(crate) top_chats_asked: Option<RequestId>,
     /// TDLib option `disable_top_chats` (tdesktop "Suggest frequent
     /// contacts" off): the strip is hidden and nothing is fetched.
     pub top_chats_disabled: bool,
@@ -225,6 +228,7 @@ impl Default for SearchState {
             filters: crate::search_filters::GlobalSearchFilters::default(),
             server_chats: Default::default(),
             top_chats: Vec::new(),
+            top_chats_asked: None,
             top_chats_disabled: false,
             confirm: None,
             top_view: Default::default(),

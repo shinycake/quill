@@ -22,7 +22,7 @@ impl SearchPurpose {
             | Self::SearchChatMessagesMore
             | Self::SearchFromMembers
             | Self::GetChatMessageByDate
-            | Self::GetChatMessageCalendar { .. }
+            | Self::GetChatMessageCalendar
             | Self::ViewSponsoredChat => RequestKind::Lookup,
             Self::AddRecentlyFoundChat
             | Self::RemoveTopChat

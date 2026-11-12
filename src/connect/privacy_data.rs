@@ -23,12 +23,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        // One fetch at a time. A value already shown stays (and keeps
-        // taking saves) while the refresh is out.
-        if self
-            .session
-            .requests
-            .has_purpose(RequestPurpose::GetNewChatPrivacy)
+        // One fetch at a time: the first is the stage's own, a refresh over a
+        // value already shown holds its request in `new_chat_refresh`, stays
+        // quiet and keeps taking saves.
+        let data = &self.session.settings.privacy_data;
+        if matches!(data.new_chat, Some(NewChatPrivacyState::Loading(_)))
+            || data.new_chat_refresh.is_some()
         {
             return Ok(());
         }
@@ -51,6 +51,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session.settings.privacy_data.new_chat = Some(NewChatPrivacyState::Failed);
             }
             return Err(err);
+        }
+        if showing {
+            self.session.settings.privacy_data.new_chat_refresh = Some(extra);
         }
         Ok(())
     }
@@ -243,15 +246,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.settings.privacy_data.network.begin();
         let extra = self
             .session
             .request(RequestPurpose::GetNetworkStatistics, None);
         if let Err(err) = self.sender.send_json(&get_network_statistics(extra)) {
             self.session.requests.take(extra);
-            self.session.settings.privacy_data.network.cancel();
             return Err(err);
         }
+        // Only an ask that went out is waited for, under its own request.
+        let network = &mut self.session.settings.privacy_data.network;
+        network.begin();
+        network.sent(extra);
         Ok(())
     }
 

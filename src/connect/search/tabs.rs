@@ -203,7 +203,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .fail("could not send");
             return Err(err);
         }
-        self.session.search.search.tabs.recommended.begin();
+        let recommended = &mut self.session.search.search.tabs.recommended;
+        recommended.begin();
+        recommended.sent(extra);
         Ok(Some(extra))
     }
 
