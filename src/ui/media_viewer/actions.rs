@@ -369,9 +369,10 @@ impl QuillApp {
                 .ok()?;
             Some(bytes.into_inner())
         });
-        self.spawn_scoped(cx, async move |this, cx| {
+        let encoding = self.spawn_scoped(cx, async move |this, cx| {
             let png = job.await;
             let _ = this.update(cx, |this, cx| {
+                this.viewer.extra.copy.finish();
                 match png {
                     Some(bytes) => {
                         cx.write_to_clipboard(ClipboardItem::new_image(
@@ -385,8 +386,8 @@ impl QuillApp {
                 }
                 cx.notify();
             });
-        })
-        .detach();
+        });
+        self.viewer.extra.copy = PhotoCopy::Encoding { task: encoding };
     }
 
     /// "Copy Frame": the video frame on screen to the clipboard as an

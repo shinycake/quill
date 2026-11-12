@@ -144,6 +144,23 @@ pub(super) struct MediaPanel {
     pub category: Option<quill::telegram::EmojiCategorySource>,
 }
 
+impl MediaPanel {
+    /// The one writer of what the panel lists: `tab` with `category` chosen,
+    /// from the first section and with its rows rebuilt. Every change of
+    /// tab, category or selector starts the view over through here, so a
+    /// writer cannot leave the rows or section of the one before.
+    pub(super) fn show(
+        &mut self,
+        tab: PanelTab,
+        category: Option<quill::telegram::EmojiCategorySource>,
+    ) {
+        self.tab = tab;
+        self.category = category;
+        self.key = None;
+        self.active_section = 0;
+    }
+}
+
 impl Default for MediaPanel {
     fn default() -> Self {
         Self {
@@ -360,10 +377,7 @@ impl QuillApp {
 
     fn set_media_panel_tab(&mut self, tab: PanelTab, cx: &mut Context<Self>) {
         if self.pickers.media_panel.tab != tab {
-            self.pickers.media_panel.tab = tab;
-            self.pickers.media_panel.category = None;
-            self.pickers.media_panel.key = None;
-            self.pickers.media_panel.active_section = 0;
+            self.pickers.media_panel.show(tab, None);
             self.pickers.gif_tab.stop_typing();
             // GIFs download and play only while their tab shows.
             self.sync_gif_downloads();

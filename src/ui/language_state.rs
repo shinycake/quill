@@ -25,13 +25,24 @@ pub(super) enum LanguageFile {
     Cache = 2,
 }
 
-/// Background writes of the language files: a write only lands when no
-/// newer write of the same file has (a fast A → B switch never leaves A on
-/// disk).
+/// Background writes of the language files. Each file's writes run one
+/// after the other in the order they were asked (a fast A → B switch never
+/// leaves A on disk): a write waits for the task of the one before it, which
+/// it owns.
 #[derive(Default)]
 pub(super) struct LanguageWrites {
-    issued: [u64; 3],
-    written: std::sync::Arc<std::sync::Mutex<[u64; 3]>>,
+    files: [WriteStage; 3],
+}
+
+/// The last write asked of one file: none yet, or the task that waits for
+/// its predecessor and then writes.
+#[derive(Default)]
+enum WriteStage {
+    #[default]
+    Idle,
+    Writing {
+        task: Task<()>,
+    },
 }
 
 impl LanguageWrites {
@@ -41,25 +52,17 @@ impl LanguageWrites {
         cx: &mut Context<QuillApp>,
         write: impl FnOnce() + Send + 'static,
     ) {
-        let slot = file as usize;
-        let Some(issued) = self.issued.get_mut(slot) else {
+        let Some(stage) = self.files.get_mut(file as usize) else {
             return;
         };
-        *issued = issued.wrapping_add(1);
-        let seq = *issued;
-        let written = self.written.clone();
-        cx.background_spawn(async move {
-            let mut written = written
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if let Some(last) = written.get_mut(slot)
-                && seq > *last
-            {
-                write();
-                *last = seq;
+        let previous = std::mem::take(stage);
+        let task = cx.background_spawn(async move {
+            if let WriteStage::Writing { task } = previous {
+                task.await;
             }
-        })
-        .detach();
+            write();
+        });
+        *stage = WriteStage::Writing { task };
     }
 }
 

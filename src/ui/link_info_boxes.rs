@@ -121,7 +121,8 @@ impl QuillApp {
     pub(super) fn open_gift_code_link(&mut self, code: String, cx: &mut Context<Self>) {
         match self.live.as_mut() {
             Some(live) => {
-                // A code being applied keeps its box; the new link waits.
+                // A code being applied keeps its box (the new link is not
+                // checked; the box shows the apply and its answer).
                 let applying = live
                     .driver
                     .session
@@ -159,8 +160,17 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Close the gift code box. While `applyPremiumGiftCode` is out the box
+    /// stays: it owns the request's answer, which it then shows (success or
+    /// "already used"), so a Close then would drop the answer unseen.
     pub(super) fn close_gift_code_box(&mut self, cx: &mut Context<Self>) {
-        if let Some(session) = self.link_info_session_mut() {
+        if let Some(session) = self.link_info_session_mut()
+            && !session
+                .payments
+                .gift_code
+                .as_ref()
+                .is_some_and(|lookup| lookup.applying())
+        {
             session.payments.gift_code = None;
         }
         cx.notify();
@@ -319,6 +329,7 @@ impl QuillApp {
                             tr(keys::CLOSE)
                         })
                         .ghost()
+                        .disabled(applying)
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.close_gift_code_box(cx);
                             this.close_kit_dialog_if_done(DialogKind::GiftCodeLink, window, cx);
@@ -489,3 +500,8 @@ crate::ui::shell::register_dialogs! {
     )
     .close(|app, _, cx| app.close_language_box(cx)),
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "link_info_boxes_tests.rs"]
+mod tests;

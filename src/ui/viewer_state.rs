@@ -113,7 +113,7 @@ impl ViewerUi {
     pub(super) fn new_item(&mut self, orientation: quill::media_viewer::ViewerOrientation) {
         let Self {
             state: _,
-            extra: _,
+            extra,
             photo_editor: _,
             zoom,
             frame: _,
@@ -141,6 +141,10 @@ impl ViewerUi {
         hdr.reset();
         clip.clear_error();
         reorient.reset(orientation);
+        // The caption's expand state and a photo copy under way are the
+        // item's: the item leaving ends both.
+        extra.caption.reset();
+        extra.copy = Default::default();
     }
 
     /// The viewer closed: everything that belongs to this open goes (the
@@ -174,8 +178,10 @@ impl ViewerUi {
         // played here must not start there the next time it opens.
         *pending_seek = None;
         extra.saved_toast = Default::default();
-        // Reopening the same item starts with its caption collapsed.
+        // Reopening the same item starts with its caption collapsed, and a
+        // photo copy under way is dropped.
         extra.caption = Default::default();
+        extra.copy = Default::default();
         state.close();
         // A turned photo is a full-size picture of its own (up to about
         // 20 MB, and as much again on the GPU); opening the next item

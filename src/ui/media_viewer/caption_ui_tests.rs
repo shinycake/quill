@@ -88,7 +88,6 @@ fn a_long_caption_collapses_and_expands(cx: &mut TestAppContext) {
     assert_eq!(layout.shown_h, 2. * layout.line_h);
     app.read_with(vcx, |app, _| {
         let caption = &app.viewer.extra.caption;
-        assert_eq!(caption.key, Some((11, 8901)));
         assert!(!caption.expanded());
     });
     app.update_in(vcx, |app, _, cx| app.toggle_viewer_caption(cx));
@@ -102,15 +101,15 @@ fn a_long_caption_collapses_and_expands(cx: &mut TestAppContext) {
         assert!(app.viewer.state.is_open());
         assert!(!app.viewer.extra.caption.expanded());
     });
-    // Another item starts collapsed.
+    // Another item starts collapsed, with no frame drawn in between.
     app.update_in(vcx, |app, _, cx| app.toggle_viewer_caption(cx));
     app.update_in(vcx, |app, _, cx| {
         app.open_media_viewer(ChatId(11), MessageId(8902), cx);
+        assert!(!app.viewer.extra.caption.expanded());
     });
     settle(vcx);
     app.read_with(vcx, |app, _| {
         let caption = &app.viewer.extra.caption;
-        assert_eq!(caption.key, Some((11, 8902)));
         assert!(!caption.expanded());
     });
     // With nothing expanded, Escape closes the viewer.

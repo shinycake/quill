@@ -155,10 +155,8 @@ impl DockedCaption {
 }
 
 /// The caption's expand state, reset whenever the viewer shows another
-/// item.
+/// item (`ViewerUi::new_item`, the item's own transition).
 pub(in crate::ui) struct ViewerCaption {
-    /// `(chat, message)` of the item this state belongs to.
-    key: Option<(i64, i64)>,
     /// 0 collapsed, 1 expanded.
     glide: Glide,
     scroll: ScrollHandle,
@@ -169,7 +167,6 @@ pub(in crate::ui) struct ViewerCaption {
 impl Default for ViewerCaption {
     fn default() -> Self {
         Self {
-            key: None,
             glide: Glide::settled(0., Instant::now(), sine_in_out),
             scroll: ScrollHandle::new(),
             docked: DockedCaption::Folded,
@@ -182,8 +179,8 @@ impl ViewerCaption {
         self.glide.target() > 0.5
     }
 
-    fn reset(&mut self, key: (i64, i64)) {
-        self.key = Some(key);
+    /// Collapsed and folded again, scrolled to the first line.
+    pub(in crate::ui) fn reset(&mut self) {
         self.glide = Glide::settled(0., Instant::now(), sine_in_out);
         self.scroll.set_offset(point(px(0.), px(0.)));
         self.docked = DockedCaption::Folded;
@@ -364,10 +361,6 @@ impl QuillApp {
         docked: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let key = (item.chat_id.0, item.message_id.0);
-        if self.viewer.extra.caption.key != Some(key) {
-            self.viewer.extra.caption.reset(key);
-        }
         let room = (viewport_h - VIEWER_TOP_BAR - EXPANDED_BOTTOM_ROOM).max(layout.shown_h);
         let now = Instant::now();
         let caption = &self.viewer.extra.caption;

@@ -92,6 +92,29 @@ pub(super) struct ViewerExtra {
     strip_asked: Vec<quill::ids::FileId>,
     /// The caption's collapsed / expanded state.
     pub(in crate::ui) caption: caption::ViewerCaption,
+    /// The Copy of the shown photo, while its encode runs.
+    pub(in crate::ui) copy: PhotoCopy,
+}
+
+/// Cmd+C on a photo: nothing under way, or the encode, whose task the item
+/// owns (a step or a close drops it, so a finished PNG never lands on the
+/// clipboard for an item that was left).
+#[derive(Default)]
+pub(in crate::ui) enum PhotoCopy {
+    #[default]
+    Idle,
+    Encoding {
+        task: Task<()>,
+    },
+}
+
+impl PhotoCopy {
+    /// The encode landed. This is its own task's turn: let it finish.
+    pub(in crate::ui) fn finish(&mut self) {
+        if let Self::Encoding { task } = std::mem::take(self) {
+            task.detach();
+        }
+    }
 }
 
 impl ViewerExtra {

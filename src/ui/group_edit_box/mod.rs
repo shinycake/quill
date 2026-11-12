@@ -354,7 +354,7 @@ impl QuillApp {
         }
     }
 
-    /// A refused Delete or Leave is kept in the box's own stage: the
+    /// A refused Save, Delete or Leave is kept in the box's own stage: the
     /// registry forgets failures after a while, and the box must not then
     /// close as saved with the person's edits.
     pub(in crate::ui) fn settle_group_edit_box(&mut self, cx: &mut Context<Self>) {
@@ -376,15 +376,18 @@ impl QuillApp {
             self.close_group_edit_box(cx);
             return;
         }
-        let Some(SaveStage::Exiting(request)) =
-            self.admin.group_edit_box.as_ref().map(|edit| &edit.saving)
-        else {
+        // A Save or Delete the registry saw refused is kept in the stage, as
+        // `Refused(reason)`: the registry forgets failures after a while.
+        let Some(edit) = self.admin.group_edit_box.as_ref() else {
             return;
         };
-        let Some(reason) = self
-            .session()
-            .and_then(|session| session.requests.failure(*request))
-            .map(str::to_string)
+        if !matches!(edit.saving, SaveStage::Saving(_) | SaveStage::Exiting(_)) {
+            return;
+        }
+        let EditBoxView::Failed {
+            field: GroupInfoField::Settings,
+            reason,
+        } = edit.state(self.session())
         else {
             return;
         };

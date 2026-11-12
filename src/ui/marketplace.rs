@@ -106,9 +106,13 @@ impl QuillApp {
                 cx.notify();
             });
         app.update(cx, |this, cx| {
+            // The quote belongs to the chat the box was opened for: a purchase
+            // of another chat never shows here, whoever reset what.
+            let box_chat = this.payments.marketplace.chat();
             let gift = this
                 .session()
-                .and_then(|s| s.payments.marketplace_gift.clone());
+                .and_then(|s| s.payments.marketplace_gift.clone())
+                .filter(|gift| Some(gift.chat_id) == box_chat);
             let limit = this.session().and_then(|s| s.payments.gift_text_length_max);
             let marketplace_private = this.payments.marketplace.draft().is_none_or(|d| d.private);
             let busy = gift

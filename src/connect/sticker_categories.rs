@@ -30,7 +30,18 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Ok(())
             }
             Ok(None) => Ok(()),
-            Err(err) => Err(err),
+            Err(err) => {
+                // A send that never left is a failed ask, not an idle one:
+                // the strip must not ask again from the next render.
+                self.session
+                    .stickers
+                    .emoji
+                    .sticker_categories
+                    .fail(crate::lang::tr(
+                        crate::lang::keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN,
+                    ));
+                Err(err)
+            }
         }
     }
 

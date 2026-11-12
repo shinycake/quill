@@ -471,3 +471,45 @@ fn a_refused_leave_stays_refused_after_the_registry_forgets_it(cx: &mut TestAppC
         ));
     });
 }
+
+#[gpui_kit::test]
+fn a_refused_toggle_save_stays_refused_after_the_registry_forgets_it(cx: &mut TestAppContext) {
+    use super::{EditBoxView, SaveStage};
+    use quill::state::RequestPurpose;
+    let (app, _shell, mut vcx) = open_demo(cx, "ready-group-edit-box");
+    let vcx = &mut vcx;
+    let chat = open_box(&app, vcx);
+    app.update(vcx, |app, cx| {
+        let id = app
+            .demo_session
+            .as_mut()
+            .map(|session| session.request(RequestPurpose::LeaveChat, Some(chat)))
+            .expect("session");
+        if let Some(edit) = app.admin.group_edit_box.as_mut() {
+            edit.saving = SaveStage::Saving(vec![id]);
+        }
+        if let Some(session) = app.demo_session.as_mut() {
+            session.requests.take(id);
+            session
+                .requests
+                .record_failure(id, "CHAT_ADMIN_REQUIRED".into());
+        }
+        app.settle_group_edit_box(cx);
+        // 64 more refusals push this one out of the registry.
+        if let Some(session) = app.demo_session.as_mut() {
+            for _ in 0..80 {
+                let other = session.request(RequestPurpose::LeaveChat, None);
+                session.requests.take(other);
+                session.requests.record_failure(other, "X".into());
+            }
+            assert!(session.requests.failure(id).is_none(), "evicted");
+        }
+    });
+    app.read_with(vcx, |app, _| {
+        let edit = app.group_edit_box().expect("the box stays open");
+        assert!(matches!(
+            edit.state(app.session()),
+            EditBoxView::Failed { reason, .. } if reason == "CHAT_ADMIN_REQUIRED"
+        ));
+    });
+}
