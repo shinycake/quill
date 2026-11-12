@@ -10235,7 +10235,7 @@ orders), `deep_link_routes_tests` (seek stays with its account).
 | g-250, g-251, g-252, g-256, g-249, g-254, g-255 | `GoalNow` is a value computed each render, never stored: renamed `GoalCheckResult`. `MuteState` is the big button's derived look: `MuteButtonView`. `Picture::Loading` names a spinner to draw: `Picture::Spinner`. `QuitGate::Asking` is the held Quit with its exit: `Held { exit }`. `ContactNote::Waiting` was the dialog's copy of the session's `user_full_infos` fetch, which has the request and may be shared: `Unseeded`. `StorageScrollStage::Requested { until }` expires on the executor clock, so settings opened much later do not scroll by themselves. `First::Preparing` names the `Receiver` itself, not an alias of it. The matching allow lines are gone. |
 | g-248 | `ContextMenuItems::begin` was a per-frame reset that the `unsent` pattern read as `Fetch::begin`: now `reset_claims`. |
 | g-246, g-247 | `GifPanel::save` is `GifSave::{Idle, Saving { request }}`, set by `set_gif_saved` when the send went out and ended only by that request's answer or error (`save_settled`). `Session::gif_save_in_flight` asks the table for that request. The tile and the driver no longer ask "any save or remove in flight". (`connect/gifs.rs` is another bundle's file: only the two `has_purpose` lines of `set_gif_saved` changed.) |
-| 16-008 | A GIF tab in `Asked` whose answer the session's one list no longer shows or keeps asks again once without a press (`gif_tab_upkeep`). |
+| 16-008 | Not changed: asking again from `Asked` makes two windows whose answers the one list cannot both keep take it from each other every frame (`each_window_keeps_its_own_gif_section` spins forever with that change). The window that is pressed in asks again (`follow_gif_wanted`), and an unpressed window shows its kept answer or saved GIFs. |
 | 15-011 | Retry of a failed older/newer page says so when the send is refused. |
 | 15-001 | Not a bug: `open_country_box` asks through `retry_countries`, which asks only an idle or failed list (`Fetch::can_ask`). Test `opening_a_country_box_does_not_ask_a_loaded_list_again`. |
 | 15-004 | `MediaSeek::Seeking { target, seconds, _give_up }` owns its give-up timer (a `Task`); the polled `Instant` deadline is gone. Test: the seek ends after `SEEK_WAIT` with no poll running. |
@@ -10258,6 +10258,6 @@ orders), `deep_link_routes_tests` (seek stays with its account).
 Tests: `state::tests::gif_panel_stages` (save settled by its own request),
 `state::tests::sweep_r3_04` (device login stage), `connect::tests::signin_polish`
 and `sweep_r4_08` (countries not asked again; share folder waits for a delete),
-`chat_window::asker_tests` (asked GIF tab asks again), `folders::box_stage_tests`
+`folders::box_stage_tests`
 (second addlist link waits), `deep_link_routes_tests` (seek deadline owned),
 `draft_timer`, `event_log_tests`, `emoji_effect` (wait deadline).

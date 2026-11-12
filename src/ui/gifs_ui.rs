@@ -101,9 +101,8 @@ pub(in crate::ui) enum GifTab {
         request: RequestId,
     },
     /// The ask ended (answered, refused or cancelled): upkeep does not ask
-    /// again while the session still shows or keeps its answer. If another
-    /// window's list replaced the answer, upkeep asks once more
-    /// (`gif_tab_upkeep`).
+    /// again. Another window's search may have replaced its answer in the
+    /// one list; a press in this window asks again (`follow_gif_wanted`).
     Asked(GifWanted),
     /// Typed text waits for the pause before it searches, while `wanted`
     /// stays shown. The timer is owned here: the next keystroke, a section
@@ -341,13 +340,13 @@ impl QuillApp {
             return;
         };
         let wanted = self.pickers.gif_tab.wanted().clone();
-        // `Wants` or `Asked`: an ask that ended and whose answer the session
-        // has since replaced with another window's list (and not kept) asks
-        // again, once; an answer that is shown is never asked for again. Typed
-        // text waiting for its pause keeps its timer (as above).
+        // `Wants` only: a section already asked for is not asked again (two
+        // windows whose answers the one list cannot both keep would take it
+        // from each other every frame), and typed text waiting for its pause
+        // keeps its timer (as above).
         if matches!(self.gif_shown(panel), GifShown::Missing)
             && !gifs_on_their_way(panel)
-            && matches!(self.pickers.gif_tab, GifTab::Wants(_) | GifTab::Asked(_))
+            && matches!(self.pickers.gif_tab, GifTab::Wants(_))
         {
             self.request_gifs(wanted, cx);
         }
