@@ -13,6 +13,8 @@ impl Session {
         self.payments.verification_url = None;
         self.payments.receipt_error = None;
         self.payments.unlocked_notice = None;
+        // The mini app that watched an invoice closed with its screen.
+        self.payments.outcomes.clear();
         // The earn toasts, a Fragment URL and a setup page's "go back"
         // belong to the screen that asked.
         let earn = &mut self.payments.earn;

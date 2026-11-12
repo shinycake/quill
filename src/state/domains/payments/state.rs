@@ -109,6 +109,9 @@ pub struct PaymentVerification {
     pub giveaway_chat_id: Option<i64>,
 }
 
+/// How many finished payments keep their verdict (the newest).
+const OUTCOMES_KEPT: usize = 16;
+
 /// How a `sendPaymentForm` for an invoice ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaymentVerdict {
@@ -324,6 +327,10 @@ impl PaymentsState {
             invoice: invoice.clone(),
             verdict,
         });
+        // Only a checkout still watched reads its verdict: the oldest go,
+        // so a long session does not keep one line per invoice ever paid.
+        let extra = self.outcomes.len().saturating_sub(OUTCOMES_KEPT);
+        self.outcomes.drain(..extra);
     }
 
     /// A new payment or checkout of `invoice` starts over.

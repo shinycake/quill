@@ -176,6 +176,26 @@ fn payment_result_notes_and_verification_url() {
 }
 
 #[test]
+fn finished_payments_keep_only_the_newest_verdicts_and_none_across_a_switch() {
+    let (mut session, _sink) = session();
+    let invoice = |n: usize| crate::payment_invoice::InputInvoice::Name(format!("shop{n}"));
+    for n in 0..40 {
+        session
+            .payments
+            .record_outcome(&invoice(n), PaymentVerdict::Paid);
+    }
+    assert_eq!(session.payments.outcome_of(&invoice(0)), None);
+    assert_eq!(
+        session.payments.outcome_of(&invoice(39)),
+        Some(PaymentVerdict::Paid)
+    );
+    assert!(session.payments.outcomes.len() <= 16);
+    // The mini app that watched closed with its screen.
+    session.forget_screen_outcomes();
+    assert_eq!(session.payments.outcome_of(&invoice(39)), None);
+}
+
+#[test]
 fn payment_receipt_opens_dialog() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
