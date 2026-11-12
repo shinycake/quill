@@ -11,7 +11,11 @@ use gpui_kit::Task;
 use quill::ids::ChatId;
 use std::collections::VecDeque;
 use std::rc::Rc;
+use std::sync::LazyLock;
 use std::time::{Duration, Instant};
+
+/// The note when none is current.
+static NO_NOTE: LazyLock<StatusNote> = LazyLock::new(StatusNote::default);
 
 /// Notes waiting behind the visible one. Past this, the oldest waiting
 /// confirmation is dropped; when only failures wait, the oldest of them goes.
@@ -83,6 +87,24 @@ impl Showing {
     }
 }
 
+/// The footer's note. A toast's note is shown only while its toast is on
+/// screen or waiting, so the toast stage owns it: [`ToastQueue::note`]
+/// reads it from there instead of a copy reset by hand when the toast ends.
+#[derive(Clone, Debug, PartialEq)]
+enum Footer {
+    /// A note that never toasts, or one kept after its toast was dropped.
+    Plain(StatusNote),
+    /// The note whose toast was queued last; current while that toast is
+    /// on screen or waiting, blank once it is over.
+    Toasted(StatusNote),
+}
+
+impl Default for Footer {
+    fn default() -> Self {
+        Self::Plain(StatusNote::default())
+    }
+}
+
 /// The current status note, the toasts it feeds and the wake-up scheduled
 /// for the visible one: one value, so a note, its toast and its timer end
 /// together.
@@ -90,7 +112,7 @@ impl Showing {
 pub(crate) struct ToastQueue {
     /// The current note. Every write names its kind through
     /// [`Self::set_note_in`], so a toast never depends on the words.
-    note: StatusNote,
+    footer: Footer,
     /// The wake-up scheduled for the visible toast's deadline.
     wake: Wake,
     showing: Option<Showing>,
@@ -101,14 +123,19 @@ impl ToastQueue {
     /// A queue whose current note is `note` and nothing toasts.
     pub(crate) fn with_note(note: StatusNote) -> Self {
         Self {
-            note,
+            footer: Footer::Plain(note),
             ..Self::default()
         }
     }
 
-    /// The current note.
+    /// The current note: blank once the toast it fed is over, so the same
+    /// message set again shows again.
     pub(crate) fn note(&self) -> &StatusNote {
-        &self.note
+        match &self.footer {
+            Footer::Plain(note) => note,
+            Footer::Toasted(note) if self.holds(note) => note,
+            Footer::Toasted(_) => &NO_NOTE,
+        }
     }
 
     /// Replaces the current note, toasting in the window `host` (`None`: the
@@ -117,11 +144,15 @@ impl ToastQueue {
     /// unread failure; the toast's own timer clears that one.
     // note-host: the queue's own write; `ConnectionUi::set_note_in` passes the window the Asker named.
     pub(crate) fn set_note_in(&mut self, note: StatusNote, host: Option<ChatId>, now: Instant) {
-        if note.kind() == NoteKind::Silent && self.note.is_toast() {
+        if note.kind() == NoteKind::Silent && self.note().is_toast() {
             return;
         }
         self.push_in(note.clone(), host, now);
-        self.note = note;
+        self.footer = if note.is_toast() {
+            Footer::Toasted(note)
+        } else {
+            Footer::Plain(note)
+        };
     }
 
     /// Drops the current note and its toasts.
@@ -135,16 +166,13 @@ impl ToastQueue {
     /// Drops queued toasts without touching the current note: the footer
     /// line shows that note while there is no session.
     pub(crate) fn drop_toasts(&mut self) {
-        *self = Self::with_note(std::mem::take(&mut self.note));
+        *self = Self::with_note(self.note().clone());
     }
 
-    /// Advances the timers to `now`, and drops the current note once its
-    /// toast is over so the same message set again shows again.
+    /// Advances the timers to `now`. The current note follows its toast
+    /// ([`Self::note`]).
     pub(crate) fn advance(&mut self, now: Instant) {
         self.tick(now);
-        if self.note.is_toast() && !self.holds(&self.note) {
-            self.note = StatusNote::default();
-        }
     }
 
     /// The deadline a wake-up must be scheduled for, when the visible
