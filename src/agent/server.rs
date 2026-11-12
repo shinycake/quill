@@ -403,7 +403,9 @@ fn subscription<W: Write + Send + 'static>(
                     Ok(false) => {}
                     // Signed out, not connected yet or locked: park until a
                     // message arrives, Quill unlocks or the watcher stops.
-                    Err(_) => super::events::park(WATCH_PARK),
+                    Err(_) => super::events::park(WATCH_PARK, || {
+                        flag.is_current(mine) && conn.ended().is_none()
+                    }),
                 }
             }
             flag.finished(mine);

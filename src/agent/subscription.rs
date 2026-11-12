@@ -95,18 +95,17 @@ mod tests {
             let (subscription, ended) = (subscription.clone(), ended.clone());
             std::thread::spawn(move || {
                 while subscription.is_current(token) {
-                    crate::agent::events::park(std::time::Duration::from_secs(600));
+                    crate::agent::events::park(std::time::Duration::from_secs(600), || {
+                        subscription.is_current(token)
+                    });
                 }
                 ended.store(true, Ordering::SeqCst);
             })
         };
-        // The stop wakes the park; a stop that lands before the watcher
-        // parks is seen by its `is_current` check instead.
+        // One stop, wherever the watcher is: before it parks, `park` sees
+        // it under the lock; after, the notify wakes it.
         subscription.stop();
-        while !ended.load(Ordering::SeqCst) {
-            crate::agent::events::wake_waiters();
-            std::thread::yield_now();
-        }
         assert!(watcher.join().is_ok());
+        assert!(ended.load(Ordering::SeqCst));
     }
 }

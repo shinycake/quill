@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 /// replacing the stage closes the device and an open still running finds
 /// no token of its own to land under.
 enum Stage {
-    /// No output wanted: before the first open, or after `clear`.
+    /// No output: before the first open, after `clear`, or after the open failed.
     Closed,
     /// The open runs on `thread`; only the open holding `token` may land.
     Opening {
@@ -130,6 +130,7 @@ impl SoundSlot {
                     Ok(device)
                 }
                 Err(err) => {
+                    slot.open_failed(&landing);
                     crate::advanced::debug_mode::call_log(&format!(
                         "[call] {label} sound output did not open ({err})"
                     ));
@@ -157,6 +158,15 @@ impl SoundSlot {
                 wanted.stage = Stage::Open { _thread: thread };
             }
             other => wanted.stage = other,
+        }
+    }
+
+    /// The open holding `token` failed: nothing is opening any more. An open
+    /// that was replaced meanwhile leaves the newer stage alone.
+    fn open_failed(&self, token: &Arc<()>) {
+        let mut wanted = self.wanted.lock_or_recover();
+        if matches!(&wanted.stage, Stage::Opening { token: own, .. } if Arc::ptr_eq(own, token)) {
+            wanted.stage = Stage::Closed;
         }
     }
 
@@ -280,10 +290,25 @@ mod tests {
         slot.open_with::<Device>("test".into(), 1.0, false, hold, |_, _| {
             Err("no device".into())
         });
-        assert!(wait_opened(&slot).is_err());
-        assert!(slot.audio().is_none());
-        slot.clear();
         reaper.wait_drained();
+        assert!(matches!(slot.wanted.lock_or_recover().stage, Stage::Closed));
+        assert!(slot.audio().is_none());
+    }
+
+    #[test]
+    fn a_reopen_lands_after_a_failed_open() {
+        let slot = Arc::new(SoundSlot::default());
+        let failed = Reaper::start();
+        slot.open_with::<Device>("test".into(), 1.0, false, failed.hold(), |_, _| {
+            Err("no device".into())
+        });
+        failed.wait_drained();
+        let open = blocked_open(&slot, 1.0, false);
+        let _ = open.release.send(());
+        assert!(wait_opened(&slot).is_ok());
+        let current = slot.audio();
+        let current = current.as_ref().expect("the output landed");
+        assert!(Arc::ptr_eq(current, &open.audio));
     }
 
     #[test]
