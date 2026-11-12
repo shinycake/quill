@@ -10280,3 +10280,10 @@ gone.
 | 10 | `BarReport::Out { waiting }` holds the report and leave requests in the chat's `ChatUi`; `pump_bar_report` shows "done" on the last answer and the error note on a refusal (either order). A chat change forgets the acks. |
 | 11 | The attach-bot icon cache keeps the verdict per path, usable or not. |
 | 12, 13 | `Watch` doc; `bot_create_dialog` uses `one_shot_dialog_content`. |
+
+### Sweep fixes (r4-07, round 3)
+
+- The chat action bar's report, hide, unarchive and block are one `BarWork` stage in the chat's `ChatUi`, matched by `RequestId`; a private chat reports without `leaveChat`, a refused report sends no leave, a second press while one is out does nothing, and a closed window forgets its acks.
+- Add People shows the contacts' own state (`ContactsView`) under the peer row; a new screen's `CallEnd::Unobserved` seeds from the summary it finds; a refused rich send during an edit goes before the stashed draft; text typed while a bot thread is made goes with the message.
+- One sign-in submit at a time (`AuthSubmit::send`), reset by a new client; every `getUserFullInfo` is begun and settled by its request (`UserFullInfos::answered`/`failed_request`).
+- Appearance files are asked by file id; armed draft clears settle when nothing can answer; the preparation's starter is its newest worker and a worker's task is made with it; the deletion's task is held in `deleting` from the start; a background client is one `ClientStage`; community confirm boxes hold their own request (`Ask`); the call device menu names its call with its account.
