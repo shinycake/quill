@@ -11,7 +11,6 @@
 
 AccountExport | - | the box's flag is `dialogs.account_export_dialog` (screen); the progress box shows an export the account is still running, which comes back with it
 AccountNotice | - | terms, service notices and the frozen notice are the account's own and stay until answered; the screen-held ones (`login_prevented`, `freeze_info_open`) go with the screen
-ArchiveSettings | set_archive_settings_open | `chat_list.archive_settings_open`
 BlockFromReplies | close_replies_block | `users_state.replies_block`
 BoostBox | close_boost_box_state | `groups.boost_box`
 CallLinkLeave | cancel_call_link_leave | `calls.call_link_stage`
