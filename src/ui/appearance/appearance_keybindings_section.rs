@@ -128,7 +128,9 @@ impl QuillApp {
                                         if let Some(live) = this.live.as_mut() {
                                             live.driver.save_custom_keybinding(custom);
                                             let customs = live.driver.load_custom_keybindings();
-                                            apply_custom_bindings(cx, &customs);
+                                            if !apply_custom_bindings(cx, &customs) {
+                                                this.preferences.keybinding.keymap_missed();
+                                            }
                                         }
                                         this.preferences.keybinding.reset_row(&id);
                                         cx.notify();
@@ -232,8 +234,10 @@ impl QuillApp {
             live.driver.save_custom_keybinding(custom);
             live.driver.load_custom_keybindings()
         });
-        if let Some(customs) = saved {
-            apply_custom_bindings(cx, &customs);
+        if let Some(customs) = saved
+            && !apply_custom_bindings(cx, &customs)
+        {
+            self.preferences.keybinding.keymap_missed();
         }
         self.preferences.keybinding.stop_capture();
         cx.notify();

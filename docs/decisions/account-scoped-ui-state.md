@@ -9848,3 +9848,26 @@ window), `ui/app_theme/ui_tests.rs` (failed theme read; night clock),
 `settings/appearance.rs` (`secs_until_night_change`), `composer/edit.rs`
 (as-file choice), `ui/dialogs/checklist.rs` (`DialogSend`),
 `connect/tests/owned_bots.rs` (asked requests).
+
+### Sweep fixes (r3-09)
+
+| Id | Fix |
+| --- | --- |
+| 16-012 | `CraftStage::Forging` holds the `RequestId` of the `craftGift` it was started for (`start_forge(since, request)`). `craft_frame_upkeep` ends it when the session's `CraftRun` is no longer `Crafting { request }` for that id (answered, refused, or the craft gone), so a forge cannot end on another run's state. `after_craft_pop` reads only the forge stage; it no longer also asks `craft.crafting()`. |
+| 16-009 | `GiftMarketUi::refused_files` (`RefusedFiles`) holds the sticker files whose `download_file` send the driver refused, for the files shown when they were refused. `gift_market_frame_upkeep` settles it against the shown set each upkeep (a different set forgets every refusal; the boxes closing resets it) and asks only files not refused, so a refused send is not re-sent every frame. A file that is downloading or downloaded is skipped by the session's own file state. |
+| 16-010 | `SliderStage::Refused(level)`: a release whose send was refused serves nothing, so the stage slider is made again from the server's level (and the view redraws). |
+| 16-011 | Skipped. `window_closed_by_user` is the user's decision about a call and is owned by the account's `GroupCallScreen`; `CallWindow` describes the one app-wide OS window (`GroupCall::window`). They are two owners: a dismissed call can have its window `Open` for the sync pass that removes it, and folding the call id into `CallWindow` would move per-account state into the app-wide window value (and lose the handle the sync needs). |
+| 16-008 | `StreamFacts::transport_failed` is gone (baseline line dropped). `settle_stream_join`, which runs with the window sync outside the draw, reads the call's `transport.error()` from the session. |
+| 17-001 | The Edit box holds `PackChanges { sticker, emoji }` (`PackAsk::Out(RequestId)`): the pack buttons are busy while one of this box's own requests is in the session's pending set, and the click handler refuses while busy. `settle_group_edit_box` returns an `Out` ask to `Idle` once its request is no longer pending. |
+| 17-004 | `save_group_edit_box` closes through `close_group_edit_box` on all three exits (nothing changed, demo mode, empty send list), so the emoji panel and the boost ask go with it. |
+| 17-002 | The HDR probe cache's `Entry::Probing { _job: Task<()> }` owns its probe: one foreground task awaits the background read, notifies, and replaces the entry with `Known` or `Unreadable`; dropping the entry cancels it. A path has at most one probe (no time-based re-probe, so a stalled drive piles up nothing), and a full cache keeps its running probes. The bare `Entry::Probing` baseline line stays removed because the variant now holds the task. |
+| 17-003 | `InlineBotUi` holds the user's acknowledgement as a plain value (the two-variant enum is gone): it is one fact, not a stage. |
+| 17-005 | The member list's `MembersFetchView` (renamed from `MembersStage`) is a view derived each frame from the session's `SupergroupMembersFetch`, which holds the request and is settled by its `RequestId`; the unused request field is gone. |
+| 17-006 | `State::unopenable` holds `Unopenable { path, windows }` for a clip whose file did not open, so a tile does not run `VideoPlayer::open` every frame. It follows the slot lifecycle: `retire` (used by `leave` and every pass) drops it with the same window rules as a player, and a row that keeps rendering refreshes its pass; a new path is tried again. A failed open has no player, so it cannot be a `Slot` state; it is a sibling record with the slot's windows and lifetime. |
+| 18-001 | `apply_custom_bindings` returns whether it rebuilt the keymap. `apply_pending_keybindings` records `Keymap::Applied` only then; the Shortcuts page marks the keymap `Stale` (`keymap_missed`) when its rebuild was skipped, so the next poll applies it. |
+| 18-002 | `install_language` drops a re-picked pack from `LanguageBox::removed`, so Restore is not offered for a row that is in the list again. |
+
+Tests: `language_box_tests` (a re-picked removed pack is not restored
+twice), `group_call_stage_volume` (a refused send serves nothing),
+`group_edit_box::extras` (pack buttons wait for their own request),
+`hdr_image::probe_cache` (a running probe is waited for, never restarted), `gift_market_state::refused_files_tests`, `inline_players::windows` (an unopenable clip leaves with its row).

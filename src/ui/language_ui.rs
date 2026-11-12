@@ -324,6 +324,10 @@ impl QuillApp {
         }
         if !ready.info.is_official && !choice.is_builtin() {
             self.language.recent = prefs::with_recent(&self.language.recent, &choice);
+            // Picked again: it is in the list, no longer a removed row.
+            if let Some(open) = self.language.open.as_mut() {
+                open.removed.retain(|(_, c)| c.pack_id != choice.pack_id);
+            }
         }
         self.sync_language_tag(&choice.pack_id);
         install_pack(snapshot);

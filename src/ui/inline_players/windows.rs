@@ -21,6 +21,7 @@ use super::{InlineVideos, Key, Panel, Slot, State};
 use gpui_kit::{App, Pixels, Window};
 use quill::ids::ChatId;
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::rc::Rc;
 
 /// Where a slot's row renders: the history, or a panel's grid.
@@ -46,6 +47,24 @@ pub(super) struct Seen {
     /// The player's paint count (`VideoPlayer::shown_count`) when that
     /// window's current pass began: more since means it was in view.
     pub(super) mark: u64,
+}
+
+impl Seen {
+    /// A window that renders a row with no player: nothing painted yet.
+    fn unplayed(pass: u64) -> Self {
+        Self {
+            pass,
+            in_view: false,
+            mark: 0,
+        }
+    }
+}
+
+/// A clip whose file did not open from `path`, and the windows its row
+/// renders in; it leaves with the last of them, as a slot does.
+pub(super) struct Unopenable {
+    pub(super) path: PathBuf,
+    pub(super) windows: Windows,
 }
 
 /// The windows a slot shows in.
@@ -179,6 +198,43 @@ impl State {
         self.retire(|key, windows| survives(key, windows, pass))
     }
 
+    /// Whether opening `key` from `path` already failed; if so, the row
+    /// rendering in `window` this `pass` keeps the record alive.
+    pub(super) fn note_unopenable(
+        &mut self,
+        key: Key,
+        path: &std::path::Path,
+        window: Option<ChatId>,
+        pass: u64,
+    ) -> bool {
+        let Some(failed) = self.unopenable.get_mut(&key).filter(|f| f.path == path) else {
+            return false;
+        };
+        failed
+            .windows
+            .entry(window)
+            .or_insert(Seen::unplayed(pass))
+            .pass = pass;
+        true
+    }
+
+    /// Opening `key` from `path` failed in `window` at `pass`.
+    pub(super) fn unopenable_at(
+        &mut self,
+        key: Key,
+        path: PathBuf,
+        window: Option<ChatId>,
+        pass: u64,
+    ) {
+        self.unopenable.insert(
+            key,
+            Unopenable {
+                path,
+                windows: HashMap::from([(window, Seen::unplayed(pass))]),
+            },
+        );
+    }
+
     /// The slots of `list` (`None`: of every list) leave `window`.
     fn leave(&mut self, window: Option<ChatId>, list: Option<List>) -> HashMap<Key, Slot> {
         self.expire_waiting_demands(window, list);
@@ -193,6 +249,8 @@ impl State {
     /// Take out the slots no window shows once `stays` (which takes
     /// windows off a slot) has seen each, and forget their demands.
     fn retire(&mut self, mut stays: impl FnMut(Key, &mut Windows) -> bool) -> HashMap<Key, Slot> {
+        self.unopenable
+            .retain(|key, failed| stays(*key, &mut failed.windows));
         let gone: HashMap<Key, Slot> = self
             .players
             .extract_if(|key, slot| !stays(*key, &mut slot.windows))
@@ -370,6 +428,28 @@ mod tests {
             number,
             resizing: false,
         }
+    }
+
+    #[test]
+    fn an_unopenable_clip_is_remembered_only_while_its_row_renders() {
+        let row = (11, 204);
+        let path = std::path::PathBuf::from("/tmp/clip.mp4");
+        let mut state = State::default();
+        assert!(!state.note_unopenable(row, &path, MAIN, 1));
+        state.unopenable_at(row, path.clone(), MAIN, 1);
+        assert!(
+            state.note_unopenable(row, &path, MAIN, 2),
+            "same path: not asked"
+        );
+        assert!(
+            !state.note_unopenable(row, std::path::Path::new("/tmp/other.mp4"), MAIN, 2),
+            "a new path is tried"
+        );
+        // The row last rendered in pass 2: pass 3 keeps it, pass 5 finds it gone.
+        let _ = state.retire(|key, windows| survives(key, windows, pass(MAIN, List::History, 3)));
+        assert_eq!(state.unopenable.len(), 1);
+        let _ = state.retire(|key, windows| survives(key, windows, pass(MAIN, List::History, 5)));
+        assert!(state.unopenable.is_empty(), "scrolled away: forgotten");
     }
 
     #[test]
