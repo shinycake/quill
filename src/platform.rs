@@ -756,16 +756,19 @@ mod test_launches {
     thread_local! {
         static LAUNCHES: Cell<usize> = const { Cell::new(0) };
         static NEXT_ANSWER: Cell<Option<OsOpen>> = const { Cell::new(None) };
-        static LAST_TARGET: std::cell::RefCell<Option<String>> =
-            const { std::cell::RefCell::new(None) };
+        static LAST_TARGET: Cell<Option<String>> = const { Cell::new(None) };
     }
 
     pub(super) fn note_target(target: &std::ffi::OsStr) {
-        LAST_TARGET.with(|last| *last.borrow_mut() = Some(target.to_string_lossy().into_owned()));
+        LAST_TARGET.with(|last| last.set(Some(target.to_string_lossy().into_owned())));
     }
 
     pub(super) fn last_target() -> Option<String> {
-        LAST_TARGET.with(|last| last.borrow().clone())
+        LAST_TARGET.with(|last| {
+            let target = last.take();
+            last.set(target.clone());
+            target
+        })
     }
 
     pub(super) fn script_answer(answer: OsOpen) {

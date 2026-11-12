@@ -54,16 +54,47 @@ impl QuillApp {
                 session.payments.marketplace_gift = None;
             }
         }
+        if running.is_some() {
+            // The box is shown again over the purchase it closed on.
+            if let Some(live) = self.live.as_mut()
+                && let Some(gift) = live.driver.session.payments.marketplace_gift.as_mut()
+            {
+                gift.reopen();
+            } else if let Some(gift) = self
+                .demo_session
+                .as_mut()
+                .and_then(|session| session.payments.marketplace_gift.as_mut())
+            {
+                gift.reopen();
+            }
+        }
         self.payments.marketplace.open_for(chat, running.is_some());
         self.open_box(DialogKind::Marketplace);
         cx.notify();
+    }
+
+    /// The Marketplace box closed: a purchase on its way carries on and tells
+    /// its outcome in a notice.
+    fn close_marketplace_box(&mut self) {
+        self.payments.marketplace.close();
+        if let Some(live) = self.live.as_mut()
+            && let Some(gift) = live.driver.session.payments.marketplace_gift.as_mut()
+        {
+            gift.close();
+        } else if let Some(gift) = self
+            .demo_session
+            .as_mut()
+            .and_then(|session| session.payments.marketplace_gift.as_mut())
+        {
+            gift.close();
+        }
     }
 
     /// The Send Gift box's recipient, as the chat a purchase for it goes
     /// to (a user's private chat has the user's id).
     pub(super) fn send_gift_recipient_chat(&self) -> Option<ChatId> {
         let send = &self.session()?.payments.gifts_manage.send;
-        let recipient = send.recipient.as_ref().filter(|_| send.is_open())?;
+        let recipient = send.recipient().filter(|_| send.is_open())?;
         Some(match recipient.sender {
             MessageSender::User { user_id } => ChatId(user_id),
             MessageSender::Chat { chat_id } => ChatId(chat_id),
@@ -102,7 +133,7 @@ impl QuillApp {
     ) -> Dialog {
         let close =
             QuillShell::on_close_kind(app, shell, DialogKind::Marketplace, |this, _, cx| {
-                this.payments.marketplace.close();
+                this.close_marketplace_box();
                 cx.notify();
             });
         app.update(cx, |this, cx| {
@@ -304,5 +335,5 @@ crate::ui::shell::register_dialogs! {
         |app| app.payments.marketplace.is_open(),
         QuillApp::build_marketplace_dialog,
     )
-    .close(|app, _, cx| { app.payments.marketplace.close(); cx.notify(); }),
+    .close(|app, _, cx| { app.close_marketplace_box(); cx.notify(); }),
 }

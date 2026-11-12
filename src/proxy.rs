@@ -18,7 +18,7 @@
 
 use crate::calls::proxy::{EnabledProxy, ProxyKind};
 use crate::ids::RequestId;
-pub use crate::proxy_ops::{ProxyFetch, ProxyListOps};
+pub use crate::proxy_ops::{FAILED_RETRY_AFTER, FAILED_RETRY_MAX, ProxyFetch, ProxyListOps};
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -716,13 +716,16 @@ pub enum Rotation {
     Watching,
     /// The connection has been unusable since `since_ms`.
     Disconnected { since_ms: u64 },
-    /// The timeout passed and the ping of proxy `id`, asked at `asked_ms`,
-    /// is the probe being waited for. Only that ping holds the rotation (the
-    /// edit box's link test, or any other ping, does not), and only until
-    /// [`PROBE_TIMEOUT_MS`]: a ping whose answer never comes counts as failed.
+    /// The timeout passed and the ping of proxy `id`, sent as `request` at
+    /// `asked_ms`, is the probe being waited for. Only that request holds the
+    /// rotation (the edit box's link test, or any other ping, does not), and
+    /// only until [`PROBE_TIMEOUT_MS`]: a ping whose answer never comes
+    /// counts as failed. The rotation leaves `Disconnected` for this stage
+    /// when the send went out ([`ProxyState::probe_sent`]), never before.
     Probing {
         since_ms: u64,
         id: i32,
+        request: RequestId,
         asked_ms: u64,
     },
 }
@@ -897,6 +900,19 @@ impl ProxyState {
         self.enabled().is_some()
     }
 
+    /// The ping `RotationAction::Ping(id)` asked for went out as `request`
+    /// at `now_ms`: the rotation waits for that request.
+    pub fn probe_sent(&mut self, id: i32, request: RequestId, now_ms: u64) {
+        if let Rotation::Disconnected { since_ms } = self.rotation {
+            self.rotation = Rotation::Probing {
+                since_ms,
+                id,
+                request,
+                asked_ms: now_ms,
+            };
+        }
+    }
+
     /// Auto-switch step (tdesktop `ProxyRotationManager`): once the
     /// connection has been unusable for the configured timeout, probe the
     /// other proxies one at a time and enable the first that answers.
@@ -917,8 +933,9 @@ impl ProxyState {
             Rotation::Probing {
                 since_ms,
                 id,
+                request,
                 asked_ms,
-            } => (since_ms, Some((id, asked_ms))),
+            } => (since_ms, Some((id, request, asked_ms))),
         };
         if self.rotation == Rotation::Watching {
             self.rotation = Rotation::Disconnected { since_ms: since };
@@ -929,8 +946,8 @@ impl ProxyState {
         // The probe asked for is still out: wait for its answer, but not
         // for ever: a ping whose answer never comes is a failed one (its
         // late answer then matches nothing and is dropped).
-        if let Some((id, asked_ms)) = probing
-            && matches!(self.pings.get(&id), Some(PingStatus::Checking(_)))
+        if let Some((id, request, asked_ms)) = probing
+            && self.pings.get(&id) == Some(&PingStatus::Checking(request))
         {
             if now_ms.saturating_sub(asked_ms) < PROBE_TIMEOUT_MS {
                 return RotationAction::None;
@@ -959,18 +976,18 @@ impl ProxyState {
             .find(|p| !self.pings.contains_key(&p.id))
             .map(|p| p.id)
         {
-            self.rotation = Rotation::Probing {
-                since_ms: since,
-                id: next,
-                asked_ms: now_ms,
-            };
+            // The probe is Probing once its send went out (`probe_sent`).
+            self.rotation = Rotation::Disconnected { since_ms: since };
             return RotationAction::Ping(next);
         }
-        // Every alternative failed: forget the verdicts and look again
-        // after another timeout.
+        // Every alternative failed: forget the failed verdicts and look again
+        // after another timeout. A check the user has running is not one of
+        // them: its answer still lands.
         let ids: Vec<i32> = order.iter().map(|p| p.id).collect();
         for id in ids {
-            self.pings.remove(&id);
+            if self.pings.get(&id) == Some(&PingStatus::Unavailable) {
+                self.pings.remove(&id);
+            }
         }
         self.rotation = Rotation::Disconnected { since_ms: now_ms };
         RotationAction::None
@@ -1119,6 +1136,7 @@ mod tests {
         state.rotation = Rotation::Probing {
             since_ms: 1,
             id: 2,
+            request: RequestId(3),
             asked_ms: 1,
         };
         state.set_auto_switch(None, None);
@@ -1204,11 +1222,25 @@ mod tests {
         // Timeout reached: probe the proxy after the current one.
         assert_eq!(s.rotation_step(10_000, false), RotationAction::Ping(2));
         s.pings.insert(2, PingStatus::Checking(RequestId(7)));
+        s.probe_sent(2, RequestId(7), 10_000);
         assert_eq!(s.rotation_step(10_500, false), RotationAction::None);
         s.pings.insert(2, PingStatus::Unavailable);
         assert_eq!(s.rotation_step(11_000, false), RotationAction::Ping(3));
         s.pings.insert(3, PingStatus::Available(80));
         assert_eq!(s.rotation_step(12_000, false), RotationAction::Switch(3));
+    }
+
+    /// Sweep r4-04 fix 3: looking again after every alternative failed keeps
+    /// a check the user has running.
+    #[test]
+    fn a_rotation_round_that_failed_keeps_the_users_running_check() {
+        let mut s = state(vec![entry(1, true), entry(2, false), entry(3, false)], true);
+        s.rotation_step(0, false);
+        s.pings.insert(2, PingStatus::Unavailable);
+        s.pings.insert(3, PingStatus::Checking(RequestId(5)));
+        assert_eq!(s.rotation_step(10_000, false), RotationAction::None);
+        assert_eq!(s.pings.get(&2), None, "the failed verdict is forgotten");
+        assert_eq!(s.pings.get(&3), Some(&PingStatus::Checking(RequestId(5))));
     }
 
     #[test]
@@ -1248,17 +1280,27 @@ mod tests {
         s.open_link(ProxyDraft::empty(ProxyKind::Socks5));
         s.link_checking(crate::ids::RequestId(5));
         assert_eq!(s.rotation_step(10_000, false), RotationAction::Ping(2));
+        // The probe is out only once its send went out.
+        assert_eq!(s.rotation, Rotation::Disconnected { since_ms: 0 });
+        s.pings.insert(2, PingStatus::Checking(RequestId(7)));
+        s.probe_sent(2, RequestId(7), 10_000);
         assert_eq!(
             s.rotation,
             Rotation::Probing {
                 since_ms: 0,
                 id: 2,
+                request: RequestId(7),
                 asked_ms: 10_000
             }
         );
         // Its own probe does hold it.
-        s.pings.insert(2, PingStatus::Checking(RequestId(7)));
         assert_eq!(s.rotation_step(10_500, false), RotationAction::None);
+        // Another request on the same slot (a newer ping) is not the probe:
+        // the rotation no longer waits on it, and with no other proxy to
+        // try it starts over.
+        s.pings.insert(2, PingStatus::Checking(RequestId(8)));
+        assert_eq!(s.rotation_step(10_600, false), RotationAction::None);
+        assert_eq!(s.rotation, Rotation::Disconnected { since_ms: 10_600 });
     }
 
     #[test]
@@ -1267,6 +1309,7 @@ mod tests {
         s.rotation_step(0, false);
         assert_eq!(s.rotation_step(10_000, false), RotationAction::Ping(2));
         s.pings.insert(2, PingStatus::Checking(RequestId(7)));
+        s.probe_sent(2, RequestId(7), 10_000);
         assert_eq!(
             s.rotation_step(10_000 + PROBE_TIMEOUT_MS - 1, false),
             RotationAction::None

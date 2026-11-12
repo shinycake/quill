@@ -96,12 +96,13 @@ fn the_setting_appears_with_two_accounts() {
 
 #[test]
 fn background_status_follows_the_authorization_state() {
+    let now = std::time::Instant::now();
     assert_eq!(
-        background_status(&AuthorizationState::WaitTdlibParameters),
-        BackgroundStatus::Connecting
+        background_status(&AuthorizationState::WaitTdlibParameters, now),
+        BackgroundStatus::Connecting { since: now }
     );
     assert_eq!(
-        background_status(&AuthorizationState::Ready),
+        background_status(&AuthorizationState::Ready, now),
         BackgroundStatus::Ready
     );
     for auth in [
@@ -112,7 +113,7 @@ fn background_status_follows_the_authorization_state() {
         },
         AuthorizationState::WaitRegistration { terms: None },
     ] {
-        let status = background_status(&auth);
+        let status = background_status(&auth, now);
         assert_eq!(status, BackgroundStatus::NeedsSignIn);
         assert!(status.stops_client());
         assert_eq!(status.label(), Some("Not signed in"));
@@ -122,21 +123,22 @@ fn background_status_follows_the_authorization_state() {
         AuthorizationState::Closing,
         AuthorizationState::Closed,
     ] {
-        let status = background_status(&auth);
+        let status = background_status(&auth, now);
         assert_eq!(status, BackgroundStatus::SignedOut);
         assert!(status.stops_client());
     }
     assert!(!BackgroundStatus::Ready.stops_client());
-    assert!(!BackgroundStatus::Connecting.stops_client());
+    assert!(!BackgroundStatus::Connecting { since: now }.stops_client());
     assert_eq!(BackgroundStatus::Ready.label(), None);
     assert!(BackgroundStatus::Failed("Keychain locked".into()).stops_client());
 }
 
 #[test]
 fn a_refused_database_stops_the_background_client_and_says_so() {
-    let status = background_status(&AuthorizationState::StartupFailed(
-        crate::auth::StartupFailure::WrongKey,
-    ));
+    let status = background_status(
+        &AuthorizationState::StartupFailed(crate::auth::StartupFailure::WrongKey),
+        std::time::Instant::now(),
+    );
     assert_eq!(status.label(), Some("Couldn't open this account"));
     assert!(status.stops_client());
 }
@@ -509,4 +511,41 @@ fn a_click_shown_for_one_account_never_runs_on_the_next() {
         plan_account_click(&shown_for, NotificationAction::Open, None, &[]),
         ClickPlan::Ignore
     );
+}
+
+#[test]
+fn a_start_that_never_leaves_connecting_fails_after_the_give_up() {
+    use super::CONNECT_GIVE_UP;
+    let began = std::time::Instant::now();
+    let connecting = |at| background_status(&AuthorizationState::WaitTdlibParameters, at);
+    let first = connecting(began);
+    // Later polls keep the time the start began.
+    let later = began + CONNECT_GIVE_UP / 2;
+    assert_eq!(
+        connecting(later).at(&first, later),
+        BackgroundStatus::Connecting { since: began }
+    );
+    let late = began + CONNECT_GIVE_UP;
+    let failed = connecting(late).at(&first, late);
+    assert!(matches!(failed, BackgroundStatus::Failed(_)));
+    assert!(failed.stops_client());
+    // Ready is not touched.
+    assert_eq!(
+        background_status(&AuthorizationState::Ready, late).at(&first, late),
+        BackgroundStatus::Ready
+    );
+}
+
+/// Sweep r4-04: a connect handed to the background keeps the clock of the
+/// client's start, so the give-up does not begin again at the hand-off.
+#[test]
+fn a_handed_off_connect_gives_up_by_its_own_start() {
+    use super::CONNECT_GIVE_UP;
+    let started = std::time::Instant::now();
+    let handed_off = background_status(&AuthorizationState::WaitTdlibParameters, started);
+    let later = started + CONNECT_GIVE_UP;
+    assert!(matches!(
+        handed_off.clone().at(&handed_off, later),
+        BackgroundStatus::Failed(_)
+    ));
 }

@@ -6,7 +6,6 @@
 use crate::ui::app::QuillApp;
 use crate::ui::scroll_load::{load_due, scrolled_near_end};
 use gpui_kit::*;
-use quill::premium_hub::ton::GramsView;
 
 impl QuillApp {
     pub(super) fn stars_more(&mut self, cx: &mut Context<Self>, scrolled: bool) {
@@ -75,7 +74,8 @@ impl QuillApp {
         let Some(grams) = self.session().map(|s| &s.payments.hub.grams) else {
             return;
         };
-        if grams.view != GramsView::List
+        if !grams.is_open()
+            || grams.selected().is_some()
             || (grams.load.error().is_some() && !scrolled)
             || !load_due(
                 scrolled_near_end(&self.payments.grams_scroll),

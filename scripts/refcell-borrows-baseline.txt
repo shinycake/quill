@@ -22,7 +22,5 @@ char_width::cache.borrow 1
 char_width::cache.borrow_mut 1
 current::current.borrow 1
 fit::window.borrow_mut 1
-last_target::last.borrow 1
-note_target::last.borrow_mut 1
 once::body.borrow_mut 1
 sync::applied.borrow_mut 2

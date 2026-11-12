@@ -97,7 +97,16 @@ pub(super) fn footer_effect(
         key,
         effect_id,
         outgoing: message.is_outgoing,
-        unwatched: session.is_some_and(|session| session.stickers.effects.watch.is_unwatched(key)),
+        unwatched: session.is_some_and(|session| {
+            session
+                .stickers
+                .effects
+                .watch
+                .is_unwatched(quill::ids::ChatMessage::new(
+                    quill::ids::ChatId(key.0),
+                    quill::ids::MessageId(key.1),
+                ))
+        }),
         icon,
     })
 }

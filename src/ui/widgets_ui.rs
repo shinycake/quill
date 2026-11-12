@@ -290,7 +290,7 @@ impl QuillApp {
             }
             let restart = match &entry.lifecycle {
                 // Already waiting for a sandbox, or running, or past saving.
-                Lifecycle::Waiting { .. }
+                Lifecycle::Due { .. }
                 | Lifecycle::Loading { .. }
                 | Lifecycle::Running(_)
                 | Lifecycle::Failed { .. } => None,
@@ -299,7 +299,7 @@ impl QuillApp {
             };
             if let Some(streak) = restart {
                 redraw |= entry.lifecycle.is_stopped();
-                entry.lifecycle = Lifecycle::Waiting { streak };
+                entry.lifecycle = Lifecycle::Due { streak };
             }
         }
         if resume {
@@ -335,16 +335,19 @@ impl QuillApp {
         }
     }
 
-    /// Starts the widgets waiting for a sandbox, releasing hidden ones to stay in the limit.
+    /// Starts the due widgets, releasing hidden ones to stay in the limit.
     fn start_waiting_widgets(&mut self, cx: &mut Context<Self>) {
+        // Every shown due widget starts in this pass when there is room (the
+        // capacity grows with the shown ones), so the order decides nothing
+        // but which of them a release makes room for first: by key.
         let mut waiting: Vec<WidgetKey> = self
             .widgets
             .entries
             .iter()
-            .filter(|(_, entry)| {
-                matches!(entry.lifecycle, Lifecycle::Waiting { .. }) && entry.presence.is_shown()
+            .filter_map(|(key, entry)| match entry.lifecycle {
+                Lifecycle::Due { .. } if entry.presence.is_shown() => Some(*key),
+                _ => None,
             })
-            .map(|(key, _)| *key)
             .collect();
         waiting.sort();
         let visible = self

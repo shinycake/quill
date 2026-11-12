@@ -10514,3 +10514,111 @@ Fix round 3 (review `r4-08-r2`): a link queued behind a closed folder add opens 
 Fix round 4 (review `r4-08-r3`): closing a dialog by id moves focus only when it was the newest; otherwise it hands its saved focus handle to the first open dialog above, so that dialog's own close restores what was focused before both. The kit patch is recorded in `QUILL-CHANGES.md`. `advance_thread` pages for `ScrollGoal::ThreadRoot` only when its `thread_id` is the open thread's (`ScrollGoal::belongs_to`), and otherwise ends the goal. The poll refusal test now keeps the panel open.
 
 Fix round 5 (review `r4-08-r4`): the focus test for the alert closing under another box focuses the app's handle before the alert opens, asserts the alert took focus from it, and asserts the handle is focused again once the box above closes (it failed with the kit fix reverted). The `ThreadRoot` goal check is the pure `ScrollGoal::belongs_to`, unit-tested in `threads::tests::a_goal_for_another_thread_is_dropped`.
+### Sweep fixes (r4-04)
+
+| Ids | What changed |
+| --- | --- |
+| g-456, g-475, 05-006 | `export::Stage::Starting` is gone: the start of a chat is `Collecting { read: 0 }` (label "Starting the export…"), which the account export also uses between chats. The progress count is `Stage::Written { done, total }` (a count of messages written, not an in-flight name). `stale_archives_are_removed` no longer sleeps: `remove_stale_at(dir, age, now)` takes the clock. |
+| 05-008 | The dismissed keyboard/force-reply set is `HashSet<ChatMessage>`, not `(i64, i64)`. |
+| g-449, g-450, 05-005 | `GlyphSave::Saving { _writer }` holds the writer's `JoinHandle` (taken under the lock the stage lives in, so a writer that ends at once waits for its handle); `Pending` is `Unwritten`. The allow lines went. |
+| g-451 | `link_handler::state()` returns `Option<LinkHandlerState>`: `None` is the first read still running. `LinkHandlerState::Checking` and `DemoPin` (the screenshot demo's pin) replace it. |
+| g-452 | `LinkStatus` is `LinkLine`: what the line under the group link says, worked out from the text and the verdict each time. |
+| g-463, 05-003 | `AddressStage` is `First(Lookup)`, `Later(Lookup)` or `Shown`: whether an address was ever shown is the variant, not `Address::ever_shown`. `Lookup::Resolving { point, _job: TaskHold }` holds the geocode task (the UI's separate `Geocode` stage is gone), so a new place drops the old lookup. `address_job` reads, `address_started` records. |
+| g-459, 05-002 | `VenueList` is `VenueView`, worked out from the ask's stage and the search field (`Loading` is no second copy of `AskStage`). Typing with no search location settles at once instead of sitting on Loading with nothing to send. |
+| g-476, g-477 | The screenshot demo's driver task is held by the `DemoDriver` global; its autoscroll task by the driver. No detach. |
+| g-466 | `GiftPurchaseStage::Sent` is `Completed`. |
+| g-474 | `SendStage::Sent` is `Done`. |
+| 05-001 | `media_session::worker::Worker` holds the thread of the MPRIS and SMTC backends; a send into a worker that died starts a new one. |
+| 05-004 | `Presses` is `Idle` / `Held(over)` / `Handled(over)`. |
+| 05-007 | `EffectWatch` keys are `ChatMessage`. |
+| g-453 | `MediaFile` is `MediaFileView`: read from the downloads table and the disk when the menu is built. |
+| 06-005, g-469..g-471 | `Lifecycle::Due { streak }` (was `Waiting { streak, since }`): the widget is due to start on the next present and holds no work; the `Instant` ordered nothing (every shown due widget starts in the same pass, the capacity grows with the shown ones), so it is gone. The guard counts a field typed by one of the enum's own generic parameters as the owned handle (`Loading { runtime: R }`, `Running(R)`). |
+| 06-010, g-472 | `Neighbour::Asking { gateway, since }`: a gateway that never answers is asked again after `RESOLVE_AGAIN_AFTER`. |
+| 06-011, g-447 | `BackgroundStatus::Connecting { since }`: a start that stays there past `CONNECT_GIVE_UP` is `Failed` and started again. |
+| g-460, 06-008 | `new_chat::ViewState` is `StepView` (a view worked out on each draw; `TypeSaveStage::Saving(requests)` and `NewChatStage::Creating` own the requests). `GiftsLayout` is `GiftsLayoutView`, `OwnLinkState` is `OwnLinkView` (both are worked out on each draw). |
+| 06-006, g-465 | `Dnd::Refreshing { last, _worker }` holds the worker. |
+| 06-013 | `TrustFile::SaveFailed { reason, retry_at_ms }`: a failed write of the trusted Star prices is tried again by `paid_trust_tick` after `TRUST_RETRY_MS`. |
+| 06-009, g-455, 06-001 | `PaidStage::Waiting { commit_at_ms }` (the deadline left `PendingPaid`). `PaidStage::Stuck { settle, retry_at_ms, tries }` is sent again (the commit that failed, or the undo that was refused) on a doubling wait, `MAX_TRIES` times, then let go; `Undoing { request, tries }` keeps the count across a refused resend. The user is told once. |
+| 06-012 | The Linux idle sampler is one `Sampler` stage: `Running { last_read_ms, _thread }`. The thread ends itself under the same lock reads take, so no read lands between its check and its exit. |
+| g-454 | See g-460. |
+| 06-007, g-468 | `GiftsRest::Waiting { retry_at_secs, offset }` holds its deadline; the guard counts a field named `deadline`, `retry_at_*`, `commit_at_*` or `*_until_*` as a deadline. |
+| g-479, g-478 | The test-only last target is a `Cell`, not a `RefCell`. |
+| 06-002, g-467 | `GiftValueStage::Loading(RequestId)`. |
+| g-462 | `LimitNotice::Box { over }` (how far over the limit; it was `extra`, which the guard reads as an `@extra`). |
+| g-461 | The mirrored `WithdrawalState::Pending` of Fragment is `Unsettled`. |
+| 06-003 | `GramsHub::view` is `GramsView::{Closed, List, Receipt(key), Withdraw(stage)}`; `open`, `selected` and `withdraw` are readers of it. Closing is one assignment. |
+| g-457, g-458 | `profile_photo_camera` has no `StreamStage`: the stream holds its reader's `JoinHandle` (`finished()` is `is_finished()`) and a cancel flag the reader checks. |
+| 06-004, g-473 | `Rotation::Probing { id, request, .. }`: the rotation leaves `Disconnected` when the ping's send went out (`probe_sent`), and the probe is out only while the slot is `Checking` under that request. |
+| g-464 | `BadgeStage::Pending { count, since }`: a push the platform never answers is pushed again after `PENDING_GIVES_UP_AFTER`. |
+
+Guards: `check-stage-enums.py` counts a field typed by one of the enum's own generic parameters as a carrier (not when the enum is also written `Name<()>` in `src/`, so `DeviceRun::Running` stays reported), and a field named `deadline`, `retry_at_*`, `commit_at_*` or `*_until_*` as a deadline. Allow lines removed with their shapes: `GlyphSave`, `StreamStage`, `BadgeStage::Pending`, `Stage::Writing`; the `WithdrawalState::Pending` line now names only `src/earn/revenue.rs`.
+
+Tests: `location_picker::picker_tests` (typing before a place, a new place stops the lookup), `paid_reaction::tests` (resend, let go, refused undo), `connect::tests::sweep_s3_payments_1`, `notify_accounts::tests` (give up), `net_watch::tests` (asked again), `proxy::tests` (probe by request), `icon_badge` (hung push), `paid_messages` (trust retry), `media_session::worker`.
+
+#### Fix round 2 (r4-04)
+
+| Review item | Change |
+|---|---|
+| `new_chat` rename | `StepView::{Idle, Waiting, Refused}` is a view with no payload; `TypeSaveStage::Saving(requests)` and `Creating` own the requests. |
+| Stage-enum guard | A generic field counts only when no `Name<()>` appears in `src/` (`DeviceRun::Running` is reported again, its baseline line stays). A deadline field is `deadline`, `retry_at_*`, `commit_at_*` or `*_until_*`; `sent_at_ms` is not one. `test_shape_guard.py` covers both. |
+| `link_handler` | `Stage::Reading { last, waker, invalidated, _thread }` owns its read thread (spawned under the lock); `Known { cached, stale }`. The `invalidated: Option<Instant>` mark and `Cached.started` are gone. |
+| `net_watch` | `Watcher::{Stopped, Running { _thread, since }}`: a listener thread that finished (Linux, macOS) is started again by the next `tracker()` call, at most every `WATCH_RESTART_AFTER`. |
+| `media_session::worker` | The test builds the dead worker directly and counts starts through a per-test spawn closure (`send_with`); no static, no spin. |
+| `location_picker` | `VenueView::Failed` derives from `AskStage::Failed` (`ListData::Failed` gone); the ask holds the query as typed (`initial_query` gone); the nearby place to return to lives in `SearchInput::{Typing, Settled} { back }` (`no_search_location` gone). A query typed before the first fix is sent around the fix (05-002). |
+| `gift_manage` | `GiftListFetch<T>::Answered(Vec<T>)` holds the list (`gifts()` and `premium_options()` read it); `SendStage::Open { recipient, step: SendStep }` holds the recipient. |
+| `main.rs` | The wake subscription, the first window open, the macOS menu install and the tray/chrome loop are held in globals (`WakeWatch`, `OpeningMainWindow`, `InstallingMenus`, `ChromeLoop`), like `DemoDriver`. |
+| `Lifecycle::Due` | Documented above: due to start, no work in flight; not an in-flight name. |
+| `collapsed_keyboards` | Keyed by `ChatMessage`, like `dismissed_keyboards`. |
+| `paid_messages` | `SaveFailed { retry_at_ms, tries }`: the wait doubles per failure up to `TRUST_RETRY_MAX_MS`. |
+| `background_accounts::switch` | A hand-off stamps `Connecting` with `LiveConnect::started`, so the give-up clock keeps running. |
+| `marketplace` | `accept_quote`, `accept_result` and `fail` take the `RequestId` and check it themselves. |
+
+#### Fix round 3 (r4-04)
+
+| Review item | Change |
+|---|---|
+| `location_picker` venue list | `ListData` keeps answered data only (`Option<ListData>`); `venues()` derives Loading (still locating) or WaitingForLocation from `here`. A settled query with no ask made for it (`unasked_query`) is sent from `request_venues_for_fix` and from `move_ended`. |
+| `ThemeGifts::fail` | A failed first page is `FirstFailed` (Retry), not a whole empty list. A failed next page waits `GIFTS_RETRY_SECS` doubled per failure in a row, up to `GIFTS_RETRY_MAX_SECS` (`failures` rides through `Loading`/`Waiting`). |
+| `GiftPurchase` | `SendingClosed { .. }` stage: closing the box moves `Sending` to it, reopening back; `accept_result` and `fail` return a `BoxlessAnswer` when no box shows the answer, which pushes a `PaymentNotice`. |
+| `CollectionsFetch` | Holds the list (`Ready`, `Loading { held, request }`, `LoadingStale`, `Stale`, `Failed`); a failure is `Failed` with a Retry under the tabs (`retry_gift_collections`). |
+| `SendGiftState` | `gifts_fetch`, `premium_fetch` and `selected` live in `SendStage::Open`. |
+| `passcode::idle` sampler | `note_read` treats a finished `Running` thread as not running, so the next read starts a new one. |
+| `proxy_ops` | `ProxyFetch::{LoadingStale, Failed, FailedStale}`: a failed refetch keeps the stale mark (busy). Replaced by fix round 4: each carries `tries` and the wait is `failed_retry_after(tries)`. A rotation round forgets only `Unavailable` verdicts. |
+| `net_watch` | The listener rereads the route once it is subscribed (on its own thread, never under `WATCHER`). Starts back off: `quick_ends` doubles the wait up to `WATCH_RESTART_MAX`; `Watcher::Refused` covers a thread that would not start. |
+| `GramsHub::revenue` | `Fetch<GramRevenue>` settled by `RequestId`; an error shows "Couldn't load the revenue". |
+| `paid_messages` trust file | Only `NotFound` means no file; other read errors are `TrustFile::LoadFailed { retry_at_ms, tries }` (the wait is `trust_retry_after(tries)`, see fix round 4), nothing is written over the file, and prices agreed to meanwhile join it on the next good read. |
+| `undo_paid_reaction` | A refused undo send shows "Couldn't undo the Star reaction." |
+| `settle_new_chat_stage` | A settled type Save is let go (`forget_new_chat_type_save`). |
+| `Lifecycle::Due { streak }` | `Waiting`'s `since` is gone (it ordered nothing); the variant is renamed to what it is: due to start, no work in flight. |
+| `UnreadMemo`, `BadgeCache` | `Option<(SessionCountKey, value)>`: no value without its key. |
+| `link_handler::read_on_caller` | Goes through `Cell::answered`, which settles a read in flight and wakes its watcher. |
+
+#### Fix round 4 (r4-04)
+
+| Review item | Change |
+|---|---|
+| New chat release decision | `NewChatStage::released_by(now)` is the one decision of what a left stage lets go (the create request, the Save requests); `Release` lives beside it. Test: `a_left_stage_lets_go_of_its_create_or_save`. |
+| Resale notice push | Session-level tests in `src/state/tests/marketplace_notice.rs` drive the result and the error with the box closed (a notice) and open (none); the demo-session reopen mirrors the close. |
+| Location picker "search this area" | Asks the settled or typed query, not `""`. Test: `search_this_area_asks_the_settled_query_and_a_later_pan_sends_nothing`, and the exact-point assertion. |
+| Gift collection tabs | `GiftManageState::shows_collection_tabs` includes a failed first fetch, so the Retry row stays. |
+| Proxy and trust-load back-off | `ProxyFetch` states carry `tries`; the wait doubles up to `FAILED_RETRY_MAX`, and an answer resets it. `TrustFile::LoadFailed { retry_at_ms, tries }` uses `trust_retry_after(tries)`. These replace the matching round 3 rows. |
+| Trust file driver test | `an_unreadable_trust_file_is_not_written_over_and_is_read_after_the_wait`. |
+| Allow line | `WithdrawalState::Pending` restored byte for byte at its original place in `stage-enums-allow.txt`. |
+
+#### Fix round 5 (r4-04)
+
+| Review item | Change |
+|---|---|
+| Allow line | The reworded last line is deleted; the base line is back at its original position, so the diff to base has only removals. |
+| Decisions doc | This round 4 table, and the two stale round 3 rows updated. |
+| Driver test clock | The trust-file driver test passes a fixed time to `paid_trust_tick`; it reads no wall clock. |
+| Unsent proxy retry | `NotSent` and `NotSentStale` carry `tries`, so a retry that could not be sent keeps the failure count. Test: `an_unsent_retry_keeps_the_failure_count`. |
+| `set_new_chat_stage` | Calls `NewChatStage::released_by` like `settle_new_chat_stage`: one decision site. |
+
+#### Fix round 6 (r4-04)
+
+| Review item | Change |
+|---|---|
+| Wall clock in `a_trusted_price_whose_write_failed_is_written_again_after_the_wait` | The test drives fixed times (`now`, `now + TRUST_RETRY_MS - 1`, `now + TRUST_RETRY_MS`) and holds no `unix_ms_now`. |
+| `src/main.rs` (hotspot) | Restored to base. The g-476/g-477 and `main.rs` rows above live on `claude/sweep-r4-04-main` pending the owner's hotspot decision (it needs the `hotspot-ok` label). The base line `detached:run_screenshot_demo 2` is back in `scripts/owned-timers-baseline.txt`. |
+| `src/ui/app_demo.rs` (hotspot) | Restored to base. `link_handler::demo_pin` takes `impl Into<DemoPin>`, with `From<Option<LinkHandlerState>> for DemoPin`. |

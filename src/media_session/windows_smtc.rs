@@ -10,8 +10,7 @@
 //! the media keys are simply not wired.
 
 use super::{Command, NowPlaying, push_command};
-use std::sync::OnceLock;
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::Receiver;
 use windows::Foundation::{TimeSpan, TypedEventHandler};
 use windows::Media::Playback::MediaPlayer;
 use windows::Media::{
@@ -23,15 +22,10 @@ use windows::Media::{
 use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx};
 use windows::core::HSTRING;
 
-static WORKER: OnceLock<Sender<Option<NowPlaying>>> = OnceLock::new();
+static WORKER: super::worker::Worker = super::worker::Worker::new();
 
 pub(super) fn set(info: Option<&NowPlaying>) {
-    let sender = WORKER.get_or_init(|| {
-        let (tx, rx) = channel::<Option<NowPlaying>>();
-        let _ = crate::thread_guard::spawn_guarded("smtc", move || run(rx));
-        tx
-    });
-    let _ = sender.send(info.cloned());
+    WORKER.send("smtc", run, info);
 }
 
 fn run(rx: Receiver<Option<NowPlaying>>) {

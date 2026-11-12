@@ -25,7 +25,7 @@ use quill::group_type::{GroupTypeData, USERNAME_MAX, plan_group_type_save};
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
 use quill::new_chat::{
-    NewChatBack, NewChatInvalid, NewChatKind, NewChatStage, NewChatStep, NewChatView,
+    NewChatBack, NewChatInvalid, NewChatKind, NewChatStage, NewChatStep, NewChatView, Release,
     TypeSaveStage, plan_new_chat, view,
 };
 
@@ -292,7 +292,7 @@ impl QuillApp {
     }
 
     /// Take the session's answers into the dialog's stage. The create
-    /// request the stage held is let go once the stage has left it.
+    /// request or Save the stage held is let go once the stage has left it.
     fn settle_new_chat_stage(&mut self) {
         let Some(settled) = self
             .admin
@@ -306,32 +306,31 @@ impl QuillApp {
             return;
         };
         let left = std::mem::replace(&mut dialog.stage, settled);
-        if let NewChatStage::Creating { request, .. } = left
-            && !matches!(&dialog.stage, NewChatStage::Creating { request: now, .. } if *now == request)
-            && let Some(live) = self.live.as_mut()
-        {
-            live.driver.abandon_new_chat(request);
+        let now = &dialog.stage;
+        // The create or Save the stage left is let go; a Save that settled
+        // does not leave its rows for the session.
+        let release = left.released_by(now);
+        let (Some(release), Some(live)) = (release, self.live.as_mut()) else {
+            return;
+        };
+        match release {
+            Release::Create(request) => live.driver.abandon_new_chat(request),
+            Release::Save(sent) => live.driver.forget_new_chat_type_save(&sent),
         }
     }
 
     fn set_new_chat_stage(&mut self, stage: NewChatStage, cx: &mut Context<Self>) {
-        let left = self.new_chat_dialog_mut().map(|dialog| {
+        let release = self.new_chat_dialog_mut().and_then(|dialog| {
             let left = std::mem::replace(&mut dialog.stage, stage);
             dialog.search_input.update(cx, |_, cx| cx.notify());
-            left
+            left.released_by(&dialog.stage)
         });
         // The answer of the create or Save the stage waited for is in the
         // next step.
-        if let Some(live) = self.live.as_mut() {
-            match left {
-                Some(NewChatStage::Creating { request, .. }) => {
-                    live.driver.abandon_new_chat(request)
-                }
-                Some(NewChatStage::Type {
-                    save: TypeSaveStage::Saving(sent),
-                    ..
-                }) => live.driver.forget_new_chat_type_save(&sent),
-                _ => {}
+        if let (Some(release), Some(live)) = (release, self.live.as_mut()) {
+            match release {
+                Release::Create(request) => live.driver.abandon_new_chat(request),
+                Release::Save(sent) => live.driver.forget_new_chat_type_save(&sent),
             }
         }
         cx.notify();

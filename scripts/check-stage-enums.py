@@ -14,8 +14,12 @@ hold what ends it:
 
 - `bare`: the variant has no data at all;
 - `unkeyed`: the variant has data, but no `RequestId`, `Task`,
-  `JoinHandle`, `Subscription`, channel end or deadline in it,
-  or in the types it names. A variant named `Downloading` also counts a
+  `JoinHandle`, `Subscription`, channel end or deadline (an `Instant`, or a
+  field named `deadline`, `retry_at_*`, `commit_at_*` or `*_until_*`) in it, or in the
+  types it names. A field typed by one of the enum's own generic
+  parameters (`enum Lifecycle<R> { Running(R) }`) counts, unless the enum is
+  also named with `()` somewhere in `src/` (`Lifecycle<()>`): then the stage
+  holds nothing there. A variant named `Downloading` also counts a
   `FileId`, as a direct field or a field of a type it names directly (a
   download tracked by TDLib's file id: `media.downloads` holds its end);
 - `optional`: the only request in it is an `Option<RequestId>`: a stage
@@ -79,6 +83,8 @@ IN_FLIGHT = set(
 )
 CARRIER = re.compile(
     r"\b(?:RequestId|Task|TaskHold|RenderJob|JoinHandle|Subscription|Receiver|Sender|Instant|SystemTime)\b"
+    # A deadline held as a number: `commit_at_ms`, `retry_at_secs`, `deadline`.
+    r"|\b(?:deadline|(?:retry|commit)_at_\w+|\w+_until_\w+)\s*:"
 )
 FILE_ID = re.compile(r"\bFileId\b")
 OPTIONAL_REQUEST = re.compile(r"Option\s*<\s*(?:[\w:]*::)?RequestId\s*>")
@@ -88,7 +94,8 @@ NOT_A_STAGE = re.compile(
 )
 RAW_ID = re.compile(r"\b(?:request|extra|request_id|generation|serial)\s*:\s*(?:Option\s*<\s*)?[ui]64\b")
 TYPE = re.compile(r"\b(?:struct|enum)\s+([A-Z]\w*)\s*(?:<[^{;(]*>)?\s*(?:where[^{;(]*)?([({])")
-ENUM = re.compile(r"\benum\s+([A-Z]\w*)\s*(?:<[^{;]*>)?\s*(?:where[^{;]*)?\{")
+ENUM = re.compile(r"\benum\s+([A-Z]\w*)\s*(<[^{;]*?>)?\s*(?:where[^{;]*)?\{")
+GENERIC = re.compile(r"(?:^|[<,])\s*([A-Z]\w*)\s*(?=[,=:>])")
 ATTR = re.compile(r"#\[[^\]]*\]")
 VARIANT = re.compile(r"([A-Z]\w*)\s*(.*)$", re.S)
 NAME = re.compile(r"\b[A-Z]\w*\b")
@@ -135,6 +142,11 @@ def holds_file(data, types):
     )
 
 
+def generic_field(data, params, empty):
+    """Whether `data` holds a value of one of the enum's generic parameters."""
+    return not empty and any(re.search(rf"\b{name}\b", data) for name in params)
+
+
 def hits(root):
     files = list(shape_guard.source(root))
     types = {}
@@ -149,6 +161,7 @@ def hits(root):
         for match in ENUM.finditer(text):
             if NOT_A_STAGE.search(match.group(1)):
                 continue
+            params = set(GENERIC.findall(match.group(2) or ""))
             brace = match.end() - 1
             body = text[brace + 1 : shape_guard.closing(text, brace)]
             offset = brace + 1
@@ -165,7 +178,13 @@ def hits(root):
                     yield f"bare:{match.group(1)}::{name}", path, line
                 elif optional and len(optional) == len(re.findall(r"\bRequestId\b", data)):
                     yield f"optional:{match.group(1)}::{name}", path, line
-                elif not carries(data, types) and not (name == "Downloading" and holds_file(data, types)):
+                elif (
+                    not carries(data, types)
+                    and not (name == "Downloading" and holds_file(data, types))
+                    and not generic_field(
+                        data, params, any(re.search(rf"\b{match.group(1)}\s*<\s*\(\s*\)\s*>", t) for _, t in files)
+                    )
+                ):
                     yield f"unkeyed:{match.group(1)}::{name}", path, line
 
 

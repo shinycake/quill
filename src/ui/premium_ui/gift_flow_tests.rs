@@ -49,14 +49,13 @@ fn buy_by_name_from_send_gift_buys_for_its_recipient(cx: &mut TestAppContext) {
         .update(cx, |app, window, cx| {
             if let Some(session) = app.demo_session.as_mut() {
                 session.open_chat(ChatId(11));
-                let send = &mut session.payments.gifts_manage.send;
-                send.stage = quill::gift_manage::SendStage::Idle;
-                send.recipient = Some(GiftRecipient {
-                    sender: MessageSender::User { user_id: 501 },
-                    name: "Ada".into(),
-                    is_self: false,
-                    is_channel: false,
-                });
+                session.payments.gifts_manage.send =
+                    quill::gift_manage::SendGiftState::opened_for(GiftRecipient {
+                        sender: MessageSender::User { user_id: 501 },
+                        name: "Ada".into(),
+                        is_self: false,
+                        is_channel: false,
+                    });
             }
             let chat = app.send_gift_recipient_chat();
             assert_eq!(chat, Some(ChatId(501)));

@@ -110,9 +110,8 @@ pub enum GiftValueStage {
     /// Nothing asked yet.
     #[default]
     Idle,
-    /// The request with this `@extra` is in flight; any other answer is
-    /// stale.
-    Loading(u64),
+    /// This request is in flight; any other answer is stale.
+    Loading(RequestId),
     /// Why the last request failed, shown under the Value row.
     Failed(String),
     /// The value is known; its box is closed.
@@ -194,7 +193,7 @@ impl GiftValueLookup {
 
     /// An answer for request `id` arrived; `false` when it is stale (the
     /// user asked about another gift meanwhile) and was dropped.
-    pub fn land(&mut self, id: u64, info: GiftValueInfo) -> bool {
+    pub fn land(&mut self, id: RequestId, info: GiftValueInfo) -> bool {
         if self.stage != GiftValueStage::Loading(id) {
             return false;
         }
@@ -203,7 +202,7 @@ impl GiftValueLookup {
     }
 
     /// Request `id` failed; stale failures are dropped like answers.
-    pub fn fail(&mut self, id: u64, reason: String) -> bool {
+    pub fn fail(&mut self, id: RequestId, reason: String) -> bool {
         if self.stage != GiftValueStage::Loading(id) {
             return false;
         }

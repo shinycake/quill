@@ -341,7 +341,7 @@ pub struct PaymentRequest {
 /// Pure logic: unit-tested.
 pub fn active_custom_keyboard(
     messages: &std::collections::BTreeMap<i64, HistoryMessage>,
-    dismissed: &std::collections::HashSet<(i64, i64)>,
+    dismissed: &std::collections::HashSet<crate::ids::ChatMessage>,
 ) -> Option<(ChatId, MessageId, ReplyKeyboard)> {
     let mut active: Option<(ChatId, MessageId, ReplyKeyboard)> = None;
     for message in messages.values() {
@@ -353,7 +353,9 @@ pub fn active_custom_keyboard(
             _ => {}
         }
     }
-    active.filter(|(chat_id, message_id, _)| !dismissed.contains(&(chat_id.0, message_id.0)))
+    active.filter(|(chat_id, message_id, _)| {
+        !dismissed.contains(&crate::ids::ChatMessage::new(*chat_id, *message_id))
+    })
 }
 
 impl ForwardResult {

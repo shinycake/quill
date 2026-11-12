@@ -109,7 +109,7 @@ impl QuillApp {
                     !self
                         .message_ui
                         .dismissed_keyboards
-                        .contains(&(chat_id.0, message_id.0))
+                        .contains(&quill::ids::ChatMessage::new(chat_id, message_id))
                 })
         };
         if pending.chat_id == chat_id

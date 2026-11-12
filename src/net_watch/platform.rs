@@ -39,7 +39,9 @@ mod backend {
         crate::thread_guard::ffi_boundary((), super::super::network_changed);
     }
 
-    pub(in crate::net_watch) fn watch() {
+    /// Listens until the run loop ends; `subscribed` runs once the
+    /// notifications are on, so a change before them is read again.
+    pub(in crate::net_watch) fn watch(subscribed: fn()) {
         let name = CFString::new("quill-net-watch");
         // SAFETY: `name` outlives the call, null is the default allocator,
         // and a store with no context hands the callout a null `info`,
@@ -91,6 +93,7 @@ mod backend {
         // SAFETY: `kCFRunLoopCommonModes` is an immutable constant.
         let mode = unsafe { kCFRunLoopCommonModes };
         CFRunLoop::get_current().add_source(&source, mode);
+        subscribed();
         CFRunLoop::run_current();
     }
 }
@@ -114,8 +117,11 @@ mod backend {
         super::super::netlink::open(GROUPS as u32)
     }
 
-    pub(in crate::net_watch) fn watch() {
+    /// Listens until the socket fails; `subscribed` runs once the socket is
+    /// open, so a change before it is read again.
+    pub(in crate::net_watch) fn watch(subscribed: fn()) {
         if let Ok(socket) = subscribe() {
+            subscribed();
             listen(&socket, |batch| {
                 heard(batch);
                 ControlFlow::Continue(())
@@ -313,8 +319,9 @@ mod backend {
     }
 
     /// The callbacks run on system threads for as long as Quill does.
-    pub(in crate::net_watch) fn watch() {
+    pub(in crate::net_watch) fn watch(subscribed: fn()) {
         std::mem::forget(subscribe(&NETWORK));
+        subscribed();
     }
 }
 
@@ -322,7 +329,7 @@ mod backend {
 mod backend {
     pub(in crate::net_watch) const EVENTS_COVER_PROXY: bool = false;
 
-    pub(in crate::net_watch) fn watch() {}
+    pub(in crate::net_watch) fn watch(_subscribed: fn()) {}
 }
 
 pub(super) use backend::{EVENTS_COVER_PROXY, watch};

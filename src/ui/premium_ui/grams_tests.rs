@@ -39,7 +39,7 @@ fn new_app_with_shell(
 fn grams_open(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
     app.read_with(vcx, |app, _| {
         app.session()
-            .is_some_and(|s| s.payments.hub.grams.view.is_open())
+            .is_some_and(|s| s.payments.hub.grams.is_open())
     })
 }
 
@@ -163,7 +163,7 @@ fn an_unknown_peer_shows_a_placeholder_then_a_name(cx: &mut TestAppContext) {
 fn withdraw(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<GramWithdraw> {
     app.read_with(vcx, |app, _| {
         app.session()
-            .and_then(|s| s.payments.hub.grams.withdraw.clone())
+            .and_then(|s| s.payments.hub.grams.withdraw().cloned())
     })
 }
 
@@ -202,7 +202,7 @@ fn collect_opens_the_password_box_over_the_screen(cx: &mut TestAppContext) {
     // An error stays on screen under the field.
     app.update_in(vcx, |app, _, cx| {
         if let Some(grams) = app.demo_session.as_mut().map(|s| &mut s.payments.hub.grams) {
-            grams.withdraw = Some(GramWithdraw::idle(Some(ExportError::WrongPassword)));
+            grams.put_withdraw(GramWithdraw::idle(Some(ExportError::WrongPassword)));
         }
         cx.notify();
     });
@@ -228,7 +228,7 @@ fn collect_opens_the_password_box_over_the_screen(cx: &mut TestAppContext) {
     // The security check replaces the box when there is no password.
     app.update_in(vcx, |app, _, cx| {
         if let Some(grams) = app.demo_session.as_mut().map(|s| &mut s.payments.hub.grams) {
-            grams.withdraw = Some(GramWithdraw::SecurityCheck { later: false });
+            grams.put_withdraw(GramWithdraw::SecurityCheck { later: false });
         }
         cx.notify();
     });
@@ -248,7 +248,7 @@ fn the_withdrawal_url_opens_only_through_the_link_policy(cx: &mut TestAppContext
         let url = url.to_string();
         app.update_in(vcx, |app, _, cx| {
             if let Some(grams) = app.demo_session.as_mut().map(|s| &mut s.payments.hub.grams) {
-                grams.withdraw = Some(GramWithdraw::Finished(WithdrawOutcome::Url(url)));
+                grams.put_withdraw(GramWithdraw::Finished(WithdrawOutcome::Url(url)));
             }
             cx.notify();
         });
@@ -281,7 +281,7 @@ fn the_withdrawal_url_opens_only_through_the_link_policy(cx: &mut TestAppContext
     );
     let left = app.read_with(vcx, |app, _| {
         app.session()
-            .and_then(|s| s.payments.hub.grams.withdraw.clone())
+            .and_then(|s| s.payments.hub.grams.withdraw().cloned())
     });
     assert_eq!(left, None);
 }

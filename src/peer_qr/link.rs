@@ -79,7 +79,7 @@ pub struct OwnLinkInputs<'a> {
 
 /// Where the current user's link stands.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum OwnLinkState {
+pub enum OwnLinkView {
     Ready(OwnQrLink),
     /// The phone privacy rules are still loading.
     Waiting,
@@ -99,10 +99,10 @@ pub fn countdown_text(remaining: i64) -> String {
 /// tdesktop `OwnQrLinkState::refresh`: the username link, else the phone
 /// link when the number is visible (not hidden from everyone with
 /// finding by number limited), else a temporary contact link.
-pub fn own_link(inputs: OwnLinkInputs<'_>) -> OwnLinkState {
+pub fn own_link(inputs: OwnLinkInputs<'_>) -> OwnLinkView {
     let username = inputs.username.trim_start_matches('@');
     if !username.is_empty() {
-        return OwnLinkState::Ready(OwnQrLink {
+        return OwnLinkView::Ready(OwnQrLink {
             kind: OwnLinkKind::Username,
             link: profile_link(username),
             label: username_label(username),
@@ -110,12 +110,12 @@ pub fn own_link(inputs: OwnLinkInputs<'_>) -> OwnLinkState {
         });
     }
     let (Some(show), Some(find)) = (inputs.show_phone, inputs.find_by_phone) else {
-        return OwnLinkState::Waiting;
+        return OwnLinkView::Waiting;
     };
     let digits: String = inputs.phone.chars().filter(char::is_ascii_digit).collect();
     let hidden = show == PrivacyWho::Nobody && find != PrivacyWho::Everybody;
     if !digits.is_empty() && !hidden {
-        return OwnLinkState::Ready(OwnQrLink {
+        return OwnLinkView::Ready(OwnQrLink {
             kind: OwnLinkKind::Phone,
             link: format!("https://t.me/+{digits}"),
             label: inputs.phone_label.to_string(),
@@ -123,23 +123,23 @@ pub fn own_link(inputs: OwnLinkInputs<'_>) -> OwnLinkState {
         });
     }
     match inputs.contact {
-        UserLinkFetch::Ready(data) if data.url.is_empty() => OwnLinkState::Unavailable,
-        UserLinkFetch::Ready(data) if data.expires_at == 0 => OwnLinkState::Ready(OwnQrLink {
+        UserLinkFetch::Ready(data) if data.url.is_empty() => OwnLinkView::Unavailable,
+        UserLinkFetch::Ready(data) if data.expires_at == 0 => OwnLinkView::Ready(OwnQrLink {
             kind: OwnLinkKind::Contact,
             link: data.url.clone(),
             label: String::new(),
             expires_at: 0,
         }),
         UserLinkFetch::Ready(data) if data.expires_at > inputs.now => {
-            OwnLinkState::Ready(OwnQrLink {
+            OwnLinkView::Ready(OwnQrLink {
                 kind: OwnLinkKind::Contact,
                 link: data.url.clone(),
                 label: countdown_text(data.expires_at - inputs.now),
                 expires_at: data.expires_at,
             })
         }
-        UserLinkFetch::Failed(_) => OwnLinkState::Unavailable,
-        UserLinkFetch::Loading(_) => OwnLinkState::Waiting,
-        UserLinkFetch::Idle | UserLinkFetch::Ready(_) => OwnLinkState::NeedsContactLink,
+        UserLinkFetch::Failed(_) => OwnLinkView::Unavailable,
+        UserLinkFetch::Loading(_) => OwnLinkView::Waiting,
+        UserLinkFetch::Idle | UserLinkFetch::Ready(_) => OwnLinkView::NeedsContactLink,
     }
 }

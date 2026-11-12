@@ -412,7 +412,7 @@ impl ChatOutcome {
     /// it had got (only the writing step has saved messages).
     pub(super) fn after_error(progress: &Progress, reason: String) -> Self {
         match progress.stage {
-            Stage::Writing { done, .. } if done > 0 => Self::Partial {
+            Stage::Written { done, .. } if done > 0 => Self::Partial {
                 messages: done,
                 reason,
             },
@@ -470,7 +470,7 @@ fn export_chats<T: Tdlib>(
     for (index, dialog) in dialogs.iter().enumerate() {
         // The next chat starts from its own first step; only the file
         // counts carry over from the one before.
-        chat_progress.stage = Stage::Starting;
+        chat_progress.stage = Stage::Collecting { read: 0 };
         let chat_stage = |chat: Progress| AccountProgress {
             stage: Some(AccountStage::Chats {
                 index,

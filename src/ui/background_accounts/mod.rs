@@ -473,7 +473,12 @@ impl QuillApp {
             Ok(mut live) => {
                 self.disk.seed(&mut live.driver);
                 live.bridge.wake_with(&quill::wake::BACKGROUND_UPDATES);
-                (Some(live), BackgroundStatus::Connecting)
+                (
+                    Some(live),
+                    BackgroundStatus::Connecting {
+                        since: Instant::now(),
+                    },
+                )
             }
             Err(ConnectBlocker::DiskFull) => {
                 self.background.prepare.refuse(&key);
@@ -663,7 +668,8 @@ impl QuillApp {
                     .iter()
                     .filter_map(rich_html_note),
             );
-            let mut status = background_status(&live.driver.session.auth);
+            let mut status =
+                background_status(&live.driver.session.auth, now).at(&client.status, now);
             if live.bridge.stopped_unexpectedly() {
                 status = BackgroundStatus::Failed(
                     tr(keys::Q_REST_CONNECTION_TO_TELEGRAM_WAS_CLOSED).into(),

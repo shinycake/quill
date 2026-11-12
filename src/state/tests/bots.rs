@@ -252,12 +252,15 @@ fn b1_active_custom_keyboard_rules() {
     apply_json(&mut session, &seq, &sink, &show(401));
     apply_json(&mut session, &seq, &sink, &show(402));
     let messages = &session.histories.get(&21).expect("history").messages;
-    let none: HashSet<(i64, i64)> = HashSet::new();
+    let none: HashSet<crate::ids::ChatMessage> = HashSet::new();
     // Newest show-keyboard message wins.
     let active = active_custom_keyboard(messages, &none).expect("keyboard");
     assert_eq!(active.1, MessageId(402));
     // A dismissed one-time keyboard stays hidden.
-    let dismissed: HashSet<(i64, i64)> = [(21, 402)].into_iter().collect();
+    let dismissed: HashSet<crate::ids::ChatMessage> =
+        [crate::ids::ChatMessage::new(ChatId(21), MessageId(402))]
+            .into_iter()
+            .collect();
     assert!(active_custom_keyboard(messages, &dismissed).is_none());
     // A newer remove-keyboard clears everything.
     apply_json(&mut session, &seq, &sink, &remove(403));

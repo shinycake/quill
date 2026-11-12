@@ -85,6 +85,7 @@ fn let_the_history_settle(vcx: &mut VisualTestContext) {
 }
 
 fn unwatched(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, key: (i64, i64)) -> bool {
+    let key = quill::ids::ChatMessage::new(quill::ids::ChatId(key.0), quill::ids::MessageId(key.1));
     app.update(vcx, |app, _| {
         app.session()
             .is_some_and(|session| session.stickers.effects.watch.is_unwatched(key))

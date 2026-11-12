@@ -98,12 +98,12 @@ fn collections_of_another_owner_are_dropped() {
         )
     };
     apply_json(&mut session, &seq, &sink, &list(first, 7));
-    assert!(session.payments.gifts_manage.collections.is_empty());
+    assert!(session.payments.gifts_manage.collections().is_empty());
     assert!(session.payments.gifts_manage.collections_fetch.is_loading());
     fail(&mut session, first, &sink);
     assert!(session.payments.gifts_manage.collections_fetch.is_loading());
     apply_json(&mut session, &seq, &sink, &list(second, 9));
-    assert_eq!(session.payments.gifts_manage.collections.len(), 1);
+    assert_eq!(session.payments.gifts_manage.collections().len(), 1);
     assert!(!session.payments.gifts_manage.collections_fetch.is_loading());
 }
 

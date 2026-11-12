@@ -218,25 +218,25 @@ fn only_an_https_fragment_link_is_offered() {
 fn stale_answers_and_failures_are_dropped() {
     let mut lookup = GiftValueLookup {
         name: "PlushPepe-1".into(),
-        stage: GiftValueStage::Loading(7),
+        stage: GiftValueStage::Loading(RequestId(7)),
         ..GiftValueLookup::default()
     };
-    assert!(!lookup.land(6, fixture(LAST)));
-    assert!(!lookup.fail(6, "old".into()));
+    assert!(!lookup.land(RequestId(6), fixture(LAST)));
+    assert!(!lookup.fail(RequestId(6), "old".into()));
     assert!(lookup.is_loading() && lookup.info().is_none() && lookup.error().is_none());
-    assert!(lookup.fail(7, "FLOOD_WAIT".into()));
+    assert!(lookup.fail(RequestId(7), "FLOOD_WAIT".into()));
     assert_eq!(lookup.error(), Some("FLOOD_WAIT"));
     assert!(!lookup.is_open());
     // Not loading any more: a late answer for the same id is dropped too.
-    assert!(!lookup.land(7, fixture(LAST)));
+    assert!(!lookup.land(RequestId(7), fixture(LAST)));
 
-    lookup.stage = GiftValueStage::Loading(8);
-    assert!(lookup.land(8, fixture(LAST)));
+    lookup.stage = GiftValueStage::Loading(RequestId(8));
+    assert!(lookup.land(RequestId(8), fixture(LAST)));
     assert!(lookup.is_open() && !lookup.is_loading() && lookup.error().is_none());
     // Closed, it stays known; an answer is only taken while a request runs.
     lookup.close();
     assert!(!lookup.is_open() && lookup.info().is_some());
-    assert!(!lookup.land(8, fixture(LAST)));
+    assert!(!lookup.land(RequestId(8), fixture(LAST)));
 }
 
 #[test]

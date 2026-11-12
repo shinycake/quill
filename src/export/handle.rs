@@ -327,7 +327,7 @@ impl Drop for WorkerLink {
 }
 
 /// Change the slot a poll pass reads, and wake that pass: stretches of the
-/// Writing stage send no request, so nothing else would.
+/// Written stage send no request, so nothing else would.
 pub(crate) fn publish<P>(slot: &Mutex<P>, wake: &Signal, change: impl FnOnce(&mut P)) {
     change(&mut slot.lock_or_recover());
     wake.poke();

@@ -121,7 +121,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if self.fetch_gift_collections(owner).is_err() {
             // A refused send keeps the wish: the next ingest asks again.
-            self.session.payments.gifts_manage.collections_fetch = CollectionsFetch::Stale;
+            self.session
+                .payments
+                .gifts_manage
+                .collections_fetch
+                .unsent();
         }
     }
 
@@ -161,6 +165,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         // `Stale` stays until the send went out (`Loading` is set there), so a
         // refused send keeps the mark.
         self.fetch_gift_collections(owner).map(Some)
+    }
+
+    /// Retry under the collection tabs after a failed fetch: asks again.
+    pub fn retry_gift_collections(&mut self) -> Result<(), ConnectSendError> {
+        let manage = &self.session.payments.gifts_manage;
+        let owner = self.session.payments.hub.received.owner;
+        let (true, true, Some(owner)) = (
+            manage.collections_fetch.is_failed(),
+            self.chats_path_active(),
+            owner,
+        ) else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        self.fetch_gift_collections(owner).map(|_| ())
     }
 
     /// Switch the open gifts list to a collection (`0` = all gifts).
@@ -468,7 +486,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn create_gift_collection(&mut self, name: &str) -> Result<RequestId, ConnectSendError> {
         let manage = &self.session.payments.gifts_manage;
         if !valid_collection_name(name)
-            || manage.collections.len() as i64 >= manage.limits.collections()
+            || manage.collections().len() as i64 >= manage.limits.collections()
         {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -592,18 +610,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         // for the same recipient shows that stage again; another recipient
         // waits for the answer instead of dropping it.
         if send.sending() {
-            if send.recipient.as_ref() != Some(&recipient) {
+            if send.recipient() != Some(&recipient) {
                 return Err(ConnectSendError::InvalidRequest);
             }
             // box-host: the UI's open names the window (`open_send_gift*`)
             send.reopen();
             return Ok(());
         }
-        *send = SendGiftState {
-            stage: SendStage::Idle,
-            recipient: Some(recipient),
-            ..Default::default()
-        };
+        *send = SendGiftState::opened_for(recipient);
         self.ask_send_gifts();
         if with_premium {
             self.ask_premium_gift_options();
@@ -619,10 +633,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Payments(PaymentsPurpose::GetAvailableGifts),
             None,
         );
-        self.session.payments.gifts_manage.send.gifts_fetch = GiftListFetch::Asking(extra);
+        self.session
+            .payments
+            .gifts_manage
+            .send
+            .set_gifts_fetch(GiftListFetch::Asking(extra));
         if let Err(err) = self.send_json_request(extra, &rq::get_available_gifts(extra)) {
             let send = &mut self.session.payments.gifts_manage.send;
-            send.gifts_fetch = GiftListFetch::Failed(err.stage_line());
+            send.set_gifts_fetch(GiftListFetch::Failed(err.stage_line()));
         }
     }
 
@@ -631,12 +649,19 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Payments(PaymentsPurpose::GetPremiumGiftOptions),
             None,
         );
-        self.session.payments.gifts_manage.send.premium_fetch = GiftListFetch::Asking(extra);
+        self.session
+            .payments
+            .gifts_manage
+            .send
+            .set_premium_fetch(GiftListFetch::Asking(extra));
         if let Err(err) =
             self.send_json_request(extra, &rq::get_premium_gift_payment_options(extra))
         {
-            self.session.payments.gifts_manage.send.premium_fetch =
-                GiftListFetch::Failed(err.stage_line());
+            self.session
+                .payments
+                .gifts_manage
+                .send
+                .set_premium_fetch(GiftListFetch::Failed(err.stage_line()));
         }
     }
 
@@ -647,8 +672,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !send.is_open() || !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let gifts = matches!(send.gifts_fetch, GiftListFetch::Failed(_));
-        let premium = matches!(send.premium_fetch, GiftListFetch::Failed(_));
+        let (gifts, premium) = send.failed_lists();
         if gifts {
             self.ask_send_gifts();
         }
@@ -667,9 +691,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if send.sending() {
             return;
         }
-        send.selected = id.filter(|id| send.gifts.iter().any(|g| g.id == *id));
+        let picked = id.filter(|id| send.gifts().iter().any(|g| g.id == *id));
+        send.select(picked);
         if send.is_open() {
-            send.stage = SendStage::Idle;
+            send.set_step(SendStep::Idle);
         }
     }
 
@@ -685,8 +710,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<RequestId, ConnectSendError> {
         let send = &self.session.payments.gifts_manage.send;
         let (Some(recipient), Some(gift)) = (
-            send.recipient.clone(),
-            send.gifts.iter().find(|g| g.id == gift_id).cloned(),
+            send.recipient().cloned(),
+            send.gifts().iter().find(|g| g.id == gift_id).cloned(),
         ) else {
             return Err(ConnectSendError::InvalidRequest);
         };
@@ -708,7 +733,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Payments(PaymentsPurpose::SendStarGift),
             None,
         );
-        self.session.payments.gifts_manage.send.stage = SendStage::Idle;
+        self.session
+            .payments
+            .gifts_manage
+            .send
+            .set_step(SendStep::Idle);
         let json = rq::send_gift(
             extra,
             gift_id,
@@ -718,7 +747,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             pay_for_upgrade,
         );
         self.send_json_request(extra, &json)?;
-        self.session.payments.gifts_manage.send.stage = SendStage::Sending(extra);
+        self.session
+            .payments
+            .gifts_manage
+            .send
+            .set_step(SendStep::Sending(extra));
         Ok(extra)
     }
 }

@@ -75,19 +75,19 @@ fn a_refused_collections_send_keeps_the_stale_mark() {
     let mut t = Flaky::new();
     let hub = &mut t.driver.session.payments.hub;
     hub.received.owner = Some(MessageSender::User { user_id: 7 });
-    t.driver.session.payments.gifts_manage.collections_fetch = CollectionsFetch::Stale;
+    t.driver.session.payments.gifts_manage.collections_fetch = CollectionsFetch::Stale(Vec::new());
     t.sender.refuse(&["getGiftCollections"]);
     assert!(t.driver.refresh_gift_collections_if_stale().is_err());
     assert_eq!(
         t.driver.session.payments.gifts_manage.collections_fetch,
-        CollectionsFetch::Stale
+        CollectionsFetch::Stale(Vec::new())
     );
     t.sender.refuse(&[]);
     t.driver.refresh_gift_collections_if_stale().unwrap();
     assert_eq!(t.sender.count("getGiftCollections"), 1);
     assert!(matches!(
         t.driver.session.payments.gifts_manage.collections_fetch,
-        CollectionsFetch::Loading(_)
+        CollectionsFetch::Loading { .. }
     ));
 }
 

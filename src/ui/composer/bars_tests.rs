@@ -1058,7 +1058,12 @@ fn a_one_time_keyboard_goes_only_when_its_text_went(cx: &mut TestAppContext) {
     open_chat(&app, vcx, GROUP);
     let dismissed = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext, chat: ChatId| {
         app.read_with(vcx, |app, _| {
-            app.message_ui.dismissed_keyboards.contains(&(chat.0, 1))
+            app.message_ui
+                .dismissed_keyboards
+                .contains(&quill::ids::ChatMessage::new(
+                    chat,
+                    quill::ids::MessageId(1),
+                ))
         })
     };
     // Held back by slow mode: the keyboard stays for another press.

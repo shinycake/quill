@@ -117,7 +117,7 @@ impl TonTx {
             "chatRevenueTransactionTypeFragmentWithdrawal" => {
                 // A withdrawal with no state yet is still pending here.
                 let state = match WithdrawalState::parse(ty.get("state")) {
-                    WithdrawalState::Unknown => WithdrawalState::Pending,
+                    WithdrawalState::Unknown => WithdrawalState::Unsettled,
                     known => known,
                 };
                 TonTxKind::Withdrawal {
@@ -164,7 +164,7 @@ impl TonTx {
         matches!(
             self.kind,
             TonTxKind::Withdrawal {
-                state: WithdrawalState::Pending,
+                state: WithdrawalState::Unsettled,
                 ..
             }
         )
@@ -195,7 +195,7 @@ impl TonTx {
                 state: WithdrawalState::Failed,
             } => format!("{} \u{2014} Not Completed", date(*when)),
             TonTxKind::Withdrawal {
-                state: WithdrawalState::Pending,
+                state: WithdrawalState::Unsettled,
                 ..
             } => "Pending".into(),
             TonTxKind::Withdrawal { date: when, .. } | TonTxKind::Refund { date: when } => {

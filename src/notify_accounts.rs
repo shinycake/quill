@@ -20,6 +20,11 @@ use crate::telegram::envelope::AuthorizationState;
 use crate::tray::badge_cache::SessionCountKey;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
+
+/// A background client that has not left its start after this long is given
+/// up on: it counts as failed, so the account is started again.
+pub const CONNECT_GIVE_UP: Duration = Duration::from_secs(600);
 
 /// tdesktop `System::computeSkipState`: with "All accounts" off, only the
 /// account on screen notifies.
@@ -44,8 +49,8 @@ pub fn account_name_in_title(signed_in_accounts: usize) -> bool {
 /// account list.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BackgroundStatus {
-    /// Restoring the session; no updates yet.
-    Connecting,
+    /// Restoring the session since `since`; no updates yet.
+    Connecting { since: Instant },
     /// Signed in and receiving updates.
     Ready,
     /// The account has no session: it needs the sign-in flow, which only
@@ -62,7 +67,7 @@ impl BackgroundStatus {
     /// Short label for the account list; `None` while nothing needs saying.
     pub fn label(&self) -> Option<&str> {
         match self {
-            Self::Connecting | Self::Ready => None,
+            Self::Connecting { .. } | Self::Ready => None,
             Self::NeedsSignIn => Some("Not signed in"),
             Self::SignedOut => Some("Signed out"),
             Self::Failed(message) => Some(message),
@@ -74,14 +79,31 @@ impl BackgroundStatus {
     pub fn stops_client(&self) -> bool {
         matches!(self, Self::NeedsSignIn | Self::SignedOut | Self::Failed(_))
     }
+
+    /// The status at `now`, given the one before: a start that began earlier
+    /// keeps its start time, and one past [`CONNECT_GIVE_UP`] fails.
+    pub fn at(self, before: &Self, now: Instant) -> Self {
+        let Self::Connecting { since } = self else {
+            return self;
+        };
+        let since = match before {
+            Self::Connecting { since: began } => *began,
+            _ => since,
+        };
+        if now.saturating_duration_since(since) >= CONNECT_GIVE_UP {
+            Self::Failed(tr(keys::Q_REST_CONNECTION_TO_TELEGRAM_WAS_CLOSED).into())
+        } else {
+            Self::Connecting { since }
+        }
+    }
 }
 
 /// Classify a background client's authorization state.
-pub fn background_status(auth: &AuthorizationState) -> BackgroundStatus {
+pub fn background_status(auth: &AuthorizationState, now: Instant) -> BackgroundStatus {
     match auth {
         AuthorizationState::Ready => BackgroundStatus::Ready,
         AuthorizationState::WaitTdlibParameters | AuthorizationState::Unknown(_) => {
-            BackgroundStatus::Connecting
+            BackgroundStatus::Connecting { since: now }
         }
         AuthorizationState::WaitPhoneNumber
         | AuthorizationState::WaitPremiumPurchase { .. }
@@ -193,19 +215,19 @@ thread_local! {
 /// it (`ChatListState::unread_revision`), the badge preferences change, or
 /// another account is asked about.
 #[derive(Debug, Default)]
-pub struct UnreadMemo {
-    key: Option<SessionCountKey>,
-    unread: AccountUnread,
-}
+pub struct UnreadMemo(Option<(SessionCountKey, AccountUnread)>);
 
 impl UnreadMemo {
     pub fn get(&mut self, session: &Session) -> AccountUnread {
         let prefs = &session.settings.badge_prefs;
-        if !SessionCountKey::holds(self.key.as_ref(), session, prefs) {
-            self.unread = AccountUnread::of(session);
-            self.key = Some(SessionCountKey::of(session, prefs));
+        if let Some((key, unread)) = &self.0
+            && SessionCountKey::holds(Some(key), session, prefs)
+        {
+            return *unread;
         }
-        self.unread
+        let unread = AccountUnread::of(session);
+        self.0 = Some((SessionCountKey::of(session, prefs), unread));
+        unread
     }
 }
 

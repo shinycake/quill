@@ -49,44 +49,57 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some(guard) = self.sender.paid_guard() {
             guard.set_state(prices, trusted);
         }
-        self.save_paid_trust();
+        self.save_paid_trust(crate::state::unix_ms_now());
     }
 
-    /// Reads the account's trusted prices once.
-    fn load_paid_trust(&mut self) {
-        if !self.session.payments.paid_messages.trust_unread() {
+    /// Writes the trusted prices again when the last write failed and its
+    /// wait is over. Per tick, in the background too.
+    pub(crate) fn paid_trust_tick(&mut self, now_ms: u64) {
+        self.load_paid_trust(now_ms);
+        self.save_paid_trust(now_ms);
+    }
+
+    /// Reads the account's trusted prices once. Only a missing file means
+    /// there are none; a file that cannot be read is kept as it is and read
+    /// again after a wait.
+    fn load_paid_trust(&mut self, now_ms: u64) {
+        if !self.session.payments.paid_messages.trust_read_due(now_ms) {
             return;
         }
-        let text = std::fs::read_to_string(self.paths.root.join(TRUST_FILE)).ok();
-        self.session
-            .payments
-            .paid_messages
-            .trust_loaded(text.as_deref());
+        let paid = &mut self.session.payments.paid_messages;
+        match std::fs::read_to_string(self.paths.root.join(TRUST_FILE)) {
+            Ok(text) => paid.trust_loaded(Some(&text)),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => paid.trust_loaded(None),
+            Err(_) => paid.trust_load_failed(now_ms),
+        }
         self.sync_paid_guard();
     }
 
     /// Writes the trusted prices when they changed; the file is clean
     /// after, or the write failed and the store says why.
-    fn save_paid_trust(&mut self) {
-        let Some(json) = self.session.payments.paid_messages.trust_to_write() else {
+    fn save_paid_trust(&mut self, now_ms: u64) {
+        let Some(json) = self.session.payments.paid_messages.trust_to_write(now_ms) else {
             return;
         };
         let path = self.paths.root.join(TRUST_FILE);
         let written = std::fs::create_dir_all(&self.paths.root)
             .and_then(|()| std::fs::write(path, json))
             .map_err(|err| format!("Couldn't remember this price: {err}"));
-        self.session.payments.paid_messages.trust_written(written);
+        self.session
+            .payments
+            .paid_messages
+            .trust_written(written, now_ms);
     }
 
     /// "Don't ask me again": trusts `stars` per message in a chat and
     /// keeps it across restarts.
     pub fn remember_paid_trust(&mut self, chat_id: ChatId, stars: i64) {
-        self.load_paid_trust();
+        self.load_paid_trust(crate::state::unix_ms_now());
         self.session
             .payments
             .paid_messages
             .remember_trust(chat_id.0, stars);
-        self.save_paid_trust();
+        self.save_paid_trust(crate::state::unix_ms_now());
         self.sync_paid_guard();
     }
 
@@ -135,7 +148,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Ok(());
         }
-        self.load_paid_trust();
+        self.load_paid_trust(crate::state::unix_ms_now());
         let Some(chat_id) = self.session.open_chat_id() else {
             return Ok(());
         };

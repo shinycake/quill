@@ -12,10 +12,11 @@
 //! not the effect then plays (power saving can skip it).
 #![deny(clippy::indexing_slicing)]
 
+use crate::ids::ChatMessage;
 use std::collections::{HashMap, VecDeque};
 
-/// A message: chat id and message id.
-pub type MessageKey = (i64, i64);
+/// A message of one chat.
+pub type MessageKey = ChatMessage;
 
 /// Messages remembered in each stage, at most. Past it the oldest is
 /// forgotten; a forgotten message at worst plays or skips its effect once
@@ -146,71 +147,76 @@ impl EffectWatch {
 #[cfg(test)]
 mod tests {
     use super::{EffectArrival, EffectWatch, MAX_HELD, MAX_KEYS};
+    use crate::ids::{ChatId, ChatMessage, MessageId};
+
+    fn m(chat: i64, message: i64) -> ChatMessage {
+        ChatMessage::new(ChatId(chat), MessageId(message))
+    }
 
     #[test]
     fn only_messages_sent_here_and_unread_incoming_ones_start_unwatched() {
         let mut watch = EffectWatch::default();
-        watch.note((1, 10), EffectArrival::SentHere);
-        watch.note((1, 11), EffectArrival::SentElsewhere);
-        watch.note((1, 12), EffectArrival::Incoming { unread: true });
-        watch.note((1, 13), EffectArrival::Incoming { unread: false });
-        assert!(watch.is_unwatched((1, 10)));
-        assert!(!watch.is_unwatched((1, 11)));
-        assert!(watch.is_unwatched((1, 12)));
-        assert!(!watch.is_unwatched((1, 13)));
+        watch.note(m(1, 10), EffectArrival::SentHere);
+        watch.note(m(1, 11), EffectArrival::SentElsewhere);
+        watch.note(m(1, 12), EffectArrival::Incoming { unread: true });
+        watch.note(m(1, 13), EffectArrival::Incoming { unread: false });
+        assert!(watch.is_unwatched(m(1, 10)));
+        assert!(!watch.is_unwatched(m(1, 11)));
+        assert!(watch.is_unwatched(m(1, 12)));
+        assert!(!watch.is_unwatched(m(1, 13)));
     }
 
     #[test]
     fn an_effect_plays_by_itself_once() {
         let mut watch = EffectWatch::default();
-        watch.note((1, 12), EffectArrival::Incoming { unread: true });
-        assert!(watch.mark_watched((1, 12)));
+        watch.note(m(1, 12), EffectArrival::Incoming { unread: true });
+        assert!(watch.mark_watched(m(1, 12)));
         // Shown again (scrolled back, chat reopened): not again.
-        assert!(!watch.mark_watched((1, 12)));
-        assert!(!watch.is_unwatched((1, 12)));
+        assert!(!watch.mark_watched(m(1, 12)));
+        assert!(!watch.is_unwatched(m(1, 12)));
     }
 
     #[test]
     fn a_message_stored_again_after_it_played_stays_watched() {
         let mut watch = EffectWatch::default();
-        watch.note((1, 12), EffectArrival::Incoming { unread: true });
-        watch.mark_watched((1, 12));
+        watch.note(m(1, 12), EffectArrival::Incoming { unread: true });
+        watch.mark_watched(m(1, 12));
         // A history page brings it back before the read marker moved.
-        watch.note((1, 12), EffectArrival::Incoming { unread: true });
-        assert!(!watch.is_unwatched((1, 12)));
+        watch.note(m(1, 12), EffectArrival::Incoming { unread: true });
+        assert!(!watch.is_unwatched(m(1, 12)));
     }
 
     #[test]
     fn reading_elsewhere_does_not_mark_the_effect_watched() {
         let mut watch = EffectWatch::default();
-        watch.note((1, 12), EffectArrival::Incoming { unread: true });
+        watch.note(m(1, 12), EffectArrival::Incoming { unread: true });
         // The read marker moved past it on another device; a refresh of
         // the message now notes it as read.
-        watch.note((1, 12), EffectArrival::Incoming { unread: false });
-        assert!(watch.is_unwatched((1, 12)));
+        watch.note(m(1, 12), EffectArrival::Incoming { unread: false });
+        assert!(watch.is_unwatched(m(1, 12)));
     }
 
     #[test]
     fn a_sent_message_keeps_its_effect_under_its_final_id() {
         let mut watch = EffectWatch::default();
-        watch.note((1, -5), EffectArrival::SentHere);
+        watch.note(m(1, -5), EffectArrival::SentHere);
         // The update with the final id arrives as sent.
-        watch.note((1, 300), EffectArrival::SentElsewhere);
-        watch.renamed((1, -5), (1, 300));
-        assert!(!watch.is_unwatched((1, -5)));
-        assert!(watch.is_unwatched((1, 300)));
+        watch.note(m(1, 300), EffectArrival::SentElsewhere);
+        watch.renamed(m(1, -5), m(1, 300));
+        assert!(!watch.is_unwatched(m(1, -5)));
+        assert!(watch.is_unwatched(m(1, 300)));
         // A message that already played has nothing to carry.
-        watch.mark_watched((1, 300));
-        watch.renamed((1, 300), (1, 301));
-        assert!(!watch.is_unwatched((1, 301)));
+        watch.mark_watched(m(1, 300));
+        watch.renamed(m(1, 300), m(1, 301));
+        assert!(!watch.is_unwatched(m(1, 301)));
     }
 
     #[test]
     fn the_sets_are_bounded() {
         let mut watch = EffectWatch::default();
         for id in 0..=MAX_KEYS as i64 {
-            watch.note((2, id), EffectArrival::SentHere);
-            watch.mark_watched((3, id));
+            watch.note(m(2, id), EffectArrival::SentHere);
+            watch.mark_watched(m(3, id));
         }
         assert!(watch.messages.stages.len() <= MAX_HELD);
     }
@@ -219,34 +225,34 @@ mod tests {
     fn a_full_set_forgets_the_oldest_message_only() {
         let mut watch = EffectWatch::default();
         for id in 0..MAX_KEYS as i64 {
-            watch.note((2, id), EffectArrival::SentHere);
-            watch.mark_watched((3, id));
+            watch.note(m(2, id), EffectArrival::SentHere);
+            watch.mark_watched(m(3, id));
         }
         // One more message: only the oldest goes.
-        watch.note((2, -1), EffectArrival::SentHere);
-        assert!(watch.is_unwatched((2, -1)));
-        assert!(!watch.is_unwatched((2, 0)));
-        assert!(watch.is_unwatched((2, 1)));
+        watch.note(m(2, -1), EffectArrival::SentHere);
+        assert!(watch.is_unwatched(m(2, -1)));
+        assert!(!watch.is_unwatched(m(2, 0)));
+        assert!(watch.is_unwatched(m(2, 1)));
         // A message that played long ago but not the oldest stays watched
         // when a history page brings it back.
-        watch.mark_watched((3, -1));
-        watch.note((3, 5), EffectArrival::Incoming { unread: true });
-        assert!(!watch.is_unwatched((3, 5)));
+        watch.mark_watched(m(3, -1));
+        watch.note(m(3, 5), EffectArrival::Incoming { unread: true });
+        assert!(!watch.is_unwatched(m(3, 5)));
     }
 
     #[test]
     fn a_message_marked_after_it_was_noted_is_not_evicted_by_its_stale_queue_entry() {
         let mut watch = EffectWatch::default();
-        watch.note((1, 0), EffectArrival::SentHere);
+        watch.note(m(1, 0), EffectArrival::SentHere);
         for id in 1..MAX_HELD as i64 {
-            watch.note((2, id), EffectArrival::SentHere);
+            watch.note(m(2, id), EffectArrival::SentHere);
         }
         // The first message plays: it is now the newest entry.
-        watch.mark_watched((1, 0));
-        watch.note((2, -1), EffectArrival::SentHere);
+        watch.mark_watched(m(1, 0));
+        watch.note(m(2, -1), EffectArrival::SentHere);
         // The oldest live message goes, not the one that just played.
-        assert!(!watch.is_unwatched((2, 1)));
-        watch.note((1, 0), EffectArrival::Incoming { unread: true });
-        assert!(!watch.is_unwatched((1, 0)));
+        assert!(!watch.is_unwatched(m(2, 1)));
+        watch.note(m(1, 0), EffectArrival::Incoming { unread: true });
+        assert!(!watch.is_unwatched(m(1, 0)));
     }
 }

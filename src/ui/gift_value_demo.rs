@@ -101,7 +101,7 @@ impl QuillApp {
             "loading" => self
                 .demo_gift_value_lookup(None)
                 .map(|lookup| GiftValueLookup {
-                    stage: GiftValueStage::Loading(0),
+                    stage: GiftValueStage::Loading(quill::ids::RequestId(0)),
                     ..lookup
                 }),
             "error" => self

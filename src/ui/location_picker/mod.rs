@@ -230,7 +230,7 @@ impl QuillApp {
         let job = self
             .location_sharing_mut()
             .and_then(|sharing| sharing.picker_mut())
-            .and_then(|picker| picker.take_address_job());
+            .and_then(|picker| picker.address_job());
         if let Some(point) = job {
             self.resolve_address(point, cx);
         }
@@ -252,20 +252,24 @@ impl QuillApp {
             }
             return;
         };
-        self.location_ui.geocode =
-            state::Geocode::resolving(self.spawn_scoped(cx, async move |this, cx| {
-                let address = poll_answer(receiver, GEOCODE_TIMEOUT, cx).await.flatten();
-                let _ = this.update(cx, |this, cx| {
-                    this.location_ui.geocode = state::Geocode::Idle;
-                    if let Some(picker) = this
-                        .location_sharing_mut()
-                        .and_then(|sharing| sharing.picker_mut())
-                    {
-                        picker.address_resolved(point, address);
-                    }
-                    cx.notify();
-                });
-            }));
+        let task = self.spawn_scoped(cx, async move |this, cx| {
+            let address = poll_answer(receiver, GEOCODE_TIMEOUT, cx).await.flatten();
+            let _ = this.update(cx, |this, cx| {
+                if let Some(picker) = this
+                    .location_sharing_mut()
+                    .and_then(|sharing| sharing.picker_mut())
+                {
+                    picker.address_resolved(point, address);
+                }
+                cx.notify();
+            });
+        });
+        if let Some(picker) = self
+            .location_sharing_mut()
+            .and_then(|sharing| sharing.picker_mut())
+        {
+            picker.address_started(point, quill::task_hold::TaskHold::new(task));
+        }
     }
 
     /// The map moved to `view` (a drag step or a zoom step); it settles

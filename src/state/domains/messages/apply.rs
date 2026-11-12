@@ -230,10 +230,10 @@ impl Session {
                     crate::telegram::envelope::MessageSendState::Sent,
                 );
                 self.remember_files(&message.files);
-                self.stickers
-                    .effects
-                    .watch
-                    .renamed((chat_id.0, old_message_id.0), (chat_id.0, message.id.0));
+                self.stickers.effects.watch.renamed(
+                    crate::ids::ChatMessage::new(chat_id, old_message_id),
+                    crate::ids::ChatMessage::new(chat_id, message.id),
+                );
                 self.stickers
                     .interactions
                     .renamed((chat_id.0, old_message_id.0), (chat_id.0, message.id.0));
@@ -297,10 +297,10 @@ impl Session {
                 };
                 self.note_last_message_send_state(chat_id, old_message_id, message.id, failed);
                 self.remember_files(&message.files);
-                self.stickers
-                    .effects
-                    .watch
-                    .renamed((chat_id.0, old_message_id.0), (chat_id.0, message.id.0));
+                self.stickers.effects.watch.renamed(
+                    crate::ids::ChatMessage::new(chat_id, old_message_id),
+                    crate::ids::ChatMessage::new(chat_id, message.id),
+                );
                 self.stickers
                     .interactions
                     .renamed((chat_id.0, old_message_id.0), (chat_id.0, message.id.0));

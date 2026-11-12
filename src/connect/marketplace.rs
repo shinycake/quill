@@ -54,7 +54,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Err(err) = &result
             && let Some(gift) = self.session.payments.marketplace_gift.as_mut()
         {
-            gift.fail(err.stage_line());
+            gift.fail(extra, err.stage_line());
         }
         result
     }

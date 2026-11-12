@@ -69,9 +69,11 @@ impl Session {
             }
             Some(RequestPurpose::GetMarketplaceGift | RequestPurpose::SendMarketplaceGift) => {
                 if let Some(gift) = self.payments.marketplace_gift.as_mut()
-                    && pending.is_some_and(|p| gift.waits_for(p.id))
+                    && let Some(p) = pending
+                    && let Some(answer) =
+                        gift.fail(p.id, format!("Gift request failed: {}", error_reason(err)))
                 {
-                    gift.fail(format!("Gift request failed: {}", error_reason(err)));
+                    self.payments.notices.push(boxless_notice(answer));
                 }
             }
             // No card info: the menu keeps only "Copy Card Number".
@@ -142,7 +144,7 @@ impl Session {
                 // TDLib refused the commit: its Stars are released and
                 // nothing is sent again; the user is told.
                 if let Some(id) = extra {
-                    self.payments.paid.refused(id);
+                    self.payments.paid.refused(id, crate::state::unix_ms_now());
                 }
                 self.payments.notify(
                     NoticeKind::Error,
@@ -156,7 +158,7 @@ impl Session {
                 ..
             })) => {
                 if let Some(id) = extra {
-                    self.payments.paid.refused(id);
+                    self.payments.paid.refused(id, crate::state::unix_ms_now());
                 }
                 self.payments.notify(
                     NoticeKind::Error,

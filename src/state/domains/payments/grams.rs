@@ -35,14 +35,24 @@ impl Session {
                 }
             }
             GramsPayload::Revenue(revenue) => {
-                if matches!(purpose, Some((GramsPurpose::Revenue, _))) {
-                    self.payments.hub.grams.revenue = Some(revenue);
+                if let Some((GramsPurpose::Revenue, request)) = purpose {
+                    self.payments
+                        .hub
+                        .grams
+                        .revenue
+                        .answered(Some(request), revenue);
                 }
             }
             GramsPayload::RevenueStatus(status) => {
                 let grams = &mut self.payments.hub.grams;
-                let usd_rate = grams.revenue.map_or(0.0, |known| known.usd_rate);
-                grams.revenue = Some(crate::premium_hub::ton::GramRevenue { usd_rate, ..status });
+                // A pushed update keeps the rate and leaves a request in
+                // flight alone.
+                let usd_rate = grams.revenue.data().map_or(0.0, |known| known.usd_rate);
+                let updated = crate::premium_hub::ton::GramRevenue { usd_rate, ..status };
+                match grams.revenue.data_mut() {
+                    Some(known) => *known = updated,
+                    None => grams.revenue.insert_data_if_missing(|| updated),
+                }
             }
         }
     }
@@ -63,7 +73,13 @@ impl Session {
             GramsPurpose::Probe => {
                 grams.probe.failed(request, error_reason(err), false);
             }
-            GramsPurpose::Revenue => {}
+            GramsPurpose::Revenue => {
+                grams.revenue.failed(
+                    request,
+                    crate::lang::tr(crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_REVENUE),
+                    false,
+                );
+            }
             GramsPurpose::PeerUser | GramsPurpose::PeerChat => {
                 if let Some(request) = request {
                     grams.peer_refused(request);
@@ -86,20 +102,20 @@ impl Session {
     /// it is dropped.
     pub(crate) fn apply_gram_withdrawal_url(&mut self, url: String, id: Option<RequestId>) {
         let grams = &mut self.payments.hub.grams;
-        if !grams.withdraw.as_ref().is_some_and(|w| w.waits_for(id)) {
+        if !grams.withdraw().is_some_and(|w| w.waits_for(id)) {
             return;
         }
-        grams.withdraw = if url.is_empty() {
-            None
+        if url.is_empty() {
+            grams.cancel_withdraw();
         } else {
-            Some(GramWithdraw::Finished(WithdrawOutcome::Url(url)))
-        };
+            grams.put_withdraw(GramWithdraw::Finished(WithdrawOutcome::Url(url)));
+        }
     }
 
     /// A fresh `passwordState` arrived: with no password, the idle
     /// password box becomes the security check.
     pub(crate) fn route_gram_withdrawal_on_password(&mut self, has_password: bool) {
-        if let Some(withdraw) = self.payments.hub.grams.withdraw.as_mut() {
+        if let Some(withdraw) = self.payments.hub.grams.withdraw_mut() {
             withdraw.password_state_known(has_password);
         }
     }
@@ -112,11 +128,11 @@ impl Session {
         err: &TdError,
         id: Option<RequestId>,
     ) {
-        if !grams.withdraw.as_ref().is_some_and(|w| w.waits_for(id)) {
+        if !grams.withdraw().is_some_and(|w| w.waits_for(id)) {
             return;
         }
         if err.earn_hint == Some(EarnErrorHint::AmountTooSmall) {
-            grams.withdraw = Some(GramWithdraw::Finished(WithdrawOutcome::TooSmall));
+            grams.put_withdraw(GramWithdraw::Finished(WithdrawOutcome::TooSmall));
             return;
         }
         grams.enter_withdraw(match password_check_failure(err, &error_reason(err)) {

@@ -115,6 +115,37 @@ fn a_remembered_price_is_stored_and_lets_sends_through() {
 }
 
 #[test]
+fn a_trusted_price_whose_write_failed_is_written_again_after_the_wait() {
+    use crate::paid_messages::TRUST_RETRY_MS;
+    let mut f = fixture();
+    paid_chat(&mut f, 10);
+    let now = 1_000;
+    // A directory where the file goes: the write fails.
+    let file = f.1.paths.root.join("paid_trust.json");
+    std::fs::create_dir_all(&file).unwrap();
+    f.1.session.payments.paid_messages.remember_trust(600, 10);
+    f.1.paid_trust_tick(now);
+    let failed = |f: &Fixture| {
+        f.1.session
+            .payments
+            .paid_messages
+            .trust_save_error()
+            .is_some()
+    };
+    assert!(failed(&f), "the write failed");
+    // Not before the wait is over.
+    f.1.paid_trust_tick(now + TRUST_RETRY_MS - 1);
+    assert!(failed(&f), "not before the wait");
+    // The disk is fine again: the next tick after the wait writes it.
+    std::fs::remove_dir_all(&file).unwrap();
+    f.1.paid_trust_tick(now + TRUST_RETRY_MS);
+    assert!(!failed(&f), "written after the wait");
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(PaidTrust::from_json(&text).is_trusted(600, 10));
+    cleanup(f);
+}
+
+#[test]
 fn a_paid_supergroup_gates_and_holds_like_a_user() {
     let mut f = fixture();
     ingest(
@@ -173,5 +204,32 @@ fn the_direct_messages_price_is_fetched_when_unknown() {
     // Known now: no further request.
     f.1.fetch_direct_messages_price(ChatId(-1001)).unwrap();
     assert_eq!(requests(&f, "getSupergroup").len(), 1);
+    cleanup(f);
+}
+
+/// Sweep r4-04: a trusted prices file that cannot be read (here a directory,
+/// so the read fails with something other than "not found") is not "no
+/// file": nothing is written over it and it is read again only after the
+/// wait.
+#[test]
+fn an_unreadable_trust_file_is_not_written_over_and_is_read_after_the_wait() {
+    use crate::paid_messages::TRUST_RETRY_MS;
+    let mut f = fixture();
+    let file = f.1.paths.root.join("paid_trust.json");
+    std::fs::create_dir_all(&file).unwrap();
+    let now = 1_000;
+    f.1.paid_trust_tick(now);
+    f.1.session.payments.paid_messages.remember_trust(600, 10);
+    f.1.paid_trust_tick(now + 1);
+    assert!(file.is_dir(), "nothing was written over it");
+    let paid = &f.1.session.payments.paid_messages;
+    assert!(
+        !paid.trust_read_due(now + TRUST_RETRY_MS - 1),
+        "not read again before the wait"
+    );
+    assert!(paid.trust_read_due(now + TRUST_RETRY_MS));
+    assert!(paid.trust_save_error().is_none(), "no write was tried");
+    f.1.paid_trust_tick(now + 1);
+    assert!(file.is_dir(), "a tick inside the wait changes nothing");
     cleanup(f);
 }

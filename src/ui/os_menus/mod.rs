@@ -114,7 +114,7 @@ impl QuillApp {
                         matches!(
                             client.status,
                             quill::notify_accounts::BackgroundStatus::Ready
-                                | quill::notify_accounts::BackgroundStatus::Connecting
+                                | quill::notify_accounts::BackgroundStatus::Connecting { .. }
                         )
                     })
                 };

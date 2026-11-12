@@ -16,7 +16,7 @@ impl QuillApp {
             return;
         };
         let key = live.driver.session.account.clone();
-        let status = background_status(&live.driver.session.auth);
+        let status = background_status(&live.driver.session.auth, live.started);
         let in_call = live.driver.session.calls.active_call.is_some()
             || live.driver.session.calls.active_group_call.is_some();
         self.background

@@ -60,7 +60,7 @@ fn a_refused_premium_options_send_shows_the_send_line() {
     t.sender.refuse(&["getPremiumGiftPaymentOptions"]);
     let _ = t.driver.open_send_gift(crate::ids::ChatId(21));
     assert_eq!(
-        t.driver.session.payments.gifts_manage.send.premium_fetch,
-        GiftListFetch::Failed(no_connection())
+        t.driver.session.payments.gifts_manage.send.premium_fetch(),
+        Some(&GiftListFetch::Failed(no_connection()))
     );
 }

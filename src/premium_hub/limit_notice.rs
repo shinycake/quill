@@ -8,12 +8,12 @@ use crate::premium_limits::PremiumLimitKind;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LimitNotice {
     /// The limit box is open (pins, caption, public links, ...), with how
-    /// far over the limit the action went when that is known (caption).
+    /// far `over` the limit the action went when that is known (caption).
     /// `toast` is a toast raised while the box is open: it waits for the
     /// box to close, or the window takes it at once.
     Box {
         kind: PremiumLimitKind,
-        extra: i64,
+        over: i64,
         toast: Option<PremiumLimitKind>,
     },
     /// The toast waits for the next frame (saved GIFs, favorite stickers,
@@ -24,13 +24,13 @@ pub enum LimitNotice {
 impl LimitNotice {
     /// The limit event of `kind`: its toast for the kinds tdesktop tells
     /// about with one, else the box.
-    pub fn of(kind: PremiumLimitKind, extra: i64) -> Self {
+    pub fn of(kind: PremiumLimitKind, over: i64) -> Self {
         if kind.shows_toast() {
             Self::Toast(kind)
         } else {
             Self::Box {
                 kind,
-                extra,
+                over,
                 toast: None,
             }
         }
@@ -39,7 +39,7 @@ impl LimitNotice {
     /// The open box.
     pub fn open_box(&self) -> Option<(PremiumLimitKind, i64)> {
         match *self {
-            Self::Box { kind, extra, .. } => Some((kind, extra)),
+            Self::Box { kind, over, .. } => Some((kind, over)),
             Self::Toast(_) => None,
         }
     }
@@ -58,9 +58,9 @@ impl LimitNotice {
     pub fn without_toast(self) -> Option<Self> {
         match self {
             Self::Toast(_) => None,
-            Self::Box { kind, extra, .. } => Some(Self::Box {
+            Self::Box { kind, over, .. } => Some(Self::Box {
                 kind,
-                extra,
+                over,
                 toast: None,
             }),
         }
@@ -73,16 +73,16 @@ impl LimitNotice {
 pub fn raise(slot: &mut Option<LimitNotice>, notice: LimitNotice) {
     let waiting = slot.as_ref().and_then(|n| n.toast());
     *slot = Some(match (*slot, notice) {
-        (Some(LimitNotice::Box { kind, extra, .. }), LimitNotice::Toast(toast)) => {
+        (Some(LimitNotice::Box { kind, over, .. }), LimitNotice::Toast(toast)) => {
             LimitNotice::Box {
                 kind,
-                extra,
+                over,
                 toast: Some(toast),
             }
         }
-        (_, LimitNotice::Box { kind, extra, toast }) => LimitNotice::Box {
+        (_, LimitNotice::Box { kind, over, toast }) => LimitNotice::Box {
             kind,
-            extra,
+            over,
             toast: toast.or(waiting),
         },
         (_, toast @ LimitNotice::Toast(_)) => toast,

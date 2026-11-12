@@ -15,7 +15,7 @@ use gpui_kit::{
 };
 use quill::ids::ChatId;
 use quill::location_picker::{
-    AddressLine, GeoOutcome, HereState, LocationPicker, LocationSharing, MapView, VenueList,
+    AddressLine, GeoOutcome, HereState, LocationPicker, LocationSharing, MapView, VenueView,
 };
 use std::time::Duration;
 
@@ -89,7 +89,7 @@ fn view(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> MapView {
 
 fn venue_count(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> usize {
     picker(app, vcx, |picker| match picker.venues() {
-        VenueList::Found(venues) => venues.len(),
+        VenueView::Found(venues) => venues.len(),
         _ => 0,
     })
     .unwrap_or(0)

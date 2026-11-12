@@ -45,6 +45,11 @@ pub fn app_uri() -> String {
 /// wake the worker on every pass.
 const FAILED_RETRY_AFTER: std::time::Duration = std::time::Duration::from_secs(10);
 
+/// How long a push the platform has not answered counts as in flight: a
+/// worker that hangs without dying must not keep the badge wrong for good,
+/// so after this the same count is pushed again.
+const PENDING_GIVES_UP_AFTER: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// What the dock shows, from the UI's point of view: one stage for every
 /// platform. The count the UI wants is asked of the platform through
 /// [`BadgeStage::request`]; a platform that answers later (the Linux
@@ -56,8 +61,11 @@ const FAILED_RETRY_AFTER: std::time::Duration = std::time::Duration::from_secs(1
 enum BadgeStage {
     /// Nothing shown that we know of, or the OS may have lost it.
     Idle,
-    /// Handed to the platform, not answered.
-    Pending(u32),
+    /// Handed to the platform at `since`, not answered.
+    Pending {
+        count: u32,
+        since: std::time::Instant,
+    },
     /// The platform showed it.
     Delivered(u32),
     /// The platform could not show it at `at`: the same count is asked again
@@ -72,17 +80,25 @@ impl BadgeStage {
     fn request(&mut self, unread: u32, now: std::time::Instant) -> bool {
         match *self {
             BadgeStage::Delivered(shown) if shown == unread => false,
-            BadgeStage::Pending(asked) if asked == unread => false,
+            BadgeStage::Pending { count, since }
+                if count == unread
+                    && now.saturating_duration_since(since) < PENDING_GIVES_UP_AFTER =>
+            {
+                false
+            }
             BadgeStage::Failed { count, at }
                 if count == unread && now.saturating_duration_since(at) < FAILED_RETRY_AFTER =>
             {
                 false
             }
             BadgeStage::Idle
-            | BadgeStage::Pending(_)
+            | BadgeStage::Pending { .. }
             | BadgeStage::Delivered(_)
             | BadgeStage::Failed { .. } => {
-                *self = BadgeStage::Pending(unread);
+                *self = BadgeStage::Pending {
+                    count: unread,
+                    since: now,
+                };
                 true
             }
         }
@@ -91,7 +107,7 @@ impl BadgeStage {
     /// The platform's answer for `count`; a newer request that overtook it
     /// stays pending.
     fn answered(&mut self, count: u32, shown: bool, now: std::time::Instant) {
-        if *self == BadgeStage::Pending(count) {
+        if matches!(*self, BadgeStage::Pending { count: asked, .. } if asked == count) {
             *self = if shown {
                 BadgeStage::Delivered(count)
             } else {
@@ -104,7 +120,7 @@ impl BadgeStage {
     /// gone): ask again after the wait.
     #[cfg(any(all(target_os = "linux", feature = "ui"), test))]
     fn abandoned(&mut self, now: std::time::Instant) {
-        if let BadgeStage::Pending(count) = *self {
+        if let BadgeStage::Pending { count, .. } = *self {
             *self = BadgeStage::Failed { count, at: now };
         }
     }
@@ -617,6 +633,20 @@ mod tests {
         assert!(!stage.request(2, t0()), "2 is still pending");
         stage.answered(2, true, t0());
         assert!(!stage.request(2, t0()));
+    }
+
+    #[test]
+    fn a_push_the_platform_never_answers_is_pushed_again_after_the_wait() {
+        let mut stage = BadgeStage::Idle;
+        let t = t0();
+        assert!(stage.request(3, t));
+        assert!(
+            !stage.request(3, t + PENDING_GIVES_UP_AFTER / 2),
+            "in flight"
+        );
+        assert!(stage.request(3, t + PENDING_GIVES_UP_AFTER), "given up on");
+        stage.answered(3, true, t + PENDING_GIVES_UP_AFTER);
+        assert_eq!(stage, BadgeStage::Delivered(3));
     }
 
     #[test]

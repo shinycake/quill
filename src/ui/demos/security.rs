@@ -116,9 +116,11 @@ impl QuillApp {
             ThemeChoice::Light
         };
         let checking = std::env::var("QUILL_DEMO_LINK_HANDLER").as_deref() == Ok("checking");
-        quill::link_handler::demo_pin(
-            checking.then_some(quill::link_handler::LinkHandlerState::Checking),
-        );
+        quill::link_handler::demo_pin(if checking {
+            quill::link_handler::DemoPin::Unread
+        } else {
+            quill::link_handler::DemoPin::Off
+        });
         self.open_settings_on(quill::settings_catalog::Page::System, cx);
         self.set_note(StatusNote::silent("screenshot demo — default app row"));
     }

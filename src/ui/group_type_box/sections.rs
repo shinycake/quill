@@ -15,7 +15,7 @@ use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use quill::group_type::{LinkStatus, join_approval_applies, request_to_join_about};
+use quill::group_type::{LinkLine, join_approval_applies, request_to_join_about};
 use quill::lang::{keys, tr, trn};
 use quill::state::InviteLinkFetch;
 
@@ -155,15 +155,15 @@ impl QuillApp {
         let theme = cx.theme();
         let (danger, muted, good) = (theme.danger, theme.muted_foreground, theme.success);
         let line: Option<AnyElement> = match status {
-            LinkStatus::Empty | LinkStatus::Current => None,
-            LinkStatus::Pending => Some(
+            LinkLine::Empty | LinkLine::Current => None,
+            LinkLine::Pending => Some(
                 div()
                     .text_xs()
                     .text_color(muted)
                     .child(tr(keys::CREATE_CHANNEL_LINK_PENDING))
                     .into_any_element(),
             ),
-            LinkStatus::Available => Some(
+            LinkLine::Available => Some(
                 div()
                     .id("group-type-link-status")
                     .text_xs()
@@ -171,7 +171,7 @@ impl QuillApp {
                     .child(tr(keys::CREATE_CHANNEL_LINK_AVAILABLE))
                     .into_any_element(),
             ),
-            LinkStatus::Problem(problem) => Some(
+            LinkLine::Problem(problem) => Some(
                 div()
                     .id("group-type-link-status")
                     .text_xs()
@@ -179,7 +179,7 @@ impl QuillApp {
                     .child(tr(problem.text()))
                     .into_any_element(),
             ),
-            LinkStatus::Purchasable => {
+            LinkLine::Purchasable => {
                 let app = cx.weak_entity();
                 Some(self.group_type_purchase_line(type_box, app, cx))
             }
@@ -189,7 +189,7 @@ impl QuillApp {
         } else {
             self.group_edit_box()
                 .and_then(|edit| edit.username_failure(self.session()))
-                .filter(|_| status == LinkStatus::Current)
+                .filter(|_| status == LinkLine::Current)
         }
         .map(|reason| {
             div()

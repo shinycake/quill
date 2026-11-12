@@ -152,16 +152,23 @@ pub(super) use sampler::{linux_idle_known, linux_idle_ms};
 mod sampler {
     use super::*;
     use crate::locks::LockExt;
-    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
     use std::time::Duration;
 
     static IDLE: std::sync::Mutex<IdleCache> = std::sync::Mutex::new(IdleCache::Unknown);
 
-    /// Time of the latest read (`u64::MAX` = never).
-    static IDLE_LAST_READ: AtomicU64 = AtomicU64::new(u64::MAX);
+    /// The sampler thread: not running, or running with the time of the
+    /// latest read. The thread ends itself, under this lock, once reads stop
+    /// ([`idle_sampling_wanted`]); a read that comes after starts a new one,
+    /// so no read lands between the check and the exit.
+    enum Sampler {
+        Stopped,
+        Running {
+            last_read_ms: u64,
+            _thread: std::thread::JoinHandle<Option<()>>,
+        },
+    }
 
-    /// True while a sampler thread is alive.
-    static IDLE_RUNNING: AtomicBool = AtomicBool::new(false);
+    static SAMPLER: std::sync::Mutex<Sampler> = std::sync::Mutex::new(Sampler::Stopped);
 
     fn cache() -> IdleCache {
         *IDLE.lock_or_recover()
@@ -174,20 +181,12 @@ mod sampler {
         u64::try_from(START.get_or_init(Instant::now).elapsed().as_millis()).unwrap_or(u64::MAX)
     }
 
-    fn last_read() -> Option<u64> {
-        match IDLE_LAST_READ.load(Ordering::Relaxed) {
-            u64::MAX => None,
-            t => Some(t),
-        }
-    }
-
     /// Reads the cache a background thread refreshes every two seconds.
     /// A read starts the thread; it pauses once reads stop (auto-lock off or
     /// locked). While no backend answers it tries again less and less
     /// often. Never blocks on D-Bus or X.
     pub(in crate::passcode) fn linux_idle_ms() -> Option<u64> {
-        IDLE_LAST_READ.store(now_ms(), Ordering::Relaxed);
-        start();
+        start(now_ms());
         cache().read(now_ms())
     }
 
@@ -286,13 +285,34 @@ mod sampler {
         select_backend(candidates, |backend| sources.sample(backend))
     }
 
-    /// Starts the sampler thread unless one is running. The thread exits
-    /// when reads stop, and the next read restarts it.
-    fn start() {
-        if IDLE_RUNNING.swap(true, Ordering::AcqRel) {
+    /// Notes a read at `now` on a sampler thread that runs, and says whether
+    /// there is one. A thread that ended without clearing the stage (it
+    /// panicked) does not run: the caller starts a new one.
+    fn note_read(
+        sampler: &mut Sampler,
+        now: u64,
+        finished: impl Fn(&std::thread::JoinHandle<Option<()>>) -> bool,
+    ) -> bool {
+        match sampler {
+            Sampler::Running {
+                last_read_ms,
+                _thread,
+            } if !finished(_thread) => {
+                *last_read_ms = now;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Notes a read at `now`, and starts the sampler thread unless one is
+    /// running. The thread exits when reads stop, and the next read restarts
+    /// it.
+    fn start(now: u64) {
+        let mut sampler = SAMPLER.lock_or_recover();
+        if note_read(&mut sampler, now, std::thread::JoinHandle::is_finished) {
             return;
         }
-        now_ms(); // pin the clock origin before the first sample
         // A sample from before a pause would extrapolate to a bogus huge idle
         // time (and lock spuriously); drop it until the fresh one lands. A
         // failure keeps its backoff.
@@ -302,21 +322,22 @@ mod sampler {
                 *idle = IdleCache::Unknown;
             }
         }
+        // The lock is held across the spawn: the thread's first look at the
+        // reads waits until its handle is in the stage.
         let spawned = crate::thread_guard::spawn_guarded("quill-idle", || {
             let env = SessionEnv::detect();
             let candidates = candidate_backends(env);
             let mut sources = Sources::open(env);
             let mut chosen = None;
             loop {
-                if !idle_sampling_wanted(last_read(), now_ms()) {
-                    IDLE_RUNNING.store(false, Ordering::Release);
-                    // A read may have raced the exit; pick it back up.
-                    if idle_sampling_wanted(last_read(), now_ms())
-                        && !IDLE_RUNNING.swap(true, Ordering::AcqRel)
-                    {
-                        continue;
+                {
+                    let mut sampler = SAMPLER.lock_or_recover();
+                    let wanted = matches!(&*sampler, Sampler::Running { last_read_ms, .. }
+                        if idle_sampling_wanted(Some(*last_read_ms), now_ms()));
+                    if !wanted {
+                        *sampler = Sampler::Stopped;
+                        return;
                     }
-                    return;
                 }
                 let before = cache();
                 if before.sample_due(now_ms()) {
@@ -334,8 +355,41 @@ mod sampler {
                 std::thread::sleep(Duration::from_secs(2));
             }
         });
-        if spawned.is_err() {
-            IDLE_RUNNING.store(false, Ordering::Release);
+        if let Ok(thread) = spawned {
+            *sampler = Sampler::Running {
+                last_read_ms: now,
+                _thread: thread,
+            };
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn running(thread: std::thread::JoinHandle<Option<()>>) -> Sampler {
+            Sampler::Running {
+                last_read_ms: 1,
+                _thread: thread,
+            }
+        }
+
+        /// Sweep r4-04 fix 3: a sampler thread that died (a panic caught
+        /// before it cleared the stage) is replaced by the next read.
+        #[test]
+        fn a_dead_sampler_thread_is_not_a_running_one() {
+            let mut sampler = running(std::thread::spawn(|| None));
+            assert!(!note_read(&mut sampler, 50, |_| true), "start a new thread");
+            let mut sampler = running(std::thread::spawn(|| None));
+            assert!(note_read(&mut sampler, 50, |_| false));
+            assert!(matches!(
+                sampler,
+                Sampler::Running {
+                    last_read_ms: 50,
+                    ..
+                }
+            ));
+            assert!(!note_read(&mut Sampler::Stopped, 50, |_| false));
         }
     }
 }
