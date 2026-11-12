@@ -539,7 +539,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                         reconnect_attempts: 0,
                     };
                     call.transport = match result {
-                        Ok(()) => CallTransport::Connecting(link),
+                        Ok(()) => CallTransport::Attempt(link),
                         Err(err) => CallTransport::Failed {
                             reason: err.to_string(),
                             link: Some(link),

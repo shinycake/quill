@@ -5,7 +5,7 @@ use super::*;
 impl FooterMeta {
     pub(in crate::ui) fn of(
         message: &quill::state::HistoryMessage,
-        receipt: OutboxReceipt,
+        receipt: OutboxReceiptView,
         views: Option<i32>,
         signature: Option<String>,
     ) -> Self {

@@ -102,10 +102,10 @@ pub struct ConferenceCall {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConferenceStage {
     /// Joined or created without a 1:1 call to take over.
-    Running,
+    Standalone,
     /// Created from a 1:1 call: it ends and the people are invited once
-    /// the conference has its link.
-    Upgrading(ConferenceUpgrade),
+    /// the conference has its link (`upgrade` holds who and what).
+    Handover(ConferenceUpgrade),
     /// Took over the 1:1 call `from`: its end shows no end screen
     /// (tdesktop moves the call panel into the conference).
     Upgraded { from: i32 },
@@ -119,7 +119,7 @@ impl ConferenceCall {
     /// The 1:1 call still to end and the people still to invite.
     pub fn upgrade(&self) -> Option<&ConferenceUpgrade> {
         match &self.stage {
-            ConferenceStage::Upgrading(upgrade) => Some(upgrade),
+            ConferenceStage::Handover(upgrade) => Some(upgrade),
             _ => None,
         }
     }
@@ -203,8 +203,8 @@ impl Session {
                 stage: match pending.origin {
                     ConferenceOrigin::Create {
                         upgrade: Some(upgrade),
-                    } => ConferenceStage::Upgrading(upgrade),
-                    _ => ConferenceStage::Running,
+                    } => ConferenceStage::Handover(upgrade),
+                    _ => ConferenceStage::Standalone,
                 },
             });
         }

@@ -20,7 +20,6 @@ bare:CeremonySheet::Probing 1
 bare:ClipState::Opening 1
 bare:CloseProgress::Pending 1
 bare:CodeLanguageStage::Opening 1
-bare:ConferenceStage::Running 1
 bare:Decoding::Running 1
 bare:DeviceLink::Opening 1
 bare:DeviceRun::Opening 1
@@ -111,7 +110,6 @@ unkeyed:BotUsernameCheck::Checking 1
 unkeyed:CallLinkStage::Leaving 1
 unkeyed:Cancellation::InFlight 1
 unkeyed:ChatSearchPaging::Loading 1
-unkeyed:ConferenceStage::Upgrading 1
 unkeyed:CreateStage::Creating 1
 unkeyed:DebugConfirm::Asking 1
 unkeyed:DemandStage::Asked 1

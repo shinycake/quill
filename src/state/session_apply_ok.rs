@@ -547,14 +547,14 @@ impl Session {
             && let Some(summary) = self.calls.summary.as_mut()
             && summary.log == CallUpload::Sending(pending.id)
         {
-            summary.log = CallUpload::Sent;
+            summary.log = CallUpload::Uploaded;
         }
         if let Some(pending) = pending
             && pending.purpose == RequestPurpose::SendCallDebugInformation
             && let Some(summary) = self.calls.summary.as_mut()
             && summary.debug_information == CallUpload::Sending(pending.id)
         {
-            summary.debug_information = CallUpload::Sent;
+            summary.debug_information = CallUpload::Uploaded;
         }
         // `sendCallRating` confirmed: the card says thanks.
         if let Some(RequestPurpose::SendCallRating) = pending.map(|p| p.purpose)
@@ -562,7 +562,7 @@ impl Session {
             && let Some(pending) = pending
             && summary.rating.sends(pending.id)
         {
-            summary.rating = CallRating::Sent;
+            summary.rating = CallRating::Rated;
         }
         // Slice S3: `setReadDatePrivacySettings` confirmed — clear
         // the optimistic spinner (the value itself was set at

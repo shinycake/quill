@@ -196,7 +196,7 @@ impl Session {
                             draft_id,
                             keep_on_stop,
                             content,
-                            stop: carried.unwrap_or(BotStopStage::Running { can_stop }),
+                            stop: carried.unwrap_or(BotStopStage::Streaming { can_stop }),
                             expires_at_ms: unix_ms_now().saturating_add(
                                 self.messages.pending_bot_period_secs.saturating_mul(1000),
                             ),

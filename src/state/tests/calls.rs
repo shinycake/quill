@@ -433,7 +433,7 @@ fn a_failed_rating_brings_the_card_back_and_an_ok_says_thanks() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, retry.as_extra()),
     );
-    assert_eq!(rating(&session), Some(CallRating::Sent));
+    assert_eq!(rating(&session), Some(CallRating::Rated));
 }
 
 #[test]

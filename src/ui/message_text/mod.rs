@@ -18,7 +18,7 @@ use quill::ids::{ChatId, FileId, MessageId};
 use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
 use quill::rich::RichBlock;
-use quill::state::{OutboxReceipt, Session, message_time_hhmm};
+use quill::state::{OutboxReceiptView, Session, message_time_hhmm};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{MessageContent, ParsedFile};
 use quill::text::{
@@ -292,14 +292,14 @@ pub(super) enum Delivery {
 
 impl Delivery {
     /// A message still pending is sending whatever its receipt says.
-    pub(super) fn of(pending: bool, receipt: OutboxReceipt) -> Self {
+    pub(super) fn of(pending: bool, receipt: OutboxReceiptView) -> Self {
         if pending {
             return Self::Sending;
         }
         match receipt {
-            OutboxReceipt::Read => Self::Read,
-            OutboxReceipt::Sent => Self::Sent,
-            OutboxReceipt::None => Self::Incoming,
+            OutboxReceiptView::Read => Self::Read,
+            OutboxReceiptView::Sent => Self::Sent,
+            OutboxReceiptView::None => Self::Incoming,
         }
     }
 
@@ -479,7 +479,7 @@ pub(in crate::ui) fn avatar_initials(name: &str) -> String {
 /// avatar slot / footer) from row inputs.
 pub(super) fn message_chrome(
     sender: Option<super::history_row::SenderLabel>,
-    receipt: OutboxReceipt,
+    receipt: OutboxReceiptView,
     sender_avatar: Option<super::history_row::SenderAvatar>,
     date: i32,
     pending: bool,

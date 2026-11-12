@@ -211,7 +211,7 @@ impl QuillApp {
             Some(
                 super::message_text::FooterMeta::of(
                     message,
-                    quill::state::OutboxReceipt::None,
+                    quill::state::OutboxReceiptView::None,
                     message
                         .interaction_info
                         .as_ref()

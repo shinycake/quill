@@ -8,7 +8,7 @@ use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, MessageId};
-use quill::state::OutboxReceipt;
+use quill::state::OutboxReceiptView;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
@@ -146,14 +146,14 @@ fn a_read_receipt_patches_the_outgoing_row(cx: &mut TestAppContext) {
     let receipt = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
         app.read_with(vcx, |app, _| single(app, 203).map(|row| row.chrome.receipt))
     };
-    assert_eq!(receipt(&app, vcx), Some(OutboxReceipt::Sent));
+    assert_eq!(receipt(&app, vcx), Some(OutboxReceiptView::Sent));
     let (built, patched) = counts(&app, vcx);
     apply(
         &app,
         vcx,
         &[r#"{"@type":"updateChatReadOutbox","chat_id":31,"last_read_outbox_message_id":203}"#],
     );
-    assert_eq!(receipt(&app, vcx), Some(OutboxReceipt::Read));
+    assert_eq!(receipt(&app, vcx), Some(OutboxReceiptView::Read));
     assert_eq!(counts(&app, vcx), (built, patched + 1));
 }
 

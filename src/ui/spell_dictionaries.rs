@@ -412,7 +412,6 @@ mod tests {
     use gpui_kit::component::Root;
     use gpui_kit::{AppContext, TestAppContext, VisualTestContext, px, size};
     use quill::spell_download::Progress;
-    use std::sync::Arc;
 
     /// Switching a running download off ends the row's download at once,
     /// but the stage keeps the task that sees the worker out, so a cancel

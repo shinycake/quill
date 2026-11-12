@@ -76,7 +76,7 @@ impl Session {
                 if let Some(summary) = self.calls.summary.as_mut()
                     && extra.is_some_and(|extra| summary.rating.sends(extra))
                     && let CallRating::Sending { draft, .. } =
-                        std::mem::replace(&mut summary.rating, CallRating::Sent)
+                        std::mem::replace(&mut summary.rating, CallRating::Rated)
                 {
                     summary.rating = CallRating::Failed {
                         error: call_request_error_line(err, "Could not send the rating"),

@@ -7,7 +7,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use crate::ids::FileId;
-use crate::state::{HistoryMessage, OutboxReceipt};
+use crate::state::{HistoryMessage, OutboxReceiptView};
 use crate::telegram::envelope::{MessageContent, ParsedFile};
 use crate::telegram::envelope::{PollType, ReactionType};
 
@@ -17,7 +17,7 @@ pub struct MessageA11yContext {
     /// The incoming message's sender (`displayFrom()->name()`).
     pub sender_name: Option<String>,
     /// Outgoing: the peer has read past this message.
-    pub receipt: Option<OutboxReceipt>,
+    pub receipt: Option<OutboxReceiptView>,
     /// The inline bot's username, without the "@".
     pub via_bot: Option<String>,
     /// The resolved reply: the replied sender (`None` reads "Me") and its
@@ -42,7 +42,7 @@ pub fn message_accessibility_name(
     let mut lines: Vec<String> = Vec::new();
     if message.is_outgoing {
         lines.push(
-            if context.receipt == Some(OutboxReceipt::Read) {
+            if context.receipt == Some(OutboxReceiptView::Read) {
                 "Seen"
             } else {
                 "Not seen"

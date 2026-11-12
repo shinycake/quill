@@ -15,7 +15,7 @@ pub(in crate::ui) fn session_history_row(
     sender: Option<SenderLabel>,
     // The Premium status or star after the sender's name.
     sender_status: Option<AnyElement>,
-    receipt: OutboxReceipt,
+    receipt: OutboxReceiptView,
     sender_avatar: Option<SenderAvatar>,
     reply_header: Option<quill::state::ReplyHeader>,
     forward_header: Option<quill::state::ForwardHeader>,

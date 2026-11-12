@@ -1,6 +1,6 @@
 #![deny(clippy::indexing_slicing)]
 use quill::ids::MessageId;
-use quill::state::{HistoryMessage, OutboxReceipt};
+use quill::state::{HistoryMessage, OutboxReceiptView};
 use std::path::PathBuf;
 /// kit Phase 3: everything `session_history_row` needs for one message,
 /// snapshotted when the rows are built so the `MessageScroller` renderer
@@ -44,7 +44,7 @@ pub(crate) struct RowChrome {
     /// `None` for outgoing rows and when the header collapses (same
     /// direction as the previous row).
     pub(crate) sender: Option<SenderLabel>,
-    pub(crate) receipt: OutboxReceipt,
+    pub(crate) receipt: OutboxReceiptView,
     /// kit Phase 4: `(name, photo)` for the kit `Message` avatar slot.
     /// `None` where the sender can't be identified (groups) or the row is
     /// outgoing — never invented.

@@ -873,7 +873,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             .filter(|draft| {
                 matches!(
                     draft.stop,
-                    crate::state::BotStopStage::Running { .. } | crate::state::BotStopStage::Failed
+                    crate::state::BotStopStage::Streaming { .. }
+                        | crate::state::BotStopStage::Failed
                 )
             })
         {

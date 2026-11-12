@@ -114,7 +114,9 @@ pub enum CallRating {
         request: RequestId,
         draft: RatingDraft,
     },
-    Sent,
+    /// The rating was sent and answered: the end state that keeps the card
+    /// from coming back.
+    Rated,
     /// The send failed: the card says why and the editor is back on the
     /// draft that was sent.
     Failed {
@@ -166,7 +168,8 @@ pub enum CallUpload {
     NotNeeded,
     Idle,
     Sending(RequestId),
-    Sent,
+    /// The upload was answered; nothing leaves this stage.
+    Uploaded,
     Failed(String),
 }
 
@@ -179,7 +182,7 @@ impl CallUpload {
     pub fn error(&self) -> Option<&str> {
         match self {
             Self::Failed(error) => Some(error),
-            Self::NotNeeded | Self::Idle | Self::Sending(_) | Self::Sent => None,
+            Self::NotNeeded | Self::Idle | Self::Sending(_) | Self::Uploaded => None,
         }
     }
 }
@@ -226,8 +229,9 @@ pub enum CallTransport {
     NotStarted {
         start_error: Option<String>,
     },
-    /// Connect issued, or the engine reports it is connecting.
-    Connecting(CallLink),
+    /// A connect attempt is under way: issued, or the engine reports it is
+    /// connecting. The engine's next state report ends it.
+    Attempt(CallLink),
     Connected(CallLink),
     /// A retry of the retained parameters is in flight.
     Reconnecting(CallLink),
@@ -263,7 +267,7 @@ impl CallTransport {
     pub fn state(&self) -> Option<TransportState> {
         match self {
             Self::NotStarted { .. } => None,
-            Self::Connecting(_) => Some(TransportState::Connecting),
+            Self::Attempt(_) => Some(TransportState::Connecting),
             Self::Connected(_) => Some(TransportState::Connected),
             Self::Reconnecting(_) => Some(TransportState::Reconnecting),
             Self::Closed(_) => Some(TransportState::Closed),
@@ -292,7 +296,7 @@ impl CallTransport {
     pub fn link(&self) -> Option<&CallLink> {
         match self {
             Self::NotStarted { .. } => None,
-            Self::Connecting(link)
+            Self::Attempt(link)
             | Self::Connected(link)
             | Self::Reconnecting(link)
             | Self::Closed(link) => Some(link),
@@ -319,7 +323,7 @@ impl CallTransport {
     /// one: a reported failure goes through the reconnect decision.
     pub fn reported(state: TransportState, link: CallLink) -> Option<Self> {
         match state {
-            TransportState::Connecting => Some(Self::Connecting(link)),
+            TransportState::Connecting => Some(Self::Attempt(link)),
             TransportState::Connected => Some(Self::Connected(CallLink {
                 reconnect_attempts: 0,
                 ..link

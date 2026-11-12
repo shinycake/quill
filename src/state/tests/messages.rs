@@ -497,7 +497,7 @@ fn outbox_receipt_is_honest_when_cursor_is_zero() {
         .messages
         .get(&20)
         .unwrap();
-    assert_eq!(chat.outbox_receipt(message), OutboxReceipt::Sent);
+    assert_eq!(chat.outbox_receipt(message), OutboxReceiptView::Sent);
     assert_eq!(
         outgoing_status_label(false, chat.outbox_receipt(message)),
         "You · sent"
@@ -516,13 +516,13 @@ fn outbox_receipt_is_honest_when_cursor_is_zero() {
         .messages
         .get(&20)
         .unwrap();
-    assert_eq!(chat.outbox_receipt(message), OutboxReceipt::Read);
+    assert_eq!(chat.outbox_receipt(message), OutboxReceiptView::Read);
     assert_eq!(
         outgoing_status_label(false, chat.outbox_receipt(message)),
         "You · read"
     );
     assert_eq!(
-        outgoing_status_label(true, OutboxReceipt::None),
+        outgoing_status_label(true, OutboxReceiptView::None),
         "You (sending)"
     );
     assert!(!sink.rendered().contains("CANARY_OUTBOX"));

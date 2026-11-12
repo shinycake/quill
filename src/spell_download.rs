@@ -51,7 +51,9 @@ impl DownloadStage {
 /// The worker's end of a download: dropping it marks the download finished,
 /// however the worker ends.
 #[derive(Debug)]
-pub struct Worker(Sender<()>);
+pub struct Worker {
+    _end: Sender<()>,
+}
 
 /// Shared between the download thread and the UI.
 #[derive(Debug)]
@@ -70,7 +72,7 @@ impl Progress {
             received: AtomicU64::new(0),
             stage: Mutex::new(DownloadStage::Running { ended }),
         };
-        (std::sync::Arc::new(progress), Worker(end))
+        (std::sync::Arc::new(progress), Worker { _end: end })
     }
 
     pub fn received(&self) -> u64 {

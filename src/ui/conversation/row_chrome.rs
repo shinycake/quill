@@ -85,9 +85,9 @@ impl ChromeInputs<'_> {
         let receipt = if message.is_outgoing {
             self.chat
                 .map(|summary| summary.outbox_receipt(message))
-                .unwrap_or(OutboxReceipt::Sent)
+                .unwrap_or(OutboxReceiptView::Sent)
         } else {
-            OutboxReceipt::None
+            OutboxReceiptView::None
         };
         let photo = match message.sender {
             Some(MessageSender::User { user_id }) => {
