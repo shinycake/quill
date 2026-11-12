@@ -27,7 +27,7 @@ pub(super) struct DraftClear {
 /// later ack of the same send finds it by id and never another send's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ClearStage {
-    Waiting,
+    Armed,
     /// One message acked (the draft was cleared then) or failed (the draft
     /// stays): the rest of the send's acks clear nothing.
     Spent,
@@ -58,7 +58,7 @@ impl DraftClear {
             chat_id,
             sent,
             messages: Vec::new(),
-            stage: ClearStage::Waiting,
+            stage: ClearStage::Armed,
         }
     }
 
@@ -108,7 +108,7 @@ impl DraftClear {
     /// `message` acked. True for the ack that clears the draft: the first
     /// of the send. The message leaves the send either way.
     pub(super) fn ack(&mut self, message: MessageId) -> bool {
-        let clears = self.stage == ClearStage::Waiting;
+        let clears = self.stage == ClearStage::Armed;
         self.stage = ClearStage::Spent;
         self.settle(message);
         clears
