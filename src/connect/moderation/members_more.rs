@@ -9,9 +9,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
         filter: MemberListFilter,
     ) -> bool {
-        self.session
-            .groups
-            .member_more_asking(chat_id.0, filter)
+        self.session.groups.member_more_asking(chat_id.0, filter)
     }
 
     /// `getSupergroupMembers` from `offset` (tdesktop asks 200 per page

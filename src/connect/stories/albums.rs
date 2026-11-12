@@ -277,7 +277,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         let purpose = RequestPurpose::GetChatPostedToChatPageStories;
         // The stories page does not ask again while its own page is out (the
         // gallery's tab keeps track of its own requests).
-        if gallery.is_none() && self.session.stories.page_asks.any(|chat| *chat == chat_id.0) {
+        if gallery.is_none()
+            && self
+                .session
+                .stories
+                .page_asks
+                .any(|chat| *chat == chat_id.0)
+        {
             return Ok(None);
         }
         let extra = match gallery {

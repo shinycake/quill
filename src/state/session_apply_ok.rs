@@ -208,9 +208,7 @@ impl Session {
         // `updateAuthorizationState` → `Closed` (`set_auth`
         // invalidates the account there). Both clear the
         // in-flight flag and any stale error.
-        self.settings
-            .account_write
-            .settle(pending.map(|p| p.id));
+        self.settings.account_write.settle(pending.map(|p| p.id));
         if let Some(RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { days })) =
             pending.map(|p| p.purpose)
         {

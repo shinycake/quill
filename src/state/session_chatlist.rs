@@ -60,7 +60,11 @@ impl Session {
             .values()
             .filter(|c| Self::is_pinned_in(c, archived))
             .map(|c| {
-                let order = if archived { c.archive_order() } else { c.order() };
+                let order = if archived {
+                    c.archive_order()
+                } else {
+                    c.order()
+                };
                 (c.id.0, order)
             })
             .collect();
@@ -93,10 +97,13 @@ impl Session {
             .pinned_chat_ids(archived)
             .into_iter()
             .map(|id| {
-                let order = self
-                    .chats
-                    .get(&id)
-                    .map(|c| if archived { c.archive_order() } else { c.order() });
+                let order = self.chats.get(&id).map(|c| {
+                    if archived {
+                        c.archive_order()
+                    } else {
+                        c.order()
+                    }
+                });
                 (id, order.unwrap_or(0))
             })
             .collect();
@@ -109,10 +116,12 @@ impl Session {
         }
         let orders: Vec<i64> = current.iter().map(|(_, order)| *order).collect();
         for (id, order) in new_ids.iter().zip(orders.iter()) {
-            if let Some(chat) = self.chats.get_mut(id) {
-                if let Some(position) = chat.position_mut(archived) {
-                    position.order = *order;
-                }
+            if let Some(position) = self
+                .chats
+                .get_mut(id)
+                .and_then(|chat| chat.position_mut(archived))
+            {
+                position.order = *order;
             }
         }
         self.rebuild_main_order();

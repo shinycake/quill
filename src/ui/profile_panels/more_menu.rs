@@ -133,8 +133,9 @@ impl QuillApp {
                 .chat
                 .and_then(|id| session.private_sharing_disabled(id)),
             can_add_to_folder: !session.chat_list.chat_folders.is_empty()
-                && chat
-                    .is_some_and(|chat| chat.supported() && (chat.in_main_list() || chat.in_archive())),
+                && chat.is_some_and(|chat| {
+                    chat.supported() && (chat.in_main_list() || chat.in_archive())
+                }),
             blocked: target.user.filter(|_| !is_self).map(|_| {
                 user_info.is_some_and(|info| info.blocked) || chat.is_some_and(|chat| chat.blocked)
             }),

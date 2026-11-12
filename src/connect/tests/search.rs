@@ -589,7 +589,12 @@ fn closing_the_chat_search_cancels_a_query_in_its_quiet_window() {
     };
     driver.close_chat_search();
     assert!(!driver.session.search.chat_search.is_open());
-    assert!(driver.commit_debounced_chat_search(token).unwrap().is_none());
+    assert!(
+        driver
+            .commit_debounced_chat_search(token)
+            .unwrap()
+            .is_none()
+    );
     assert!(driver.open_chat_search().unwrap());
     assert!(matches!(
         driver.session.search.chat_search.status(),

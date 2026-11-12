@@ -314,7 +314,11 @@ fn a_handover_whose_group_call_cannot_be_fetched_ends_the_call_and_fails_the_inv
     let call = harness.1.session.calls.active_group_call.as_ref().unwrap();
     assert!(call.conference.as_ref().unwrap().upgrade().is_none());
     let results = harness.1.session.calls.invite_results.as_ref().unwrap();
-    assert_eq!(results.failed, vec![42], "the other side of the call is not invited");
+    assert_eq!(
+        results.failed,
+        vec![42],
+        "the other side of the call is not invited"
+    );
     let _ = std::fs::remove_dir_all(&harness.0);
 }
 

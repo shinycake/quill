@@ -200,7 +200,13 @@ fn cl2_mark_all_chats_as_read_sends_read_chat_list() {
     let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
     let seq = AtomicU64::new(0);
     ready_private_chat(&mut driver, &seq, &dyn_sink);
-    driver.session.chats.get_mut(&7).expect("chat").main.get_or_insert_with(Default::default);
+    driver
+        .session
+        .chats
+        .get_mut(&7)
+        .expect("chat")
+        .main
+        .get_or_insert_with(Default::default);
 
     let sent = driver.mark_all_chats_as_read(false).expect("send");
     assert!(sent.is_some(), "chat 7 is unread");

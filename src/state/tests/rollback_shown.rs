@@ -24,12 +24,25 @@ fn a_refused_reorder_keeps_the_order_a_newer_position_update_set() {
         shown: vec![(7, 200), (9, 300)],
         archived: false,
     };
-    session.chats.get_mut(&7).expect("chat").main.get_or_insert_with(Default::default).order = 500;
-    session.chats.get_mut(&9).expect("chat").main.get_or_insert_with(Default::default).order = 300;
+    session
+        .chats
+        .get_mut(&7)
+        .expect("chat")
+        .main
+        .get_or_insert_with(Default::default)
+        .order = 500;
+    session
+        .chats
+        .get_mut(&9)
+        .expect("chat")
+        .main
+        .get_or_insert_with(Default::default)
+        .order = 300;
     session.restore_optimistic(rollback, None);
     assert_eq!(session.chats[&7].order(), 500, "the server's order stands");
     assert_eq!(
-        session.chats[&9].order(), 200,
+        session.chats[&9].order(),
+        200,
         "an untouched chat is put back"
     );
 }

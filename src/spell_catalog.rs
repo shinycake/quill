@@ -496,11 +496,8 @@ pub fn install(dir: &Path, code: &str, aff: &[u8], dic: &[u8]) -> Result<(), Ins
     let put_back = |had_old: bool| {
         if had_old {
             let _ = std::fs::remove_file(target("aff"));
-            let _ = crate::fs_retry::rename_retrying(
-                &backup,
-                &target("aff"),
-                crate::fs_retry::LONG,
-            );
+            let _ =
+                crate::fs_retry::rename_retrying(&backup, &target("aff"), crate::fs_retry::LONG);
         }
     };
     if let Err(err) = rename(&part("aff"), &target("aff")) {

@@ -30,14 +30,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         // The stage holds each request it sent: it leaves with its answer,
         // its error or its loss.
         if let Some(subject) = &subject
-            && self
-                .session
-                .settings
-                .quick_replies
-                .sent
-                .any(|sent| {
-                    sent.purpose == purpose && sent.chat_id == chat_id && sent.subject == *subject
-                })
+            && self.session.settings.quick_replies.sent.any(|sent| {
+                sent.purpose == purpose && sent.chat_id == chat_id && sent.subject == *subject
+            })
         {
             return Ok(None);
         }

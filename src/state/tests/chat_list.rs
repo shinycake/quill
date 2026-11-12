@@ -541,7 +541,13 @@ fn cl1_pin_error_rolls_back_and_surfaces() {
         shown: true,
         archived: false,
     });
-    session.chats.get_mut(&11).expect("chat").main.get_or_insert_with(Default::default).is_pinned = true;
+    session
+        .chats
+        .get_mut(&11)
+        .expect("chat")
+        .main
+        .get_or_insert_with(Default::default)
+        .is_pinned = true;
     apply_json(
         &mut session,
         &seq,

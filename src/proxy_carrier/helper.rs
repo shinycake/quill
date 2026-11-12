@@ -614,9 +614,7 @@ impl HelperCarrierHost {
                 waited = Waited::GaveUp;
             }
         }
-        if let Folder::Claimed(generation) =
-            std::mem::replace(&mut self.folder, Folder::Stopped)
-        {
+        if let Folder::Claimed(generation) = std::mem::replace(&mut self.folder, Folder::Stopped) {
             if wait {
                 generation.tear_down(data_folder::RETRY_FOR);
             } else {

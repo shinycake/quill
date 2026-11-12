@@ -19,9 +19,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || !self.has_call_engine() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.calls.active_call.is_some()
-            || !self.session.calls.creates.is_empty()
-        {
+        if self.session.calls.active_call.is_some() || !self.session.calls.creates.is_empty() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let user = self.session.user(user_id);

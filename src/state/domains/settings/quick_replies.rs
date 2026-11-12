@@ -228,11 +228,9 @@ impl Session {
         // Only a fetch that waits for this request takes its failure (an
         // older load's error is nothing the page awaits).
         let took = match purpose {
-            Some(RequestPurpose::Settings(SettingsPurpose::LoadQuickReplyShortcuts)) => {
-                state
-                    .shortcuts_load
-                    .failed(request, error_reason(err), false)
-            }
+            Some(RequestPurpose::Settings(SettingsPurpose::LoadQuickReplyShortcuts)) => state
+                .shortcuts_load
+                .failed(request, error_reason(err), false),
             Some(RequestPurpose::Settings(SettingsPurpose::LoadQuickReplyMessages {
                 shortcut_id,
             })) => {

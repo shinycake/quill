@@ -117,7 +117,13 @@ fn a_late_mask_set_answer_after_a_change_leaves_no_entry_behind() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let ask = session.request(StickersPurpose::GetMaskSet { set_id: 5 }.into(), None);
-    session.stickers.masks.sets.entry(5).or_default().begin_with(ask);
+    session
+        .stickers
+        .masks
+        .sets
+        .entry(5)
+        .or_default()
+        .begin_with(ask);
     // A change cleared the sets meanwhile.
     let change = session.request(
         StickersPurpose::ChangeMaskSet {
@@ -260,7 +266,10 @@ fn an_unpin_outdates_a_pinned_list_fetch_in_flight() {
         r#"{"@type":"updateMessageIsPinned","chat_id":11,"message_id":101,"is_pinned":false}"#,
     );
     let fetch = &session.messages.pinned_messages[&11];
-    assert!(fetch.is_outdated(), "asked again, not answered with the old");
+    assert!(
+        fetch.is_outdated(),
+        "asked again, not answered with the old"
+    );
     assert!(!fetch.waits_for(ask));
 }
 
@@ -287,7 +296,10 @@ fn held_requests_leave_with_their_answer_error_or_loss() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, other.0),
     );
-    assert!(!session.calls.creates.is_empty(), "another request's answer");
+    assert!(
+        !session.calls.creates.is_empty(),
+        "another request's answer"
+    );
     apply_json(
         &mut session,
         &seq,

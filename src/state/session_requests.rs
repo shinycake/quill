@@ -29,7 +29,8 @@ impl Session {
             && matches!(
                 purpose,
                 RequestPurpose::Groups(
-                    GroupsPurpose::SetChatMemberStatus { .. } | GroupsPurpose::SetChatMemberTag { .. }
+                    GroupsPurpose::SetChatMemberStatus { .. }
+                        | GroupsPurpose::SetChatMemberTag { .. }
                 ) | RequestPurpose::AddChatMembers
                     | RequestPurpose::AddChatMember
             )
