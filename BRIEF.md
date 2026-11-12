@@ -122,7 +122,7 @@ IS entries are not user-visible bugs. Each one names a struct whose stages are k
 ## Round 2 bundles (r2-NN)
 
 These come from the 2026-11-11 re-sweep of every file, run on the integration branch after all IS bundles merged.
-The whole re-sweep register is `register-r2.jsonl` (1,133 entries); line numbers refer to `origin/claude/sweep-r3` at f9fd2d57b.
+The whole re-sweep register is `register-r2.jsonl` (1,133 entries); line numbers refer to `origin/claude/project-thread-mnl7ex` at f9fd2d57b.
 Each r2 bundle holds the S2 and confirmed S3 entries for its files. While you are in a file, also fix any other `register-r2.jsonl`
 entry for that same file when the fix is local, and list it in your table.
 Do not spawn subagents or run anything in the background except the gate command with its Monitor wait: ending your turn ends your session.
@@ -150,3 +150,17 @@ Reviews of the first round-2 bundles still caught: a newest-request-wins rollbac
 (test both orders of two in-flight requests), a locally refused send stored as the same Failed value as a server refusal
 (keep them apart when the UI treats them differently), a dropped `Result` from a fetch call leaving a box on "Loading" forever,
 and a fix that added an `Option<RequestId>` side field beside the value it guards (put the request inside the stage instead).
+
+## Round 3 bundles (r3-NN), 2026-11-12
+
+From the third full read of every file, on main at 9ef204ed9 after round 2 merged (#1452). Base and integration branch:
+`claude/sweep-r3`. Each r3 bundle owns every entry for its files, all severities. The file-complete rule above applies
+with `register-r3.jsonl` in place of `register-r2.jsonl`, and the fresh-reviewer pass uses `RESWEEP-BRIEF.md` on branch
+`sweep/resweep3-plan`.
+
+Why entries keep turning up: each round's readers catch a different part of the same shapes. When you fix an entry,
+look for the same shape in the rest of the file and in its callers, and when the shape can be caught mechanically
+(an answer applied by request purpose or chat id instead of the `RequestId` that asked; a generation counter or
+`u64` standing in for a `RequestId`; a `Vec`/queue of in-flight requests beside a stage; a detached task or timer the
+stage does not own), extend the matching guard in `scripts/` (check-request-match.py, check-owned-timers.py,
+check-stage-enums.py, check-implicit-state.py) so CI rejects it. Name each guard change in your final message.
