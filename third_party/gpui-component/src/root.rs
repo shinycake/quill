@@ -476,7 +476,21 @@ impl WindowState {
         else {
             return false;
         };
-        if let Some(handle) = self.close_dialog_at(ix, window, cx) {
+        // A dialog under another one has no focus to give back: the dialog
+        // above keeps it, and takes over the handle this one saved, so its
+        // own close restores what was focused before both.
+        let saved = self.active_dialogs[ix].previous_focused_handle.clone();
+        let above = self
+            .active_dialogs
+            .iter_mut()
+            .skip(ix + 1)
+            .find(|dialog| !dialog.closing);
+        let was_newest = above.is_none();
+        if let Some(above) = above {
+            above.previous_focused_handle = saved;
+        }
+        let restored = self.close_dialog_at(ix, window, cx);
+        if let Some(handle) = restored.filter(|_| was_newest) {
             window.focus(&handle, cx);
         }
         gpui_base::TextSelection::clear(window, cx);

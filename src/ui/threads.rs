@@ -229,10 +229,19 @@ impl QuillApp {
         }
         // "Jump to root" pages older replies until the root is in; the
         // history list scrolls there (`ScrollGoal::ThreadRoot`).
-        if matches!(
-            self.screen.history.aim.goal(),
-            Some(ScrollGoal::ThreadRoot { .. })
-        ) {
+        if let Some(ScrollGoal::ThreadRoot { thread_id }) = self.screen.history.aim.goal() {
+            let open_thread = live
+                .driver
+                .session
+                .threads
+                .thread
+                .as_ref()
+                .map(|thread| thread.thread_id);
+            // A goal another thread set is not this thread's to page for.
+            if open_thread != Some(thread_id) {
+                self.screen.history.aim.take_goal();
+                return;
+            }
             let complete = live
                 .driver
                 .session

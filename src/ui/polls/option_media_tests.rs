@@ -115,7 +115,18 @@ fn a_new_add_clears_the_last_refusal(cx: &mut TestAppContext) {
         input.update(cx, |input, cx| {
             input.set_value("A brand new option", window, cx)
         });
+        // A video still being read keeps the panel open past the judgement,
+        // so an empty refusal below is the cleared one, not a closed panel.
+        if let Some(panel) = app.message_ui.poll_add_option.as_mut() {
+            panel.attach.media = crate::ui::dialogs::OptionMediaSlot::Preparing(
+                crate::ui::dialogs::Preparing::new("clip.mp4".into(), gpui_kit::Task::ready(())),
+            );
+        }
         app.submit_poll_add_option(cx);
+        assert!(
+            app.message_ui.poll_add_option.is_some(),
+            "the panel waits for the video"
+        );
         assert!(refused(app).is_none(), "the fixed text is judged anew");
     });
 }

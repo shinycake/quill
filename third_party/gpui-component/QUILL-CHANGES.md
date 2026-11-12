@@ -102,3 +102,11 @@ media viewer). The wheel over the button still scrolls the list. Background:
 the middle of the view and the "Unread messages" bar at its top by measuring
 where the paint put them and scrolling by the difference
 (`docs/decisions/unread-open-landing.md`). Re-apply when re-vendoring.
+
+`src/root.rs`, `src/window_ext.rs`: `WindowState::last_dialog_id`,
+`WindowState::close_dialog_by_id` (with `close_dialog_at` split out of
+`close_dialog_internal`) and `WindowExt::{last_dialog_id, close_dialog_by_id}`.
+Quill's `QuitGate` must close only its own "Stop and quit?" alert, never a box
+that opened on top of it (`src/ui/export_quit.rs`). Closing a dialog by id
+moves focus only when it was the newest; otherwise it hands its saved focus
+handle to the dialog above. Re-apply when re-vendoring.

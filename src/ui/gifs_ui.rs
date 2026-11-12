@@ -501,8 +501,6 @@ impl QuillApp {
             .into_any_element()
     }
 
-    /// Why the grid is empty. Nothing while the first answer is on its way
-    /// (the field's spinner says so).
     /// The line a GIF tab with nothing to draw shows, if any. A section
     /// missing after its second ask is spent has no answer on its way and
     /// waits for a press, so it says so instead of drawing blank.
@@ -537,6 +535,7 @@ impl QuillApp {
         }
     }
 
+    /// Draws `gif_status_text` where the grid would be.
     fn gif_panel_status(
         &self,
         panel: &GifPanel,

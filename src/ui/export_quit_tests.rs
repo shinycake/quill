@@ -531,13 +531,20 @@ fn the_exports_ending_closes_the_alert_not_the_box_above(cx: &mut TestAppContext
         window.open_dialog(cx, |dialog, _, _| dialog.title("Other"));
         window.last_dialog_id(cx)
     });
+    settle(vcx);
+    let focus_before = vcx.update(|window, cx| window.focused(cx));
     app.update(vcx, |app, _| {
         app.demo_session.as_mut().unwrap().settings.chat_export = None;
     });
     app.update_in(vcx, |app, window, cx| app.quit_gate_upkeep(window, cx));
     settle(vcx);
     assert!(!box_open(&app, vcx), "the hold is over");
+    let focus_after = vcx.update(|window, cx| window.focused(cx));
     let top = vcx.update(|window, cx| window.last_dialog_id(cx));
     assert!(above.is_some() && top == above, "the box above stays");
+    assert!(
+        focus_before.is_some() && focus_after == focus_before,
+        "focus stays in the box above"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
