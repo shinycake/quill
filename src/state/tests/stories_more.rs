@@ -749,7 +749,7 @@ fn b14_close_friends_error_keeps_the_list() {
     assert_eq!(session.stories.close_friends.ids(), Some(&vec![31]));
     assert!(matches!(
         session.stories.page_ops.latest().map(|op| &op.state),
-        Some(crate::story_page::StoryPageOpState::Failed(_))
+        Some(crate::story_page::StoryPageOpState::Failed { .. })
     ));
 }
 
@@ -771,7 +771,7 @@ fn b14_hide_and_profile_ops_finish_on_ok() {
         );
         assert_eq!(
             session.stories.page_ops.latest().map(|op| &op.state),
-            Some(&crate::story_page::StoryPageOpState::Succeeded)
+            Some(&crate::story_page::StoryPageOpState::Succeeded { request: extra })
         );
     }
 }
@@ -799,11 +799,11 @@ fn a_stale_answer_does_not_settle_the_op_tracked_now() {
     );
     assert_eq!(
         session.stories.page_ops.get(second).map(|op| &op.state),
-        Some(&crate::story_page::StoryPageOpState::Sending)
+        Some(&crate::story_page::StoryPageOpState::Sending { request: second })
     );
     assert!(matches!(
         session.stories.page_ops.get(first).map(|op| &op.state),
-        Some(crate::story_page::StoryPageOpState::Failed(_))
+        Some(crate::story_page::StoryPageOpState::Failed { .. })
     ));
 }
 

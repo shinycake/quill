@@ -341,8 +341,8 @@ fn attached_sticker_sets_fail_the_box_and_drop_an_earlier_answer() {
     let seq = AtomicU64::new(0);
     let purpose = RequestPurpose::Stickers(StickersPurpose::GetAttachedStickerSets { file_id: 1 });
     let ask = |session: &mut Session| {
-        session.stickers.sticker_set_view = Some(StickerSetView::loading(0));
         let extra = session.request(purpose, None);
+        session.stickers.sticker_set_view = Some(StickerSetView::loading(0, extra));
         session.stickers.stickers.attached = crate::state::AttachedSets::Asked(extra);
         extra
     };
@@ -398,12 +398,11 @@ fn a_failed_refetch_keeps_the_shown_sticker_set() {
         is_emoji: false,
         is_owned: true,
         stickers: Vec::new(),
-        files: Default::default(),
     };
-    let mut view = StickerSetView::loading(5);
+    let mut view = StickerSetView::loading(5, RequestId(50));
     view.stage = ready.clone();
     session.stickers.sticker_set_view = Some(view);
-    session.fail_sticker_set_view(5);
+    session.fail_sticker_set_view(RequestId(50));
     let stage = |session: &Session| {
         session
             .stickers
@@ -412,8 +411,13 @@ fn a_failed_refetch_keeps_the_shown_sticker_set() {
             .map(|v| v.stage.clone())
     };
     assert_eq!(stage(&session), Some(ready));
-    session.stickers.sticker_set_view = Some(StickerSetView::loading(5));
-    session.fail_sticker_set_view(5);
+    session.stickers.sticker_set_view = Some(StickerSetView::loading(5, RequestId(51)));
+    session.fail_sticker_set_view(RequestId(50));
+    assert!(matches!(
+        stage(&session),
+        Some(StickerSetViewStage::Loading { .. })
+    ));
+    session.fail_sticker_set_view(RequestId(51));
     assert_eq!(stage(&session), Some(StickerSetViewStage::Failed));
 }
 

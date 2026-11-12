@@ -295,7 +295,7 @@ fn an_unforwardable_member_keeps_the_selection_from_lifting(cx: &mut TestAppCont
             .and_then(|s| s.histories.get_mut(&11))
             .and_then(|h| h.messages.get_mut(&102))
         {
-            message.send = quill::state::SendState::Sending;
+            message.send = quill::state::SendState::Unconfirmed;
         }
     });
     frames(vcx);

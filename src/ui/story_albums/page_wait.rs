@@ -25,11 +25,11 @@ pub(super) fn answer(ops: &StoryPageOps, requests: &[RequestId]) -> Answer {
     let mut refused = false;
     for request in requests {
         match ops.get(*request).map(|op| &op.state) {
-            Some(StoryPageOpState::Sending | StoryPageOpState::Checking) => {
+            Some(StoryPageOpState::Sending { .. } | StoryPageOpState::Checking { .. }) => {
                 return Answer::Waiting;
             }
-            Some(StoryPageOpState::Succeeded) => {}
-            Some(StoryPageOpState::Failed(_)) | None => refused = true,
+            Some(StoryPageOpState::Succeeded { .. }) => {}
+            Some(StoryPageOpState::Failed { .. }) | None => refused = true,
         }
     }
     if refused {

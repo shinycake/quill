@@ -137,7 +137,7 @@ impl QuillApp {
         let (chat_id, message_id) = (accept.chat_id, accept.message_id);
         let decided = self
             .suggestion(chat_id, message_id)
-            .is_some_and(|s| s.info.state != SuggestedPostState::Pending);
+            .is_some_and(|s| s.info.state != SuggestedPostState::Proposed);
         if decided {
             self.close_suggest_accept(cx);
         }
@@ -158,7 +158,7 @@ impl QuillApp {
         // is sent for a suggestion that is no longer pending.
         let pending = self
             .suggestion(accept.chat_id, accept.message_id)
-            .is_none_or(|s| s.info.state == SuggestedPostState::Pending);
+            .is_none_or(|s| s.info.state == SuggestedPostState::Proposed);
         if !pending {
             self.suggested_posts.close_accept();
             self.set_note(StatusNote::error(tr(

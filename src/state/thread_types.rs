@@ -34,12 +34,12 @@ pub enum ThreadStatus {
     },
     /// The thread is known but lives in another chat (a channel post's
     /// discussion group): the driver still has to open that chat. Leaves
-    /// by `switch_to_thread_chat` (`Starting`, or `Failed` when the chat
+    /// by `switch_to_thread_chat` (`ChatOpen`, or `Failed` when the chat
     /// is unknown) or by closing the thread.
     SwitchingChat,
     /// The thread's chat is open; reading and the first
     /// `getMessageThreadHistory` page are still to be started.
-    Starting,
+    ChatOpen,
     /// The first `getMessageThreadHistory` page is in flight (the
     /// request that went out). Its answer makes the thread `Ready`, its
     /// error `Failed`; it is entered only once the send succeeded.
@@ -65,7 +65,7 @@ impl ThreadStatus {
 
     /// The thread chat is open and its first page was not requested yet.
     pub fn needs_start(&self) -> bool {
-        matches!(self, Self::Starting)
+        matches!(self, Self::ChatOpen)
     }
 
     /// The thread is known but its first page has not landed: the driver
@@ -74,7 +74,7 @@ impl ThreadStatus {
     pub fn is_opening(&self) -> bool {
         matches!(
             self,
-            Self::SwitchingChat | Self::Starting | Self::LoadingHistory(_)
+            Self::SwitchingChat | Self::ChatOpen | Self::LoadingHistory(_)
         )
     }
 
@@ -82,7 +82,7 @@ impl ThreadStatus {
     /// first page is out (`LoadingHistory`) only that request's answer
     /// counts; any other page is from a view that is gone. (The driver
     /// enters `LoadingHistory` in the same step that sends the page, so
-    /// nothing answers during `Starting`.)
+    /// nothing answers during `ChatOpen`.)
     pub fn takes_page_of(&self, request: RequestId) -> bool {
         match self {
             Self::LoadingHistory(waiting) => *waiting == request,

@@ -256,7 +256,7 @@ fn group_reply_thread_pages_older_and_fails_with_retry() {
         ),
     );
     let thread = driver.session.threads.thread.as_ref().unwrap();
-    assert_eq!(thread.status, ThreadStatus::Starting, "same chat");
+    assert_eq!(thread.status, ThreadStatus::ChatOpen, "same chat");
     assert!(!thread.is_comments());
     assert_eq!(thread.subtitle(), "1 reply");
     let page = driver

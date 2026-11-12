@@ -112,6 +112,12 @@ pub fn pending() -> bool {
 }
 
 /// How long after a read that found nothing the next one may start.
+/// Both queries of a read end within their limit; past twice that the read
+/// is lost.
+#[cfg(target_os = "linux")]
+const READ_LOST_AFTER: std::time::Duration =
+    std::time::Duration::from_secs(2 * crate::child_timeout::DESKTOP_QUERY_LIMIT.as_secs() + 1);
+
 #[cfg(target_os = "linux")]
 const RETRY_AFTER: std::time::Duration = std::time::Duration::from_secs(30);
 
@@ -123,8 +129,12 @@ enum AccentRead {
     Idle {
         last: Option<u32>,
     },
+    /// A read is running. Its two queries each end within
+    /// `DESKTOP_QUERY_LIMIT`; a read still out at `deadline` is taken for
+    /// lost and a new one may start.
     Reading {
         last: Option<u32>,
+        deadline: std::time::Instant,
     },
     /// A read found nothing; the next may start at `retry_at`.
     Failed {
@@ -137,28 +147,28 @@ enum AccentRead {
 impl AccentRead {
     fn last(&self) -> Option<u32> {
         match self {
-            Self::Idle { last } | Self::Reading { last } | Self::Failed { last, .. } => *last,
+            Self::Idle { last } | Self::Reading { last, .. } | Self::Failed { last, .. } => *last,
         }
     }
 
     /// A read may start at `now`: move to `Reading` and say so.
     fn begin(&mut self, now: std::time::Instant) -> bool {
-        match *self {
-            Self::Idle { last } => {
-                *self = Self::Reading { last };
-                true
-            }
-            Self::Failed { last, retry_at } if now >= retry_at => {
-                *self = Self::Reading { last };
-                true
-            }
-            Self::Reading { .. } | Self::Failed { .. } => false,
-        }
+        let last = match *self {
+            Self::Idle { last } => last,
+            Self::Failed { last, retry_at } if now >= retry_at => last,
+            Self::Reading { last, deadline } if now >= deadline => last,
+            Self::Reading { .. } | Self::Failed { .. } => return false,
+        };
+        *self = Self::Reading {
+            last,
+            deadline: now + READ_LOST_AFTER,
+        };
+        true
     }
 
     /// The read ended at `now` with `value` (`None`: it found nothing).
     fn finish(&mut self, value: Option<u32>, now: std::time::Instant) {
-        if let Self::Reading { last } = *self {
+        if let Self::Reading { last, .. } = *self {
             *self = match value {
                 Some(value) => Self::Idle { last: Some(value) },
                 None => Self::Failed {
@@ -314,6 +324,11 @@ mod tests {
         let mut read = AccentRead::Idle { last: None };
         assert!(read.begin(t0));
         assert!(!read.begin(t0), "one read at a time");
+        assert!(
+            read.begin(t0 + READ_LOST_AFTER),
+            "a read out past its deadline is taken for lost"
+        );
+        let t0 = t0 + READ_LOST_AFTER;
         read.finish(None, t0);
         assert!(!read.begin(t0), "not again at once");
         assert!(!read.begin(t0 + RETRY_AFTER / 2));

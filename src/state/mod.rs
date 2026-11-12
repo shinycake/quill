@@ -256,16 +256,16 @@ pub(crate) use session_history_window::WindowEdge;
 pub use session_links_boosts::*;
 pub use session_message_menu::{
     Audience, CustomEmojiAnswer, CustomEmojiAnswers, CustomEmojiPreview, MessageAudience,
-    MessageReportFlow, MessageReportStage, PollOptionMenu, SetChange, SetChangeStage, SetFiles,
+    MessageReportFlow, MessageReportStage, PollOptionMenu, SetChange, SetChangeStage,
     StickerSetView, StickerSetViewStage, poll_option_key, reaction_filter_key,
 };
 pub use session_message_story::{
-    StoryCardState, StoryPreview, media_unlocked_note, message_story_key,
+    StoryCardView, StoryPreview, media_unlocked_note, message_story_key,
 };
 pub use session_privacy_data::{PasswordCheck, PrivacyControl, PrivacyData};
 pub use session_reply::story_thumb_candidates;
 pub use session_reply::{
-    ForwardHeader, ForwardLink, MAX_REPLY_TARGETS_OUTSIDE_WINDOW, ReplyHeader, ReplyState,
+    ForwardHeader, ForwardLink, MAX_REPLY_TARGETS_OUTSIDE_WINDOW, ReplyHeader, ReplyTargetView,
     ReplyTarget, footer_tooltip, thumb_candidates,
 };
 pub use session_reply_keyboard::*;

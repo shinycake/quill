@@ -11,7 +11,7 @@ use super::*;
 use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr};
 use quill::service_text::{Seg, ServiceText};
-use quill::state::{StoryCardState, StoryPreview};
+use quill::state::{StoryCardView, StoryPreview};
 use quill::story_viewer::StoryOpenScope;
 
 /// Side of the round picture of a story mention (`st::storyMentionSize`).
@@ -90,7 +90,7 @@ impl QuillApp {
         let state = self
             .session()
             .map(|s| s.story_card_state(poster.0, story_id));
-        if state == Some(StoryCardState::Expired) {
+        if state == Some(StoryCardView::Expired) {
             self.set_status_note(StatusNote::silent(tr(keys::FORWARDED_STORY_EXPIRED)), cx);
             return;
         }
@@ -109,10 +109,10 @@ pub(in crate::ui) fn story_card(
     width_max: i32,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
-    let state = session.map_or(StoryCardState::Loading, |s| {
+    let state = session.map_or(StoryCardView::Loading, |s| {
         s.story_card_state(poster.0, story_id)
     });
-    if state == StoryCardState::Expired {
+    if state == StoryCardView::Expired {
         return div()
             .id(("story-expired", row_id))
             .role(gpui_kit::Role::Label)
@@ -225,7 +225,7 @@ pub(in crate::ui) fn story_mention_extras(
     cx: &mut Context<QuillApp>,
 ) -> Option<AnyElement> {
     let state = session?.story_card_state(poster.0, story_id);
-    if state == StoryCardState::Expired {
+    if state == StoryCardView::Expired {
         return None;
     }
     let preview = session.and_then(|s| s.story_preview(poster.0, story_id));

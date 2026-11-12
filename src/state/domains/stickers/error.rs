@@ -60,8 +60,10 @@ impl Session {
                     titles.remove(&set_id);
                 }
             }
-            Some(RequestPurpose::Stickers(StickersPurpose::ViewStickerSet { set_id })) => {
-                self.fail_sticker_set_view(set_id)
+            Some(RequestPurpose::Stickers(StickersPurpose::ViewStickerSet { .. })) => {
+                if let Some(pending) = pending {
+                    self.fail_sticker_set_view(pending.id);
+                }
             }
             Some(RequestPurpose::Stickers(StickersPurpose::CustomEmojiPack { .. })) => {
                 if let Some(pending) = pending {
@@ -78,7 +80,9 @@ impl Session {
                     .waits_for(pending.map(|p| p.id))
                 {
                     self.stickers.stickers.attached = AttachedSets::Idle;
-                    self.fail_sticker_set_view(0);
+                    if let Some(pending) = pending {
+                        self.fail_sticker_set_view(pending.id);
+                    }
                 }
             }
             // The lookup's ids are asked for again. A rate limit is no

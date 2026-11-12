@@ -405,7 +405,7 @@ fn info_updates_change_the_loaded_message() {
             .and_then(|m| m.extras.suggested_post)
             .map(|info| info.state)
     };
-    assert_eq!(state(&f), Some(SuggestedPostState::Pending));
+    assert_eq!(state(&f), Some(SuggestedPostState::Proposed));
     f.ingest(&format!(
         r#"{{"@type":"updateMessageSuggestedPostInfo","chat_id":{},"message_id":{},"suggested_post_info":{{"@type":"suggestedPostInfo","price":null,"send_date":0,"state":{{"@type":"suggestedPostStateApproved"}},"can_be_approved":false,"can_be_declined":false}}}}"#,
         CHAT.0,

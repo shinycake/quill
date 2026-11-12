@@ -98,8 +98,8 @@ pub fn effective_preview(message: &HistoryMessage) -> String {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum SendState {
     #[default]
-    Sent,
-    Sending,
+    Delivered,
+    Unconfirmed,
     /// `can_retry`: `resendMessages` may retry it (not every failure can).
     Failed {
         can_retry: bool,
@@ -112,8 +112,8 @@ impl SendState {
     pub fn from_flags(pending: bool, failed: bool, can_retry: bool) -> Self {
         match (pending, failed) {
             (_, true) => Self::Failed { can_retry },
-            (true, false) => Self::Sending,
-            (false, false) => Self::Sent,
+            (true, false) => Self::Unconfirmed,
+            (false, false) => Self::Delivered,
         }
     }
 }
@@ -169,7 +169,7 @@ pub struct HistoryMessage {
 impl HistoryMessage {
     /// Not on the server yet: still sending, or its send failed.
     pub fn pending(&self) -> bool {
-        self.send != SendState::Sent
+        self.send != SendState::Delivered
     }
 
     /// The send failed (the row shows the failed mark).

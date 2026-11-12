@@ -35,7 +35,7 @@ pub const MAX_REPLY_TARGETS_OUTSIDE_WINDOW: usize = 256;
 
 /// How far a reply strip got in resolving its target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReplyState {
+pub enum ReplyTargetView {
     Ready,
     Loading,
     Deleted,
@@ -46,7 +46,7 @@ pub enum ReplyState {
 pub struct ReplyHeader {
     pub target_chat: ChatId,
     pub target_id: MessageId,
-    pub state: ReplyState,
+    pub state: ReplyTargetView,
     /// The replied message's sender (user, channel or hidden name).
     pub name: Option<String>,
     /// Telegram name color id of that sender, when known.
@@ -308,7 +308,7 @@ impl Session {
         ReplyHeader {
             target_chat: poster,
             target_id: MessageId(0),
-            state: ReplyState::Ready,
+            state: ReplyTargetView::Ready,
             name,
             accent,
             text: "Story".to_string(),
@@ -380,17 +380,17 @@ impl Session {
                 .map(|_| "You".to_string())
         });
         let state = if original.is_some() || preview.is_some() || quote.is_some() {
-            ReplyState::Ready
+            ReplyTargetView::Ready
         } else if tombstoned || matches!(fetched, Some(ReplyTarget::Missing)) {
-            ReplyState::Deleted
+            ReplyTargetView::Deleted
         } else {
-            ReplyState::Loading
+            ReplyTargetView::Loading
         };
         let text = match (state, quote) {
             (_, Some(quote)) => quote.to_string(),
-            (ReplyState::Ready, None) => preview.unwrap_or_default(),
-            (ReplyState::Loading, None) => "Loading…".to_string(),
-            (ReplyState::Deleted, None) => "Deleted message".to_string(),
+            (ReplyTargetView::Ready, None) => preview.unwrap_or_default(),
+            (ReplyTargetView::Loading, None) => "Loading…".to_string(),
+            (ReplyTargetView::Deleted, None) => "Deleted message".to_string(),
         };
         let thumb = if quote.is_some() {
             Vec::new()
@@ -411,7 +411,7 @@ impl Session {
             })
             .flatten();
         let clickable =
-            state == ReplyState::Ready && (!external || self.chats.contains_key(&target_chat.0));
+            state == ReplyTargetView::Ready && (!external || self.chats.contains_key(&target_chat.0));
         Some(ReplyHeader {
             target_chat,
             target_id: reply.message_id(),

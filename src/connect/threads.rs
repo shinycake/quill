@@ -121,7 +121,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let _ = self.settle_pending_draft();
         self.session.open_chat(chat_id);
         if let Some(thread) = self.session.threads.thread.as_mut() {
-            thread.status = ThreadStatus::Starting;
+            thread.status = ThreadStatus::ChatOpen;
         }
         if let Err(err) = self.send_open_chat(chat_id) {
             // TDLib never heard of the chat: it is not open here either

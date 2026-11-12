@@ -309,33 +309,21 @@ fn sticker_set_json(extra: &serde_json::Value, ids: &[i32]) -> serde_json::Value
         "stickers":stickers,"emojis":[]})
 }
 
-/// 02-083 / 13-028: the set view's previews are marked asked only once the
-/// downloads left; a refused send is asked again.
+/// 02-083 / 13-028: a refused preview download is asked again for the set
+/// view at the next upkeep, and a file already asked is not asked twice.
 #[test]
 fn a_refused_preview_download_is_asked_again_for_the_set_view() {
-    use crate::state::{SetFiles, StickerSetViewStage};
     let mut t = Flaky::new();
     let extra = t.driver.view_sticker_set(77).unwrap();
     t.feed(sticker_set_json(&extra.as_extra().into(), &[1, 2]));
-    let files = |t: &Flaky| match &t
-        .driver
-        .session
-        .stickers
-        .sticker_set_view
-        .as_ref()
-        .unwrap()
-        .stage
-    {
-        StickerSetViewStage::Ready { files, .. } => *files,
-        other => panic!("not ready: {other:?}"),
-    };
     t.sender.refuse(&["downloadFile"]);
     assert!(t.driver.ensure_sticker_set_view_files().is_err());
-    assert_eq!(files(&t), SetFiles::Unasked);
     t.sender.refuse(&[]);
     t.driver.ensure_sticker_set_view_files().unwrap();
-    assert_eq!(files(&t), SetFiles::Asked);
-    assert!(t.sender.count("downloadFile") >= 2);
+    let sent = t.sender.count("downloadFile");
+    assert!(sent >= 2);
+    t.driver.ensure_sticker_set_view_files().unwrap();
+    assert_eq!(t.sender.count("downloadFile"), sent);
 }
 
 /// 02-084: opening the menu twice asks the emoji pack's title once.

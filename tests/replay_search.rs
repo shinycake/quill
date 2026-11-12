@@ -32,7 +32,7 @@ fn replay_global_search_happy_empty_and_error() {
     );
     assert_eq!(
         session.search.search.status(),
-        quill::state::SearchStatus::Ready
+        quill::state::SearchStateView::Ready
     );
     assert!(session.search.search.is_recents());
     assert_eq!(session.search.search.chat_ids[0].0, 7);
@@ -64,7 +64,7 @@ fn replay_global_search_happy_empty_and_error() {
     );
     assert_eq!(
         session.search.search.status(),
-        quill::state::SearchStatus::Ready
+        quill::state::SearchStateView::Ready
     );
     assert_eq!(session.search.search.chat_ids[0].0, 7);
     assert_eq!(session.search.search.public_chat_ids[0].0, 4242);
@@ -104,7 +104,7 @@ fn replay_global_search_happy_empty_and_error() {
     );
     assert_eq!(
         session.search.search.status(),
-        quill::state::SearchStatus::Empty
+        quill::state::SearchStateView::Empty
     );
 
     session.search.search.begin_query("nope");
@@ -132,12 +132,12 @@ fn replay_global_search_happy_empty_and_error() {
     );
     assert_eq!(
         session.search.search.status(),
-        quill::state::SearchStatus::Failed
+        quill::state::SearchStateView::Failed
     );
     session.close_search();
     assert_eq!(
         session.search.search.status(),
-        quill::state::SearchStatus::Closed
+        quill::state::SearchStateView::Closed
     );
     assert!(!sink.rendered().contains("CANARY_REPLAY"));
 }
@@ -178,7 +178,7 @@ fn replay_chat_search_generation_jump_and_empty() {
     );
     assert_eq!(
         session.search.chat_search.status(),
-        quill::state::SearchStatus::Ready
+        quill::state::SearchStateView::Ready
     );
     assert_eq!(session.search.chat_search.hits().len(), 2);
     assert_eq!(
@@ -237,7 +237,7 @@ fn replay_chat_search_generation_jump_and_empty() {
     );
     assert_eq!(
         session.search.chat_search.status(),
-        quill::state::SearchStatus::Searching
+        quill::state::SearchStateView::Searching
     );
     assert!(session.search.chat_search.hits().is_empty());
 
@@ -258,14 +258,14 @@ fn replay_chat_search_generation_jump_and_empty() {
     );
     assert_eq!(
         session.search.chat_search.status(),
-        quill::state::SearchStatus::Empty
+        quill::state::SearchStateView::Empty
     );
 
     let open_chat = session.open_chat_id();
     session.close_chat_search();
     assert_eq!(
         session.search.chat_search.status(),
-        quill::state::SearchStatus::Closed
+        quill::state::SearchStateView::Closed
     );
     assert_eq!(session.open_chat_id(), open_chat);
     assert!(

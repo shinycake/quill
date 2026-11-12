@@ -5,7 +5,7 @@
 //! arms, and the `Session` methods.
 #![deny(clippy::indexing_slicing)]
 
-use crate::ids::ChatId;
+use crate::ids::{ChatId, RequestId};
 use crate::state::RequestPurpose;
 
 /// Phase 9.7: one chat's `getChatPostedToChatPageStories` state — the
@@ -32,15 +32,44 @@ pub struct ArchivedStories {
 /// Phase 9.7: honest album/pin mutation states on the story page.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StoryPageOpState {
-    /// A read is in flight (`getChatStoryAlbums`,
+    /// A read is in flight as `request` (`getChatStoryAlbums`,
     /// `getStoryAlbumStories`, `getChatArchivedStories`,
     /// `getChatPostedToChatPageStories`).
-    Checking,
-    /// A mutation is in flight (create/reorder/delete/rename album,
-    /// add/remove/reorder album stories, set pinned stories).
-    Sending,
-    Succeeded,
-    Failed(String),
+    Checking { request: RequestId },
+    /// A mutation is in flight as `request` (create/reorder/delete/rename
+    /// album, add/remove/reorder album stories, set pinned stories).
+    Sending { request: RequestId },
+    /// `request` was answered.
+    Succeeded { request: RequestId },
+    /// `request` was refused, or could not be sent.
+    Failed { request: RequestId, reason: String },
+}
+
+impl StoryPageOpState {
+    /// The call this state is about.
+    pub fn request(&self) -> RequestId {
+        match self {
+            Self::Checking { request }
+            | Self::Sending { request }
+            | Self::Succeeded { request }
+            | Self::Failed { request, .. } => *request,
+        }
+    }
+
+    /// The same call answered with success.
+    pub fn succeeded(&self) -> Self {
+        Self::Succeeded {
+            request: self.request(),
+        }
+    }
+
+    /// The same call refused with `reason`.
+    pub fn failed(&self, reason: String) -> Self {
+        Self::Failed {
+            request: self.request(),
+            reason,
+        }
+    }
 }
 
 /// Which story-page call an op is, so a status line and a "this read is in
@@ -92,13 +121,12 @@ impl StoryPageOpKind {
 }
 
 /// Phase 9.7: one story-page call — `kind` names the operation, `state`
-/// the honest TDLib round-trip state, `request` the call it tracks (only
-/// its answer moves `state`) and `chat_id` the chat page it is about.
+/// the honest TDLib round-trip state and the call it tracks (only its
+/// answer moves `state`) and `chat_id` the chat page it is about.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoryPageOp {
     pub kind: StoryPageOpKind,
     pub state: StoryPageOpState,
-    pub request: crate::ids::RequestId,
     pub chat_id: Option<ChatId>,
 }
 
@@ -117,38 +145,44 @@ impl StoryPageOps {
     /// Track `op`. A call tracked under the same request is replaced, and
     /// the finished outcome of the same call on the same page is dropped:
     /// repeating it makes the earlier line stale. Past the cap the oldest
-    /// op goes, a finished one first.
+    /// finished op goes; a call still in flight stays (its answer would find
+    /// nothing).
     pub fn begin(&mut self, op: StoryPageOp) {
         self.ops.retain(|tracked| {
-            tracked.request != op.request
+            tracked.state.request() != op.state.request()
                 && !(tracked.is_finished()
                     && tracked.kind == op.kind
                     && tracked.chat_id == op.chat_id)
         });
         if self.ops.len() >= STORY_PAGE_OPS_CAP {
+            // A call in flight goes only when the list is twice the cap, a
+            // size real use (64 calls out at once) never reaches: calls
+            // that never answer still cannot grow it without end.
             let oldest = self
                 .ops
                 .iter()
                 .position(|tracked| tracked.is_finished())
-                .unwrap_or(0);
-            if oldest < self.ops.len() {
+                .or((self.ops.len() >= 2 * STORY_PAGE_OPS_CAP).then_some(0));
+            if let Some(oldest) = oldest {
                 self.ops.remove(oldest);
             }
         }
         self.ops.push(op);
     }
 
-    pub fn get(&self, request: crate::ids::RequestId) -> Option<&StoryPageOp> {
-        self.ops.iter().find(|op| op.request == request)
+    pub fn get(&self, request: RequestId) -> Option<&StoryPageOp> {
+        self.ops.iter().find(|op| op.state.request() == request)
     }
 
-    pub(crate) fn get_mut(&mut self, request: crate::ids::RequestId) -> Option<&mut StoryPageOp> {
-        self.ops.iter_mut().find(|op| op.request == request)
+    pub(crate) fn get_mut(&mut self, request: RequestId) -> Option<&mut StoryPageOp> {
+        self.ops
+            .iter_mut()
+            .find(|op| op.state.request() == request)
     }
 
-    pub(crate) fn remove(&mut self, request: crate::ids::RequestId) -> bool {
+    pub(crate) fn remove(&mut self, request: RequestId) -> bool {
         let before = self.ops.len();
-        self.ops.retain(|op| op.request != request);
+        self.ops.retain(|op| op.state.request() != request);
         self.ops.len() != before
     }
 
@@ -175,7 +209,9 @@ impl StoryPageOps {
     /// A read of `kind` for `chat_id` is in flight.
     pub fn loading(&self, chat_id: ChatId, kind: StoryPageOpKind) -> bool {
         self.ops.iter().any(|op| {
-            op.chat_id == Some(chat_id) && op.state == StoryPageOpState::Checking && op.kind == kind
+            op.chat_id == Some(chat_id)
+                && matches!(op.state, StoryPageOpState::Checking { .. })
+                && op.kind == kind
         })
     }
 
@@ -183,17 +219,19 @@ impl StoryPageOps {
     pub fn mutating(&self, chat_id: ChatId) -> bool {
         self.ops
             .iter()
-            .any(|op| op.chat_id == Some(chat_id) && op.state == StoryPageOpState::Sending)
+            .any(|op| {
+                op.chat_id == Some(chat_id) && matches!(op.state, StoryPageOpState::Sending { .. })
+            })
     }
 
     /// The one line a page shows: a failure first, then a mutation in
     /// flight, a finished one, and a read last; the newest of each kind.
     pub fn status_for(&self, chat_id: Option<ChatId>) -> Option<&StoryPageOp> {
         let rank = |op: &StoryPageOp| match op.state {
-            StoryPageOpState::Failed(_) => 3,
-            StoryPageOpState::Sending => 2,
-            StoryPageOpState::Succeeded => 1,
-            StoryPageOpState::Checking => 0,
+            StoryPageOpState::Failed { .. } => 3,
+            StoryPageOpState::Sending { .. } => 2,
+            StoryPageOpState::Succeeded { .. } => 1,
+            StoryPageOpState::Checking { .. } => 0,
         };
         self.ops
             .iter()
@@ -211,7 +249,7 @@ impl StoryPageOp {
     fn is_finished(&self) -> bool {
         matches!(
             self.state,
-            StoryPageOpState::Succeeded | StoryPageOpState::Failed(_)
+            StoryPageOpState::Succeeded { .. } | StoryPageOpState::Failed { .. }
         )
     }
 }
@@ -263,42 +301,54 @@ mod tests {
         session.apply(owned);
     }
 
-    fn op(kind: StoryPageOpKind, state: StoryPageOpState, request: u64, chat: i64) -> StoryPageOp {
+    fn op(kind: StoryPageOpKind, state: StoryPageOpState, chat: i64) -> StoryPageOp {
         StoryPageOp {
             kind,
             state,
-            request: crate::ids::RequestId(request),
             chat_id: Some(ChatId(chat)),
         }
+    }
+
+    fn id(request: u64) -> RequestId {
+        RequestId(request)
     }
 
     #[test]
     fn repeating_a_call_drops_its_finished_outcome_and_the_list_stays_bounded() {
         let mut ops = StoryPageOps::default();
         let kind = StoryPageOpKind::DeleteAlbum;
-        ops.begin(op(kind, StoryPageOpState::Failed("no".into()), 1, 11));
+        ops.begin(op(
+            kind,
+            StoryPageOpState::Failed {
+                request: id(1),
+                reason: "no".into(),
+            },
+            11,
+        ));
         ops.begin(op(
             StoryPageOpKind::CreateAlbum,
-            StoryPageOpState::Succeeded,
-            2,
+            StoryPageOpState::Succeeded { request: id(2) },
             11,
         ));
         // The same call on the same page again: its old failure is stale.
-        ops.begin(op(kind, StoryPageOpState::Sending, 3, 11));
+        ops.begin(op(kind, StoryPageOpState::Sending { request: id(3) }, 11));
         assert!(ops.get(crate::ids::RequestId(1)).is_none());
         assert!(
             ops.get(crate::ids::RequestId(2)).is_some(),
             "another call's line stays"
         );
-        // Calls that never answer cannot grow the list past the cap.
-        for request in 100..300 {
-            ops.begin(op(kind, StoryPageOpState::Sending, request, 12));
+        // A call still in flight is not dropped for the cap: the first one
+        // of a full list keeps its place and its answer finds it.
+        for request in 100..100 + STORY_PAGE_OPS_CAP as u64 {
+            ops.begin(op(kind, StoryPageOpState::Sending { request: id(request) }, 12));
         }
-        assert!(ops.ops.len() <= STORY_PAGE_OPS_CAP);
-        assert!(
-            ops.get(crate::ids::RequestId(299)).is_some(),
-            "the newest is kept"
-        );
+        assert!(ops.get(id(100)).is_some(), "an op in flight is kept");
+        // Calls that never answer still cannot grow the list without end.
+        for request in 1000..1300 {
+            ops.begin(op(kind, StoryPageOpState::Sending { request: id(request) }, 12));
+        }
+        assert!(ops.ops.len() <= 2 * STORY_PAGE_OPS_CAP);
+        assert!(ops.get(id(1299)).is_some(), "the newest is kept");
     }
 
     #[test]
@@ -355,10 +405,10 @@ mod tests {
             (extra, ids.to_vec())
         };
         let (extra, _) = fetch(&mut session, &[301, 302]);
-        assert!(matches!(
+        assert_eq!(
             session.stories.page_ops.latest().map(|op| &op.state),
-            Some(StoryPageOpState::Checking)
-        ));
+            Some(&StoryPageOpState::Checking { request: extra })
+        );
         apply_json(
             &mut session,
             &seq,
@@ -433,10 +483,10 @@ mod tests {
             story_page_op_label(RequestPurpose::GetChatArchivedStories),
             extra,
         );
-        assert!(matches!(
+        assert_eq!(
             session.stories.page_ops.latest().map(|op| &op.state),
-            Some(StoryPageOpState::Checking)
-        ));
+            Some(&StoryPageOpState::Checking { request: extra })
+        );
         apply_json(
             &mut session,
             &seq,
@@ -475,10 +525,10 @@ mod tests {
         session.stories.albums.insert(11, Vec::new());
         let extra = session.request(RequestPurpose::CreateStoryAlbum, Some(ChatId(11)));
         session.begin_story_page_op(story_page_op_label(RequestPurpose::CreateStoryAlbum), extra);
-        assert!(matches!(
+        assert_eq!(
             session.stories.page_ops.latest().map(|op| &op.state),
-            Some(StoryPageOpState::Sending)
-        ));
+            Some(&StoryPageOpState::Sending { request: extra })
+        );
         apply_json(
             &mut session,
             &seq,
@@ -490,7 +540,7 @@ mod tests {
         );
         assert!(matches!(
             session.stories.page_ops.latest().map(|op| &op.state),
-            Some(StoryPageOpState::Succeeded)
+            Some(StoryPageOpState::Succeeded { .. })
         ));
         assert_eq!(session.stories.albums[&11][0].name, "New");
         let extra = session.request(RequestPurpose::DeleteStoryAlbum, Some(ChatId(11)));
@@ -506,7 +556,7 @@ mod tests {
         );
         assert!(matches!(
             session.stories.page_ops.latest().map(|op| &op.state),
-            Some(StoryPageOpState::Failed(_))
+            Some(StoryPageOpState::Failed { .. })
         ));
     }
 }

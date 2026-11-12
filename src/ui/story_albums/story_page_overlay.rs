@@ -40,12 +40,12 @@ impl QuillApp {
             .session()
             .and_then(|s| s.stories.page_ops.status_for(Some(chat_id)).cloned())
             .map(|op| match op.state {
-                StoryPageOpState::Checking => format!("{}…", op.kind.label()),
-                StoryPageOpState::Sending => format!("{}…", op.kind.label()),
-                StoryPageOpState::Succeeded => {
+                StoryPageOpState::Checking { .. } => format!("{}…", op.kind.label()),
+                StoryPageOpState::Sending { .. } => format!("{}…", op.kind.label()),
+                StoryPageOpState::Succeeded { .. } => {
                     tr_with(keys::Q_MEDIA_DONE, &[("label", op.kind.label())])
                 }
-                StoryPageOpState::Failed(reason) => tr_with(
+                StoryPageOpState::Failed { reason, .. } => tr_with(
                     keys::Q_MEDIA_FAILED,
                     &[("label", op.kind.label()), ("reason", &reason.to_string())],
                 ),

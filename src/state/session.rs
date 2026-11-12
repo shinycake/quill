@@ -6,7 +6,7 @@ use super::*;
 /// (back to running, the refusal waiting for the UI to say so once).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShutdownPhase {
-    Running,
+    Active,
     /// The account is closing but `close` waits behind a call's hang-up
     /// until the hang-up landed or `until` passed. Nothing new starts.
     HoldingClose {
@@ -24,7 +24,7 @@ pub enum ShutdownPhase {
 impl ShutdownPhase {
     /// The session is not ending (a refused `logOut` leaves it signed in).
     pub fn is_running(&self) -> bool {
-        matches!(self, Self::Running | Self::LogoutRefused(_))
+        matches!(self, Self::Active | Self::LogoutRefused(_))
     }
 }
 

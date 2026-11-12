@@ -15,7 +15,7 @@ fn message(content: MessageContent, outgoing: bool) -> HistoryMessage {
         is_outgoing: outgoing,
         date: 0,
         content,
-        send: crate::state::SendState::Sent,
+        send: crate::state::SendState::Delivered,
         reply_to: None,
         forward_info: None,
         extras: Default::default(),
@@ -96,7 +96,7 @@ fn an_outgoing_message_reads_seen_me_and_delivery() {
         "Seen\nMe\nIn reply to Me: Earlier\nHi\nSent"
     );
     context.receipt = Some(OutboxReceipt::Sent);
-    msg.send = crate::state::SendState::Sending;
+    msg.send = crate::state::SendState::Unconfirmed;
     assert_eq!(
         message_accessibility_name(&msg, &context, &no_files),
         "Not seen\nMe\nIn reply to Me: Earlier\nHi\nSending"

@@ -183,10 +183,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             if state.query().is_empty()
                 && matches!(
                     state.status(),
-                    SearchStatus::Searching
-                        | SearchStatus::Ready
-                        | SearchStatus::Empty
-                        | SearchStatus::Failed
+                    SearchStateView::Searching
+                        | SearchStateView::Ready
+                        | SearchStateView::Empty
+                        | SearchStateView::Failed
                 )
             {
                 return Ok(ChatSearchQueryOutcome::Unchanged);
@@ -198,7 +198,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             if self.session.search.chat_search.query().is_empty()
                 && matches!(
                     self.session.search.chat_search.status(),
-                    SearchStatus::Idle | SearchStatus::Closed
+                    SearchStateView::Idle | SearchStateView::Closed
                 )
             {
                 return Ok(ChatSearchQueryOutcome::Unchanged);
@@ -221,10 +221,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             && self.session.search.chat_search.query() == trimmed
             && matches!(
                 self.session.search.chat_search.status(),
-                SearchStatus::Searching
-                    | SearchStatus::Ready
-                    | SearchStatus::Empty
-                    | SearchStatus::Failed
+                SearchStateView::Searching
+                    | SearchStateView::Ready
+                    | SearchStateView::Empty
+                    | SearchStateView::Failed
             )
         {
             return Ok(ChatSearchQueryOutcome::Unchanged);

@@ -3,7 +3,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::store::{Store, StoredFrame};
-use super::{Cancel, ClipInfo, ClipKey, ClipState, DecodeAll, Origin, Rendered, Timeline};
+use super::{Cancel, ClipInfo, ClipKey, ClipView, DecodeAll, Origin, Rendered, Timeline};
 use crate::locks::lock_or_recover;
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
@@ -68,9 +68,10 @@ pub(super) struct Clip {
 pub(super) enum Stage {
     /// Not taken yet: a worker takes `Origin` to open it.
     Waiting(Origin),
-    /// A draw worker is opening it (or decoding it, with no opener
-    /// thread running).
-    Opening,
+    /// A draw worker has taken it and is opening it (or decoding it, with
+    /// no opener thread running). The worker's `WorkerEnd` fails it if the
+    /// thread ends first.
+    Taken,
     /// Opener thread `opener` is decoding it.
     Decoding {
         opener: usize,
@@ -111,11 +112,11 @@ impl Open {
 
 impl Stage {
     /// What the UI sees: a clip not open yet is opening.
-    pub(super) fn state(&self) -> ClipState {
+    pub(super) fn state(&self) -> ClipView {
         match self {
-            Self::Waiting(_) | Self::Opening | Self::Decoding { .. } => ClipState::Opening,
-            Self::Ready(open) | Self::Drawing { open, .. } => ClipState::Ready(open.info),
-            Self::Failed(error) => ClipState::Failed(error.clone()),
+            Self::Waiting(_) | Self::Taken | Self::Decoding { .. } => ClipView::Opening,
+            Self::Ready(open) | Self::Drawing { open, .. } => ClipView::Ready(open.info),
+            Self::Failed(error) => ClipView::Failed(error.clone()),
         }
     }
 
@@ -123,7 +124,7 @@ impl Stage {
     pub(super) fn busy(&self) -> bool {
         matches!(
             self,
-            Self::Opening | Self::Decoding { .. } | Self::Drawing { .. }
+            Self::Taken | Self::Decoding { .. } | Self::Drawing { .. }
         )
     }
 
@@ -292,7 +293,7 @@ pub(super) type Spawn = dyn Fn(String, Box<dyn FnOnce() + Send>) -> std::io::Res
 /// Whether a draw worker's thread is still running.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum WorkerLife {
-    Running,
+    Alive,
     Gone,
 }
 
@@ -378,7 +379,7 @@ impl State {
     }
 
     fn worker_runs(&self, index: usize) -> bool {
-        self.workers.get(index) == Some(&WorkerLife::Running)
+        self.workers.get(index) == Some(&WorkerLife::Alive)
     }
 }
 
@@ -409,8 +410,8 @@ impl Engine {
                 closed: vec![Vec::new(); workers],
                 freed: Vec::new(),
                 stop: false,
-                workers: vec![WorkerLife::Running; workers],
-                openers: vec![WorkerLife::Running; workers],
+                workers: vec![WorkerLife::Alive; workers],
+                openers: vec![WorkerLife::Alive; workers],
                 budget,
                 store_bytes: 0,
                 stats: EngineStats::default(),
@@ -520,7 +521,7 @@ impl Engine {
     }
 
     /// The state of `key`, if it is open.
-    pub fn state(&self, key: &ClipKey) -> Option<ClipState> {
+    pub fn state(&self, key: &ClipKey) -> Option<ClipView> {
         lock_or_recover(&self.shared.state)
             .clips
             .get(key)
@@ -539,7 +540,7 @@ impl Engine {
     /// The opened clip's frames, if it opened.
     pub fn info(&self, key: &ClipKey) -> Option<ClipInfo> {
         match self.state(key)? {
-            ClipState::Ready(info) => Some(info),
+            ClipView::Ready(info) => Some(info),
             _ => None,
         }
     }
@@ -787,7 +788,7 @@ impl State {
         let key = opening?;
         let clip = self.clips.get_mut(&key)?;
         let id = clip.id;
-        let Stage::Waiting(origin) = std::mem::replace(&mut clip.stage, Stage::Opening) else {
+        let Stage::Waiting(origin) = std::mem::replace(&mut clip.stage, Stage::Taken) else {
             return None;
         };
         match origin {

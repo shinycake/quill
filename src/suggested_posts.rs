@@ -104,7 +104,7 @@ pub fn price_label(price: Option<SuggestedPrice>) -> String {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SuggestedPostState {
     #[default]
-    Pending,
+    Proposed,
     Approved,
     Declined,
 }
@@ -136,7 +136,7 @@ impl SuggestedPostInfo {
         {
             Some("suggestedPostStateApproved") => SuggestedPostState::Approved,
             Some("suggestedPostStateDeclined") => SuggestedPostState::Declined,
-            _ => SuggestedPostState::Pending,
+            _ => SuggestedPostState::Proposed,
         };
         let flag = |name: &str| value.get(name).and_then(Value::as_bool).unwrap_or(false);
         Some(Self {
@@ -329,7 +329,7 @@ impl SuggestionButtons {
     /// buttons. `AcceptAndDecline` shows [Decline | Accept] and [Suggest
     /// Changes]; `Decline` alone shows [Decline].
     pub fn for_info(info: &SuggestedPostInfo) -> Self {
-        if info.state != SuggestedPostState::Pending {
+        if info.state != SuggestedPostState::Proposed {
             return Self::default();
         }
         let accept = info.can_be_approved;

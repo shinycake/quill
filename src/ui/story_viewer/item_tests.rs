@@ -149,7 +149,6 @@ fn a_finished_page_op_goes_with_the_story(cx: &mut TestAppContext) {
     let op = |state| StoryPageOp {
         kind: quill::story_page::StoryPageOpKind::Other,
         state,
-        request: quill::ids::RequestId(1),
         chat_id: None,
     };
     app.update(&mut vcx, |app, cx| {
@@ -157,7 +156,9 @@ fn a_finished_page_op_goes_with_the_story(cx: &mut TestAppContext) {
             session
                 .stories
                 .page_ops
-                .begin(op(StoryPageOpState::Sending));
+                .begin(op(StoryPageOpState::Sending {
+                    request: quill::ids::RequestId(1),
+                }));
         }
         app.close_story_viewer(cx);
         let kept = app
@@ -175,7 +176,10 @@ fn a_finished_page_op_goes_with_the_story(cx: &mut TestAppContext) {
             session
                 .stories
                 .page_ops
-                .begin(op(StoryPageOpState::Failed("no".into())));
+                .begin(op(StoryPageOpState::Failed {
+                    request: quill::ids::RequestId(1),
+                    reason: "no".into(),
+                }));
         }
         app.close_story_viewer(cx);
         let kept = app
@@ -200,8 +204,7 @@ fn a_late_story_answer_stays_with_its_story(cx: &mut TestAppContext) {
             manage.start(request, LEO, 3);
             session.stories.page_ops.begin(StoryPageOp {
                 kind: quill::story_page::StoryPageOpKind::Other,
-                state: StoryPageOpState::Sending,
-                request,
+                state: StoryPageOpState::Sending { request },
                 chat_id: None,
             });
         }
@@ -231,8 +234,10 @@ fn a_late_story_answer_stays_with_its_story(cx: &mut TestAppContext) {
             );
             session.stories.page_ops.begin(StoryPageOp {
                 kind: quill::story_page::StoryPageOpKind::Other,
-                state: StoryPageOpState::Failed("PEER_ID_INVALID".into()),
-                request,
+                state: StoryPageOpState::Failed {
+                    request,
+                    reason: "PEER_ID_INVALID".into(),
+                },
                 chat_id: None,
             });
         }

@@ -625,7 +625,7 @@ fn a_paid_search_is_bound_to_the_confirmed_query_and_price() {
     };
     let search = &fx.driver.session.search.search;
     assert_eq!(search.paying(), Some((request, 25)));
-    assert_eq!(search.status(), crate::state::SearchStatus::Searching);
+    assert_eq!(search.status(), crate::state::SearchStateView::Searching);
     fx.answer(
         "searchPublicPosts",
         "foundPublicPosts",

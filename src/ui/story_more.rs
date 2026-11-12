@@ -591,11 +591,11 @@ impl QuillApp {
                 .and_then(|s| s.stories.page_ops.get(request))
                 .map(|op| op.state.clone());
             match state {
-                Some(S::Sending | S::Checking) => {}
+                Some(S::Sending { .. } | S::Checking { .. }) => {}
                 // The list is saved: the editor closes. A finished op that was
                 // settled away (the viewer stepped on) is read from the list
                 // the answer left in the session.
-                Some(S::Succeeded) => {
+                Some(S::Succeeded { .. }) => {
                     self.stories.with_viewer_ui(|open| {
                         open.set_close_friends(CloseFriendsStage::Closed);
                         open.notice = Some(tr(keys::Q_MEDIA_CLOSE_FRIENDS_UPDATED).into());
@@ -604,7 +604,7 @@ impl QuillApp {
                 }
                 // The call failed (its line shows under the story): the edit
                 // is back, Save asks again.
-                Some(S::Failed(_)) => {
+                Some(S::Failed { .. }) => {
                     self.stories.with_viewer_ui(|open| {
                         open.set_close_friends(CloseFriendsStage::Editing(edit))
                     });
@@ -677,7 +677,7 @@ impl QuillApp {
         if let Some(op) = self.viewer_story_page_op() {
             use quill::story_page::StoryPageOpState as S;
             match op.state {
-                S::Sending | S::Checking => {
+                S::Sending { .. } | S::Checking { .. } => {
                     column = column.child(
                         div()
                             .text_xs()
@@ -685,7 +685,7 @@ impl QuillApp {
                             .child(format!("{}…", op.kind.label())),
                     );
                 }
-                S::Failed(reason) => {
+                S::Failed { reason, .. } => {
                     column = column.child(
                         div()
                             .text_xs()
@@ -693,7 +693,7 @@ impl QuillApp {
                             .child(format!("{} failed: {reason}", op.kind.label())),
                     );
                 }
-                S::Succeeded => {}
+                S::Succeeded { .. } => {}
             }
         }
         column.into_any_element()

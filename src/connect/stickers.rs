@@ -38,13 +38,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || file_id.0 <= 0 {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.stickers.sticker_set_view = Some(crate::state::StickerSetView::loading(0));
         let extra = self.session.request(
             RequestPurpose::Stickers(StickersPurpose::GetAttachedStickerSets {
                 file_id: file_id.0,
             }),
             None,
         );
+        self.session.stickers.sticker_set_view = Some(crate::state::StickerSetView::loading(0, extra));
         self.session.stickers.stickers.attached = crate::state::AttachedSets::Asked(extra);
         match self
             .sender
@@ -72,7 +72,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             .sticker_set_view
             .as_ref()
             .is_some_and(|view| {
-                view.set_id == 0 && view.stage == crate::state::StickerSetViewStage::Loading
+                view.set_id == 0
+                    && matches!(view.stage, crate::state::StickerSetViewStage::Loading { .. })
             });
         if !waiting {
             return Ok(());

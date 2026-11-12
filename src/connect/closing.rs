@@ -102,7 +102,7 @@ pub(crate) fn release_close<S: JsonSender>(driver: &mut ConnectDriver<S>, now: I
         return;
     };
     if now >= until || !driver.hang_up_pending() {
-        driver.session.shutdown = ShutdownPhase::Running;
+        driver.session.shutdown = ShutdownPhase::Active;
         let _ = driver.request_close();
     }
 }

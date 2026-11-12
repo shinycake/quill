@@ -6,7 +6,7 @@ use super::*;
 use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::ids::{AccountKey, ChatId, RequestId};
 use crate::platform::MemorySecretStore;
-use crate::state::{STORIES_RETRY_FIRST, STORIES_RETRY_MAX, Session, StoryCardState};
+use crate::state::{STORIES_RETRY_FIRST, STORIES_RETRY_MAX, Session, StoryCardView};
 use crate::telegram::client::copy_and_parse;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -107,7 +107,7 @@ fn a_500_is_not_asked_again_on_every_frame() {
     h.fail(extra, 500);
     assert_eq!(
         h.driver.session.story_card_state(7, 5),
-        StoryCardState::Loading,
+        StoryCardView::Loading,
         "a 500 does not mean the story is gone"
     );
     for _ in 0..5 {

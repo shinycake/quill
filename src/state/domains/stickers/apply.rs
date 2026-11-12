@@ -286,12 +286,13 @@ impl Session {
                     self.chats_state.enter_deep_link_stage(DeepLinkState::Ui(
                         crate::deep_link_types::DeepLinkUi::StickerSet { set_id: id },
                     ));
-                } else if let Some(RequestPurpose::Stickers(StickersPurpose::ViewStickerSet {
+                } else if let Some((request, RequestPurpose::Stickers(StickersPurpose::ViewStickerSet {
                     set_id,
-                })) = pending.map(|p| p.purpose)
+                }))) = pending.map(|p| (p.id, p.purpose))
                 {
                     self.remember_files(&files);
                     self.accept_sticker_set_view(
+                        request,
                         set_id,
                         StickerSetViewStage::Ready {
                             title,
@@ -300,7 +301,6 @@ impl Session {
                             is_emoji: is_custom_emoji,
                             is_owned,
                             stickers,
-                            files: SetFiles::Unasked,
                         },
                     );
                 } else if let Some(PendingRequest {

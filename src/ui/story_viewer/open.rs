@@ -5,7 +5,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::*;
-use quill::state::StoryCardState;
+use quill::state::StoryCardView;
 use quill::story_repost::RepostGone;
 use quill::story_tray_walk::TrayWalk;
 use quill::story_viewer::{StoryOpenScope, collect_found_story_items, story_open_switch};
@@ -70,7 +70,7 @@ impl QuillApp {
             .map(|s| {
                 wanted
                     .into_iter()
-                    .filter(|id| s.story_card_state(chat_id.0, *id) == StoryCardState::Loading)
+                    .filter(|id| s.story_card_state(chat_id.0, *id) == StoryCardView::Loading)
                     .collect()
             })
             .unwrap_or_default();
@@ -137,24 +137,24 @@ impl QuillApp {
         if let Some(gone) = open.if_gone
             && matches!(
                 (state, failed),
-                (StoryCardState::Expired, _) | (StoryCardState::Loading, true)
+                (StoryCardView::Expired, _) | (StoryCardView::Loading, true)
             )
         {
             self.stories.viewer.stop_waiting();
             return self.show_story_repost_gone(gone, window, cx);
         }
         match state {
-            StoryCardState::Ready => {
+            StoryCardView::Ready => {
                 self.stories.viewer.stop_waiting();
                 self.rebuild_story_viewer(open, cx);
             }
-            StoryCardState::Expired => {
+            StoryCardView::Expired => {
                 self.stories.viewer.stop_waiting();
                 if open.scope == StoryOpenScope::Link {
                     self.set_status_note(StatusNote::info(tr(keys::STORIES_LINK_INVALID)), cx);
                 }
             }
-            StoryCardState::Loading if failed => {
+            StoryCardView::Loading if failed => {
                 self.stories.viewer.stop_waiting();
                 let note = match open.scope {
                     StoryOpenScope::Link => keys::STORIES_LINK_INVALID,
@@ -164,7 +164,7 @@ impl QuillApp {
                 };
                 self.set_status_note(StatusNote::info(tr(note)), cx);
             }
-            StoryCardState::Loading => {}
+            StoryCardView::Loading => {}
         }
     }
 

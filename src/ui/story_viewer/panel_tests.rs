@@ -114,7 +114,6 @@ fn the_close_friends_save_leaves_saving_with_its_answer(cx: &mut TestAppContext)
             session.stories.page_ops.begin(StoryPageOp {
                 kind: quill::story_page::StoryPageOpKind::SaveCloseFriends,
                 state,
-                request: RequestId(60),
                 chat_id: None,
             });
         }
@@ -128,10 +127,16 @@ fn the_close_friends_save_leaves_saving_with_its_answer(cx: &mut TestAppContext)
                 request: RequestId(60),
             }))
         });
-        set_op(app, StoryPageOpState::Sending);
+        set_op(app, StoryPageOpState::Sending { request: RequestId(60) });
         app.tick_close_friends(cx);
         assert!(app.stories.viewer_ui().close_friends().is_saving());
-        set_op(app, StoryPageOpState::Failed("no".into()));
+        set_op(
+            app,
+            StoryPageOpState::Failed {
+                request: RequestId(60),
+                reason: "no".into(),
+            },
+        );
         app.tick_close_friends(cx);
         let stage = app.stories.viewer_ui().close_friends();
         assert!(!stage.is_saving(), "the failure ended Saving");
@@ -147,7 +152,7 @@ fn the_close_friends_save_leaves_saving_with_its_answer(cx: &mut TestAppContext)
                 request: RequestId(60),
             }))
         });
-        set_op(app, StoryPageOpState::Succeeded);
+        set_op(app, StoryPageOpState::Succeeded { request: RequestId(60) });
         app.tick_close_friends(cx);
         assert!(!app.stories.viewer_ui().close_friends().is_open());
     });

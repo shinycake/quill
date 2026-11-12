@@ -37,7 +37,7 @@ impl Session {
             view_generation: ViewGeneration(1),
             requests: RequestRegistry::default(),
             acks: RequestAcks::default(),
-            shutdown: ShutdownPhase::Running,
+            shutdown: ShutdownPhase::Active,
             last_seq: 0,
             bots: Box::new(BotsState::new()),
             communities: Box::new(CommunitiesState::new()),

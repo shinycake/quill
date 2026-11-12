@@ -6,7 +6,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::*;
-use quill::state::StoryCardState;
+use quill::state::StoryCardView;
 use quill::story_tray_walk::{StoryStep, shown_story};
 use quill::story_viewer::collect_found_story_items;
 
@@ -26,12 +26,12 @@ impl QuillApp {
                 Some((ChatId(chat_id), shown_story(tray, shown)?))
             })
             .find(|(chat, id)| match session.story_card_state(chat.0, *id) {
-                StoryCardState::Loading => !session.stories.story_fetch_waiting((chat.0, *id), now),
-                StoryCardState::Ready => {
+                StoryCardView::Loading => !session.stories.story_fetch_waiting((chat.0, *id), now),
+                StoryCardView::Ready => {
                     !collect_found_story_items(&[(chat.0, *id)], &session.stories.stories)
                         .is_empty()
                 }
-                StoryCardState::Expired => false,
+                StoryCardView::Expired => false,
             })
     }
 

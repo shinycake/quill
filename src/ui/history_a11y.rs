@@ -29,7 +29,7 @@ use super::history_row::HistoryRow;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
 use quill::message_a11y::{MessageA11yContext, message_accessibility_name};
-use quill::state::{ReplyState, message_time_hhmm};
+use quill::state::{ReplyTargetView, message_time_hhmm};
 use quill::telegram::envelope::MessageContent;
 
 /// Whether the history has keyboard focus, and whether it waits for its
@@ -410,7 +410,7 @@ impl QuillApp {
         let reply = chrome
             .reply_header
             .as_ref()
-            .filter(|header| header.state == ReplyState::Ready)
+            .filter(|header| header.state == ReplyTargetView::Ready)
             .map(|header| (header.name.clone(), header.text.clone()));
         let context = MessageA11yContext {
             sender_name,

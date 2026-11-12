@@ -45,10 +45,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             && !search.is_recents()
             && matches!(
                 search.status(),
-                SearchStatus::Searching
-                    | SearchStatus::Ready
-                    | SearchStatus::Empty
-                    | SearchStatus::Failed
+                SearchStateView::Searching
+                    | SearchStateView::Ready
+                    | SearchStateView::Empty
+                    | SearchStateView::Failed
             )
         {
             return Ok(None);

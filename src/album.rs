@@ -621,7 +621,7 @@ mod tests {
             is_outgoing: false,
             date: 0,
             content: crate::telegram::envelope::MessageContent::Text(TextContent::plain("x")),
-            send: crate::state::SendState::Sent,
+            send: crate::state::SendState::Delivered,
             reply_to: None,
             forward_info: None,
             extras: Default::default(),

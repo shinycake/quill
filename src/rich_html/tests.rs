@@ -628,7 +628,7 @@ fn unsent_self_destructing_and_unsaveable_messages_never_qualify() {
     // The send path marks its own rows as still sending or failed.
     if let Some(history) = session.histories.get_mut(&77) {
         if let Some(row) = history.messages.get_mut(&6) {
-            row.send = crate::state::SendState::Sending;
+            row.send = crate::state::SendState::Unconfirmed;
         }
         if let Some(row) = history.messages.get_mut(&7) {
             row.send = crate::state::SendState::Failed { can_retry: false };

@@ -226,10 +226,10 @@ pub enum SetChangeStage {
 
 impl StickerSetView {
     /// A view that is still loading its set.
-    pub fn loading(set_id: i64) -> Self {
+    pub fn loading(set_id: i64, request: RequestId) -> Self {
         Self {
             set_id,
-            stage: StickerSetViewStage::Loading,
+            stage: StickerSetViewStage::Loading { request },
             edits: StickerSetEdits::default(),
             change: SetChangeStage::Idle,
         }
@@ -238,7 +238,12 @@ impl StickerSetView {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StickerSetViewStage {
-    Loading,
+    /// `request` is the `getStickerSet` (or, for the attached sets of a
+    /// photo, `getAttachedStickerSets`) the box waits for; only its answer
+    /// or failure leaves the stage.
+    Loading {
+        request: RequestId,
+    },
     Ready {
         title: String,
         /// The set's short name, for its `t.me` link (empty if unknown).
@@ -250,19 +255,8 @@ pub enum StickerSetViewStage {
         /// box offers editing.
         is_owned: bool,
         stickers: Vec<StickerItem>,
-        /// Whether the sticker previews were asked to download. A set
-        /// that arrives anew (an edit refreshed it) starts unasked.
-        files: SetFiles,
     },
     Failed,
-}
-
-/// Whether the viewed set's sticker previews were asked to download.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SetFiles {
-    #[default]
-    Unasked,
-    Asked,
 }
 
 /// What a tapped emoji's pack lookup came back with.
@@ -362,9 +356,15 @@ impl Session {
     }
 
     /// The set's contents arrived (`stage` is the `Ready` stage).
-    pub(crate) fn accept_sticker_set_view(&mut self, set_id: i64, stage: StickerSetViewStage) {
+    pub(crate) fn accept_sticker_set_view(
+        &mut self,
+        request: RequestId,
+        set_id: i64,
+        stage: StickerSetViewStage,
+    ) {
         if let Some(view) = self.stickers.sticker_set_view.as_mut()
             && view.set_id == set_id
+            && !matches!(view.stage, StickerSetViewStage::Loading { request: waiting } if waiting != request)
         {
             view.stage = stage;
             // An edit still in flight (a move applied locally) may have
@@ -377,10 +377,9 @@ impl Session {
     /// The box's load failed. A refetch after an edit (a rename, an add,
     /// a remove) that took is not a failed load: the box keeps what it
     /// shows.
-    pub(crate) fn fail_sticker_set_view(&mut self, set_id: i64) {
+    pub(crate) fn fail_sticker_set_view(&mut self, request: RequestId) {
         if let Some(view) = self.stickers.sticker_set_view.as_mut()
-            && view.set_id == set_id
-            && matches!(view.stage, StickerSetViewStage::Loading)
+            && matches!(view.stage, StickerSetViewStage::Loading { request: waiting } if waiting == request)
         {
             view.stage = StickerSetViewStage::Failed;
         }

@@ -145,7 +145,7 @@ impl Session {
         thread.status = if open_chat != Some(info.chat_id) {
             ThreadStatus::SwitchingChat
         } else {
-            ThreadStatus::Starting
+            ThreadStatus::ChatOpen
         };
         let rows: Vec<HistoryMessage> = info
             .messages

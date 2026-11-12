@@ -1,7 +1,7 @@
 //! What a press on a repost's origin does, after tdesktop's
 //! `RepostView::lookupHandler` (`media/stories/media_stories_repost_view.cpp`).
 
-use crate::state::StoryCardState;
+use crate::state::StoryCardView;
 use crate::telegram::envelope::StoryOriginView;
 
 /// The result of pressing "Reposted from ...".
@@ -34,7 +34,7 @@ pub enum RepostGone {
 /// whose poster has none says it expired, whenever the answer came.
 pub fn press(
     origin: &StoryOriginView,
-    state: impl Fn(i64, i32) -> StoryCardState,
+    state: impl Fn(i64, i32) -> StoryCardView,
     has_profile: impl Fn(i64) -> bool,
 ) -> RepostPress {
     match *origin {
@@ -45,12 +45,12 @@ pub fn press(
                 RepostGone::Expired
             };
             match state(chat_id, story_id) {
-                StoryCardState::Ready | StoryCardState::Loading => RepostPress::OpenStory {
+                StoryCardView::Ready | StoryCardView::Loading => RepostPress::OpenStory {
                     chat_id,
                     story_id,
                     if_gone,
                 },
-                StoryCardState::Expired => RepostPress::Gone(if_gone),
+                StoryCardView::Expired => RepostPress::Gone(if_gone),
             }
         }
         StoryOriginView::PublicStory { .. } | StoryOriginView::HiddenUser { .. } => {
@@ -64,11 +64,11 @@ pub fn press(
 /// whether it is still there.
 pub fn origin_to_fetch(
     origin: &StoryOriginView,
-    state: impl Fn(i64, i32) -> StoryCardState,
+    state: impl Fn(i64, i32) -> StoryCardView,
 ) -> Option<(i64, i32)> {
     match *origin {
         StoryOriginView::PublicStory { chat_id, story_id }
-            if story_id != 0 && state(chat_id, story_id) == StoryCardState::Loading =>
+            if story_id != 0 && state(chat_id, story_id) == StoryCardView::Loading =>
         {
             Some((chat_id, story_id))
         }
@@ -89,7 +89,7 @@ mod tests {
 
     #[test]
     fn a_loaded_or_loading_origin_opens_the_story_then_the_poster_if_gone() {
-        for state in [StoryCardState::Ready, StoryCardState::Loading] {
+        for state in [StoryCardView::Ready, StoryCardView::Loading] {
             assert_eq!(
                 press(&public(9), |_, _| state, |_| true),
                 RepostPress::OpenStory {
@@ -113,11 +113,11 @@ mod tests {
     #[test]
     fn a_deleted_origin_opens_the_poster_else_says_it_expired() {
         assert_eq!(
-            press(&public(9), |_, _| StoryCardState::Expired, |_| true),
+            press(&public(9), |_, _| StoryCardView::Expired, |_| true),
             RepostPress::Gone(RepostGone::OpenPeer { chat_id: 5 })
         );
         assert_eq!(
-            press(&public(9), |_, _| StoryCardState::Expired, |_| false),
+            press(&public(9), |_, _| StoryCardView::Expired, |_| false),
             RepostPress::Gone(RepostGone::Expired),
             "the same note as when the answer comes after the press"
         );
@@ -129,9 +129,9 @@ mod tests {
             poster_name: "Someone".into(),
         };
         let gone = RepostPress::Gone(RepostGone::Expired);
-        assert_eq!(press(&hidden, |_, _| StoryCardState::Ready, |_| true), gone);
+        assert_eq!(press(&hidden, |_, _| StoryCardView::Ready, |_| true), gone);
         assert_eq!(
-            press(&public(0), |_, _| StoryCardState::Ready, |_| true),
+            press(&public(0), |_, _| StoryCardView::Ready, |_| true),
             gone
         );
     }
@@ -139,14 +139,14 @@ mod tests {
     #[test]
     fn only_an_origin_not_cached_yet_is_fetched() {
         assert_eq!(
-            origin_to_fetch(&public(9), |_, _| StoryCardState::Loading),
+            origin_to_fetch(&public(9), |_, _| StoryCardView::Loading),
             Some((5, 9))
         );
-        for state in [StoryCardState::Ready, StoryCardState::Expired] {
+        for state in [StoryCardView::Ready, StoryCardView::Expired] {
             assert_eq!(origin_to_fetch(&public(9), |_, _| state), None);
         }
         assert_eq!(
-            origin_to_fetch(&public(0), |_, _| StoryCardState::Loading),
+            origin_to_fetch(&public(0), |_, _| StoryCardView::Loading),
             None
         );
     }

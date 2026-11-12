@@ -3,7 +3,7 @@ use super::*;
 use crate::ids::{ChatId, MessageId, RequestId, TopicId};
 use crate::search_filters::{SearchMediaKind, YearMonth};
 use crate::state::{
-    ChatSearchJumpNeed, RequestPurpose, RequestRollback, SearchStatus, SharedMediaTab,
+    ChatSearchJumpNeed, RequestPurpose, RequestRollback, SearchStateView, SharedMediaTab,
 };
 use crate::state::{DateJumpMode, HistoryOpen};
 use crate::state::{MediaPurpose, SearchPurpose};
@@ -41,7 +41,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             && self.session.search.search.is_recents()
             && matches!(
                 self.session.search.search.status(),
-                SearchStatus::Searching | SearchStatus::Ready | SearchStatus::Idle
+                SearchStateView::Searching | SearchStateView::Ready | SearchStateView::Idle
             )
         {
             return Ok(None);
@@ -85,7 +85,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 && self.session.search.search.is_recents()
                 && matches!(
                     self.session.search.search.status(),
-                    SearchStatus::Searching | SearchStatus::Ready | SearchStatus::Idle
+                    SearchStateView::Searching | SearchStateView::Ready | SearchStateView::Idle
                 )
             {
                 return Ok(SearchQueryOutcome::Unchanged);
@@ -111,10 +111,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             && !self.session.search.search.is_recents()
             && matches!(
                 self.session.search.search.status(),
-                SearchStatus::Searching
-                    | SearchStatus::Ready
-                    | SearchStatus::Empty
-                    | SearchStatus::Failed
+                SearchStateView::Searching
+                    | SearchStateView::Ready
+                    | SearchStateView::Empty
+                    | SearchStateView::Failed
             )
         {
             return Ok(SearchQueryOutcome::Unchanged);
