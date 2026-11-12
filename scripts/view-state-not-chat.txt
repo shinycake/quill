@@ -28,7 +28,7 @@ HistoryUi.ends | compared with the history synced next; a new chat's ends differ
 HistoryUi.anchor.Anchoring.landed | compared with the session's highlight, which is the open chat's; the anchor starts a new chat with none
 HistoryUi.anchor.Anchored.landed | compared with the session's highlight, which is the open chat's; the anchor starts a new chat with none
 
-HistoryUi.live_location_tick | the running tick task and the chat it ticks for; the tick holds its own beat, and it ends with the stage that owns it
+HistoryUi.live_location_tick | the running tick task and the chat it ticks for; the task ends itself once that chat is no longer open (live_location_wait), and the next chat's tick replaces it
 
 ShareUi.forward.Bar.dest | the chat the forward bar waits in; kept across chats on purpose (dismiss_forward_for_view)
 ShareUi.forward.Picking.bar | the forward bar the share box was opened over, which leaving the box returns to; it goes with the bar (dismiss_forward_for_view)
