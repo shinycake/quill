@@ -78,3 +78,22 @@ src/ui/composer/toggle_composer_silent.rs 754 read
 src/ui/composer_boxes.rs 136 read
 src/ui/composer_date.rs 283 read
 src/ui/composer_events.rs 138 read
+src/ui/composer_field.rs 667 read
+src/ui/composer_rtl.rs 1259 read (cfg(test)-only file; lines 792-1259 skimmed by structure, no non-test code)
+src/ui/composer_sends.rs 862 read
+src/ui/composer_shortcuts.rs 653 read
+src/ui/composer_state.rs 352 read
+src/ui/composer_suggest.rs 864 read
+src/ui/composer_system_replace.rs 103 read
+src/ui/composer_targets.rs 113 read
+src/ui/composer_thumb.rs 134 read
+src/ui/composer_ui/bar_slide.rs 117 read
+src/ui/composer_ui/command_menu_view.rs 180 read
+src/ui/composer_ui/mod.rs 610 read
+src/ui/composer_ui/send_sticker_pick.rs 854 read
+src/ui/composer_ui/text_limit.rs 184 read
+src/ui/composer_unicode.rs 103 read
+src/ui/confirm_boxes.rs 180 read
+src/ui/connect_ui.rs 437 read
+src/ui/connection_state.rs 227 read
+src/ui/contacts.rs 619 read
