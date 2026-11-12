@@ -48,12 +48,6 @@ QuillApp::spawn_system_unlock_wait::held.borrow_mut 1
 QuillApp::spawn_system_unlock_wait::master.borrow_mut 1
 QuillApp::translate_offer::offer.borrow 1
 QuillApp::translate_offer::offer.borrow_mut 1
-SelectableRichText::paint::owners.borrow 1
-SelectableRichText::paint::owners.borrow_mut 1
-RunningResize::drop::resize.borrow_mut 1
-WindowZoom::fire_resize::resize.borrow_mut 1
-WindowZoom::register::list.borrow_mut 1
-ZoomWindow::on_resize::resize.borrow_mut 1
 active::a.borrow 1
 anchor::anchors.borrow 1
 anchor_tracker::anchors.borrow_mut 1
@@ -61,8 +55,6 @@ begin_pass::anchors.borrow_mut 1
 build_community_hub_dialog::body.borrow_mut 1
 build_create_community_dialog::body.borrow_mut 1
 build_tile_in_background::tile.borrow_mut 1
-cell_probe::cells.borrow_mut 1
-cancel::running.borrow_mut 1
 char_width::cache.borrow 1
 char_width::cache.borrow_mut 1
 claim_build::tile.borrow_mut 1
@@ -100,9 +92,3 @@ revealing::reveals.borrow 1
 set_display::displays.borrow_mut 1
 sync::applied.borrow_mut 2
 take_text_painted::painted.borrow_mut 1
-watch_gpu_loss::slot.borrow_mut 1
-with_selected::selected.borrow_mut 1
-wrap::fly.borrow 1
-take_unshowable::retired.borrow_mut 1
-wake::retired.borrow 1
-wake::slot.borrow_mut 1

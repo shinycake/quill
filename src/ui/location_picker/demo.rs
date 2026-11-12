@@ -198,7 +198,7 @@ impl QuillApp {
             if let Some(input) = self.location_ui.search.input().cloned() {
                 input.update(cx, |input, cx| input.set_value(text.clone(), window, cx));
             }
-            self.location_search_changed(Some(text), cx);
+            self.location_search_changed(super::state::SearchEdit::Text(text), cx);
         }
     }
 }
