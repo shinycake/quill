@@ -174,7 +174,7 @@ impl Session {
             // on the group-call overlay).
             CallsPayload::InviteGroupCallParticipantResult(result) => {
                 // One of "Add People"'s invitations: its toast tells.
-                if let Some(results) = self.calls.invite_results.as_mut()
+                if let Some(results) = self.calls.invite_results_mut()
                     && let Some(pending) = pending
                     && results.owns(Some(pending.id))
                 {

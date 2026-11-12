@@ -48,13 +48,13 @@ impl Session {
             self.chats_state.send_as_options.clear();
             self.messages.share_search = ShareSearch::default();
             self.calls.add_people_search = ShareSearch::default();
-            self.calls.invite_results = None;
+            self.calls.clear_invite_results();
             self.messages.forwards.clear();
         }
         if matches!(state, AuthorizationState::LoggingOut) {
             self.settle_account_requests();
             self.calls.add_people_search = ShareSearch::default();
-            self.calls.invite_results = None;
+            self.calls.clear_invite_results();
             self.search.search.close();
             self.search.chat_search.close();
             self.messages.forwards.forget_flights();

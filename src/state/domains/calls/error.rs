@@ -25,7 +25,7 @@ impl Session {
             return;
         }
         // One of "Add People"'s invitations failed: its toast tells.
-        if let Some(results) = self.calls.invite_results.as_mut()
+        if let Some(results) = self.calls.invite_results_mut()
             && let Some(extra) = extra
             && results.owns(Some(extra))
         {

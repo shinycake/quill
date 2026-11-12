@@ -580,6 +580,10 @@ pub struct ActiveGroupCall {
     /// request; removed by that request's answer or error, and gone with
     /// the call.
     pub mute_toggles: std::collections::HashMap<MessageSender, RequestId>,
+    /// The invitations "Add People" sent into this conference, until their
+    /// toast is dismissed (`crate::state::conference_add_people`); gone
+    /// with the call, so they never outlive it.
+    pub invite_results: Option<crate::state::ConferenceInviteResults>,
     /// The identity the next join uses; `None` joins as yourself.
     pub join_as: Option<MessageSender>,
     /// How the joined call carries media, from the engine after the native
@@ -822,6 +826,7 @@ impl ActiveGroupCall {
             is_video_recorded: false,
             join_as_options: Default::default(),
             mute_toggles: Default::default(),
+            invite_results: None,
             join_as: None,
             media: Default::default(),
             viewer_count: 0,

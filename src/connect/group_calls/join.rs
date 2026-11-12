@@ -592,8 +592,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
             call.rejoin.leave();
+            call.invite_results = None;
         }
-        self.session.calls.invite_results = None;
         // Phase C2g: tear the native group transport down eagerly; the
         // pump's before/after backstop covers server-driven ends.
         self.teardown_group_call_transport(group_call_id);
@@ -654,8 +654,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
             call.rejoin.leave();
+            call.invite_results = None;
         }
-        self.session.calls.invite_results = None;
         // Phase C2g: same native teardown as leaving; the server-driven
         // end also lands via the pump backstop.
         self.teardown_group_call_transport(group_call_id);
