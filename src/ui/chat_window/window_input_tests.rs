@@ -237,5 +237,6 @@ fn each_window_owns_the_timer_of_its_typed_chat_search(cx: &mut TestAppContext) 
     scoped(&h, Some(OTHER), cx, |app, _| {
         app.search_ui.debounce.chat = gpui_kit::Task::ready(());
     });
+    cx.run_until_parked();
     assert!(cancelled.get(), "the window's own next query replaces it");
 }

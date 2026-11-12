@@ -215,9 +215,11 @@ fn replay_chat_search_generation_jump_and_empty() {
     session.search.chat_search.begin_query("old");
     let stale_extra =
         session.request_chat_search(RequestPurpose::SearchChatMessages, quill::ids::ChatId(7));
+    session.search.chat_search.searching(stale_extra);
     session.search.chat_search.begin_query("new");
-    let _fresh_extra =
+    let fresh_extra =
         session.request_chat_search(RequestPurpose::SearchChatMessages, quill::ids::ChatId(7));
+    session.search.chat_search.searching(fresh_extra);
     apply_all_seq(
         &mut session,
         &sink,
@@ -236,6 +238,7 @@ fn replay_chat_search_generation_jump_and_empty() {
     session.search.chat_search.begin_query("zzz");
     let empty_extra =
         session.request_chat_search(RequestPurpose::SearchChatMessages, quill::ids::ChatId(7));
+    session.search.chat_search.searching(empty_extra);
     apply_all_seq(
         &mut session,
         &sink,
