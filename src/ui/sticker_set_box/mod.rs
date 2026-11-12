@@ -450,6 +450,7 @@ impl QuillApp {
                             link,
                             can_archive(installed, kind),
                             is_owned,
+                            this.sticker_box.editing.is_idle(),
                             cx,
                         )
                         .into_any_element()

@@ -15,6 +15,7 @@ impl QuillApp {
         link: String,
         archivable: bool,
         is_owned: bool,
+        idle: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let owner = cx.entity().downgrade();
@@ -55,13 +56,14 @@ impl QuillApp {
                                 });
                             },
                         ))
-                        .item(PopupMenuItem::new(tr(keys::Q_MEDIA_REORDER)).on_click(
-                            move |_, _, cx| {
-                                let _ = reorder.update(cx, |this, cx| {
-                                    this.begin_edit_stickers(cx);
-                                });
-                            },
-                        ));
+                        .item(PopupMenuItem::new(tr(keys::Q_MEDIA_REORDER))
+                                .disabled(!idle)
+                                .on_click(move |_, _, cx| {
+                                    let _ = reorder.update(cx, |this, cx| {
+                                        this.begin_edit_stickers(cx);
+                                    });
+                                }),
+                        );
                 }
                 if archivable {
                     let archive = owner.clone();

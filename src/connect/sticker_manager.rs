@@ -111,11 +111,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         // succeeds. At the front its first send happens now: when that
         // cannot go out the change is taken back, the call fails, and the
         // box keeps its edits and tells the user itself.
-        if first && let Err(err) = self.advance_manager_commit() {
+        if first {
+            // An earlier commit's failure the UI has not shown yet is not
+            // this call's to clear: set it aside while the send is tried.
+            let earlier = self.session.stickers.manager.take_failure();
+            let sent = self.advance_manager_commit();
             let manager = &mut self.session.stickers.manager;
-            manager.commits.pop_back();
-            let _ = manager.take_failure();
-            return Err(err);
+            if sent.is_err() {
+                manager.commits.pop_back();
+                let _ = manager.take_failure();
+            }
+            if earlier.is_some() {
+                manager.failure = earlier;
+            }
+            return sent;
         }
         Ok(())
     }

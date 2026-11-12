@@ -238,3 +238,44 @@ fn a_commit_whose_first_send_is_refused_fails_the_call_and_is_taken_back() {
         .unwrap();
     assert_eq!(count(&inner, "changeStickerSet"), 1);
 }
+
+/// Taking back a refused first commit leaves a failure from the commit
+/// before it, which the UI has not shown yet, in place (sweep r3-12).
+#[test]
+fn taking_back_a_refused_commit_keeps_an_earlier_unshown_failure() {
+    use super::flood_retry_lost::SwitchSender;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let (_dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let down = Arc::new(AtomicBool::new(false));
+    let inner = Arc::new(RecordingSender::new());
+    let sender = SwitchSender {
+        inner: inner.clone(),
+        down: down.clone(),
+    };
+    let session = crate::state::Session::new(crate::ids::AccountKey::primary(), sink.clone());
+    let mut driver = ConnectDriver::new(session, sender, test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    driver
+        .ingest(
+            copy_and_parse(
+                r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    driver.session.stickers.manager.failure = Some(crate::state::CommitFailure { masks: true });
+    down.store(true, Ordering::SeqCst);
+    assert!(
+        driver
+            .commit_sticker_manager(false, vec![22], None)
+            .is_err()
+    );
+    assert!(driver.session.stickers.manager.commits.is_empty());
+    assert_eq!(
+        driver.session.stickers.manager.failure,
+        Some(crate::state::CommitFailure { masks: true })
+    );
+}
