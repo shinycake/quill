@@ -49,20 +49,29 @@ pub(super) fn looks_like_svg(bytes: &[u8]) -> bool {
 }
 
 /// What was read from an icon file and the modification time it was read
-/// at: a file replaced at the same path reads again.
+/// at: an unusable file (still downloading, not an SVG) that is replaced at
+/// the same path reads again.
 type IconCache = Mutex<HashMap<String, (Option<std::time::SystemTime>, Option<Arc<[u8]>>)>>;
+
+/// Icons kept; past it the cache starts over (a menu shows a handful).
+const ICONS_KEPT: usize = 64;
 
 fn cache() -> &'static IconCache {
     static CACHE: std::sync::OnceLock<IconCache> = std::sync::OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// The SVG at `path`, read once per version of the file (the menu rebuilds
-/// with every render). A file that is missing or fails to read is asked
-/// again at the next render; one that is not a usable SVG (too big, not an
-/// SVG) stays unused until its modification time changes.
+/// The SVG at `path`, read once (the menu rebuilds with every render). A
+/// usable icon is kept as read and costs no file call afterwards: a
+/// downloaded file does not change under its path. A file that is missing
+/// or fails to read is asked again at the next render; one that is not a
+/// usable SVG (too big, not an SVG, still downloading) stays unused until
+/// its modification time changes.
 pub(super) fn icon_svg(path: &str) -> Option<Arc<[u8]>> {
     let mut cache = cache().lock_or_recover();
+    if let Some((_, Some(icon))) = cache.get(path) {
+        return Some(icon.clone());
+    }
     let Ok(meta) = std::fs::metadata(path) else {
         cache.remove(path);
         return None;
@@ -80,6 +89,9 @@ pub(super) fn icon_svg(path: &str) -> Option<Arc<[u8]>> {
     } else {
         None
     };
+    if cache.len() >= ICONS_KEPT {
+        cache.clear();
+    }
     cache.insert(path.to_string(), (stamp, icon.clone()));
     icon
 }
@@ -175,7 +187,7 @@ mod tests {
     }
 
     #[test]
-    fn an_icon_replaced_at_the_same_path_is_read_again() {
+    fn an_unusable_file_replaced_at_the_same_path_is_read_again() {
         let dir = std::env::temp_dir().join(format!("quill-attach-icons-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("bot.svg");
@@ -196,9 +208,12 @@ mod tests {
         // The finished file replaces it.
         write(b"<svg/>", 2_000);
         assert_eq!(icon_svg(key).as_deref(), Some(&b"<svg/>"[..]));
-        // Removed: no icon, and not remembered.
+        // A usable icon costs no file call: it stays after the file goes.
         std::fs::remove_file(&path).unwrap();
-        assert!(icon_svg(key).is_none());
+        assert_eq!(icon_svg(key).as_deref(), Some(&b"<svg/>"[..]));
+        // A file that never was usable and is gone is not remembered.
+        let missing = dir.join("never.svg");
+        assert!(icon_svg(missing.to_str().unwrap()).is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

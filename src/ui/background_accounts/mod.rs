@@ -119,9 +119,6 @@ pub(crate) struct BackgroundAccounts {
     prepare: prepare::PrepareSet,
     /// `start_connection` preparations still running on a worker.
     pub(super) screen_workers: crate::ui::connect_ui::ScreenWorkers,
-    /// Bumped by `stop_background_accounts`: starts in flight and the poll
-    /// loop of an older generation end.
-    generation: u64,
     /// The background poll; dropping it ends the loop.
     poll: Option<Task<()>>,
     pub(super) clicks: AccountClicks,
@@ -158,7 +155,6 @@ impl BackgroundAccounts {
             clients: Vec::new(),
             prepare: prepare::PrepareSet::default(),
             screen_workers: Default::default(),
-            generation: 0,
             poll: None,
             clicks: Arc::new(Mutex::new(Vec::new())),
             pending_open: None,
@@ -378,8 +374,7 @@ impl QuillApp {
                 });
                 continue;
             }
-            self.background.prepare.begin(&key);
-            let generation = self.background.generation;
+            let token = self.background.prepare.begin(&key);
             let prepare_root = root.clone();
             let prepare_key = key.clone();
             let prepare_credentials = credentials.clone();
@@ -395,14 +390,16 @@ impl QuillApp {
             });
             let credentials = credentials.clone();
             let root = root.clone();
-            // screen-scope: a background start belongs to the app's account list, not to the account on screen; its generation guard ends it on a restart.
-            Self::spawn_app(cx, async move |this, cx| {
+            // screen-scope: a background start belongs to the app's account list, not to the account on screen; a stop leaves it `Cancelled`, which ends it unstarted.
+            let held_key = key.clone();
+            let held_token = token.clone();
+            let worker = Self::spawn_app(cx, async move |this, cx| {
                 let prepared = prepared.await;
                 let _ = this.update(cx, |this, cx| {
-                    this.finish_background_prepare(key, generation, root, credentials, prepared, cx)
+                    this.finish_background_prepare(key, &token, root, credentials, prepared, cx)
                 });
-            })
-            .detach();
+            });
+            self.background.prepare.hold(&held_key, &held_token, worker);
         }
         self.spawn_background_poll(cx);
     }
@@ -412,13 +409,13 @@ impl QuillApp {
     fn finish_background_prepare(
         &mut self,
         key: AccountKey,
-        generation: u64,
+        token: &Arc<()>,
         root: std::path::PathBuf,
         credentials: quill::credentials::TelegramCredentials,
         prepared: Result<quill::connect::PreparedConnect, ConnectBlocker>,
         cx: &mut Context<Self>,
     ) {
-        self.apply_background_prepare(key, generation, root, credentials, prepared, cx);
+        self.apply_background_prepare(key, token, root, credentials, prepared, cx);
         self.settle_close_waiters(cx);
     }
 
@@ -427,17 +424,14 @@ impl QuillApp {
     fn apply_background_prepare(
         &mut self,
         key: AccountKey,
-        generation: u64,
+        token: &Arc<()>,
         root: std::path::PathBuf,
         credentials: quill::credentials::TelegramCredentials,
         prepared: Result<quill::connect::PreparedConnect, ConnectBlocker>,
         cx: &mut Context<Self>,
     ) {
-        let wanted = self.background.prepare.finished(&key);
-        // Stopped since: every start of that generation ends.
-        if generation != self.background.generation {
-            return;
-        }
+        // A stop since left the start `Cancelled`: it is not wanted.
+        let wanted = self.background.prepare.finished(&key, token);
         // Removed since (it is no longer wanted), being wiped,
         // switched to meanwhile, or still closing: a second
         // client must never open the same database, nor one
@@ -517,13 +511,12 @@ impl QuillApp {
     }
 
     fn stop_background_clients(&mut self, cx: &mut Context<Self>) {
-        self.background.generation += 1;
         self.background.prepare.cancel_all();
-        // The old loop ends with its task; the new generation's poll
+        // The old loop ends with its task; the new poll
         // drains the closing clients.
         self.background.poll = None;
         self.background.close_all_later();
-        // The new generation's poll drains the closing clients.
+        // The new poll drains the closing clients.
         self.spawn_background_poll(cx);
     }
 
@@ -541,8 +534,7 @@ impl QuillApp {
         if self.background.poll.is_some() || !self.background.has_work() {
             return;
         }
-        let generation = self.background.generation;
-        // screen-scope: the poll loop drains the background accounts; its generation guard ends it on a restart.
+        // screen-scope: the poll loop drains the background accounts; a restart replaces the task, which ends the old loop.
         let poll = Self::spawn_app(cx, async move |this, cx| {
             let executor = cx.background_executor().clone();
             let hold = backlog_hold(&executor);
@@ -553,9 +545,6 @@ impl QuillApp {
                 hold,
                 || {
                     this.update(cx, |this, cx| {
-                        if generation != this.background.generation {
-                            return None;
-                        }
                         let work_left = this.poll_background(cx);
                         // A close, a start or a preparation may have ended.
                         this.settle_close_waiters(cx);

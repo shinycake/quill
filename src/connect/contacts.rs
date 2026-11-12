@@ -47,11 +47,14 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// A contact change set the list to `None` (add, delete, import,
-    /// clear): fetch it again for the tab that shows it. A list that
+    /// clear), or the list was never loaded: fetch it again for the tab that shows it. A list that
     /// failed waits for Retry; a send that fails ends the loading with
     /// Retry instead of leaving "Loading contacts..." up.
     pub fn refetch_invalidated_contacts(&mut self) {
-        if !self.session.users_state.contacts.is_outdated() {
+        // A list nothing asked for yet is asked for too (sync off, so the
+        // tab's own open did not): its tab would read "Loading" for good.
+        let contacts = &self.session.users_state.contacts;
+        if !(contacts.is_outdated() || contacts.is_idle()) {
             return;
         }
         // A fetch out from before the change is no longer waited for

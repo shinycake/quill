@@ -294,6 +294,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(Some(extra))
     }
 
+    /// The unblock of `chat_id`'s user already on its way, if any: what a
+    /// second Unblock (`set_chat_user_blocked` answers `Ok(None)`) can wait
+    /// on instead of sending another.
+    pub fn pending_unblock(&self, chat_id: ChatId) -> Option<RequestId> {
+        let purpose =
+            RequestPurpose::Users(UsersPurpose::SetMessageSenderBlockList { block: false });
+        self.session
+            .requests
+            .ids_for_chat(&[purpose], chat_id)
+            .first()
+            .copied()
+    }
+
     /// Phase 3.2: send a callback query for an inline keyboard button press
     /// (`getCallbackQueryAnswer`; TDLib answers with `callbackQueryAnswer`).
     /// Only real (non-pending) messages in a supported chat can be answered.

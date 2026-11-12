@@ -1,6 +1,6 @@
 //! The bot command menu above the composer.
 
-use super::send_bot_command::MenuSend;
+use super::send_bot_command::MenuSendOutcome;
 use super::*;
 use crate::ui::composer_sends::SendOnce;
 use quill::composer::{commands_with_username, complete_command_at};
@@ -330,7 +330,7 @@ impl QuillApp {
         // The gates run first: a command that cannot go (slow mode, no right
         // to send, a frozen account) stays typed in the field.
         let outcome = self.send_menu_command(&command, cx);
-        if outcome == MenuSend::Refused {
+        if outcome == MenuSendOutcome::Refused {
             return;
         }
         self.close_command_menu(cx);
@@ -351,7 +351,7 @@ impl QuillApp {
                     .update(cx, |input, cx| input.focus(window, cx));
             }
         }
-        if outcome == MenuSend::Sent {
+        if outcome == MenuSendOutcome::Sent {
             // The send leaves the chat draft alone (`clear_draft` is off for
             // a menu command); the kept text is saved at once.
             if self.composer.read(cx).value().is_empty() {

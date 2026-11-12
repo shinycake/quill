@@ -615,7 +615,7 @@ fn a_ban_warning_opens_at_once_when_no_box_is_open(cx: &mut TestAppContext) {
 
 #[gpui_kit::test]
 fn the_chooser_reads_loading_while_the_owned_bots_load(cx: &mut TestAppContext) {
-    use super::chooser::CandidateStatus;
+    use super::chooser::CandidateView;
     let (app, mut vcx) = new_app(cx);
     frames(&mut vcx);
     app.update(&mut vcx, |app, _| {
@@ -626,7 +626,7 @@ fn the_chooser_reads_loading_while_the_owned_bots_load(cx: &mut TestAppContext) 
     let status = app.read_with(&vcx, |app, _| app.community_candidates("").1);
     assert_eq!(
         status,
-        CandidateStatus::Loading,
+        CandidateView::Loading,
         "the empty list is not 'No chats found' while the bots are on their way"
     );
     app.update(&mut vcx, |app, _| {
@@ -635,5 +635,5 @@ fn the_chooser_reads_loading_while_the_owned_bots_load(cx: &mut TestAppContext) 
         }
     });
     let status = app.read_with(&vcx, |app, _| app.community_candidates("").1);
-    assert_eq!(status, CandidateStatus::Ready);
+    assert_eq!(status, CandidateView::Ready);
 }

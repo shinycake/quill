@@ -8,7 +8,7 @@ use quill::composer::SendOptions;
 
 /// What came of sending a command picked from the menu.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(in crate::ui) enum MenuSend {
+pub(in crate::ui) enum MenuSendOutcome {
     /// The message went out (or a demo session applied it).
     Sent,
     /// A gate said no or the send failed; a note says why. Nothing went out.
@@ -33,14 +33,14 @@ impl QuillApp {
         &mut self,
         command: &str,
         cx: &mut Context<Self>,
-    ) -> MenuSend {
+    ) -> MenuSendOutcome {
         if self.live.is_none() {
             if self.demo_session.is_none() {
-                return MenuSend::Unavailable;
+                return MenuSendOutcome::Unavailable;
             }
             let chat_id = self.demo_session.as_ref().and_then(|s| s.open_chat_id());
             if chat_id.is_some_and(|chat| self.slow_mode_blocked(chat, cx)) {
-                return MenuSend::Refused;
+                return MenuSendOutcome::Refused;
             }
             let reply = self.reply_for_send(cx);
             self.apply_demo_outgoing(command, None, reply.as_ref());
@@ -51,20 +51,20 @@ impl QuillApp {
                 keys::Q_CHAT_DEMO_SEND_APPLIED_LOCALLY_NO,
             )));
             cx.notify();
-            return MenuSend::Sent;
+            return MenuSendOutcome::Sent;
         }
         if !matches!(self.pane_mode(), PaneMode::Ready) {
-            return MenuSend::Unavailable;
+            return MenuSendOutcome::Unavailable;
         }
         if self.session().is_some_and(|s| s.is_frozen()) {
             self.set_note(StatusNote::error(tr(
                 keys::Q_CHAT_YOUR_ACCOUNT_IS_FROZEN_AND,
             )));
             cx.notify();
-            return MenuSend::Refused;
+            return MenuSendOutcome::Refused;
         }
         let Some(chat_id) = self.open_chat_id() else {
-            return MenuSend::Refused;
+            return MenuSendOutcome::Refused;
         };
         let supported = self
             .session()
@@ -73,10 +73,10 @@ impl QuillApp {
         if !supported {
             self.set_note(StatusNote::silent(tr(keys::Q_CHAT_THIS_CHAT_TYPE_IS_NOT)));
             cx.notify();
-            return MenuSend::Refused;
+            return MenuSendOutcome::Refused;
         }
         if self.deny_send(SendKind::Message, cx) || self.slow_mode_blocked(chat_id, cx) {
-            return MenuSend::Refused;
+            return MenuSendOutcome::Refused;
         }
         let reply = self.reply_for_send(cx);
         let options = SendOptions {
@@ -85,7 +85,7 @@ impl QuillApp {
             ..SendOptions::default()
         };
         let Some(live) = self.live.as_mut() else {
-            return MenuSend::Refused;
+            return MenuSendOutcome::Refused;
         };
         let snapshot =
             ComposerSnapshot::capture(chat_id, live.driver.session.view_generation, command)
@@ -101,11 +101,11 @@ impl QuillApp {
                     tr(keys::Q_CHAT_SENDING),
                 );
                 self.set_note(note);
-                MenuSend::Sent
+                MenuSendOutcome::Sent
             }
             Err(_) => {
                 self.set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEND_MESSAGE)));
-                MenuSend::Refused
+                MenuSendOutcome::Refused
             }
         };
         cx.notify();

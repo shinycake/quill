@@ -15,11 +15,12 @@ use gpui_kit::component::*;
 use quill::new_chat::{NewChatKind, NewChatStep};
 use quill::state::{ProfileChatsFetch, ProfileChatsKind};
 
-/// How the chooser's lists stand: still loading, or why one failed (its
+/// How the chooser's lists stand, computed from the session's fetches on
+/// each draw (nothing stores it): still loading, or why one failed (its
 /// chats are then missing from the list, which says so with a Retry
 /// instead of "No chats found").
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum CandidateStatus {
+pub(crate) enum CandidateView {
     Ready,
     Loading,
     Failed(String),
@@ -66,9 +67,9 @@ impl QuillApp {
     /// The chats the box offers, by title, filtered by `query`: the
     /// suitable chats, then the owned bots (`getOwnedBots`) that are in
     /// no community. A bot's chat is its user id.
-    pub(crate) fn community_candidates(&self, query: &str) -> (Vec<Candidate>, CandidateStatus) {
+    pub(crate) fn community_candidates(&self, query: &str) -> (Vec<Candidate>, CandidateView) {
         let Some(session) = self.session() else {
-            return (Vec::new(), CandidateStatus::Ready);
+            return (Vec::new(), CandidateView::Ready);
         };
         let query = query.trim().to_lowercase();
         let (suitable, mut status) = match session
@@ -76,23 +77,23 @@ impl QuillApp {
             .profile_chat_lists
             .get(&(ProfileChatsKind::SuitableCommunityChats, 0))
         {
-            Some(ProfileChatsFetch::Loaded { ids, .. }) => (ids.clone(), CandidateStatus::Ready),
-            Some(ProfileChatsFetch::Loading(_)) => (Vec::new(), CandidateStatus::Loading),
+            Some(ProfileChatsFetch::Loaded { ids, .. }) => (ids.clone(), CandidateView::Ready),
+            Some(ProfileChatsFetch::Loading(_)) => (Vec::new(), CandidateView::Loading),
             Some(ProfileChatsFetch::Failed(error)) => {
-                (Vec::new(), CandidateStatus::Failed(error.clone()))
+                (Vec::new(), CandidateView::Failed(error.clone()))
             }
-            None => (Vec::new(), CandidateStatus::Ready),
+            None => (Vec::new(), CandidateView::Ready),
         };
         // The owned bots are the second list: the chooser reads "Loading"
         // while either is on its way, and a failure of either shows once
         // none is left loading.
         let bots_fetch = &session.communities.owned_bots;
-        if bots_fetch.is_loading() && !matches!(status, CandidateStatus::Loading) {
-            status = CandidateStatus::Loading;
-        } else if status == CandidateStatus::Ready
+        if bots_fetch.is_loading() && !matches!(status, CandidateView::Loading) {
+            status = CandidateView::Loading;
+        } else if status == CandidateView::Ready
             && let Some(error) = bots_fetch.error()
         {
-            status = CandidateStatus::Failed(error.to_string());
+            status = CandidateView::Failed(error.to_string());
         }
         let mut chats: Vec<Candidate> = suitable
             .into_iter()
@@ -243,7 +244,7 @@ impl QuillApp {
                         .child(div().min_w_0().truncate().child(candidate.title.clone())),
                 );
             }
-            if let CandidateStatus::Failed(error) = &status {
+            if let CandidateView::Failed(error) = &status {
                 list = list.child(
                     div()
                         .py_2()
@@ -262,7 +263,7 @@ impl QuillApp {
                         ),
                 );
             } else if candidates.is_empty() {
-                list = list.child(if status == CandidateStatus::Loading {
+                list = list.child(if status == CandidateView::Loading {
                     div()
                         .py_4()
                         .flex()

@@ -838,7 +838,8 @@ fn a_refused_rich_send_gives_the_text_back(cx: &mut TestAppContext) {
         app.read_with(vcx, |app, _| app.chat_ui.sent_text.clone()),
         SentText::None
     );
-    // An accepted send lets the text go; text typed since is not replaced.
+    // An accepted send lets the text go; a refused one is put in front of
+    // text typed since, so neither is lost (Sweep r4 14-004).
     set_field(&app, vcx, "");
     sent(&app, vcx);
     vcx.update(|window, cx| {
@@ -854,7 +855,7 @@ fn a_refused_rich_send_gives_the_text_back(cx: &mut TestAppContext) {
             app.apply_sent_text_answer(&Answer::Failed("FLOOD".into()), window, cx)
         })
     });
-    assert_eq!(field(&app, vcx), "typed meanwhile");
+    assert_eq!(field(&app, vcx), "# Title\nbody\ntyped meanwhile");
 }
 
 /// Sweep 08-149/150: a refused rich send keeps no draft clear, so a later
@@ -1082,16 +1083,16 @@ fn a_one_time_keyboard_goes_only_when_its_text_went(cx: &mut TestAppContext) {
 /// keeps the typed token in the field; one that goes reports `Sent`.
 #[gpui_kit::test]
 fn a_menu_command_says_whether_it_went(cx: &mut TestAppContext) {
-    use crate::ui::composer::send_bot_command::MenuSend;
+    use crate::ui::composer::send_bot_command::MenuSendOutcome;
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     let slow = app.update(vcx, |app, _| waiting_group(app));
     open_chat(&app, vcx, slow);
     let refused = app.update(vcx, |app, cx| app.send_menu_command("/start", cx));
-    assert_eq!(refused, MenuSend::Refused, "slow mode holds it back");
+    assert_eq!(refused, MenuSendOutcome::Refused, "slow mode holds it back");
     open_chat(&app, vcx, GROUP);
     let sent = app.update(vcx, |app, cx| app.send_menu_command("/start", cx));
-    assert_eq!(sent, MenuSend::Sent);
+    assert_eq!(sent, MenuSendOutcome::Sent);
 }
 
 /// Sweep 09-112: a forced reply waits for the window that shows its chat.

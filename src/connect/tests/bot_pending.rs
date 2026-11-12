@@ -195,3 +195,32 @@ fn bot_stream_stop_races_retention_topics_and_expiry() {
     )));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// A second Unblock while one is out sends nothing, and names the request
+/// already out, so a Restart waits on it (sweep r4 13-004).
+#[test]
+fn a_second_unblock_names_the_request_already_out() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let chat = r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Bot","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#;
+    driver
+        .ingest(copy_and_parse(chat, &seq, &sink).unwrap())
+        .unwrap();
+    assert_eq!(driver.pending_unblock(ChatId(7)), None);
+    let first = driver
+        .set_chat_user_blocked(ChatId(7), false)
+        .unwrap()
+        .unwrap();
+    let sent = recorder.snapshot().len();
+    assert_eq!(
+        driver.set_chat_user_blocked(ChatId(7), false).unwrap(),
+        None
+    );
+    assert_eq!(recorder.snapshot().len(), sent, "nothing is sent twice");
+    assert_eq!(driver.pending_unblock(ChatId(7)), Some(first));
+    drop(driver);
+    std::fs::remove_dir_all(dir).unwrap();
+}

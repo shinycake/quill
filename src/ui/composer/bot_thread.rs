@@ -90,10 +90,17 @@ impl QuillApp {
         let BotThreadStart::Asked { request, .. } = self.chat_ui.bot_thread else {
             return;
         };
-        let Some(outcome) = self
-            .session_mut()
-            .and_then(|session| session.take_bot_thread_start(request))
-        else {
+        let Some(session) = self.session_mut() else {
+            return;
+        };
+        let answer = session.take_bot_thread_start(request);
+        // A request the session no longer knows, with no answer kept, is
+        // lost (a reset, a dropped send): the text stays in the field and
+        // the next Send asks again.
+        let lost = answer.is_none() && session.requests.get(request).is_none();
+        let Some(outcome) = answer.or_else(|| {
+            lost.then(|| Err(tr(keys::Q_CHAT_COULDN_T_START_A_NEW_THREAD).to_string()))
+        }) else {
             return;
         };
         let BotThreadStart::Asked { text, once, .. } = std::mem::take(&mut self.chat_ui.bot_thread)

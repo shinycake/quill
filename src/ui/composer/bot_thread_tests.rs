@@ -130,3 +130,23 @@ fn a_send_from_all_opens_a_new_thread_with_the_message(cx: &mut TestAppContext) 
         assert_eq!(all, in_all);
     });
 }
+
+#[gpui_kit::test]
+fn a_lost_new_thread_request_gives_the_send_back(cx: &mut TestAppContext) {
+    use super::BotThreadStart;
+    let (app, mut vcx) = new_app(cx);
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            // A request the session never registered: nothing will answer it.
+            app.chat_ui.bot_thread = BotThreadStart::Asked {
+                request: quill::ids::RequestId(9_999_999),
+                text: "Plan a weekend in Lisbon".to_string(),
+                once: Default::default(),
+            };
+            app.advance_bot_thread(window, cx);
+        });
+    });
+    app.read_with(&vcx, |app, _| {
+        assert!(matches!(app.chat_ui.bot_thread, BotThreadStart::Idle));
+    });
+}

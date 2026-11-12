@@ -151,6 +151,25 @@ impl DraftClear {
         self.stage.spend(message);
     }
 
+    /// A send that has acked or failed one message stops waiting for those
+    /// that can no longer answer: a made message that left the history
+    /// (deleted while it uploaded), an asked one whose request is gone.
+    /// Settled when none is left.
+    pub(super) fn forget_lost(
+        &mut self,
+        message_exists: impl Fn(ChatId, MessageId) -> bool,
+        request_waits: impl Fn(RequestId) -> bool,
+    ) -> bool {
+        let chat = self.chat_id;
+        if let ClearStage::Spent(messages) = &mut self.stage {
+            messages.retain(|m| match *m {
+                SentMessage::Made { message, .. } => message_exists(chat, message),
+                SentMessage::Asked(request) => request_waits(request),
+            });
+        }
+        self.is_settled()
+    }
+
     /// Every message of the send has acked or failed.
     pub(super) fn is_settled(&self) -> bool {
         matches!(&self.stage, ClearStage::Spent(messages) if messages.is_empty())
@@ -325,5 +344,28 @@ impl super::on_screen::Farewell for ComposerUi {
         cx: &mut gpui_kit::Context<super::app::QuillApp>,
     ) {
         app.close_video_editor(cx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DraftClear;
+    use quill::ids::{ChatId, MessageId, RequestId};
+
+    /// An album whose second part is deleted while it uploads never acks it:
+    /// once the first has acked and the second left the history, the clear
+    /// is settled instead of living until a newer send replaces it.
+    #[test]
+    fn a_clear_stops_waiting_for_an_album_part_that_left_the_history() {
+        let chat = ChatId(5);
+        let mut clear = DraftClear::whole_composer(chat).asked([RequestId(1)]);
+        clear.answered(RequestId(1), MessageId(-10));
+        clear.answered(RequestId(1), MessageId(-11));
+        assert!(clear.ack(MessageId(-10)), "the first ack clears the draft");
+        let there = |_: ChatId, message: MessageId| message == MessageId(-11);
+        let waits = |_: RequestId| false;
+        assert!(!clear.forget_lost(there, waits), "the part is still there");
+        let gone = |_: ChatId, _: MessageId| false;
+        assert!(clear.forget_lost(gone, waits), "the part left the history");
     }
 }

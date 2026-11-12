@@ -238,14 +238,38 @@ impl QuillApp {
         self.auth_demo.stage.cancel_connecting();
         self.close_screen_client(cx);
         self.stop_background_accounts(cx);
+        self.wipe_when_closed(root, accounts, cx);
+        Ok(())
+    }
+
+    /// Delete the accounts' local data once their clients have closed. The
+    /// passcode is already forgotten, so a close that is only slow (a large
+    /// database) is waited for again rather than given up on: only a close
+    /// that can never be confirmed leaves the data for the next start.
+    fn wipe_when_closed(
+        &mut self,
+        root: PathBuf,
+        accounts: Vec<AccountKey>,
+        cx: &mut Context<Self>,
+    ) {
+        let again = (root.clone(), accounts.clone());
         self.delete_after_close(
             root,
             accounts,
-            |this, deletion, cx| match deletion {
+            move |this, deletion, cx| match deletion {
                 Deletion::Done { error: None } => {
                     this.background.local = LocalData::Swept;
                     this.disk_accounts_wiped();
                     this.start_connection(cx);
+                }
+                Deletion::Deferred
+                    if !again
+                        .1
+                        .iter()
+                        .any(|key| this.background.closing.unconfirmed(key)) =>
+                {
+                    let (root, accounts) = again;
+                    this.wipe_when_closed(root, accounts, cx);
                 }
                 // Nothing opens in this run (a folder that is not gone would
                 // open its old database); the next start deletes the folders
@@ -259,7 +283,6 @@ impl QuillApp {
             },
             cx,
         );
-        Ok(())
     }
 
     /// Delete `keys`' folders (already recorded in `accounts.json`) once

@@ -364,6 +364,9 @@ impl QuillApp {
             keys::NEW_CONTACT_SHARE_SURE,
             &[("phone", &phone.to_string()), ("user", &name.to_string())],
         );
+        // The box is the account's: pressing OK after a switch does nothing
+        // (the chat id is the old account's).
+        let screen = self.screen_epoch();
         window.open_alert_dialog(cx, move |alert, _, _| {
             let app = app.clone();
             alert
@@ -374,20 +377,26 @@ impl QuillApp {
                 .show_cancel(true)
                 .on_ok(move |_, _, cx| {
                     let _ = app.update(cx, |this, cx| {
-                        if let Some(live) = this.live.as_mut() {
-                            if live.driver.share_phone_number(chat_id, user_id).is_err() {
-                                this.set_note(StatusNote::error(tr(
-                                    keys::Q_CHAT_COULD_NOT_SHARE_YOUR_PHONE,
-                                )));
-                            }
-                        } else if let Some(session) = this.demo_session.as_mut() {
-                            session.set_chat_action_bar(chat_id.0, None);
-                        }
-                        cx.notify();
+                        this.in_screen_scope(screen, cx, |this, cx| {
+                            this.submit_bar_share_phone(chat_id, user_id, cx);
+                        });
                     });
                     true
                 })
         });
+    }
+
+    fn submit_bar_share_phone(&mut self, chat_id: ChatId, user_id: i64, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            if live.driver.share_phone_number(chat_id, user_id).is_err() {
+                self.set_note(StatusNote::error(tr(
+                    keys::Q_CHAT_COULD_NOT_SHARE_YOUR_PHONE,
+                )));
+            }
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.set_chat_action_bar(chat_id.0, None);
+        }
+        cx.notify();
     }
 
     /// "Report spam (and leave)": confirm, `reportChat`, then `leaveChat`.
@@ -402,6 +411,7 @@ impl QuillApp {
             tr(keys::REPORT_SPAM_SURE_GROUP)
         };
         let app = cx.entity().downgrade();
+        let screen = self.screen_epoch();
         window.open_alert_dialog(cx, move |alert, _, _| {
             let app = app.clone();
             alert
@@ -411,7 +421,11 @@ impl QuillApp {
                 .cancel_text(tr(keys::CANCEL))
                 .show_cancel(true)
                 .on_ok(move |_, _, cx| {
-                    let _ = app.update(cx, |this, cx| this.submit_bar_report(chat_id, cx));
+                    let _ = app.update(cx, |this, cx| {
+                        this.in_screen_scope(screen, cx, |this, cx| {
+                            this.submit_bar_report(chat_id, cx);
+                        });
+                    });
                     true
                 })
         });

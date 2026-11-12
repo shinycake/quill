@@ -42,7 +42,7 @@ pub(super) struct AddPeopleBox {
 /// shows there (the field needs that window), so the box starts without it.
 enum SearchField {
     /// Not built yet; it starts with this text.
-    Opening {
+    Unbuilt {
         initial: String,
     },
     Open(Entity<InputState>),
@@ -55,7 +55,7 @@ impl AddPeopleBox {
             call_id,
             picked: Vec::new(),
             promoted: Vec::new(),
-            field: SearchField::Opening {
+            field: SearchField::Unbuilt {
                 initial: String::new(),
             },
         }
@@ -65,7 +65,7 @@ impl AddPeopleBox {
     #[cfg(feature = "demo-capture")]
     pub(super) fn with_query(call_id: i32, query: String) -> Self {
         Self {
-            field: SearchField::Opening { initial: query },
+            field: SearchField::Unbuilt { initial: query },
             ..Self::new(call_id)
         }
     }
@@ -141,7 +141,7 @@ impl QuillApp {
             .as_ref()
             .and_then(|open| match &open.field {
                 SearchField::Open(input) => Some(input),
-                SearchField::Opening { .. } => None,
+                SearchField::Unbuilt { .. } => None,
             })
             .map(|input| input.read(cx).value().to_string())
             .unwrap_or_default()
@@ -226,7 +226,7 @@ impl QuillApp {
         let open = self.call_boxes.add_people.as_ref()?;
         let initial = match &open.field {
             SearchField::Open(input) => return Some(input.clone()),
-            SearchField::Opening { initial } => initial.clone(),
+            SearchField::Unbuilt { initial } => initial.clone(),
         };
         let input = cx.new(|cx| {
             InputState::new(window, cx)

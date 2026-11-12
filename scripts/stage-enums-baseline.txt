@@ -5,11 +5,9 @@ bare:AccountStage::Starting 1
 bare:Answer::Waiting 1
 bare:ApplyStage::Sent 1
 bare:BackgroundStatus::Connecting 1
-bare:BoxStage::Opening 1
 bare:CalendarPaging::Loading 1
 bare:CallLinkStep::Busy 1
 bare:CallWindow::Opening 1
-bare:CandidateStatus::Loading 1
 bare:CaptureStage::Running 1
 bare:CardState::Waiting 1
 bare:CarrierStage::Closing 1
@@ -18,13 +16,11 @@ bare:CeremonySheet::Connecting 1
 bare:CeremonySheet::Probing 1
 bare:ClipState::Opening 1
 bare:CloseProgress::Pending 1
-bare:CodeLanguageStage::Opening 1
 bare:ConferenceStage::Running 1
 bare:Decoding::Running 1
 bare:DeviceRun::Opening 1
 bare:DownloadStatus::Downloading 1
 bare:Echo::Waiting 1
-bare:Entry::Pending 1
 bare:ExtractionStage::Starting 1
 bare:FeederState::Syncing 1
 bare:GiftsLayout::Loading 1
@@ -35,10 +31,8 @@ bare:LinkHandlerState::Checking 1
 bare:LinkStatus::Pending 1
 bare:ListStatus::Loading 1
 bare:LookStage::Rendering 1
-bare:Lookup::Pending 1
 bare:Lookup::Waiting 1
 bare:MediaFile::Downloading 1
-bare:MenuSend::Sent 1
 bare:MuteState::Connecting 1
 bare:Opening::Pending 1
 bare:OwnLinkState::Waiting 1
@@ -58,7 +52,6 @@ bare:PlayState::Opening 1
 bare:Playback::Waiting 1
 bare:Refire::Running 1
 bare:ReplyState::Loading 1
-bare:Restore::Pending 1
 bare:RichHtmlStage::Running 1
 bare:Run::Running 1
 bare:SaveAnswer::Waiting 1
@@ -132,8 +125,6 @@ unkeyed:P2pStage::Waiting 1
 unkeyed:PickWait::Downloading 1
 unkeyed:PickerFill::Waiting 1
 unkeyed:PictureState::Downloading 1
-unkeyed:RegistrationStep::Asking 1
-unkeyed:Restore::Opening 1
 unkeyed:Rotation::Probing 1
 unkeyed:RowDownload::Running 1
 unkeyed:RowState::Downloading 1

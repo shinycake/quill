@@ -298,6 +298,37 @@ fn a_quit_before_the_clients_closed_still_removes_and_logs_out_on_the_next_start
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// Sweep r4 13-007: the passcode is forgotten when the lock-screen log out
+/// starts, so a client that only closes slowly (a large database, past the
+/// wait's cap) must not leave the wipe deferred for the whole run.
+#[gpui_kit::test]
+fn a_slow_close_does_not_leave_the_lock_screen_wipe_deferred(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let root = temp_root();
+    isolate(&app, &mut vcx, &root, &[]);
+    let slow = Fake::default();
+    app.update_in(&mut vcx, |app, _, cx| {
+        app.background
+            .closing
+            .push(AccountKey::primary(), slow.boxed(), false);
+        app.begin_local_wipe(root.clone(), cx).unwrap();
+    });
+    // The close outlasts the wait's cap: the wipe waits again.
+    vcx.executor().advance_clock(Duration::from_secs(61));
+    vcx.run_until_parked();
+    assert!(
+        folder(&root, &AccountKey::primary()),
+        "nothing under it yet"
+    );
+    slow.close();
+    run_for(&mut vcx, 400);
+    assert!(
+        !folder(&root, &AccountKey::primary()),
+        "wiped once the client closed"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 #[gpui_kit::test]
 fn the_startup_sweep_skips_accounts_this_run_still_has_open(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);

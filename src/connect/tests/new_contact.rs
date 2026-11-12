@@ -164,6 +164,19 @@ fn an_invalidated_contact_list_is_fetched_again() {
     cleanup(f);
 }
 
+/// A list nothing has asked for (sync contacts off, nothing fetched at
+/// login) is fetched when the open tab asks, instead of reading "Loading"
+/// with nothing in flight.
+#[test]
+fn a_never_loaded_contact_list_is_fetched_for_the_open_tab() {
+    let mut f = fixture();
+    assert!(f.1.session.users_state.contacts.is_idle());
+    f.1.refetch_invalidated_contacts();
+    assert_eq!(last_request(&f)["@type"], "getContacts");
+    assert!(f.1.session.users_state.contacts.is_loading());
+    cleanup(f);
+}
+
 /// With the chats path not active the fetch cannot start: the tab shows the
 /// error and its Retry, not a list that stays on "Loading contacts...".
 #[test]

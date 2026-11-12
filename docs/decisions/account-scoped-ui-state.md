@@ -10220,3 +10220,49 @@ add and closed link save), `composer_sends_tests` (an ack never takes a
 neighbour's clear), `chat_window::asker_tests` (gif ask settles; two
 windows keep their own link text), `forum_extras::tests` (both answer
 orders), `deep_link_routes_tests` (seek stays with its account).
+
+### Sweep fixes (r4-07)
+
+| Ids | What changed |
+| --- | --- |
+| 13-003, g-222, g-230 | `SendToMenu::Reading { _read }` and `Applying { want, queued, _write }` hold their tasks, so replacing the stage cancels the work. `click` and `written` take a closure that starts the write and mutate in place; the type is no longer `Copy`. Tests drive them with `Task::ready`. |
+| g-238 | `system_accent::refresh_then(done)` runs `done` (or drops it) when the Linux read thread ends; `refresh_system_accent` waits on that channel, not on a 100 ms timer. |
+| g-216 | `EngineState` is a view computed by `AudioEngine::state` from `Playback`/`Sound`, which own the stage and the build task: renamed `EngineView`. |
+| g-214, g-231, g-242 | `DeviceLink::Opening { _open }` holds the opener thread's `JoinHandle`; `WatchHandle` holds the watch thread's and a `WatchStop` (flag + condvar), so dropping the device wakes the watch at once instead of at its next look. |
+| g-223 | `Stretch::Starting` is a position in the stretch loop, not work in flight: `First` / `FirstInputEnded`. |
+| g-201, g-203, g-204 | `AuthUi::submit: AuthSubmit` holds the `RequestId` of the sign-in submit this screen sent; busy is "that request is still in the session's table". The five sign-in sends, the recovery sends and the registration record it (`AuthSubmit::sent`). Onboarding, the sidebar's QR button and the registration form read `auth_submit_busy`; the purpose queries are gone. |
+| g-227 | `RegistrationStep::Asking` waits for the user's tick, not a request: `Unticked`. |
+| 13-005 | The code field keeps its text until the step ends (`sync_auth_forms` clears it), like the email and recovery fields. |
+| 13-008, g-235 | `Active::chat` is an `AccountChat`. The middle-click loop runs one step per frame of the window (`on_next_frame`, ended by the `Weak` of the mode's `Rc`), not a 15 ms timer. |
+| g-234 | The battery saver watch is held by a `Watching` global (also the "started" mark) instead of a detached task. |
+| 13-002, g-232 | `BotCreateDialog::check: UsernameCheck::{Idle, Waiting { _timer }}` replaces the keystroke counter and the detached timer. |
+| g-224, g-220 | `Submitted` and `MenuSend` are the outcome of one call, kept nowhere: `SubmitOutcome`, `MenuSendOutcome`. |
+| g-243, g-244, g-245 | The three dialog bodies go through `one_shot_dialog_content` / a `Cell` take: no `RefCell` borrow. |
+| g-218, g-233 | `Found` is a view of the session's lookup: `FoundView`. The chatbot field's subscription is held in `ChatbotDraft::_typing`, not detached. |
+| g-215, g-206 | `Draft::Waiting` and `BotLink::Loading` wait on the session's `Fetch`, which owns the request: `Unbuilt`, `Unreported`. |
+| g-229 | `SearchField::Opening` is a field not built yet: `Unbuilt`. |
+| g-209, g-210, g-226, g-225, g-208, g-211, g-236 | `Busy` is the busy line/tone, not work in flight: `BusyLine`, `BusyTone`; `CallEnd::Running` is `NotEnded`. `CallWindow::Opening { _open }` holds the task that opens the window (the `cx.defer` is a spawned task). The call clock arms one beat at a time and the stage holds it. |
+| g-240 | The mic test watchdog arms one look at a time inside `MicTest`. |
+| g-241 | The device-access prompt answers through a oneshot channel, not a 100 ms `try_recv` poll. |
+| g-237 | The slow-mode countdown is drawn by the send button, which asks the frame clock for a frame a second while it shows one. `SlowModeTick` is gone. |
+| g-239 | The swipe poll arms one beat at a time and the stage holds it. |
+| 13-001 | `BackgroundAccounts::generation` and the hand-counted `workers` are gone. `PrepareSet` holds each worker's `Task` and names it with a token; a stop leaves the start `Cancelled`, which ends it unstarted. The poll loop of an older generation ended by dropping its task already. |
+| 13-007 | The lock-screen wipe waits again when only the wait's cap fired (`wipe_when_closed`); a close that cannot be confirmed still defers to the next start. Test `a_slow_close_does_not_leave_the_lock_screen_wipe_deferred`. |
+| 13-004 | A second Unblock while one is out adopts that request (`ConnectDriver::pending_unblock`), so the Restart still sends /start. |
+| 13-006 | A usable icon is read once and costs no file call afterwards; the cache starts over past 64 icons. |
+| 13-009 | The Share phone number and Report spam alerts run through `in_screen_scope` with the epoch captured when they opened. |
+| 13-010 | The icon and status downloads go out when their lists grew (`files_asked`), not on every draw; the level line reads the boost status `Fetch`. |
+| g-221, g-228 | `Restore::Pending` / `Opening` list windows still to open: `Unlooked` / `ToOpen`. |
+| 14-001, g-217, g-219 | `Entry::Pending { _job }` holds the tokenizer task in the cache; a tokenizer that panics leaves `Failed` (plain, not asked again). `Lookup` is the view `LookupView`. Test `a_failed_tokenizer_leaves_the_block_plain_and_is_not_asked_again`. |
+| g-212 | `CandidateStatus` is a view: `CandidateView`. |
+| 14-002 | The reply bar is spent when the checklist send is acknowledged (or the box is closed with it out), not when it goes out. |
+| 14-003 | A new-thread request the session no longer knows, with no answer kept, gives the text back with a note. Test `a_lost_new_thread_request_gives_the_send_back`. |
+| 14-004 | A refused rich send goes back in front of what was typed since (or to the chat's draft while an edit is open). |
+| 14-005, g-207, g-213 | The Add Link and Code Language boxes use the `focus_on_mount` slot the other boxes use; the stage enums are gone. |
+| 14-006 | A send waiting only for messages that left the history (or whose request is gone) settles (`DraftClear::forget_lost`). Test `a_clear_stops_waiting_for_an_album_part_that_left_the_history`. |
+| 14-007 | An idle contact list is fetched when the open tab asks (`refetch_invalidated_contacts`). Test `a_never_loaded_contact_list_is_fetched_for_the_open_tab`. |
+| g-205 | `ScreenWorkers::begin` is `enlist`: it is not a `Fetch`. |
+| g-202 | See 13-010. |
+
+Guards: no guard changed; the baselines and allow lines of the shapes above are
+gone.

@@ -80,7 +80,6 @@ purpose:ConnectDriver::sync_sticker_set_view 1
 purpose:ConnectDriver::toggle_saved_topic_pinned 1
 purpose:ConnectDriver::update_animated_emoji_suggestion 2
 purpose:ConnectDriver::update_sticker_suggestions 3
-purpose:QuillApp::chat_appearance_level_line 1
 purpose:QuillApp::gif_grid 2
 purpose:QuillApp::manager_set_pending 1
 purpose:QuillApp::manager_view 3
@@ -122,5 +121,4 @@ unsent:ConnectDriver::maybe_fetch_notification_exceptions 1
 unsent:ConnectDriver::probe_self_star_stats 1
 unsent:GifPanel::saved_asked 1
 unsent:GiveawayOptions::begin 2
-unsent:QuillApp::begin_screen_worker 1
 unsent:QuillApp::menu_focus_upkeep 1

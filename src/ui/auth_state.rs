@@ -106,7 +106,7 @@ pub(crate) enum RegistrationStep {
     #[default]
     Idle,
     /// The terms (none when there are none to accept) wait for a tick.
-    Asking(Option<RegistrationTerms>),
+    Unticked(Option<RegistrationTerms>),
     /// The user accepted these terms; with none to accept, it starts so.
     Accepted(Option<RegistrationTerms>),
 }
@@ -130,7 +130,7 @@ impl RegistrationStep {
         *self = if on {
             Self::Accepted(terms)
         } else {
-            Self::Asking(terms)
+            Self::Unticked(terms)
         };
     }
 }
@@ -148,11 +148,11 @@ impl AuthUi {
         };
         let same = matches!(
             &self.registration,
-            RegistrationStep::Asking(asked) | RegistrationStep::Accepted(asked) if asked == terms
+            RegistrationStep::Unticked(asked) | RegistrationStep::Accepted(asked) if asked == terms
         );
         if !same {
             self.registration = match terms {
-                Some(_) => RegistrationStep::Asking(terms.clone()),
+                Some(_) => RegistrationStep::Unticked(terms.clone()),
                 None => RegistrationStep::Accepted(None),
             };
         }

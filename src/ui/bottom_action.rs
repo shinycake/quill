@@ -171,7 +171,14 @@ impl QuillApp {
         let mut restart_now = false;
         if let Some(live) = self.live.as_mut() {
             let sent = live.driver.set_chat_user_blocked(chat_id, false);
-            if let Ok(Some(request)) = sent
+            // An unblock already out (from another entry) is the one the
+            // /start waits for.
+            let waited = match &sent {
+                Ok(Some(request)) => Some(*request),
+                Ok(None) => live.driver.pending_unblock(chat_id),
+                Err(_) => None,
+            };
+            if let Some(request) = waited
                 && restart
             {
                 live.driver.session.acks.expect(request);

@@ -142,6 +142,18 @@ impl QuillApp {
             return;
         };
         let account = live.driver.session.account.clone();
+        // Sends that wait only for messages that cannot answer any more.
+        let session = &live.driver.session;
+        self.composer_sends.forget_lost_clears(
+            &account,
+            |chat, message| {
+                session
+                    .histories
+                    .get(&chat.0)
+                    .is_some_and(|history| history.messages.contains_key(&message.0))
+            },
+            |request| session.requests.get(request).is_some(),
+        );
         let answered = self
             .composer_sends
             .take_left_sends(&account, |request| live.driver.session.acks.take(request));
@@ -167,7 +179,7 @@ impl QuillApp {
     }
 
     /// Frame upkeep: a refused rich send puts its text back in the field,
-    /// when the user has typed nothing since; an accepted one lets it go.
+    /// (in front of whatever the user typed since); an accepted one lets it go.
     pub(in crate::ui) fn settle_sent_text(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(request) = self.chat_ui.sent_text.request() else {
             return;
@@ -202,12 +214,33 @@ impl QuillApp {
         if rich && let Some(slot) = self.send_slot() {
             self.composer_sends.set_draft_clear(&slot, None);
         }
-        if self.composer.read(cx).value().is_empty() && !self.chat_ui.is_editing() {
-            self.chat_ui.rich.set_editor(rich);
-            self.set_composer_markup(&markup, window, cx);
-            self.note_open_draft(false, cx);
-            cx.notify();
+        if self.chat_ui.is_editing() {
+            // The field holds an edit of another message: the refused text
+            // waits as the chat's draft, as for a send left behind.
+            if let Some(slot) = self.send_slot() {
+                self.save_chat_draft(
+                    ChatId(slot.draft.chat_id),
+                    slot.draft.topic,
+                    quill::composer::DraftContent::Text(markup),
+                    None,
+                    false,
+                    cx,
+                );
+            }
+            return;
         }
+        // The refused text goes back in front of anything typed since, so
+        // neither is lost.
+        let typed = self.composer_markup(cx);
+        let restored = if typed.is_empty() {
+            markup
+        } else {
+            format!("{markup}\n{typed}")
+        };
+        self.chat_ui.rich.set_editor(rich);
+        self.set_composer_markup(&restored, window, cx);
+        self.note_open_draft(false, cx);
+        cx.notify();
     }
 }
 
