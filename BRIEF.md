@@ -5,20 +5,21 @@ This branch (`sweep/fix-briefs`) holds the briefs only; it is never merged. Your
 `bundles/` and your branch name.
 
 Each bundle line is `{"id","file","line","kind","severity","confidence","title","trigger","effect","fields","fix"}`.
-`register.jsonl` here is the whole register (1,898 entries) for context. Line numbers refer to commit bc5f50ef2;
-the code has moved since.
+Round 3 bundles are `bundles/r3-NN.jsonl`; `register-r3.jsonl` here is the whole round 3 register (154 entries) for
+context, read against main at 9ef204ed9, so line numbers are close. Severity IS means implicit state: fix it like any
+bug (one enum per stage). Earlier rounds' registers (`register.jsonl`, `register-r2.jsonl`) are history only.
 
 ## Setup
 
 ```bash
-git fetch origin sweep/fix-briefs claude/project-thread-mnl7ex
+git fetch origin sweep/fix-briefs claude/sweep-r3
 git show origin/sweep/fix-briefs:bundles/<bundle>.jsonl > /tmp/bundle.jsonl
 git show origin/sweep/fix-briefs:gate.sh > /tmp/gate.sh
 git show origin/sweep/fix-briefs:rules.txt > /tmp/rules.txt
-git checkout -B <your-branch> origin/claude/project-thread-mnl7ex
+git checkout -B <your-branch> origin/claude/sweep-r3
 ```
 
-`claude/project-thread-mnl7ex` is the integration branch. Branch from it, never from main, and never push to it.
+`claude/sweep-r3` is the integration branch. Branch from it, never from main, and never push to it.
 
 Read before any code: `AGENTS.md`, `docs/contributing/state-machines.md`, `docs/contributing/panic-safety.md`,
 `docs/contributing/structure.md`, `/tmp/rules.txt`, and sections 1 to 7 of
@@ -121,7 +122,7 @@ IS entries are not user-visible bugs. Each one names a struct whose stages are k
 ## Round 2 bundles (r2-NN)
 
 These come from the 2026-11-11 re-sweep of every file, run on the integration branch after all IS bundles merged.
-The whole re-sweep register is `register-r2.jsonl` (1,133 entries); line numbers refer to `origin/claude/project-thread-mnl7ex` at f9fd2d57b.
+The whole re-sweep register is `register-r2.jsonl` (1,133 entries); line numbers refer to `origin/claude/sweep-r3` at f9fd2d57b.
 Each r2 bundle holds the S2 and confirmed S3 entries for its files. While you are in a file, also fix any other `register-r2.jsonl`
 entry for that same file when the fix is local, and list it in your table.
 Do not spawn subagents or run anything in the background except the gate command with its Monitor wait: ending your turn ends your session.
