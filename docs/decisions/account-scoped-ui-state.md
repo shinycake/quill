@@ -8067,7 +8067,7 @@ proxy. Every entry of the bundle is fixed or shown false:
 | 12-A010 | `OptionMediaSlot::Preparing{path, read: ReadId}`: a file read answers the slot holding its `ReadId`, never the first one with the same path. |
 | 12-A018 | `GramWithdraw::Done(WithdrawOutcome)` carries the outcome in the stage (the `withdraw_outcome` slot is gone). `grams_outcome_window` names the window that takes it: the box's host, else the Grams screen's, else main when that one closed. |
 | 12-A019 | A limit toast is claimed by the window of the last press (`PaymentUi::limit_toast`, per account) and shown in that window's next frame, not at a later press. |
-| 12-A020 | `PaymentsState::select_gift` is the one way a gift panel opens or closes from the UI; it drops an Upgrade or resale form that names another gift. |
+| 12-A020 | A form that names a gift lives in that gift's panel: `GiftView::Form{id, form: GiftForm::{Upgrade{keep_details, ask}, Resale{ask}}}` (`premium_hub/gift_view.rs`). `GiftFlow` keeps only the flows that name no shown gift (the collection forms, and the transfer picker, which is its own box `DialogKind::GiftTransfer` with a request of its own). Selecting another gift, `restart` (another collection, a new owner), `close`, the upgrade answer and the delete answer all end the form by replacing the view; `form_sent`, `form_refused` and `close_form_answered_by` match the answer by `RequestId`. `PaymentsState::select_gift` is gone: nobody writes a selection next to a separate `flow = None`. Tests: `a_form_belongs_to_its_gift_alone`, `only_the_form_that_sent_a_request_closes_on_its_answer`, `a_gifts_form_ends_with_its_panel_on_every_path`. |
 | 12-B019 | `mutate_privacy_detail` says whether it sent; the exception picker closes only then. |
 | 12-B017 | `ProfileDialog::owner()` (kind and person) is compared when the photo picker answers, so another person's Edit contact is not mistaken for the box that asked. |
 | 12-B018 | `user_photos_request_ended` ends a user's pending gallery when the first page's request is gone, with a note. |
@@ -8077,8 +8077,11 @@ proxy. Every entry of the bundle is fixed or shown false:
 | 14-068 | `video_encode_failed` is the one failure transition of the video editor (tray, edit box, avatar): ready again, with its player back. |
 | 12-B005 | `ProxyNotice::{Hidden, Showing{text, _timer}}`: the line under the list hides itself. |
 | 12-B006 | `remove_proxy` is sent first; the system-proxy fallback is set only when it went out. |
-| 12-B007 | `ProxyState::{review_link, warn_link, set_auto_switch}` own the link stage and the rotation reset; the UI calls them. The box's draft stays UI data (`ProxyLinkBox`); the check stage lives in the session because its answer settles it by `RequestId`. |
+| 12-B007 | One owner: `ProxyState::link: LinkBox::{Closed, Review(draft), Warn(draft), Checking{draft, request}, Available{draft, ms}, Unavailable(draft)}` in the session's proxy state; `ProxyUi::link` and `ProxyLinkBox` are gone. Opening a link (`open_link`), Check (`warn_link`, `link_checking`), Connect (`take_link`) and closing (`close_link`) are transitions of that value, and `settle_link` settles only `Checking` under its own request, so a check cancelled by closing the box does not touch the next link's box. `ping_link_proxy` reads the draft from the stage. The demo session holds the box too. Tests: `the_link_box_is_one_stage_that_holds_its_draft` and the connect test of two link checks answered in either order. |
 | 12-B008 | The sign-in screen's own state (`AuthUi::proxy_list_open`) holds the box; the Ready transition (`follow_auth`) ends it. The per-frame sync is gone. |
+| review nits | `scripts/dialog-hosts.txt` and `scripts/session-dialogs.txt` name `auth.proxy_list_open` (was `proxy.list_box`). |
+| 12-A008 (nit) | Turning Limit Duration off forgets the chosen deadline on purpose: `close: Option<PollClose>` is the one value, and re-enabling starts from the default period like a fresh box. Remembering it would be a second field kept beside the stage. |
+| 12-A007 (nit) | Turning multiple answers off in a quiz keeps the first marked row by position. The box stores no click order, and the tdesktop `CreatePollBox` source is not in the sandbox to say which row it keeps; this is the smallest safe choice. |
 
 ### Sweep fixes (r2-05)
 

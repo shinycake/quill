@@ -145,13 +145,11 @@ fn a_folder_deleted_remotely_ends_a_pinned_drag_unsaved(cx: &mut TestAppContext)
     drag(&app, &mut vcx, first, 200.0);
     assert!(app.read_with(&vcx, |app, _| app.chat_list.pin.drag().is_some()));
     app.update(&mut vcx, |app, _| {
-        let screen = &mut app.screen;
-        screen.folders.tab = Some(1);
-        let filter = screen.chat_list.filter;
-        screen
-            .chat_list
-            .show_view(&mut screen.folders.tab, filter, None);
-        assert_eq!(screen.folders.tab, None);
+        let chat_list = &mut app.screen.chat_list;
+        let filter = chat_list.view.filter();
+        chat_list.show_view(filter, Some(1));
+        chat_list.show_view(filter, None);
+        assert_eq!(chat_list.view.folder(), None);
     });
     assert!(app.read_with(&vcx, |app, _| app.chat_list.pin.drag().is_none()));
 }

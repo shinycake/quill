@@ -269,7 +269,7 @@ fn the_exception_picker_closes_only_when_the_edit_went_out(cx: &mut TestAppConte
             session
                 .settings
                 .privacy
-                .insert(key, PrivacyKeyState::Failed);
+                .insert(key, PrivacyKeyState::Failed { stale: None });
         }
     });
     assert!(add(&app, vcx), "a failed rule ignores the edit");

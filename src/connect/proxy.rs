@@ -3,9 +3,7 @@
 //! the gate is "not shutting down", not "auth Ready".
 use super::*;
 use crate::ids::RequestId;
-use crate::proxy::{
-    LinkCheck, PingStatus, ProxyDraft, ProxyEntry, RotationAction, SystemStepState,
-};
+use crate::proxy::{PingStatus, ProxyDraft, ProxyEntry, RotationAction, SystemStepState};
 use crate::proxy_sync::{ProxySyncStep, plan_proxy_sync};
 use crate::settings::save_proxy_prefs;
 use crate::state::SettingsPurpose;
@@ -237,9 +235,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.ping_draft(proxy_id, &draft)
     }
 
-    /// `pingProxy` for the link-confirmation box's proxy (not in the
+    /// `pingProxy` for the open link-confirmation box's proxy (not in the
     /// list); the box's stage becomes `Checking` with this request.
-    pub fn ping_link_proxy(&mut self, draft: &ProxyDraft) -> Result<RequestId, ConnectSendError> {
+    pub fn ping_link_proxy(&mut self) -> Result<RequestId, ConnectSendError> {
+        let Some(draft) = self.session.settings.proxy.link.draft().cloned() else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
         if !self.proxy_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -247,9 +248,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Settings(SettingsPurpose::PingLinkProxy),
             None,
         );
-        match self.sender.send_json(&ping_proxy(extra, draft)) {
+        match self.sender.send_json(&ping_proxy(extra, &draft)) {
             Ok(()) => {
-                self.session.settings.proxy.link_check = LinkCheck::Checking(extra);
+                self.session.settings.proxy.link_checking(extra);
                 Ok(extra)
             }
             Err(err) => {

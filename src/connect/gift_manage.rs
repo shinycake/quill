@@ -48,6 +48,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self.send_gift_mutation(owner, purpose, None, build)?;
         // The open form that sent it is the one its answer closes.
         self.session.payments.gifts_manage.flow_sent(purpose, extra);
+        self.session
+            .payments
+            .hub
+            .received
+            .view
+            .form_sent(purpose, extra);
         Ok(extra)
     }
 
