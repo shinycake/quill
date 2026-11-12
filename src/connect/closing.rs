@@ -115,17 +115,13 @@ fn send_close<S: JsonSender>(driver: &mut ConnectDriver<S>) {
 
 pub(crate) fn release_close<S: JsonSender>(driver: &mut ConnectDriver<S>, now: Instant) {
     match driver.session.shutdown {
-        ShutdownPhase::HoldingClose { until } => {
-            if now >= until || !driver.hang_up_pending() {
-                driver.session.shutdown = ShutdownPhase::Running;
-                send_close(driver);
-            }
+        ShutdownPhase::HoldingClose { until } if now >= until || !driver.hang_up_pending() => {
+            driver.session.shutdown = ShutdownPhase::Running;
+            send_close(driver);
         }
-        ShutdownPhase::CloseRefused { retry_at } => {
-            if now >= retry_at {
-                driver.session.shutdown = ShutdownPhase::Running;
-                send_close(driver);
-            }
+        ShutdownPhase::CloseRefused { retry_at } if now >= retry_at => {
+            driver.session.shutdown = ShutdownPhase::Running;
+            send_close(driver);
         }
         _ => {}
     }

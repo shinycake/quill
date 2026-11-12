@@ -88,14 +88,14 @@ impl Session {
             )) => {
                 self.chats_state.chat_action_error.push(error_reason(err));
             }
-            Some((RequestPurpose::GetRecommendedChatFolders, _)) => {
-                if self
-                    .chat_list
-                    .recommended_folders
-                    .failed(pending_id, error_reason(err), false)
-                {
-                    self.chats_state.chat_action_error.push(error_reason(err));
-                }
+            Some((RequestPurpose::GetRecommendedChatFolders, _))
+                if self.chat_list.recommended_folders.failed(
+                    pending_id,
+                    error_reason(err),
+                    false,
+                ) =>
+            {
+                self.chats_state.chat_action_error.push(error_reason(err));
             }
             _ => {}
         }

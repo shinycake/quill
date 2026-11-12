@@ -37,7 +37,10 @@ fn a_refused_close_is_held_and_sent_again_on_the_next_drain() {
     };
     // A drain before the backoff has passed does not ask again.
     recorder.refuse(None);
-    crate::connect::closing::release_close(&mut driver, retry_at - Duration::from_millis(1));
+    let before = retry_at
+        .checked_sub(Duration::from_millis(1))
+        .expect("an earlier instant");
+    crate::connect::closing::release_close(&mut driver, before);
     assert_eq!(close_requests(&recorder), 0, "the backoff holds");
     assert!(matches!(
         driver.session.shutdown,
