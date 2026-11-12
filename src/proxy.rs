@@ -18,7 +18,7 @@
 
 use crate::calls::proxy::{EnabledProxy, ProxyKind};
 use crate::ids::RequestId;
-pub use crate::proxy_ops::{ProxyFetch, ProxyListOps};
+pub use crate::proxy_ops::{FAILED_RETRY_AFTER, ProxyFetch, ProxyListOps};
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -980,11 +980,14 @@ impl ProxyState {
             self.rotation = Rotation::Disconnected { since_ms: since };
             return RotationAction::Ping(next);
         }
-        // Every alternative failed: forget the verdicts and look again
-        // after another timeout.
+        // Every alternative failed: forget the failed verdicts and look again
+        // after another timeout. A check the user has running is not one of
+        // them: its answer still lands.
         let ids: Vec<i32> = order.iter().map(|p| p.id).collect();
         for id in ids {
-            self.pings.remove(&id);
+            if self.pings.get(&id) == Some(&PingStatus::Unavailable) {
+                self.pings.remove(&id);
+            }
         }
         self.rotation = Rotation::Disconnected { since_ms: now_ms };
         RotationAction::None
@@ -1225,6 +1228,19 @@ mod tests {
         assert_eq!(s.rotation_step(11_000, false), RotationAction::Ping(3));
         s.pings.insert(3, PingStatus::Available(80));
         assert_eq!(s.rotation_step(12_000, false), RotationAction::Switch(3));
+    }
+
+    /// Sweep r4-04 fix 3: looking again after every alternative failed keeps
+    /// a check the user has running.
+    #[test]
+    fn a_rotation_round_that_failed_keeps_the_users_running_check() {
+        let mut s = state(vec![entry(1, true), entry(2, false), entry(3, false)], true);
+        s.rotation_step(0, false);
+        s.pings.insert(2, PingStatus::Unavailable);
+        s.pings.insert(3, PingStatus::Checking(RequestId(5)));
+        assert_eq!(s.rotation_step(10_000, false), RotationAction::None);
+        assert_eq!(s.pings.get(&2), None, "the failed verdict is forgotten");
+        assert_eq!(s.pings.get(&3), Some(&PingStatus::Checking(RequestId(5))));
     }
 
     #[test]

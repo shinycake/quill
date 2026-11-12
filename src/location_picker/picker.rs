@@ -124,23 +124,18 @@ struct VenueAsk {
     stage: AskStage,
 }
 
-/// The answered part of the venue list. What is loading, and what failed, is
-/// not stored here: it follows the ask's stage and the search field
-/// ([`LocationPicker::venues`]).
+/// The answered part of the venue list. What is loading, what failed and
+/// what is waiting for a place is not stored here: it follows the ask, the
+/// search field and the "where am I" lookup ([`LocationPicker::venues`]).
 #[derive(Debug, Clone, PartialEq)]
 enum ListData {
-    /// Nothing was asked yet: the first fix is still being looked for.
-    Unlocated,
-    NothingFound {
-        query: String,
-    },
-    WaitingForLocation,
+    NothingFound { query: String },
     Found(Vec<Venue>),
 }
 
 #[derive(Debug)]
 struct VenueSearch {
-    list: ListData,
+    list: Option<ListData>,
     request: Option<VenueAsk>,
     cache: Vec<(String, GeoPoint, Vec<Venue>)>,
     /// Where a search looks (tdesktop `_venuesSearchLocation`); a search
@@ -247,7 +242,7 @@ impl LocationPicker {
             here: HereState::Locating,
             address: AddressStage::default(),
             venues: VenueSearch {
-                list: ListData::Unlocated,
+                list: None,
                 request: None,
                 cache: Vec::new(),
                 search_location: None,
@@ -292,10 +287,12 @@ impl LocationPicker {
             return VenueView::Failed;
         }
         match &self.venues.list {
-            ListData::Unlocated => VenueView::Loading,
-            ListData::NothingFound { query } => VenueView::NothingFound { query },
-            ListData::WaitingForLocation => VenueView::WaitingForLocation,
-            ListData::Found(venues) => VenueView::Found(venues),
+            // Nothing asked: still looking for a place, or waiting for the
+            // user to choose one.
+            None if self.here == HereState::Locating => VenueView::Loading,
+            None => VenueView::WaitingForLocation,
+            Some(ListData::NothingFound { query }) => VenueView::NothingFound { query },
+            Some(ListData::Found(venues)) => VenueView::Found(venues),
         }
     }
 
@@ -391,13 +388,17 @@ impl LocationPicker {
             kept if same_place(kept.point(), Some(location)) => kept,
             other => other.with(Lookup::Postponed(location)),
         };
+        self.venues.search_location = Some(location);
+        // A query typed before any place was known is asked around this one.
+        if let Some(query) = self.unasked_query() {
+            self.request_venues(location, &query);
+        }
         if !same_place(
             self.venues.request.as_ref().map(|r| r.point),
             Some(location),
         ) {
             self.pin = Pin::RestedAway;
         }
-        self.venues.search_location = Some(location);
     }
 
     /// The pin rested long enough: resolve its address.
@@ -470,7 +471,6 @@ impl LocationPicker {
             GeoOutcome::Found(point) => {
                 self.here = HereState::Found;
                 if !changed {
-                    self.wait_for_location();
                     return;
                 }
                 self.request_venues_for_fix(point);
@@ -480,26 +480,18 @@ impl LocationPicker {
             }
             GeoOutcome::Denied => {
                 self.here = HereState::Denied;
-                self.wait_for_location();
             }
             GeoOutcome::Unavailable => {
                 self.here = HereState::Unavailable;
-                self.wait_for_location();
             }
         }
     }
 
     /// A new fix: the nearby list is asked for, or, when a query was typed
-    /// before any place was known, that query around the fix. A query typed
-    /// after a place was known waits for its own debounce.
+    /// and not asked yet, that query around the fix. A query typed after a
+    /// place was known waits for its own debounce.
     fn request_venues_for_fix(&mut self, point: GeoPoint) {
-        let typed = match &self.venues.input {
-            SearchInput::Settled { query, .. } if self.venues.search_location.is_none() => {
-                Some(query.clone())
-            }
-            _ => None,
-        };
-        match typed {
+        match self.unasked_query() {
             Some(query) => self.request_venues(point, &query),
             None if self.venues.input.query().unwrap_or("").is_empty() => {
                 self.request_venues(point, "");
@@ -508,10 +500,18 @@ impl LocationPicker {
         }
     }
 
-    fn wait_for_location(&mut self) {
-        if self.venues.search_location.is_none() {
-            self.venues.list = ListData::WaitingForLocation;
-        }
+    /// The settled query no ask was made for (it was typed with no place to
+    /// search around).
+    fn unasked_query(&self) -> Option<String> {
+        let SearchInput::Settled { query, .. } = &self.venues.input else {
+            return None;
+        };
+        let asked = self
+            .venues
+            .request
+            .as_ref()
+            .is_some_and(|ask| normalize_query(&ask.query) == normalize_query(query));
+        (!asked).then(|| query.clone())
     }
 
     pub fn search_places_in_area(&mut self) {
@@ -720,7 +720,7 @@ impl LocationPicker {
     }
 
     fn apply_venues(&mut self, venues: Vec<Venue>) {
-        self.venues.list = if venues.is_empty() {
+        self.venues.list = Some(if venues.is_empty() {
             ListData::NothingFound {
                 query: self
                     .venues
@@ -731,7 +731,7 @@ impl LocationPicker {
             }
         } else {
             ListData::Found(venues)
-        };
+        });
     }
 
     pub(super) fn tile_to_request(&self) -> Option<TileKey> {
@@ -825,7 +825,7 @@ impl LocationPicker {
     }
 
     pub(super) fn listed_venue_types(&self) -> Vec<String> {
-        let ListData::Found(venues) = &self.venues.list else {
+        let Some(ListData::Found(venues)) = &self.venues.list else {
             return Vec::new();
         };
         let mut types: Vec<String> = Vec::new();

@@ -121,7 +121,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if self.fetch_gift_collections(owner).is_err() {
             // A refused send keeps the wish: the next ingest asks again.
-            self.session.payments.gifts_manage.collections_fetch = CollectionsFetch::Stale;
+            self.session.payments.gifts_manage.collections_fetch.unsent();
         }
     }
 
@@ -161,6 +161,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         // `Stale` stays until the send went out (`Loading` is set there), so a
         // refused send keeps the mark.
         self.fetch_gift_collections(owner).map(Some)
+    }
+
+    /// Retry under the collection tabs after a failed fetch: asks again.
+    pub fn retry_gift_collections(&mut self) -> Result<(), ConnectSendError> {
+        let manage = &self.session.payments.gifts_manage;
+        let owner = self.session.payments.hub.received.owner;
+        let (true, true, Some(owner)) = (
+            manage.collections_fetch.is_failed(),
+            self.chats_path_active(),
+            owner,
+        ) else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        self.fetch_gift_collections(owner).map(|_| ())
     }
 
     /// Switch the open gifts list to a collection (`0` = all gifts).
@@ -468,7 +482,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn create_gift_collection(&mut self, name: &str) -> Result<RequestId, ConnectSendError> {
         let manage = &self.session.payments.gifts_manage;
         if !valid_collection_name(name)
-            || manage.collections.len() as i64 >= manage.limits.collections()
+            || manage.collections().len() as i64 >= manage.limits.collections()
         {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -623,13 +637,17 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Payments(PaymentsPurpose::GetAvailableGifts),
             None,
         );
-        self.session.payments.gifts_manage.send.gifts_fetch = GiftListFetch::Asking(extra);
+        self.session
+            .payments
+            .gifts_manage
+            .send
+            .set_gifts_fetch(GiftListFetch::Asking(extra));
         if self
             .send_json_request(extra, &rq::get_available_gifts(extra))
             .is_err()
         {
             let send = &mut self.session.payments.gifts_manage.send;
-            send.gifts_fetch = GiftListFetch::Failed("Couldn't load the gifts.".into());
+            send.set_gifts_fetch(GiftListFetch::Failed("Couldn't load the gifts.".into()));
         }
     }
 
@@ -638,13 +656,18 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Payments(PaymentsPurpose::GetPremiumGiftOptions),
             None,
         );
-        self.session.payments.gifts_manage.send.premium_fetch = GiftListFetch::Asking(extra);
+        self.session
+            .payments
+            .gifts_manage
+            .send
+            .set_premium_fetch(GiftListFetch::Asking(extra));
         if self
             .send_json_request(extra, &rq::get_premium_gift_payment_options(extra))
             .is_err()
         {
-            self.session.payments.gifts_manage.send.premium_fetch =
-                GiftListFetch::Failed("Couldn't load the Premium options.".into());
+            self.session.payments.gifts_manage.send.set_premium_fetch(GiftListFetch::Failed(
+                "Couldn't load the Premium options.".into(),
+            ));
         }
     }
 
@@ -655,8 +678,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !send.is_open() || !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let gifts = matches!(send.gifts_fetch, GiftListFetch::Failed(_));
-        let premium = matches!(send.premium_fetch, GiftListFetch::Failed(_));
+        let (gifts, premium) = send.failed_lists();
         if gifts {
             self.ask_send_gifts();
         }
@@ -675,7 +697,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if send.sending() {
             return;
         }
-        send.selected = id.filter(|id| send.gifts().iter().any(|g| g.id == *id));
+        let picked = id.filter(|id| send.gifts().iter().any(|g| g.id == *id));
+        send.select(picked);
         if send.is_open() {
             send.set_step(SendStep::Idle);
         }

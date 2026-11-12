@@ -267,14 +267,14 @@ impl QuillApp {
                         &[("stars", &(stars(balance.stars)).to_string())],
                     )));
                 }
-                if send.gifts_fetch.is_loading() {
+                if send.gifts_loading() {
                     body = body.child(
                         div()
                             .text_sm()
                             .text_color(muted)
                             .child(tr(keys::Q_MONEY_LOADING_GIFTS)),
                     );
-                } else if send.gifts_fetch.answered_empty() {
+                } else if send.gifts_answered_empty() {
                     body = body.child(
                         div()
                             .text_sm()

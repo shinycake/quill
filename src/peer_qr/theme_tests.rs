@@ -696,7 +696,38 @@ fn a_gifts_request_the_session_dropped_fails_instead_of_loading_for_good() {
     // Gone from the table with no answer: the panel stops waiting.
     gifts.forget_dropped(&HashSet::new());
     assert!(!gifts.asking());
-    assert_eq!(gifts_layout(&gifts), GiftsLayoutView::Empty);
+    // A dropped first page is a failure with Retry, not an empty list.
+    assert_eq!(gifts_layout(&gifts), GiftsLayoutView::Failed);
+}
+
+/// Sweep r4-04 fix 3: a failed first page is not a whole empty list.
+#[test]
+fn a_failed_first_gifts_page_offers_retry_and_a_failed_next_page_backs_off() {
+    use crate::peer_qr::theme::{GIFTS_RETRY_MAX_SECS, GIFTS_RETRY_SECS, ThemeOwner};
+    let owner = ThemeOwner::User(1);
+    let mut gifts = ThemeGifts::default();
+    gifts.plan(owner, false, 0).unwrap();
+    gifts.asked(RequestId(1), 0);
+    gifts.fail();
+    assert_eq!(gifts_layout(&gifts), GiftsLayoutView::Failed);
+    assert!(!gifts.wants_more(1_000));
+    // Next pages: each failure in a row doubles the wait, up to a cap.
+    gifts.plan(owner, false, 0).unwrap();
+    gifts.asked(RequestId(2), 0);
+    gifts.accept(vec![gift(1, "r1")], "p2".into(), true);
+    let mut now = 100;
+    let mut wait = GIFTS_RETRY_SECS;
+    for n in 0..12u64 {
+        assert!(gifts.wants_more(now));
+        gifts.asked(RequestId(10 + n), now);
+        gifts.fail();
+        let wait_now = wait.min(GIFTS_RETRY_MAX_SECS);
+        assert!(!gifts.wants_more(now + wait_now - 1), "round {n}");
+        assert!(gifts.wants_more(now + wait_now), "round {n}");
+        now += wait_now;
+        wait = wait.saturating_mul(2);
+    }
+    assert_eq!(wait.min(GIFTS_RETRY_MAX_SECS), GIFTS_RETRY_MAX_SECS);
 }
 
 #[test]

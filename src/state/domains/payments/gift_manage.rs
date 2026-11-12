@@ -50,8 +50,9 @@ impl Session {
                     list.iter().flat_map(|c| c.files.iter().cloned()).collect();
                 self.remember_files(&files);
                 let manage = &mut self.payments.gifts_manage;
-                manage.collections_fetch.settle(pending.map(|p| p.id));
-                manage.collections = list;
+                manage
+                    .collections_fetch
+                    .answered(pending.map(|p| p.id), list);
                 if manage.active_collection != 0
                     && manage.collection(manage.active_collection).is_none()
                 {
@@ -88,7 +89,7 @@ impl Session {
                 if !send.asked_gifts(pending) {
                     return;
                 }
-                send.gifts_fetch = GiftListFetch::Answered(gifts);
+                send.set_gifts_fetch(GiftListFetch::Answered(gifts));
             }
             (
                 GiftManagePayload::PremiumOptions(options),
@@ -98,7 +99,7 @@ impl Session {
                 if !send.asked_premium(pending) {
                     return;
                 }
-                send.premium_fetch = GiftListFetch::Answered(options);
+                send.set_premium_fetch(GiftListFetch::Answered(options));
             }
             (
                 GiftManagePayload::TemporaryPassword { has_password },
@@ -184,7 +185,7 @@ impl Session {
                     ));
                     return;
                 }
-                manage.send.selected = None;
+                manage.send.select(None);
                 manage.send.set_step(SendStep::Done(
                     crate::lang::tr(crate::lang::keys::Q_MONEY_GIFT_SENT).into(),
                 ));
@@ -358,18 +359,20 @@ impl Session {
             PaymentsPurpose::GetGiftOption(_) => manage.limits_ask.fail(pending.map(|p| p.id)),
             PaymentsPurpose::GetGiftCollections { owner } => {
                 if self.payments.hub.received.owner == Some(owner) {
-                    manage.collections_fetch.settle(pending.map(|p| p.id));
+                    manage.collections_fetch.failed(pending.map(|p| p.id));
                 }
             }
             PaymentsPurpose::GetAvailableGifts if !manage.send.asked_gifts(pending) => {}
             PaymentsPurpose::GetPremiumGiftOptions if !manage.send.asked_premium(pending) => {}
             PaymentsPurpose::GetAvailableGifts => {
-                manage.send.gifts_fetch =
-                    GiftListFetch::Failed(format!("Couldn't load the gifts: {reason}"));
+                manage.send.set_gifts_fetch(GiftListFetch::Failed(format!(
+                    "Couldn't load the gifts: {reason}"
+                )));
             }
             PaymentsPurpose::GetPremiumGiftOptions => {
-                manage.send.premium_fetch =
-                    GiftListFetch::Failed(format!("Couldn't load the Premium options: {reason}"));
+                manage.send.set_premium_fetch(GiftListFetch::Failed(format!(
+                    "Couldn't load the Premium options: {reason}"
+                )));
             }
             PaymentsPurpose::TransferGift => {
                 if let (Some(picker), Some(request)) =

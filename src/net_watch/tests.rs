@@ -273,5 +273,42 @@ fn a_lost_listener_is_started_again_but_not_in_a_rush() {
     let mut refused = Watcher::Stopped;
     refused.ensure_with(start, |_| true, || Err(io::Error::other("no thread")));
     refused.ensure_with(start, |_| true, spawn);
-    assert_eq!(starts.get(), 3, "a refused start is tried by the next call");
+    assert_eq!(starts.get(), 2, "a refused start waits, not every call");
+    refused.ensure_with(start + WATCH_RESTART_AFTER, |_| true, spawn);
+    assert_eq!(starts.get(), 3, "a refused start is tried again later");
+}
+
+/// Sweep r4-04 fix 3: a listener that keeps ending at once (a sandbox refuses
+/// the socket) is started on a growing wait, up to a cap; one that ran a
+/// while starts the wait over.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn a_listener_that_cannot_start_is_retried_on_a_growing_wait() {
+    use super::{WATCH_RESTART_AFTER, WATCH_RESTART_MAX, WATCH_STABLE_FOR, Watcher};
+    use std::cell::Cell;
+    let starts = Cell::new(0);
+    let spawn = || {
+        starts.set(starts.get() + 1);
+        Ok(std::thread::spawn(|| Some(())))
+    };
+    let mut now = Instant::now();
+    let mut watcher = Watcher::Stopped;
+    watcher.ensure_with(now, |_| true, spawn);
+    let mut wait = WATCH_RESTART_AFTER;
+    for round in 2..=12 {
+        let wait_now = wait.min(WATCH_RESTART_MAX);
+        watcher.ensure_with(now + wait_now / 2, |_| true, spawn);
+        assert_eq!(starts.get(), round - 1, "too soon, round {round}");
+        now += wait_now;
+        watcher.ensure_with(now, |_| true, spawn);
+        assert_eq!(starts.get(), round, "round {round}");
+        wait = wait.saturating_mul(2);
+    }
+    assert_eq!(wait.min(WATCH_RESTART_MAX), WATCH_RESTART_MAX);
+    // A listener that ran a while and then ended starts again at once.
+    now += WATCH_RESTART_MAX + WATCH_STABLE_FOR;
+    watcher.ensure_with(now, |_| true, spawn);
+    assert_eq!(starts.get(), 13);
+    watcher.ensure_with(now + WATCH_RESTART_AFTER, |_| true, spawn);
+    assert_eq!(starts.get(), 14, "back to the first wait");
 }

@@ -101,7 +101,7 @@ fn opening_my_gifts_loads_collections_and_limits_once() {
         json!({"@type": "giftCollections", "@extra": sent["@extra"], "collections": [
             {"@type": "giftCollection", "id": 4, "name": "Cats", "gift_count": 1}]}),
     );
-    assert_eq!(p.0.session.payments.gifts_manage.collections.len(), 1);
+    assert_eq!(p.0.session.payments.gifts_manage.collections().len(), 1);
     // The limit options land by name.
     let option =
         p.1.snapshot()
@@ -728,8 +728,8 @@ fn an_earlier_boxs_gift_answers_are_dropped() {
         json!({"@type": "error", "@extra": first_premium["@extra"], "code": 400, "message": "FLOOD"}),
     );
     let send = &p.0.session.payments.gifts_manage.send;
-    assert!(send.gifts_fetch.is_loading() && send.error_line().is_none());
-    assert!(send.premium_fetch.is_loading());
+    assert!(send.gifts_loading() && send.error_line().is_none());
+    assert!(send.premium_loading());
     assert!(
         send.gifts().is_empty(),
         "a list asked again shows no old answer"
@@ -771,8 +771,8 @@ fn a_failed_premium_list_shows_a_line_and_retry_asks_only_it() {
     assert!(send.error_line().is_some_and(|line| !line.is_empty()));
     p.0.retry_send_gift_lists().unwrap();
     let send = &p.0.session.payments.gifts_manage.send;
-    assert!(send.premium_fetch.is_loading());
-    assert!(send.gifts_fetch.answered_empty());
+    assert!(send.premium_loading());
+    assert!(send.gifts_answered_empty());
     assert!(!send.lists_failed());
 }
 

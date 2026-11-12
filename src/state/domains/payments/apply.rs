@@ -158,8 +158,16 @@ impl Session {
                 if let Some(p) =
                     pending.filter(|p| p.purpose == RequestPurpose::SendMarketplaceGift)
                     && let Some(gift) = self.payments.marketplace_gift.as_mut()
+                    && let Some(answer) = gift.accept_result(p.id, result)
                 {
-                    gift.accept_result(p.id, result);
+                    let kind = if answer.sent {
+                        NoticeKind::Info
+                    } else {
+                        NoticeKind::Error
+                    };
+                    self.payments
+                        .notices
+                        .push(PaymentNotice::new(kind, answer.line));
                 }
             }
             PaymentsPayload::PaymentReceipt(receipt) => {

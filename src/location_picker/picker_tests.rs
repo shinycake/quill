@@ -502,3 +502,49 @@ fn a_new_place_stops_the_lookup_of_the_old_one() {
         "A's lookup ended with its stage"
     );
 }
+
+/// Sweep r4-04 fix 3: a pan while locating, then a Denied fix, leaves the list
+/// waiting for a place, not spinning.
+#[test]
+fn a_pan_while_locating_then_a_refusal_does_not_spin() {
+    let mut picker = fresh();
+    picker.moved_to(crate::location_picker::MapView::new(point(10., 10.), 5));
+    picker.move_ended();
+    assert_eq!(picker.venues(), VenueView::Loading, "still locating");
+    picker.geolocated(GeoOutcome::Denied, false);
+    assert_eq!(picker.venues(), VenueView::WaitingForLocation);
+}
+
+/// Sweep r4-04 fix 3: a query typed with no place, a pan, then the fix: the
+/// query is asked around the fix.
+#[test]
+fn a_query_typed_then_a_pan_then_the_fix_is_still_sent() {
+    let mut picker = fresh();
+    picker.search_changed(Some("pizza".into()));
+    picker.moved_to(crate::location_picker::MapView::new(point(10., 10.), 5));
+    picker.move_ended();
+    let (_, query) = picker
+        .venue_query_to_send()
+        .expect("the pan gives the query a place");
+    assert_eq!(query, "pizza");
+    let here = point(48.85, 2.35);
+    picker.geolocated(GeoOutcome::Found(here), true);
+    let (at, query) = picker.venue_query_to_send().expect("still asking");
+    assert_eq!(query, "pizza");
+    assert!(at.same_place(&here) || at.same_place(&point(10., 10.)));
+}
+
+/// Sweep r4-04 fix 3: refused, a query typed, then a pan: the query is sent.
+#[test]
+fn a_refusal_then_a_query_then_a_pan_sends_the_query() {
+    let mut picker = fresh();
+    picker.geolocated(GeoOutcome::Denied, false);
+    picker.search_changed(Some("pizza".into()));
+    assert_eq!(picker.venue_query_to_send(), None);
+    let there = point(10., 10.);
+    picker.moved_to(crate::location_picker::MapView::new(there, 5));
+    picker.move_ended();
+    let (at, query) = picker.venue_query_to_send().expect("sent after the pan");
+    assert_eq!((at, query.as_str()), (there, "pizza"));
+    assert!(!picker.places_in_area_shown());
+}

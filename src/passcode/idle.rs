@@ -285,13 +285,32 @@ mod sampler {
         select_backend(candidates, |backend| sources.sample(backend))
     }
 
+    /// Notes a read at `now` on a sampler thread that runs, and says whether
+    /// there is one. A thread that ended without clearing the stage (it
+    /// panicked) does not run: the caller starts a new one.
+    fn note_read(
+        sampler: &mut Sampler,
+        now: u64,
+        finished: impl Fn(&std::thread::JoinHandle<Option<()>>) -> bool,
+    ) -> bool {
+        match sampler {
+            Sampler::Running {
+                last_read_ms,
+                _thread,
+            } if !finished(_thread) => {
+                *last_read_ms = now;
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Notes a read at `now`, and starts the sampler thread unless one is
     /// running. The thread exits when reads stop, and the next read restarts
     /// it.
     fn start(now: u64) {
         let mut sampler = SAMPLER.lock_or_recover();
-        if let Sampler::Running { last_read_ms, .. } = &mut *sampler {
-            *last_read_ms = now;
+        if note_read(&mut sampler, now, std::thread::JoinHandle::is_finished) {
             return;
         }
         // A sample from before a pause would extrapolate to a bogus huge idle
@@ -341,6 +360,36 @@ mod sampler {
                 last_read_ms: now,
                 _thread: thread,
             };
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn running(thread: std::thread::JoinHandle<Option<()>>) -> Sampler {
+            Sampler::Running {
+                last_read_ms: 1,
+                _thread: thread,
+            }
+        }
+
+        /// Sweep r4-04 fix 3: a sampler thread that died (a panic caught
+        /// before it cleared the stage) is replaced by the next read.
+        #[test]
+        fn a_dead_sampler_thread_is_not_a_running_one() {
+            let mut sampler = running(std::thread::spawn(|| None));
+            assert!(!note_read(&mut sampler, 50, |_| true), "start a new thread");
+            let mut sampler = running(std::thread::spawn(|| None));
+            assert!(note_read(&mut sampler, 50, |_| false));
+            assert!(matches!(
+                sampler,
+                Sampler::Running {
+                    last_read_ms: 50,
+                    ..
+                }
+            ));
+            assert!(!note_read(&mut Sampler::Stopped, 50, |_| false));
         }
     }
 }

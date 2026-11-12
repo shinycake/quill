@@ -71,7 +71,14 @@ impl Session {
                 if let Some(gift) = self.payments.marketplace_gift.as_mut()
                     && let Some(p) = pending
                 {
-                    gift.fail(p.id, format!("Gift request failed: {}", error_reason(err)));
+                    if let Some(answer) =
+                        gift.fail(p.id, format!("Gift request failed: {}", error_reason(err)))
+                    {
+                        self.payments.notices.push(PaymentNotice::new(
+                            NoticeKind::Error,
+                            answer.line,
+                        ));
+                    }
                 }
             }
             // No card info: the menu keeps only "Copy Card Number".

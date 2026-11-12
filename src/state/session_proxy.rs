@@ -153,7 +153,7 @@ impl Session {
     ) {
         match purpose {
             RequestPurpose::GetProxies => {
-                if pending.is_some_and(|p| self.settings.proxy.ops.fetch_failed(p.id)) {
+                if pending.is_some_and(|p| self.settings.proxy.ops.fetch_failed(p.id, std::time::Instant::now())) {
                     self.settings.proxy.error =
                         Some(sessions_error_line("load the proxy list", err));
                 }

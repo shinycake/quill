@@ -342,7 +342,7 @@ pub struct GiftsAsk {
 /// page live in the stage they belong to.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum GiftsStage {
-    /// No first page yet; its request is on its way (or not sent yet).
+    /// No first page yet and no request out (the panel has not asked).
     #[default]
     First,
     /// The first page's request is out as `ask`.
@@ -362,11 +362,21 @@ pub enum GiftsRest {
     /// There is more from `offset`, and no request is on its way.
     More { offset: String },
     /// A request is on its way as `ask` (the next page from `offset`, or a
-    /// refresh that shows the list meanwhile).
-    Loading { ask: GiftsAsk, offset: String },
-    /// The next page failed: the panel stops asking for more until
-    /// `retry_at_secs` (unix seconds).
-    Waiting { retry_at_secs: i64, offset: String },
+    /// refresh that shows the list meanwhile); `failures` asks in a row
+    /// failed before it.
+    Loading {
+        ask: GiftsAsk,
+        offset: String,
+        failures: u8,
+    },
+    /// The next page failed `failures` times in a row: the panel stops asking
+    /// for more until `retry_at_secs` (unix seconds), which grows with each
+    /// failure up to [`GIFTS_RETRY_MAX_SECS`].
+    Waiting {
+        retry_at_secs: i64,
+        offset: String,
+        failures: u8,
+    },
 }
 
 impl GiftsRest {
@@ -380,15 +390,26 @@ impl GiftsRest {
         }
     }
 
+    /// Asks in a row that failed before now.
+    fn failures(&self) -> u8 {
+        match self {
+            Self::Complete | Self::More { .. } => 0,
+            Self::Loading { failures, .. } | Self::Waiting { failures, .. } => *failures,
+        }
+    }
+
     /// The rest after a request that began at `since` failed: a whole list
     /// stays whole (no offset is left), else the next page waits
-    /// [`GIFTS_RETRY_SECS`].
+    /// [`GIFTS_RETRY_SECS`], doubled for each failure in a row.
     fn failed_at(&self, since: i64) -> Self {
+        let failures = self.failures();
+        let wait = (GIFTS_RETRY_SECS << failures.min(8)).min(GIFTS_RETRY_MAX_SECS);
         match self.offset() {
             "" => Self::Complete,
             offset => Self::Waiting {
-                retry_at_secs: since.saturating_add(GIFTS_RETRY_SECS),
+                retry_at_secs: since.saturating_add(wait),
                 offset: offset.to_string(),
+                failures: failures.saturating_add(1),
             },
         }
     }
@@ -405,6 +426,9 @@ pub struct ThemeGifts {
 /// How long the gifts panel waits after a failed page before it asks for
 /// the next one again.
 pub const GIFTS_RETRY_SECS: i64 = 5;
+
+/// The longest the wait grows to when pages keep failing.
+pub const GIFTS_RETRY_MAX_SECS: i64 = 300;
 
 impl ThemeGifts {
     /// A list of `owner` that is shown as loaded: `list`, with the next
@@ -462,6 +486,7 @@ impl ThemeGifts {
             GiftsStage::Listed(rest) => GiftsStage::Listed(GiftsRest::Loading {
                 ask,
                 offset: rest.offset().to_string(),
+                failures: rest.failures(),
             }),
             GiftsStage::First | GiftsStage::FirstAsking(_) | GiftsStage::FirstFailed => {
                 GiftsStage::FirstAsking(ask)
@@ -514,18 +539,27 @@ impl ThemeGifts {
 
     /// The request failed. The list stays as it was; the empty state shows
     /// only when there is nothing to list. A failed next page is retried
-    /// [`GIFTS_RETRY_SECS`] after it was asked for.
+    /// after a wait that grows with each failure in a row.
     pub fn fail(&mut self) {
         self.stage = match std::mem::take(&mut self.stage) {
-            GiftsStage::Listed(GiftsRest::Loading { ask, offset }) => {
-                GiftsStage::Listed(GiftsRest::Loading { ask, offset }.failed_at(ask.at))
-            }
+            GiftsStage::Listed(GiftsRest::Loading {
+                ask,
+                offset,
+                failures,
+            }) => GiftsStage::Listed(
+                GiftsRest::Loading {
+                    ask,
+                    offset,
+                    failures,
+                }
+                .failed_at(ask.at),
+            ),
             // No request is out: nothing failed.
             GiftsStage::Listed(rest) => GiftsStage::Listed(rest),
-            // No first page ever came: show what there is (nothing) as
-            // a whole list, as tdesktop does.
+            // No first page came: a failure is not an empty list, the panel
+            // says so and offers Retry.
             GiftsStage::First | GiftsStage::FirstAsking(_) | GiftsStage::FirstFailed => {
-                GiftsStage::Listed(GiftsRest::Complete)
+                GiftsStage::FirstFailed
             }
         };
     }

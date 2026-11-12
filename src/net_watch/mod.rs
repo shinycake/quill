@@ -322,15 +322,39 @@ impl Tracker {
 /// the last start. On Windows the listener hands over to system threads and
 /// returns, which is not a loss.
 enum Watcher {
+    /// Nothing started yet.
     Stopped,
     Running {
         _thread: JoinHandle<Option<()>>,
         since: Instant,
+        /// How many starts in a row ended soon after (see [`WATCH_STABLE_FOR`]).
+        quick_ends: u8,
     },
+    /// The thread could not be started at `at`; tried again on the same
+    /// back-off.
+    Refused { at: Instant, quick_ends: u8 },
 }
 
-/// How soon a lost listener is started again.
+/// How soon a lost listener is started again; each lost start in a row that
+/// lived less than [`WATCH_STABLE_FOR`] doubles the wait up to
+/// [`WATCH_RESTART_MAX`], so a listener that can never start (a sandbox
+/// refuses the socket) is not respawned every few seconds for the whole
+/// session.
 const WATCH_RESTART_AFTER: Duration = Duration::from_secs(5);
+
+/// The longest wait between starts of a listener that keeps ending.
+const WATCH_RESTART_MAX: Duration = Duration::from_secs(300);
+
+/// A listener that ran this long (past its wait) was working: its end starts
+/// the back-off over.
+const WATCH_STABLE_FOR: Duration = Duration::from_secs(60);
+
+/// The wait after `quick_ends` quick ends in a row.
+fn restart_wait(quick_ends: u8) -> Duration {
+    WATCH_RESTART_AFTER
+        .saturating_mul(1u32 << quick_ends.min(6))
+        .min(WATCH_RESTART_MAX)
+}
 
 /// Whether a finished listener thread means the listener was lost.
 const WATCH_RUNS_FOR_GOOD: bool = cfg!(any(target_os = "linux", target_os = "macos"));
@@ -348,21 +372,45 @@ impl Watcher {
         finished: impl FnOnce(&JoinHandle<Option<()>>) -> bool,
         spawn: impl FnOnce() -> io::Result<JoinHandle<Option<()>>>,
     ) {
-        if let Watcher::Running { _thread, since } = self
-            && (!WATCH_RUNS_FOR_GOOD
-                || !finished(_thread)
-                || now.saturating_duration_since(*since) < WATCH_RESTART_AFTER)
-        {
-            return;
-        }
+        let quick_ends = match &*self {
+            Watcher::Stopped => 0,
+            Watcher::Running {
+                _thread,
+                since,
+                quick_ends,
+            } => {
+                let ran = now.saturating_duration_since(*since);
+                if !WATCH_RUNS_FOR_GOOD || !finished(_thread) {
+                    return;
+                }
+                // The end is noticed on a later call, so a listener that
+                // lived less than the wait plus [`WATCH_STABLE_FOR`] did
+                // not run for long.
+                let wait = restart_wait(*quick_ends);
+                if ran < wait {
+                    return;
+                } else if ran >= wait.saturating_add(WATCH_STABLE_FOR) {
+                    0
+                } else {
+                    quick_ends.saturating_add(1)
+                }
+            }
+            Watcher::Refused { at, quick_ends } => {
+                if now.saturating_duration_since(*at) < restart_wait(*quick_ends) {
+                    return;
+                }
+                quick_ends.saturating_add(1)
+            }
+        };
         *self = match spawn() {
             Ok(thread) => Watcher::Running {
                 _thread: thread,
                 since: now,
+                quick_ends,
             },
             Err(error) => {
                 eprintln!("quill: no network watcher: {error}");
-                Watcher::Stopped
+                Watcher::Refused { at: now, quick_ends }
             }
         };
     }
@@ -372,7 +420,11 @@ fn tracker() -> &'static Mutex<Tracker> {
     static TRACKER: OnceLock<Mutex<Tracker>> = OnceLock::new();
     static WATCHER: Mutex<Watcher> = Mutex::new(Watcher::Stopped);
     lock_or_recover(&WATCHER).ensure(Instant::now(), || {
-        crate::thread_guard::spawn_guarded("quill-net-watch", platform::watch)
+        // Once the listener is on, the route is read again: what changed
+        // while no listener ran (a replaced one) is not waited for. This runs
+        // on the listener's own thread, never under the WATCHER lock
+        // (`network_changed` takes TRACKER and calls `tracker()`).
+        crate::thread_guard::spawn_guarded("quill-net-watch", || platform::watch(network_changed))
     });
     TRACKER.get_or_init(|| Mutex::new(Tracker::new(route_now())))
 }

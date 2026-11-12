@@ -342,22 +342,55 @@ fn an_auction_gift_is_marked_limited() {
     assert!(!auction.can_delete(true));
 }
 
+fn collection(id: i32) -> crate::gift_manage::GiftCollection {
+    crate::gift_manage::GiftCollection {
+        id,
+        name: format!("c{id}"),
+        icon: None,
+        files: Vec::new(),
+        gift_count: 0,
+    }
+}
+
 #[test]
 fn a_collection_change_while_the_list_loads_asks_again_after_it() {
     use crate::gift_manage::CollectionsFetch;
     use crate::ids::RequestId;
-    let mut fetch = CollectionsFetch::Loading(RequestId(4));
+    let mut fetch = CollectionsFetch::default();
+    fetch.begin(RequestId(4));
     // A collection changed while the request was out: the list is stale.
     fetch.mark_stale();
     // Another request's answer settles nothing.
-    fetch.settle(Some(RequestId(9)));
+    fetch.answered(Some(RequestId(9)), vec![collection(1)]);
     assert!(fetch.is_loading());
     // The answer of the request in flight does not clear it.
-    fetch.settle(Some(RequestId(4)));
+    fetch.answered(Some(RequestId(4)), vec![collection(2)]);
     assert!(fetch.is_stale());
-    let mut loading = CollectionsFetch::Loading(RequestId(5));
-    loading.settle(Some(RequestId(5)));
-    assert_eq!(loading, CollectionsFetch::Idle);
+    assert_eq!(fetch.list().len(), 1);
+    let mut loading = CollectionsFetch::default();
+    loading.begin(RequestId(5));
+    loading.answered(Some(RequestId(5)), vec![collection(3)]);
+    assert_eq!(loading, CollectionsFetch::Ready(vec![collection(3)]));
+}
+
+/// Sweep r4-04 fix 3: a failed fetch is not a loaded list: it keeps the tabs
+/// it had and says it failed, so the UI offers Retry.
+#[test]
+fn a_failed_collections_fetch_is_failed_not_loaded() {
+    use crate::gift_manage::CollectionsFetch;
+    use crate::ids::RequestId;
+    let mut fetch = CollectionsFetch::Ready(vec![collection(1)]);
+    fetch.begin(RequestId(4));
+    fetch.failed(Some(RequestId(9)));
+    assert!(fetch.is_loading(), "another request's error changes nothing");
+    fetch.failed(Some(RequestId(4)));
+    assert!(fetch.is_failed() && !fetch.is_loading());
+    assert_eq!(fetch.list().len(), 1, "the tabs stay");
+    // Retry asks again; a change that came while it was out keeps it stale.
+    fetch.begin(RequestId(5));
+    fetch.mark_stale();
+    fetch.failed(Some(RequestId(5)));
+    assert!(fetch.is_stale());
 }
 
 #[test]
@@ -390,7 +423,7 @@ fn a_gift_list_failure_leaves_a_send_in_flight_alone() {
     use crate::ids::RequestId;
     let mut send = SendGiftState::opened_for(recipient());
     send.set_step(SendStep::Sending(RequestId(5)));
-    send.gifts_fetch = GiftListFetch::Failed("Couldn't load the gifts.".into());
+    send.set_gifts_fetch(GiftListFetch::Failed("Couldn't load the gifts.".into()));
     assert!(send.sending(), "the send keeps its request");
     assert_eq!(send.error_line(), Some("Couldn't load the gifts."));
     send.set_step(SendStep::Failed("no".into()));

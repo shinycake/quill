@@ -149,8 +149,9 @@ pub enum SendStep {
     Failed(String),
 }
 
-/// Where the send-gift dialog stands, open or not. The recipient lives in
-/// the open stage: a closed dialog has none.
+/// Where the send-gift dialog stands, open or not. What belongs to the open
+/// dialog (the recipient, the two lists it asks for, the gift picked) lives
+/// in the open stage: a closed dialog has none.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub enum SendStage {
     /// No dialog: nothing open, nothing out.
@@ -160,17 +161,18 @@ pub enum SendStage {
     Open {
         recipient: GiftRecipient,
         step: SendStep,
+        /// `getAvailableGifts`, and its answer.
+        gifts_fetch: GiftListFetch<AvailableGift>,
+        /// `getPremiumGiftPaymentOptions`, and its answer.
+        premium_fetch: GiftListFetch<PremiumGiftOption>,
+        /// The gift picked in the list.
+        selected: Option<i64>,
     },
 }
 
 /// The send-gift dialog (`GiftBox` in tdesktop).
 #[derive(Debug, Clone, Default)]
 pub struct SendGiftState {
-    /// `getAvailableGifts`, and its answer.
-    pub gifts_fetch: GiftListFetch<AvailableGift>,
-    pub selected: Option<i64>,
-    /// `getPremiumGiftPaymentOptions`, and its answer.
-    pub premium_fetch: GiftListFetch<PremiumGiftOption>,
     pub stage: SendStage,
 }
 
@@ -181,8 +183,10 @@ impl SendGiftState {
             stage: SendStage::Open {
                 recipient,
                 step: SendStep::Idle,
+                gifts_fetch: GiftListFetch::NotAsked,
+                premium_fetch: GiftListFetch::NotAsked,
+                selected: None,
             },
-            ..Default::default()
         }
     }
 
@@ -208,14 +212,69 @@ impl SendGiftState {
         }
     }
 
+    fn gifts_fetch(&self) -> Option<&GiftListFetch<AvailableGift>> {
+        match &self.stage {
+            SendStage::Open { gifts_fetch, .. } => Some(gifts_fetch),
+            SendStage::Closed => None,
+        }
+    }
+
+    fn premium_fetch(&self) -> Option<&GiftListFetch<PremiumGiftOption>> {
+        match &self.stage {
+            SendStage::Open { premium_fetch, .. } => Some(premium_fetch),
+            SendStage::Closed => None,
+        }
+    }
+
+    /// The gift list is now `fetch`; a closed dialog has none to set.
+    pub fn set_gifts_fetch(&mut self, fetch: GiftListFetch<AvailableGift>) {
+        if let SendStage::Open { gifts_fetch, .. } = &mut self.stage {
+            *gifts_fetch = fetch;
+        }
+    }
+
+    /// The Premium options are now `fetch`; a closed dialog has none to set.
+    pub fn set_premium_fetch(&mut self, fetch: GiftListFetch<PremiumGiftOption>) {
+        if let SendStage::Open { premium_fetch, .. } = &mut self.stage {
+            *premium_fetch = fetch;
+        }
+    }
+
+    /// The gift picked (or none); a closed dialog picks nothing.
+    pub fn select(&mut self, id: Option<i64>) {
+        if let SendStage::Open { selected, .. } = &mut self.stage {
+            *selected = id;
+        }
+    }
+
+    pub fn selected(&self) -> Option<i64> {
+        match &self.stage {
+            SendStage::Open { selected, .. } => *selected,
+            SendStage::Closed => None,
+        }
+    }
+
     /// The gifts `getAvailableGifts` listed.
     pub fn gifts(&self) -> &[AvailableGift] {
-        self.gifts_fetch.items()
+        self.gifts_fetch().map_or(&[], GiftListFetch::items)
     }
 
     /// The Premium options `getPremiumGiftPaymentOptions` listed.
     pub fn premium_options(&self) -> &[PremiumGiftOption] {
-        self.premium_fetch.items()
+        self.premium_fetch().map_or(&[], GiftListFetch::items)
+    }
+
+    pub fn gifts_loading(&self) -> bool {
+        self.gifts_fetch().is_some_and(GiftListFetch::is_loading)
+    }
+
+    pub fn premium_loading(&self) -> bool {
+        self.premium_fetch().is_some_and(GiftListFetch::is_loading)
+    }
+
+    pub fn gifts_answered_empty(&self) -> bool {
+        self.gifts_fetch()
+            .is_some_and(GiftListFetch::answered_empty)
     }
 
     /// The dialog is open.
@@ -240,7 +299,7 @@ impl SendGiftState {
 
     /// The dialog is closed: a `sendGift` in flight carries on without it.
     pub fn close(&mut self) {
-        self.selected = None;
+        self.select(None);
         match self.step().cloned() {
             Some(SendStep::Sending(request) | SendStep::SendingClosed(request)) => {
                 self.set_step(SendStep::SendingClosed(request));
@@ -266,32 +325,40 @@ impl SendGiftState {
 
     /// The line after a failed send, gift list or Premium options list.
     pub fn error_line(&self) -> Option<&str> {
-        match (self.step(), &self.gifts_fetch, &self.premium_fetch) {
+        match (self.step(), self.gifts_fetch(), self.premium_fetch()) {
             (Some(SendStep::Failed(line)), _, _)
-            | (_, GiftListFetch::Failed(line), _)
-            | (_, _, GiftListFetch::Failed(line)) => Some(line),
+            | (_, Some(GiftListFetch::Failed(line)), _)
+            | (_, _, Some(GiftListFetch::Failed(line))) => Some(line),
             _ => None,
         }
     }
 
     /// A list the box shows failed: Retry asks it again.
     pub fn lists_failed(&self) -> bool {
-        matches!(self.gifts_fetch, GiftListFetch::Failed(_))
-            || matches!(self.premium_fetch, GiftListFetch::Failed(_))
+        matches!(self.gifts_fetch(), Some(GiftListFetch::Failed(_)))
+            || matches!(self.premium_fetch(), Some(GiftListFetch::Failed(_)))
+    }
+
+    /// Which of the two lists failed: (gifts, Premium options).
+    pub fn failed_lists(&self) -> (bool, bool) {
+        (
+            matches!(self.gifts_fetch(), Some(GiftListFetch::Failed(_))),
+            matches!(self.premium_fetch(), Some(GiftListFetch::Failed(_))),
+        )
     }
 
     /// Whether `pending` is the gift list request of this dialog.
     pub(crate) fn asked_gifts(&self, pending: Option<&crate::state::PendingRequest>) -> bool {
-        self.gifts_fetch.asked_by(pending)
+        self.gifts_fetch().is_some_and(|fetch| fetch.asked_by(pending))
     }
 
     /// Whether `pending` is the Premium options request of this dialog.
     pub(crate) fn asked_premium(&self, pending: Option<&crate::state::PendingRequest>) -> bool {
-        self.premium_fetch.asked_by(pending)
+        self.premium_fetch().is_some_and(|fetch| fetch.asked_by(pending))
     }
 
     pub fn selected_gift(&self) -> Option<&AvailableGift> {
-        let id = self.selected?;
+        let id = self.selected()?;
         self.gifts().iter().find(|g| g.id == id)
     }
 }
@@ -302,8 +369,7 @@ pub struct GiftManageState {
     /// The `getOption` batch behind `limits`: a failed one is asked again
     /// at the next gifts open.
     pub limits_ask: crate::state::fetch::BatchAsk,
-    pub collections: Vec<GiftCollection>,
-    /// Where the owner's collections list stands.
+    /// The owner's collections list, and where it stands.
     pub collections_fetch: CollectionsFetch,
     /// The collection tab that is open; 0 = all gifts.
     pub active_collection: i32,
@@ -316,58 +382,117 @@ pub struct GiftManageState {
     pub events: Vec<GiftEvent>,
 }
 
-/// The collections list of the open gifts owner: current, on its way under
-/// a request, or out of date because a collection changed (the next look
-/// asks again). A change while a request is out leaves it
-/// `LoadingStale`, so that answer is taken but the list is asked for once
-/// more. Only the answer of the request named here settles it: an earlier
-/// owner's does not.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// The collections list of the open gifts owner, with where it stands:
+/// current, on its way under a request, out of date because a collection
+/// changed (the next look asks again), or failed. A list that is on its way
+/// or failed keeps the one it had in `held`, so the tabs do not blink out.
+/// A change while a request is out leaves it `LoadingStale`, so that answer
+/// is taken but the list is asked for once more. Only the answer of the
+/// request named here settles it: an earlier owner's does not.
+#[derive(Debug, Clone, PartialEq)]
 pub enum CollectionsFetch {
-    #[default]
-    Idle,
-    Loading(crate::ids::RequestId),
-    LoadingStale(crate::ids::RequestId),
-    Stale,
+    /// The list is current.
+    Ready(Vec<GiftCollection>),
+    Loading {
+        held: Vec<GiftCollection>,
+        request: crate::ids::RequestId,
+    },
+    LoadingStale {
+        held: Vec<GiftCollection>,
+        request: crate::ids::RequestId,
+    },
+    Stale(Vec<GiftCollection>),
+    /// The ask failed or could not be sent: the tabs say so and offer Retry.
+    Failed(Vec<GiftCollection>),
+}
+
+impl Default for CollectionsFetch {
+    fn default() -> Self {
+        Self::Ready(Vec::new())
+    }
 }
 
 impl CollectionsFetch {
-    pub fn is_loading(self) -> bool {
-        matches!(self, Self::Loading(_) | Self::LoadingStale(_))
+    /// The collections shown: the current list, or the one held meanwhile.
+    pub fn list(&self) -> &[GiftCollection] {
+        match self {
+            Self::Ready(list) | Self::Stale(list) | Self::Failed(list) => list,
+            Self::Loading { held, .. } | Self::LoadingStale { held, .. } => held,
+        }
     }
 
-    pub fn is_stale(self) -> bool {
-        self == Self::Stale
+    pub fn is_loading(&self) -> bool {
+        matches!(self, Self::Loading { .. } | Self::LoadingStale { .. })
+    }
+
+    pub fn is_stale(&self) -> bool {
+        matches!(self, Self::Stale(_))
+    }
+
+    pub fn is_failed(&self) -> bool {
+        matches!(self, Self::Failed(_))
+    }
+
+    fn take_list(&mut self) -> Vec<GiftCollection> {
+        match std::mem::take(self) {
+            Self::Ready(list) | Self::Stale(list) | Self::Failed(list) => list,
+            Self::Loading { held, .. } | Self::LoadingStale { held, .. } => held,
+        }
     }
 
     /// The ask went out as `request`.
     pub fn begin(&mut self, request: crate::ids::RequestId) {
-        *self = Self::Loading(request);
+        let held = self.take_list();
+        *self = Self::Loading { held, request };
     }
 
     /// A collection changed: the list is asked again once the answer in
     /// flight, if any, has landed.
     pub fn mark_stale(&mut self) {
-        *self = match *self {
-            Self::Loading(request) | Self::LoadingStale(request) => Self::LoadingStale(request),
-            _ => Self::Stale,
+        *self = match std::mem::take(self) {
+            Self::Loading { held, request } | Self::LoadingStale { held, request } => {
+                Self::LoadingStale { held, request }
+            }
+            Self::Ready(list) | Self::Stale(list) | Self::Failed(list) => Self::Stale(list),
         };
     }
 
-    /// `request` is the ask this list waits for.
-    pub fn waits_for(self, request: Option<crate::ids::RequestId>) -> bool {
-        matches!(self, Self::Loading(asked) | Self::LoadingStale(asked) if Some(asked) == request)
+    /// The ask could not be sent: the wish stays, so the next look asks again.
+    pub fn unsent(&mut self) {
+        let list = self.take_list();
+        *self = Self::Stale(list);
     }
 
-    /// The answer (or error) of `request`: a list marked stale meanwhile
-    /// stays so. Any other request's changes nothing.
-    pub fn settle(&mut self, request: Option<crate::ids::RequestId>) {
+    /// `request` is the ask this list waits for.
+    pub fn waits_for(&self, request: Option<crate::ids::RequestId>) -> bool {
+        matches!(self, Self::Loading { request: asked, .. } | Self::LoadingStale { request: asked, .. } if Some(*asked) == request)
+    }
+
+    /// The answer of `request`: the list is `list`; one marked stale
+    /// meanwhile stays so. Any other request's changes nothing.
+    pub fn answered(&mut self, request: Option<crate::ids::RequestId>, list: Vec<GiftCollection>) {
         if !self.waits_for(request) {
             return;
         }
-        *self = match *self {
-            Self::LoadingStale(_) => Self::Stale,
-            _ => Self::Idle,
+        *self = match self {
+            Self::LoadingStale { .. } => Self::Stale(list),
+            _ => Self::Ready(list),
+        };
+    }
+
+    /// The error of `request`: the list held stays, marked failed (or stale
+    /// when a change came meanwhile, which asks again anyway). Any other
+    /// request's changes nothing.
+    pub fn failed(&mut self, request: Option<crate::ids::RequestId>) {
+        if !self.waits_for(request) {
+            return;
+        }
+        let stale = matches!(self, Self::LoadingStale { .. });
+        let held = self.take_list();
+        *self = if stale {
+            Self::Stale(held)
+        } else {
+            Self::Failed(held)
         };
     }
 }
@@ -485,14 +610,18 @@ impl GiftManageState {
         self.events.contains(&GiftEvent::Deleted)
     }
 
+    /// The collections shown (the list held while a fetch is out or failed).
+    pub fn collections(&self) -> &[GiftCollection] {
+        self.collections_fetch.list()
+    }
+
     pub fn collection(&self, id: i32) -> Option<&GiftCollection> {
-        self.collections.iter().find(|c| c.id == id)
+        self.collections().iter().find(|c| c.id == id)
     }
 
     /// Forget the per-owner state when another gifts list opens.
     pub fn reset_for_owner(&mut self) {
-        self.collections.clear();
-        self.collections_fetch = CollectionsFetch::Idle;
+        self.collections_fetch = CollectionsFetch::default();
         self.active_collection = 0;
         self.flow = None;
         self.note = None;
