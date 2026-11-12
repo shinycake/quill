@@ -127,7 +127,7 @@ START = re.compile(
 # Where a chat window's state is declared and exchanged with the app's.
 SLOT_FILE = pathlib.Path("chat_window") / "slot.rs"
 SLOT_SWAP = re.compile(
-    r"std::mem::swap\(\s*&mut\s+self\.([a-z_][a-z0-9_.]*)\s*,\s*&mut\s+slot\.([a-z_][a-z0-9_]*)\s*\)"
+    r"std::mem::swap\(\s*&mut\s+self\.([a-z_][a-z0-9_.]*)\s*,\s*&mut\s+slot\.([a-z_][a-z0-9_]*)\s*,?\s*\)"
 )
 # Continuations: a closure that runs later and acts for the account that
 # was on screen when it was made.
