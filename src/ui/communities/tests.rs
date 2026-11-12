@@ -198,7 +198,7 @@ fn ungroup_sends_one_toggle_and_a_second_press_sends_nothing() {
     let sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> =
         std::sync::Arc::new(quill::diagnostics::MemorySink::new());
     let seq = std::sync::atomic::AtomicU64::new(1000);
-    let mut ingest = |driver: &mut quill::connect::ConnectDriver<_>, json: &str| {
+    let ingest = |driver: &mut quill::connect::ConnectDriver<_>, json: &str| {
         if let Some(parsed) = quill::telegram::client::copy_and_parse(json, &seq, &sink) {
             let _ = driver.ingest(parsed);
         }
