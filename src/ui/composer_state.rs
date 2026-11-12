@@ -41,8 +41,24 @@ enum ClearStage {
 }
 
 /// The claim a recording makes on its slot's draft clear when Send is tapped.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct Reservation(pub(super) u64);
+/// Told apart by identity: the recording and its held clear share one
+/// allocation, and no other claim does.
+#[derive(Clone, Debug)]
+pub(super) struct Reservation(std::rc::Rc<()>);
+
+impl Reservation {
+    pub(super) fn new() -> Self {
+        Self(std::rc::Rc::new(()))
+    }
+}
+
+impl PartialEq for Reservation {
+    fn eq(&self, other: &Self) -> bool {
+        std::rc::Rc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for Reservation {}
 
 /// One message of a send: asked for under a request, then made by it.
 /// A request that sends an album is answered once per message.
@@ -107,13 +123,13 @@ impl DraftClear {
     }
 
     /// Whether this is the clear `claim` reserved.
-    pub(super) fn is_reserved_by(&self, claim: Reservation) -> bool {
-        self.stage == ClearStage::Reserved(claim)
+    pub(super) fn is_reserved_by(&self, claim: &Reservation) -> bool {
+        matches!(&self.stage, ClearStage::Reserved(held) if held == claim)
     }
 
     /// The recording that reserved this clear sent as `request`: it waits
     /// for its ack now. False when `claim` no longer holds it.
-    pub(super) fn arm(&mut self, claim: Reservation, request: RequestId) -> bool {
+    pub(super) fn arm(&mut self, claim: &Reservation, request: RequestId) -> bool {
         let held = self.is_reserved_by(claim);
         if held {
             self.stage = ClearStage::Armed(vec![SentMessage::Asked(request)]);

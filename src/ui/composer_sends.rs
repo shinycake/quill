@@ -313,8 +313,6 @@ pub(crate) struct ComposerSends {
     pub(super) prep: super::send_prep::SendPrepState,
     /// What was read about the files of every tray (`send_box_state`).
     pub(super) reads: super::send_box_state::TrayReads,
-    /// The next claim a recording makes on a slot's draft clear.
-    next_claim: u64,
 }
 
 impl ComposerSends {
@@ -324,9 +322,8 @@ impl ComposerSends {
     /// tap replaces this one, so the recording's ack can never clear what
     /// that send owns.
     pub(super) fn reserve_draft_clear(&mut self, slot: &SendSlot, chat: ChatId) -> Reservation {
-        let claim = Reservation(self.next_claim);
-        self.next_claim = self.next_claim.wrapping_add(1);
-        self.set_draft_clear(slot, Some(DraftClear::reserved(chat, claim)));
+        let claim = Reservation::new();
+        self.set_draft_clear(slot, Some(DraftClear::reserved(chat, claim.clone())));
         claim
     }
 
@@ -335,7 +332,7 @@ impl ComposerSends {
     pub(super) fn arm_draft_clear(
         &mut self,
         slot: &SendSlot,
-        claim: Reservation,
+        claim: &Reservation,
         request: RequestId,
     ) {
         if let Some(clear) = self
@@ -349,7 +346,7 @@ impl ComposerSends {
 
     /// The recording `claim` was not sent: its held clear goes, and a newer
     /// send's stays.
-    pub(super) fn release_draft_clear(&mut self, slot: &SendSlot, claim: Reservation) {
+    pub(super) fn release_draft_clear(&mut self, slot: &SendSlot, claim: &Reservation) {
         let held = self
             .accounts
             .get(&slot.account)

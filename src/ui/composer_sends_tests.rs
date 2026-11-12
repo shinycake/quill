@@ -1187,11 +1187,11 @@ fn a_recording_finished_after_a_text_send_leaves_the_texts_clear() {
         Some(DraftClear::of_text(chat, "text").asked([RequestId(1)])),
     );
     // The file is ready; the voice goes out as request 2.
-    sends.arm_draft_clear(&slot, claim, RequestId(2));
+    sends.arm_draft_clear(&slot, &claim, RequestId(2));
     sends.note_send_answer(&account, RequestId(2), MessageId(-2));
     sends.note_send_answer(&account, RequestId(1), MessageId(-1));
     // The voice failing releases nothing of the text's.
-    sends.release_draft_clear(&slot, claim);
+    sends.release_draft_clear(&slot, &claim);
     let taken = sends.take_draft_clear(&account, MessageId(-1), slot.draft);
     assert_eq!(
         taken.map(|(_, clear)| clear.sent),
@@ -1209,13 +1209,13 @@ fn a_recording_alone_in_its_slot_clears_on_its_ack_or_releases() {
     let mut sends = crate::ui::composer_sends::ComposerSends::default();
     let claim = sends.reserve_draft_clear(&slot, chat);
     assert!(sends.has_draft_clear(&slot));
-    sends.arm_draft_clear(&slot, claim, RequestId(5));
+    sends.arm_draft_clear(&slot, &claim, RequestId(5));
     sends.note_send_answer(&account, RequestId(5), MessageId(-5));
     let taken = sends.take_draft_clear(&account, MessageId(-5), slot.draft);
     assert_eq!(taken.map(|(_, clear)| clear.sent), Some(None));
 
     let claim = sends.reserve_draft_clear(&slot, chat);
-    sends.release_draft_clear(&slot, claim);
+    sends.release_draft_clear(&slot, &claim);
     assert!(!sends.has_draft_clear(&slot), "a send that never went");
     // An ack with nothing held finds nothing.
     assert_eq!(

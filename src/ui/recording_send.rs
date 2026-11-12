@@ -170,7 +170,7 @@ impl QuillApp {
     /// The recording's send went out as `request` (its clear waits for the
     /// ack), or did not go (the clear it held goes).
     fn settle_claim(&mut self, target: &SendTarget, request: Option<RequestId>) {
-        let Some(claim) = target.claim else {
+        let Some(claim) = target.claim.as_ref() else {
             return;
         };
         match request {
