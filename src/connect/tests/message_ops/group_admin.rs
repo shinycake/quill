@@ -400,7 +400,15 @@ fn driver_group_sticker_set_gates_and_shape() {
             )
             .unwrap();
     }
-    assert!(!driver.session.stickers.stickers.lists.installed.is_loading());
+    assert!(
+        !driver
+            .session
+            .stickers
+            .stickers
+            .lists
+            .installed
+            .is_loading()
+    );
     assert!(!driver.session.stickers.emoji.lists.installed.is_loading());
     assert!(
         driver
