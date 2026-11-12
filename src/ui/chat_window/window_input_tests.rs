@@ -52,7 +52,7 @@ fn a_main_window_menu_leaves_a_chat_windows_keys_alone(cx: &mut TestAppContext) 
     let _chat_window = h.open_in_new_window(OTHER, cx);
     h.settle(cx);
     h.app.update(cx, |app, _| {
-        app.chat_list.overlay.open_archive(point(px(40.), px(80.)));
+        app.message_ui.menu.open_archive(point(px(40.), px(80.)));
     });
     assert!(scoped(&h, None, cx, |app, _| app.context_menu_open()));
     assert!(
@@ -64,7 +64,7 @@ fn a_main_window_menu_leaves_a_chat_windows_keys_alone(cx: &mut TestAppContext) 
     assert!(!spent);
     let still = h
         .app
-        .read_with(cx, |app, _| app.chat_list.overlay.archive().is_some());
+        .read_with(cx, |app, _| app.message_ui.menu.archive().is_some());
     assert!(still, "the main window's menu stays open");
     assert!(scoped(&h, None, cx, |app, cx| app.dismiss_context_menus(cx)));
 }

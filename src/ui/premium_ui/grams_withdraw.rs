@@ -11,7 +11,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
-use crate::ui::fragment_password::{PasswordBox, SecurityCheck, Showing};
+use crate::ui::fragment_password::{PasswordBox, PasswordView, SecurityCheck, ShowingView};
 use crate::ui::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
@@ -169,13 +169,13 @@ impl QuillApp {
                         .as_ref()
                         .is_some_and(GramWithdraw::can_submit);
                 let field = match (showing, idle) {
-                    (false, _) => Showing::Off,
-                    (true, true) => Showing::Idle,
-                    (true, false) => Showing::Sending,
+                    (false, _) => ShowingView::Off,
+                    (true, true) => ShowingView::Idle,
+                    (true, false) => ShowingView::Sending,
                 };
                 (grams.take_withdraw_outcome(), field)
             }
-            None => (None, Showing::Off),
+            None => (None, ShowingView::Off),
         };
         self.screen
             .payments
@@ -223,10 +223,12 @@ impl QuillApp {
                         id: "grams-withdraw",
                         input: &this.payments.grams_withdraw_password,
                         description: tr(keys::BOT_EARN_BALANCE_PASSWORD_DESCRIPTION),
-                        sending: withdraw.sending(),
-                        error: match &withdraw {
-                            GramWithdraw::Password { error } => error.as_ref(),
-                            _ => None,
+                        entry: match &withdraw {
+                            GramWithdraw::Sending(_) => PasswordView::Sending,
+                            GramWithdraw::Password { error: Some(error) } => {
+                                PasswordView::Failed(error)
+                            }
+                            _ => PasswordView::Idle,
                         },
                         on_submit: QuillApp::submit_grams_withdraw_password,
                         on_cancel: QuillApp::cancel_grams_withdraw,

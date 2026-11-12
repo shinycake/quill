@@ -364,8 +364,8 @@ const MAIN_WINDOW: &[Surface] = &[
         open: |h| {
             h.act(|app, _, cx| {
                 let at = point(px(40.), px(80.));
-                app.chat_list
-                    .overlay
+                app.message_ui
+                    .menu
                     .open_row(crate::ui::menu_states::ChatMenuState::at(ChatId(11), at));
                 cx.notify();
             })

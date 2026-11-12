@@ -9,6 +9,7 @@ ChecklistSend::others_can_mark_tasks_as_done a send option of inputChecklist (ma
 
 MiniAppWindow::closing_confirmation the mini app's own setting (`web_app_setup_closing_behavior`: ask before closing), set and cleared by the app; not a stage of anything Quill runs
 MediaFacts::in_saved_messages the message's chat is Saved Messages: a fact about where the message lives, read once when the menu opens, not a stage of anything
+DestRow::saved the destination row is Saved Messages: a fact about the chat the row stands for, read from the session when the rows are built, not a stage of anything
 AppearancePrefs::ignore_battery_saving tdesktop's ignoreBatterySaving user setting: whether the animation switches in power_saving hold while the system battery saver is on; two independent preferences, not a stage of anything
 ChatSwipeFacts::is_saved the chat with yourself: a fact about the chat read when the swipe label is resolved, not a stage
 RowMenuFacts::is_saved_messages the chat is Saved Messages: a fact about the chat read once when the row menu is built, not a stage

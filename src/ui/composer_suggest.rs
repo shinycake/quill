@@ -7,7 +7,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::emoji_bar::EmojiBarUi;
+use super::emoji_bar::{BarOwner, EmojiBarUi};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -449,13 +449,21 @@ impl QuillApp {
         if same {
             return;
         }
-        // Rows that appear or go start the strip at its start; more emoji
-        // for the same query (an answer, a set loaded) keep the view.
-        if rows.is_none() || items.is_none() {
-            ui.bar.reset();
+        // Rows that appear start the strip at its start and rows that go
+        // give the bar back; more emoji for the same query (an answer, a set
+        // loaded) keep the view.
+        let opened = rows.is_none() && items.is_some();
+        match (rows.is_some(), items.is_some()) {
+            (false, true) => ui.bar.restart(BarOwner::Suggest),
+            (true, false) => ui.bar.release(BarOwner::Suggest),
+            _ => {}
         }
         *rows = items.map(|items| Rows { items, selected });
         cx.notify();
+        // A new list opens: a failed installed-sets list is asked again.
+        if opened && query.kind != SuggestKind::Hashtag {
+            self.retry_suggestion_emoji_sets();
+        }
     }
 
     /// "Replace emoji automatically": after a keystroke, swap a finished
@@ -533,7 +541,7 @@ impl QuillApp {
         else {
             return false;
         };
-        ui.bar.reset();
+        ui.bar.release(BarOwner::Suggest);
         if remember {
             ui.dismissed = Some((query.kind, query.range.start, query.query));
         }
@@ -622,7 +630,7 @@ impl QuillApp {
         else {
             return;
         };
-        ui.bar.reset();
+        ui.bar.release(BarOwner::Suggest);
         let Some(item) = rows.items.get(index) else {
             return;
         };

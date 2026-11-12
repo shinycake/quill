@@ -22,9 +22,10 @@ pub(crate) enum RightPress {
 }
 
 pub(crate) struct MessageUi {
-    /// M1: right-click context menu target + window position, and what
-    /// it was opened over (`message_menu_state`).
-    pub(super) menu: super::message_menu_state::MessageMenu,
+    /// What floats over the window: the open context menu (a message's, a
+    /// chat row's, the archive row's or a folder tab's) or the peek preview of
+    /// a chat row. One value, so opening one closes the others.
+    pub(super) menu: super::chat_list_state::ChatOverlay,
     /// Page, report and sticker-set dialogs of the message menu's extras.
     pub(super) menu_ui: super::message_menu_ui::MessageMenuUi,
     /// What the latest right-press was over (a link, a task or a poll

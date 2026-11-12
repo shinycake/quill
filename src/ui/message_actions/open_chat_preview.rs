@@ -15,7 +15,7 @@ impl QuillApp {
     ) {
         // The press owns its timer: a release, a newer press or a menu
         // drops it, so it only ever fires for the press that is still held.
-        let timer = self.spawn_screen(cx, async move |this, cx| {
+        let timer = self.spawn_scoped(cx, async move |this, cx| {
             cx.background_executor()
                 .timer(Self::CHAT_PREVIEW_LONG_PRESS)
                 .await;
@@ -23,7 +23,7 @@ impl QuillApp {
                 this.open_chat_preview(chat_id, anchor, cx);
             });
         });
-        self.chat_list.overlay.press(chat_id, timer);
+        self.message_ui.menu.press(chat_id, timer);
     }
 
     /// Slice CL: open the read-only peek preview for a chat — recent
@@ -36,8 +36,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         // The panel replaces a menu that was open: one thing floats.
-        self.chat_list
-            .overlay
+        self.message_ui
+            .menu
             .open_peek(ChatPreviewState { chat_id, anchor });
         // Live fetch for unopened chats; already-loaded history renders
         // immediately. Demo/no-driver sessions skip the network.

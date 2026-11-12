@@ -107,10 +107,12 @@ fn the_learn_box_counts_diamonds_and_closes(cx: &mut TestAppContext) {
     for _ in 0..3 {
         click(vcx, "earn-learn-diamond");
     }
-    app.read_with(vcx, |app, _| assert_eq!(app.earn.diamonds, 3));
+    app.read_with(vcx, |app, _| {
+        assert_eq!(app.earn.learn.map(|l| l.diamonds), Some(3))
+    });
     assert!(!note(&app, vcx).is_empty(), "each diamond shows a toast");
     click(vcx, "earn-learn-close");
-    app.read_with(vcx, |app, _| assert!(!app.earn.learn));
+    app.read_with(vcx, |app, _| assert!(app.earn.learn.is_none()));
     assert_ne!(open_dialog(&shell, vcx), Some(DialogKind::EarnLearn));
 }
 

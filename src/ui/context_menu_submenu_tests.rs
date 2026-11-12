@@ -88,7 +88,7 @@ fn mute_label() -> String {
 
 fn submenu(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<ChatMenuSubmenu> {
     app.read_with(vcx, |app, _| {
-        app.chat_list.overlay.row().and_then(|menu| menu.submenu)
+        app.message_ui.menu.row().and_then(|menu| menu.submenu)
     })
 }
 

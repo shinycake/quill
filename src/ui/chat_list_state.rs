@@ -22,12 +22,14 @@ pub(crate) struct PinDrag {
     pub(super) next_press: Option<(i64, f32)>,
 }
 
-/// What floats over the chat list: a context menu (a chat row's, or the
-/// "Archived chats" row's), or the peek preview of a row (a long press in
-/// progress, with the row's chat and the timer that opens the panel, or the
-/// open panel). One value: opening one replaces the other, and a close ends
-/// only its own. The press owns its timer, so a release, a newer press, a
-/// menu or a close drops it.
+/// What floats over the window's lists: a context menu (a chat row's, the
+/// "Archived chats" row's, a folder tab's or a message's), or the peek
+/// preview of a row (a long press in progress, with the row's chat and the
+/// timer that opens the panel, or the open panel). One value, held in the
+/// window's `MessageUi::menu`: opening one replaces whatever floated before
+/// it, so no opener closes the others by hand, and a close ends only its
+/// own. The press owns its timer, so a release, a newer press, a menu or a
+/// close drops it.
 #[derive(Default)]
 pub(crate) enum ChatOverlay {
     #[default]
@@ -36,6 +38,11 @@ pub(crate) enum ChatOverlay {
     RowMenu(ChatMenuState),
     /// The archive row's menu, at the pointer.
     ArchiveMenu(Point<Pixels>),
+    /// A folder tab's menu.
+    FolderTab(super::folder_extras::FolderTabMenu),
+    /// A message's menu, with what was true when it opened
+    /// (`message_menu_state`).
+    Message(super::message_menu_state::OpenMenu),
     /// A press on a row; `over` is the panel still showing under it (a new
     /// press leaves an open panel until its own opens).
     Pressing {
@@ -77,12 +84,24 @@ impl ChatOverlay {
         }
     }
 
-    /// A menu (a row's or the archive row's) is open.
-    pub(super) fn menu_open(&self) -> bool {
-        matches!(self, Self::RowMenu(_) | Self::ArchiveMenu(_))
+    /// A folder tab's menu, if that is what floats.
+    pub(super) fn folder_tab(&self) -> Option<super::folder_extras::FolderTabMenu> {
+        match self {
+            Self::FolderTab(menu) => Some(*menu),
+            _ => None,
+        }
     }
 
-    /// The menu goes; a peek is not the menu's to close.
+    /// A menu (a chat row's, the archive row's, a folder tab's or a
+    /// message's) is open.
+    pub(super) fn menu_open(&self) -> bool {
+        matches!(
+            self,
+            Self::RowMenu(_) | Self::ArchiveMenu(_) | Self::FolderTab(_) | Self::Message(_)
+        )
+    }
+
+    /// The menu goes, whichever it is; a peek is not the menu's to close.
     pub(super) fn close_menu(&mut self) {
         if self.menu_open() {
             *self = Self::None;
@@ -97,6 +116,11 @@ impl ChatOverlay {
     /// The archive row's menu opens over whatever floated before it.
     pub(super) fn open_archive(&mut self, at: Point<Pixels>) {
         *self = Self::ArchiveMenu(at);
+    }
+
+    /// A folder tab's menu opens over whatever floated before it.
+    pub(super) fn open_folder_tab(&mut self, menu: super::folder_extras::FolderTabMenu) {
+        *self = Self::FolderTab(menu);
     }
 
     /// The open peek panel, also while a new press waits over it.
@@ -348,11 +372,6 @@ pub(crate) struct ChatListUi {
     /// snaps on first sight instead of animating from another account's
     /// state (a chat id alone does not name the same chat across accounts).
     pub(super) row_fx: std::cell::RefCell<quill::row_fx::RowFxMap>,
-    /// What floats over the list: the right-click menu of a chat row
-    /// (target and window position) or of the "Archived chats" row, the
-    /// peek preview of a row (a long press in progress, or the open panel;
-    /// never an open chat), or nothing.
-    pub(super) overlay: ChatOverlay,
     /// Contacts tab, stories menu, suggestions and search tabs.
     pub(super) global: super::chatlist_global::ChatlistGlobal,
     /// The pinned-row gesture: press, drag (or its release slide).
@@ -409,7 +428,6 @@ impl ChatListUi {
             swipe: Default::default(),
             downloads_panel_open: false,
             row_fx: Default::default(),
-            overlay: ChatOverlay::None,
             global,
             pin: PinStage::Idle,
             selected: HashSet::new(),

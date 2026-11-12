@@ -30,7 +30,7 @@ fn diamonds_toast(count: u32) -> String {
 
 impl QuillApp {
     fn close_earn_learn(&mut self, cx: &mut Context<Self>) {
-        self.earn.learn = false;
+        self.earn.learn = None;
         cx.notify();
     }
 
@@ -119,12 +119,14 @@ impl QuillApp {
                                 .debug_selector(|| "earn-learn-diamond".into())
                                 .cursor_pointer()
                                 .on_click(cx.listener(|this, _, _, cx| {
-                                    if this.earn.diamonds < 100 {
-                                        this.earn.diamonds += 1;
+                                    let Some(learn) = this.earn.learn.as_mut() else {
+                                        return;
+                                    };
+                                    if learn.diamonds < 100 {
+                                        learn.diamonds += 1;
                                     }
-                                    this.set_note(StatusNote::info(diamonds_toast(
-                                        this.screen.earn.diamonds,
-                                    )));
+                                    let diamonds = learn.diamonds;
+                                    this.set_note(StatusNote::info(diamonds_toast(diamonds)));
                                     cx.notify();
                                 }))
                                 .child(ton_icon(20., primary)),
@@ -403,7 +405,7 @@ impl QuillApp {
 
 crate::ui::shell::register_dialogs! {
     /// The Monetization page's "Learn more" box.
-    EarnLearn => DialogSpec::new(7610, |app| app.earn.learn, QuillApp::build_earn_learn_dialog)
+    EarnLearn => DialogSpec::new(7610, |app| app.earn.learn.is_some(), QuillApp::build_earn_learn_dialog)
     .close(|app, _, cx| app.close_earn_learn(cx)),
     /// A TON transaction's details.
     EarnTonTx => DialogSpec::new(

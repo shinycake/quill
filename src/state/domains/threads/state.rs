@@ -41,6 +41,9 @@ pub struct ThreadsState {
     /// Answers to the composer's new-thread requests in bot chats, until
     /// the window that asked takes its own.
     pub bot_thread_starts: Vec<BotThreadStarted>,
+    /// How a topic menu action's request ended (`true`: it went through),
+    /// until the window that asked takes its own.
+    pub topic_action_answers: Vec<(RequestId, bool)>,
 }
 
 impl ThreadsState {
@@ -56,6 +59,7 @@ impl ThreadsState {
             thread: None,
             direct: DirectMessagesTopics::default(),
             bot_thread_starts: Vec::new(),
+            topic_action_answers: Vec::new(),
         }
     }
 }

@@ -86,7 +86,7 @@ fn a_chat_windows_message_menu_takes_and_gives_back_its_focus(cx: &mut TestAppCo
     assert_eq!(again, rows, "a frame claims each row once");
 
     scoped(&h, cx, |app, cx| {
-        app.message_ui.menu.close();
+        app.message_ui.menu.close_message();
         cx.notify();
     });
     render(chat_window, cx);

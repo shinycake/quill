@@ -8044,6 +8044,66 @@ whose variants carry the data, with a way out of every stage.
   `ProxyFetch::FailedStale`: the tick does not ask again, the list stays
   busy (never planned on), and Refresh is the way out.
 
+### Sweep fixes (r2-26)
+
+Round 2, files `earn_state` to `fragment_password` (ids are the register-r2
+ids `09-NNN`).
+
+| id | result |
+| --- | --- |
+| 09-081 | Fixed by the integration's `EarnLayer { Closed, Open { back, restore, fade } }` (`earn/layer.rs`, the fade stage owns its timer); this branch's second version is gone. |
+| 09-082 | Fixed: `EarnUi::learn: Option<LearnBox { diamonds }>`; closing the box drops the count. |
+| 09-083 | Fixed: `MediaEdit::image: EditImageFetch::Downloading { file_id }` lives with the edit; `edit_image_upkeep` opens the editor when the photo lands or says it failed. The stage keeps no `RequestId`: the download tracker owns the request and reads the end per file (`downloads.ended_without_file`), because `downloadFile` answers at once and can share a transfer already under way. `stage-enums-allow.txt` says so. |
+| 09-084 | Fixed: `BarOwner { Free, Suggest, Word }` on the one `EmojiBarUi`; `restart` for a new list, `release` by its own owner only (no closer repeats the "unless suggestions use it" rule). |
+| 09-085 | Fixed: a failed installed-sets list is asked again from a new list opening (`retry_suggestion_emoji_sets`), not from every rebuild. |
+| 09-086, 09-087 | Fixed: `SetsView { tab, typing: Debounce }` replaces `emoji_set_return_tab` and `emoji_set_debounce`; the integration's `Debounce` (the timer lives in the value) is kept and the tab lives beside it in the one value, so opening, closing or choosing a tab drops a search that has not gone out. |
+| 09-088, 09-089 | Fixed: `Sheet::Loading { _decode }` holds the decode, which retries a failed read after 1 s and 2 s; `Failed` after six reads (1, 2, 4, 8, 16 s: a disk that stalls for half a minute still gets its sheet); the atlas going away cancels it. A sheet that is corrupt stays on the system glyphs until the set is installed again. |
+| 09-090 | Fixed: no data folder puts `SetStage::Failed` on the row. |
+| 09-091 | Fixed: `Startup::Reading` is set only when the task exists; `Done` comes from the task. |
+| 09-092 | `open` skipped: it is the box's presence for `DialogSpec` (one source, nothing mirrors it). `Switching { id, task }` now carries its set and the answer is applied only while it is the stage in place. |
+| 09-093 | Fixed (review round): `WordBar::Asking { request: RequestId }` is settled only by that request. `KeywordLookups::outcome(id)` says how it ended (the last 64 are kept): answered opens the bar; failed follows the retry out for the word, asks once more from the transition (`Settle::Again`), or gives up with the note. A later lookup of the same word, a different request, cannot open the bar. "Suggest Emoji" opens at once only for an answer that was already cached, and notes the failure when the lookup was turned away. |
+| 09-094 | Fixed by the integration's `RightPress` (a link, a task or a poll option, with its clearing `Task`); this branch's `RightClickedLink` is gone. |
+| 09-101 | Fixed: `FolderPick::Choosing` holds the picker task inside the draft. |
+| 09-102 | Fixed: closing a draft never hides a running export; asking for the box drops a draft over a run. |
+| 09-103 | Fixed: `QuitGate { Open, Asking { exit } }` ends with the exports as well as the alert (`quit_gate_upkeep`). |
+| 09-104, 09-105 | Fixed: `FirstRun { Writing { _write }, Playing, Leaving, Notice, .. }`; a replay or skip drops the write task. |
+| 09-106 | Fixed: `JoinStage { Choosing, Joining { request } }`; the box closes on the offer going, or returns to choosing with the ticks kept. |
+| 09-107 | Fixed (rebase round): the integration's `ChatOverlay` is the one value of what floats over the window, held in `MessageUi::menu` (a chat window has its own): `RowMenu`, `ArchiveMenu`, `FolderTab`, `Message(OpenMenu)`, and the long press and peek. Opening any of them replaces whatever floated before, so no opener closes the others by hand (`FolderUi::tab_menu` and the separate message menu slot are gone); `close_menu` closes any menu and leaves a peek, `close_message` only a message's. Left as is: a message menu replaced by another menu no longer resets the session's reaction options at once (they are keyed by chat and message, and the next message menu asks for its own). |
+| 09-119 | Fixed by the integration's `ChatListView { filter, folder }` (written only by `ChatListUi::show_view`, which ends the selection and pinned drag); this branch's enum is gone. |
+| 09-117 | Fixed: the success note of a topic action is shown from the answer (`TopicAction::Waiting`, `Session::topic_action_answered`). |
+| 09-120 | Fixed by the integration's `ForwardStage::Picking.share_at` (with `ticks`); this branch's `at_time` is gone. |
+| 09-123 | Allowed: `DestRow::saved` is a per-row fact. |
+| 09-121 | Fixed: a lifted message drag is read from the active drag's payload (`App::active_drag_is`, a one-method addition to the vendored gpui). |
+| 09-124, 09-125 | Fixed: `PasswordView { Idle, Sending, Failed }`; the field's own `FieldStage` is `Away`/`Typing` (a try out or the box off screen both mean the keyboard is taken again when the box is idle; `Disabled` was the same as `Away`). |
+
+Rebase round (r2-26): merged `sweep-r2-38` (the follow-up with r2-31 and
+r2-38) and `sweep-r2-41`. Where both sides fixed an entry the integration's
+shape stayed (`EarnLayer`, `ChatListView`, `RightPress`, `Picking.share_at`,
+`Debounce`, `SuggestStage::Live`, the `ReplyBar`/`ReplyPanel` split, the
+`PasswordView` caller's stage kept); this branch's fixes the integration had
+nothing for were rebuilt on its shapes: the word bar owner on the suggest
+stage (`BarOwner`, restarted when rows appear, released when they go), the
+chat list's menu with the folder tab's and the message's in `ChatOverlay`,
+`LearnBox`, `SetsView` around `Debounce`, and `PasswordView` for the grams
+withdraw password. `emoji_access` is a `Vec` of `EmojiAccessAnswer` (r2-41's
+oldest-first list with the follow-up's answer type).
+
+Review round (r2-26): merged `sweep-r2-followup` (its `SavedToastStage`,
+`TrendingSets`/`Fetch` list stages and `FolderShare` shapes kept; the sets
+panel reads `lists.{installed, trending, search}` loading itself, as the
+guard asks). Also: `process_folder_new_chats` hands back a request already in
+flight for the folder instead of `Ok(None)`, so a second Join waits on it and
+closes or returns to choosing with it (nit, no silent dead end); register
+02-052 (`fetch_folder_share` sends both halves independently) was already
+fixed on the integration branch. Fresh review of every file in the bundle:
+no new findings (the remaining `detach` calls end finished tasks the stage
+had moved past, `later`, `pending` and `skippable` are facts of the thing
+shown).
+
+Also: the emoji style download no longer polls (the open row asks the frame
+clock for frames), the sets and open-link boxes use `Cell`, the sprite and
+preview cells use `try_borrow`.
+
 ### Sweep fixes (r2-31)
 
 Twenty-eight re-sweep entries in twenty files. A file in the bundle was read again

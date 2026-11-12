@@ -54,8 +54,8 @@ pub use edit::{
     cancel_edit_keeping_reply,
 };
 pub use edit_media_tools::{
-    CLEAR_COVER_LABEL, EditMediaTool, ExistingVideo, cover_peer_allows, cover_send_path,
-    session_allows_cover,
+    CLEAR_COVER_LABEL, EditImageFetch, EditMediaTool, ExistingVideo, cover_peer_allows,
+    cover_send_path, session_allows_cover,
 };
 pub use markup::{
     ComposerEntity, FormatAction, FormatKind, apply_format_markup, clear_format_markup,

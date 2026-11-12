@@ -529,14 +529,27 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// The composer's emoji suggestions offer custom emoji from the
     /// installed emoji sets (tdesktop `SuggestionsWidget::appendCustom`):
-    /// load the installed list when it was never asked for or its last
-    /// request failed, and the sets' contents. Loaded and loading sets are
-    /// skipped, so this is cheap to call whenever the strip is rebuilt.
+    /// load the installed list when it was never asked for, and the sets'
+    /// contents. Loaded and loading sets are skipped, so this is cheap to
+    /// call whenever the strip is rebuilt; a failed list is not asked for
+    /// again from here ([`Self::retry_suggestion_emoji_sets`]).
     pub fn ensure_suggestion_emoji_sets(&mut self) -> Result<(), ConnectSendError> {
+        self.suggestion_emoji_sets(false)
+    }
+
+    /// [`Self::ensure_suggestion_emoji_sets`] for a new list opening (a
+    /// `:` query, a word's bar): a list whose last request failed is
+    /// asked for again.
+    pub fn retry_suggestion_emoji_sets(&mut self) -> Result<(), ConnectSendError> {
+        self.suggestion_emoji_sets(true)
+    }
+
+    fn suggestion_emoji_sets(&mut self, retry_failed: bool) -> Result<(), ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.stickers.emoji.lists.installed.can_ask()
+        let installed = &self.session.stickers.emoji.lists.installed;
+        if (installed.is_idle() || (retry_failed && installed.can_ask()))
             && self.session.stickers.emoji.installed_sets.is_empty()
         {
             self.emoji_set_request(

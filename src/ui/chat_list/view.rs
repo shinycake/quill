@@ -58,11 +58,9 @@ impl ChatListUi {
         self.items.clear();
     }
 
-    /// A pinned reorder begins (or fails to). It is not a long press, so no
-    /// peek preview shows over it.
+    /// A pinned reorder begins (or fails to).
     pub(in crate::ui) fn begin_pin_drag(&mut self, stage: PinStage) {
         self.pin = stage;
-        self.overlay.close_peek();
     }
 
     /// A new list pass starts: rows not drawn in it age out of the

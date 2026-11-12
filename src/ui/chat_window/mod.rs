@@ -142,7 +142,7 @@ pub(crate) struct MainWindow {
     /// The exit a Quit left waiting behind the "Stop and quit" alert. The
     /// alert is the window's and the Quit is the app's, so an account
     /// switch under the alert does not take the exit with it.
-    pub(super) export_stop: Option<super::export_quit::ExitAfterStop>,
+    pub(super) quit_gate: super::export_quit::QuitGate,
     /// Keys go to the window that received them: the interceptor runs
     /// before any handler and puts that window's state in place.
     _key_scope: Subscription,
@@ -187,7 +187,7 @@ impl MainWindow {
             place: None,
             cascade: 0,
             dialogs_closed: Default::default(),
-            export_stop: None,
+            quit_gate: Default::default(),
             _key_scope: key_scope,
         }
     }

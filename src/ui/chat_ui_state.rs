@@ -207,6 +207,9 @@ pub(crate) struct ChatUi {
     /// The address tooltip of the link under the pointer. It goes with the
     /// chat: another chat under a resting pointer shows none.
     pub(super) link_tooltip: Option<super::entity_links::LinkTooltip>,
+    /// A topic menu action whose note waits for its answer. It goes with
+    /// the chat, so another chat never shows it.
+    pub(super) topic_action: super::forum_extras::TopicAction,
     /// The bot command list above the composer: closed, opened by a typed
     /// `/` token, or opened by the bot's Menu button.
     pub(super) command_menu: super::composer::CommandMenu,

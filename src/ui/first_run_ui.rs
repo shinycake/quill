@@ -81,19 +81,18 @@ pub(super) fn start_intro(cx: &mut Context<QuillApp>) -> FirstRun {
         return FirstRun::welcome(None, now);
     }
     let written = cx.background_spawn(async { intro_file() });
-    cx.spawn(async move |this, cx| {
+    // The write belongs to the stage it starts: a replay or a skip drops
+    // the stage and with it this wait, so it never installs its player
+    // into a later welcome.
+    let write = cx.spawn(async move |this, cx| {
         let path = written.await;
         let _ = this.update(cx, |this, cx| {
-            if !this.first_run.awaits_intro() {
-                return;
-            }
             let player = path.and_then(|path| open_intro(&path, cx));
             this.first_run.intro_written(player);
             cx.notify();
         });
-    })
-    .detach();
-    FirstRun::writing_intro(now)
+    });
+    FirstRun::writing_intro(now, write)
 }
 
 /// The intro clip at `path`, playing with its sound; `None` when it can't
@@ -173,15 +172,15 @@ impl QuillApp {
         let now = Instant::now();
         self.settle_first_run(now, cx);
         let (card, shown) = match &self.first_run {
-            FirstRun::Welcome { .. } => (
-                self.first_run_notice(cx),
-                self.first_run.intro_look(now).card,
-            ),
             FirstRun::Highlights { since } => (
                 self.first_run_highlights(cx),
                 progress(elapsed_since(*since, now), CARD_IN),
             ),
             FirstRun::Done => return None,
+            _ => (
+                self.first_run_notice(cx),
+                self.first_run.intro_look(now).card,
+            ),
         };
         let eased = ease_out_circ(shown);
         let curtain = if COVERS_TITLE_BAR {
@@ -230,7 +229,7 @@ impl QuillApp {
     fn first_run_curtain(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let now = Instant::now();
         self.settle_first_run(now, cx);
-        if !matches!(self.first_run, FirstRun::Welcome { .. }) {
+        if !self.first_run.in_welcome() {
             return None;
         }
         let look = self.first_run.intro_look(now);

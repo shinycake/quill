@@ -668,6 +668,8 @@ impl QuillApp {
                         )
                     });
             self.chat_list.begin_pin_drag(stage);
+            // A pinned reorder is not a long press: no peek shows over it.
+            self.message_ui.menu.close_peek();
         }
         self.notify_sidebar(cx);
     }

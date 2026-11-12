@@ -406,22 +406,22 @@ impl QuillApp {
     /// own; the others only the main window draws, so a chat window's keys
     /// and Escape never reach them.
     pub(super) fn context_menu_open(&self) -> bool {
-        self.message_ui.menu.is_open() || (!self.windows.in_window() && self.main_menu_open())
+        self.message_ui.menu.menu_open() || (!self.windows.in_window() && self.main_menu_open())
     }
 
-    /// The menus only the main window draws: the chat list's row, archive
-    /// and story menus, a playlist's and a folder tab's.
+    /// The menus only the main window draws, beside the window's own
+    /// `message_ui.menu` value: the community and story menus and a
+    /// playlist's.
     fn main_menu_open(&self) -> bool {
-        self.chat_list.overlay.menu_open()
-            || self.admin.community.flow.row_menu.is_some()
+        self.admin.community.flow.row_menu.is_some()
             || self.chat_list.global.story_menu.is_some()
             || self.playback.playlist.menu().is_some()
-            || self.folders.tab_menu.is_some()
     }
 
-    /// Close the message menu and forget the reaction options it asked for.
+    /// Close the message menu (another menu stays) and forget the reaction
+    /// options it asked for.
     pub(super) fn close_message_menu(&mut self) {
-        self.message_ui.menu.close();
+        self.message_ui.menu.close_message();
         let session = match self.live.as_mut() {
             Some(live) => Some(&mut live.driver.session),
             None => self.demo_session.as_deref_mut(),
@@ -440,10 +440,9 @@ impl QuillApp {
         self.close_message_menu();
         if !self.windows.in_window() {
             self.playback.playlist.close_menu();
-            self.chat_list.overlay.close_menu();
+            self.message_ui.menu.close_menu();
             self.admin.community.flow.row_menu = None;
             self.chat_list.global.story_menu = None;
-            self.folders.tab_menu = None;
         }
         cx.notify();
         true
@@ -484,7 +483,7 @@ impl QuillApp {
             return None;
         }
         match (
-            self.chat_list.overlay.row(),
+            self.message_ui.menu.row(),
             &self.admin.community.flow.row_menu,
         ) {
             (Some(menu), _) => menu.submenu,

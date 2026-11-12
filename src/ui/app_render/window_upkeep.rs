@@ -100,6 +100,10 @@ impl QuillApp {
         // A video chosen for an owned set finished downloading: its editor,
         // in the window the pick was made in.
         self.sticker_box_window_upkeep(window, cx);
+        // A topic menu action's answer: its success note.
+        self.topic_action_upkeep(cx);
+        // A photo "Edit Image" waited for: its editor, or a note.
+        self.edit_image_upkeep(cx);
         self.call_boxes_upkeep(window, cx);
         self.box_answers_upkeep(window, cx);
         self.checkout_prefill_upkeep(window, cx);
@@ -199,6 +203,13 @@ impl QuillApp {
         // The welcome messages box clears its field when an Add is answered.
         if self.windows.dialog_may_show_in(DialogKind::Welcome, here) {
             self.settle_welcome_dialog(window, cx);
+        }
+        // The shared folder's join box closes on its request's answer.
+        if self
+            .windows
+            .dialog_may_show_in(DialogKind::FolderNewChats, here)
+        {
+            self.folder_new_chats_upkeep(window, cx);
         }
         // A collectible lookup that failed copies its link, with the toast
         // in the box's window.

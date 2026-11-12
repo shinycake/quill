@@ -253,8 +253,6 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // A lifted message drag ends here wherever it was dropped.
-        super::forward_drag_source::end_forward_lift(cx);
         self.end_forward_drag(cx);
         let Some(drag) = self.message_ui.selection_drag.take() else {
             return;

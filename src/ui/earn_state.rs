@@ -61,6 +61,13 @@ impl TxBox {
     }
 }
 
+/// The "Learn more" box of the Monetization page and its TON easter egg
+/// (tdesktop counts diamonds); closing the box drops the count.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct LearnBox {
+    pub(super) diamonds: u32,
+}
+
 pub(crate) struct EarnUi {
     /// The Stars to withdraw (tdesktop `AddInputFieldForCredits`).
     pub(super) amount: Entity<InputState>,
@@ -71,10 +78,8 @@ pub(crate) struct EarnUi {
     pub(super) prefilled: Option<(EarnPeer, i64)>,
     /// The layer's stack, covered panel and fade.
     pub(super) layer: super::earn::EarnLayer,
-    /// The "Learn more" box of the Monetization page.
-    pub(super) learn: bool,
-    /// The learn box's TON easter egg (tdesktop counts diamonds).
-    pub(super) diamonds: u32,
+    /// The "Learn more" box of the Monetization page, while open.
+    pub(super) learn: Option<LearnBox>,
     /// A history row's details box: a TON row's details, or a Stars row's
     /// receipt.
     pub(super) tx_box: TxBox,
@@ -124,8 +129,7 @@ impl EarnUi {
             }),
             prefilled: None,
             layer: super::earn::EarnLayer::Closed,
-            learn: false,
-            diamonds: 0,
+            learn: None,
             tx_box: TxBox::None,
             ask_boost: None,
             sliders: None,

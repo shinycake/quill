@@ -126,22 +126,11 @@ pub(super) fn media_block(
     }
 }
 
-/// Present while a lifted message drag is in flight, so the history can tell
-/// it from any other drag. Removed when the button comes up.
-struct ForwardLift;
-
-impl Global for ForwardLift {}
-
-/// A message drag was lifted and has not ended.
+/// A message drag is in flight: the active drag carries a message
+/// payload, so no other drag (a file, some text) reads as one, and a
+/// drag that was cancelled leaves nothing behind.
 pub(super) fn forward_lift_live(cx: &App) -> bool {
-    cx.has_global::<ForwardLift>() && cx.has_active_drag()
-}
-
-/// The button came up: the lifted drag, if any, is over.
-pub(super) fn end_forward_lift(cx: &mut App) {
-    if cx.has_global::<ForwardLift>() {
-        cx.remove_global::<ForwardLift>();
-    }
+    cx.active_drag_is::<ForwardDrag>()
 }
 
 impl QuillApp {
@@ -208,7 +197,6 @@ where
     match drag {
         Some(drag) => element
             .on_drag(drag, |drag: &ForwardDrag, _, _, cx| {
-                cx.set_global(ForwardLift);
                 cx.new(|_| ForwardGhost::new(drag))
             })
             // tdesktop starts a drag after `QApplication::startDragDistance`;

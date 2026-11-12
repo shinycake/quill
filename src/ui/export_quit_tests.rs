@@ -101,7 +101,7 @@ fn app_wide_actions(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
 }
 
 fn box_open(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
-    app.read_with(vcx, |app, _| app.main_window.export_stop.is_some())
+    app.read_with(vcx, |app, _| app.main_window.quit_gate.is_asking())
 }
 
 #[gpui_kit::test]

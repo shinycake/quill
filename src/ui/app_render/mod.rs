@@ -562,7 +562,7 @@ impl Render for QuillApp {
                 },
             )
             // Slice CL1: right-click chat-row context menu.
-            .when_some(self.chat_list.overlay.row_copy(), |this, menu| {
+            .when_some(self.message_ui.menu.row_copy(), |this, menu| {
                 this.child(self.chat_menu_overlay(menu, cx))
             })
             .when_some(
@@ -574,20 +574,20 @@ impl Render for QuillApp {
             .when_some(self.playback.playlist.menu(), |this, menu| {
                 this.child(self.playlist_menu_overlay(menu, cx))
             })
-            .when_some(self.chat_list.overlay.archive(), |this, position| {
+            .when_some(self.message_ui.menu.archive(), |this, position| {
                 this.child(self.archive_menu_overlay(position, cx))
             })
             .when_some(self.admin.community.flow.row_menu, |this, menu| {
                 this.child(self.community_row_menu_overlay(menu, cx))
             })
-            .when_some(self.folders.tab_menu, |this, menu| {
+            .when_some(self.message_ui.menu.folder_tab(), |this, menu| {
                 this.child(self.folder_tab_menu_overlay(menu, cx))
             })
             // Slice CL: floating peek preview — read-only recent
             // messages beside the pressed chat-list row. Rendered above
             // the row menu; any click or the long-press release closes
             // it.
-            .when_some(self.chat_list.overlay.peek(), |this, preview| {
+            .when_some(self.message_ui.menu.peek(), |this, preview| {
                 this.child(self.chat_preview_overlay(preview, cx))
             })
             // MED4: Instant View reader overlay (above the menu).

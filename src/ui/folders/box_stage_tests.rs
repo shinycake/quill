@@ -388,6 +388,7 @@ fn joining_new_chats_sends_only_what_the_folder_still_offers(cx: &mut TestAppCon
     let dialog = crate::ui::folder_extras::FolderNewChatsDialog {
         folder_id: 5,
         selected: [1, 2, 3].into_iter().collect(),
+        stage: crate::ui::folder_extras::JoinStage::Choosing,
     };
     assert_eq!(dialog.still_offered(&[3, 9, 1]), vec![1, 3]);
     assert!(dialog.still_offered(&[]).is_empty());
@@ -544,6 +545,44 @@ fn another_link_does_not_replace_an_add_in_flight(cx: &mut TestAppContext) {
             dialog.stage,
             InviteStage::Adding { request: kept, .. } if kept == request
         ));
+    });
+}
+
+/// The shared folder's join box stays up, drawing "Joining", until the
+/// answer to its own request: the offer gone closes it, the offer standing
+/// (the request failed) sends it back to choosing with the ticks kept.
+#[gpui_kit::test]
+fn the_join_box_waits_for_its_answer(cx: &mut TestAppContext) {
+    use crate::ui::folder_extras::{FolderNewChatsDialog, JoinStage};
+    let (app, mut vcx) = open(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        let Some(session) = app.demo_session.as_mut() else {
+            return;
+        };
+        session.chat_list.folder_new_chats.insert(5, vec![1, 2]);
+        app.folders.new_chats_dialog = Some(FolderNewChatsDialog {
+            folder_id: 5,
+            selected: [1, 2].into_iter().collect(),
+            stage: JoinStage::Joining {
+                request: RequestId(900),
+            },
+        });
+        // Its request is gone and the offer stands: it failed.
+        app.folder_new_chats_upkeep(window, cx);
+        let dialog = app.folders.new_chats_dialog.as_ref();
+        assert_eq!(dialog.map(|d| d.stage), Some(JoinStage::Choosing));
+        assert_eq!(dialog.map(|d| d.selected.len()), Some(2), "ticks kept");
+        if let Some(dialog) = app.folders.new_chats_dialog.as_mut() {
+            dialog.stage = JoinStage::Joining {
+                request: RequestId(901),
+            };
+        }
+        // The offer is gone: it went through.
+        if let Some(session) = app.demo_session.as_mut() {
+            session.chat_list.folder_new_chats.remove(&5);
+        }
+        app.folder_new_chats_upkeep(window, cx);
+        assert!(app.folders.new_chats_dialog.is_none());
     });
 }
 

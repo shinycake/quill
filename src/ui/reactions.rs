@@ -53,7 +53,7 @@ impl QuillApp {
         let here = self.windows.scope;
         self.in_every_window(cx, |app, _| {
             if app.windows.scope != here {
-                app.message_ui.menu.close();
+                app.message_ui.menu.close_message();
             }
         });
     }
@@ -129,7 +129,7 @@ impl QuillApp {
                 self.widget_selection(key).map(str::to_owned)
             });
         self.message_ui.menu =
-            super::message_menu_state::MessageMenu::Open(super::message_menu_state::OpenMenu {
+            super::chat_list_state::ChatOverlay::Message(super::message_menu_state::OpenMenu {
                 at: menu,
                 selection: selected_text
                     .map(|text| super::message_menu_state::MenuSelection { text, nth }),
@@ -216,13 +216,13 @@ impl QuillApp {
     /// Escape closes an open message or chat context menu first: the
     /// window's own message menu, and in the main window the chat menu.
     pub(super) fn close_context_menus(&mut self, cx: &mut Context<Self>) -> bool {
-        let chat_menu = !self.windows.in_window() && self.chat_list.overlay.row().is_some();
+        let chat_menu = !self.windows.in_window() && self.message_ui.menu.row().is_some();
         if !self.message_ui.menu.is_open() && !chat_menu {
             return false;
         }
         self.close_message_menu();
         if chat_menu {
-            self.chat_list.overlay.close_menu();
+            self.message_ui.menu.close_menu();
         }
         cx.notify();
         true

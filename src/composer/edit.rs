@@ -184,6 +184,10 @@ pub struct MediaEdit {
     /// The photo or video on the message is under a spoiler; an edited
     /// image keeps it (tdesktop `MediaEditManager::_spoilered`).
     pub had_spoiler: bool,
+    /// "Edit Image" on a photo that was not on disk: the download the
+    /// editor waits for (`edit_media_tools.rs`). It lives with the edit,
+    /// so ending the edit ends the wait.
+    pub image: super::edit_media_tools::EditImageFetch,
 }
 
 /// Audio extensions that go as `inputMessageAudio` (tdesktop treats
@@ -408,6 +412,7 @@ impl ComposerEdit {
                 },
                 in_album: false,
                 replacement: None,
+                image: Default::default(),
                 video: match content {
                     MessageContent::Video(video) => {
                         super::edit_media_tools::ExistingVideo::from_content(video)

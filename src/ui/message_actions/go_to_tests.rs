@@ -55,7 +55,7 @@ fn preview_row_menu_opens_the_chat(cx: &mut TestAppContext) {
     });
     assert_ne!(open, other);
     app.update(vcx, |app, cx| {
-        app.chat_list.overlay.open_peek(ChatPreviewState {
+        app.message_ui.menu.open_peek(ChatPreviewState {
             chat_id: other,
             anchor: point(px(300.), px(300.)),
         });
@@ -80,7 +80,7 @@ fn preview_row_menu_opens_the_chat(cx: &mut TestAppContext) {
     vcx.simulate_click(item, Modifiers::default());
     vcx.run_until_parked();
     app.read_with(vcx, |app, _| {
-        assert!(app.chat_list.overlay.peek_idle(), "the preview closes");
+        assert!(app.message_ui.menu.peek_idle(), "the preview closes");
         assert_eq!(app.session().and_then(|s| s.open_chat_id()), Some(other));
     });
 }

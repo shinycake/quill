@@ -974,7 +974,8 @@ impl RequestRegistry {
     }
 
     /// Parity slice: the in-flight request id for a purpose/folder pair
-    /// (test hook; the live path matches responses by `@extra`).
+    /// (a second ask waits on it; the live path matches responses by
+    /// `@extra`).
     pub fn pending_extra_for_folder(
         &self,
         purpose: RequestPurpose,

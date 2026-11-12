@@ -213,7 +213,7 @@ impl QuillApp {
         });
         // `QUILL_DEMO_SECRET_CLOSE=1`: the Close Secret Chat box instead.
         if std::env::var_os("QUILL_DEMO_SECRET_CLOSE").is_some() {
-            self.message_ui.menu.close();
+            self.message_ui.menu.close_menu();
             self.open_close_secret_chat_confirm(ChatId(11), cx);
         }
     }

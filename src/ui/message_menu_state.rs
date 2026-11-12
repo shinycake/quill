@@ -5,6 +5,7 @@
 //! of one menu reaches the next.
 #![deny(clippy::indexing_slicing)]
 
+use super::chat_list_state::ChatOverlay;
 use super::menu_states::MessageMenuState;
 use quill::composer::ReplyItem;
 use quill::telegram::envelope::ReactionType;
@@ -57,41 +58,35 @@ pub(super) struct OpenMenu {
     pub(super) first_tab: Option<ReactionType>,
 }
 
-#[derive(Debug, Clone, Default)]
-pub(super) enum MessageMenu {
-    #[default]
-    Closed,
-    Open(OpenMenu),
-}
-
-impl MessageMenu {
+impl ChatOverlay {
     /// Where and for which message the menu is open.
     pub(super) fn at(&self) -> Option<MessageMenuState> {
         self.open().map(|open| open.at)
     }
 
+    /// Whether a message's menu is the one open.
     pub(super) fn is_open(&self) -> bool {
-        matches!(self, Self::Open(_))
+        matches!(self, Self::Message(_))
     }
 
     pub(super) fn open(&self) -> Option<&OpenMenu> {
         match self {
-            Self::Open(open) => Some(open),
-            Self::Closed => None,
+            Self::Message(open) => Some(open),
+            _ => None,
         }
     }
 
     pub(super) fn open_mut(&mut self) -> Option<&mut OpenMenu> {
         match self {
-            Self::Open(open) => Some(open),
-            Self::Closed => None,
+            Self::Message(open) => Some(open),
+            _ => None,
         }
     }
 
     /// Open for `at` with nothing else known: the main page over the whole
     /// message.
     pub(super) fn open_at(&mut self, at: MessageMenuState) {
-        *self = Self::Open(OpenMenu {
+        *self = Self::Message(OpenMenu {
             at,
             selection: None,
             link: None,
@@ -102,8 +97,11 @@ impl MessageMenu {
         });
     }
 
-    pub(super) fn close(&mut self) {
-        *self = Self::Closed;
+    /// Close the menu if it is a message's; another menu stays.
+    pub(super) fn close_message(&mut self) {
+        if self.is_open() {
+            *self = Self::None;
+        }
     }
 
     pub(super) fn page(&self) -> MessageMenuPage {
@@ -179,7 +177,7 @@ mod tests {
 
     #[test]
     fn closing_drops_the_page_selection_and_strip_together() {
-        let mut menu = MessageMenu::default();
+        let mut menu = ChatOverlay::default();
         menu.open_at(at());
         menu.show_page(MessageMenuPage::Audience {
             tab: Some(ReactionType::Paid),
@@ -193,7 +191,7 @@ mod tests {
         }
         assert_eq!(menu.selection_nth(), 2);
         assert!(menu.audience_tab().is_some() && menu.reactions_expanded());
-        menu.close();
+        menu.close_message();
         assert!(!menu.is_open());
         assert_eq!(menu.page(), MessageMenuPage::Main);
         assert_eq!(menu.selection_text(), None);

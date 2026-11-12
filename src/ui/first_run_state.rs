@@ -5,6 +5,7 @@
 
 use super::motion::{elapsed_since, progress};
 use super::video_player::{PlayState, Transport, VideoPlayer};
+use gpui_kit::Task;
 use std::time::{Duration, Instant};
 
 /// How long the clip takes to rise out of black.
@@ -18,32 +19,40 @@ const OPEN_TIMEOUT: Duration = Duration::from_secs(4);
 /// How long a card takes to rise into place.
 pub(super) const CARD_IN: Duration = Duration::from_millis(320);
 
+/// The onboarding's stage. The welcome is the intro clip over the whole
+/// window, then the notice: `Writing` (the clip is written out for the
+/// player, on black), `Playing`, `Leaving` (the way out, once it started)
+/// or `Notice` (no clip: the notice shows at once).
 #[derive(Default)]
 pub(super) enum FirstRun {
-    /// The intro clip over the whole window, then the notice. The clip is
-    /// `Writing` out for the player (or was skipped before it was), and
-    /// `Absent` when it could not open (or animations are off): the notice
-    /// then shows at once.
-    Welcome {
-        clip: Clip,
+    /// The intro on black while its clip is written out; the task answers
+    /// with [`FirstRun::intro_written`]. Leaving the stage drops the task,
+    /// so a replay or a skip is never answered by the write it replaced.
+    /// The open timeout and a skip cover a write that never answers by
+    /// running the way out on black.
+    Writing {
         opened_at: Instant,
-        outro: Option<Outro>,
+        _write: Task<()>,
     },
+    Playing {
+        opened_at: Instant,
+        player: VideoPlayer,
+    },
+    /// The way out of the clip, on the wall clock whatever the player does;
+    /// `player` is `None` when the clip never came (skipped or timed out
+    /// while it was written).
+    Leaving {
+        outro: Outro,
+        player: Option<VideoPlayer>,
+    },
+    /// The clip could not open (or animations are off): the notice.
+    Notice,
     Highlights {
         since: Instant,
     },
     /// Finished, or never needed: the sign-in screen shows.
     #[default]
     Done,
-}
-
-/// The intro clip's player. `Writing` leaves on the answer (`Ready` or
-/// `Absent`); the open timeout and a skip cover a write that never answers
-/// by running the way out on black.
-pub(super) enum Clip {
-    Writing,
-    Ready(VideoPlayer),
-    Absent,
 }
 
 /// The way out of the clip, once it started.
@@ -79,22 +88,37 @@ impl IntroLook {
     };
 }
 
+/// The transport of a clip that has not shown a picture yet.
+fn opening() -> Transport {
+    Transport {
+        state: PlayState::Opening,
+        position: 0.,
+        duration: None,
+        buffered: Vec::new(),
+        rate: 1.,
+        volume: 1.,
+        has_sound: false,
+        live: false,
+    }
+}
+
 impl FirstRun {
     pub(super) fn welcome(intro: Option<VideoPlayer>, now: Instant) -> Self {
-        Self::Welcome {
-            clip: intro.map_or(Clip::Absent, Clip::Ready),
-            opened_at: now,
-            outro: None,
+        match intro {
+            Some(player) => Self::Playing {
+                opened_at: now,
+                player,
+            },
+            None => Self::Notice,
         }
     }
 
-    /// The intro on black while its clip is written out off the UI thread;
-    /// [`Self::intro_written`] hands it the player.
-    pub(super) fn writing_intro(now: Instant) -> Self {
-        Self::Welcome {
-            clip: Clip::Writing,
+    /// The intro on black while its clip is written out off the UI thread
+    /// by `write`; [`Self::intro_written`] hands it the player.
+    pub(super) fn writing_intro(now: Instant, write: Task<()>) -> Self {
+        Self::Writing {
             opened_at: now,
-            outro: None,
+            _write: write,
         }
     }
 
@@ -102,48 +126,34 @@ impl FirstRun {
     /// that already started (a skip, the open timeout) runs to its end on
     /// black without it.
     pub(super) fn intro_written(&mut self, player: Option<VideoPlayer>) {
-        if let Self::Welcome {
-            clip: clip @ Clip::Writing,
-            outro: None,
-            ..
-        } = self
-        {
-            *clip = player.map_or(Clip::Absent, Clip::Ready);
+        if let Self::Writing { opened_at, .. } = self {
+            let opened_at = *opened_at;
+            *self = match player {
+                Some(player) => Self::Playing { opened_at, player },
+                None => Self::Notice,
+            };
         }
     }
 
     /// The intro is on black, waiting for its clip to be written.
     pub(super) fn awaits_intro(&self) -> bool {
+        matches!(self, Self::Writing { .. })
+    }
+
+    /// The welcome (intro or its notice) is the stage.
+    pub(super) fn in_welcome(&self) -> bool {
         matches!(
             self,
-            Self::Welcome {
-                clip: Clip::Writing,
-                outro: None,
-                ..
-            }
+            Self::Writing { .. } | Self::Playing { .. } | Self::Leaving { .. } | Self::Notice
         )
     }
 
-    /// Where the clip is: a clip still being written is still opening.
+    /// Where the clip is, before its way out: a clip still being written
+    /// is still opening.
     fn intro_transport(&self) -> Option<Transport> {
         match self {
-            Self::Welcome {
-                clip: Clip::Ready(player),
-                ..
-            } => Some(player.transport()),
-            Self::Welcome {
-                clip: Clip::Writing,
-                ..
-            } => Some(Transport {
-                state: PlayState::Opening,
-                position: 0.,
-                duration: None,
-                buffered: Vec::new(),
-                rate: 1.,
-                volume: 1.,
-                has_sound: false,
-                live: false,
-            }),
+            Self::Playing { player, .. } => Some(player.transport()),
+            Self::Writing { .. } => Some(opening()),
             _ => None,
         }
     }
@@ -152,43 +162,45 @@ impl FirstRun {
         self.intro_look(now).skippable
     }
 
+    /// The way out begins: the clip (if there is one) goes with it.
+    fn leave(&mut self, outro: Outro) {
+        let player = match std::mem::take(self) {
+            Self::Playing { player, .. } => Some(player),
+            _ => None,
+        };
+        *self = Self::Leaving { outro, player };
+    }
+
     /// Skip the clip: the way out starts now.
     pub(super) fn skip_intro(&mut self, now: Instant) {
         let Some(transport) = self.intro_transport() else {
             return;
         };
-        if let Self::Welcome {
-            outro: outro @ None,
-            ..
-        } = self
-        {
-            *outro = Some(Outro {
-                from: now,
-                dark: 1. - rising(&transport),
-            });
-        }
+        self.leave(Outro {
+            from: now,
+            dark: 1. - rising(&transport),
+        });
     }
 
     /// Start the way out when the clip reaches its last moments, ends,
     /// fails or never opens; then the clock runs it, whatever the player
     /// does. Once the clip is black it stops playing.
     pub(super) fn settle(&mut self, now: Instant) {
-        let Some(transport) = self.intro_transport() else {
-            return;
+        let started = match (&*self, self.intro_transport()) {
+            (
+                Self::Writing { opened_at, .. } | Self::Playing { opened_at, .. },
+                Some(transport),
+            ) => outro_start(&transport, *opened_at, now),
+            _ => None,
         };
-        let Self::Welcome {
-            clip,
-            opened_at,
-            outro,
-        } = self
-        else {
-            return;
-        };
-        if outro.is_none() {
-            *outro = outro_start(&transport, *opened_at, now);
+        if let Some(outro) = started {
+            self.leave(outro);
         }
-        if let Clip::Ready(player) = clip
-            && outro.is_some_and(|o| sunk(o, now) >= 1.)
+        if let Self::Leaving {
+            outro,
+            player: Some(player),
+        } = self
+            && sunk(*outro, now) >= 1.
             && player.wants_play()
         {
             player.pause();
@@ -197,7 +209,7 @@ impl FirstRun {
 
     /// The notice was acknowledged: the clip's player goes away with it.
     pub(super) fn acknowledge(&mut self, now: Instant) {
-        if matches!(self, Self::Welcome { .. }) {
+        if self.in_welcome() {
             *self = Self::Highlights { since: now };
         }
     }
@@ -208,8 +220,9 @@ impl FirstRun {
 
     pub(super) fn intro_player(&self) -> Option<&VideoPlayer> {
         match self {
-            Self::Welcome {
-                clip: Clip::Ready(player),
+            Self::Playing { player, .. }
+            | Self::Leaving {
+                player: Some(player),
                 ..
             } => Some(player),
             _ => None,
@@ -217,27 +230,27 @@ impl FirstRun {
     }
 
     pub(super) fn intro_look(&self, now: Instant) -> IntroLook {
-        match (self, self.intro_transport()) {
-            (Self::Welcome { outro, .. }, Some(transport)) => intro_look(&transport, *outro, now),
-            _ => IntroLook::NOTICE,
+        match self {
+            Self::Writing { .. } => intro_look(&opening(), None, now),
+            Self::Playing { player, .. } => intro_look(&player.transport(), None, now),
+            // The way out runs on the clock; the transport is not read.
+            Self::Leaving { outro, .. } => intro_look(&opening(), Some(*outro), now),
+            Self::Notice | Self::Highlights { .. } | Self::Done => IntroLook::NOTICE,
         }
     }
 
     /// A transition is running that no video frame drives, or the clip
     /// has not shown a picture yet (the open timeout needs a clock).
     pub(super) fn animating(&self, now: Instant) -> bool {
-        match (self, self.intro_transport()) {
-            (
-                Self::Welcome {
-                    outro: Some(outro), ..
-                },
-                Some(_),
-            ) => elapsed_since(outro.from, now) < OUTRO,
-            (Self::Welcome { outro: None, .. }, Some(transport)) => {
-                matches!(transport.state, PlayState::Opening | PlayState::Ready)
-            }
-            (Self::Highlights { since }, _) => elapsed_since(*since, now) < CARD_IN,
-            _ => false,
+        match self {
+            Self::Leaving { outro, .. } => elapsed_since(outro.from, now) < OUTRO,
+            Self::Writing { .. } => true,
+            Self::Playing { player, .. } => matches!(
+                player.transport().state,
+                PlayState::Opening | PlayState::Ready
+            ),
+            Self::Highlights { since } => elapsed_since(*since, now) < CARD_IN,
+            Self::Notice | Self::Done => false,
         }
     }
 }
@@ -416,7 +429,7 @@ mod tests {
     #[test]
     fn the_intro_waits_on_black_while_its_clip_is_written() {
         let now = Instant::now();
-        let mut writing = FirstRun::writing_intro(now);
+        let mut writing = FirstRun::writing_intro(now, gpui_kit::Task::ready(()));
         assert!(writing.awaits_intro());
         let look = writing.intro_look(now);
         assert!(look.skippable && look.curtain == 1. && look.veil == 1.);
@@ -425,7 +438,7 @@ mod tests {
         assert!(!writing.awaits_intro());
         assert_eq!(writing.intro_look(now).card, 1., "the notice");
 
-        let mut skipped = FirstRun::writing_intro(now);
+        let mut skipped = FirstRun::writing_intro(now, gpui_kit::Task::ready(()));
         skipped.skip_intro(now);
         assert!(!skipped.awaits_intro(), "no player is wanted any more");
         skipped.intro_written(None);
@@ -433,7 +446,7 @@ mod tests {
         assert!(lifting.curtain > 0. && lifting.curtain < 1., "{lifting:?}");
         assert_eq!(skipped.intro_look(now + OUTRO).card, 1.);
 
-        let mut slow = FirstRun::writing_intro(now);
+        let mut slow = FirstRun::writing_intro(now, gpui_kit::Task::ready(()));
         let late = now + Duration::from_secs(5);
         slow.settle(late);
         assert!(!slow.awaits_intro(), "the open timeout covers the write");

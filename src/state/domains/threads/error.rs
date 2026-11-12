@@ -113,6 +113,9 @@ impl Session {
                 | RequestPurpose::GetSavedMessagesTopicHistory { .. }
                 | RequestPurpose::SearchSavedMessages { .. },
             ) => {
+                if let Some(request) = extra {
+                    self.topic_action_answered(request, false);
+                }
                 self.chats_state
                     .chat_action_error
                     .push(call_request_error_line(

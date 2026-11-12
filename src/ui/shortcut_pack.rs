@@ -663,7 +663,7 @@ impl QuillApp {
         };
         let size = window.viewport_size();
         // The menu replaces a peek that was open: one thing floats.
-        self.chat_list.overlay.open_row(ChatMenuState::at(
+        self.message_ui.menu.open_row(ChatMenuState::at(
             chat_id,
             point(size.width - px(220.), px(64.)),
         ));
