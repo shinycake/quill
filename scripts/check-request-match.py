@@ -63,18 +63,27 @@ SUCCEED = re.compile(r"\.\s*succeed\s*\(")
 PURPOSE_FILE = re.compile(r"^src/state/(?:request_purpose\.rs|domains/[^/]+/purpose\.rs)$")
 VARIANT = re.compile(r"^\s{4}([A-Z]\w*)\s*\{")
 GENERATION_FIELD = re.compile(r"^\s+generation\s*:\s*u64\b")
+GENERATION_INLINE = re.compile(r"\{[^}]*\bgeneration\s*:\s*u64\b")
+
+
+def generation_hits(text):
+    """(variant, line number) of every purpose variant carrying `generation: u64`."""
+    variant = ""
+    for number, line in enumerate(text.splitlines(), 1):
+        found = VARIANT.match(line)
+        if found:
+            variant = found.group(1)
+            if GENERATION_INLINE.search(line):
+                yield variant, number
+        elif GENERATION_FIELD.match(line):
+            yield variant, number
 
 
 def hits(root):
     for path, text in shape_guard.source(root):
         if PURPOSE_FILE.match(path):
-            variant = ""
-            for number, line in enumerate(text.splitlines(), 1):
-                found = VARIANT.match(line)
-                if found:
-                    variant = found.group(1)
-                elif GENERATION_FIELD.match(line):
-                    yield f"generation:{variant}", path, number
+            for variant, number in generation_hits(text):
+                yield f"generation:{variant}", path, number
         if path == OWNER or shape_guard.is_seeder(path):
             continue
         purpose = "_purpose" in text or "has_auth_submit" in text
@@ -92,5 +101,14 @@ def hits(root):
                 yield f"unmatched:{scopes.at(match.start())}", path, line
 
 
+def self_test():
+    one_line = "    DeepLinkInfo { generation: u64 },\n"
+    multi = "    Jump {\n        generation: u64,\n    },\n"
+    assert list(generation_hits(one_line)) == [("DeepLinkInfo", 1)]
+    assert list(generation_hits(multi)) == [("Jump", 2)]
+    assert not list(generation_hits("    Plain { request: u64 },\n"))
+
+
 if __name__ == "__main__":
+    self_test()
     shape_guard.main("check-request-match", hits, BASELINE, ALLOW, HEADER, ADVICE)

@@ -680,6 +680,36 @@ fn a_refused_phone_share_reports_failure() {
 }
 
 #[test]
+fn a_phone_share_answer_nobody_waits_on_is_dropped_by_the_next_take() {
+    let mut h = Harness::ready();
+    let late = h
+        .driver
+        .share_phone_with_bot(42, &my_contact())
+        .expect("sent");
+    let current = h
+        .driver
+        .share_phone_with_bot(42, &my_contact())
+        .expect("sent");
+    h.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":403,"message":"Bot was blocked by the user"}}"#,
+        late.as_extra()
+    ));
+    let apps = &mut h.driver.session.bots.web_apps;
+    assert_eq!(apps.take_phone_share(None), None, "no flow waits");
+    assert!(apps.phone_share.is_empty(), "the unowned answer is gone");
+    h.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":403,"message":"Bot was blocked by the user"}}"#,
+        late.as_extra()
+    ));
+    let apps = &mut h.driver.session.bots.web_apps;
+    assert_eq!(apps.take_phone_share(Some(current)), None);
+    assert!(
+        apps.phone_share.is_empty(),
+        "an answer for another send is dropped, not kept"
+    );
+}
+
+#[test]
 fn a_phone_share_without_a_number_is_not_sent() {
     let mut h = Harness::ready();
     let mut contact = my_contact();

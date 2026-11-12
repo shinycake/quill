@@ -127,6 +127,19 @@ pub struct CustomRequestReply {
 }
 
 impl WebApps {
+    /// Drains every phone-share answer. The one for `waiting` (the send
+    /// the open window's flow waits on) is returned as "was it sent";
+    /// the rest belong to a send nobody waits on (timed out, window
+    /// closed) and are dropped, so none outlives the next poll.
+    pub fn take_phone_share(&mut self, waiting: Option<crate::ids::RequestId>) -> Option<bool> {
+        let answers = std::mem::take(&mut self.phone_share);
+        let waiting = waiting?;
+        answers
+            .into_iter()
+            .find(|answer| answer.request() == waiting)
+            .map(PhoneShare::is_sent)
+    }
+
     /// The mini app launch `launch_id` closed: its custom requests in
     /// flight and the answers nobody took go with it.
     pub fn forget_custom_requests_of(&mut self, launch_id: i64) {
