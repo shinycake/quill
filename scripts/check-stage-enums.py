@@ -14,9 +14,10 @@ hold what ends it:
 
 - `bare`: the variant has no data at all;
 - `unkeyed`: the variant has data, but no `RequestId`, `Task`,
-  `JoinHandle`, `Subscription`, channel end, deadline or `FileId` in it,
-  or in the types it names (a `FileId` is a download tracked by TDLib's
-  file id: the tracker, `media.downloads`, holds its end);
+  `JoinHandle`, `Subscription`, channel end or deadline in it,
+  or in the types it names. A variant named `Downloading` also counts a
+  `FileId`, as a direct field or a field of a type it names directly (a
+  download tracked by TDLib's file id: `media.downloads` holds its end);
 - `optional`: the only request in it is an `Option<RequestId>`: a stage
   that is `Loading(None)` until a second call fills the request in is the
   "asked but not sent" flag again. Hold `Idle` until the request exists
@@ -77,8 +78,9 @@ IN_FLIGHT = set(
     "Building Cutting Encoding Activating Rendering Listing Jumping Capturing".split()
 )
 CARRIER = re.compile(
-    r"\b(?:RequestId|Task|TaskHold|RenderJob|JoinHandle|Subscription|Receiver|Sender|Instant|SystemTime|FileId)\b"
+    r"\b(?:RequestId|Task|TaskHold|RenderJob|JoinHandle|Subscription|Receiver|Sender|Instant|SystemTime)\b"
 )
+FILE_ID = re.compile(r"\bFileId\b")
 OPTIONAL_REQUEST = re.compile(r"Option\s*<\s*(?:[\w:]*::)?RequestId\s*>")
 # Enums that name a message, a reason or a derived view, not a stored stage.
 NOT_A_STAGE = re.compile(
@@ -126,6 +128,13 @@ def carries(data, types, depth=3):
     )
 
 
+def holds_file(data, types):
+    """Whether `data` has a `FileId`, directly or in a type it names directly."""
+    return bool(FILE_ID.search(data)) or any(
+        FILE_ID.search(body) for name in set(NAME.findall(data)) for body in types.get(name, ())
+    )
+
+
 def hits(root):
     files = list(shape_guard.source(root))
     types = {}
@@ -156,7 +165,7 @@ def hits(root):
                     yield f"bare:{match.group(1)}::{name}", path, line
                 elif optional and len(optional) == len(re.findall(r"\bRequestId\b", data)):
                     yield f"optional:{match.group(1)}::{name}", path, line
-                elif not carries(data, types):
+                elif not carries(data, types) and not (name == "Downloading" and holds_file(data, types)):
                     yield f"unkeyed:{match.group(1)}::{name}", path, line
 
 

@@ -334,12 +334,26 @@ class Enums(unittest.TestCase):
     def test_a_download_stage_holds_its_file_id(self):
         files = {
             "src/state/a.rs": (
-                "pub enum Wait { Idle, Downloading { file: FileId }, Sending(Pending) }\n"
+                "pub enum Wait { Idle, Downloading { file: FileId } }\n"
+                "pub enum Named { Idle, Downloading(Pending) }\n"
                 "pub struct Pending { file_id: FileId, text: String }\n"
                 "pub enum Bare { Idle, Downloading { name: String } }\n"
+                "pub enum Deep { Idle, Downloading(Outer) }\n"
+                "pub struct Outer { inner: Pending }\n"
+                "pub enum Other { Idle, Waiting(Contents) }\n"
+                "pub struct Contents { inner: Pending }\n"
+                "pub enum Send { Idle, Sending { file: FileId } }\n"
             ),
         }
-        self.assertEqual(keys(enums, files), ["unkeyed:Bare::Downloading"])
+        self.assertEqual(
+            keys(enums, files),
+            [
+                "unkeyed:Bare::Downloading",
+                "unkeyed:Deep::Downloading",
+                "unkeyed:Other::Waiting",
+                "unkeyed:Send::Sending",
+            ],
+        )
 
     def test_a_u64_standing_in_for_a_request_id_fails(self):
         files = {
