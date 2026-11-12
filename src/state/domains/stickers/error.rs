@@ -179,6 +179,13 @@ impl Session {
                 .animated
                 .failed_request(pending.map(|p| p.id));
         }
+        if let Some(purpose) = emoji_purpose {
+            self.stickers.emoji.status_list_failed(
+                purpose,
+                pending.map(|p| p.id),
+                crate::lang::tr(crate::lang::keys::Q_MEDIA_COULD_NOT_UPDATE_EMOJI_PACKS),
+            );
+        }
         if let Some(list) = emoji_purpose.and_then(|p| self.stickers.emoji.lists.for_purpose(p)) {
             list.failed(
                 pending.map(|p| p.id),

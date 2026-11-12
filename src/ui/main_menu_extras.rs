@@ -83,6 +83,7 @@ impl QuillApp {
                     .stickers
                     .emoji
                     .upgraded_gift_statuses
+                    .items()
                     .iter()
                     .any(|s| {
                         s.gift

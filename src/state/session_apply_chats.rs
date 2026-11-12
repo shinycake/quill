@@ -606,11 +606,10 @@ impl Session {
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatFolderNewChats)
             && let Some(folder_id) = pending.and_then(|p| p.folder_id())
         {
-            // Asked now that it answered: a request that never left is
-            // asked again, one that answered waits out the update period.
+            // The poll that is out for this request ends: the next waits out
+            // the update period.
             self.chat_list
-                .folder_new_chats_asked
-                .insert(folder_id, std::time::Instant::now());
+                .new_chats_settled(folder_id, pending.map(|p| p.id));
             let ids: Vec<i64> = chat_ids.iter().map(|id| id.0).collect();
             if ids.is_empty() {
                 self.chat_list.folder_new_chats.remove(&folder_id);

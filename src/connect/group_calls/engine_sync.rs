@@ -44,9 +44,7 @@ impl<T: PartialEq + Clone> EngineApply<T> {
                 wanted: refused,
                 retry_at,
                 ..
-            } => {
-                refused != wanted || now >= *retry_at
-            }
+            } => refused != wanted || now >= *retry_at,
         }
     }
 

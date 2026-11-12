@@ -378,8 +378,9 @@ fn the_demo_seed_is_premium_with_every_status_resolved() {
     let emoji = &session.stickers.emoji;
     for id in emoji
         .themed_status_ids
+        .items()
         .iter()
-        .chain(&emoji.default_status_ids)
+        .chain(emoji.default_status_ids.items())
     {
         assert!(emoji.custom_emoji_stickers.lookup(*id).is_some());
     }

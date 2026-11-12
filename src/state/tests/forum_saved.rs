@@ -538,6 +538,8 @@ fn default_icons_keep_only_custom_emoji_stickers() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetForumTopicDefaultIcons, None);
+    session.threads.forum_topic_icons.begin();
+    session.threads.forum_topic_icons.sent(extra);
     let sticker = |id: i64, emoji_id: i64| {
         format!(
             r#"{{"@type":"sticker","id":"{id}","set_id":"1","width":100,"height":100,"emoji":"A","format":{{"@type":"stickerFormatWebp"}},"full_type":{{"@type":"stickerFullTypeCustomEmoji","custom_emoji_id":"{emoji_id}","needs_repainting":false}},"thumbnail":null,"sticker":{{"@type":"file","id":{id},"size":1,"expected_size":1,"local":{{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0}},"remote":{{"@type":"remoteFile","id":"r","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":1}}}}}}"#
@@ -554,9 +556,9 @@ fn default_icons_keep_only_custom_emoji_stickers() {
             sticker(6, 0)
         ),
     );
-    assert_eq!(session.threads.forum_topic_icons.len(), 1);
+    assert_eq!(session.threads.forum_topic_icons.items().len(), 1);
     assert_eq!(
-        session.threads.forum_topic_icons[0].custom_emoji_id,
+        session.threads.forum_topic_icons.items()[0].custom_emoji_id,
         Some(5005)
     );
 }

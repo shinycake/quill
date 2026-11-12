@@ -323,32 +323,26 @@ impl<S: JsonSender> ConnectDriver<S> {
             .chat_folders
             .iter()
             .any(|f| f.id == folder_id && f.is_shareable);
-        if !shared
-            || self
-                .session
-                .requests
-                .has_purpose_for_folder(RequestPurpose::GetChatFolderNewChats, folder_id)
-        {
+        if !shared {
             return Ok(None);
         }
         let period = std::time::Duration::from_secs(
             u64::try_from(self.session.chat_list.folder_limits.new_chats_period_secs())
                 .unwrap_or(3600),
         );
-        if self
-            .session
-            .chat_list
-            .folder_new_chats_asked
-            .get(&folder_id)
-            .is_some_and(|asked| asked.elapsed() < period)
-        {
+        if !self.session.chat_list.new_chats_due(folder_id, period) {
             return Ok(None);
         }
         let extra = self
             .session
             .request_for_folder(RequestPurpose::GetChatFolderNewChats, folder_id);
-        self.send_folder_request(extra, get_chat_folder_new_chats(extra, folder_id))
-            .map(Some)
+        match self.send_folder_request(extra, get_chat_folder_new_chats(extra, folder_id)) {
+            Ok(extra) => {
+                self.session.chat_list.new_chats_sent(folder_id, extra);
+                Ok(Some(extra))
+            }
+            Err(err) => Err(err),
+        }
     }
 
     /// `processChatFolderNewChats`: join the chosen new chats, or dismiss the

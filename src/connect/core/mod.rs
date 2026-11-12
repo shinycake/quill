@@ -77,7 +77,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .filter(|_| ok)
             .and_then(crate::state::story_list_of);
         let main_was_exhausted = self.session.chat_list.main_paging.is_exhausted();
-        let had_topic_icons = !self.session.threads.forum_topic_icons.is_empty();
+        let had_topic_icons = !self.session.threads.forum_topic_icons.items().is_empty();
         // Parity slice: a folder `loadChats` page completing with ok pages
         // on (until a 404 marks the folder exhausted in the reducer).
         // Captured before `apply` takes the pending request.
@@ -704,7 +704,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.maybe_finish_folder_removals()?;
         self.maybe_finish_leave_deletes()?;
         // The topic icon picker's thumbnails come once, when the list lands.
-        if !had_topic_icons && !self.session.threads.forum_topic_icons.is_empty() {
+        if !had_topic_icons && !self.session.threads.forum_topic_icons.items().is_empty() {
             self.download_forum_topic_icons();
         }
         if became_ready {

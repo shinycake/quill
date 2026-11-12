@@ -152,9 +152,11 @@ impl QuillApp {
         let Some(session) = session_mut(self) else {
             return;
         };
-        session.threads.forum_topic_icons = (0..8)
-            .map(|ix| emoji_item(5000 + ix, 0, "\u{2B50}", EMOJI_FILE))
-            .collect();
+        session.threads.forum_topic_icons = quill::state::fetch::Fetch::Ready(
+            (0..8)
+                .map(|ix| emoji_item(5000 + ix, 0, "\u{2B50}", EMOJI_FILE))
+                .collect(),
+        );
         let set: Vec<StickerItem> = [
             "\u{1F3F4}\u{200D}\u{2620}\u{FE0F}",
             "\u{2693}",

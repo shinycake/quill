@@ -219,6 +219,10 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
     // Recent statuses land in the emoji panel under
     // GetRecentEmojiStatuses.
     let extra = with_purpose.request(RequestPurpose::GetRecentEmojiStatuses, None);
+    with_purpose
+        .stickers
+        .emoji
+        .status_list_sent(RequestPurpose::GetRecentEmojiStatuses, extra);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -228,13 +232,13 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
             extra.0
         ),
     );
-    assert_eq!(with_purpose.stickers.emoji.recent_statuses.len(), 1);
+    assert_eq!(with_purpose.stickers.emoji.recent_statuses.items().len(), 1);
     assert_eq!(
-        with_purpose.stickers.emoji.recent_statuses[0].custom_emoji_id,
+        with_purpose.stickers.emoji.recent_statuses.items()[0].custom_emoji_id,
         12345
     );
     assert_eq!(
-        with_purpose.stickers.emoji.recent_statuses[0].expiration_date,
+        with_purpose.stickers.emoji.recent_statuses.items()[0].expiration_date,
         3600
     );
 
@@ -247,10 +251,21 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
         &sink2,
         r#"{"@type":"emojiStatuses","emoji_statuses":[]}"#,
     );
-    assert!(without_purpose.stickers.emoji.recent_statuses.is_empty());
+    assert!(
+        without_purpose
+            .stickers
+            .emoji
+            .recent_statuses
+            .items()
+            .is_empty()
+    );
 
     // Themed/default ids land in their own slots.
     let extra = with_purpose.request(RequestPurpose::GetThemedEmojiStatuses, None);
+    with_purpose
+        .stickers
+        .emoji
+        .status_list_sent(RequestPurpose::GetThemedEmojiStatuses, extra);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -260,8 +275,15 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
             extra.0
         ),
     );
-    assert_eq!(with_purpose.stickers.emoji.themed_status_ids, vec![11, 22]);
+    assert_eq!(
+        with_purpose.stickers.emoji.themed_status_ids.items(),
+        [11, 22]
+    );
     let extra = with_purpose.request(RequestPurpose::GetDefaultEmojiStatuses, None);
+    with_purpose
+        .stickers
+        .emoji
+        .status_list_sent(RequestPurpose::GetDefaultEmojiStatuses, extra);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -271,7 +293,7 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
             extra.0
         ),
     );
-    assert_eq!(with_purpose.stickers.emoji.default_status_ids, vec![33]);
+    assert_eq!(with_purpose.stickers.emoji.default_status_ids.items(), [33]);
 
     // getAnimatedEmoji's animatedEmoji lands under GetAnimatedEmoji.
     let extra = with_purpose.request(RequestPurpose::GetAnimatedEmoji, None);
@@ -445,14 +467,22 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(with_purpose.stickers.emoji.recent_statuses.is_empty());
+    assert!(
+        with_purpose
+            .stickers
+            .emoji
+            .recent_statuses
+            .items()
+            .is_empty()
+    );
 
     // A setEmojiStatus `ok` likewise invalidates recent statuses.
-    with_purpose.stickers.emoji.recent_statuses = vec![EmojiStatusItem {
-        custom_emoji_id: 1,
-        expiration_date: 0,
-        gift: None,
-    }];
+    with_purpose.stickers.emoji.recent_statuses =
+        crate::state::fetch::Fetch::Ready(vec![EmojiStatusItem {
+            custom_emoji_id: 1,
+            expiration_date: 0,
+            gift: None,
+        }]);
     let extra = with_purpose.request(RequestPurpose::SetEmojiStatus, None);
     apply_json(
         &mut with_purpose,
@@ -460,7 +490,14 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(with_purpose.stickers.emoji.recent_statuses.is_empty());
+    assert!(
+        with_purpose
+            .stickers
+            .emoji
+            .recent_statuses
+            .items()
+            .is_empty()
+    );
 
     // A changeStickerSet (emoji) `ok` drops the installed emoji sets.
     let extra = with_purpose.request(RequestPurpose::ChangeEmojiSet, None);

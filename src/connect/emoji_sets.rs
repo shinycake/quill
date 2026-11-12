@@ -85,6 +85,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .stickers
             .emoji
             .upgraded_gift_statuses
+            .items()
             .iter()
             .filter_map(|item| item.gift.clone())
             .find(|gift| gift.model_custom_emoji_id == custom_emoji_id)
@@ -208,6 +209,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .stickers
             .emoji
             .recent_statuses
+            .items()
             .iter()
             .map(|s| s.custom_emoji_id)
             .chain(
@@ -215,6 +217,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .stickers
                     .emoji
                     .themed_status_ids
+                    .items()
                     .iter()
                     .copied(),
             )
@@ -223,6 +226,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .stickers
                     .emoji
                     .default_status_ids
+                    .items()
                     .iter()
                     .copied(),
             )
@@ -231,6 +235,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .stickers
                     .emoji
                     .chat_default_status_ids
+                    .items()
                     .iter()
                     .copied(),
             )
@@ -239,6 +244,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .stickers
                     .emoji
                     .upgraded_gift_statuses
+                    .items()
                     .iter()
                     .filter_map(|item| item.gift.as_ref().map(|g| g.model_custom_emoji_id)),
             )
@@ -299,30 +305,36 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        // A list is busy while its own fetch waits; any other request while
-        // the one this driver sent for it is out.
+        // A list is busy while its own fetch waits, a change while its stage
+        // holds the request. Nothing else is kept beside the stage.
         let busy = match self.session.stickers.emoji.lists.for_purpose(purpose) {
             Some(list) => list.is_loading(),
-            None => self.asked.is_out(&self.session.requests, purpose),
+            None if purpose == RequestPurpose::ChangeEmojiSet => {
+                self.session.stickers.emoji.mutation.is_running()
+            }
+            None => self.session.stickers.emoji.status_list_loading(purpose),
         };
         if purpose != RequestPurpose::ViewTrendingEmojiSets && busy {
             return Ok(None);
         }
         let extra = self.session.request(purpose, None);
-        self.asked.sent(&self.session.requests, purpose, extra);
         if let Err(err) = self.sender.send_json(&build(extra)) {
             self.session.requests.take(extra);
+            let line = crate::lang::tr(crate::lang::keys::Q_MEDIA_COULD_NOT_UPDATE_EMOJI_PACKS);
             if let Some(list) = self.session.stickers.emoji.lists.for_purpose(purpose) {
-                list.fail(crate::lang::tr(
-                    crate::lang::keys::Q_MEDIA_COULD_NOT_UPDATE_EMOJI_PACKS,
-                ));
+                list.fail(line);
             }
+            self.session
+                .stickers
+                .emoji
+                .status_list_refused(purpose, line);
             return Err(err);
         }
         if let Some(list) = self.session.stickers.emoji.lists.for_purpose(purpose) {
             list.begin();
             list.sent(extra);
         }
+        self.session.stickers.emoji.status_list_sent(purpose, extra);
         Ok(Some(extra))
     }
 

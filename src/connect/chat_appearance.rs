@@ -49,17 +49,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.load_background_emoji_icons()?;
         self.session.stickers.emoji.status_picker = crate::emoji::StatusPicker::ChatAppearance;
         let purpose = RequestPurpose::GetDefaultChatEmojiStatuses;
-        if self
-            .session
-            .stickers
-            .emoji
-            .chat_default_status_ids
-            .is_empty()
-            && !self.asked.is_out(&self.session.requests, purpose)
-        {
+        let emoji = &mut self.session.stickers.emoji;
+        if emoji.chat_default_status_ids.data().is_none() && !emoji.status_list_loading(purpose) {
             let extra = self.session.request(purpose, None);
-            self.asked.sent(&self.session.requests, purpose, extra);
-            self.send_json_request(extra, &get_default_chat_emoji_statuses(extra))?;
+            match self.send_json_request(extra, &get_default_chat_emoji_statuses(extra)) {
+                Ok(extra) => self.session.stickers.emoji.status_list_sent(purpose, extra),
+                Err(err) => {
+                    self.session
+                        .stickers
+                        .emoji
+                        .status_list_refused(purpose, &err.stage_line());
+                    return Err(err);
+                }
+            }
         }
         Ok(())
     }
@@ -193,6 +195,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let emoji = &self.session.stickers.emoji;
         let files: Vec<FileId> = emoji
             .chat_default_status_ids
+            .items()
             .iter()
             .filter_map(|id| {
                 emoji

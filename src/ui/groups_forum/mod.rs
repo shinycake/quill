@@ -451,6 +451,7 @@ impl QuillApp {
             session.and_then(|s| {
                 s.threads
                     .forum_topic_icons
+                    .items()
                     .iter()
                     .find(|sticker| sticker.custom_emoji_id == Some(id))
             })
@@ -513,7 +514,7 @@ impl QuillApp {
                     .child(letter_icon(&name, editor.color, 28.)),
             );
         for (ix, sticker) in session
-            .map(|s| s.threads.forum_topic_icons.as_slice())
+            .map(|s| s.threads.forum_topic_icons.items())
             .unwrap_or_default()
             .iter()
             .enumerate()
@@ -541,11 +542,7 @@ impl QuillApp {
                     .child(visual(id, 28.)),
             );
         }
-        let loading = session.is_some_and(|s| {
-            s.threads.forum_topic_icons.is_empty()
-                && s.requests
-                    .has_purpose(RequestPurpose::GetForumTopicDefaultIcons)
-        });
+        let loading = session.is_some_and(|s| s.threads.forum_topic_icons.shows_loading());
         let creating = editor.target.is_none();
         let sending = editor
             .submit

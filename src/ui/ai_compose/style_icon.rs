@@ -41,6 +41,7 @@ impl QuillApp {
         let item = session
             .threads
             .forum_topic_icons
+            .items()
             .iter()
             .chain(session.media.media_library.values().flatten())
             .find(|item| item.custom_emoji_id == Some(id))?;
@@ -54,6 +55,7 @@ impl QuillApp {
         let icons: Vec<StickerItem> = session
             .threads
             .forum_topic_icons
+            .items()
             .iter()
             .filter(|item| item.custom_emoji_id.is_some())
             .cloned()

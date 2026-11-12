@@ -179,13 +179,11 @@ impl Session {
                     err.code
                 ));
             }
-            // Asked, so the poll waits out the update period instead of
+            // The poll that failed waits out the update period instead of
             // asking again on every tick.
             Some(RequestPurpose::GetChatFolderNewChats) => {
                 if let Some(folder_id) = pending.and_then(|p| p.folder_id()) {
-                    self.chat_list
-                        .folder_new_chats_asked
-                        .insert(folder_id, std::time::Instant::now());
+                    self.chat_list.new_chats_settled(folder_id, pending_id);
                 }
             }
             Some(RequestPurpose::HidePromotion) => {

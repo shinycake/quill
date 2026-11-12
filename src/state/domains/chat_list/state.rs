@@ -3,6 +3,45 @@
 //! with `new`.
 use crate::state::*;
 
+/// Where one folder's new-chats poll is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NewChatsAsk {
+    /// `getChatFolderNewChats` is out as this request.
+    Out(RequestId),
+    /// It was answered (or failed) at this time: the next waits out the
+    /// update period.
+    Answered(std::time::Instant),
+}
+
+impl ChatListState {
+    /// Whether the folder's new chats may be asked for now: not out, and
+    /// the update period since the last answer has passed.
+    pub fn new_chats_due(&self, folder_id: i32, period: std::time::Duration) -> bool {
+        match self.folder_new_chats_ask.get(&folder_id) {
+            None => true,
+            Some(NewChatsAsk::Out(_)) => false,
+            Some(NewChatsAsk::Answered(at)) => at.elapsed() >= period,
+        }
+    }
+
+    /// The poll went out as `request`.
+    pub(crate) fn new_chats_sent(&mut self, folder_id: i32, request: RequestId) {
+        self.folder_new_chats_ask
+            .insert(folder_id, NewChatsAsk::Out(request));
+    }
+
+    /// `request` answered or failed: only the poll that is out for it ends,
+    /// and the next waits out the update period.
+    pub(crate) fn new_chats_settled(&mut self, folder_id: i32, request: Option<RequestId>) {
+        if let Some(NewChatsAsk::Out(out)) = self.folder_new_chats_ask.get(&folder_id)
+            && Some(*out) == request
+        {
+            self.folder_new_chats_ask
+                .insert(folder_id, NewChatsAsk::Answered(std::time::Instant::now()));
+        }
+    }
+}
+
 /// The Share Folder box's data for one folder: what each of its two
 /// fetches stands at, with the answer inside (`Fetch`).
 #[derive(Debug, Default)]
@@ -70,9 +109,10 @@ pub struct ChatListState {
     /// `getChatFolderNewChats` answers per shared folder: chats its owner
     /// added since the user last looked (the "N new chats" bar).
     pub folder_new_chats: HashMap<i32, Vec<i64>>,
-    /// When each folder's new chats were last asked for (TDLib wants one
-    /// call per `chat_folder_new_chats_update_period`).
-    pub folder_new_chats_asked: HashMap<i32, std::time::Instant>,
+    /// Where each folder's new-chats poll is: out as a request, or answered
+    /// at a time (TDLib wants one call per
+    /// `chat_folder_new_chats_update_period`).
+    pub folder_new_chats_ask: HashMap<i32, NewChatsAsk>,
     /// Folder limits from TDLib options and `getPremiumLimit`.
     pub folder_limits: crate::folder_limits::FolderLimits,
     /// Folder requests that failed on a limit, oldest first, until the UI
@@ -328,7 +368,7 @@ impl ChatListState {
             recommended_folders: crate::state::fetch::Fetch::Idle,
             dialog_answers: DialogAnswers::default(),
             folder_new_chats: HashMap::new(),
-            folder_new_chats_asked: HashMap::new(),
+            folder_new_chats_ask: HashMap::new(),
             folder_limits: crate::folder_limits::FolderLimits::default(),
             folder_limit_hits: Default::default(),
             // Slice CL1: TDLib's compiled defaults for the pin limits

@@ -195,15 +195,15 @@ pub struct EmojiPanel {
     /// Slice S10: `searchStickerSets` results (emoji type).
     pub found_sets: Vec<StickerSetInfo>,
     /// Slice S10: recent emoji statuses (`getRecentEmojiStatuses`).
-    pub recent_statuses: Vec<EmojiStatusItem>,
+    pub recent_statuses: crate::state::fetch::Fetch<Vec<EmojiStatusItem>>,
     /// Slice S10: picker's "trending" statuses (`getThemedEmojiStatuses`).
-    pub themed_status_ids: Vec<i64>,
+    pub themed_status_ids: crate::state::fetch::Fetch<Vec<i64>>,
     /// Slice S10: default statuses (`getDefaultEmojiStatuses`).
-    pub default_status_ids: Vec<i64>,
+    pub default_status_ids: crate::state::fetch::Fetch<Vec<i64>>,
     /// `getDefaultChatEmojiStatuses`: the statuses of channels and groups.
-    pub chat_default_status_ids: Vec<i64>,
+    pub chat_default_status_ids: crate::state::fetch::Fetch<Vec<i64>>,
     /// Slice S10: upgraded-gift statuses (`getUpgradedGiftEmojiStatuses`).
-    pub upgraded_gift_statuses: Vec<EmojiStatusItem>,
+    pub upgraded_gift_statuses: crate::state::fetch::Fetch<Vec<EmojiStatusItem>>,
     /// `getAnimatedEmoji` for the composer's "suggest animated emoji": the
     /// emoji asked (it dedupes requests across keystrokes) and its answer.
     pub animated: AnimatedSuggestion,
@@ -437,12 +437,12 @@ impl Session {
     ) {
         match payload {
             EnvelopePayload::Stickers(StickersPayload::EmojiStatuses { statuses }) => {
-                self.accept_emoji_statuses(purpose, statuses);
+                self.accept_emoji_statuses(purpose, request, statuses);
             }
             EnvelopePayload::Stickers(StickersPayload::EmojiStatusCustomEmojis {
                 custom_emoji_ids,
             }) => {
-                self.accept_emoji_status_ids(purpose, custom_emoji_ids);
+                self.accept_emoji_status_ids(purpose, request, custom_emoji_ids);
             }
             EnvelopePayload::Stickers(StickersPayload::AnimatedEmoji { sticker, files }) => {
                 self.accept_animated_emoji(purpose, request, sticker, files);
@@ -459,31 +459,38 @@ impl Session {
         }
     }
 
-    /// Slice S10: store `emojiStatuses` under the matching status purpose.
+    /// Slice S10: store `emojiStatuses` for the list whose request answered.
     pub fn accept_emoji_statuses(
         &mut self,
         purpose: Option<RequestPurpose>,
+        request: Option<crate::ids::RequestId>,
         statuses: Vec<EmojiStatusItem>,
     ) {
+        let emoji = &mut self.stickers.emoji;
         if purpose == Some(RequestPurpose::GetRecentEmojiStatuses) {
-            self.stickers.emoji.recent_statuses = statuses;
+            emoji.recent_statuses.answered(request, statuses);
         } else if purpose == Some(RequestPurpose::GetUpgradedGiftEmojiStatuses) {
-            self.stickers.emoji.upgraded_gift_statuses = statuses;
+            emoji.upgraded_gift_statuses.answered(request, statuses);
         }
     }
 
-    /// Slice S10: store `emojiStatusCustomEmojis` under the matching purpose.
+    /// Slice S10: store `emojiStatusCustomEmojis` for the list whose request
+    /// answered.
     pub fn accept_emoji_status_ids(
         &mut self,
         purpose: Option<RequestPurpose>,
+        request: Option<crate::ids::RequestId>,
         custom_emoji_ids: Vec<i64>,
     ) {
+        let emoji = &mut self.stickers.emoji;
         if purpose == Some(RequestPurpose::GetThemedEmojiStatuses) {
-            self.stickers.emoji.themed_status_ids = custom_emoji_ids;
+            emoji.themed_status_ids.answered(request, custom_emoji_ids);
         } else if purpose == Some(RequestPurpose::GetDefaultEmojiStatuses) {
-            self.stickers.emoji.default_status_ids = custom_emoji_ids;
+            emoji.default_status_ids.answered(request, custom_emoji_ids);
         } else if purpose == Some(RequestPurpose::GetDefaultChatEmojiStatuses) {
-            self.stickers.emoji.chat_default_status_ids = custom_emoji_ids;
+            emoji
+                .chat_default_status_ids
+                .answered(request, custom_emoji_ids);
         }
     }
 
@@ -756,11 +763,13 @@ impl Session {
             if let Some(Some(id)) = self.stickers.emoji.status_change.answered(request) {
                 self.remember_emoji_pack_usage(&[id]);
             }
-            self.stickers.emoji.recent_statuses.clear();
-            drop(
-                self.requests
-                    .take_purpose(RequestPurpose::GetRecentEmojiStatuses),
-            );
+            // The recents the change made wrong go, and a fetch still out
+            // asked before it: its request is dropped with its stage.
+            let asked = self.stickers.emoji.recent_statuses.request();
+            self.stickers.emoji.recent_statuses = Default::default();
+            if let Some(asked) = asked {
+                drop(self.requests.take(asked));
+            }
         }
         if matches!(
             purpose,
@@ -778,3 +787,70 @@ mod tests;
 
 #[cfg(test)]
 mod keyword_language_tests;
+
+/// Runs `$body` on the fetch of the status list `$purpose` loads (`$default`
+/// for any other purpose). The lists hold different items, so this expands
+/// the body once per list.
+macro_rules! on_status_list {
+    ($panel:expr, $purpose:expr, $default:expr, |$list:ident| $body:expr) => {
+        match $purpose {
+            RequestPurpose::GetRecentEmojiStatuses => {
+                let $list = &mut $panel.recent_statuses;
+                $body
+            }
+            RequestPurpose::GetThemedEmojiStatuses => {
+                let $list = &mut $panel.themed_status_ids;
+                $body
+            }
+            RequestPurpose::GetDefaultEmojiStatuses => {
+                let $list = &mut $panel.default_status_ids;
+                $body
+            }
+            RequestPurpose::GetDefaultChatEmojiStatuses => {
+                let $list = &mut $panel.chat_default_status_ids;
+                $body
+            }
+            RequestPurpose::GetUpgradedGiftEmojiStatuses => {
+                let $list = &mut $panel.upgraded_gift_statuses;
+                $body
+            }
+            _ => $default,
+        }
+    };
+}
+
+/// The five status lists the pickers load: each is its own fetch, matched to
+/// the request that asked.
+impl EmojiPanel {
+    /// The status list `purpose` loads is waiting for its answer.
+    pub fn status_list_loading(&mut self, purpose: RequestPurpose) -> bool {
+        on_status_list!(self, purpose, false, |list| list.is_loading())
+    }
+
+    /// The status list `purpose` loads goes out as `request`.
+    pub fn status_list_sent(&mut self, purpose: RequestPurpose, request: crate::ids::RequestId) {
+        on_status_list!(self, purpose, (), |list| {
+            list.begin();
+            list.sent(request);
+        })
+    }
+
+    /// The request of the status list `purpose` loads failed: only the list
+    /// that waits for it fails.
+    pub fn status_list_failed(
+        &mut self,
+        purpose: RequestPurpose,
+        request: Option<crate::ids::RequestId>,
+        error: &str,
+    ) {
+        on_status_list!(self, purpose, (), |list| {
+            list.failed(request, error, false);
+        })
+    }
+
+    /// The request of the status list `purpose` loads was refused before it
+    /// left.
+    pub fn status_list_refused(&mut self, purpose: RequestPurpose, error: &str) {
+        on_status_list!(self, purpose, (), |list| list.fail(error))
+    }
+}
