@@ -229,7 +229,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         // Slice G1: a new add attempt resets the failure count — errors
         // from a previous attempt must not linger into this one.
-        self.session.groups.add_members_failed.remove(&chat_id.0);
+        self.session.groups.begin_member_add(chat_id.0);
         // Basic groups need one `addChatMember` per user; supergroups and
         // channels take a single bulk `addChatMembers`.
         let mut first_extra = None;
@@ -248,13 +248,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     // dialog's note says so instead of reporting success.
                     let unsent =
                         i32::try_from(user_ids.len().saturating_sub(index)).unwrap_or(i32::MAX);
-                    let failed = self
-                        .session
-                        .groups
-                        .add_members_failed
-                        .entry(chat_id.0)
-                        .or_insert(0);
-                    *failed = failed.saturating_add(unsent);
+                    self.session.groups.add_members_unsent(chat_id.0, unsent);
                     break;
                 }
                 if first_extra.is_none() {

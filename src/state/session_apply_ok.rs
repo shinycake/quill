@@ -693,7 +693,7 @@ impl Session {
                 .supergroup_members
                 .retain(|(id, _), _| *id != chat_id.0);
             self.groups.admin_lists.remove(&chat_id.0);
-            self.groups.add_members_failed.remove(&chat_id.0);
+            self.groups.member_actions.remove(&chat_id.0);
         }
         // Phase D3a: `processChatJoinRequest` confirmed — drop the
         // processed request from the cached list. The count is

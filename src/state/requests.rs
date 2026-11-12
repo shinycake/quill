@@ -448,6 +448,11 @@ impl RequestRegistry {
             .any(|p| p.purpose == purpose && p.secret_chat_id() == Some(secret_chat_id))
     }
 
+    /// The id of the newest request registered so far (0 before any).
+    pub fn newest(&self) -> RequestId {
+        RequestId(self.next)
+    }
+
     /// A request with no correlation, under the next id.
     fn blank(
         &mut self,

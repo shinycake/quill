@@ -30,8 +30,7 @@ fn custom_title_failure_surfaces_in_member_dialog() {
     );
     let message = session
         .groups
-        .member_action_error
-        .get(&13)
+        .member_action_error(13)
         .expect("member action error recorded");
     assert!(message.contains("Could not set custom title"));
     assert!(matches!(
@@ -64,7 +63,7 @@ fn a_refused_member_status_change_keeps_the_loaded_administrators() {
             extra.0
         ),
     );
-    assert!(session.groups.member_action_error.contains_key(&13));
+    assert!(session.groups.member_action_error(13).is_some());
     assert!(matches!(
         session.groups.admin_lists.get(&13),
         Some(AdminListFetch::Loaded(_))
@@ -101,7 +100,7 @@ fn basic_group_add_member_failures_accumulate() {
             ),
         );
     }
-    assert_eq!(session.groups.add_members_failed.get(&13), Some(&1));
+    assert_eq!(session.groups.add_members_failed(13), 1);
     let extra = session.request(RequestPurpose::AddChatMember, Some(ChatId(13)));
     apply_json(
         &mut session,
@@ -112,7 +111,7 @@ fn basic_group_add_member_failures_accumulate() {
             extra.0
         ),
     );
-    assert_eq!(session.groups.add_members_failed.get(&13), Some(&2));
+    assert_eq!(session.groups.add_members_failed(13), 2);
 }
 
 #[test]
@@ -137,7 +136,7 @@ fn bulk_add_members_response_replaces_count() {
             ),
         );
     }
-    assert_eq!(session.groups.add_members_failed.get(&13), Some(&1));
+    assert_eq!(session.groups.add_members_failed(13), 1);
 }
 
 /// An older list request's error does not fail a list a newer request
@@ -1205,4 +1204,27 @@ fn a_refused_boost_settings_ask_fails_and_is_asked_again() {
     session.groups.boosts_per_gift.sent(other);
     apply_json(&mut session, &seq, &sink, &error(asked));
     assert!(session.groups.boosts_per_gift.is_loading());
+}
+
+/// Sweep 08-018: the refusal of an action asked before the member dialog
+/// was opened again lands nowhere; one asked after it shows.
+#[test]
+fn a_late_member_action_error_never_lands_on_a_newer_dialog() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let tag = RequestPurpose::Groups(GroupsPurpose::SetChatMemberTag { user_id: 42 });
+    let old = session.request(tag, Some(ChatId(13)));
+    let newest = session.newest_request();
+    session.groups.open_member_actions(13, newest);
+    let new = session.request(tag, Some(ChatId(13)));
+    let refused = |extra: RequestId| {
+        format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHAT_ADMIN_REQUIRED"}}"#,
+            extra.0
+        )
+    };
+    apply_json(&mut session, &seq, &sink, &refused(old));
+    assert_eq!(session.groups.member_action_error(13), None);
+    apply_json(&mut session, &seq, &sink, &refused(new));
+    assert!(session.groups.member_action_error(13).is_some());
 }

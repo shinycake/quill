@@ -103,9 +103,13 @@ impl Session {
         } else {
             fetch.take_data().unwrap_or_default()
         };
-        let handled = self.communities.handled_add_requests.get(&community_id);
+        // The marks were for the page that just answered.
+        let handled = self.communities.handled_add_requests.remove(&community_id);
         for request in page.requests {
-            if handled.is_some_and(|handled| handled.contains(&request.chat_id)) {
+            if handled
+                .as_ref()
+                .is_some_and(|handled| handled.contains(&request.chat_id))
+            {
                 continue;
             }
             if !list.requests.iter().any(|r| r.chat_id == request.chat_id) {
@@ -188,12 +192,21 @@ impl Session {
     /// `ok` (`CommunityManager::on_change_community_dialogs`), so the new
     /// count has already come with `updateCommunityFullInfo`.
     fn drop_add_chat_request(&mut self, community_id: i64, chat_id: i64) {
-        // A page asked before this request was handled may still list it.
-        self.communities
-            .handled_add_requests
-            .entry(community_id)
-            .or_default()
-            .insert(chat_id);
+        // A page asked before this request was handled may still list it:
+        // marked only while such a page is out, and the mark goes with that
+        // page's answer, so a chat that asks again later is not hidden.
+        if self
+            .communities
+            .add_chat_requests
+            .get(&community_id)
+            .is_some_and(Fetch::is_loading)
+        {
+            self.communities
+                .handled_add_requests
+                .entry(community_id)
+                .or_default()
+                .insert(chat_id);
+        }
         let Some(list) = self
             .communities
             .add_chat_requests

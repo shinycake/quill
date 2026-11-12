@@ -450,3 +450,29 @@ fn a_swept_request_settles_the_box_waiting_on_it() {
         "the sweep refuses it, so the dialog returns to editing"
     );
 }
+
+/// Sweep 07-007: a swept `getWebPageInstantView` leaves no ask behind and
+/// the link opens in the browser, as after a refusal.
+#[test]
+fn a_swept_instant_view_request_falls_back_to_the_browser() {
+    let mut session = ready_session();
+    let request = session.request(RequestPurpose::GetWebPageInstantView, None);
+    session.messages.instant_view_requests.insert(
+        request,
+        InstantViewAsk {
+            url: "https://example.com/a".into(),
+            from_agent: false,
+        },
+    );
+    let pending = session.requests.take(request).expect("registered");
+    session.settle_lost_request(pending);
+    assert!(session.messages.instant_view_requests.is_empty());
+    assert_eq!(
+        session.messages.instant_view_fallbacks,
+        vec![InstantViewFallback {
+            window: None,
+            url: "https://example.com/a".into(),
+            from_agent: false,
+        }]
+    );
+}

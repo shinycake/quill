@@ -2,6 +2,11 @@
 use super::*;
 
 impl Session {
+    /// The newest request this session registered so far.
+    pub fn newest_request(&self) -> RequestId {
+        self.requests.newest()
+    }
+
     pub fn request(&mut self, purpose: RequestPurpose, chat_id: Option<ChatId>) -> RequestId {
         let view = if matches!(
             purpose,

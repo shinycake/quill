@@ -284,20 +284,10 @@ pub struct GroupsState {
     pub basic_group_active: HashMap<i64, bool>,
     /// B7: steps waiting for a group-admin request to succeed.
     pub admin_followups: Vec<(RequestId, AdminFollowup)>,
-    /// Slice G1: `addChatMembers` failure count from the last add
-    /// attempt — `failedToAddMembers.failed_to_add_members.len()` for the
-    /// bulk path (schema 1.8.67, line 3640), or the accumulated per-user
-    /// `addChatMember` `failedToAddMembers` counts plus error responses
-    /// for basic groups — keyed by chat id.
-    /// Reset when a new add starts; cleared when the dialog closes.
-    pub add_members_failed: HashMap<i64, i32>,
-    /// Slice G1: last member-action failure for the member-management
-    /// dialog (`setChatMemberTag` / `setChatMemberStatus`), keyed by
-    /// chat id. The dialog reads the member-list fetch states, not
-    /// `admin_lists`, so action failures need their own slot to be
-    /// visible where the action was taken. Cleared when the dialog
-    /// opens.
-    pub member_action_error: HashMap<i64, String>,
+    /// Slice G1: what the member actions of a chat came to, for the
+    /// member-management dialog and the Administrators page (see
+    /// [`MemberActions`]).
+    pub member_actions: HashMap<i64, MemberActions>,
     /// Phase D3b: one administrator's parsed `chatAdministratorRights`
     /// fetch state, keyed by (chat_id, user_id). Filled by `getChatMember`
     /// (purpose `GetAdminRights`); drives the edit-rights dialog.
@@ -305,7 +295,115 @@ pub struct GroupsState {
     pub private_sharing: PrivateSharingState,
 }
 
+/// What the member actions of one chat came to since the member dialog
+/// opened. An answer or error of a request asked before `since` (an action
+/// of an earlier open of the dialog) lands nowhere, so a late line never
+/// shows up on a newer dialog.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemberActions {
+    /// The newest request when the dialog opened.
+    since: RequestId,
+    /// Last member-action failure (`setChatMemberTag` /
+    /// `setChatMemberStatus`). The dialog reads the member-list fetch
+    /// states, not `admin_lists`, so action failures need their own slot to
+    /// be visible where the action was taken.
+    error: Option<String>,
+    /// `addChatMembers` failure count of the last add attempt:
+    /// `failedToAddMembers.failed_to_add_members.len()` for the bulk path
+    /// (schema 1.8.67, line 3640), or the accumulated per-user
+    /// `addChatMember` counts plus error responses for basic groups.
+    add_failed: i32,
+}
+
 impl GroupsState {
+    /// The member dialog of `chat_id` opens: the last open's failures go,
+    /// and so does the answer of any request asked before now.
+    pub fn open_member_actions(&mut self, chat_id: i64, newest: RequestId) {
+        self.member_actions.insert(
+            chat_id,
+            MemberActions {
+                since: newest,
+                error: None,
+                add_failed: 0,
+            },
+        );
+    }
+
+    fn member_actions_for(&mut self, chat_id: i64) -> &mut MemberActions {
+        self.member_actions
+            .entry(chat_id)
+            .or_insert_with(|| MemberActions {
+                since: RequestId(0),
+                error: None,
+                add_failed: 0,
+            })
+    }
+
+    /// The failure line of the last refused member action.
+    pub fn member_action_error(&self, chat_id: i64) -> Option<&str> {
+        self.member_actions.get(&chat_id)?.error.as_deref()
+    }
+
+    pub fn dismiss_member_action_error(&mut self, chat_id: i64) {
+        if let Some(actions) = self.member_actions.get_mut(&chat_id) {
+            actions.error = None;
+        }
+    }
+
+    /// `request` (a member action of `chat_id`) was refused.
+    pub(crate) fn member_action_failed(&mut self, chat_id: i64, request: RequestId, line: String) {
+        let actions = self.member_actions_for(chat_id);
+        if request.0 > actions.since.0 {
+            actions.error = Some(line);
+        }
+    }
+
+    /// Members the last add could not add.
+    pub fn add_members_failed(&self, chat_id: i64) -> i32 {
+        self.member_actions
+            .get(&chat_id)
+            .map_or(0, |actions| actions.add_failed)
+    }
+
+    /// A new add attempt starts: the last attempt's failures go.
+    pub(crate) fn begin_member_add(&mut self, chat_id: i64) {
+        self.member_actions_for(chat_id).add_failed = 0;
+    }
+
+    /// The add-members failures are dismissed or the dialog closed.
+    pub fn clear_add_members_failed(&mut self, chat_id: i64) {
+        if let Some(actions) = self.member_actions.get_mut(&chat_id) {
+            actions.add_failed = 0;
+        }
+    }
+
+    /// `request` (an add of `chat_id`) failed for `count` more members; an
+    /// answer of an earlier open of the dialog adds nothing. `replace` sets
+    /// the count instead (the bulk answer is a single response).
+    pub(crate) fn add_members_failed_by(
+        &mut self,
+        chat_id: i64,
+        request: RequestId,
+        count: i32,
+        replace: bool,
+    ) {
+        let actions = self.member_actions_for(chat_id);
+        if request.0 <= actions.since.0 {
+            return;
+        }
+        actions.add_failed = if replace {
+            count
+        } else {
+            actions.add_failed.saturating_add(count)
+        };
+    }
+
+    /// Members the add never sent count as failed (no request to match).
+    pub(crate) fn add_members_unsent(&mut self, chat_id: i64, count: i32) {
+        let actions = self.member_actions_for(chat_id);
+        actions.add_failed = actions.add_failed.saturating_add(count);
+    }
+
     /// `updateChatWelcomeMessages` carries the whole pack and asks nothing:
     /// it is the newest truth, so it replaces the pack whichever fetch was
     /// in flight (a late answer of that fetch finds `Ready` and is dropped).
@@ -380,8 +478,7 @@ impl GroupsState {
             basic_group_manage_video_chats_right: HashMap::new(),
             basic_group_active: HashMap::new(),
             admin_followups: Vec::new(),
-            add_members_failed: HashMap::new(),
-            member_action_error: HashMap::new(),
+            member_actions: HashMap::new(),
             admin_rights: HashMap::new(),
             private_sharing: PrivateSharingState::default(),
         }

@@ -63,13 +63,14 @@ impl QuillApp {
         // Slice G1: a fresh dialog open clears the last action error —
         // stale failures from a previous open must not linger.
         if let Some(live) = self.live.as_mut() {
+            let newest = live.driver.session.newest_request();
             live.driver
                 .session
                 .groups
-                .member_action_error
-                .remove(&chat_id.0);
+                .open_member_actions(chat_id.0, newest);
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.groups.member_action_error.remove(&chat_id.0);
+            let newest = session.newest_request();
+            session.groups.open_member_actions(chat_id.0, newest);
         }
         cx.notify();
         self.refresh_member_dialog(cx);
@@ -82,10 +83,9 @@ impl QuillApp {
                 live.driver
                     .session
                     .groups
-                    .add_members_failed
-                    .remove(&chat_id.0);
+                    .clear_add_members_failed(chat_id.0);
             } else if let Some(session) = self.demo_session.as_mut() {
-                session.groups.add_members_failed.remove(&chat_id.0);
+                session.groups.clear_add_members_failed(chat_id.0);
             }
         }
         cx.notify();
@@ -284,8 +284,8 @@ impl QuillApp {
             ));
             if let Some(error) = this
                 .session()
-                .and_then(|session| session.groups.member_action_error.get(&chat_id.0))
-                .cloned()
+                .and_then(|session| session.groups.member_action_error(chat_id.0))
+                .map(str::to_owned)
             {
                 body = body.child(
                     div()
@@ -446,8 +446,7 @@ impl QuillApp {
                 if add_open {
                     if let Some(failed) = this
                         .session()
-                        .and_then(|session| session.groups.add_members_failed.get(&chat_id.0))
-                        .copied()
+                        .map(|session| session.groups.add_members_failed(chat_id.0))
                         .filter(|count| *count > 0)
                     {
                         body = body.child(
@@ -470,8 +469,7 @@ impl QuillApp {
                                                 live.driver
                                                     .session
                                                     .groups
-                                                    .add_members_failed
-                                                    .remove(&chat_id.0);
+                                                    .clear_add_members_failed(chat_id.0);
                                             }
                                             cx.notify();
                                             this.close_kit_dialog_if_done(
