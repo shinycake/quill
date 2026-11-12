@@ -159,7 +159,7 @@ pub fn draft_text_to_store(text: &str, has_reply: bool) -> Option<&str> {
 pub enum SendContent {
     #[default]
     Text,
-    Single(ComposerAttachment),
+    Single(Box<ComposerAttachment>),
     /// 2–10 photos and/or videos, or files.
     Album(Vec<ComposerAttachment>),
 }
@@ -178,7 +178,7 @@ impl SendContent {
     pub fn attachments(&self) -> &[ComposerAttachment] {
         match self {
             Self::Text => &[],
-            Self::Single(attachment) => std::slice::from_ref(attachment),
+            Self::Single(attachment) => std::slice::from_ref(&**attachment),
             Self::Album(list) => list,
         }
     }
@@ -233,7 +233,9 @@ impl ComposerSnapshot {
             chat_id: chat_id.0,
             view_generation: view_generation.0,
             text: text.into(),
-            content: attachment.map_or(SendContent::Text, SendContent::Single),
+            content: attachment.map_or(SendContent::Text, |attachment| {
+                SendContent::Single(Box::new(attachment))
+            }),
             reply_to: None,
             self_destruct: None,
             send_options: SendOptions::default(),
