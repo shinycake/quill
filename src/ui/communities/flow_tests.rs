@@ -455,6 +455,7 @@ fn ban_waiting_for_a_warning(app: &Entity<QuillApp>, vcx: &mut VisualTestContext
             community_id: RUSTACEANS,
             member,
             name: "Ann".into(),
+            request: quill::ids::RequestId(7),
             over: None,
         });
         if let Some(session) = app.demo_session.as_mut() {
@@ -489,6 +490,117 @@ fn a_ban_warning_is_dropped_when_another_box_is_open_at_its_answer(cx: &mut Test
     // Closing Pick later pops nothing.
     app.update(&mut vcx, |app, cx| assert!(!app.drain_pending_ban(cx)));
     assert_eq!(open_box(&app, &mut vcx), "none");
+}
+
+fn push_ban(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, member: i64, request: u64) {
+    use super::PendingBan;
+    use quill::state::{CommunityMember, fetch::Fetch};
+    app.update(vcx, |app, _| {
+        let member = CommunityMember::User(member);
+        app.admin.community.flow.ban_waits.push_back(PendingBan {
+            community_id: RUSTACEANS,
+            member,
+            name: "Ann".into(),
+            request: quill::ids::RequestId(request),
+            over: None,
+        });
+        if let Some(session) = app.demo_session.as_mut() {
+            session.communities.member_chats.insert(
+                (RUSTACEANS, member),
+                Fetch::Loading {
+                    stale: None,
+                    request: Some(quill::ids::RequestId(request)),
+                },
+            );
+        }
+    });
+}
+
+/// A ban whose ask is still out does not hold up another whose ask
+/// answered, in either order of the two.
+#[gpui_kit::test]
+fn a_ban_still_waiting_does_not_hold_up_one_that_answered(cx: &mut TestAppContext) {
+    use quill::state::{CommunityMember, fetch::Fetch};
+    use quill::telegram::envelope::CommunityMemberChats;
+    for answered_second in [true, false] {
+        let (app, mut vcx) = new_app(cx);
+        frames(&mut vcx);
+        push_ban(&app, &mut vcx, 5, 21);
+        push_ban(&app, &mut vcx, 6, 22);
+        app.update(&mut vcx, |app, cx| assert!(!app.drain_pending_ban(cx)));
+        let answered = if answered_second { 6 } else { 5 };
+        app.update(&mut vcx, |app, cx| {
+            if let Some(session) = app.demo_session.as_mut() {
+                session.communities.member_chats.insert(
+                    (RUSTACEANS, CommunityMember::User(answered)),
+                    Fetch::Ready(CommunityMemberChats {
+                        owned_chat_ids: vec![61],
+                        joined_chat_ids: Vec::new(),
+                    }),
+                );
+            }
+            assert!(app.drain_pending_ban(cx));
+        });
+        let left = app.read_with(&vcx, |app, _| {
+            app.admin
+                .community
+                .flow
+                .ban_waits
+                .iter()
+                .map(|wait| wait.member)
+                .collect::<Vec<_>>()
+        });
+        let other = CommunityMember::User(if answered_second { 5 } else { 6 });
+        assert_eq!(left, vec![other]);
+        assert_eq!(open_box(&app, &mut vcx), "ban-warning");
+    }
+}
+
+/// A newer ask for the same member replaces the entry the wait was for;
+/// the wait follows the newer request and settles on its answer.
+#[gpui_kit::test]
+fn a_ban_follows_a_newer_ask_for_its_member(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    frames(&mut vcx);
+    push_ban(&app, &mut vcx, 5, 21);
+    app.update(&mut vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.communities.member_chats.insert(
+                (RUSTACEANS, quill::state::CommunityMember::User(5)),
+                quill::state::fetch::Fetch::Loading {
+                    stale: None,
+                    request: Some(quill::ids::RequestId(30)),
+                },
+            );
+        }
+    });
+    app.update(&mut vcx, |app, cx| assert!(!app.drain_pending_ban(cx)));
+    let request = app.read_with(&vcx, |app, _| {
+        app.admin
+            .community
+            .flow
+            .ban_waits
+            .front()
+            .map(|w| w.request)
+    });
+    assert_eq!(request, Some(quill::ids::RequestId(30)));
+}
+
+/// The ban pressed from a box ends when that box closes.
+#[gpui_kit::test]
+fn a_ban_ends_when_the_box_it_was_pressed_from_closes(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    frames(&mut vcx);
+    push_ban(&app, &mut vcx, 5, 21);
+    push_ban(&app, &mut vcx, 6, 22);
+    app.update(&mut vcx, |app, _| {
+        if let Some(wait) = app.admin.community.flow.ban_waits.front_mut() {
+            wait.over = Some("community-requests");
+        }
+        app.drop_bans_over("community-requests");
+    });
+    let left = app.read_with(&vcx, |app, _| app.admin.community.flow.ban_waits.len());
+    assert_eq!(left, 1);
 }
 
 #[gpui_kit::test]

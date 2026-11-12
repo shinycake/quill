@@ -511,6 +511,7 @@ impl QuillShell {
                 app.update(cx, |app, _| {
                     if !Self::flag_open(app, shown) {
                         app.windows.dialog_closed_in(shown, host);
+                        app.drop_bans_over(shown.0);
                     }
                 });
             }
@@ -558,7 +559,10 @@ impl QuillShell {
         let app = app.clone();
         let shell = shell.clone();
         move |_, window, cx: &mut App| {
-            app.update(cx, |this, cx| clear(this, window, cx));
+            app.update(cx, |this, cx| {
+                clear(this, window, cx);
+                this.drop_bans_over(kind.0);
+            });
             shell.update(cx, |shell, _| {
                 if shell.open_dialog == Some(kind) {
                     shell.open_dialog = None;

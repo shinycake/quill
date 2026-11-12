@@ -78,7 +78,7 @@ fn closing_the_box_drops_the_draft(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     app.update_in(vcx, |app, _, cx| app.start_chat_export(ChatId(1), cx));
     app.update_in(vcx, |app, _, cx| {
-        app.dialogs.chat_export.reset();
+        app.dialogs.chat_export.close();
         cx.notify();
     });
     vcx.run_until_parked();
@@ -87,8 +87,8 @@ fn closing_the_box_drops_the_draft(cx: &mut TestAppContext) {
     });
 }
 
-/// The progress box's "hidden" choice lives with the export, so reopening
-/// the box shows the export again and a hidden one stays hidden.
+/// The box's own stage says whether the progress shows, so a run started
+/// with the box closed stays hidden until the box is asked for again.
 #[gpui_kit::test]
 fn a_hidden_export_stays_hidden_until_the_box_is_asked_for_again(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
@@ -100,58 +100,49 @@ fn a_hidden_export_stays_hidden_until_the_box_is_asked_for_again(cx: &mut TestAp
     let export = quill::export::ChatExport::start(settings, dir.clone(), None).unwrap();
     app.update_in(vcx, |app, _, cx| {
         app.demo_session.as_mut().unwrap().settings.chat_export = Some(export);
-        app.set_chat_export_view(quill::export::ExportView::Hidden);
         cx.notify();
     });
     let shown = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
-        app.read_with(vcx, |app, _| {
-            app.session()
-                .and_then(|s| s.settings.chat_export.as_ref())
-                .map(|export| export.view)
-        })
+        app.read_with(vcx, |app, _| app.dialogs.chat_export.is_progress())
     };
-    assert_eq!(shown(&app, vcx), Some(quill::export::ExportView::Hidden));
+    assert!(!shown(&app, vcx));
     app.update_in(vcx, |app, _, cx| app.start_chat_export(ChatId(1), cx));
-    assert_eq!(shown(&app, vcx), Some(quill::export::ExportView::Shown));
+    assert!(shown(&app, vcx));
+    app.update_in(vcx, |app, _, _| app.close_chat_export_box());
+    assert!(!shown(&app, vcx));
     app.update_in(vcx, |app, _, _| {
         app.demo_session.as_mut().unwrap().settings.chat_export = None;
     });
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// Closing an options draft leaves a running export as it was; closing
-/// its progress box hides it.
+/// Closing the box closes it whatever it showed, and the run goes on;
+/// asking for the box while the run exists drops a draft over it.
 #[gpui_kit::test]
-fn closing_a_draft_does_not_hide_a_running_export(cx: &mut TestAppContext) {
+fn closing_the_box_leaves_a_running_export_going(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     let dir = std::env::temp_dir().join(format!("quill-chat-draft-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let settings = quill::export::ExportSettings::new(16, "Export".into(), dir.clone());
     let export = quill::export::ChatExport::start(settings, dir.clone(), None).unwrap();
-    let view = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
-        app.read_with(vcx, |app, _| {
-            app.session()
-                .and_then(|s| s.settings.chat_export.as_ref())
-                .map(|export| export.view)
-        })
-    };
-    // A draft is open when an export starts elsewhere and is shown.
+    // A draft is open when an export starts elsewhere.
     app.update_in(vcx, |app, _, cx| app.start_chat_export(ChatId(1), cx));
     app.update_in(vcx, |app, _, _| {
         app.demo_session.as_mut().unwrap().settings.chat_export = Some(export);
-        app.set_chat_export_view(quill::export::ExportView::Shown);
     });
     app.read_with(vcx, |app, _| assert!(app.dialogs.chat_export.is_options()));
     app.update_in(vcx, |app, _, _| app.close_chat_export_box());
-    assert_eq!(view(&app, vcx), Some(quill::export::ExportView::Shown));
-    // Closing the progress box hides the run.
-    app.update_in(vcx, |app, _, _| app.close_chat_export_box());
-    assert_eq!(view(&app, vcx), Some(quill::export::ExportView::Hidden));
-    // Asking for the box while the run exists drops a draft over it.
+    app.read_with(vcx, |app, _| {
+        assert!(!app.dialogs.chat_export.is_options());
+        assert!(!app.dialogs.chat_export.is_progress());
+        assert!(app.session().unwrap().settings.chat_export.is_some());
+    });
     app.update_in(vcx, |app, _, cx| app.start_chat_export(ChatId(1), cx));
-    assert_eq!(view(&app, vcx), Some(quill::export::ExportView::Shown));
-    app.read_with(vcx, |app, _| assert!(!app.dialogs.chat_export.is_options()));
+    app.read_with(vcx, |app, _| {
+        assert!(app.dialogs.chat_export.is_progress());
+        assert!(!app.dialogs.chat_export.is_options());
+    });
     app.update_in(vcx, |app, _, _| {
         app.demo_session.as_mut().unwrap().settings.chat_export = None;
     });

@@ -94,8 +94,7 @@ impl QuillApp {
             .is_some_and(|s| s.settings.chat_export.is_some())
         {
             // A draft left open by another window gives way to the run.
-            self.dialogs.chat_export.reset();
-            self.set_chat_export_view(quill::export::ExportView::Shown);
+            self.dialogs.chat_export.show_progress();
             self.open_box(DialogKind::ChatExport);
             cx.notify();
             return;
@@ -132,27 +131,10 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Show or hide the running export's progress box. The choice lives
-    /// with the export in the account's session, so it survives a switch
-    /// to another account and back.
-    pub(super) fn set_chat_export_view(&mut self, view: quill::export::ExportView) {
-        if let Some(export) = self
-            .session_mut()
-            .and_then(|s| s.settings.chat_export.as_mut())
-        {
-            export.view = view;
-        }
-    }
-
     /// The box closed (its close button, Escape, or the dialog going
-    /// away). A running export keeps going and is hidden, but only when the
-    /// box was showing it: closing an options draft leaves it as it was.
+    /// away). A running export keeps going and is hidden.
     pub(super) fn close_chat_export_box(&mut self) {
-        let was_draft = self.dialogs.chat_export.is_options();
-        self.dialogs.chat_export.reset();
-        if !was_draft {
-            self.set_chat_export_view(quill::export::ExportView::Hidden);
-        }
+        self.dialogs.chat_export.close();
     }
 
     /// Start the export with the box's choices. The worker thread pages
@@ -172,7 +154,7 @@ impl QuillApp {
             ))),
         };
         match started {
-            Ok(()) => self.dialogs.chat_export.reset(),
+            Ok(()) => self.dialogs.chat_export.show_progress(),
             Err(error) => draft.error = Some(error.to_string()),
         }
         cx.notify();
@@ -450,7 +432,7 @@ impl QuillApp {
                     .label(tr(keys::CANCEL))
                     .ghost()
                     .on_click(cx.listener(|this, _, window, cx| {
-                        this.dialogs.chat_export.reset();
+                        this.dialogs.chat_export.close();
                         cx.notify();
                         this.close_kit_dialog_if_done(DialogKind::ChatExport, window, cx);
                     })),
@@ -637,12 +619,10 @@ crate::ui::shell::register_dialogs! {
         1500,
         |app| {
             app.dialogs.chat_export.is_options()
-                || app.session().is_some_and(|s| {
-                    s.settings
-                        .chat_export
-                        .as_ref()
-                        .is_some_and(|export| export.view == quill::export::ExportView::Shown)
-                })
+                || (app.dialogs.chat_export.is_progress()
+                    && app
+                        .session()
+                        .is_some_and(|s| s.settings.chat_export.is_some()))
         },
         QuillApp::build_chat_export_dialog,
     )

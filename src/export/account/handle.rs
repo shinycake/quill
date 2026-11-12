@@ -3,7 +3,7 @@
 //! polls. Replaces the earlier raw JSONL account export.
 use super::settings::AccountSettings;
 use super::worker::{AccountJob, AccountProgress, AccountStage, create_folder, run};
-use crate::export::handle::{ExportView, SettleOnPanic, WorkerLink, publish};
+use crate::export::handle::{SettleOnPanic, WorkerLink, publish};
 use crate::export::worker::ExportError;
 use crate::locks::LockExt;
 use std::io;
@@ -14,7 +14,6 @@ pub struct AccountExport {
     pub link: WorkerLink,
     progress: Arc<Mutex<AccountProgress>>,
     pub folder: PathBuf,
-    pub view: ExportView,
 }
 
 impl AccountExport {
@@ -62,7 +61,6 @@ impl AccountExport {
             link,
             progress,
             folder,
-            view: ExportView::Shown,
         })
     }
 
@@ -83,7 +81,6 @@ impl AccountExport {
             link,
             progress: Arc::new(Mutex::new(AccountProgress::starting())),
             folder: PathBuf::new(),
-            view: ExportView::Shown,
         };
         (export, worker.into_scripted())
     }

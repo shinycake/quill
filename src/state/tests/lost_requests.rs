@@ -435,3 +435,20 @@ fn sweeping_a_lost_panel_request_ends_its_loading_stage() {
         Some(InlineQueryFetch::Failed(_))
     ));
 }
+
+#[test]
+fn a_swept_request_settles_the_box_waiting_on_it() {
+    let mut session = ready_session();
+    let generation = session.account_generation;
+    let request =
+        session
+            .requests
+            .register(generation, RequestPurpose::GetUserFullInfo, None, None);
+    session.acks.expect(request);
+    assert_eq!(session.acks.take(request), None, "still out");
+    assert!(sweep(&mut session));
+    assert!(
+        matches!(session.acks.take(request), Some(Answer::Failed(_))),
+        "the sweep refuses it, so the dialog returns to editing"
+    );
+}

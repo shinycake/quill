@@ -268,9 +268,15 @@ impl QuillApp {
             super::glyph_sweep::window_activation(window.window_handle().window_id(), active);
             this.viewer_window_activation(window, cx);
             // The system accent may have changed while another app was in
-            // front.
+            // front, and the night clock's wait ran on a clock that stops
+            // while the machine sleeps: apply again and arm it afresh.
             if active && this.appearance.system_accent {
                 this.refresh_system_accent(cx);
+            }
+            if active
+                && (this.appearance.system_accent
+                    || this.appearance.auto_night == quill::settings::AutoNight::Scheduled)
+            {
                 this.apply_appearance(cx);
             }
             cx.notify();
@@ -298,17 +304,7 @@ impl QuillApp {
             && super::demo::demo_stress_size().is_some()
             && std::env::var_os("QUILL_DEMO_STRESS_REDRAW").is_none_or(|v| v != "0")
         {
-            cx.spawn(async move |this, cx| {
-                loop {
-                    cx.background_executor()
-                        .timer(Duration::from_millis(16))
-                        .await;
-                    if this.update(cx, |_, cx| cx.notify()).is_err() {
-                        break;
-                    }
-                }
-            })
-            .detach();
+            app.spawn_stress_redraw(cx);
         }
         if demo.is_none() {
             app.start_update_checks(cx);
@@ -319,7 +315,34 @@ impl QuillApp {
             this.apply_appearance(cx);
         })
         .detach();
+        // The night clock waits on the background executor, whose clock
+        // stops while the machine sleeps, and a wait spans a DST change
+        // wrong: after a wake the schedule is read again and re-armed.
+        let woken = cx.entity().downgrade();
+        cx.on_system_wake(move |cx| {
+            let _ = woken.update(cx, |this, cx| this.apply_appearance(cx));
+        })
+        .detach();
         super::os_menus::install(demo.is_some(), window, cx);
         app
+    }
+}
+
+impl QuillApp {
+    /// The performance fixture's steady 60 Hz redraw. A clock by design
+    /// (`check-owned-timers` allow list): a profiler needs frames that
+    /// nothing else asked for. It ends when the app entity is gone.
+    fn spawn_stress_redraw(&mut self, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(16))
+                    .await;
+                if this.update(cx, |_, cx| cx.notify()).is_err() {
+                    break;
+                }
+            }
+        })
+        .detach();
     }
 }

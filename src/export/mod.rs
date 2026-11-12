@@ -33,7 +33,7 @@ pub mod worker;
 mod tests;
 
 pub use account::{AccountExport, AccountSettings};
-pub use handle::{ChatExport, ExportView};
+pub use handle::ChatExport;
 pub use settings::{ExportFormat, ExportSettings, MediaKind, MediaTypes};
 pub use worker::{Progress, Stage};
 

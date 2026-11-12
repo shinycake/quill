@@ -35,62 +35,91 @@ pub(crate) fn ban_step(fetch: &Fetch<quill::telegram::envelope::CommunityMemberC
 /// What a ban does once its `getCommunityMemberChats` ask was tried.
 #[derive(Debug)]
 pub(crate) enum BanStart {
-    /// The ask is in flight: the ban waits for it ([`ban_step`]).
-    Wait,
+    /// The ask is in flight under this request: the ban waits for it
+    /// ([`ban_step`]).
+    Wait(quill::ids::RequestId),
     /// Nothing went and nothing will answer: the community is gone or no
     /// longer accessible.
     Refused,
     Failed(quill::connect::ConnectSendError),
 }
 
-/// Whether an answer to the member-chats ask is on its way (the ask just
-/// went, or the same one is already in flight).
+/// The request of the member-chats ask already in flight, if one is (the
+/// same ask pressed twice is not sent twice).
 pub(crate) fn answer_coming(
     session: &quill::state::Session,
     community_id: i64,
     member: CommunityMember,
-) -> bool {
-    session
-        .communities
-        .member_chats(community_id, member)
-        .is_loading()
+) -> Option<quill::ids::RequestId> {
+    match session.communities.member_chats(community_id, member) {
+        Fetch::Loading { request, .. } => *request,
+        _ => None,
+    }
 }
 
 pub(crate) fn ban_start(
     sent: Result<Option<quill::ids::RequestId>, quill::connect::ConnectSendError>,
-    answer_coming: bool,
+    answer_coming: Option<quill::ids::RequestId>,
 ) -> BanStart {
     match sent {
-        Ok(Some(_)) => BanStart::Wait,
-        Ok(None) if answer_coming => BanStart::Wait,
-        Ok(None) => BanStart::Refused,
+        Ok(Some(request)) => BanStart::Wait(request),
+        Ok(None) => answer_coming.map_or(BanStart::Refused, BanStart::Wait),
         Err(err) => BanStart::Failed(err),
     }
 }
 
 impl QuillApp {
-    /// Moves a waiting ban on once its member chats answered.
+    /// Moves a waiting ban on once its member chats answered. Any wait may
+    /// settle, not only the oldest: one still out never holds up another.
     pub(super) fn drain_pending_ban(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(pending) = self.admin.community.flow.ban_waits.front().cloned() else {
+        let Some(session) = self.session() else {
             return false;
         };
-        let Some(step) = self.session().map(|s| {
-            ban_step(
-                s.communities
-                    .member_chats(pending.community_id, pending.member),
-            )
-        }) else {
-            return false;
+        let mut settled = None;
+        for (index, pending) in self.admin.community.flow.ban_waits.iter().enumerate() {
+            let fetch = session
+                .communities
+                .member_chats(pending.community_id, pending.member);
+            // A newer ask for the same member took the entry over: this
+            // wait follows it, since only the newest ask can answer.
+            if let Fetch::Loading {
+                request: Some(newer),
+                ..
+            } = fetch
+                && *newer != pending.request
+            {
+                settled = Some((index, Err(*newer)));
+                break;
+            }
+            let step = ban_step(fetch);
+            if step != BanStep::Wait {
+                settled = Some((index, Ok(step)));
+                break;
+            }
+        }
+        let step = match settled {
+            None => return false,
+            Some((index, Err(newer))) => {
+                if let Some(pending) = self.admin.community.flow.ban_waits.get_mut(index) {
+                    pending.request = newer;
+                }
+                return false;
+            }
+            Some((index, Ok(step))) => {
+                let Some(pending) = self.admin.community.flow.ban_waits.remove(index) else {
+                    return false;
+                };
+                (pending, step)
+            }
         };
+        let (pending, step) = step;
         match step {
             BanStep::Wait => false,
             BanStep::Cancel => {
-                self.admin.community.flow.ban_waits.pop_front();
                 self.set_note(StatusNote::error(tr(keys::Q_COMMUNITY_BAN_UNAVAILABLE)));
                 true
             }
             BanStep::BanNow => {
-                self.admin.community.flow.ban_waits.pop_front();
                 self.send_community_ban(pending.community_id, pending.member, cx);
                 true
             }
@@ -103,10 +132,8 @@ impl QuillApp {
                 if let Some(open) = QuillShell::open_dialog_name(self)
                     && Some(open) != pending.over
                 {
-                    self.admin.community.flow.ban_waits.pop_front();
                     return true;
                 }
-                self.admin.community.flow.ban_waits.pop_front();
                 self.show_community_box(
                     CommunityBox::BanWarning {
                         community_id: pending.community_id,
@@ -119,6 +146,16 @@ impl QuillApp {
                 true
             }
         }
+    }
+
+    /// The box named `name` closed: a ban pressed from it ends with it, so
+    /// its answer never pops a warning for a press long forgotten.
+    pub(in crate::ui) fn drop_bans_over(&mut self, name: &'static str) {
+        self.admin
+            .community
+            .flow
+            .ban_waits
+            .retain(|wait| wait.over != Some(name));
     }
 
     /// "Ban" on the warning: the box closes and the ban goes.

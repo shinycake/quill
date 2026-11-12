@@ -164,6 +164,10 @@ pub(crate) struct PendingBan {
     pub(crate) community_id: i64,
     pub(crate) member: CommunityMember,
     pub(crate) name: String,
+    /// The `getCommunityMemberChats` ask this wait is for. The answer
+    /// settles the wait only under this id; a newer ask for the same
+    /// member replaces it (`drain_pending_ban`).
+    pub(crate) request: quill::ids::RequestId,
     /// The box that was open when Ban was pressed (`open_dialog_name`):
     /// the warning opens only while it is still the one on screen.
     pub(crate) over: Option<&'static str>,
@@ -187,10 +191,11 @@ impl CommunitiesUi {
 #[derive(Default)]
 pub(crate) struct CommunitiesUi {
     pub(crate) open: Option<CommunityBox>,
-    /// The bans waiting for their member's chats, oldest first, with no box
-    /// of their own (`drain_pending_ban` settles the first). A newer ban
-    /// queues behind it. Each leaves on its answer, or when another box
-    /// than the one it was pressed from is open at the answer.
+    /// The bans waiting for their member's chats, each under the request
+    /// that asked (`drain_pending_ban` settles any whose ask answered). Each
+    /// leaves on its answer, when the box it was pressed from closes
+    /// (`drop_bans_over`), or when another box than that one is open at the
+    /// answer.
     pub(crate) ban_waits: std::collections::VecDeque<PendingBan>,
     /// "Create a New Chat" from this community's chooser: the new chat goes
     /// to the visibility box once made (`drain_new_community_chat`). Its own
@@ -513,7 +518,7 @@ impl QuillApp {
             .fetch_community_member_chats(community_id, member);
         let asking = ban::answer_coming(&live.driver.session, community_id, member);
         match ban::ban_start(sent, asking) {
-            ban::BanStart::Wait => {
+            ban::BanStart::Wait(request) => {
                 let waits = &mut self.admin.community.flow.ban_waits;
                 // Pressing Ban again on the member already waiting adds
                 // nothing.
@@ -525,6 +530,7 @@ impl QuillApp {
                         community_id,
                         member,
                         name,
+                        request,
                         over,
                     });
                 }
