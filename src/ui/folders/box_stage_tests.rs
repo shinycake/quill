@@ -557,14 +557,19 @@ fn another_link_does_not_replace_an_add_in_flight(cx: &mut TestAppContext) {
         });
         app.folders.invite = Some(FolderInviteDialog::new(
             "first".into(),
-            InviteStage::Adding { request, info },
+            InviteStage::Adding {
+                request,
+                info,
+                next: None,
+            },
         ));
         app.open_folder_invite("second".into(), cx);
         let dialog = app.folders.invite.as_ref().expect("the box stays");
         assert_eq!(dialog.link, "first", "the add in flight keeps its box");
         assert!(matches!(
-            dialog.stage,
-            InviteStage::Adding { request: kept, .. } if kept == request
+            &dialog.stage,
+            InviteStage::Adding { request: kept, next: Some(link), .. }
+                if *kept == request && link == "second"
         ));
     });
 }
@@ -590,7 +595,11 @@ fn closing_the_add_folder_box_keeps_the_adds_answer(cx: &mut TestAppContext) {
         });
         app.folders.invite = Some(FolderInviteDialog::new(
             "first".into(),
-            InviteStage::Adding { request, info },
+            InviteStage::Adding {
+                request,
+                info,
+                next: None,
+            },
         ));
         app.close_folder_invite(cx);
         assert!(app.folders.invite.is_none(), "the box is gone");

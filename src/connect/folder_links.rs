@@ -77,7 +77,23 @@ impl<S: JsonSender> ConnectDriver<S> {
             .folder_shares
             .get(&folder_id)
             .is_some_and(|share| share.links.is_loading());
-        if !links_loading {
+        // A delete of this folder's link still out holds the fetch back:
+        // queries are not ordered, so the list could be read before the delete
+        // lands and bring the link back. The list is marked due instead, and
+        // `refetch_outdated_folder_links` asks once the delete is answered.
+        let delete_out = self
+            .session
+            .requests
+            .has_purpose_for_folder(RequestPurpose::DeleteChatFolderInviteLink, folder_id);
+        if delete_out && !links_loading {
+            self.session
+                .chat_list
+                .folder_shares
+                .entry(folder_id)
+                .or_default()
+                .links
+                .outdate();
+        } else if !links_loading {
             let extra = self
                 .session
                 .request_for_folder(RequestPurpose::GetChatFolderInviteLinks, folder_id);

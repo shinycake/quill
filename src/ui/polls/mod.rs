@@ -461,15 +461,21 @@ impl QuillApp {
 
     /// Phase 4.2: open the poll creation dialog above the composer.
     pub(super) fn open_poll_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.open_poll_dialog_locked(QuizLock::Free, window, cx);
+        self.open_poll_dialog_locked(QuizLock::Free, None, window, cx);
     }
 
     /// The poll box, with the type fixed when a bot's request-poll button
     /// asked for a quiz or a regular poll (tdesktop `kDefaultPollCreateFlags`
     /// with `disabled |= Quiz`).
+    ///
+    /// `dismiss_keyboard_on_send`: a bot's one-time keyboard whose Poll button
+    /// opened the box; it goes when the poll is sent. It is given to the box
+    /// as it is made, so a box that does not open (or another one already
+    /// open) never takes it.
     pub(super) fn open_poll_dialog_locked(
         &mut self,
         lock: QuizLock,
+        dismiss_keyboard_on_send: Option<(ChatId, MessageId)>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -499,7 +505,13 @@ impl QuillApp {
             .session()
             .and_then(|s| s.open_chat_id().and_then(|id| s.chats.get(&id.0)))
             .is_some_and(|chat| chat.is_channel());
-        self.chat_ui.poll_dialog = Some(PollDialog::new(window, cx, in_channel, lock));
+        self.chat_ui.poll_dialog = Some(PollDialog::new(
+            window,
+            cx,
+            in_channel,
+            lock,
+            dismiss_keyboard_on_send,
+        ));
         cx.notify();
     }
 

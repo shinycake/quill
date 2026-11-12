@@ -14,7 +14,8 @@ pub(crate) enum ClosedAsk {
     /// many chats were joined.
     FolderAdded { folder: String, joined: usize },
     /// A link save or delete of the Share Folder box: the list is the
-    /// session's, so only a failure has something to say.
+    /// session's, so only a failure has something to say; a success asks
+    /// the list of a box reopened since (`refetch_open_folder_links`).
     LinkChange,
 }
 
@@ -50,7 +51,9 @@ impl QuillApp {
                 (ClosedAsk::FolderAdded { folder, joined }, _) => {
                     self.set_note(folder_added_note(&folder, joined));
                 }
-                (ClosedAsk::LinkChange, _) => {}
+                // The delete or save landed: a box reopened meanwhile held its
+                // list back for it (`fetch_folder_share`) and asks it now.
+                (ClosedAsk::LinkChange, _) => self.refetch_open_folder_links(),
             }
             changed = true;
         }

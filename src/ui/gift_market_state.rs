@@ -264,12 +264,12 @@ pub(crate) enum CraftStage {
     /// The gift the craft info box was opened for.
     Chosen(CraftGift),
     /// The forge runs at least `FORGE_SECONDS` from `since`; it ends when
-    /// the answer to `request` (the `craftGift` it was started for) is in,
-    /// and `primary` is kept for the boxes below.
+    /// the craft is answered, and `primary` is kept for the boxes below. The
+    /// craft in flight (its request and answer) is the session's alone
+    /// (`CraftSession::run`); this holds only the forge's own clock.
     Forging {
         primary: Option<CraftGift>,
         since: Instant,
-        request: quill::ids::RequestId,
     },
 }
 
@@ -300,22 +300,10 @@ impl CraftStage {
         true
     }
 
-    /// The request the running forge waits for.
-    pub(super) fn forge_request(&self) -> Option<quill::ids::RequestId> {
-        match self {
-            Self::Forging { request, .. } => Some(*request),
-            _ => None,
-        }
-    }
-
-    /// The forge starts (or restarts) at `since`, for `request`.
-    pub(super) fn start_forge(&mut self, since: Instant, request: quill::ids::RequestId) {
+    /// The forge starts (or restarts) at `since`.
+    pub(super) fn start_forge(&mut self, since: Instant) {
         let primary = self.primary().cloned();
-        *self = Self::Forging {
-            primary,
-            since,
-            request,
-        };
+        *self = Self::Forging { primary, since };
     }
 
     /// The forge ended: the chosen gift stays for the boxes below.

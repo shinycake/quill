@@ -257,22 +257,21 @@ fn the_poll_stops_while_the_window_is_inactive(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     app.update_in(&mut vcx, |app, _, cx| {
         app.open_group_settings_view(CHANNEL, GroupSettingsView::RecentActions, cx);
-        app.event_log_page_for(CHANNEL).poll = Some(cx.spawn(async |_, _| {}));
+        app.event_log_page_for(CHANNEL).poll = crate::ui::admin_state::EventLogPoll::Running {
+            _task: cx.spawn(async |_, _| {}),
+        };
+        let running = |app: &QuillApp| {
+            app.admin.event_log_page.as_ref().is_some_and(|p| {
+                matches!(p.poll, crate::ui::admin_state::EventLogPoll::Running { .. })
+            })
+        };
         app.frame.window_active.set(true);
         assert!(app.event_log_poll_tick(CHANNEL, cx), "active: keeps going");
-        assert!(
-            app.admin
-                .event_log_page
-                .as_ref()
-                .is_some_and(|p| p.poll.is_some())
-        );
+        assert!(running(app));
         app.frame.window_active.set(false);
         assert!(!app.event_log_poll_tick(CHANNEL, cx), "inactive: stops");
-        assert!(
-            app.admin
-                .event_log_page
-                .as_ref()
-                .is_some_and(|p| p.poll.is_none())
-        );
+        // The loop ends by itself and says so: the page holds no poll.
+        app.event_log_poll_ended(CHANNEL);
+        assert!(!running(app));
     });
 }

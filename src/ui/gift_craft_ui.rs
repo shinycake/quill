@@ -213,17 +213,19 @@ impl QuillApp {
     /// The craft button: `craftGift`, and the forge starts.
     pub(super) fn craft_now(&mut self, cx: &mut Context<Self>) {
         let started = match self.live.as_mut() {
-            Some(live) => live.driver.craft_gift().ok(),
+            Some(live) => live.driver.craft_gift().is_ok(),
             // The demo crafts nothing; the forge ends in a failure.
-            None => self.craft_mut().map(|craft| {
-                craft.run = CraftRun::Crafting {
-                    request: RequestId(0),
-                };
-                RequestId(0)
-            }),
+            None => self
+                .craft_mut()
+                .map(|craft| {
+                    craft.run = CraftRun::Crafting {
+                        request: RequestId(0),
+                    };
+                })
+                .is_some(),
         };
-        if let Some(request) = started {
-            self.gift_market.craft.start_forge(Instant::now(), request);
+        if started {
+            self.gift_market.craft.start_forge(Instant::now());
         } else {
             self.set_note(StatusNote::error(tr(keys::Q_MONEY_COULDNT_CRAFT_THE_GIFT)));
         }
@@ -258,10 +260,7 @@ impl QuillApp {
 
     /// Ends the forge once it ran its time and the answer is in.
     pub(super) fn craft_frame_upkeep(&mut self, cx: &mut Context<Self>) {
-        let (Some(started), Some(request)) = (
-            self.gift_market.craft.forge_since(),
-            self.gift_market.craft.forge_request(),
-        ) else {
+        let Some(started) = self.gift_market.craft.forge_since() else {
             return;
         };
         if started.elapsed().as_secs_f32() < FORGE_SECONDS {
@@ -273,7 +272,7 @@ impl QuillApp {
             self.after_craft_pop();
             return;
         };
-        let waiting = craft.run == (CraftRun::Crafting { request });
+        let waiting = craft.crafting();
         if demo && waiting {
             craft.run = CraftRun::Done(CraftResult::Fail);
         } else if waiting {

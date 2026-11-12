@@ -15,7 +15,9 @@ pub(crate) enum OptionMediaSlot {
     None,
     /// A picked file being read (duration and size) off the UI thread.
     Preparing(Preparing),
-    Ready(PollOptionInput),
+    /// The media to send, and for a video a frame drawn beside it: the frame
+    /// lives in the slot, so replacing or clearing the media drops it too.
+    Ready(PollOptionInput, Option<std::path::PathBuf>),
 }
 
 /// The read of a picked file. The task is owned here: replacing or clearing
@@ -40,7 +42,7 @@ impl OptionMediaSlot {
     /// The media, once it is ready to send.
     pub(crate) fn ready(&self) -> Option<&PollOptionInput> {
         match self {
-            Self::Ready(media) => Some(media),
+            Self::Ready(media, _) => Some(media),
             _ => None,
         }
     }
@@ -98,8 +100,6 @@ pub(crate) struct OptionAttach {
     pub(crate) media: OptionMediaSlot,
     /// What the attach area under the field is doing.
     pub(crate) mode: AttachMode,
-    /// A frame of a picked video, drawn while it is attached.
-    pub(crate) preview: Option<std::path::PathBuf>,
 }
 
 impl Default for OptionAttach {
@@ -109,7 +109,6 @@ impl Default for OptionAttach {
             id: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             media: OptionMediaSlot::default(),
             mode: AttachMode::Idle,
-            preview: None,
         }
     }
 }
@@ -380,6 +379,7 @@ impl PollDialog {
         cx: &mut Context<QuillApp>,
         in_channel: bool,
         lock: QuizLock,
+        dismiss_keyboard_on_send: Option<(ChatId, MessageId)>,
     ) -> Self {
         let mut textarea = |cx: &mut Context<QuillApp>, placeholder: &str, rows: (usize, usize)| {
             cx.new(|cx| {
@@ -430,7 +430,7 @@ impl PollDialog {
             close_at: PollClose::Period(POLL_DEFAULT_PERIOD_SECS),
             page: PollPage::Form,
             focus_on_mount: Some(question_input.clone()),
-            dismiss_keyboard_on_send: None,
+            dismiss_keyboard_on_send,
             baseline: None,
         };
         dialog.baseline = Some(dialog.toggles());

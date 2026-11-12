@@ -36,7 +36,7 @@ fn dialog_rows(app: &QuillApp) -> Vec<usize> {
 
 fn open(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, lock: QuizLock) {
     app.update_in(vcx, |app, window, cx| {
-        app.open_poll_dialog_locked(lock, window, cx);
+        app.open_poll_dialog_locked(lock, None, window, cx);
     });
     vcx.run_until_parked();
 }

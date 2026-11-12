@@ -378,7 +378,7 @@ fn another_chat_closes_the_poll_and_checklist_boxes(cx: &mut TestAppContext) {
     let other = other_chat(&app, &mut vcx);
     open(&app, &mut vcx, CHAT);
     app.update_in(&mut vcx, |app, window, cx| {
-        app.chat_ui.poll_dialog = Some(PollDialog::new(window, cx, false, QuizLock::Free));
+        app.chat_ui.poll_dialog = Some(PollDialog::new(window, cx, false, QuizLock::Free, None));
         app.chat_ui.checklist_dialog = Some(ChecklistDialog::new(None, window, cx));
     });
     frames(&mut vcx);

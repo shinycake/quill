@@ -10220,3 +10220,44 @@ add and closed link save), `composer_sends_tests` (an ack never takes a
 neighbour's clear), `chat_window::asker_tests` (gif ask settles; two
 windows keep their own link text), `forum_extras::tests` (both answer
 orders), `deep_link_routes_tests` (seek stays with its account).
+
+### Sweep fixes (r4-08)
+
+| Ids | What changed |
+| --- | --- |
+| g-262 to g-264, g-266 to g-272, g-275 to g-279 | `emoji_effect.rs` has no `RefCell`: the playing effects and the anchors are `thread_local Cell`s read through `with_active` / `with_anchors`, which take the value out for the call and put it back after (a re-entrant call sees an empty list, never a panic). |
+| g-253 | `Playback::Waiting { until }` carries the executor-clock deadline; the effect's `queued` and `wait` fields are gone. |
+| g-273, g-274, g-265 | The three dialog bodies given to an `Fn` closure are `Rc<Cell<Option<AnyElement>>>` (`take`), as `panic-safety.md` says. |
+| g-261 | `forget_native_window` clears the title cache through `RefCell::get_mut`, which cannot panic. |
+| g-258 | `DraftTimer` has no loop and no due time: each keystroke replaces `Armed { token, _task }`, so the old wait is dropped with its task; the woken task settles by token (`DraftTimer::settle`). |
+| g-257 | The frame clock is one beat per task: `clock_task` waits once, ticks, and when the clock goes on hands the next beat to `ClockLoop::Running`, which drops the task that made it. No `loop`. |
+| g-259, g-260 | Not baseline lines: `spawn_event_log_poll` and `watch_disk_space` are in `owned-timers-allow.txt` with their reasons (TDLib sends no event for a new chat event; free disk space has no change event). `check-owned-timers.py --list` prints allowed hits too. Both loops are owned by a stage (`EventLogPoll::Running`, `DiskUi::_watcher`). |
+| g-250, g-251, g-252, g-256, g-249, g-254, g-255 | `GoalNow` is a value computed each render, never stored: renamed `GoalCheckResult`. `MuteState` is the big button's derived look: `MuteButtonView`. `Picture::Loading` names a spinner to draw: `Picture::Spinner`. `QuitGate::Asking` is the held Quit with its exit: `Held { exit }`. `ContactNote::Waiting` was the dialog's copy of the session's `user_full_infos` fetch, which has the request and may be shared: `Unseeded`. `StorageScrollStage::Requested { until }` expires on the executor clock, so settings opened much later do not scroll by themselves. `First::Preparing` names the `Receiver` itself, not an alias of it. The matching allow lines are gone. |
+| g-248 | `ContextMenuItems::begin` was a per-frame reset that the `unsent` pattern read as `Fetch::begin`: now `reset_claims`. |
+| g-246, g-247 | `GifPanel::save` is `GifSave::{Idle, Saving { request }}`, set by `set_gif_saved` when the send went out and ended only by that request's answer or error (`save_settled`). `Session::gif_save_in_flight` asks the table for that request. The tile and the driver no longer ask "any save or remove in flight". (`connect/gifs.rs` is another bundle's file: only the two `has_purpose` lines of `set_gif_saved` changed.) |
+| 16-008 | A GIF tab in `Asked` whose answer the session's one list no longer shows or keeps asks again once without a press (`gif_tab_upkeep`). |
+| 15-011 | Retry of a failed older/newer page says so when the send is refused. |
+| 15-001 | Not a bug: `open_country_box` asks through `retry_countries`, which asks only an idle or failed list (`Fetch::can_ask`). Test `opening_a_country_box_does_not_ask_a_loaded_list_again`. |
+| 15-004 | `MediaSeek::Seeking { target, seconds, _give_up }` owns its give-up timer (a `Task`); the polled `Instant` deadline is gone. Test: the seek ends after `SEEK_WAIT` with no poll running. |
+| 15-002 | A queued link whose send fails leaves the error note. |
+| 15-003 | Join on the invite box: a send refused before the flow changed drops the invite and says so (the usual refusal already enters the "Couldn't reach Telegram" text stage). |
+| 15-005 | `DeviceLink::Linking` is gone: a link that went to Telegram is the session's `DeviceLogin` alone, which the page reads (`device_link_busy`, `device_link_notice`, `take_result`). |
+| 15-006 | The auto-download sliders are the limits while the box is open; the draft only seeds them and Save reads them. `on_auto_download_slider` is gone. |
+| 15-012, 15-013 | Create/Schedule or Start Streaming while a `createVideoChat` is out keeps its box and says "Starting the video chat…". |
+| 15-007 | The video frame of a poll option lives in `OptionMediaSlot::Ready(input, preview)`; `OptionAttach::preview` is gone. |
+| 15-008 | The bot keyboard to dismiss is an argument of `PollDialog::new`, so a box that does not open (or another one already open) never takes it. |
+| 15-009 | The withdrawal password is read into `Zeroizing<String>`. |
+| 15-010 | The Edit Cover dialog's wait is `EditMode::cover_pick` (`CoverPick::Picking { _task }`): ending the edit, or starting another of the same message, drops it. |
+| 16-001 | `SetsView` keeps only `return_to` (the tab an emptied search field goes back to); the bar highlights the session panel's tab, or `return_to` while it is `Search`. |
+| 16-005, 16-002 | `EventLogPage::poll` is `EventLogPoll::{Stopped, Running { _task }}`, set `Stopped` by the loop's own exit. `EventLogRows` owns the list and the ids it shows and changes them only through `sync` and `forget`. |
+| 16-004 | An `addlist` link opened while an add is out waits in `InviteStage::Adding { next }` and is checked when the add settles (or the box closes). |
+| 16-003 | `fetch_folder_share` does not read the list beside an unanswered delete of the same folder: it marks the list due, and the delete's closed ask refetches (`refetch_open_folder_links`). Test `reopening_share_folder_waits_for_a_delete_still_out`. |
+| 16-007 | `CraftStage::Forging { primary, since }` no longer copies the craft request; the craft in flight is the session's `CraftSession::run` alone. |
+| 16-006 | Cancel in the Recent Actions filter box only changes the view; the ask, scroll hook and poll belong to the first open. |
+
+Tests: `state::tests::gif_panel_stages` (save settled by its own request),
+`state::tests::sweep_r3_04` (device login stage), `connect::tests::signin_polish`
+and `sweep_r4_08` (countries not asked again; share folder waits for a delete),
+`chat_window::asker_tests` (asked GIF tab asks again), `folders::box_stage_tests`
+(second addlist link waits), `deep_link_routes_tests` (seek deadline owned),
+`draft_timer`, `event_log_tests`, `emoji_effect` (wait deadline).

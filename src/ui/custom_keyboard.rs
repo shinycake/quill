@@ -341,12 +341,10 @@ impl QuillApp {
             KeyboardButtonType::RequestPoll(request) => {
                 let lock = QuizLock::from_button(*request);
                 element.on_click(cx.listener(move |this, _, window, cx| {
-                    this.open_poll_dialog_locked(lock, window, cx);
                     // A one-time keyboard hides when the poll is sent: a
                     // cancelled box leaves it.
-                    if one_time && let Some(dialog) = this.chat_ui.poll_dialog.as_mut() {
-                        dialog.dismiss_keyboard_on_send = Some((chat_id, message_id));
-                    }
+                    let dismiss = one_time.then_some((chat_id, message_id));
+                    this.open_poll_dialog_locked(lock, dismiss, window, cx);
                 }))
             }
             _ => element.disabled(true),

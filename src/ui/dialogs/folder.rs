@@ -375,6 +375,9 @@ pub enum InviteStage {
     Adding {
         request: RequestId,
         info: Box<ChatFolderInviteLinkInfo>,
+        /// Another `addlist` link opened while this add was out: checked
+        /// when the add settles (the last one wins).
+        next: Option<String>,
     },
     Failed(String),
 }
