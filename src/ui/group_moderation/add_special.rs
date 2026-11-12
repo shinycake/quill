@@ -145,17 +145,23 @@ impl QuillApp {
         let Some(dialog) = self.admin.add_special.as_mut() else {
             return;
         };
-        let chat_id = dialog.chat_id;
+        let (chat_id, role) = (dialog.chat_id, dialog.role);
         match step {
             SpecialStep::Ask(question) => dialog.confirm = Some((user_id, question)),
             SpecialStep::Restrict => self.open_restrict_dialog(chat_id, user_id, false, window, cx),
-            SpecialStep::Kick => self.kick_from_add_special(chat_id, user_id, cx),
+            SpecialStep::Kick => self.kick_from_add_special(chat_id, role, user_id, cx),
         }
         cx.notify();
     }
 
     /// tdesktop `kickUser`: banned with `KickedRestrictedRights`, forever.
-    fn kick_from_add_special(&mut self, chat_id: ChatId, user_id: i64, cx: &mut Context<Self>) {
+    fn kick_from_add_special(
+        &mut self,
+        chat_id: ChatId,
+        role: SpecialRole,
+        user_id: i64,
+        cx: &mut Context<Self>,
+    ) {
         let note = match self.live.as_mut() {
             // The picker closes and the note says "banned" when the answer
             // arrives (`settle_member_changes`).
@@ -163,7 +169,10 @@ impl QuillApp {
                 Ok(Some(request)) => {
                     self.admin.member_changes.push(super::MemberChange {
                         request,
-                        kind: super::MemberChangeKind::Kick,
+                        kind: super::MemberChangeKind::Kick {
+                            chat: chat_id,
+                            role,
+                        },
                     });
                     cx.notify();
                     return;

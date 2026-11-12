@@ -147,3 +147,32 @@ fn the_custom_end_opens_a_day_after_the_installed_clock(cx: &mut TestAppContext)
         );
     });
 }
+
+/// A kick answers after the picker was closed and another opened: only the
+/// picker the kick came from closes.
+#[gpui_kit::test]
+fn a_kick_answer_closes_only_its_own_picker(cx: &mut TestAppContext) {
+    use crate::ui::group_moderation::{MemberChange, MemberChangeKind};
+    use quill::add_special::SpecialRole;
+    use quill::ids::{ChatId, RequestId};
+    let (app, mut vcx) = new_app(cx, "group-add-exception");
+    let vcx = &mut vcx;
+    let kick = |chat: i64| MemberChange {
+        request: RequestId(9_000),
+        kind: MemberChangeKind::Kick {
+            chat: ChatId(chat),
+            role: SpecialRole::Restricted,
+        },
+    };
+    app.update(vcx, |app, cx| {
+        assert!(app.admin.add_special.is_some(), "the picker is open");
+        // A kick from another group's picker answers.
+        app.admin.member_changes.push(kick(GROUP + 1));
+        app.settle_member_changes(cx);
+        assert!(app.admin.add_special.is_some(), "not this picker's kick");
+        // Its own kick answers.
+        app.admin.member_changes.push(kick(GROUP));
+        app.settle_member_changes(cx);
+        assert!(app.admin.add_special.is_none(), "its own kick closes it");
+    });
+}

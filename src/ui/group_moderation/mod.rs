@@ -40,9 +40,13 @@ pub(in crate::ui) struct MemberChange {
 pub(in crate::ui) enum MemberChangeKind {
     /// A restriction or ban lifted from the member dialog.
     Unban,
-    /// "Remove user" from the Add exception / Remove user picker: the
-    /// picker closes when the ban is answered.
-    Kick,
+    /// "Remove user" from the Add exception / Remove user picker of `chat`
+    /// in `role`: that picker closes when the ban is answered, and no other
+    /// (another group's, or another kind opened since).
+    Kick {
+        chat: quill::ids::ChatId,
+        role: quill::add_special::SpecialRole,
+    },
 }
 
 /// What the admin dialog's Submit sends.
@@ -503,14 +507,21 @@ impl QuillApp {
                 (MemberChangeKind::Unban, SubmitView::Failed(_)) => {
                     StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_UNBAN_MEMBER))
                 }
-                (MemberChangeKind::Kick, SubmitView::Failed(_)) => {
+                (MemberChangeKind::Kick { .. }, SubmitView::Failed(_)) => {
                     StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_UPDATE_MEMBER_STATUS))
                 }
                 (MemberChangeKind::Unban, _) => {
                     StatusNote::silent(tr(keys::Q_PEOPLE_MEMBER_UNBANNED))
                 }
-                (MemberChangeKind::Kick, _) => {
-                    self.admin.add_special = None;
+                (MemberChangeKind::Kick { chat, role }, _) => {
+                    if self
+                        .admin
+                        .add_special
+                        .as_ref()
+                        .is_some_and(|picker| picker.chat_id == chat && picker.role == role)
+                    {
+                        self.admin.add_special = None;
+                    }
                     StatusNote::silent(tr(keys::Q_PEOPLE_MEMBER_BANNED))
                 }
             };
