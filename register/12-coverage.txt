@@ -101,3 +101,12 @@ src/ui/audio/engine.rs 1627 read
 src/ui/audio/output.rs 1490 read
 src/ui/audio/tempo.rs 406 read
 src/ui/audio/opus.rs 296 read
+src/ui/audio_playback.rs 821 read
+src/ui/auth_recovery.rs 246 read
+src/ui/auth_registration.rs 126 read
+src/ui/auth_state.rs 227 read
+src/ui/auth_ui.rs 298 read
+src/ui/autoscroll_ui.rs 285 read
+src/ui/background_accounts/account_row.rs 148 read
+src/ui/background_accounts/calls.rs 409 read
+src/ui/background_accounts/chrome.rs 65 read
