@@ -24,13 +24,11 @@ fn own_box() -> PeerQrBox {
 }
 
 fn custom_box() -> PeerQrBox {
-    PeerQrBox::new(
-        QrSubject::Custom(CustomQr {
-            link: "https://t.me/+invite".into(),
-            title: None,
-            about: None,
-        }),
-    )
+    PeerQrBox::new(QrSubject::Custom(CustomQr {
+        link: "https://t.me/+invite".into(),
+        title: None,
+        about: None,
+    }))
 }
 
 fn env(now: i64) -> QrEnv {

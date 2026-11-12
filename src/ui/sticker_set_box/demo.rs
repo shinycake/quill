@@ -178,7 +178,9 @@ impl QuillApp {
             Ok("panel") => {
                 self.sticker_box.host = super::state::SetBoxHost::Closed;
                 self.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
-                self.pickers.media_panel.show(crate::ui::media_panel::PanelTab::Stickers, None);
+                self.pickers
+                    .media_panel
+                    .show(crate::ui::media_panel::PanelTab::Stickers, None);
             }
             _ => {}
         }

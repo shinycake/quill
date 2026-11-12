@@ -15,7 +15,9 @@ pub(super) enum OfferSend {
     /// `joinVideoChat` or `joinLiveStory`. `muted`: it joins with the
     /// microphone closed (push-to-talk), whatever the tracked flag says when
     /// the payload lands.
-    Join { muted: bool },
+    Join {
+        muted: bool,
+    },
     Rejoin {
         conference: Option<ConferenceInput>,
         orphaned_presentation: bool,

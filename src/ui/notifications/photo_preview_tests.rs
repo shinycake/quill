@@ -1,6 +1,6 @@
 //! A notification waiting for its photo: the deadline task belongs to the
 //! wait that made it.
-use super::{PHOTO_WAIT, PreviewWait};
+use super::PreviewWait;
 use crate::ui::app::QuillApp;
 use crate::ui::notifications::viewer_progress_tests::open_app;
 use gpui_kit::{Entity, TestAppContext, VisualTestContext};
@@ -41,7 +41,7 @@ fn a_wait_settled_early_leaves_no_deadline_to_end_the_next_wait(cx: &mut TestApp
     wait_for(&app, &mut vcx, &key);
     // The first wait's deadline passes: the second still waits.
     vcx.executor()
-        .advance_clock(PHOTO_WAIT - Duration::from_millis(500));
+        .advance_clock(Duration::from_millis(2_500));
     vcx.run_until_parked();
     assert!(waiting(&app, &vcx, &key), "settled by the old deadline");
     vcx.executor().advance_clock(Duration::from_secs(1));

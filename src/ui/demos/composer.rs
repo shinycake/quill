@@ -110,7 +110,9 @@ impl QuillApp {
         let sticker = quill::ids::MessageId(crate::ui::demo::HISTORY_ANIM_STICKER);
         if demo_history_extra("panel") {
             self.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
-            self.pickers.media_panel.show(crate::ui::media_panel::PanelTab::Emoji, None);
+            self.pickers
+                .media_panel
+                .show(crate::ui::media_panel::PanelTab::Emoji, None);
         }
         if demo_history_extra("menu") {
             self.message_ui

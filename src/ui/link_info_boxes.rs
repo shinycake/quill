@@ -132,9 +132,7 @@ impl QuillApp {
             match self.live.as_mut() {
                 Some(live) => {
                     if live.driver.request_gift_code_info(&code).is_err() {
-                        self.set_note(StatusNote::error(tr(
-                            keys::Q_REST_COULD_NOT_CHECK_THE_GIFT,
-                        )));
+                        self.set_note(StatusNote::error(tr(keys::Q_REST_COULD_NOT_CHECK_THE_GIFT)));
                     }
                 }
                 None => {

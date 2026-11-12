@@ -436,7 +436,9 @@ impl QuillApp {
             session.media.media_library.insert(77, stickers);
         }
         self.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
-        self.pickers.media_panel.show(crate::ui::media_panel::PanelTab::Stickers, None);
+        self.pickers
+            .media_panel
+            .show(crate::ui::media_panel::PanelTab::Stickers, None);
         self.set_note(StatusNote::silent(
             "screenshot demo — stickers · tap to send",
         ));
@@ -455,7 +457,9 @@ impl QuillApp {
         }
         if demo == GifsDemo::Gifs {
             self.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
-            self.pickers.media_panel.show(crate::ui::media_panel::PanelTab::Gifs, None);
+            self.pickers
+                .media_panel
+                .show(crate::ui::media_panel::PanelTab::Gifs, None);
             self.toggle_animation_playback(
                 MessageId(501),
                 quill::ids::FileId(63),

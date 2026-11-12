@@ -141,7 +141,9 @@ fn a_muted_join_marks_the_call_only_once_it_goes_out() {
     let (dir, mut driver, recorder, handle, _sink, _seq) = ready_group_call_driver();
     assert!(!tracked(&driver).is_muted_self);
     handle.fail_group_offer();
-    driver.join_video_chat_with(555, true).expect("the press is taken");
+    driver
+        .join_video_chat_with(555, true)
+        .expect("the press is taken");
     assert!(
         !tracked(&driver).is_muted_self,
         "a join that never left marked nothing"

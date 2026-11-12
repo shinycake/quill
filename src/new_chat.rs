@@ -444,7 +444,11 @@ mod tests {
         let shown = view(&failed);
         assert_eq!(shown.step, NewChatStep::Info);
         assert_eq!(shown.failure(), Some((CreateFailure::Restricted, "nope")));
-        assert_eq!(shown.refused_title(), None, "only NO_CHAT_TITLE is about the name");
+        assert_eq!(
+            shown.refused_title(),
+            None,
+            "only NO_CHAT_TITLE is about the name"
+        );
         assert!(!shown.busy());
     }
 

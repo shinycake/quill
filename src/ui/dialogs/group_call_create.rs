@@ -27,8 +27,8 @@ use gpui_kit::component::{ActiveTheme, Sizable, WindowExt};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::calls::group_call_create::{
-    BeforeCreate, Countdown, CreateKind, CurrentCall, JoinAsStep,
-    LeaveText, SCHEDULE_MIN_AHEAD_SECS, before_create, check_schedule, countdown, countdown_wait,
+    BeforeCreate, Countdown, CreateKind, CurrentCall, JoinAsStep, LeaveText,
+    SCHEDULE_MIN_AHEAD_SECS, before_create, check_schedule, countdown, countdown_wait,
     default_schedule_at, join_as_step, schedule_max,
 };
 use quill::ids::{ChatId, RequestId};

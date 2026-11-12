@@ -203,7 +203,10 @@ fn a_refused_name_shows_its_error_when_typed_back() {
     // "A" was refused by the server; Confirm on an empty name followed.
     let judged = TitleCheck::Judged(String::new());
     assert!(judged.shows_error(Some("A"), "A"), "typed back: refused");
-    assert!(!judged.shows_error(Some("A"), "AB"), "another text: no error");
+    assert!(
+        !judged.shows_error(Some("A"), "AB"),
+        "another text: no error"
+    );
     assert!(judged.shows_error(None, ""), "the dialog's own refusal");
     assert!(!TitleCheck::Fine.shows_error(None, "A"));
 }

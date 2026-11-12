@@ -367,7 +367,10 @@ fn an_empty_field_does_not_leave_the_system_prompt(cx: &mut TestAppContext) {
         assert!(app.account.passcode.job.is_running(), "still waiting");
     });
     frame(vcx);
-    assert!(answer.send(true).is_ok(), "the wait still holds its receiver");
+    assert!(
+        answer.send(true).is_ok(),
+        "the wait still holds its receiver"
+    );
     frame(vcx);
     assert!(
         !app.read_with(vcx, |app, _| app.account.passcode.is_locked()),

@@ -159,7 +159,10 @@ mod tests {
         assert!(shown(&state, 5, "PlushPepe-1"), "resumed with its purchase");
         state.close();
         state.open_for(ChatId(5), false);
-        assert!(!shown(&state, 5, "PlushPepe-1"), "fresh: the old quote hides");
+        assert!(
+            !shown(&state, 5, "PlushPepe-1"),
+            "fresh: the old quote hides"
+        );
     }
 
     #[test]

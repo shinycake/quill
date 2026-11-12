@@ -52,10 +52,9 @@ impl VideoFullscreen {
     /// made full screen and has not given back yet stays Quill's.
     pub(in crate::ui) fn enter(self, window_fullscreen: bool) -> (Self, bool) {
         match self {
-            Self::Entering
-            | Self::Active
-            | Self::InFullscreenWindow
-            | Self::Reentering { .. } => (self, false),
+            Self::Entering | Self::Active | Self::InFullscreenWindow | Self::Reentering { .. } => {
+                (self, false)
+            }
             Self::GoingBack | Self::Cancelling { .. } if window_fullscreen => (Self::Active, false),
             // The window is still leaving: ask for it again once it has.
             Self::Exiting { until } if window_fullscreen => (Self::Reentering { until }, false),
@@ -98,7 +97,9 @@ impl VideoFullscreen {
             Self::GoingBack => (Self::Off, false),
             Self::Exiting { until } if window_fullscreen && now < until => (self, false),
             Self::Exiting { .. } => (Self::Off, false),
-            Self::Reentering { until } if window_fullscreen && now >= until => (Self::Active, false),
+            Self::Reentering { until } if window_fullscreen && now >= until => {
+                (Self::Active, false)
+            }
             Self::Reentering { .. } if window_fullscreen => (self, false),
             Self::Reentering { .. } => (Self::Entering, true),
             Self::Cancelling { until } if now >= until => (Self::Off, false),
@@ -154,7 +155,11 @@ mod tests {
         let (mode, ask) = leaving.enter(true);
         assert!(!ask, "not yet: the window is still leaving");
         assert!(mode.is_on());
-        assert_eq!(mode.follow_window(true, now), (mode, false), "still leaving");
+        assert_eq!(
+            mode.follow_window(true, now),
+            (mode, false),
+            "still leaving"
+        );
         let (mode, toggle) = mode.follow_window(false, now);
         assert_eq!((mode, toggle), (VideoFullscreen::Entering, true));
         // A window that never left within the wait stays Quill's.

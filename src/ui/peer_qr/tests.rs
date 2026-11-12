@@ -514,7 +514,10 @@ fn the_clock_rests_in_the_background_and_runs_again_on_activation(cx: &mut TestA
     vcx.executor()
         .advance_clock(std::time::Duration::from_millis(1_100));
     vcx.run_until_parked();
-    assert!(!running(&app, vcx), "the next tick finds the app hidden and stops");
+    assert!(
+        !running(&app, vcx),
+        "the next tick finds the app hidden and stops"
+    );
 }
 
 /// A message price and a temporary free code, then the pill's menu.
