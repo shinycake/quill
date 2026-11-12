@@ -544,15 +544,17 @@ impl QuillApp {
                     .child(tr(keys::Q_PREFS_COULDN_T_LOAD_PRIVACY_SETTINGS)),
             )
             .child(
-                Button::new(format!("{id}-retry"))
-                    .label(tr(keys::Q_PREFS_RETRY))
-                    .ghost()
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if let Some(live) = this.live.as_mut() {
-                            let _ = live.driver.fetch_privacy_rules(key);
-                        }
-                        cx.notify();
-                    })),
+                div().debug_selector(|| format!("{id}-retry")).child(
+                    Button::new(format!("{id}-retry"))
+                        .label(tr(keys::Q_PREFS_RETRY))
+                        .ghost()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if let Some(live) = this.live.as_mut() {
+                                let _ = live.driver.fetch_privacy_rules(key);
+                            }
+                            cx.notify();
+                        })),
+                ),
             )
             .into_any_element()
     }
@@ -834,3 +836,8 @@ crate::ui::shell::register_dialogs! {
     )
     .close(|app, _, _| app.set_archive_settings_open(false)),
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "calls_privacy_tests.rs"]
+mod calls_privacy_tests;

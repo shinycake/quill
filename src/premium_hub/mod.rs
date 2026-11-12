@@ -820,6 +820,26 @@ pub struct PremiumHub {
 }
 
 impl PremiumHub {
+    /// A chat of `domain` opened by `flow`: the queued `/start`, when it is
+    /// this flow's. Any other chat opening ends the Premium link's flow, so
+    /// its `/start` is dropped here and cannot wait for a later visit.
+    pub fn take_auto_start(
+        &mut self,
+        domain: &str,
+        flow: Option<crate::ids::RequestId>,
+    ) -> Option<PremiumAutoStart> {
+        if self
+            .auto_start
+            .as_ref()
+            .is_some_and(|auto| auto.is_for(domain, flow))
+        {
+            self.auto_start.take()
+        } else {
+            self.auto_start = None;
+            None
+        }
+    }
+
     pub fn apply_transactions(&mut self, page: StarTxPage, append: bool) {
         self.stars.page = page_stage::PageStage::Ready;
         self.balance = Some(page.balance);

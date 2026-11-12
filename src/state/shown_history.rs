@@ -1,12 +1,22 @@
-//! The messages the open chat's view draws: a forum topic shows its own
-//! history, not the chat's main one, so anything that picks rows (a drag
-//! selection, "Select up to this") reads them from here.
+//! The messages a chat's view draws, in the view's own order: an open
+//! comment thread, then an open forum topic, then the chat's main history.
+//! Anything that picks rows (a drag selection, "Select up to this") reads
+//! them from here. Saved Messages sublists and tag filters live in the UI
+//! (`QuillApp::shown_history`), which asks here for every other view.
 use super::*;
 
 impl Session {
-    /// The loaded messages `chat_id`'s view draws: the open topic's page
-    /// when that topic is open in this chat, else the chat's main history.
+    /// The loaded messages `chat_id`'s view draws: the open thread's
+    /// replies (a failed thread falls through, as the view does), else the
+    /// open topic's page, else the chat's main history.
     pub fn shown_history(&self, chat_id: ChatId) -> Option<&HistoryMessages> {
+        if self.open.chat() == Some(chat_id)
+            && let Some(thread) = self
+                .thread_for_chat(chat_id)
+                .filter(|thread| !matches!(thread.status, ThreadStatus::Failed(_)))
+        {
+            return Some(&thread.history.messages);
+        }
         if self.open.chat() == Some(chat_id)
             && let Some(topic) = self.open.topic()
         {

@@ -182,6 +182,24 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.fetch_poll_voters_page(chat_id, message_id, option_index, 0)
     }
 
+    /// Frame upkeep: the poll changed, which made the list `Stale`; ask for
+    /// it again. The ask turns the stage into `Loading` (or `Failed` when it
+    /// cannot go), so a stale list is asked once. Whether it asked.
+    pub fn refresh_stale_poll_voters(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        option_index: usize,
+    ) -> bool {
+        let key = (chat_id.0, message_id.0, option_index as i32);
+        matches!(
+            self.session.messages.poll_voters.get(&key),
+            Some(PollVotersFetch::Stale)
+        ) && self
+            .fetch_poll_voters(chat_id, message_id, option_index)
+            .is_ok()
+    }
+
     /// B4: the next `getPollVoters` page — `offset` is the already-loaded
     /// count. No-op unless the cache holds a loaded page; exhaustion is
     /// handled in the reducer, which clamps `total_count` on a short

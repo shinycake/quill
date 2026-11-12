@@ -295,11 +295,11 @@ impl QuillApp {
             .is_empty()
     }
 
-    /// Loaded, sent messages the chat's view draws (the open topic's, in a
-    /// forum topic), in history order.
+    /// Loaded, sent messages the chat's view draws (the open thread's,
+    /// topic's or Saved view's own rows), in history order.
     pub(super) fn loaded_selectable_ids(&self, chat_id: ChatId) -> Vec<MessageId> {
         self.session()
-            .and_then(|s| s.shown_history(chat_id))
+            .and_then(|_| self.shown_history(chat_id))
             .map(|messages| {
                 messages
                     .values()
@@ -328,10 +328,7 @@ impl QuillApp {
         let Some(draft) = self.forward_draft() else {
             return Vec::new();
         };
-        let Some(messages) = self
-            .session()
-            .and_then(|s| s.shown_history(draft.from_chat_id))
-        else {
+        let Some(messages) = self.shown_history(draft.from_chat_id) else {
             return Vec::new();
         };
         let mut ids = draft.message_ids.clone();
@@ -406,7 +403,7 @@ impl QuillApp {
         {
             return false;
         }
-        let Some(messages) = session.shown_history(chat_id) else {
+        let Some(messages) = self.shown_history(chat_id) else {
             return false;
         };
         !draft.message_ids.is_empty()
@@ -434,7 +431,7 @@ impl QuillApp {
     pub(super) fn selected_messages_text(&self) -> Option<(ChatId, String)> {
         let draft = self.forward_draft()?;
         let session = self.session()?;
-        let shown = session.shown_history(draft.from_chat_id)?;
+        let shown = self.shown_history(draft.from_chat_id)?;
         let mut ids = draft.message_ids.clone();
         ids.sort_by_key(|id| id.0);
         let messages: Vec<_> = ids.iter().filter_map(|id| shown.get(&id.0)).collect();
@@ -484,7 +481,7 @@ impl QuillApp {
         };
         // Every message must be yours and still open to "delete for
         // everyone" (TDLib refuses the whole batch otherwise).
-        let all_outgoing = session.shown_history(chat_id).is_some_and(|shown| {
+        let all_outgoing = self.shown_history(chat_id).is_some_and(|shown| {
             ids.iter().all(|id| {
                 shown.get(&id.0).is_some_and(|message| {
                     message.is_outgoing

@@ -225,3 +225,54 @@ fn a_stale_list_whose_ask_cannot_go_ends_as_failed() {
     assert_eq!(stage(&driver), Some(PollVotersFetch::Loading(retry)));
     std::fs::remove_dir_all(dir).ok();
 }
+
+/// Sweep r4-10 round 4: the frame upkeep asks a `Stale` list again, once.
+#[test]
+fn a_stale_list_is_asked_again_by_the_upkeep_once() {
+    let (dir, mut driver, recorder, _sink, dyn_sink, seq) = poll_driver();
+    seed_poll(&mut driver, &seq, &dyn_sink);
+    let (chat, message) = (ChatId(7), MessageId(108));
+    assert!(
+        !driver.refresh_stale_poll_voters(chat, message, 0),
+        "nothing asked yet: nothing is stale"
+    );
+    let first = driver.fetch_poll_voters(chat, message, 0).unwrap().unwrap();
+    driver
+        .ingest(copy_and_parse(&voters_page(first, &[1, 2]), &seq, &dyn_sink).unwrap())
+        .unwrap();
+    driver
+        .session
+        .messages
+        .poll_voters
+        .insert((7, 108, 0), PollVotersFetch::Stale);
+    assert!(driver.refresh_stale_poll_voters(chat, message, 0));
+    let asked = extra_of_last(&recorder);
+    assert_eq!(stage(&driver), Some(PollVotersFetch::Loading(asked)));
+    assert!(!driver.refresh_stale_poll_voters(chat, message, 0), "once");
+    std::fs::remove_dir_all(dir).ok();
+}
+
+/// Sweep r4-10 round 4: the stats Retry's fetch turns a `Failed` entry
+/// into `Loading` of the request it sent.
+#[test]
+fn the_stats_fetch_turns_a_failed_entry_into_loading() {
+    use crate::state::PollStatsFetch;
+    let (dir, mut driver, recorder, _sink, dyn_sink, seq) = poll_driver();
+    seed_poll(&mut driver, &seq, &dyn_sink);
+    let (chat, message) = (ChatId(7), MessageId(108));
+    driver
+        .session
+        .messages
+        .poll_stats
+        .insert((7, 108), PollStatsFetch::Failed("no".into()));
+    let asked = driver
+        .fetch_poll_vote_statistics(chat, message, false)
+        .unwrap()
+        .unwrap();
+    assert_eq!(extra_of_last(&recorder), asked);
+    assert_eq!(
+        driver.session.messages.poll_stats.get(&(7, 108)),
+        Some(&PollStatsFetch::Loading(asked))
+    );
+    std::fs::remove_dir_all(dir).ok();
+}

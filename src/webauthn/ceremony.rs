@@ -107,6 +107,9 @@ pub struct Ceremony {
     commands: Sender<CeremonyCommand>,
     cancel: Arc<AtomicBool>,
     on_cancel: Option<OnCancel>,
+    /// The worker, so a test can wait for it to finish (its poke included).
+    #[cfg(test)]
+    pub(super) worker: Option<std::thread::JoinHandle<Option<()>>>,
 }
 
 /// The ceremony runs and its events are read, or it has said its last
@@ -176,7 +179,7 @@ impl Ceremony {
             commands: command_rx,
             cancel: cancel.clone(),
         };
-        let spawned = crate::thread_guard::spawn_guarded("quill-passkey", move || {
+        let worker = crate::thread_guard::spawn_guarded("quill-passkey", move || {
             // A worker that panics still tells the dialog (it reads events
             // when `wake::PASSKEY` pokes, never on a timer).
             let last = crate::thread_guard::run_guarded(|| work(&link)).unwrap_or_else(|| {
@@ -184,7 +187,7 @@ impl Ceremony {
             });
             link.emit(last);
         });
-        if spawned.is_err() {
+        if worker.is_err() {
             let _ = event_tx.send(CeremonyEvent::Failed(CeremonyError::Other(
                 "could not start the worker".into(),
             )));
@@ -196,6 +199,8 @@ impl Ceremony {
             commands,
             cancel,
             on_cancel,
+            #[cfg(test)]
+            worker: worker.ok(),
         }
     }
 

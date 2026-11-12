@@ -160,9 +160,9 @@ impl QuillApp {
     /// answer.
     fn forget_quick_reply_stage(&mut self, stage: PaneStage) {
         if let PaneStage::Saving { request, .. } | PaneStage::Deleting { request, .. } = stage
-            && let Some(live) = self.live.as_mut()
+            && let Some(session) = self.session_mut()
         {
-            live.driver.session.acks.forget(request);
+            session.acks.forget(request);
         }
     }
 

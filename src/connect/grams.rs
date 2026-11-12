@@ -158,6 +158,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.fetch_grams_page(true).map(Some)
     }
 
+    /// The Retry of a failed page: a failed first page starts the tab over,
+    /// a failed later page asks that page again and keeps the rows loaded.
+    pub fn retry_grams(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        let grams = &self.session.payments.hub.grams;
+        if grams.load.error().is_none() {
+            return Ok(None);
+        }
+        if grams.rows.is_empty() {
+            let filter = grams.filter;
+            return self.set_grams_filter(filter);
+        }
+        self.fetch_more_grams()
+    }
+
     /// Switch the All / Incoming / Outgoing tab and refetch from the top.
     pub fn set_grams_filter(
         &mut self,

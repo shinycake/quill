@@ -111,30 +111,17 @@ impl QuillApp {
         let DeepLinkAction::OpenUsername { domain, .. } = action else {
             return false;
         };
-        let Some(live) = self.live.as_mut() else {
+        let Some(session) = self.session_mut() else {
             return false;
         };
-        let session = &mut live.driver.session;
-        let matches_bot = session
-            .payments
-            .hub
-            .auto_start
-            .as_ref()
-            .is_some_and(|auto| auto.is_for(domain, flow));
-        if !matches_bot {
-            // Another link (or another flow to the same bot) opened a chat:
-            // the Premium link's flow is over, and its `/start` must not
-            // wait for a later visit to the bot.
-            session.payments.hub.auto_start = None;
+        let Some(PremiumAutoStart { start_ref, .. }) =
+            session.payments.hub.take_auto_start(domain, flow)
+        else {
             return false;
-        }
+        };
         let bot_id = match session.chats.get(&chat_id.0).map(|chat| &chat.kind) {
             Some(ChatKind::Private { user_id }) => user_id.0,
             _ => return false,
-        };
-        let Some(PremiumAutoStart { start_ref, .. }) = session.payments.hub.auto_start.take()
-        else {
-            return false;
         };
         self.press_bot_start(chat_id, bot_id, start_ref, cx);
         true

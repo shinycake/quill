@@ -435,9 +435,9 @@ impl QuillApp {
 
     /// Whether the message is not on the server yet (or is gone), as it
     /// stands now.
-    fn message_still_sending(&self, chat: ChatId, id: MessageId) -> bool {
-        self.session()
-            .and_then(|session| session.shown_message(chat, id))
+    pub(super) fn message_still_sending(&self, chat: ChatId, id: MessageId) -> bool {
+        self.shown_history(chat)
+            .and_then(|messages| messages.get(&id.0))
             .is_none_or(|message| message.pending())
     }
 

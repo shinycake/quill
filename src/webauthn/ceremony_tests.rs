@@ -335,6 +335,11 @@ fn a_panicking_worker_ends_with_a_failure_and_a_poke() {
         next(&mut ceremony),
         CeremonyEvent::Failed(CeremonyError::Other("the worker stopped".into()))
     );
+    // `emit` sends the event and then pokes; the poke is the worker's last
+    // act, so once the worker is joined it has happened.
+    if let Some(worker) = ceremony.worker.take() {
+        let _ = worker.join();
+    }
     assert!(crate::wake::PASSKEY.epoch() > seen, "the dialog was poked");
 }
 

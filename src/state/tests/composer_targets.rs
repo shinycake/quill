@@ -321,3 +321,27 @@ fn the_shown_history_is_the_open_topics_page_not_the_main_one() {
     );
     assert!(session.shown_history(ChatId(9)).is_none());
 }
+
+/// Sweep r4-10 round 4: an open comment thread draws its own replies (in
+/// the discussion group), so a selection picks from them, not the main
+/// history; a failed thread falls through to the main one.
+#[test]
+fn the_shown_history_is_the_open_threads_replies_not_the_main_one() {
+    let (mut session, _sink, _seq) = seeded();
+    let mut reply = session.histories[&7].messages[&50].clone();
+    reply.id = MessageId(70);
+    let mut thread = ThreadView::resolving(ChatId(7), MessageId(50), RequestId(1));
+    thread.thread_id = 50;
+    thread.status = ThreadStatus::Ready;
+    thread.history.messages.insert(70, reply);
+    session.threads.thread = Some(thread);
+    assert!(session.shown_message(ChatId(7), MessageId(70)).is_some());
+    assert!(
+        session.shown_message(ChatId(7), MessageId(50)).is_none(),
+        "a main-history id is not drawn in the thread"
+    );
+    if let Some(thread) = session.threads.thread.as_mut() {
+        thread.status = ThreadStatus::Failed(String::new());
+    }
+    assert!(session.shown_message(ChatId(7), MessageId(50)).is_some());
+}

@@ -175,12 +175,12 @@ impl QuillApp {
             .edit_profile_dialog
             .take()
             .and_then(|dialog| dialog.op.in_flight());
-        if let Some(live) = self.live.as_mut() {
+        if let Some(session) = self.session_mut() {
             if let Some(id) = waiting {
-                live.driver.session.acks.forget(id);
+                session.acks.forget(id);
             }
             // The check belongs to the box: it goes with it.
-            live.driver.session.users_state.username_check = Default::default();
+            session.users_state.username_check = Default::default();
         }
         cx.notify();
     }

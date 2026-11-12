@@ -202,3 +202,49 @@ fn each_saved_view_has_its_own_history_key(cx: &mut TestAppContext) {
         "never a reply thread's id"
     );
 }
+
+/// Sweep r4-10 round 4: a selection in a Saved Messages sublist picks from
+/// the sublist's own rows, not the main Saved history.
+#[gpui_kit::test]
+fn a_saved_sublist_selection_reads_the_sublists_rows(cx: &mut TestAppContext) {
+    use quill::ids::MessageId;
+    use quill::state::{SavedSublistView, TopicHistory};
+    let h = new_app(cx);
+    let (shown, selectable, sending, main_shown) = h.app.update(cx, |app, _| {
+        let Some(session) = app.demo_session.as_mut() else {
+            return (false, Vec::new(), true, false);
+        };
+        let Some(chat) = session.open_chat_id() else {
+            return (false, Vec::new(), true, false);
+        };
+        session.my_user_id = Some(chat.0);
+        let Some(main) = session
+            .histories
+            .get(&chat.0)
+            .and_then(|history| history.messages.values().next().cloned())
+        else {
+            return (false, Vec::new(), true, false);
+        };
+        let main_id = main.id;
+        let mut row = main;
+        row.id = MessageId(900_001);
+        let mut history = TopicHistory::default();
+        history.messages.insert(row.id.0, row);
+        session.threads.saved.sublist = Some(SavedSublistView {
+            topic_id: 5,
+            history,
+        });
+        (
+            app.shown_history(chat)
+                .is_some_and(|rows| rows.contains_key(&900_001)),
+            app.loaded_selectable_ids(chat),
+            app.message_still_sending(chat, MessageId(900_001)),
+            app.shown_history(chat)
+                .is_some_and(|rows| rows.contains_key(&main_id.0)),
+        )
+    });
+    assert!(shown, "the sublist's row is the shown one");
+    assert!(!main_shown, "a main Saved row is not drawn in the sublist");
+    assert!(selectable.iter().all(|id| id.0 == 900_001));
+    assert!(!sending, "a sent row of the sublist is not 'still sending'");
+}

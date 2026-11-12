@@ -156,17 +156,9 @@ impl QuillApp {
         };
         let (chat_id, message_id) = (dialog.chat_id, dialog.message_id);
         let option = dialog.view.option().unwrap_or(0);
-        let stale = self.session().is_some_and(|session| {
-            matches!(
-                session
-                    .messages
-                    .poll_voters
-                    .get(&(chat_id.0, message_id.0, option as i32)),
-                Some(PollVotersFetch::Stale)
-            )
-        });
-        if stale && let Some(live) = self.live.as_mut() {
-            let _ = live.driver.fetch_poll_voters(chat_id, message_id, option);
+        if let Some(live) = self.live.as_mut() {
+            live.driver
+                .refresh_stale_poll_voters(chat_id, message_id, option);
         }
     }
 

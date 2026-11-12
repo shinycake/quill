@@ -173,6 +173,15 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Retry of a failed page: the first page starts over, a later page is
+    /// asked again with the loaded rows kept.
+    fn retry_grams(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.retry_grams();
+        }
+        cx.notify();
+    }
+
     /// Show the receipt of the row with `key` (`TonTx::key`), or the list.
     pub(in crate::ui) fn select_grams_tx(&mut self, key: Option<String>, cx: &mut Context<Self>) {
         if let Some(grams) = self.grams_mut() {
@@ -360,14 +369,13 @@ fn history(
     let muted = cx.theme().muted_foreground;
     let mut col = div().flex().flex_col().gap_1().pt_3();
     if let Some(error) = grams.load.error() {
-        let filter = grams.filter;
         col = col.child(div().text_sm().child(error.to_string())).child(
             div().debug_selector(|| "grams-retry".to_string()).child(
                 Button::new("grams-retry")
                     .label(tr(keys::Q_CHAT_RETRY))
                     .ghost()
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.set_grams_filter(filter, cx);
+                        this.retry_grams(cx);
                     })),
             ),
         );
