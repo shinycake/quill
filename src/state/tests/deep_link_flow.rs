@@ -18,7 +18,7 @@ fn a_request_in_flight_stays_and_a_terminal_step_is_taken_once() {
     assert!(chats.take_deep_link_step().is_none());
     chats.start_deep_link(
         DeepLinkState::ResolvingInfo {
-            generation: 1,
+            request: crate::state::RequestId(1),
             original: String::new(),
         },
         true,

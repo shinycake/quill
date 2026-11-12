@@ -7,12 +7,12 @@ use crate::state::request_purpose::flat_purposes;
 pub enum ChatsPurpose {
     /// `parity:platform-deep-links`: `getDeepLinkInfo` for a launch-time
     /// `t.me` / `tg:` link (schema 1.8.67, line 16189). The answer lands
-    /// in `Session::deep_link`; `generation` drops stale answers.
-    DeepLinkInfo { generation: u64 },
+    /// in `Session::deep_link`; the flow's stage holds the request.
+    DeepLinkInfo,
     /// `getInternalLinkType` for a link the local parsers do not cover
     /// (`parity:deeplink-internal-link-type`). Same slot as
     /// [`Self::DeepLinkInfo`] (`ResolvingInfo`).
-    DeepLinkInternalType { generation: u64 },
+    DeepLinkInternalType,
     /// `parity:platform-deep-links`: deep-link follow-up resolving to a
     /// chat (`searchPublicChat` / `createPrivateChat` / `getChat`). The
     /// `chat` answer is picked up in `apply_update_new_chat` and opens

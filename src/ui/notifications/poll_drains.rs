@@ -199,9 +199,7 @@ impl QuillApp {
         // the administrators `Stale`: the ones on screen ask again, so
         // they show the new membership instead of sticking on "Loading
         // members…". A list nobody shows stays `Stale` until it is shown.
-        if self.member_dialog_fetch().is_some_and(|fetch| {
-            matches!(fetch, quill::state::SupergroupMembersFetch::Stale { .. })
-        }) {
+        if self.member_dialog_is_stale() {
             self.refresh_member_dialog(cx);
             progressed = true;
         }

@@ -166,13 +166,11 @@ impl Session {
                         .and_then(|stage| stage.resolving_action(pending.id))
                         .cloned()
                 {
-                    let generation = self.chats_state.next_deep_link_generation();
                     // `searchUserByPhoneNumber` answer: open the private chat.
                     self.chats_state.enter_deep_link_stage(DeepLinkState::Info {
                         text: String::new(),
                         need_update: false,
                         action: Some(DeepLinkAction::OpenUserDraft { user_id, draft }),
-                        generation,
                     });
                 }
             }

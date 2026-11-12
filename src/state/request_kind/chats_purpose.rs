@@ -6,8 +6,8 @@ impl ChatsPurpose {
     /// What this request is. Exhaustive: a new variant must be classified here.
     pub(crate) fn kind(&self) -> RequestKind {
         match self {
-            Self::DeepLinkInfo { .. }
-            | Self::DeepLinkInternalType { .. }
+            Self::DeepLinkInfo
+            | Self::DeepLinkInternalType
             | Self::DeepLinkResolve
             | Self::DeepLinkCheckInvite
             | Self::GetInstalledBackgrounds { .. }

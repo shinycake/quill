@@ -763,7 +763,7 @@ mod pump_tests {
         // No deep-link flow at all: the case on every idle poll.
         assert!(!deep_link_step_redraws(None, None));
         let resolving = DeepLinkState::ResolvingInfo {
-            generation: 1,
+            request: quill::ids::RequestId(1),
             original: String::new(),
         };
         assert!(!deep_link_step_redraws(Some(&resolving), None));

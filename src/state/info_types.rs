@@ -891,11 +891,14 @@ pub enum DeepLinkState {
         is_channel: bool,
         generation: u64,
     },
-    /// `getDeepLinkInfo` / `getInternalLinkType` in flight; `generation`
-    /// drops stale answers. `original` is the link text a
+    /// `getDeepLinkInfo` / `getInternalLinkType` in flight as `request`:
+    /// only its answer or error leaves the stage. `original` is the link text a
     /// `getInternalLinkType` lookup resolves (the proxy hand-off and the
     /// web fallback need it back); empty for a `getDeepLinkInfo` lookup.
-    ResolvingInfo { generation: u64, original: String },
+    ResolvingInfo {
+        request: RequestId,
+        original: String,
+    },
     /// `deepLinkInfo` answer parsed. The UI consumes this once: with an
     /// action it fires the follow-up request, otherwise (or when
     /// `need_update`) it shows `text` in a dialog.
@@ -903,7 +906,6 @@ pub enum DeepLinkState {
         text: String,
         need_update: bool,
         action: Option<DeepLinkAction>,
-        generation: u64,
     },
     /// Follow-up request (`searchPublicChat` / `createPrivateChat` /
     /// `checkChatInviteLink` / confirmed `joinChatByInviteLink` / `getChat`) in flight.
@@ -942,19 +944,14 @@ pub struct DeepLinkFlow {
 }
 
 impl DeepLinkState {
-    /// The flow generation of a stage that belongs to one; answers of an
-    /// older flow are dropped by comparing it.
-    pub fn generation(&self) -> Option<u64> {
-        match self {
-            Self::InvitePreview { generation, .. }
-            | Self::ResolvingInfo { generation, .. }
-            | Self::Info { generation, .. } => Some(*generation),
-            Self::ResolvingChat { .. }
-            | Self::ChatReady { .. }
-            | Self::ShowText(_)
-            | Self::Ui(_)
-            | Self::Unknown { .. } => None,
-        }
+    /// Whether the stage waits for the answer or error of `request` (a
+    /// lookup or a follow-up of the flow): any other request's is stale.
+    pub fn waits_for(&self, request: RequestId) -> bool {
+        matches!(
+            self,
+            Self::ResolvingInfo { request: asked, .. } | Self::ResolvingChat { request: asked, .. }
+                if *asked == request
+        )
     }
 
     /// The action of the follow-up request `request`, while the stage

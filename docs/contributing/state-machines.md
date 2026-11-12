@@ -108,18 +108,23 @@ in flight (`Loading`, `Asking`, `Sending`, `Sent`, `Waiting`, `Pending`,
 
 #### `check-request-match.py`: an answer is matched by its `RequestId`
 
-The check rejects two shortcuts. `purpose`: a call to
+The check rejects three shortcuts. `purpose`: a call to
 `requests.has_purpose(..)`, `take_purpose(..)` or `has_auth_submit()`.
 "Some request with this purpose is in flight" is also true for another
 window's request, an older one, or one for another chat, so the busy
 state is wrong and a late answer or error ends the wrong stage.
 `unmatched`: a call to `Fetch::succeed`, which takes the answer whatever
-request it came from.
+request it came from. `ticket`: a request purpose with a `u64` field named
+`token`, `generation`, `ticket` or `seq`. The counter stands in for the
+`RequestId`; every start path has to remember to bump it, and nothing ties
+it to the request that is out.
 
 - Fix: record the request in the stage when it is sent
   (`fetch.sent(request)`), and settle it with
   `fetch.answered(Some(pending.id), value)` / `failed(..)`. Ask "is mine
-  in flight" with `fetch.waits_for(id)` or `is_loading()`.
+  in flight" with `fetch.waits_for(id)` or `is_loading()`. For `ticket`,
+  drop the counter from the purpose and keep the `RequestId` the driver
+  returned in the stage (`Loading { request }`), set once the send went out.
 - Needs no matching: `scripts/request-match-allow.txt` with the reason.
 
 #### `check-owned-timers.py`: a timer belongs to the stage that waits for it

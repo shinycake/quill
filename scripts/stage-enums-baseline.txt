@@ -122,7 +122,6 @@ unkeyed:Beats::Running 1
 unkeyed:BotUsernameCheck::Checking 1
 unkeyed:CallLinkStage::Leaving 1
 unkeyed:Cancellation::InFlight 1
-unkeyed:CardState::Loading 1
 unkeyed:ChatSearchPaging::Loading 1
 unkeyed:ConferenceStage::Upgrading 1
 unkeyed:CreateStage::Creating 1

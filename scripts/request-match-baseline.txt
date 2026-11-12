@@ -96,6 +96,13 @@ purpose:Session::mark_saved_sounds_stale 1
 purpose:Session::needs_profile_audio_check 1
 purpose:Session::sharing_request_answering 1
 purpose:Session::suggested_post_busy 1
+ticket:BotsPurpose::CheckBotUsername 1
+ticket:BotsPurpose::CreateBot 1
+ticket:BotsPurpose::GetWidgetQueryAnswer 1
+ticket:MediaPurpose::GetProfileGifts 1
+ticket:MediaPurpose::GetSharedMediaMore 1
+ticket:RequestPurpose::GetSharedMedia 1
+ticket:SearchPurpose::GetChatMessageCalendar 1
 unmatched:ConnectDriver::save_connected_bot 1
 unmatched:ForumTopicsMap::insert 1
 unmatched:GifPanel::search_answered 1

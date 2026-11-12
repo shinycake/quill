@@ -105,38 +105,22 @@ impl Session {
             }
             // `parity:platform-deep-links`: a failed deep-link request
             // surfaces TDLib's error as a dialog; stale failures (a newer
-            // flow is already in flight) are ignored via the generation
-            // guard.
+            // flow is already in flight) are ignored: the stage waits for
+            // one request only.
             Some(RequestPurpose::Chats(
-                ChatsPurpose::DeepLinkInfo { .. }
-                | ChatsPurpose::DeepLinkInternalType { .. }
+                ChatsPurpose::DeepLinkInfo
+                | ChatsPurpose::DeepLinkInternalType
                 | ChatsPurpose::DeepLinkResolve
                 | ChatsPurpose::DeepLinkJoin
                 | ChatsPurpose::DeepLinkCheckInvite,
             )) => {
                 // The flow this request belongs to is the one whose stage
-                // waits for exactly this request (a lookup's stage carries
-                // its generation, a follow-up's stage the request itself).
-                let lookup_generation = match pending.map(|p| p.purpose) {
-                    Some(
-                        RequestPurpose::Chats(ChatsPurpose::DeepLinkInfo { generation })
-                        | RequestPurpose::Chats(ChatsPurpose::DeepLinkInternalType { generation }),
-                    ) => Some(generation),
-                    _ => None,
-                };
-                let stale = match lookup_generation {
-                    Some(generation) => {
-                        self.chats_state
-                            .deep_link_stage()
-                            .and_then(DeepLinkState::generation)
-                            != Some(generation)
-                    }
-                    None => !pending.is_some_and(|p| {
-                        self.chats_state
-                            .deep_link_stage()
-                            .is_some_and(|stage| stage.resolving_action(p.id).is_some())
-                    }),
-                };
+                // waits for exactly this request.
+                let stale = !pending.is_some_and(|p| {
+                    self.chats_state
+                        .deep_link_stage()
+                        .is_some_and(|stage| stage.waits_for(p.id))
+                });
                 // `joinChatByInviteLink` over the community limit opens the
                 // limit box (tdesktop `ChannelsLimitBox`) instead of a dialog.
                 // A stale answer (the flow ended, as an account switch
@@ -145,7 +129,7 @@ impl Session {
                 let limit_box = !stale
                     && matches!(
                         pending.map(|p| p.purpose),
-                        Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin { .. }))
+                        Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin))
                     )
                     && self.note_premium_limit(err, pending);
                 // A web link TDLib calls not internal (`t.me/` itself, a
@@ -154,9 +138,7 @@ impl Session {
                 let web_fallback =
                     matches!(
                         pending.map(|p| p.purpose),
-                        Some(RequestPurpose::Chats(
-                            ChatsPurpose::DeepLinkInternalType { .. }
-                        ))
+                        Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkInternalType))
                     ) && crate::text::openable_http_url(self.chats_state.deep_link_original());
                 // The Premium bot's `/start` was for the link that failed
                 // (stale or not): a later link to the bot must not send it

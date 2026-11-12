@@ -9817,3 +9817,30 @@ kept until sent, a refused refetch does not repeat), `state/account_notices`
 `connect/tests/stories.rs` (tray refresh on ingest),
 `connect/tests/chat_list/folder_removals.rs` (leaving a folder stops the
 retry; no wall clock), `state/tests/history_prune.rs` (translations pruned).
+
+### Sweep fixes (r3-03)
+
+| Id | Fix |
+| --- | --- |
+| 08-001, 08-003 | One `MemberList { query, fetch, more }` per (chat, filter) replaces `supergroup_members` + `member_asks.first/more`. The first-page request lives in `SupergroupMembersFetch::Loading { request }` (not an `Option`), the next page in `MoreMembers::Asking { request }`, and a new first page replaces the whole value. A first page answers or fails only a list that is `Loading` as that very request (`answer_member_first` / `fail_member_first`), so a search refused at send (`NotSent` under the new query, no request) is never filled by an older search's answer. A send that is refused puts back the list as it was (`restore_member_list`), except a stale one, which becomes `NotSent`. |
+| 08-002 | `members_added` and the one-shot `member_list_stale` queue are gone. `GroupsState::members_changed(chat)` makes the member pages `SupergroupMembersFetch::Stale { last }` (the page stays drawn; no request is out, so no answer can land on it) and an asked administrators list `AdminListFetch::Stale`. Whoever shows the list asks: the fetch functions no longer treat an older request of the same purpose as the list being asked, the poll refetches only the dialog's and the panel's stale list and the stale administrators, and a stale list that cannot be asked goes (`drop_stale_*`) or becomes `NotSent` so the poll does not repeat it. |
+| 08-004 | `DeepLinkState::ResolvingChat { action, request }` and `ResolvingInfo { request, original }` hold the request they wait for; `DeepLinkState::waits_for` / `resolving_action` compare it with `pending.id` (join, check, resolve, lookups, the sticker/user/chat answers and the error arm). The purposes lost their `generation`. The invite box is identified by a generation minted when the preview appears, and the Premium `/start` is tied to the follow-up's request (`PremiumAutoStart::request`). |
+| 08-005 | A missing `admin_lists` / `invite_links` entry no longer counts as waiting: an answer or error lands only on a list that is `Loading` as that request (every sender writes `Loading` first). |
+| 08-006 | `ToggleBroadcastGroup` rolls back through `RequestRollback::BroadcastGroup { previous }`, restoring the known flag instead of removing the entry. |
+| 08-007, 08-009 | `AiComposeState::style_edits` is a `Replies<_>` filed by request (a few kept); the editor takes the answer of its own request, so two answers in one drain overwrite nothing. Style notices are a bounded queue (`take_style_notices`), and the op failures a bounded list. |
+| 08-008 | The AI box, the apply-in-place shortcut, the style lookup and the example hold the `RequestId`: `CardState::Loading { request }` (set by `sent` once the driver returned the id, failed by `send_failed`), `ApplyInPlace::request`, `PreviewStage::LookingUp { request }`, `ExampleFetch::Asked { request }`, `StyleReply::Running { request }`. Answers are filed in `Replies` under the request (`box_answers`, `apply_answers`); a box that is gone drops them. The `u64` tokens and `fresh_token` are gone. |
+| 08-010 | `PrivateSharingState::enable` is one `EnableSharing { Idle, Asking { chat, request }, TurnOff, AskToRequest }`: set when the lookup went out, moved only by the answer or error of that request (`answered`, `lookup_failed`), left by the box closing; a second tap while it is out does nothing (no purpose check). |
+| 08-030 | The chat-wide list and a link's list are different scopes (search and paging vs. one link's page); both are edited only by `forget_join_request`, which now calls one `drop_request` helper for the row and the total. |
+| 07-005 | `ChatsState::background_error` is cleared by a wallpaper change that succeeds, a retry of the list, a preview opening and the gallery being left. |
+
+Guard: `check-request-match.py` has a third rule, `ticket`: a purpose
+variant carrying a `u64` `token`/`generation`/`seq` stands in for the
+`RequestId` (the existing ones are baselined).
+
+Tests: `state/tests/sweep_r3_03.rs`, `connect/tests/sweep_r3_03.rs`
+(stale lists asked again while an older request is out, a refused search
+not filled by an older answer, the sharing lookup, the wallpaper line),
+`connect/tests/ai_compose.rs` (answers per request, older lookup ignored,
+notices kept together and bounded), `state/tests/premium_limit.rs`
+(join errors of an older request dropped), `state/tests/groups.rs` (the
+broadcast flag comes back as it was).

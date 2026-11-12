@@ -16,6 +16,12 @@ the re-sweep of 2026-11-11), and this check counts both:
 - `unmatched`: a call to `Fetch::succeed`, which sets the answer whatever
   request it came from. An older request's late answer overwrites a newer
   one.
+- `ticket`: a request purpose that carries a `u64` counter (`token`,
+  `generation`) to tell its answer from an older one. The counter stands
+  in for the `RequestId`: every start path must remember to bump it, and
+  nothing ties it to the request that is out. The stage that waits holds
+  the `RequestId` (`ResolvingChat { request }`, `Loading { request }`) and
+  compares it with the answer's.
 
 Screenshot-demo and fixture files seed state this way and are not checked.
 
@@ -53,6 +59,20 @@ ADVICE = (
 OWNER = "src/state/requests.rs"
 PURPOSE = re.compile(r"\.\s*(?:has_purpose|take_purpose|has_auth_submit)\s*\(")
 SUCCEED = re.compile(r"\.\s*succeed\s*\(")
+TICKET = re.compile(r"\b(?:token|generation|ticket|seq)\s*:\s*u64\b")
+
+
+def variant_of(text, at):
+    """`Enum::Variant` the field at `at` belongs to (a purpose variant)."""
+    enum = None
+    for enum in re.finditer(r"\benum\s+(\w+)", text[:at]):
+        pass
+    if enum is None:
+        return "@purpose"
+    variant = None
+    for variant in re.finditer(r"\b([A-Z]\w*)\s*\{", text[enum.end() : at]):
+        pass
+    return f"{enum.group(1)}::{variant.group(1) if variant else '?'}"
 
 
 def hits(root):
@@ -61,9 +81,14 @@ def hits(root):
             continue
         purpose = "_purpose" in text or "has_auth_submit" in text
         succeed = ".succeed" in text
-        if not purpose and not succeed:
+        ticket = "purpose" in path and path.startswith("src/state/")
+        if not purpose and not succeed and not ticket:
             continue
         scopes = shape_guard.Scopes(path, text)
+        if "purpose" in path and path.startswith("src/state/"):
+            for match in TICKET.finditer(text):
+                line = shape_guard.line_of(text, match.start())
+                yield f"ticket:{variant_of(text, match.start())}", path, line
         if purpose:
             for match in PURPOSE.finditer(text):
                 line = shape_guard.line_of(text, match.start())

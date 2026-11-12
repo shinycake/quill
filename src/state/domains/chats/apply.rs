@@ -543,13 +543,12 @@ impl Session {
                     .insert(chat_id, online_member_count);
             }
             ChatsPayload::InternalLinkType(link) => {
-                if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkInternalType {
-                    generation,
-                })) = pending.map(|p| p.purpose)
-                    && matches!(
-                        self.chats_state.deep_link_stage(),
-                        Some(DeepLinkState::ResolvingInfo { generation: slot, .. }) if *slot == generation
-                    )
+                if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::Chats(ChatsPurpose::DeepLinkInternalType)
+                    && self
+                        .chats_state
+                        .deep_link_stage()
+                        .is_some_and(|stage| stage.waits_for(pending.id))
                 {
                     use crate::deep_link_types::{LinkRoute, route};
                     let original = self.chats_state.deep_link_original().to_string();
@@ -569,7 +568,6 @@ impl Session {
                                 text: String::new(),
                                 need_update: false,
                                 action: Some(action),
-                                generation,
                             },
                             LinkRoute::Ui(ui) => DeepLinkState::Ui(ui),
                             LinkRoute::Unknown(link) => DeepLinkState::Unknown { link },
@@ -597,7 +595,6 @@ impl Session {
                         Some(DeepLinkAction::MessageLink { .. })
                     )
                 {
-                    let generation = self.chats_state.next_deep_link_generation();
                     self.chats_state.enter_deep_link_stage(if chat_id == 0 {
                         DeepLinkState::ShowText(
                             "This message is in a chat you can't see. Join it first.".into(),
@@ -612,7 +609,6 @@ impl Session {
                                 media_timestamp,
                                 thread_id,
                             }),
-                            generation,
                         }
                     });
                 }
@@ -627,7 +623,6 @@ impl Session {
                         Some(DeepLinkAction::BoostLink { .. })
                     )
                 {
-                    let generation = self.chats_state.next_deep_link_generation();
                     self.chats_state.enter_deep_link_stage(if chat_id == 0 {
                         DeepLinkState::ShowText("This boost link is broken.".into())
                     } else {
@@ -635,14 +630,13 @@ impl Session {
                             text: String::new(),
                             need_update: false,
                             action: Some(DeepLinkAction::OpenChannelBoost { chat_id }),
-                            generation,
                         }
                     });
                 }
             }
             // `parity:platform-deep-links`: `getDeepLinkInfo` answer. The
             // actionable destination is parsed from the `textEntityTypeTextUrl`
-            // entities; the generation guard drops stale answers. The UI
+            // entities; the stage waits for its request only. The UI
             // consumes `Info` once (follow-up request, or a dialog with
             // `text` when there is no action / an update is required).
             ChatsPayload::DeepLinkInfo {
@@ -650,22 +644,18 @@ impl Session {
                 need_update,
                 entities,
             } => {
-                if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkInfo { generation })) =
-                    pending.map(|p| p.purpose)
-                    && matches!(
-                        self.chats_state.deep_link_stage(),
-                        Some(DeepLinkState::ResolvingInfo {
-                            generation: slot,
-                            ..
-                        }) if *slot == generation
-                    )
+                if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::Chats(ChatsPurpose::DeepLinkInfo)
+                    && self
+                        .chats_state
+                        .deep_link_stage()
+                        .is_some_and(|stage| stage.waits_for(pending.id))
                 {
                     let action = crate::connect::parse_deep_link_action(&entities);
                     self.chats_state.enter_deep_link_stage(DeepLinkState::Info {
                         text,
                         need_update,
                         action,
-                        generation,
                     });
                 }
             }

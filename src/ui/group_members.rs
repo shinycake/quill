@@ -620,6 +620,23 @@ impl QuillApp {
             .cloned()
     }
 
+    /// Whether the page the dialog's current tab shows is `Stale` (a
+    /// membership change made it out of date and nobody asked again yet).
+    pub(super) fn member_dialog_is_stale(&self) -> bool {
+        let (Some(dialog), Some(session)) = (self.admin.member_dialog.as_ref(), self.session())
+        else {
+            return false;
+        };
+        if dialog.is_basic_group {
+            return session.groups.basic_members_are_stale(dialog.chat_id.0);
+        }
+        self.member_dialog_filter().is_some_and(|filter| {
+            session
+                .groups
+                .member_list_is_stale((dialog.chat_id.0, filter))
+        })
+    }
+
     /// The supergroup list the dialog's tab and search show.
     fn member_dialog_filter(&self) -> Option<MemberListFilter> {
         let dialog = self.admin.member_dialog.as_ref()?;
