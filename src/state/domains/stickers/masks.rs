@@ -228,15 +228,8 @@ impl Session {
             )
         ) {
             // A list asked before the change answers with what the change
-            // replaced: dropped, so it neither lands as the new list nor
-            // keeps the refetch from going out.
-            for purpose in [
-                StickersPurpose::GetInstalledMaskSets,
-                StickersPurpose::GetArchivedMaskSets { first_page: true },
-                StickersPurpose::GetArchivedMaskSets { first_page: false },
-            ] {
-                while self.requests.take_purpose(purpose.into()).is_some() {}
-            }
+            // replaced: its fetch is replaced here, so that answer finds no
+            // request it waits for and is dropped, and the refetch goes out.
             let masks = &mut self.stickers.masks;
             masks.installed = Fetch::Idle;
             masks.archived = Fetch::Idle;

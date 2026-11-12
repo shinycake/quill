@@ -150,10 +150,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Payments(PaymentsPurpose::SuggestedPost(purpose)),
             Some(chat_id),
         );
+        if busy {
+            self.session.decision_sent(post_chat, post_message, extra);
+        }
         match self.sender.send_json(&json(extra)) {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
+                self.session.decision_settled(extra);
                 Err(err)
             }
         }

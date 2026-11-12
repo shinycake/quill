@@ -768,6 +768,19 @@ pub struct SuggestedPostsState {
     /// so they come out in the order they failed. Capped at
     /// [`MAX_FAILURES`]: past it the oldest is dropped.
     pub failures: VecDeque<SuggestedPostFailure>,
+    /// The approvals and declines out, each with its request: the only
+    /// record of them, so the answer, the error or the loss of the request
+    /// frees the post.
+    pub deciding: Vec<PostDecision>,
+}
+
+/// An approve or decline of the suggested post `(chat_id, message_id)`, out
+/// as `request`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PostDecision {
+    pub chat_id: i64,
+    pub message_id: i64,
+    pub request: crate::ids::RequestId,
 }
 
 /// Most unshown failures kept.

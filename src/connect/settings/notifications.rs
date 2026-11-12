@@ -261,15 +261,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        // Asked when never asked, or owed again; a failed fetch waits for
-        // the next change of the list.
-        let saved = &self.session.settings.saved_sounds;
-        if !saved.wants_fetch()
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetSavedNotificationSounds)
-        {
+        // Asked when never asked, or owed again; a fetch in flight or a
+        // failed one waits (a failed fetch for the next change of the list).
+        if !self.session.settings.saved_sounds.wants_fetch() {
             return Ok(None);
         }
         let extra = self

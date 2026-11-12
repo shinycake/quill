@@ -92,6 +92,9 @@ impl Session {
                 self.fail_ownership_transfer(pending.map(|p| p.id), err);
             }
             Some(RequestPurpose::Groups(GroupsPurpose::AnswerSharingRequest { .. })) => {
+                if let Some(pending) = pending {
+                    self.groups.private_sharing.answer_settled(pending.id);
+                }
                 self.chats_state
                     .chat_action_error
                     .push(call_request_error_line(

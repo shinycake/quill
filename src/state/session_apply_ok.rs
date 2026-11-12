@@ -26,6 +26,17 @@ impl Session {
         {
             self.threads.saved.page_answered(pending.id);
         }
+        if let Some(pending) = pending
+            && matches!(
+                pending.purpose,
+                RequestPurpose::Groups(GroupsPurpose::AnswerSharingRequest { .. })
+            )
+        {
+            self.groups.private_sharing.answer_settled(pending.id);
+        }
+        if let Some(pending) = pending {
+            self.decision_settled(pending.id);
+        }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::RemoveSavedNotificationSound) {
             self.mark_saved_sounds_stale();
         }

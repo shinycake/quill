@@ -208,12 +208,12 @@ fn a_mask_list_asked_before_a_change_does_not_land_after_it() {
         installed: false,
         archived: false,
     });
+    session.stickers.masks.installed.begin();
+    session.stickers.masks.installed.sent(list);
     session.finish_mask_mutation(Some(change));
-    assert!(
-        !session
-            .requests
-            .has_purpose(StickersPurpose::GetInstalledMaskSets.into())
-    );
+    // The fetch forgot the request it waited for: the refetch may go out,
+    // and the late answer below finds nothing to land on.
+    assert!(session.stickers.masks.installed.is_idle());
     t.feed(
         json!({"@type":"stickerSets","@extra":list.as_extra(),"sets":[
         {"@type":"stickerSetInfo","id":"3","size":1,"is_installed":true}]}),
