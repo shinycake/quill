@@ -83,10 +83,8 @@ impl Session {
             && menu.message_id == message_id
             && poll_option_key(&menu.option_id) == option_key
         {
-            menu.properties = crate::state::fetch::Fetch::Failed {
-                error: format!("{:?}", err.class),
-                stale: None,
-            };
+            menu.properties
+                .failed(pending.map(|p| p.id), format!("{:?}", err.class), false);
         }
         // A caption over the limit opens its box (tdesktop `CaptionLimitBox`).
         if matches!(

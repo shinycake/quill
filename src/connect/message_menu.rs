@@ -330,10 +330,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             }),
             Some(chat_id),
         );
-        self.send_audience(
+        if let Err(err) = self.send_audience(
             extra,
             &get_poll_option_properties(extra, chat_id, message_id, option_id),
-        )?;
+        ) {
+            self.session.poll_option_menu_refused();
+            return Err(err);
+        }
+        self.session.poll_option_menu_sent(extra);
         Ok(extra)
     }
 

@@ -556,15 +556,29 @@ impl Session {
         message_id: MessageId,
         option_id: &str,
     ) {
+        let mut properties = crate::state::fetch::Fetch::default();
+        properties.begin();
         self.messages.poll_option_menu = Some(PollOptionMenu {
             chat_id,
             message_id,
             option_id: option_id.to_string(),
-            properties: crate::state::fetch::Fetch::Loading {
-                stale: None,
-                request: None,
-            },
+            properties,
         });
+    }
+
+    /// The option menu's properties request went out as `request`.
+    pub fn poll_option_menu_sent(&mut self, request: RequestId) {
+        if let Some(menu) = self.messages.poll_option_menu.as_mut() {
+            menu.properties.sent(request);
+        }
+    }
+
+    /// The option menu's properties request could not be sent: the menu
+    /// stops waiting for rows that will not come.
+    pub fn poll_option_menu_refused(&mut self) {
+        if let Some(menu) = self.messages.poll_option_menu.as_mut() {
+            menu.properties.fail("the request was not sent");
+        }
     }
 
     pub fn audience_reactions_loading(
@@ -672,10 +686,11 @@ impl Session {
             } else {
                 a.filtered.get_mut(&filter)
             };
-            if let Some(slot) = slot
-                && let Audience::Ready(page) = std::mem::take(slot)
-            {
-                *slot = Audience::Paging { page, request };
+            if let Some(slot) = slot {
+                *slot = match std::mem::take(slot) {
+                    Audience::Ready(page) => Audience::Paging { page, request },
+                    other => other,
+                };
             }
         }
     }
