@@ -270,6 +270,7 @@ impl Session {
                 error: Some(ExportError::ServerError),
             };
         }
+        manage.password_ready();
     }
 
     /// The password-less probe returned a URL. It is never opened: the
@@ -278,6 +279,7 @@ impl Session {
         if let Some(picker) = self.payments.gifts_manage.transfer_mut() {
             picker.probe_answered(request);
         }
+        self.payments.gifts_manage.password_ready();
     }
 
     /// A fresh `passwordState` arrived: the export step routes on it, since
@@ -304,6 +306,7 @@ impl Session {
         if let Some(picker) = self.payments.gifts_manage.transfer_mut() {
             picker.probe_failed(request, outcome, has_password);
         }
+        self.payments.gifts_manage.password_ready();
     }
 
     /// tdesktop `ExportOnBlockchain`'s failures: the password box shows a
@@ -334,6 +337,7 @@ impl Session {
         if let Some(picker) = manage.transfer_mut() {
             picker.stage = stage;
         }
+        manage.password_ready();
     }
 
     /// A failed gift management request: release the lock and say why.

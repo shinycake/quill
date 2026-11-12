@@ -7,6 +7,7 @@ use crate::composer::DraftTopic;
 use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::ids::{ChatId, MessageId};
 use crate::platform::MemorySecretStore;
+use crate::state::SendAck;
 use crate::telegram::client::copy_and_parse;
 use crate::telegram::envelope::ChatDraft;
 use serde_json::Value;
@@ -278,7 +279,11 @@ fn forum_topics_draft_per_topic_with_message_topic_forum() {
     );
     assert_eq!(
         f.driver.session.messages.draft_clears,
-        vec![(ChatId(16), DraftTopic::Forum(4))]
+        vec![SendAck {
+            chat_id: ChatId(16),
+            slot: DraftTopic::Forum(4),
+            old_message_id: MessageId(-1)
+        }]
     );
     f.driver
         .clear_draft_after_send(ChatId(16), DraftTopic::Forum(4), true)
@@ -448,7 +453,11 @@ fn a_comments_thread_drafts_with_message_topic_thread() {
     ));
     assert_eq!(
         f.driver.session.messages.draft_clears,
-        vec![(ChatId(14), DraftTopic::Thread(501))]
+        vec![SendAck {
+            chat_id: ChatId(14),
+            slot: DraftTopic::Thread(501),
+            old_message_id: MessageId(-1)
+        }]
     );
     f.driver
         .clear_draft_after_send(ChatId(14), DraftTopic::Thread(501), true)

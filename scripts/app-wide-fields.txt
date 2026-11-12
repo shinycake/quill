@@ -107,12 +107,10 @@ disk.seen | what the last reading found: the free space and whether the data fol
 disk.floors | the floors for that level
 disk.waited | how long the disk has been short
 disk._watcher | the disk poll, which ends with the disk state
-disk.screen_refused | the on-screen client was refused for space; `disk.on_screen` names it
 disk.full_notices | how many full-disk notices were shown
 disk.cache_folder | the cache folder measured
 disk.database_bytes | the database size measured
 disk.main_window | the window the space notice opens on
-disk.start_refused | a client start was refused for space; retried for every account
 demo_ui.call_devices | the screenshot demos' call devices
 demo_ui.selected_devices | the screenshot demos' chosen devices
 demo_ui.selected_camera | the screenshot demos' chosen camera

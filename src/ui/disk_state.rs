@@ -1,6 +1,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::{PaneMode, QuillApp};
+use super::connect_ui::ConnectStage;
 use super::message_media::format_bytes;
 use super::status_note::StatusNote;
 use gpui_kit::component::alert::Alert;
@@ -32,10 +33,6 @@ pub(crate) struct DiskUi {
     floors: DiskFloors,
     /// The wait before the last reading, to measure how fast the disk falls.
     waited: Duration,
-    /// The on-screen client was refused below the open floor. The screen
-    /// says so, while clients already running keep going until a reading
-    /// falls below close.
-    screen_refused: bool,
     /// How many times this run the full-disk screen went up, each with one
     /// system notification.
     full_notices: u32,
@@ -48,7 +45,6 @@ pub(crate) struct DiskUi {
     /// any switch: the reading's own account is the one on screen.
     on_screen: Option<quill::ids::AccountKey>,
     main_window: AnyWindowHandle,
-    start_refused: bool,
     /// The poll of the disk, which ends with this value.
     _watcher: Option<Task<()>>,
 }
@@ -76,7 +72,7 @@ impl DiskUi {
                 window.on_next_frame(move |_, _| {
                     let _ = drawn.send(());
                 });
-                watch(root, first_frame, cx)
+                watch_disk_space(root, first_frame, cx)
             })
         };
         Self {
@@ -84,13 +80,11 @@ impl DiskUi {
             seen: Seen::default(),
             floors: FLOORS,
             waited: Duration::ZERO,
-            screen_refused: false,
             full_notices: 0,
             cache_folder: None,
             database_bytes: None,
             on_screen: None,
             main_window: window.window_handle(),
-            start_refused: false,
             _watcher: watcher,
         }
     }
@@ -105,10 +99,9 @@ impl DiskUi {
         self.stage.held_for_call()
     }
 
-    /// The full-disk screen is up: the disk is full, or the on-screen
-    /// client was refused.
-    pub(super) fn shows_screen(&self) -> bool {
-        (self.is_full() && !self.held_for_call()) || self.screen_refused
+    /// The disk is full and no call holds the on-screen client open.
+    fn full_without_call(&self) -> bool {
+        self.is_full() && !self.held_for_call()
     }
 
     pub(super) fn holds_auto_downloads(&self) -> bool {
@@ -123,13 +116,9 @@ impl DiskUi {
     ) {
         let _ = driver.note_disk(self.stage.state(), self.seen.free, &self.floors);
     }
-
-    pub(super) fn refused_start(&mut self) {
-        self.start_refused = true;
-    }
 }
 
-fn watch(
+fn watch_disk_space(
     root: PathBuf,
     first_frame: futures_channel::oneshot::Receiver<()>,
     cx: &Context<QuillApp>,
@@ -320,8 +309,8 @@ impl QuillApp {
             self.set_note(StatusNote::silent(tr(keys::Q_DISK_DOWNLOAD_NO_ROOM)));
         }
         let room = free.is_some_and(|free| free >= floors.open);
-        let retry_starts = self.disk.start_refused && room;
-        let retry_screen = self.disk.screen_refused && room && after != DiskState::Full;
+        let retry_starts = self.background.has_refused_start() && room;
+        let retry_screen = self.screen_refused() && room && after != DiskState::Full;
         let screen_held = self.disk.held_for_call();
         let before = self.enter_disk_state(after, next, cx);
         let step = before.step(
@@ -336,12 +325,8 @@ impl QuillApp {
             DiskStep::Hold => {}
             DiskStep::Close => self.close_clients_for_full_disk(cx),
             DiskStep::Reconnect => self.reconnect_after_disk(cx),
-            DiskStep::ReconnectBackground => {
-                self.disk.start_refused = false;
-                self.ensure_background_accounts(cx);
-            }
-            DiskStep::RetryStarts => {
-                self.disk.start_refused = false;
+            DiskStep::ReconnectBackground | DiskStep::RetryStarts => {
+                self.background.release_refused_starts();
                 self.ensure_background_accounts(cx);
             }
         }
@@ -350,15 +335,28 @@ impl QuillApp {
         }
         if before != after
             || self.disk.seen.unwritable != shown.unwritable
-            || (self.disk.shows_screen() && self.disk.seen.free != shown.free)
+            || (self.shows_disk_screen() && self.disk.seen.free != shown.free)
         {
             cx.notify();
         }
     }
 
+    /// The on-screen client was refused below the open floor and waits for
+    /// a reading with room.
+    fn screen_refused(&self) -> bool {
+        matches!(self.auth_demo.stage, ConnectStage::DiskRefused)
+    }
+
+    /// The full-disk screen is up: the disk is full, or the on-screen
+    /// client was refused (clients already running keep going until a
+    /// reading falls below close).
+    pub(super) fn shows_disk_screen(&self) -> bool {
+        self.disk.full_without_call() || self.screen_refused()
+    }
+
     fn reconnect_after_disk(&mut self, cx: &mut Context<Self>) {
-        self.disk.screen_refused = false;
         if self.account.passcode.is_locked() {
+            self.auth_demo.stage = ConnectStage::Idle;
             self.account.passcode.connect_at_unlock = self.current_account();
         } else {
             self.start_connection(cx);
@@ -369,10 +367,10 @@ impl QuillApp {
     /// Only that client waits: the state stays with the readings, so other
     /// running clients close only when a reading falls below close.
     pub(super) fn refuse_screen_open(&mut self, cx: &mut Context<Self>) {
-        if !self.disk.shows_screen() {
+        if !self.shows_disk_screen() {
             self.announce_full_disk(cx);
         }
-        self.disk.screen_refused = true;
+        self.auth_demo.stage = ConnectStage::DiskRefused;
         cx.notify();
     }
 
@@ -384,7 +382,7 @@ impl QuillApp {
     ) -> DiskState {
         let before = self.disk.stage.state();
         self.disk.stage = next;
-        if after == DiskState::Full && before != DiskState::Full && !self.disk.screen_refused {
+        if after == DiskState::Full && before != DiskState::Full && !self.screen_refused() {
             self.announce_full_disk(cx);
         }
         if after == DiskState::Healthy && before != DiskState::Healthy {
@@ -447,7 +445,7 @@ impl QuillApp {
         auth: &AuthView,
         cx: &mut Context<Self>,
     ) -> Option<gpui_kit::AnyElement> {
-        self.disk.shows_screen().then(|| {
+        self.shows_disk_screen().then(|| {
             gpui_kit::div()
                 .id("disk-full-cover")
                 .debug_selector(|| "disk-full-cover".to_string())
@@ -464,7 +462,7 @@ impl QuillApp {
     }
 
     pub(super) fn disk_full_view(&self) -> Option<AuthView> {
-        if !self.disk.shows_screen() {
+        if !self.shows_disk_screen() {
             return None;
         }
         if self.disk.seen.unwritable {
@@ -495,7 +493,7 @@ impl QuillApp {
     /// in the file manager, so they can be removed there. Quill deletes
     /// nothing itself while TDLib is closed: TDLib keeps their records.
     pub(super) fn disk_full_reveal(&self, cx: &Context<Self>) -> Option<gpui_kit::AnyElement> {
-        if !self.disk.shows_screen() || self.disk.seen.unwritable {
+        if !self.shows_disk_screen() || self.disk.seen.unwritable {
             return None;
         }
         let folder = self.disk.cache_folder.clone()?;
@@ -538,7 +536,7 @@ impl QuillApp {
         cx: &Context<Self>,
     ) -> Option<gpui_kit::AnyElement> {
         let held = self.disk.is_full() && self.disk.held_for_call();
-        let low = self.disk.stage.state() == DiskState::Low && !self.disk.shows_screen();
+        let low = self.disk.stage.state() == DiskState::Low && !self.shows_disk_screen();
         (low || held).then(|| {
             let message = if held {
                 tr(keys::Q_DISK_FULL_IN_CALL)

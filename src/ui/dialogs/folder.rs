@@ -23,9 +23,9 @@ pub enum FolderLoad {
     },
     /// Save found the folder changed since the form opened: the fresh
     /// folder is being fetched so the person's edits go onto it, not over
-    /// it (`FolderEditor::merged_onto`). A failed fetch is back in `Ready`
-    /// with the error, the edits kept.
-    Merging,
+    /// it (`FolderEditor::merged_onto`). The fetch is this request; a failed
+    /// one is back in `Ready` with the error, the edits kept.
+    Merging(RequestId),
     /// Save went out: the box closes on the answer to this request and
     /// shows the error (back in `Ready`) when it fails.
     Saving(RequestId),

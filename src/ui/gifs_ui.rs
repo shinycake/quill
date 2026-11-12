@@ -17,7 +17,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::gif_grid::{GIF_GRID_PADDING, layout_gifs};
-use quill::ids::FileId;
+use quill::ids::{FileId, RequestId};
 use quill::inline_grid::{MEDIA_HEIGHT, Placed, SKIP, should_load_more};
 use quill::lang::{keys, tr, tr_with};
 use quill::state::{GifPanel, RequestPurpose};
@@ -93,8 +93,15 @@ pub(in crate::ui) enum GifWanted {
 pub(in crate::ui) enum GifTab {
     /// Shows this section and has not asked for it yet.
     Wants(GifWanted),
-    /// Asked the session for it (the answer or a refusal ended the ask):
-    /// upkeep does not ask again.
+    /// Asked the session for it as `request`, which has not ended yet.
+    /// The answer, a refusal, or another window's search cancelling it
+    /// ends it (`settle_gif_ask`).
+    Asking {
+        wanted: GifWanted,
+        request: RequestId,
+    },
+    /// The ask ended (answered, refused or cancelled): upkeep does not ask
+    /// again.
     Asked(GifWanted),
     /// Typed text waits for the pause before it searches, while `wanted`
     /// stays shown. The timer is owned here: the next keystroke, a section
@@ -112,7 +119,10 @@ impl GifTab {
     /// The section this window's tab shows.
     pub(in crate::ui) fn wanted(&self) -> &GifWanted {
         match self {
-            Self::Wants(wanted) | Self::Asked(wanted) | Self::Typing { wanted, .. } => wanted,
+            Self::Wants(wanted)
+            | Self::Asking { wanted, .. }
+            | Self::Asked(wanted)
+            | Self::Typing { wanted, .. } => wanted,
         }
     }
 
@@ -196,12 +206,13 @@ impl QuillApp {
     /// that cannot be sent leaves the window on what the list holds, so
     /// nothing asks again every frame.
     fn request_gifs(&mut self, wanted: GifWanted, cx: &mut Context<Self>) {
-        self.pickers.gif_tab = GifTab::Asked(wanted.clone());
         let chat = self.viewed_chat();
-        let sent = if let Some(live) = self.live.as_mut() {
+        // `Some(request)`: the request now out; `Some(None)` is a send that
+        // had nothing to wait for; `None`, one that could not be sent.
+        let sent: Option<Option<RequestId>> = if let Some(live) = self.live.as_mut() {
             match &wanted {
-                GifWanted::Saved => live.driver.show_saved_gifs().is_ok(),
-                GifWanted::Search(query) => live.driver.search_gifs(query, chat).is_ok(),
+                GifWanted::Saved => live.driver.show_saved_gifs().ok(),
+                GifWanted::Search(query) => live.driver.search_gifs(query, chat).ok(),
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             match &wanted {
@@ -209,28 +220,51 @@ impl QuillApp {
                 GifWanted::Search(query) => {
                     // No search bot offline: the demo finds nothing.
                     session.stickers.gifs.search_begun(query.clone());
-                    session.stickers.gifs.search_sent(quill::ids::RequestId(0));
+                    session.stickers.gifs.search_sent(RequestId(0));
                     session.accept_gif_search_results(
-                        Some(quill::ids::RequestId(0)),
+                        Some(RequestId(0)),
                         Vec::new(),
                         String::new(),
                         true,
                     );
                 }
             }
-            true
+            Some(None)
         } else {
-            false
+            None
         };
-        if !sent {
-            if let Some(panel) = self.session().map(|session| &session.stickers.gifs) {
-                self.pickers.gif_tab = GifTab::Wants(GifWanted::shown(panel));
+        // Replacing the stage drops typing that was waiting for its pause.
+        self.pickers.gif_tab = match sent {
+            Some(Some(request)) => GifTab::Asking { wanted, request },
+            Some(None) => GifTab::Asked(wanted),
+            None => {
+                if matches!(wanted, GifWanted::Search(_)) && self.live.is_some() {
+                    self.set_note(StatusNote::error(tr(keys::Q_MISC_COULD_NOT_SEARCH_GIFS)));
+                }
+                // A request that cannot be sent leaves the window on what
+                // the list holds, so nothing asks again every frame.
+                match self.session().map(|session| &session.stickers.gifs) {
+                    Some(panel) => GifTab::Wants(GifWanted::shown(panel)),
+                    None => GifTab::Asked(wanted),
+                }
             }
-            if matches!(wanted, GifWanted::Search(_)) && self.live.is_some() {
-                self.set_note(StatusNote::error(tr(keys::Q_MISC_COULD_NOT_SEARCH_GIFS)));
-            }
-        }
+        };
         cx.notify();
+    }
+
+    /// An ask whose request has ended settles to `Asked`, whatever ended
+    /// it, so the stage never waits for a request that is gone.
+    fn settle_gif_ask(&mut self) {
+        let GifTab::Asking { wanted, request } = &self.pickers.gif_tab else {
+            return;
+        };
+        let waits = self
+            .session()
+            .is_some_and(|session| session.requests.get(*request).is_some());
+        if !waits {
+            let wanted = wanted.clone();
+            self.pickers.gif_tab = GifTab::Asked(wanted);
+        }
     }
 
     /// A footer section was picked: the field empties (tdesktop cancels its
@@ -292,6 +326,7 @@ impl QuillApp {
     /// or its search kept from before, and when it has neither it asks
     /// once, after any answer on its way, without a press.
     pub(in crate::ui) fn gif_tab_upkeep(&mut self, cx: &mut Context<Self>) {
+        self.settle_gif_ask();
         if !self.pickers.media_panel.shows_gifs() {
             self.pickers.gif_tab.stop_typing();
             return;

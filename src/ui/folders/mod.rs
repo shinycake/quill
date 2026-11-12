@@ -45,14 +45,13 @@ impl QuillApp {
             let loading = this.folders.editor.as_ref().is_some_and(|d| {
                 !matches!(
                     d.load,
-                    FolderLoad::Ready { .. } | FolderLoad::Merging | FolderLoad::Saving(_)
+                    FolderLoad::Ready { .. } | FolderLoad::Merging(_) | FolderLoad::Saving(_)
                 )
             });
-            let saving = this
-                .folders
-                .editor
-                .as_ref()
-                .is_some_and(|d| matches!(d.load, FolderLoad::Merging | FolderLoad::Saving(_)));
+            let saving =
+                this.folders.editor.as_ref().is_some_and(|d| {
+                    matches!(d.load, FolderLoad::Merging(_) | FolderLoad::Saving(_))
+                });
             let footer = div()
                 .flex()
                 .justify_end()
@@ -611,7 +610,7 @@ impl QuillApp {
             );
         }
         match &dialog.load {
-            FolderLoad::Ready { .. } | FolderLoad::Merging | FolderLoad::Saving(_) => {}
+            FolderLoad::Ready { .. } | FolderLoad::Merging(_) | FolderLoad::Saving(_) => {}
             FolderLoad::Loading(_) => {
                 return panel
                     .child(

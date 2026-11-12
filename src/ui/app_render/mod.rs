@@ -130,7 +130,7 @@ impl Render for QuillApp {
         let auth_state = self.current_auth();
         let auth = view_for(&auth_state);
         let inputs_live =
-            (self.live.is_some() || self.auth_demo.demo_inputs) && !self.disk.shows_screen();
+            (self.live.is_some() || self.auth_demo.demo_inputs) && !self.shows_disk_screen();
         let show_phone = inputs_live && matches!(auth.action, AuthAction::EnterPhone);
         let show_code = inputs_live && matches!(auth.action, AuthAction::EnterCode);
         let show_password = inputs_live && matches!(auth.action, AuthAction::EnterPassword);
@@ -392,7 +392,7 @@ impl Render for QuillApp {
                 },
             )
             .when(
-                self.pane_mode() == super::app::PaneMode::Connecting && !self.disk.shows_screen(),
+                self.pane_mode() == super::app::PaneMode::Connecting && !self.shows_disk_screen(),
                 |this| {
                     // Sign-in replaces the chat layout until the account is
                     // ready; the first-run onboarding comes before it.

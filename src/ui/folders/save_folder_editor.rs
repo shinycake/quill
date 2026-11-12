@@ -55,21 +55,15 @@ impl QuillApp {
     }
 
     /// Save found no fresh copy of the folder: ask for it once, and wait in
-    /// `Merging` for the answer. A request that cannot be sent leaves the
-    /// form as it was, with the error shown.
+    /// `Merging` for the answer to that request. A request that cannot be
+    /// sent leaves the form as it was, with the error shown.
     fn start_folder_editor_merge(&mut self, folder_id: i32, cx: &mut Context<Self>) {
-        let sent = self
-            .live
-            .as_mut()
-            .map(|live| live.driver.fetch_chat_folder(folder_id));
+        let load = match self.ask_chat_folder(folder_id) {
+            Ok(request) => FolderLoad::Merging(request),
+            Err(line) => FolderLoad::refused(line),
+        };
         if let Some(dialog) = self.folders.editor.as_mut() {
-            match sent {
-                Some(Err(err)) => {
-                    dialog.load =
-                        FolderLoad::refused(user_error_for(keys::Q_NOTES_FAILED_FOLDER, &err));
-                }
-                _ => dialog.load = FolderLoad::Merging,
-            }
+            dialog.load = load;
         }
         cx.notify();
     }

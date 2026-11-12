@@ -160,12 +160,7 @@ impl QuillApp {
                     // honest UI is TDLib's own text saying so.
                     (true, _) => {
                         self.cancel_inline_opening();
-                        self.links.deep_link_dialog = Some(text);
-                        self.screen.windows.open_box_in(
-                            DialogKind::DeepLinkInfo,
-                            from_window,
-                            waits.clone(),
-                        );
+                        self.show_deep_link_info(text, from_window, cx);
                     }
                     (false, Some(action)) => {
                         let _ = live.driver.continue_deep_link(action, from_agent);
@@ -178,12 +173,7 @@ impl QuillApp {
                     // copy written for exactly this case.
                     (false, None) => {
                         self.cancel_inline_opening();
-                        self.links.deep_link_dialog = Some(text);
-                        self.screen.windows.open_box_in(
-                            DialogKind::DeepLinkInfo,
-                            from_window,
-                            waits.clone(),
-                        );
+                        self.show_deep_link_info(text, from_window, cx);
                     }
                 }
             }
@@ -217,12 +207,7 @@ impl QuillApp {
             }
             DeepLinkState::ShowText(text) => {
                 self.cancel_inline_opening();
-                self.links.deep_link_dialog = Some(text);
-                self.screen.windows.open_box_in(
-                    DialogKind::DeepLinkInfo,
-                    from_window,
-                    waits.clone(),
-                );
+                self.show_deep_link_info(text, from_window, cx);
             }
             // Typed links (`deep_link_types`): the UI half runs in render.
             // An agent's step gets none of them (settings, proxies, folders,
@@ -657,6 +642,28 @@ impl QuillApp {
         })
     }
 
+    /// TDLib's text for a link opens in the window the link was clicked in
+    /// (the main window once that one has closed): every window holds its
+    /// own, so two links resolved for two windows each keep their text.
+    pub(in crate::ui) fn show_deep_link_info(
+        &mut self,
+        text: String,
+        window: Option<quill::ids::ChatId>,
+        cx: &mut Context<Self>,
+    ) {
+        let shown = self
+            .in_window_scope(window, cx, |this, _| {
+                this.message_ui.deep_link_info = Some(text.clone());
+            })
+            .is_some();
+        if !shown {
+            self.in_window_scope(None, cx, |this, _| {
+                this.message_ui.deep_link_info = Some(text);
+            });
+        }
+        cx.notify();
+    }
+
     /// kit `Dialog` for TDLib's deep-link info / error text, via
     /// `window.open_dialog` like every other dialog (`DialogKind::DeepLinkInfo`).
     pub(super) fn build_deep_link_dialog(
@@ -667,11 +674,11 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::DeepLinkInfo, |this, _, cx| {
-                this.links.deep_link_dialog = None;
+                this.message_ui.deep_link_info = None;
                 cx.notify();
             });
         app.update(cx, |this, cx| {
-            let text = this.links.deep_link_dialog.clone().unwrap_or_default();
+            let text = this.message_ui.deep_link_info.clone().unwrap_or_default();
             let body = div()
                 .flex()
                 .flex_col()
@@ -683,7 +690,7 @@ impl QuillApp {
                     .label(tr(keys::BOX_OK))
                     .primary()
                     .on_click(cx.listener(|this, _, window, cx| {
-                        this.links.deep_link_dialog = None;
+                        this.message_ui.deep_link_info = None;
                         cx.notify();
                         this.close_kit_dialog_if_done(DialogKind::DeepLinkInfo, window, cx);
                     })),
@@ -706,11 +713,12 @@ crate::ui::shell::register_dialogs! {
         // `parity:platform-deep-links`: link info sits with the other
         // low-priority informational dialogs.
         2700,
-        |app| app.links.deep_link_dialog.is_some(),
+        |app| app.message_ui.deep_link_info.is_some(),
         QuillApp::build_deep_link_dialog,
     )
+    .per_window()
     .close(|app, _, cx| {
-            app.links.deep_link_dialog = None;
+            app.message_ui.deep_link_info = None;
             cx.notify();
         }),
 

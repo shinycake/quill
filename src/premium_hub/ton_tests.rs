@@ -1,5 +1,5 @@
 use super::{
-    GramRevenue, GramsHub, GramsPayload, TonTxKind, TonTxPage, WithdrawalState,
+    GramRevenue, GramsEvent, GramsHub, GramsPayload, TonTxKind, TonTxPage, WithdrawalState,
     get_gram_revenue_statistics, get_ton_transactions, get_user, gram_amount_2dp, gram_balance,
     gram_balance_short, parse_kind, parse_payload, parse_ton_transactions, signed_gram_amount,
     usd_line,
@@ -418,4 +418,19 @@ fn closing_the_screen_drops_an_unacted_outcome() {
     hub.close();
     assert!(!hub.open && hub.selected.is_none());
     assert_eq!(hub.take_withdraw_outcome(), None);
+}
+
+/// Sweep r3-08 review (16-006): entering the idle password box queues the
+/// focus for its field once; every other stage queues nothing.
+#[test]
+fn entering_the_idle_password_box_queues_its_focus_once() {
+    use super::GramWithdraw;
+    let mut hub = GramsHub::default();
+    hub.enter_withdraw(GramWithdraw::Sending(RequestId(3)));
+    assert!(hub.take_events().is_empty());
+    hub.enter_withdraw(GramWithdraw::idle(None));
+    assert_eq!(hub.take_events(), vec![GramsEvent::PasswordReady]);
+    assert!(hub.take_events().is_empty(), "taken once");
+    hub.enter_withdraw(GramWithdraw::SecurityCheck { later: false });
+    assert!(hub.take_events().is_empty());
 }

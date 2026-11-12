@@ -29,6 +29,7 @@ impl Session {
             && pending.purpose == RequestPurpose::SendMessageAlbum
         {
             for message in messages {
+                self.record_send_answer(pending.id, message.chat_id, message.id);
                 self.upsert_message(message, true);
             }
             return;

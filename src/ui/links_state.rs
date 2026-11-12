@@ -142,9 +142,6 @@ impl InviteBox {
 }
 
 pub(crate) struct LinkUi {
-    /// `parity:platform-deep-links`: TDLib's info / error text for the
-    /// deep link, shown in a dialog (`DialogKind::DeepLinkInfo`).
-    pub(super) deep_link_dialog: Option<String>,
     /// The invite preview box of the deep-link flow (the flow itself, with
     /// its origin window, is the session's).
     pub(super) invite_box: InviteBox,
@@ -196,7 +193,6 @@ impl LinkUi {
 
     pub(super) fn new() -> Self {
         Self {
-            deep_link_dialog: None,
             invite_box: InviteBox::Closed,
             resolved: None,
             callback_password_dialog: None,

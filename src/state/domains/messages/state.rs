@@ -26,6 +26,26 @@ pub struct MessageLinkAnswer {
     pub is_public: bool,
 }
 
+/// How a send of the composer ended, named by the temporary id TDLib gave
+/// the message (`old_message_id` of `updateMessageSendSucceeded` and
+/// `updateMessageSendFailed`) and the draft slot it went to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SendAck {
+    pub chat_id: ChatId,
+    pub slot: DraftTopic,
+    pub old_message_id: MessageId,
+}
+
+/// The answer to a send: the temporary message TDLib made for `request`.
+/// The composer's pending draft clear holds the requests of its send, so
+/// this is how an ack finds the clear of the send it ends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SendAnswered {
+    pub request: RequestId,
+    pub chat_id: ChatId,
+    pub message_id: MessageId,
+}
+
 pub struct MessagesState {
     /// The composer's `@` suggestions for the open chat.
     pub mention_search: Option<MentionSearch>,
@@ -159,10 +179,13 @@ pub struct MessagesState {
     pub(crate) remote_draft_revision: u64,
     /// Send succeeded in this (chat, topic); UI clears the server draft
     /// if the composer is still empty.
-    pub draft_clears: Vec<(ChatId, DraftTopic)>,
+    pub draft_clears: Vec<SendAck>,
     /// Send failed in this (chat, topic): a draft clear that waited on its
     /// ack is dropped, the draft stays.
-    pub failed_sends: Vec<(ChatId, DraftTopic)>,
+    pub failed_sends: Vec<SendAck>,
+    /// Sends of the composer answered since the UI last looked: the
+    /// temporary message each request made (`SendMessage` answers).
+    pub sent_answers: Vec<SendAnswered>,
     /// Captions chosen for media messages that are still being sent; each
     /// goes out as an edit once the message has its real id.
     pub deferred_captions: Vec<crate::composer::DeferredCaption>,
@@ -239,6 +262,7 @@ impl MessagesState {
             remote_draft_revision: 0,
             draft_clears: Vec::new(),
             failed_sends: Vec::new(),
+            sent_answers: Vec::new(),
             deferred_captions: Vec::new(),
             sponsored: HashMap::new(),
             sponsored_report: SponsoredReportFlow::Idle,
