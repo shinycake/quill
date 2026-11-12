@@ -58,3 +58,17 @@
 727 src/video_decode/ffi.rs read
 969 src/video_decode/mod.rs read
 321 src/video_decode/nv12.rs read
+132 src/video_decode/present.rs read
+55 src/video_decode/presenting.rs read
+72 src/video_decode/reattach.rs read
+902 src/video_edit.rs read
+309 src/video_encoder.rs read
+537 src/video_timeline.rs read
+370 src/viewer_extras.rs read
+999 src/voice.rs read
+214 src/voice_input.rs read
+481 src/voice_opus.rs read
+352 src/wake.rs read
+590 src/wallpaper_raster/mod.rs read
+105 src/wallpaper_raster/soft_light.rs read
+1064 src/web_app/bridge.rs read
