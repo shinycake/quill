@@ -74,11 +74,12 @@ fn show_menu_with(
                 window,
                 cx,
             );
-            if let (Some(session), Some(state)) = (app.demo_session.as_mut(), state) {
-                session
-                    .stickers
-                    .message_reaction_options
-                    .set(CHAT, MESSAGE, state);
+            if let Some(session) = app.demo_session.as_mut() {
+                let book = &mut session.stickers.message_reaction_options;
+                match state {
+                    Some(state) => book.set(CHAT, MESSAGE, state),
+                    None => book.forget(CHAT, MESSAGE),
+                }
             }
             cx.notify();
         });

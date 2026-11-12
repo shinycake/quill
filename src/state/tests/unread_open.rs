@@ -26,8 +26,10 @@ fn the_bar_and_the_held_reads_leave_together_or_one_at_a_time() {
 
 #[test]
 fn ending_the_open_clears_the_bar_and_the_hold_in_one_step() {
-    let mut history = HistoryState::default();
-    history.unread_open = UnreadOpen::opened_at(Some(MessageId(5)));
+    let mut history = HistoryState {
+        unread_open: UnreadOpen::opened_at(Some(MessageId(5))),
+        ..Default::default()
+    };
     assert!(history.opened_with_unread());
     history.end_unread_open();
     assert!(!history.opened_with_unread());

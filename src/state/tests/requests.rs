@@ -157,7 +157,7 @@ fn optimistic_mutations_roll_back_on_error() {
             extra.0
         ),
     );
-    assert_eq!(session.groups.supergroup(21).join_by_request, true);
+    assert!(session.groups.supergroup(21).join_by_request);
 
     // Username: absent stays absent, present is restored.
     session

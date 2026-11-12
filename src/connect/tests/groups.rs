@@ -61,7 +61,7 @@ fn driver_toggle_sign_messages_sends_and_rolls_back() {
     assert_eq!(value["sign_messages"], true);
     assert_eq!(value["show_message_sender"], true);
     // Optimistic state.
-    assert_eq!(driver.session.groups.supergroup(13).sign_messages, true);
+    assert!(driver.session.groups.supergroup(13).sign_messages);
     // In flight → no-op.
     assert_eq!(
         driver.toggle_sign_messages(ChatId(13), true, true).unwrap(),
@@ -75,11 +75,8 @@ fn driver_toggle_sign_messages_sends_and_rolls_back() {
             extra.0
         ),
     );
-    assert_eq!(driver.session.groups.supergroup(13).sign_messages, false);
-    assert_eq!(
-        driver.session.groups.supergroup(13).show_message_sender,
-        false
-    );
+    assert!(!driver.session.groups.supergroup(13).sign_messages);
+    assert!(!driver.session.groups.supergroup(13).show_message_sender);
     // A non-channel supergroup is not eligible at all.
     ingest_json(
         &mut driver,
@@ -135,7 +132,7 @@ fn driver_toggle_anti_spam_gated_on_full_info_capability() {
     let value: Value = serde_json::from_str(&sent).unwrap();
     assert_eq!(value["supergroup_id"], 13);
     assert_eq!(value["has_aggressive_anti_spam_enabled"], true);
-    assert_eq!(driver.session.groups.supergroup_anti_spam(13).enabled, true);
+    assert!(driver.session.groups.supergroup_anti_spam(13).enabled);
     ingest_json(
         &mut driver,
         &format!(
@@ -143,10 +140,7 @@ fn driver_toggle_anti_spam_gated_on_full_info_capability() {
             extra.0
         ),
     );
-    assert_eq!(
-        driver.session.groups.supergroup_anti_spam(13).enabled,
-        false
-    );
+    assert!(!driver.session.groups.supergroup_anti_spam(13).enabled);
     let _ = std::fs::remove_dir_all(&dir);
 }
 

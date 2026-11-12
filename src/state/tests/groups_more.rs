@@ -592,14 +592,11 @@ fn g2_update_supergroup_caches_sign_flags_and_rights() {
         &sink,
         r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":25,"sign_messages":true,"show_message_sender":true,"status":{"@type":"chatMemberStatusAdministrator","rights":{"@type":"chatAdministratorRights","can_change_info":true,"can_manage_topics":true,"can_send_welcome_messages":true}}}}"#,
     );
-    assert_eq!(session.groups.supergroup(25).sign_messages, true);
-    assert_eq!(session.groups.supergroup(25).show_message_sender, true);
-    assert_eq!(session.groups.supergroup(25).can_manage_topics, true);
-    assert_eq!(session.groups.supergroup(25).can_change_info, true);
-    assert_eq!(
-        session.groups.supergroup(25).can_send_welcome_messages,
-        true
-    );
+    assert!(session.groups.supergroup(25).sign_messages);
+    assert!(session.groups.supergroup(25).show_message_sender);
+    assert!(session.groups.supergroup(25).can_manage_topics);
+    assert!(session.groups.supergroup(25).can_change_info);
+    assert!(session.groups.supergroup(25).can_send_welcome_messages);
     assert!(session.chat_can_manage_topics(ChatId(13)));
     assert!(session.chat_can_change_info(ChatId(13)));
     assert!(session.chat_can_send_welcome_messages(ChatId(13)));
@@ -870,8 +867,8 @@ fn g2_sign_toggle_error_rolls_back() {
             extra.0
         ),
     );
-    assert_eq!(session.groups.supergroup(25).sign_messages, false);
-    assert_eq!(session.groups.supergroup(25).show_message_sender, false);
+    assert!(!session.groups.supergroup(25).sign_messages);
+    assert!(!session.groups.supergroup(25).show_message_sender);
 }
 
 #[test]
@@ -908,7 +905,7 @@ fn g2_anti_spam_toggle_error_rolls_back() {
             extra.0
         ),
     );
-    assert_eq!(session.groups.supergroup_anti_spam(25).enabled, false);
+    assert!(!session.groups.supergroup_anti_spam(25).enabled);
 }
 
 #[test]
