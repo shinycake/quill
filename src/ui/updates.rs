@@ -33,6 +33,16 @@ impl QuillApp {
     /// the banner would come back at the next launch. So no check, from the
     /// button or the timer, starts over it.
     pub(super) fn check_for_updates(&mut self, cx: &mut Context<Self>) {
+        self.check_for_updates_keeping(None, cx);
+    }
+
+    /// A check that, when it fails, ends in `DownloadFailed(kept, message)`
+    /// instead of `Failed`: the kept release stays on offer.
+    fn check_for_updates_keeping(
+        &mut self,
+        kept: Option<quill::updater::ReleaseInfo>,
+        cx: &mut Context<Self>,
+    ) {
         if !matches!(
             self.update_control(),
             UpdateControl::Check { busy: false }
@@ -46,7 +56,12 @@ impl QuillApp {
             .spawn(async move { check_latest_release() });
         // The stage holds the task: replacing the stage cancels the check.
         let task = cx.spawn(async move |this, cx| {
-            let state = check.await;
+            let state = match (check.await, kept) {
+                (UpdateState::Failed(message), Some(release)) => {
+                    UpdateState::DownloadFailed(release, message)
+                }
+                (state, _) => state,
+            };
             let _ = this.update(cx, |this, cx| this.apply_check_result(state, cx));
         });
         self.preferences.update_state = UpdateState::Checking(Job::hold(task));
@@ -57,20 +72,23 @@ impl QuillApp {
     /// update already found, held (the disk bar), failed or on its way is
     /// not replaced by a check that may fail offline (`Checking` keeps no
     /// offer to return to). The button's check can still start over those.
-    /// A download that failed is checked again by the timer: the release
-    /// that fixes it (a bad checksum, an asset taken down) is found, and the
-    /// kept release, when it is still the latest, is downloaded again by the
-    /// found update's own start (`auto_download_update`).
+    /// A download that failed is checked again by the timer, keeping its
+    /// release: a check that fails (offline) puts `DownloadFailed` back with
+    /// that release, and one that finds a release (a bad checksum fixed, an
+    /// asset taken down) shows it. When the kept release is still the
+    /// latest, the found update's own start downloads it again
+    /// (`auto_download_update`).
     pub(super) fn recheck_for_updates(&mut self, cx: &mut Context<Self>) {
-        if matches!(
-            self.preferences.update_state,
+        match &self.preferences.update_state {
             UpdateState::Idle
-                | UpdateState::UpToDate
-                | UpdateState::NoRelease
-                | UpdateState::Failed(_)
-                | UpdateState::DownloadFailed(..)
-        ) {
-            self.check_for_updates(cx);
+            | UpdateState::UpToDate
+            | UpdateState::NoRelease
+            | UpdateState::Failed(_) => self.check_for_updates(cx),
+            UpdateState::DownloadFailed(release, _) => {
+                let kept = release.clone();
+                self.check_for_updates_keeping(Some(kept), cx);
+            }
+            _ => {}
         }
     }
 

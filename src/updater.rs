@@ -371,6 +371,18 @@ pub fn force_latest_release(release: Option<ReleaseInfo>) {
     }
 }
 
+/// The failure a check ends in instead of asking the server (tests).
+#[cfg(all(feature = "ui", any(test, feature = "demo-capture")))]
+static FORCED_FAILURE: std::sync::Mutex<Option<&'static str>> = std::sync::Mutex::new(None);
+
+/// Make [`check_latest_release`] fail with `message` (`None`: ask the server).
+#[cfg(all(feature = "ui", any(test, feature = "demo-capture")))]
+pub fn force_check_failure(message: Option<&'static str>) {
+    if let Ok(mut forced) = FORCED_FAILURE.lock() {
+        *forced = message;
+    }
+}
+
 /// Blocking, bounded check of the latest stable release; callers run it on
 /// the background executor.
 #[cfg(feature = "ui")]
@@ -378,6 +390,10 @@ pub fn check_latest_release() -> UpdateState {
     #[cfg(any(test, feature = "demo-capture"))]
     if let Some(release) = FORCED_LATEST.lock().ok().and_then(|forced| forced.clone()) {
         return UpdateState::Available(release);
+    }
+    #[cfg(any(test, feature = "demo-capture"))]
+    if let Some(message) = FORCED_FAILURE.lock().ok().and_then(|forced| *forced) {
+        return UpdateState::Failed(message);
     }
     match fetch_release_json(false) {
         Ok((status, body)) => interpret_release(status, &body, crate::version::APP),

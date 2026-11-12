@@ -109,6 +109,9 @@ fn the_timer_finds_a_newer_release_after_a_failed_download(cx: &mut TestAppConte
         ..release()
     };
     quill::updater::force_latest_release(Some(newer));
+    quill::update_install::force_self_update_available(Some(Err(
+        quill::update_install::Unavailable::PackageManager,
+    )));
     app.update(&mut vcx, |app, cx| {
         app.preferences.update_state = UpdateState::DownloadFailed(release(), "checksum");
         app.start_update_checks(cx);
@@ -130,4 +133,34 @@ fn the_timer_finds_a_newer_release_after_a_failed_download(cx: &mut TestAppConte
         );
     });
     quill::updater::force_latest_release(None);
+    quill::update_install::force_self_update_available(None);
+}
+
+/// A recheck that fails offline keeps the failed download's release on offer.
+#[gpui_kit::test]
+fn a_failed_recheck_keeps_the_release_of_a_failed_download(cx: &mut TestAppContext) {
+    let _guard = quill::update_install::FORCE_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let (app, mut vcx) = new_app(cx);
+    quill::updater::force_latest_release(None);
+    quill::updater::force_check_failure(Some("offline"));
+    quill::update_install::force_self_update_available(Some(Err(
+        quill::update_install::Unavailable::PackageManager,
+    )));
+    app.update(&mut vcx, |app, cx| {
+        app.preferences.update_state = UpdateState::DownloadFailed(release(), "checksum");
+        app.start_update_checks(cx);
+    });
+    vcx.run_until_parked();
+    vcx.executor().advance_clock(super::RECHECK_EVERY);
+    vcx.run_until_parked();
+    app.update(&mut vcx, |app, _| {
+        assert!(
+            matches!(&app.preferences.update_state, UpdateState::DownloadFailed(r, _) if r.version == release().version),
+            "the kept release stays"
+        );
+    });
+    quill::updater::force_check_failure(None);
+    quill::update_install::force_self_update_available(None);
 }
