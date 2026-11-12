@@ -219,6 +219,13 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
     // Recent statuses land in the emoji panel under
     // GetRecentEmojiStatuses.
     let extra = with_purpose.request(RequestPurpose::GetRecentEmojiStatuses, None);
+    with_purpose.stickers.emoji.lists.recent_statuses.begin();
+    with_purpose
+        .stickers
+        .emoji
+        .lists
+        .recent_statuses
+        .sent(extra);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -421,8 +428,7 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
     assert_eq!(with_purpose.stickers.emoji.archived_sets.len(), 2);
 
     let extra = with_purpose.request(RequestPurpose::GetTrendingEmojiSets, None);
-    with_purpose.stickers.emoji.lists.trending.begin(0);
-    with_purpose.stickers.emoji.lists.trending.sent(extra);
+    with_purpose.stickers.emoji.lists.trending.begin(0, extra);
     apply_json(
         &mut with_purpose,
         &seq,

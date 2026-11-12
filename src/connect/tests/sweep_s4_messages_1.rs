@@ -368,28 +368,33 @@ fn the_reply_bar_copy_shows_an_edit_and_the_oldest_copy_is_the_one_dropped() {
 }
 
 #[test]
-fn each_create_gets_its_own_generation_and_a_reset_never_reuses_one() {
+fn each_create_waits_for_its_own_request_and_a_reset_drops_the_older_one() {
+    use crate::state::CreateStage;
     let mut t = Flaky::new();
-    let generation = |t: &Flaky| t.driver.session.bots.owned.create.generation;
-    let before = generation(&t);
-    t.driver
+    let waiting = |t: &Flaky| match &t.driver.session.bots.owned.create.stage {
+        CreateStage::Creating { request, .. } => Some(*request),
+        _ => None,
+    };
+    assert_eq!(waiting(&t), None);
+    let first = t
+        .driver
         .create_managed_bot(900, "A", "a_bot", false, None)
         .unwrap();
-    let first = generation(&t);
-    assert_eq!(first, before + 1);
+    assert_eq!(waiting(&t), Some(first));
     // One create at a time: a second waits for the first's answer.
     assert!(
         t.driver
             .create_managed_bot(900, "B", "b_bot", false, None)
             .is_err()
     );
-    assert_eq!(generation(&t), first);
-    // The older create's answer finds a newer generation and drops.
+    assert_eq!(waiting(&t), Some(first));
+    // The older create's answer finds another stage and drops.
     t.driver.reset_create_bot();
-    assert_eq!(generation(&t), first + 1);
     assert!(!t.driver.session.bots.owned.create.creating());
-    t.driver
+    let second = t
+        .driver
         .create_managed_bot(900, "B", "b_bot", false, None)
         .unwrap();
-    assert_eq!(generation(&t), first + 2);
+    assert_ne!(first, second);
+    assert_eq!(waiting(&t), Some(second));
 }

@@ -125,6 +125,15 @@ impl KeywordLookups {
         self.answers.insert(query, (self.generation, keywords));
     }
 
+    /// The connection is back: queries given up on while it was down may be
+    /// asked again, and readers look again.
+    pub fn forgive_failures(&mut self) {
+        if !self.failures.is_empty() {
+            self.failures.clear();
+            self.generation += 1;
+        }
+    }
+
     /// Forget requests that will never answer (swept, or the account
     /// went away), so they do not hold a flight slot. Each counts as a
     /// failed attempt, so a query that is never answered is given up on
@@ -290,6 +299,18 @@ mod tests {
         assert!(!lookups.wants("other"));
         lookups.retain_in_flight(|id| id.0 < 100);
         assert!(lookups.wants("other"));
+    }
+
+    #[test]
+    fn a_query_given_up_offline_is_asked_again_when_the_connection_returns() {
+        let mut lookups = KeywordLookups::default();
+        for round in 1..=u64::from(ATTEMPTS) {
+            lookups.sent(RequestId(round), "fire".into());
+            lookups.failed(RequestId(round));
+        }
+        assert!(lookups.gave_up("fire") && !lookups.wants("fire"));
+        lookups.forgive_failures();
+        assert!(!lookups.gave_up("fire") && lookups.wants("fire"));
     }
 
     #[test]

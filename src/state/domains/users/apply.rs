@@ -149,7 +149,7 @@ impl Session {
                     self.users_state.my_id_probe.answered(extra, ());
                 } else if matches!(
                     pending.map(|p| p.purpose),
-                    Some(RequestPurpose::Bots(BotsPurpose::CreateBot { .. }))
+                    Some(RequestPurpose::Bots(BotsPurpose::CreateBot))
                 ) {
                     self.apply_created_bot(user_id, pending);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSupportUser) {

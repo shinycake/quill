@@ -67,8 +67,12 @@ pub struct BotEditTexts {
 pub enum BotUsernameCheck {
     #[default]
     Idle,
-    /// `checkBotUsername` for `username` is out as `generation`.
-    Checking { generation: u64, username: String },
+    /// `checkBotUsername` for `username` is out as `request`; only its
+    /// answer or error leaves the stage.
+    Checking {
+        request: crate::ids::RequestId,
+        username: String,
+    },
     /// The latest answered check.
     Known {
         username: String,
@@ -80,8 +84,6 @@ pub enum BotUsernameCheck {
 /// press, so a closed box still reports with its own name and manager.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreateSubmission {
-    /// Bumped per username check and per create, so late answers drop.
-    pub generation: u64,
     pub name: String,
     pub username: String,
     pub manager_id: i64,
@@ -103,7 +105,11 @@ pub struct ManagedBotShare {
 pub enum CreateStage {
     #[default]
     Editing,
-    Creating(CreateSubmission),
+    /// `createBot` is out as `request`; only its answer or error leaves.
+    Creating {
+        request: crate::ids::RequestId,
+        submission: CreateSubmission,
+    },
     /// The new bot exists; the UI reports it once.
     Created {
         submission: CreateSubmission,
@@ -116,15 +122,13 @@ pub enum CreateStage {
 /// The "Create Bot" dialog's server state.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct CreateBotState {
-    /// Bumped per username check and per create, so late answers drop.
-    pub generation: u64,
     pub check: BotUsernameCheck,
     pub stage: CreateStage,
 }
 
 impl CreateBotState {
     pub fn creating(&self) -> bool {
-        matches!(self.stage, CreateStage::Creating(_))
+        matches!(self.stage, CreateStage::Creating { .. })
     }
 
     pub fn error(&self) -> Option<&str> {
@@ -278,17 +282,18 @@ impl Session {
         result: UsernameCheckResult,
         pending: Option<&PendingRequest>,
     ) {
-        let Some(RequestPurpose::Bots(BotsPurpose::CheckBotUsername { generation })) =
-            pending.map(|p| p.purpose)
-        else {
+        let Some(pending) = pending else {
             return;
         };
+        if !matches!(
+            pending.purpose,
+            RequestPurpose::Bots(BotsPurpose::CheckBotUsername)
+        ) {
+            return;
+        }
         let create = &mut self.bots.owned.create;
-        if let BotUsernameCheck::Checking {
-            generation: asked,
-            username,
-        } = &create.check
-            && *asked == generation
+        if let BotUsernameCheck::Checking { request, username } = &create.check
+            && *request == pending.id
         {
             create.check = BotUsernameCheck::Known {
                 username: username.clone(),
@@ -299,12 +304,15 @@ impl Session {
 
     /// The `user` answer of `createBot`.
     pub(crate) fn apply_created_bot(&mut self, user_id: i64, pending: Option<&PendingRequest>) {
-        if let Some(RequestPurpose::Bots(BotsPurpose::CreateBot { generation })) =
-            pending.map(|p| p.purpose)
+        if let Some(pending) =
+            pending.filter(|p| matches!(p.purpose, RequestPurpose::Bots(BotsPurpose::CreateBot)))
         {
             let create = &mut self.bots.owned.create;
-            if let CreateStage::Creating(submission) = &create.stage
-                && submission.generation == generation
+            if let CreateStage::Creating {
+                request,
+                submission,
+            } = &create.stage
+                && *request == pending.id
             {
                 create.stage = CreateStage::Created {
                     submission: submission.clone(),
@@ -352,13 +360,10 @@ impl Session {
                     *save = BotSave::Failed(format!("Could not save {what} (error {}).", err.code));
                 }
             }
-            BotsPurpose::CheckBotUsername { generation } => {
+            BotsPurpose::CheckBotUsername => {
                 let create = &mut self.bots.owned.create;
-                if let BotUsernameCheck::Checking {
-                    generation: asked,
-                    username,
-                } = &create.check
-                    && *asked == generation
+                if let BotUsernameCheck::Checking { request, username } = &create.check
+                    && pending.is_some_and(|p| p.id == *request)
                 {
                     // tdesktop treats a failed check as "taken".
                     create.check = BotUsernameCheck::Known {
@@ -367,10 +372,10 @@ impl Session {
                     };
                 }
             }
-            BotsPurpose::CreateBot { generation } => {
+            BotsPurpose::CreateBot => {
                 let create = &mut self.bots.owned.create;
-                if let CreateStage::Creating(submission) = &create.stage
-                    && submission.generation == generation
+                if let CreateStage::Creating { request, .. } = &create.stage
+                    && pending.is_some_and(|p| p.id == *request)
                 {
                     if err.premium_limit == Some(crate::premium_limits::PremiumLimitKind::OwnedBots)
                     {

@@ -609,7 +609,6 @@ impl QuillApp {
                 }
             }
             RuntimeEvent::Request { token, data } => {
-                let ours = super::widgets_state::next_query_token();
                 // A runtime that is gone (stopped or failed earlier in this
                 // batch) has nobody to answer: nothing goes to TDLib.
                 let Some(live) = self
@@ -620,22 +619,36 @@ impl QuillApp {
                 else {
                     return;
                 };
-                live.queries.insert(ours, token);
+                // The query is known by the request it went out as; a send
+                // that failed answers the widget at once.
                 let sent = self
                     .live
                     .as_mut()
-                    .map(|live| {
-                        live.driver
-                            .send_widget_query(key, ours, data.as_bytes())
-                            .is_ok()
-                    })
-                    .unwrap_or(false);
-                if !sent {
-                    self.answer_widget_query(
-                        key,
-                        ours,
-                        Err(quill::message_widget::QueryFailure::Failed.code()),
-                    );
+                    .and_then(|live| live.driver.send_widget_query(key, data.as_bytes()).ok());
+                match sent {
+                    Some(request) => {
+                        if let Some(live) = self
+                            .widgets
+                            .entries
+                            .get_mut(&key)
+                            .and_then(|entry| entry.live_mut())
+                        {
+                            live.queries.insert(request, token);
+                        }
+                    }
+                    None => {
+                        if let Some(live) = self
+                            .widgets
+                            .entries
+                            .get_mut(&key)
+                            .and_then(|entry| entry.live_mut())
+                        {
+                            live.runtime.respond(
+                                token,
+                                Err(quill::message_widget::QueryFailure::Failed.code()),
+                            );
+                        }
+                    }
                 }
             }
             RuntimeEvent::Copy(text) => self.copy_widget_text(text, cx),
@@ -692,11 +705,11 @@ impl QuillApp {
             match answer {
                 WidgetAnswer::Query {
                     key,
-                    token,
+                    request,
                     outcome,
                 } => self.answer_widget_query(
                     key,
-                    token,
+                    request,
                     match outcome {
                         QueryOutcome::Answered(data) => Ok(data),
                         QueryOutcome::Failed(failure) => Err(failure.code()),
@@ -729,14 +742,19 @@ impl QuillApp {
 
     /// The answer to Quill's query `token`, for the runtime that asked:
     /// dropped when that runtime is gone (a restart starts a new list).
-    fn answer_widget_query(&mut self, key: WidgetKey, token: u64, outcome: Result<String, i32>) {
+    fn answer_widget_query(
+        &mut self,
+        key: WidgetKey,
+        request: quill::ids::RequestId,
+        outcome: Result<String, i32>,
+    ) {
         let Some(entry) = self.widgets.entries.get_mut(&key) else {
             return;
         };
         let Some(live) = entry.live_mut() else {
             return;
         };
-        let Some(theirs) = live.queries.remove(&token) else {
+        let Some(theirs) = live.queries.remove(&request) else {
             return;
         };
         live.runtime.respond(theirs, outcome);

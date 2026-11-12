@@ -36,6 +36,9 @@ pub struct EmojiLists {
     /// The Trending tab holds its list and its paging in the one value.
     pub trending: TrendingSets,
     pub search: crate::state::fetch::Fetch<()>,
+    /// `getRecentEmojiStatuses` (the status picker's recent row): its
+    /// answer lands only while this waits for it.
+    pub recent_statuses: crate::state::fetch::Fetch<()>,
 }
 
 impl EmojiLists {
@@ -48,6 +51,7 @@ impl EmojiLists {
         match purpose {
             RequestPurpose::GetInstalledEmojiSets => Some(&mut self.installed),
             RequestPurpose::SearchEmojiSets => Some(&mut self.search),
+            RequestPurpose::GetRecentEmojiStatuses => Some(&mut self.recent_statuses),
             _ => None,
         }
     }
@@ -407,7 +411,7 @@ impl Session {
     ) {
         match payload {
             EnvelopePayload::Stickers(StickersPayload::EmojiStatuses { statuses }) => {
-                self.accept_emoji_statuses(purpose, statuses);
+                self.accept_emoji_statuses(purpose, request, statuses);
             }
             EnvelopePayload::Stickers(StickersPayload::EmojiStatusCustomEmojis {
                 custom_emoji_ids,
@@ -433,10 +437,21 @@ impl Session {
     pub fn accept_emoji_statuses(
         &mut self,
         purpose: Option<RequestPurpose>,
+        request: Option<crate::ids::RequestId>,
         statuses: Vec<EmojiStatusItem>,
     ) {
         if purpose == Some(RequestPurpose::GetRecentEmojiStatuses) {
-            self.stickers.emoji.recent_statuses = statuses;
+            // Only the ask the row waits for fills it: an older one, asked
+            // before a status change, carries the old list.
+            if self
+                .stickers
+                .emoji
+                .lists
+                .recent_statuses
+                .answered(request, ())
+            {
+                self.stickers.emoji.recent_statuses = statuses;
+            }
         } else if purpose == Some(RequestPurpose::GetUpgradedGiftEmojiStatuses) {
             self.stickers.emoji.upgraded_gift_statuses = statuses;
         }
@@ -736,10 +751,8 @@ impl Session {
                 }
             }
             self.stickers.emoji.recent_statuses.clear();
-            drop(
-                self.requests
-                    .take_purpose(RequestPurpose::GetRecentEmojiStatuses),
-            );
+            // An ask out from before the change carries the old list.
+            self.stickers.emoji.lists.recent_statuses = crate::state::fetch::Fetch::Idle;
         }
         if matches!(
             purpose,

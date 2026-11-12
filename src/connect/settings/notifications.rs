@@ -427,10 +427,13 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Parity slice: resolve a notification sound to a playable form.
     /// A custom id missing from the saved list falls back to the default
     /// tone (per the `getSavedNotificationSounds` schema comment).
-    pub fn resolve_notification_sound(&mut self, kind: NotificationSoundKind) -> SoundResolution {
+    pub fn resolve_notification_sound(
+        &mut self,
+        kind: NotificationSoundKind,
+    ) -> Option<SoundResolution> {
         use SoundResolution as R;
         let sound_id = match kind {
-            NotificationSoundKind::Default => return R::DefaultTone,
+            NotificationSoundKind::Default => return Some(R::DefaultTone),
             NotificationSoundKind::Custom(id) => id,
         };
         let Some(entry) = self
@@ -440,11 +443,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             .iter()
             .find(|s| s.id == sound_id)
         else {
-            return R::DefaultTone;
+            return Some(R::DefaultTone);
         };
         let file_id = entry.sound.id;
         if let Some(path) = self.session.file(file_id).and_then(|f| f.usable_path()) {
-            return R::FilePath(path.into());
+            return Some(R::FilePath(path.into()));
         }
         // Not local yet: mark the file as a notification sound, request
         // playback on completion, and start the download (deduped).
@@ -468,6 +471,6 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .pending_sound_downloads
                 .remove(&sound_id);
         }
-        R::Pending
+        None
     }
 }

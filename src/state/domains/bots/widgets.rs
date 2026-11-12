@@ -27,10 +27,10 @@ impl Session {
         let answer = match (payload, pending.purpose) {
             (
                 BotsPayload::WidgetQueryAnswer { data },
-                RequestPurpose::Bots(BotsPurpose::GetWidgetQueryAnswer { token }),
+                RequestPurpose::Bots(BotsPurpose::GetWidgetQueryAnswer),
             ) => WidgetAnswer::Query {
                 key,
-                token,
+                request: pending.id,
                 outcome: QueryOutcome::Answered(data),
             },
             (
@@ -58,10 +58,10 @@ impl Session {
     ) -> bool {
         let Some(pending) = pending else { return false };
         let answer = match pending.purpose {
-            RequestPurpose::Bots(BotsPurpose::GetWidgetQueryAnswer { token }) => {
+            RequestPurpose::Bots(BotsPurpose::GetWidgetQueryAnswer) => {
                 widget_key(pending).map(|key| WidgetAnswer::Query {
                     key,
-                    token,
+                    request: pending.id,
                     outcome: QueryOutcome::Failed(QueryFailure::of(err)),
                 })
             }

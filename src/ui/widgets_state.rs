@@ -224,10 +224,10 @@ impl Pointer {
 /// restarted widget starts with none of it.
 pub(super) struct Live<R = Runtime> {
     pub runtime: R,
-    /// Queries with TDLib: Quill's token for each, to the token this
-    /// runtime gave it. A new runtime starts empty, so a late answer to the
+    /// Queries with TDLib: the request each went out as, to the token this
+    /// runtime gave it. Request ids never repeat in a run. A new runtime starts empty, so a late answer to the
     /// runtime before never reaches it.
-    pub queries: HashMap<u64, u64>,
+    pub queries: HashMap<quill::ids::RequestId, u64>,
     /// The theme and bubble color the runtime has, to send only changes.
     pub theme: (String, [u8; 3]),
     /// What the runtime itself asked for last (it animates): it ticks only
@@ -433,19 +433,6 @@ pub(super) enum WidgetStorage {
     /// nothing is written, until the screen is replaced (round 18 C #10: a
     /// runtime left alive wrote the folder back).
     Forgotten,
-}
-
-/// The last token Quill gave a widget query (`WidgetEntry::queries`). One
-/// counter for the process, not one per screen: a screen starts over on
-/// every account switch, and a per-screen counter gave a new query the
-/// token of a late answer still on its way after switching A, B, A.
-static LAST_QUERY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
-/// A widget query token no other query of this run had.
-pub(super) fn next_query_token() -> u64 {
-    LAST_QUERY
-        .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        .wrapping_add(1)
 }
 
 /// Writes a widget's changed storage with `save`. The entry is clean only

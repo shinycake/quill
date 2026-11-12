@@ -1,8 +1,5 @@
 # Answers not matched by RequestId (scripts/check-request-match.py).
 # <rule>:<Type::function> <count>. Only remove lines or lower counts.
-counter:BotsPurpose::CheckBotUsername 1
-counter:BotsPurpose::CreateBot 1
-counter:BotsPurpose::GetWidgetQueryAnswer 1
 counter:SettingsPurpose::GetBlockedSenders 1
 counter:SettingsPurpose::LookupBusinessBot 1
 purpose:ConnectDriver::ask_gift_text_limit 1
@@ -39,7 +36,6 @@ purpose:ConnectDriver::parameters_sent 1
 purpose:ConnectDriver::refresh_emoji_pack_catalog 2
 purpose:ConnectDriver::request_qr_login 1
 purpose:ConnectDriver::search_emoji_packs 1
-purpose:ConnectDriver::search_keyword_emojis 1
 purpose:ConnectDriver::select_emoji_set_tab 1
 purpose:ConnectDriver::set_archive_chat_list_settings 1
 purpose:ConnectDriver::set_gif_saved 2
@@ -62,7 +58,6 @@ purpose:QuillApp::topic_editor_body 1
 purpose:Session::accept_group_call_participant_update 1
 purpose:Session::apply_ok 2
 purpose:Session::finish_mask_mutation 1
-purpose:Session::invalidate_emoji_caches 1
 purpose:Session::mark_saved_sounds_stale 1
 purpose:Session::needs_profile_audio_check 1
 purpose:Session::sharing_request_answering 1

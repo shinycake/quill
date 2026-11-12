@@ -340,7 +340,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetTrendingEmojiSets, None);
-        self.session.stickers.emoji.lists.trending.begin(from);
         if let Err(err) = self
             .sender
             .send_json(&get_trending_emoji_sets(extra, from, 100))
@@ -356,7 +355,13 @@ impl<S: JsonSender> ConnectDriver<S> {
                 ));
             return Err(err);
         }
-        self.session.stickers.emoji.lists.trending.sent(extra);
+        // Only a page that went out is waited for.
+        self.session
+            .stickers
+            .emoji
+            .lists
+            .trending
+            .begin(from, extra);
         Ok(Some(extra))
     }
 
@@ -449,21 +454,18 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// B11: the panel's emoji search also asks `getKeywordEmojis`, in the
     /// language of what was typed, the system language and English; the
-    /// matches join the catalog's. A newer query replaces the pending one.
+    /// matches join the catalog's. Every query holds its own search, so
+    /// another window's query is not replaced.
     pub fn search_keyword_emojis(&mut self, query: &str) -> Result<(), ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        drop(
-            self.session
-                .requests
-                .take_purpose(RequestPurpose::GetKeywordEmojis),
-        );
         let query = query.trim();
-        self.session.stickers.emoji.keyword_emojis = crate::emoji::KeywordEmojis::Idle {
-            query: query.to_string(),
-        };
         if query.is_empty() {
+            self.session.stickers.emoji.keyword_emojis.cleared();
+            return Ok(());
+        }
+        if self.session.stickers.emoji.keyword_emojis.asking(query) {
             return Ok(());
         }
         let codes =
@@ -476,15 +478,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             ))
         {
             self.session.requests.take(extra);
-            self.session.stickers.emoji.keyword_emojis = crate::emoji::KeywordEmojis::Failed {
-                query: query.to_string(),
-            };
+            self.session.stickers.emoji.keyword_emojis.unsent(query);
             return Err(err);
         }
-        self.session.stickers.emoji.keyword_emojis = crate::emoji::KeywordEmojis::Asking {
-            query: query.to_string(),
-            request: extra,
-        };
+        self.session
+            .stickers
+            .emoji
+            .keyword_emojis
+            .asked(query, extra);
         Ok(())
     }
 

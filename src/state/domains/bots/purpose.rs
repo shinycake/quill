@@ -154,21 +154,16 @@ pub enum BotsPurpose {
     SetBotPhoto {
         bot_user_id: i64,
     },
-    /// `checkBotUsername` for the create dialog; `generation` drops stale
-    /// answers. Answers `checkChatUsernameResult*`.
-    CheckBotUsername {
-        generation: u64,
-    },
-    /// `createBot`; answers the new `user`.
-    CreateBot {
-        generation: u64,
-    },
-    /// `getWidgetQueryAnswer` for a widget's request `token`; the message
-    /// rides the pending request (`request_for_message`). The answer or the
-    /// failure lands in `bots.widget_answers`.
-    GetWidgetQueryAnswer {
-        token: u64,
-    },
+    /// `checkBotUsername` for the create dialog (the dialog's check stage
+    /// holds the request). Answers `checkChatUsernameResult*`.
+    CheckBotUsername,
+    /// `createBot` (the create stage holds the request); answers the new
+    /// `user`.
+    CreateBot,
+    /// `getWidgetQueryAnswer` for a widget's query; the message rides the
+    /// pending request (`request_for_message`). The answer or the failure
+    /// lands in `bots.widget_answers` under the request.
+    GetWidgetQueryAnswer,
     /// `getWidgetPublicData` for an on-screen widget that asked to poll.
     GetWidgetPublicData,
 }

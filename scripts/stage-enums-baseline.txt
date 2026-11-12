@@ -1,7 +1,6 @@
 # In-flight stages that hold nothing to match or cancel (scripts/check-stage-enums.py).
 # <rule>:<Enum>::<Variant> <count>. Only remove lines.
 bare:AccessStage::Asking 1
-bare:AccountStage::Starting 1
 bare:Answer::Waiting 1
 bare:ApplyStage::Sent 1
 bare:BackgroundStatus::Connecting 1
@@ -75,7 +74,6 @@ bare:Sent::Queued 1
 bare:SetFiles::Asked 1
 bare:ShutdownPhase::Running 1
 bare:Slot::Loading 2
-bare:SoundResolution::Pending 1
 bare:Stage::Opening 1
 bare:Stage::Queued 1
 bare:Stage::Running 1
@@ -103,8 +101,6 @@ bare:WriteAccess::Asking 1
 optional:Fetch::Loading 1
 optional:LiveJoin::Joining 1
 optional:SetStage::Resolving 1
-optional:TrendingSets::Loading 1
-rawid:BotUsernameCheck::Checking 1
 rawid:EditorStage::Encoding 1
 rawid:EditorStage::Reading 1
 rawid:LimitNotice::Box 1
@@ -112,11 +108,9 @@ unkeyed:AccentRead::Reading 1
 unkeyed:AddressStage::Resolving 1
 unkeyed:Assembly::Reading 1
 unkeyed:Beats::Running 1
-unkeyed:BotUsernameCheck::Checking 1
 unkeyed:CallLinkStage::Leaving 1
 unkeyed:Cancellation::InFlight 1
 unkeyed:ConferenceStage::Upgrading 1
-unkeyed:CreateStage::Creating 1
 unkeyed:DebugConfirm::Asking 1
 unkeyed:DemandStage::Asked 1
 unkeyed:DeviceRun::Running 1
@@ -127,7 +121,6 @@ unkeyed:First::Preparing 1
 unkeyed:GiftPurchaseStage::Sent 1
 unkeyed:GiftValueStage::Loading 1
 unkeyed:GiftsRest::Waiting 1
-unkeyed:IdLookup::Asking 1
 unkeyed:Lifecycle::Loading 1
 unkeyed:Lifecycle::Running 1
 unkeyed:Lifecycle::Waiting 1
@@ -144,7 +137,6 @@ unkeyed:RowDownload::Running 1
 unkeyed:RowState::Downloading 1
 unkeyed:SendStage::Sent 1
 unkeyed:SendToMenu::Applying 1
-unkeyed:SetState::Loading 1
 unkeyed:SizedState::Loading 1
 unkeyed:Stage::Running 1
 unkeyed:StoryFetch::Asked 1

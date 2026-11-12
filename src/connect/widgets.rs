@@ -17,17 +17,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.chats_path_active() && key.message_id.0 > 0 && key.chat_id.0 != 0
     }
 
-    /// The widget's request `token` to its bot (`getWidgetQueryAnswer`).
+    /// The widget's query to its bot (`getWidgetQueryAnswer`). The answer
+    /// comes back under the returned request.
     pub fn send_widget_query(
         &mut self,
         key: WidgetKey,
-        token: u64,
         data: &[u8],
     ) -> Result<RequestId, ConnectSendError> {
         if !self.widget_request_allowed(key) || data.is_empty() || data.len() > MAX_QUERY_BYTES {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let purpose = RequestPurpose::Bots(BotsPurpose::GetWidgetQueryAnswer { token });
+        let purpose = RequestPurpose::Bots(BotsPurpose::GetWidgetQueryAnswer);
         let extra = self
             .session
             .request_for_message(purpose, key.chat_id, key.message_id);
