@@ -62,6 +62,8 @@ pub(crate) enum CallEnd {
     /// stage from the target.
     #[default]
     Unobserved,
+    /// No linger runs: no call ended, or a busy line's summary this screen
+    /// saw, which stays until Cancel or Redial (`CallWindowTarget::lingers`).
     NotEnded,
     /// The call ended; the window lingers on "call ended" until the timer
     /// fires. The stage holds the timer, so a new call or a switch of

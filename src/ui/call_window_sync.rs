@@ -126,8 +126,10 @@ impl QuillApp {
     }
 
     /// The window's ended call: it lingers on "call ended" under a timer
-    /// the stage holds (a busy line stays until its buttons dismiss it); a
-    /// call still going, or none, ends the stage and drops the timer.
+    /// the stage holds; a call still going, or none, ends the stage and
+    /// drops the timer. A busy line's summary runs no timer: its stage is
+    /// `NotEnded` while the summary shows, until Cancel or Redial
+    /// (`CallWindowTarget::lingers`).
     fn follow_call_end(&mut self, target: CallWindowTarget, cx: &mut Context<Self>) {
         let end = &self.call_screen.end;
         if matches!(end, CallEnd::Unobserved) {
