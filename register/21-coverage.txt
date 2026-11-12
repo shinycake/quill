@@ -93,3 +93,12 @@ src/ui/security/mod.rs 820 read
 src/ui/security/passkey_ceremony.rs 812 read
 src/ui/security/passkeys.rs 888 read
 src/ui/security/twofa_status_body.rs 680 read
+src/ui/security_recovery.rs 696 read
+src/ui/screen_chooser.rs 932 read
+src/ui/selection_mode.rs 905 read
+src/ui/selection_drag.rs 810 read
+src/ui/send_prep.rs 833 read
+src/ui/shell.rs 876 read
+src/ui/settings_ui.rs 810 read
+src/ui/send_card/tiles.rs 780 read
+src/ui/selectable_text.rs 1198 read
