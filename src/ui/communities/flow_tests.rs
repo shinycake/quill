@@ -373,7 +373,10 @@ fn ungroup_waits_while_show_as_one_chat_is_changing(cx: &mut TestAppContext) {
                 quill::state::RequestPurpose::Communities(purpose),
                 RUSTACEANS,
             );
-            session.communities.sent.begin(request, (RUSTACEANS, purpose));
+            session
+                .communities
+                .sent
+                .begin(request, (RUSTACEANS, purpose));
         }
         app.show_community_box(
             CommunityBox::Ungroup {
