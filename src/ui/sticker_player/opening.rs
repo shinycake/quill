@@ -2,7 +2,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::{ChatId, Part, Place};
-use quill::sticker_playback::player::Timeline;
+use quill::sticker_playback::player::{ClipState, Timeline};
 use std::time::{Duration, Instant};
 
 /// How long a view keeps ticking for an open that has not answered. The
@@ -24,6 +24,21 @@ pub(super) enum Opening {
     },
     Ready(Timeline),
     Failed,
+}
+
+impl Opening {
+    /// This open once the engine says `state` of its clip: a pending one
+    /// follows the engine's answer, an answered one stays.
+    pub(super) fn settled(self, state: Option<ClipState>) -> Self {
+        if !matches!(self, Self::Pending { .. }) {
+            return self;
+        }
+        match state {
+            Some(ClipState::Ready(info)) => Self::Ready(info.timeline),
+            Some(ClipState::Failed(_)) | None => Self::Failed,
+            Some(ClipState::Opening) => self,
+        }
+    }
 }
 
 /// What a window lets go of (`Player::leave`).

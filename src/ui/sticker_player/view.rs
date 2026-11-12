@@ -135,7 +135,8 @@ impl StickerView {
         };
         let open = match self.state(&inner) {
             ViewState::Gone => return 0,
-            // An open that outlived its give-up is a failed one: no ticks.
+            // An open that outlived its give-up is not ticked for: the pump
+            // redraws when the engine answers it (`Player::settle_opens`).
             ViewState::Opening { since } if open_gave_up(since, self.player.now()) => return 0,
             ViewState::Opening { .. } => return OPENING_FPS.min(self.max_fps),
             ViewState::Open(open) => open,

@@ -455,6 +455,24 @@ impl Player {
         first
     }
 
+    /// Moves every clip whose open the engine has answered out of
+    /// `Opening::Pending`; true when one moved. The engine wakes the UI for
+    /// an open (ready or failed), and a view that gave up ticking for it
+    /// only redraws if the wake says so.
+    fn settle_opens(&self) -> bool {
+        let Ok(mut inner) = self.inner.try_borrow_mut() else {
+            return false;
+        };
+        let mut moved = false;
+        for (key, clip) in inner.clips.iter_mut() {
+            if matches!(clip.opening, Opening::Pending { .. }) {
+                clip.opening = clip.opening.settled(self.engine.state(key));
+                moved |= !matches!(clip.opening, Opening::Pending { .. });
+            }
+        }
+        moved
+    }
+
     /// Opens `spec` at `edge` for a view at `place` unless it is open; true
     /// once a frame of it (at any size) can show.
     pub(super) fn prepare(&self, spec: &ClipSpec, edge: u32, place: Place) -> bool {
@@ -511,13 +529,7 @@ impl Player {
             clip.used = Some(now);
             note_drawn(&mut clip.drawn, drawn);
             note_place(&mut clip.places, place);
-            if let Opening::Pending { .. } = clip.opening {
-                match self.engine.state(&key) {
-                    Some(ClipState::Ready(info)) => clip.opening = Opening::Ready(info.timeline),
-                    Some(ClipState::Failed(_)) | None => clip.opening = Opening::Failed,
-                    Some(ClipState::Opening) => {}
-                }
-            }
+            clip.opening = clip.opening.settled(self.engine.state(&key));
             match clip.timeline() {
                 Some(timeline) => {
                     let entry = inner.heads.entry((head, key.file)).or_insert_with(|| Head {

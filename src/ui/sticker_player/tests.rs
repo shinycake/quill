@@ -723,3 +723,41 @@ fn a_clip_that_opens_after_the_give_up_still_plays() {
         "the engine opened it: it shows"
     );
 }
+
+/// The engine's wake for an open reaches the pump after the views gave up
+/// ticking: the pump redraws when an open is answered, so the view shows the
+/// clip without any other input.
+#[test]
+fn an_open_that_lands_after_the_give_up_is_reported_to_the_pump() {
+    let (player, spec) = player(9);
+    let other = ClipSpec {
+        file: FileId(9),
+        ..spec
+    };
+    player.set_fixture(
+        9,
+        Arc::new(|edge| DecodedFrames {
+            frames: vec![vec![5; (edge as usize).pow(2) * 4]],
+            fps: FPS,
+        }),
+    );
+    let at_head = head("slow-pump");
+    let now = || player.now();
+    assert!(
+        player
+            .frame(&other, at_head, PlayMode::Loop, EDGE, false, None, now())
+            .is_none(),
+        "asked, not open"
+    );
+    player.skip(OPEN_GIVE_UP + ms(1));
+    // The views no longer call `frame`: only the engine's answer is left.
+    player.settle();
+    assert!(player.settle_opens(), "the answered open is reported once");
+    assert!(!player.settle_opens(), "and not again");
+    assert!(
+        player
+            .frame(&other, at_head, PlayMode::Loop, EDGE, false, None, now())
+            .is_some(),
+        "the redraw shows the clip"
+    );
+}

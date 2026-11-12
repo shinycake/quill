@@ -421,11 +421,14 @@ impl QuillApp {
                     break;
                 }
                 pending.store(false, Ordering::Release);
-                // Only a clip's first frame needs a redraw (its view switches
-                // from the still); later frames are shown by the animation
-                // ticks the views already ask for.
+                // Only a clip's first frame, or its open (which no view is
+                // ticking for after its give-up), needs a redraw (its view
+                // switches from the still); later frames are shown by the
+                // animation ticks the views already ask for.
                 let alive = this.update(cx, |this, cx| {
-                    if this.players.stickers.drain() {
+                    let first = this.players.stickers.drain();
+                    let opened = this.players.stickers.settle_opens();
+                    if first || opened {
                         cx.notify();
                     }
                 });
