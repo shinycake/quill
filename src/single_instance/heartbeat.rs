@@ -3,6 +3,7 @@
 //! frozen, and the second launch would exit with nothing on screen.
 //! tdesktop checks its main thread before it answers too (`sandbox.cpp`).
 
+use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::sync::{Condvar, Mutex};
 use std::time::Instant;
 
@@ -19,25 +20,31 @@ impl Clock for SystemClock {
     }
 }
 
-/// Whether the UI thread is beating, and how often it has.
-#[derive(Clone, Copy, PartialEq, Eq)]
+/// Whether the UI thread is beating, and which launches wait for its next
+/// beat.
 enum Beats {
     /// Before [`Heartbeat::start`] and after [`Heartbeat::stop`]: every
     /// launch is answered at once.
     NotRunning,
     Running {
-        count: u64,
+        /// The launches that wait for a beat; a beat answers all of them.
+        waiting: Vec<Waiter>,
     },
 }
 
-impl Beats {
-    /// The count while running.
-    fn count(self) -> Option<u64> {
-        match self {
-            Self::NotRunning => None,
-            Self::Running { count } => Some(count),
-        }
-    }
+/// A launch that waits for the next beat.
+struct Waiter {
+    wake: Sender<()>,
+    /// When it gives up, so a launch that gave up is dropped from the list.
+    until: Instant,
+}
+
+/// What a launch holds while it waits: the beat arrives on it, or the
+/// sender goes away (the UI stopped), which answers it as well.
+pub(super) enum Mark {
+    /// The UI is not beating: answered at once.
+    NotRunning,
+    Waiting(Receiver<()>),
 }
 
 pub struct Heartbeat {
@@ -66,8 +73,10 @@ impl Heartbeat {
     /// after [`Self::stop`], every launch is answered at once.
     pub fn start(&self) {
         let mut beats = crate::locks::lock_or_recover(&self.beats);
-        if *beats == Beats::NotRunning {
-            *beats = Beats::Running { count: 0 };
+        if matches!(*beats, Beats::NotRunning) {
+            *beats = Beats::Running {
+                waiting: Vec::new(),
+            };
         }
     }
 
@@ -78,29 +87,39 @@ impl Heartbeat {
 
     pub fn beat(&self) {
         let mut beats = crate::locks::lock_or_recover(&self.beats);
-        if let Beats::Running { count } = &mut *beats {
-            *count = count.wrapping_add(1);
+        if let Beats::Running { waiting } = &mut *beats {
+            for waiter in waiting.drain(..) {
+                let _ = waiter.wake.send(());
+            }
         }
         drop(beats);
         self.beat.notify_all();
     }
 
-    /// The mark to pass to [`Self::answered_since`].
-    pub(super) fn mark(&self) -> Option<u64> {
-        crate::locks::lock_or_recover(&self.beats).count()
+    /// A launch starts waiting for the next beat until `until`; `now` drops
+    /// the launches whose time has passed.
+    pub(super) fn mark(&self, now: Instant, until: Instant) -> Mark {
+        match &mut *crate::locks::lock_or_recover(&self.beats) {
+            Beats::NotRunning => Mark::NotRunning,
+            Beats::Running { waiting } => {
+                waiting.retain(|waiter| waiter.until > now);
+                let (wake, beat) = channel();
+                waiting.push(Waiter { wake, until });
+                Mark::Waiting(beat)
+            }
+        }
     }
 
     /// Whether the UI beat after `mark` by `deadline` on `clock`, or does
     /// not beat at all.
-    pub(super) fn answered_by(
-        &self,
-        mark: Option<u64>,
-        deadline: Instant,
-        clock: &dyn Clock,
-    ) -> bool {
+    pub(super) fn answered_by(&self, mark: &Mark, deadline: Instant, clock: &dyn Clock) -> bool {
+        let Mark::Waiting(beat) = mark else {
+            return true;
+        };
         let mut beats = crate::locks::lock_or_recover(&self.beats);
         loop {
-            if mark.is_none() || beats.count() != mark {
+            // A beat, or the UI stopping (the sender is dropped), answers.
+            if !matches!(beat.try_recv(), Err(TryRecvError::Empty)) {
                 return true;
             }
             let left = deadline.saturating_duration_since(clock.now());

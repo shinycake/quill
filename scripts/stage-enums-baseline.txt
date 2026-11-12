@@ -15,8 +15,6 @@ bare:CallWindow::Opening 2
 bare:CandidateStatus::Loading 1
 bare:CaptureStage::Running 1
 bare:CardState::Waiting 1
-bare:CarrierStage::Closing 1
-bare:CarrierStage::Starting 1
 bare:CeremonySheet::Connecting 1
 bare:CeremonySheet::Probing 1
 bare:ClipState::Opening 1
@@ -58,14 +56,12 @@ bare:Phase::Waiting 1
 bare:PhoneFlow::Asking 1
 bare:Picture::Loading 1
 bare:PictureState::Waiting 1
-bare:PinTarget::Loading 1
 bare:PlayHead::Waiting 1
 bare:PlayState::Opening 1
 bare:Playback::Waiting 1
 bare:Refire::Running 1
 bare:ReplyState::Loading 1
 bare:Restore::Pending 1
-bare:RichHtmlStage::Running 1
 bare:Run::Running 1
 bare:SaveAnswer::Waiting 1
 bare:SearchStatus::Searching 1
@@ -98,7 +94,6 @@ bare:VideoFullscreen::Leaving 1
 bare:ViewState::Opening 1
 bare:ViewState::Waiting 1
 bare:Waker::Pending 1
-bare:WebRowState::Connecting 1
 bare:WorkerLife::Running 1
 bare:WriteAccess::Asking 1
 optional:Fetch::Loading 1
@@ -112,7 +107,6 @@ rawid:LimitNotice::Box 1
 unkeyed:AccentRead::Reading 1
 unkeyed:AddressStage::Resolving 1
 unkeyed:Assembly::Reading 1
-unkeyed:Beats::Running 1
 unkeyed:BotUsernameCheck::Checking 1
 unkeyed:CallLinkStage::Leaving 1
 unkeyed:Cancellation::InFlight 1
@@ -142,8 +136,6 @@ unkeyed:PictureState::Downloading 1
 unkeyed:RegistrationStep::Asking 1
 unkeyed:Restore::Opening 1
 unkeyed:Rotation::Probing 1
-unkeyed:RowDownload::Running 1
-unkeyed:RowState::Downloading 1
 unkeyed:SendStage::Sent 1
 unkeyed:SendToMenu::Applying 1
 unkeyed:SetState::Loading 1
@@ -156,4 +148,3 @@ unkeyed:UpdateControl::Downloading 1
 unkeyed:VcardImport::Reading 1
 unkeyed:WaitingCheck::Pending 1
 unkeyed:Watch::Running 1
-unkeyed:Writer::Running 1

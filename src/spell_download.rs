@@ -6,116 +6,105 @@
 //! (tdesktop: switching a downloading dictionary off destroys the loader).
 #![deny(clippy::indexing_slicing)]
 
-use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 
 use crate::spell_catalog::DOWNLOAD_HOST;
 
 /// Where the download is. It only moves forward, so a stop request and the
 /// worker's completion cannot disagree: a download that finished after a
-/// stop was asked for reads [`Cancelled`](DownloadStage::Cancelled), not
-/// [`Done`](DownloadStage::Done).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub enum DownloadStage {
-    Running = 0,
+/// stop was asked for reads `Cancelled`, not `Done`. The worker's end is the
+/// [`Worker`] it holds: the stage sees it drop (return, panic, or the job
+/// never started) through `ended`.
+#[derive(Debug)]
+enum DownloadStage {
+    Running {
+        ended: Receiver<()>,
+    },
     /// The UI asked to stop; the worker ends at the next chunk.
-    Cancelling = 1,
+    Cancelling {
+        ended: Receiver<()>,
+    },
     /// The worker finished without a stop request.
-    Done = 2,
+    Done,
     /// The worker finished after a stop request.
-    Cancelled = 3,
+    Cancelled,
 }
 
 impl DownloadStage {
-    fn from_raw(raw: u8) -> Self {
-        match raw {
-            0 => Self::Running,
-            1 => Self::Cancelling,
-            2 => Self::Done,
+    /// Moves on to `Done` or `Cancelled` once the worker's end is gone.
+    fn settle(&mut self) {
+        let (Self::Running { ended } | Self::Cancelling { ended }) = self else {
+            return;
+        };
+        if matches!(ended.try_recv(), Err(TryRecvError::Empty)) {
+            return;
+        }
+        *self = match self {
+            Self::Running { .. } => Self::Done,
             _ => Self::Cancelled,
-        }
-    }
-
-    /// The stage after the worker ends.
-    fn finished(self) -> Self {
-        match self {
-            Self::Running | Self::Done => Self::Done,
-            Self::Cancelling | Self::Cancelled => Self::Cancelled,
-        }
+        };
     }
 }
 
+/// The worker's end of a download: dropping it marks the download finished,
+/// however the worker ends.
+#[derive(Debug)]
+pub struct Worker(Sender<()>);
+
 /// Shared between the download thread and the UI.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Progress {
     /// Bytes received over both files.
     pub received: AtomicU64,
-    /// A [`DownloadStage`], moved only by [`Progress::cancel`] and
-    /// [`Progress::finish`].
-    stage: AtomicU8,
+    stage: Mutex<DownloadStage>,
 }
 
 impl Progress {
+    /// A download that has begun: the progress for the UI to read and the
+    /// [`Worker`] the thread holds until it ends.
+    pub fn start() -> (std::sync::Arc<Self>, Worker) {
+        let (end, ended) = channel();
+        let progress = Self {
+            received: AtomicU64::new(0),
+            stage: Mutex::new(DownloadStage::Running { ended }),
+        };
+        (std::sync::Arc::new(progress), Worker(end))
+    }
+
     pub fn received(&self) -> u64 {
         self.received.load(Ordering::Relaxed)
     }
 
-    pub fn stage(&self) -> DownloadStage {
-        DownloadStage::from_raw(self.stage.load(Ordering::Acquire))
+    fn settled<R>(&self, read: impl FnOnce(&mut DownloadStage) -> R) -> R {
+        let mut stage = crate::locks::lock_or_recover(&self.stage);
+        stage.settle();
+        read(&mut stage)
     }
 
     /// Asks the worker to stop; a finished download stays finished.
     pub fn cancel(&self) {
-        let _ = self.stage.compare_exchange(
-            DownloadStage::Running as u8,
-            DownloadStage::Cancelling as u8,
-            Ordering::AcqRel,
-            Ordering::Acquire,
-        );
+        self.settled(|stage| {
+            *stage = match std::mem::replace(stage, DownloadStage::Done) {
+                DownloadStage::Running { ended } => DownloadStage::Cancelling { ended },
+                other => other,
+            };
+        });
     }
 
     /// A stop was asked for, whether or not the worker has finished.
     pub fn is_cancelled(&self) -> bool {
-        matches!(
-            self.stage(),
-            DownloadStage::Cancelling | DownloadStage::Cancelled
-        )
+        self.settled(|stage| {
+            matches!(
+                stage,
+                DownloadStage::Cancelling { .. } | DownloadStage::Cancelled
+            )
+        })
     }
 
     pub fn is_finished(&self) -> bool {
-        matches!(self.stage(), DownloadStage::Done | DownloadStage::Cancelled)
-    }
-
-    pub fn finish(&self) {
-        let mut raw = self.stage.load(Ordering::Acquire);
-        loop {
-            let next = DownloadStage::from_raw(raw).finished() as u8;
-            if next == raw {
-                return;
-            }
-            match self
-                .stage
-                .compare_exchange(raw, next, Ordering::AcqRel, Ordering::Acquire)
-            {
-                Ok(_) => return,
-                Err(seen) => raw = seen,
-            }
-        }
-    }
-
-    /// Marks the download finished when dropped, so a worker that panics
-    /// still ends the row's progress loop.
-    pub fn finish_on_drop(&self) -> FinishOnDrop<'_> {
-        FinishOnDrop(self)
-    }
-}
-
-/// See [`Progress::finish_on_drop`].
-pub struct FinishOnDrop<'a>(&'a Progress);
-
-impl Drop for FinishOnDrop<'_> {
-    fn drop(&mut self) {
-        self.0.finish();
+        self.settled(|stage| matches!(stage, DownloadStage::Done | DownloadStage::Cancelled))
     }
 }
 
@@ -209,12 +198,12 @@ pub const WORKER_PANICKED: &str = "The download stopped unexpectedly.";
 
 /// Runs the download job on the worker. A panic in it comes back as an
 /// `Err` (the row shows it) instead of unwinding into whoever awaits the
-/// worker, and the progress is finished either way.
+/// worker, and the download is finished either way (the [`Worker`] drops).
 pub fn run_guarded(
-    progress: &Progress,
+    worker: Worker,
     job: impl FnOnce() -> Result<(), DownloadError>,
 ) -> Result<(), DownloadError> {
-    let _done = progress.finish_on_drop();
+    let _done = worker;
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(job))
         .unwrap_or_else(|_| Err(DownloadError::Message(WORKER_PANICKED.to_string())))
 }
@@ -248,31 +237,38 @@ mod tests {
 
     #[test]
     fn progress_flags() {
-        let p = Progress::default();
+        let (p, worker) = Progress::start();
         assert!(!p.is_cancelled() && !p.is_finished());
         p.received.fetch_add(5, Ordering::Relaxed);
         p.cancel();
         assert!(p.is_cancelled() && !p.is_finished());
-        assert_eq!(p.stage(), DownloadStage::Cancelling);
-        p.finish();
-        assert!(p.is_cancelled() && p.is_finished());
-        assert_eq!(p.stage(), DownloadStage::Cancelled, "a cancelled finish");
+        drop(worker);
+        assert!(p.is_cancelled() && p.is_finished(), "a cancelled finish");
         assert_eq!(p.received(), 5);
     }
 
     #[test]
     fn a_finished_download_stays_finished_when_cancel_comes_late() {
-        let p = Progress::default();
-        p.finish();
+        let (p, worker) = Progress::start();
+        drop(worker);
         p.cancel();
-        assert_eq!(p.stage(), DownloadStage::Done);
         assert!(!p.is_cancelled() && p.is_finished());
     }
 
     #[test]
+    fn a_worker_that_never_ran_still_finishes_the_download() {
+        let (p, worker) = Progress::start();
+        let job = move || drop(worker);
+        drop(job);
+        assert!(p.is_finished());
+    }
+
+    #[test]
     fn a_panicking_worker_finishes_and_returns_an_error() {
-        let p = Progress::default();
-        let outcome = run_guarded(&p, || std::panic::resume_unwind(Box::new("worker failed")));
+        let (p, worker) = Progress::start();
+        let outcome = run_guarded(worker, || {
+            std::panic::resume_unwind(Box::new("worker failed"))
+        });
         assert_eq!(
             outcome,
             Err(DownloadError::Message(WORKER_PANICKED.to_string()))
@@ -282,12 +278,12 @@ mod tests {
 
     #[test]
     fn a_worker_result_passes_through() {
-        let p = Progress::default();
-        assert_eq!(run_guarded(&p, || Ok(())), Ok(()));
+        let (p, worker) = Progress::start();
+        assert_eq!(run_guarded(worker, || Ok(())), Ok(()));
         assert!(p.is_finished());
-        let p = Progress::default();
+        let (p, worker) = Progress::start();
         assert_eq!(
-            run_guarded(&p, || Err(DownloadError::Cancelled)),
+            run_guarded(worker, || Err(DownloadError::Cancelled)),
             Err(DownloadError::Cancelled)
         );
         assert!(p.is_finished());

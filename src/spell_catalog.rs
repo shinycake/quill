@@ -453,9 +453,12 @@ impl std::fmt::Display for InstallError {
     }
 }
 
-/// Vet a downloaded pair and move it into `dir`. Each file is written to a
-/// temporary name and renamed, `.dic` last, so a dictionary the engine can
-/// see (it needs both) is always complete.
+/// Vet a downloaded pair and move it into `dir`. Both files are written to
+/// temporary names first, then renamed, `.dic` last, so a dictionary the
+/// engine can see (it needs both) is always complete. When the `.dic` cannot
+/// be put in place (Windows: the old one is held open), the `.aff` that was
+/// already replaced is put back, so a re-download never leaves a mismatched
+/// pair.
 pub fn install(dir: &Path, code: &str, aff: &[u8], dic: &[u8]) -> Result<(), InstallError> {
     if entry(code).is_none() {
         return Err(InstallError::UnknownCode);
@@ -469,15 +472,44 @@ pub fn install(dir: &Path, code: &str, aff: &[u8], dic: &[u8]) -> Result<(), Ins
         return Err(InstallError::Invalid);
     }
     std::fs::create_dir_all(dir).map_err(InstallError::Io)?;
+    let part = |ext: &str| dir.join(format!(".{code}.{ext}.part"));
+    let target = |ext: &str| dir.join(format!("{code}.{ext}"));
+    let backup = dir.join(format!(".{code}.aff.old"));
+    let discard_parts = || {
+        let _ = std::fs::remove_file(part("aff"));
+        let _ = std::fs::remove_file(part("dic"));
+    };
     for (ext, bytes) in [("aff", aff), ("dic", dic)] {
-        let tmp = dir.join(format!(".{code}.{ext}.part"));
-        let target = dir.join(format!("{code}.{ext}"));
-        std::fs::write(&tmp, bytes).map_err(InstallError::Io)?;
-        if let Err(err) = crate::fs_retry::rename_retrying(&tmp, &target, crate::fs_retry::LONG) {
-            let _ = std::fs::remove_file(&tmp);
+        if let Err(err) = std::fs::write(part(ext), bytes) {
+            discard_parts();
             return Err(InstallError::Io(err));
         }
     }
+    let rename =
+        |from: &Path, to: &Path| crate::fs_retry::rename_retrying(from, to, crate::fs_retry::LONG);
+    // The old `.aff` (if any) is kept aside until the new pair is in place.
+    let had_old = target("aff").exists();
+    if had_old && let Err(err) = rename(&target("aff"), &backup) {
+        discard_parts();
+        return Err(InstallError::Io(err));
+    }
+    let put_back = |had_old: bool| {
+        if had_old {
+            let _ = std::fs::remove_file(target("aff"));
+            let _ = std::fs::rename(&backup, target("aff"));
+        }
+    };
+    if let Err(err) = rename(&part("aff"), &target("aff")) {
+        put_back(had_old);
+        discard_parts();
+        return Err(InstallError::Io(err));
+    }
+    if let Err(err) = rename(&part("dic"), &target("dic")) {
+        put_back(had_old);
+        discard_parts();
+        return Err(InstallError::Io(err));
+    }
+    let _ = std::fs::remove_file(&backup);
     Ok(())
 }
 
@@ -519,9 +551,10 @@ pub fn next_chosen(chosen: &[String], active: &[String], code: &str, enable: boo
     next
 }
 
-/// What a row shows (tdesktop `BlobState`).
+/// What a row shows (tdesktop `BlobState`), computed by [`build_rows`] on
+/// every draw from the download and the folder; never stored.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RowState {
+pub enum RowView {
     /// Installed and in use.
     Enabled,
     /// Installed, switched off.
@@ -539,7 +572,7 @@ pub enum RowState {
 pub struct ManagerRow {
     pub code: String,
     pub name: String,
-    pub state: RowState,
+    pub state: RowView,
     /// Installed by Quill, so "Remove" may delete it. System dictionaries
     /// are never deleted.
     pub removable: bool,
@@ -549,11 +582,11 @@ impl ManagerRow {
     /// The grey line under the name (tdesktop `StateDescription`).
     pub fn status(&self) -> String {
         match self.state {
-            RowState::Enabled => "Enabled".to_string(),
-            RowState::Installed => "Installed".to_string(),
-            RowState::Available { bytes } => format!("Download size {}", format_size(bytes)),
-            RowState::Downloading { percent } => format!("Downloading {percent}%"),
-            RowState::Failed => "Download failed. Click to retry.".to_string(),
+            RowView::Enabled => "Enabled".to_string(),
+            RowView::Installed => "Installed".to_string(),
+            RowView::Available { bytes } => format!("Download size {}", format_size(bytes)),
+            RowView::Downloading { percent } => format!("Downloading {percent}%"),
+            RowView::Failed => "Download failed. Click to retry.".to_string(),
         }
     }
 }
@@ -565,9 +598,10 @@ pub struct Transfer<'a> {
     pub percent: u8,
 }
 
-/// What the one download (a dictionary loads at a time) is doing.
+/// What the one download (a dictionary loads at a time) is doing, as the
+/// list is told on every draw; the download itself is the manager's stage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum RowDownload<'a> {
+pub enum RowDownloadView<'a> {
     #[default]
     None,
     Running(Transfer<'a>),
@@ -583,28 +617,28 @@ pub struct RowInputs<'a> {
     pub available: &'a [String],
     /// In use.
     pub active: &'a [String],
-    pub download: RowDownload<'a>,
+    pub download: RowDownloadView<'a>,
 }
 
 /// The rows for the manager: the catalog, then dictionaries found on the
 /// system that the catalog lacks (shown by code), filtered by `query`.
 pub fn build_rows(inputs: &RowInputs<'_>, query: &str) -> Vec<ManagerRow> {
     let mut rows = Vec::new();
-    let state_of = |code: &str, bytes: u64| -> RowState {
-        if let RowDownload::Running(t) = inputs.download
+    let state_of = |code: &str, bytes: u64| -> RowView {
+        if let RowDownloadView::Running(t) = inputs.download
             && t.code == code
         {
-            RowState::Downloading { percent: t.percent }
+            RowView::Downloading { percent: t.percent }
         } else if inputs.available.iter().any(|a| a == code) {
             if inputs.active.iter().any(|a| a == code) {
-                RowState::Enabled
+                RowView::Enabled
             } else {
-                RowState::Installed
+                RowView::Installed
             }
-        } else if inputs.download == RowDownload::Failed(code) {
-            RowState::Failed
+        } else if inputs.download == RowDownloadView::Failed(code) {
+            RowView::Failed
         } else {
-            RowState::Available { bytes }
+            RowView::Available { bytes }
         }
     };
     for e in CATALOG {
@@ -749,6 +783,34 @@ mod tests {
         assert_eq!(with_managed_dir(None, dirs.clone()), dirs);
     }
 
+    /// Sweep 07-006: a `.dic` that cannot be replaced puts the old `.aff`
+    /// back, so the pair on disk is still the old, matching one.
+    #[test]
+    fn a_failed_dic_rename_restores_the_old_aff() {
+        let tmp = TempDir::new();
+        let dir = tmp.0.join("dictionaries");
+        install(&dir, "de", &fixture("de_DE.aff"), &fixture("de_DE.dic")).unwrap();
+        let old_aff = std::fs::read(dir.join("de.aff")).unwrap();
+        // A directory in the way of the `.dic` makes its rename fail.
+        std::fs::remove_file(dir.join("de.dic")).unwrap();
+        std::fs::create_dir_all(dir.join("de.dic").join("held")).unwrap();
+        let newer_aff = [fixture("de_DE.aff"), b"\n# newer\n".to_vec()].concat();
+        let failed = install(&dir, "de", &newer_aff, &fixture("de_DE.dic"));
+        assert!(matches!(failed, Err(InstallError::Io(_))));
+        assert_eq!(std::fs::read(dir.join("de.aff")).unwrap(), old_aff);
+        let names: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            names
+                .iter()
+                .all(|n| !n.ends_with(".part") && !n.ends_with(".old")),
+            "{names:?}"
+        );
+    }
+
     #[test]
     fn install_validates_writes_atomically_and_remove_cleans_up() {
         let tmp = TempDir::new();
@@ -829,7 +891,7 @@ mod tests {
                 managed: &managed,
                 available: &available,
                 active: &active,
-                download: RowDownload::Running(Transfer {
+                download: RowDownloadView::Running(Transfer {
                     code: "fr",
                     percent: 42,
                 }),
@@ -841,19 +903,19 @@ mod tests {
                 managed: &managed,
                 available: &available,
                 active: &active,
-                download: RowDownload::Failed("it"),
+                download: RowDownloadView::Failed("it"),
             },
             "",
         );
         let by = |code: &str| rows.iter().find(|r| r.code == code).unwrap();
-        assert_eq!(by("en_US").state, RowState::Enabled);
+        assert_eq!(by("en_US").state, RowView::Enabled);
         assert!(!by("en_US").removable, "a system copy is never removed");
-        assert_eq!(by("de").state, RowState::Installed);
+        assert_eq!(by("de").state, RowView::Installed);
         assert!(by("de").removable);
         assert_eq!(by("fr").status(), "Downloading 42%");
-        assert!(matches!(by("it").state, RowState::Available { .. }));
+        assert!(matches!(by("it").state, RowView::Available { .. }));
         let failed_it = failed.iter().find(|r| r.code == "it").unwrap();
-        assert_eq!(failed_it.state, RowState::Failed);
+        assert_eq!(failed_it.state, RowView::Failed);
         assert!(by("es").status().starts_with("Download size "));
         // A system dictionary outside the catalog is listed by its code.
         assert_eq!(by("tlh_XX").name, "tlh_XX");
@@ -874,7 +936,7 @@ mod tests {
                 managed: &managed,
                 available: &[],
                 active: &[],
-                download: RowDownload::None,
+                download: RowDownloadView::None,
             },
             "span",
         );

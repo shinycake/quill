@@ -41,7 +41,7 @@ impl ServiceNames for Names {
             100 => PinTarget::Text("Lunch at noon, bring snacks!".into()),
             101 => PinTarget::Text("Short note".into()),
             102 => PinTarget::Media("a photo".into()),
-            _ => PinTarget::Loading,
+            _ => PinTarget::NotLoaded,
         }
     }
     fn game_title(&self, id: i64) -> Option<String> {

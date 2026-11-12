@@ -857,7 +857,7 @@ impl QuillApp {
             for entry in state.entries() {
                 let ping = state.pings.get(&entry.id).copied();
                 let web = (entry.proxy.kind == ProxyKind::Web).then(|| {
-                    quill::proxy_web::WebRowState::for_entry(
+                    quill::proxy_web::WebRowView::for_entry(
                         entry.is_enabled,
                         connected,
                         state.carriers.failed_for(entry.id) || !state.can_enable(entry.proxy.kind),

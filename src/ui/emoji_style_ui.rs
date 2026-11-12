@@ -404,12 +404,12 @@ impl QuillApp {
         };
         let state = &mut self.preferences.emoji_style;
         state.file.forget_refusal();
-        let progress = Arc::new(Progress::default());
+        let (progress, ended) = Progress::start();
         let worker_progress = progress.clone();
         let worker = cx.background_spawn(async move {
-            let result = quill::emoji_sets_style::download::download(&root, id, &worker_progress);
-            worker_progress.finish();
-            result
+            // Dropped with this job, however it ends: the download is over.
+            let _ended = ended;
+            quill::emoji_sets_style::download::download(&root, id, &worker_progress)
         });
         let task = cx.spawn(async move |this, cx| {
             let result = worker.await;

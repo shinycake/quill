@@ -24,7 +24,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with};
 use quill::spell_catalog::{
-    ManagerRow, RowDownload, RowInputs, RowState, Transfer, build_rows, installed_codes,
+    ManagerRow, RowDownloadView, RowInputs, RowView, Transfer, build_rows, installed_codes,
     managed_dir, next_chosen, percent, remove,
 };
 use quill::spell_dict::EngineKind;
@@ -103,12 +103,12 @@ impl QuillApp {
         }
         let managed = &self.spell.dict_manager.installed;
         let download = match &self.spell.dict_manager.download {
-            DictDownload::Idle | DictDownload::Cancelling { .. } => RowDownload::None,
-            DictDownload::Running { download, .. } => RowDownload::Running(Transfer {
+            DictDownload::Idle | DictDownload::Cancelling { .. } => RowDownloadView::None,
+            DictDownload::Running { download, .. } => RowDownloadView::Running(Transfer {
                 code: &download.code,
                 percent: download.percent,
             }),
-            DictDownload::Failed { code, .. } => RowDownload::Failed(code),
+            DictDownload::Failed { code, .. } => RowDownloadView::Failed(code),
         };
         build_rows(
             &RowInputs {
@@ -183,7 +183,7 @@ impl QuillApp {
         else {
             return;
         };
-        let progress = Arc::new(Progress::default());
+        let (progress, ended) = Progress::start();
         let download = ActiveDownload {
             code: code.to_string(),
             progress: progress.clone(),
@@ -194,7 +194,7 @@ impl QuillApp {
         let worker_progress = progress.clone();
         let worker_code = code.clone();
         let worker = cx.background_spawn(async move {
-            run_guarded(&worker_progress, || {
+            run_guarded(ended, || {
                 download_dictionary(&dir, &worker_code, &worker_progress)
             })
         });
@@ -280,15 +280,15 @@ impl QuillApp {
     }
 
     fn dictionary_row(&self, row: &ManagerRow, cx: &mut Context<Self>) -> AnyElement {
-        let on = matches!(row.state, RowState::Enabled | RowState::Downloading { .. });
-        let failed = matches!(row.state, RowState::Failed);
+        let on = matches!(row.state, RowView::Enabled | RowView::Downloading { .. });
+        let failed = matches!(row.state, RowView::Failed);
         let code = row.code.clone();
         let toggle_code = row.code.clone();
         let remove_code = row.code.clone();
-        let removable = row.removable && !matches!(row.state, RowState::Downloading { .. });
+        let removable = row.removable && !matches!(row.state, RowView::Downloading { .. });
         let status_color = if failed {
             cx.theme().danger
-        } else if matches!(row.state, RowState::Enabled) {
+        } else if matches!(row.state, RowView::Enabled) {
             cx.theme().primary
         } else {
             cx.theme().muted_foreground
@@ -437,7 +437,7 @@ mod tests {
         });
         let app = slot.borrow().clone().expect("the app view");
         let mut vcx = VisualTestContext::from_window(handle.into(), cx);
-        let progress = Arc::new(Progress::default());
+        let (progress, _worker) = Progress::start();
         app.update(&mut vcx, |app, cx| {
             app.spell.dict_manager.download = DictDownload::Running {
                 download: ActiveDownload {
