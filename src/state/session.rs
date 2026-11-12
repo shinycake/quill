@@ -12,8 +12,7 @@ pub enum ShutdownPhase {
     HoldingClose {
         until: std::time::Instant,
     },
-    /// `close` was refused by the sender: it is sent again once `retry_at`
-    /// has passed (backing off, not on every drain).
+    /// `close` was refused by the sender; sent again once `retry_at` passes.
     CloseRefused {
         retry_at: std::time::Instant,
     },

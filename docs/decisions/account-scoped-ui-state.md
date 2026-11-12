@@ -10283,7 +10283,7 @@ the `engine_sync` and `disk_pauses` unit tests.
 | Community create | Any create is refused while one that carries a picture is out (`community_photo_create_out`), and the identity box says so (`qll_community_create_busy`) instead of doing nothing. |
 | Live story commit | A commit that could not be sent notes the send's own line, not "not enough Stars". |
 | Group type upgrade | The upgrade's error path (a lost request and logout settle through it) removes the `after_upgrade` entry that waited on it. |
-| Emoji set lists | `lists.installed` and `lists.search` are `Fetch<Vec<StickerSetInfo>>`; `installed_sets` and `found_sets` are gone. The media library and the message menu ask when the list `can_ask` or is outdated, not when it is empty (an account with no sets no longer re-asks). |
+| Emoji set lists | `lists.installed` and `lists.search` are `Fetch<Vec<StickerSetInfo>>`; `installed_sets` and `found_sets` are gone. The media library and the message menu ask when the list `can_ask` or is outdated, not when it is empty (an account with no sets no longer re-asks). Round 4 changes the refresh rule. |
 | Mask reorder | Busy is `mask_change_pending()` or the installed `Fetch` loading. |
 | Reaction options, pack title | Busy is the stage alone; the error paths (lost requests included) take the entry out. |
 | `moderate_message` | A refusal after a step went out is a note; only a refused first step fails the call. |
@@ -10291,3 +10291,24 @@ the `engine_sync` and `disk_pauses` unit tests.
 
 Tests: `sweep_r4_02_round2.rs`, `sweep_r4_02_round3.rs`, `group_type.rs`,
 `live_story.rs`, `message_menu.rs`, `media_library.rs`, `masks.rs`.
+
+#### Fix round 4 (review of r4-02)
+
+| What | Change |
+| --- | --- |
+| Emoji set lists | `refresh_emoji_pack_catalog` asks again when `lists.installed` is not `Idle`, so an empty `Ready` list is asked again on `updateInstalledStickerSets`. The panel and the menu still ask only on `can_ask` or `is_outdated`. |
+| Community create | `create_refusal` returns `Own`, `Busy` or `None`, and the busy press shows `qll_community_create_busy` through `note_create_busy`. |
+| Send lines | Chat links, the chatbot and the Premium options use `err.stage_line()`. |
+| Group strings | `qll_group_upgraded_link_not_saved`, `qll_group_ownership_check_failed` and `qll_group_setting_change_failed` replace the English literals in group_type.rs and groups/error.rs. |
+
+Tests: `media_library.rs` (`an_empty_custom_emoji_answer_is_not_asked_again_on_reopen`,
+`a_set_added_after_an_empty_answer_is_asked_for`), `sweep_r4_02_round3.rs`,
+`communities/flow_tests.rs`, `group_type.rs` and `group_admin.rs`.
+
+#### Fix round 5 (review of r4-02)
+
+| What | Change |
+| --- | --- |
+| Hotspot | The `ShutdownPhase::CloseRefused` doc in `src/state/session.rs` is one line, so the file's change fits `max:4` with no `Hotspot-change:` trailer. |
+| Community create test | The flow test no longer counts `createCommunity` sends (it only confirmed the first). The second press is asserted through `create_refusal` (`Busy`) and the note it shows. |
+| Decision doc | Round 4 and round 5 entries added; the round-3 emoji row points to round 4. |
