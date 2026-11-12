@@ -123,6 +123,7 @@ impl QuillApp {
         };
         if let Some(session) = self.session_mut() {
             session.groups.forget_member_more(shape.chat.0);
+            session.groups.forget_failed_member_lists(shape.chat.0);
         }
         self.inline_members_fetch(shape, MemberListFilter::Recent, cx);
         cx.notify();
