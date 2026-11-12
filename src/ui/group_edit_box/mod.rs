@@ -184,9 +184,9 @@ impl GroupEditBox {
             .info_edit_errors
             .get(&self.chat_id.0)
             .and_then(|errors| {
-                errors
-                    .iter()
-                    .find(|error| error.field != GroupInfoField::Photo && sent.contains(&error.request))
+                errors.iter().find(|error| {
+                    error.field != GroupInfoField::Photo && sent.contains(&error.request)
+                })
             });
         match own {
             Some(error) => EditBoxView::Failed {

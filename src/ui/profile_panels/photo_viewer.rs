@@ -199,7 +199,8 @@ impl QuillApp {
             return;
         }
         self.dialogs.pending_profile_gallery = None;
-        self.viewer.open_viewer(MediaViewer::open_profile(owner, items, 0, gallery.total));
+        self.viewer
+            .open_viewer(MediaViewer::open_profile(owner, items, 0, gallery.total));
         self.viewer_note_activity(cx);
         self.reset_viewer_item_state(cx);
         cx.notify();

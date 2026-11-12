@@ -127,7 +127,11 @@ fn call_ids_and_video_chat_boxes_do_not_carry_over(cx: &mut TestAppContext) {
         app.group_call_screen.window_closed_by_user = Some(1);
         app.group_call_screen.view_of(5).open = crate::ui::group_call_state::CallBox::Settings;
         app.group_call_screen.stream_watch = crate::ui::group_call_state::StreamWatch::Joining(
-            crate::ui::group_call_state::StreamJoining::new(1, crate::ui::group_call_state::JoinSent::Demo, gpui_kit::Task::ready(())),
+            crate::ui::group_call_state::StreamJoining::new(
+                1,
+                crate::ui::group_call_state::JoinSent::Demo,
+                gpui_kit::Task::ready(()),
+            ),
         );
         let composer = cx.new(|cx| gpui_kit::component::input::TextareaState::new(window, cx));
         composer.update(cx, |input, cx| input.set_value("for A's chat", window, cx));

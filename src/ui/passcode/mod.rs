@@ -24,7 +24,9 @@ use quill::passcode::{
 use quill::platform::{MemorySecretStore, SecretStore, os_secret_store};
 use quill::settings::{list_accounts, safe_app_root};
 use stages::LockState;
-pub(crate) use stages::{AutoLock, JobFate, JobKind, PasscodeBox, PasscodeJob, Shake, SystemUnlock};
+pub(crate) use stages::{
+    AutoLock, JobFate, JobKind, PasscodeBox, PasscodeJob, Shake, SystemUnlock,
+};
 use std::cell::Cell;
 use std::path::PathBuf;
 use std::rc::Rc;

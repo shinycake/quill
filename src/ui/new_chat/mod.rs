@@ -323,9 +323,7 @@ impl QuillApp {
         // What the stage waited for is let go once it has left it: the
         // create's request, or the type Saves' entries.
         let release = match left {
-            NewChatStage::Creating { request, .. }
-                if !matches!(&dialog.stage, NewChatStage::Creating { request: now, .. } if *now == request) =>
-            {
+            NewChatStage::Creating { request, .. } if !matches!(&dialog.stage, NewChatStage::Creating { request: now, .. } if *now == request) => {
                 Some(Release::Create(request))
             }
             NewChatStage::Type {

@@ -495,7 +495,11 @@ fn a_join_that_never_lands_stops_waiting(cx: &mut TestAppContext) {
     // The timer runs out with the call still unjoined.
     app.update(&mut call, |app, cx| {
         app.group_call_screen.stream_watch = crate::ui::group_call_state::StreamWatch::Joining(
-            crate::ui::group_call_state::StreamJoining::new(CALL, crate::ui::group_call_state::JoinSent::Demo, Task::ready(())),
+            crate::ui::group_call_state::StreamJoining::new(
+                CALL,
+                crate::ui::group_call_state::JoinSent::Demo,
+                Task::ready(()),
+            ),
         );
         app.stream_join_ended(CALL, cx);
     });
@@ -512,7 +516,11 @@ fn a_join_that_never_lands_stops_waiting(cx: &mut TestAppContext) {
             active.transport.fail("connect failed");
         }
         app.group_call_screen.stream_watch = crate::ui::group_call_state::StreamWatch::Joining(
-            crate::ui::group_call_state::StreamJoining::new(CALL, crate::ui::group_call_state::JoinSent::Demo, Task::ready(())),
+            crate::ui::group_call_state::StreamJoining::new(
+                CALL,
+                crate::ui::group_call_state::JoinSent::Demo,
+                Task::ready(()),
+            ),
         );
         app.sync_group_call_window(cx);
     });
@@ -576,7 +584,11 @@ fn a_new_wish_keeps_the_join_on_its_way(cx: &mut TestAppContext) {
     track_unjoined(&app, &mut main);
     app.update(&mut main, |app, _| {
         app.group_call_screen.stream_watch = crate::ui::group_call_state::StreamWatch::Joining(
-            crate::ui::group_call_state::StreamJoining::new(CALL, crate::ui::group_call_state::JoinSent::Demo, Task::ready(())),
+            crate::ui::group_call_state::StreamJoining::new(
+                CALL,
+                crate::ui::group_call_state::JoinSent::Demo,
+                Task::ready(()),
+            ),
         );
         app.note_stream_join_intent(StreamJoinIntent::Call(999));
     });
@@ -620,7 +632,11 @@ fn a_failed_share_does_not_fail_the_join(cx: &mut TestAppContext) {
         }
         // Join was pressed; TDLib has not answered yet.
         app.group_call_screen.stream_watch = crate::ui::group_call_state::StreamWatch::Joining(
-            crate::ui::group_call_state::StreamJoining::new(CALL, crate::ui::group_call_state::JoinSent::Demo, Task::ready(())),
+            crate::ui::group_call_state::StreamJoining::new(
+                CALL,
+                crate::ui::group_call_state::JoinSent::Demo,
+                Task::ready(()),
+            ),
         );
         app.sync_group_call_window(cx);
     });
@@ -657,7 +673,11 @@ fn an_unrelated_call_error_does_not_end_the_join(cx: &mut TestAppContext) {
         }
         session.calls.group_call_error = Some("something else failed".into());
         app.group_call_screen.stream_watch = crate::ui::group_call_state::StreamWatch::Joining(
-            crate::ui::group_call_state::StreamJoining::new(CALL, crate::ui::group_call_state::JoinSent::Demo, Task::ready(())),
+            crate::ui::group_call_state::StreamJoining::new(
+                CALL,
+                crate::ui::group_call_state::JoinSent::Demo,
+                Task::ready(()),
+            ),
         );
         app.sync_group_call_window(cx);
     });

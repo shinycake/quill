@@ -167,7 +167,7 @@ fn marketplace_comment_purchase_binds_price_recipient_and_correlated_result() {
     // A refusal always says why in the purchase's one note.
     assert_eq!(
         note(&driver).as_deref(),
-        Some(crate::lang::tr(crate::lang::keys::Q_OPS_PURCHASE_REFUSED_REVIEW_THE_QUOTE).as_ref())
+        Some(crate::lang::tr(crate::lang::keys::Q_OPS_PURCHASE_REFUSED_REVIEW_THE_QUOTE))
     );
     assert!(
         driver
@@ -176,7 +176,7 @@ fn marketplace_comment_purchase_binds_price_recipient_and_correlated_result() {
     );
     assert_eq!(
         note(&driver).as_deref(),
-        Some(crate::lang::tr(crate::lang::keys::Q_MARKETPLACE_COMMENT_TOO_LONG).as_ref()),
+        Some(crate::lang::tr(crate::lang::keys::Q_MARKETPLACE_COMMENT_TOO_LONG)),
         "the comment's own reason, not a generic one"
     );
     let buy = driver

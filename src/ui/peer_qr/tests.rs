@@ -820,5 +820,8 @@ fn a_resize_replaces_the_gift_tiles(cx: &mut TestAppContext) {
         .iter()
         .map(|image| image.id.0)
         .collect();
-    assert!(old.is_some_and(|id| swept.contains(&id)), "retired: {swept:?}");
+    assert!(
+        old.is_some_and(|id| swept.contains(&id)),
+        "retired: {swept:?}"
+    );
 }

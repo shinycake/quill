@@ -131,8 +131,12 @@ pub(crate) enum CardPhase {
     /// Editing the fields. `notice` is the provider's last refusal ("Your
     /// card was declined."), shown until Done is pressed again or it is
     /// dismissed. Error ids only, never card data.
-    Editing { notice: Option<SharedString> },
-    Tokenizing { _task: Task<()> },
+    Editing {
+        notice: Option<SharedString>,
+    },
+    Tokenizing {
+        _task: Task<()>,
+    },
 }
 
 pub(crate) struct CardForm {

@@ -56,7 +56,11 @@ fn a_wait_keeps_its_account_through_a_switch(cx: &mut TestAppContext) {
     let other = AccountKey::new("account-2").expect("a key");
     app.read_with(&vcx, |app, _| {
         let on_screen = app.notification_account(None);
-        assert_eq!(app.account_arg(&on_screen), None, "on screen: the app's own");
+        assert_eq!(
+            app.account_arg(&on_screen),
+            None,
+            "on screen: the app's own"
+        );
         assert_eq!(
             app.account_arg(&other),
             Some(other.clone()),

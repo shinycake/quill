@@ -1477,7 +1477,10 @@ fn a_recording_steps_on_its_own_timer_while_no_window_draws(cx: &mut TestAppCont
         .advance_clock(std::time::Duration::from_millis(350));
     cx.run_until_parked();
     let later = h.app.update(cx, |app, _| app.recording.tick_due());
-    assert!(later > first, "the step re-armed itself: {first:?} {later:?}");
+    assert!(
+        later > first,
+        "the step re-armed itself: {first:?} {later:?}"
+    );
     // Cancelling the recording drops its step with it.
     h.app.update(cx, |app, cx| app.cancel_recording(cx));
     cx.executor()

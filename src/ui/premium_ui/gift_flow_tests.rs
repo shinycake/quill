@@ -114,7 +114,9 @@ fn a_fresh_box_hides_the_purchase_of_an_earlier_one(cx: &mut TestAppContext) {
             }
             app.open_marketplace_for(Some(ChatId(501)), window, cx);
             let draft = app.payments.marketplace.draft().cloned();
-            let gift = app.session().and_then(|s| s.payments.marketplace_gift.clone());
+            let gift = app
+                .session()
+                .and_then(|s| s.payments.marketplace_gift.clone());
             assert!(gift.is_some(), "the session's copy is not reset by the box");
             assert!(draft.is_some_and(|d| gift.is_some_and(|g| !d.shows(&g))));
         })
