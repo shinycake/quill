@@ -235,13 +235,29 @@ pub enum Mode {
     Topic,
 }
 
+/// The chat or topic a pull leads to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Next {
+    Chat(crate::ids::ChatId),
+    Topic(i32),
+}
+
+/// What a pull found when it started: where it leads, and `via` (the UI's
+/// own handle for the gesture that found it: its window, where the release
+/// opens it).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Found<W> {
+    pub next: Next,
+    pub via: W,
+}
+
 /// What the UI must do after feeding the machine.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Step {
     /// The wheel event was taken by the edge: the list must not scroll.
     pub consumed: bool,
     /// A pull began: find the next channel or topic (and preload it), then
-    /// call [`PullMachine::set_has_next`].
+    /// call [`PullMachine::set_found`].
     pub started: bool,
     /// The pull just became ready (`base::Platform::Haptic`).
     pub haptic: bool,
@@ -303,16 +319,27 @@ impl Default for Reach {
 }
 
 /// The pull in progress (`PullToNextChannel`'s `_pull`, `_reached`, ...).
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
-struct Pull {
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Pull<W> {
     /// How far the edge is stretched.
     amount: f32,
     reach: Reach,
-    /// The UI found a next channel or topic.
-    has_next: bool,
+    /// The next channel or topic the UI found, if any. It lives with the
+    /// pull, so every way the pull ends takes it along.
+    found: Option<Found<W>>,
 }
 
-impl Pull {
+impl<W> Default for Pull<W> {
+    fn default() -> Self {
+        Self {
+            amount: 0.,
+            reach: Reach::default(),
+            found: None,
+        }
+    }
+}
+
+impl<W> Pull<W> {
     fn reached(&self) -> bool {
         matches!(self.reach, Reach::Ready { .. })
     }
@@ -327,21 +354,24 @@ impl Pull {
 
 /// Where the controller is. The pull's data lives in the stages that have
 /// a pull.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
-enum Stage {
+#[derive(Debug, Clone, Default, PartialEq)]
+enum Stage<W> {
     /// No pull: the edge may stretch, nothing is shown.
     #[default]
     Idle,
-    Pulling(Pull),
+    Pulling(Pull<W>),
     /// The finger let go and the release was decided (`_committed`): the
     /// edge springs back; the decision is not taken twice.
-    Released(Pull),
+    Released(Pull<W>),
     /// The release opens the next chat: the indicator holds at its full
     /// height until the chat changes, or `until` (ms) passes, so a jump
-    /// that never lands cannot hold it for good.
+    /// that never lands cannot hold it for good. `job` is the jump itself,
+    /// owned here: leaving the stage (the chat changed, the hold ran out,
+    /// a restart) stops it.
     Jumping {
-        pull: Pull,
+        pull: Pull<W>,
         until: u64,
+        job: crate::task_hold::TaskHold,
     },
 }
 
@@ -382,14 +412,14 @@ enum Edge {
 /// The edge and the controller (`ElasticScroll` bottom edge +
 /// `PullToNextChannel`).
 #[derive(Debug, Clone)]
-pub struct PullMachine {
+pub struct PullMachine<W = ()> {
     // ElasticScroll's bottom edge.
     edge: Edge,
     last_event: u64,
     accumulated: f32,
     overscroll: f32,
     // PullToNextChannel.
-    stage: Stage,
+    stage: Stage<W>,
     effective: f32,
     expand: Expand,
     // Indicator: shown while `effective > 0`; ready while `release` heads
@@ -402,7 +432,7 @@ pub struct PullMachine {
     hint_release: Tween,
 }
 
-impl Default for PullMachine {
+impl<W> Default for PullMachine<W> {
     fn default() -> Self {
         Self {
             edge: Edge::Rest,
@@ -420,7 +450,7 @@ impl Default for PullMachine {
     }
 }
 
-impl PullMachine {
+impl<W: Copy> PullMachine<W> {
     pub fn new() -> Self {
         Self::default()
     }
@@ -451,14 +481,14 @@ impl PullMachine {
     }
 
     /// The pull of a stage that has one; nothing (all zero) when idle.
-    fn pull(&self) -> Pull {
-        match self.stage {
+    fn pull(&self) -> Pull<W> {
+        match &self.stage {
             Stage::Idle => Pull::default(),
-            Stage::Pulling(pull) | Stage::Released(pull) | Stage::Jumping { pull, .. } => pull,
+            Stage::Pulling(pull) | Stage::Released(pull) | Stage::Jumping { pull, .. } => *pull,
         }
     }
 
-    fn pull_mut(&mut self) -> Option<&mut Pull> {
+    fn pull_mut(&mut self) -> Option<&mut Pull<W>> {
         match &mut self.stage {
             Stage::Idle => None,
             Stage::Pulling(pull) | Stage::Released(pull) | Stage::Jumping { pull, .. } => {
@@ -484,7 +514,7 @@ impl PullMachine {
     /// inset (`setContentBottomInset`), which together are the indicator's
     /// height while it shows.
     pub fn content_shift(&self) -> f32 {
-        if self.stage != Stage::Idle {
+        if !matches!(self.stage, Stage::Idle) {
             self.effective
         } else {
             self.overscroll
@@ -594,14 +624,14 @@ impl PullMachine {
             if !tween.animating(now) {
                 self.expand = Expand::Settled(tween.to);
             }
-            if self.stage != Stage::Idle {
+            if !matches!(self.stage, Stage::Idle) {
                 self.push_indicator(now);
             }
             step.redraw = true;
         }
         // A jump that never landed lets go of the indicator.
-        if let Stage::Jumping { until, .. } = self.stage
-            && now >= until
+        if let Stage::Jumping { until, .. } = &self.stage
+            && now >= *until
         {
             self.reset(true, now);
             step.redraw = true;
@@ -621,27 +651,40 @@ impl PullMachine {
             || self.hint_release.animating(now)
     }
 
-    /// The UI found (or did not find) a next channel or topic.
-    pub fn set_has_next(&mut self, has_next: bool, now: u64) {
+    /// The UI found (or did not find) a next channel or topic. Without a
+    /// pull there is nothing to attach it to.
+    pub fn set_found(&mut self, found: Option<Found<W>>, now: u64) {
         if let Some(pull) = self.pull_mut() {
-            pull.has_next = has_next;
+            pull.found = found;
         }
         if self.pulling() {
             self.push_indicator(now);
         }
     }
 
-    pub fn has_next(&self) -> bool {
-        self.pull().has_next
+    /// Where the pull leads, in any stage that has a pull.
+    pub fn found(&self) -> Option<Found<W>> {
+        self.pull().found
     }
 
-    /// The release opens the next chat: the indicator holds at its full
-    /// height until the chat changes (`_jumping`), or [`JUMP_HOLD_MS`]
-    /// pass.
-    pub fn begin_jump(&mut self, now: u64) {
+    /// Where the pull leads and the gesture's handle, while the finger
+    /// pulls or has just let go (the release opens it from there).
+    pub fn found_for_release(&self) -> Option<Found<W>> {
+        match &self.stage {
+            Stage::Pulling(pull) | Stage::Released(pull) => pull.found,
+            Stage::Idle | Stage::Jumping { .. } => None,
+        }
+    }
+
+    /// The release opens the next chat, with `job` running the jump: the
+    /// indicator holds at its full height until the chat changes
+    /// (`_jumping`), or [`JUMP_HOLD_MS`] pass. The job goes when the stage
+    /// does.
+    pub fn begin_jump(&mut self, now: u64, job: crate::task_hold::TaskHold) {
         self.stage = Stage::Jumping {
             pull: self.pull(),
             until: now.saturating_add(JUMP_HOLD_MS),
+            job,
         };
     }
 
@@ -653,10 +696,10 @@ impl PullMachine {
         };
         let movement = self.movement();
         let amount = self.overscroll.max(0.);
-        let (mut pull, released) = match self.stage {
+        let (mut pull, released) = match &self.stage {
             Stage::Jumping { .. } => return step,
-            Stage::Pulling(pull) => (pull, false),
-            Stage::Released(pull) => (pull, true),
+            Stage::Pulling(pull) => (*pull, false),
+            Stage::Released(pull) => (*pull, true),
             Stage::Idle => {
                 if movement != Movement::Progress || amount <= 0. || !active {
                     return step;
@@ -803,7 +846,7 @@ impl PullMachine {
         }
         // HintOverlay::setData.
         let visible = self.edge == Edge::Held && pull.amount > 0.;
-        self.toggle_hint(visible && pull.has_next, now);
+        self.toggle_hint(visible && pull.found.is_some(), now);
         if self.hint_ready() != ready {
             let from = self.hint_release.value(now);
             self.hint_release = Tween::start(

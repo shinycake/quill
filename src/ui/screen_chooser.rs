@@ -266,27 +266,22 @@ impl QuillApp {
             }
             Chooser::Listing { .. } | Chooser::Closed | Chooser::PrivacyBox(_) => {}
         }
-        self.screen_share.generation = self.screen_share.generation.wrapping_add(1);
-        let generation = self.screen_share.generation;
-        self.screen_share.chooser = Chooser::Listing {
-            target,
-            epoch: self.screen_epoch(),
-            generation,
-        };
-        self.spawn_screen(cx, async move |this, cx| {
+        // The stage owns the listing: replacing or closing it drops the task.
+        let list = self.spawn_screen(cx, async move |this, cx| {
             let listing = backend.clone();
             let sources = cx
                 .background_executor()
                 .spawn(async move { listing.sources() })
                 .await;
-            let opened = this.update(cx, |app, cx| {
-                app.screen_chooser_listed(generation, sources, cx)
+            let _ = this.update(cx, |app, cx| {
+                app.screen_chooser_listed(sources, backend, cx)
             });
-            if opened.unwrap_or(false) {
-                load_thumbnails(this, backend, generation, cx).await;
-            }
-        })
-        .detach();
+        });
+        self.screen_share.chooser = Chooser::Listing {
+            target,
+            epoch,
+            _list: list,
+        };
         true
     }
 
@@ -303,23 +298,15 @@ impl QuillApp {
     /// the chooser), otherwise the window opens.
     fn screen_chooser_listed(
         &mut self,
-        generation: u64,
         sources: Result<Vec<ScreenSource>, quill::calls::capture::CaptureError>,
+        backend: Arc<dyn ScreenBackend>,
         cx: &mut Context<Self>,
     ) -> bool {
         // Only the listing in flight is answered; a chooser closed or
-        // replaced meanwhile drops the answer.
-        let Chooser::Listing {
-            target,
-            generation: listing,
-            ..
-        } = self.screen_share.chooser
-        else {
+        // replaced meanwhile dropped the task that would answer.
+        let Chooser::Listing { target, .. } = self.screen_share.chooser else {
             return false;
         };
-        if listing != generation {
-            return false;
-        }
         let sources = match sources {
             Ok(sources) => sources,
             Err(err) => {
@@ -338,9 +325,12 @@ impl QuillApp {
         let selected = initial_selection(&sources, active.as_ref());
         let with_audio = active.is_some() && self.active_screen_audio();
         let labels = source_labels(&sources);
+        let thumbnails = self.spawn_screen(cx, async move |this, cx| {
+            load_thumbnails(this, backend, cx).await;
+        });
         let sheet = OpenChooser {
             target,
-            generation,
+            _thumbnails: thumbnails,
             selected,
             with_audio,
             sources: sources
@@ -365,7 +355,6 @@ impl QuillApp {
         if !matches!(share.chooser, Chooser::PrivacyBox(_)) {
             share.chooser = Chooser::Closed;
         }
-        share.generation = share.generation.wrapping_add(1);
         cx.notify();
     }
 
@@ -874,14 +863,12 @@ fn source_view(
 async fn load_thumbnails(
     this: super::chat_window::ScopedApp,
     backend: Arc<dyn ScreenBackend>,
-    generation: u64,
     cx: &mut AsyncApp,
 ) {
     let Ok(sources) = this.update(cx, |app, _| {
         app.screen_share
             .chooser
             .open()
-            .filter(|open| open.generation == generation)
             .map(|open| {
                 open.sources
                     .iter()
@@ -904,12 +891,7 @@ async fn load_thumbnails(
             })
             .await;
         let current = this.update(cx, |app, cx| {
-            let Some(open) = app
-                .screen_share
-                .chooser
-                .open_mut()
-                .filter(|open| open.generation == generation)
-            else {
+            let Some(open) = app.screen_share.chooser.open_mut() else {
                 return false;
             };
             if let Some(entry) = open

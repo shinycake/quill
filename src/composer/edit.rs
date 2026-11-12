@@ -154,14 +154,25 @@ impl EditMediaReplacement {
 
 /// Where the photo editor's Done for this message edit stands. The render
 /// that lands is applied only while the edit still waits for its number; a
-/// cancelled edit takes the stage with it.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// cancelled edit takes the stage, and with it the render, away.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum EditRender {
     #[default]
     Idle,
-    /// The render numbered so goes off the UI thread; a later Done replaces
-    /// the number, so only the latest render lands.
-    Rendering(u64),
+    /// The render numbered so goes off the UI thread, its work owned by
+    /// `hold`; a later Done replaces the stage, which cancels the older
+    /// render, so only the latest one lands.
+    Rendering {
+        number: u64,
+        hold: crate::task_hold::TaskHold,
+    },
+}
+
+impl EditRender {
+    /// The render `number` is the one this edit waits for.
+    pub fn waits_for(&self, number: u64) -> bool {
+        matches!(self, Self::Rendering { number: waiting, .. } if *waiting == number)
+    }
 }
 
 /// B5: per-message media-edit state.

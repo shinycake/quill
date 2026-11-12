@@ -245,8 +245,10 @@ fn opening_the_box_clears_the_last_refusal_and_retries_a_failed_load(cx: &mut Te
     });
 }
 
+/// The poll belongs to the stage that waits: leaving the stage, or closing
+/// the box, ends it.
 #[gpui_kit::test]
-fn one_poll_runs_at_a_time_and_closing_the_box_ends_it(cx: &mut TestAppContext) {
+fn the_poll_lives_in_its_stage_and_leaving_the_stage_ends_it(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     seed(&app, vcx);
@@ -259,30 +261,30 @@ fn one_poll_runs_at_a_time_and_closing_the_box_ends_it(cx: &mut TestAppContext) 
             id: Some(1),
         },
     );
-    let watch = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+    let start = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
         vcx.update(|window, cx| {
             app.update(cx, |app, cx| {
-                app.quick_replies_watch(window, cx);
-                app.dialogs
-                    .quick_replies_dialog
-                    .as_ref()
-                    .unwrap()
-                    .watch
-                    .clone()
-                    .unwrap()
+                let poll = app.quick_replies_poll(window, cx);
+                let weak = poll.weak();
+                if let Some(dialog) = app.dialogs.quick_replies_dialog.as_mut() {
+                    dialog.pane.stage = super::PaneStage::Accepted { _poll: poll };
+                }
+                weak
             })
         })
     };
-    let first = watch(&app, vcx);
-    let second = watch(&app, vcx);
-    assert!(
-        std::rc::Rc::ptr_eq(&first, &second),
-        "a second submit stacks no loop"
-    );
-    let poll = std::rc::Rc::downgrade(&first);
-    drop((first, second));
+    let replaced = start(&app, vcx);
+    assert!(replaced.upgrade().is_some(), "the waiting stage holds it");
+    app.update(vcx, |app, _| {
+        if let Some(dialog) = app.dialogs.quick_replies_dialog.as_mut() {
+            dialog.pane.stage = super::PaneStage::default();
+        }
+    });
+    assert!(replaced.upgrade().is_none(), "leaving the stage ends it");
+    let closed = start(&app, vcx);
+    assert!(closed.upgrade().is_some());
     app.update(vcx, |app, cx| app.close_quick_replies(cx));
-    assert!(poll.upgrade().is_none(), "the poll goes with its box");
+    assert!(closed.upgrade().is_none(), "the poll goes with its box");
 }
 
 /// Open a private chat with a person and type `/` in the composer.
@@ -374,13 +376,68 @@ fn a_new_shortcut_nobody_reported_does_not_keep_the_poll_running(cx: &mut TestAp
     assert!(done, "nothing was accepted, so there is no id to wait for");
     let waiting = vcx.update(|window, cx| {
         app.update(cx, |app, cx| {
+            let poll = app.quick_replies_poll(window, cx);
             if let Some(dialog) = app.dialogs.quick_replies_dialog.as_mut() {
-                dialog.pane.stage = super::PaneStage::Accepted;
+                dialog.pane.stage = super::PaneStage::Accepted { _poll: poll };
             }
             app.quick_replies_pump(window, cx)
         })
     });
     assert!(!waiting, "an accepted text waits for its shortcut's id");
+}
+
+/// Sweep r3-11, 20-008: the waiting poll rests on the signal poked after the
+/// poll pass applied the updates. The receive thread's earlier poke finds
+/// nothing yet and must not spend the rest.
+#[gpui_kit::test]
+fn the_poll_reads_the_answer_after_the_pass_applied_it(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    seed(&app, vcx);
+    open(&app, vcx);
+    go(
+        &app,
+        vcx,
+        View::Shortcut {
+            name: "brand-new".into(),
+            id: None,
+        },
+    );
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            let poll = app.quick_replies_poll(window, cx);
+            if let Some(dialog) = app.dialogs.quick_replies_dialog.as_mut() {
+                dialog.pane.stage = super::PaneStage::Accepted { _poll: poll };
+            }
+        })
+    });
+    vcx.run_until_parked();
+    let waiting = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| {
+            app.dialogs
+                .quick_replies_dialog
+                .as_ref()
+                .is_some_and(|d| matches!(d.pane.stage, super::PaneStage::Accepted { .. }))
+        })
+    };
+    // The receive thread pokes first; the pass has not applied anything.
+    quill::wake::UPDATES.poke();
+    vcx.run_until_parked();
+    app.update(vcx, |app, _| {
+        let session = app.demo_session.as_mut().expect("demo session");
+        session.apply_quick_replies(QuickRepliesUpdate::Shortcut(QuickReplyShortcut {
+            id: 9,
+            name: "brand-new".into(),
+            message_count: 0,
+        }));
+    });
+    // Applied, then the pass pokes: the poll reads the shortcut's id.
+    quill::wake::APPLIED.poke();
+    vcx.run_until_parked();
+    assert!(
+        !waiting(&app, vcx),
+        "the wake after the apply ends the wait; no 2 s rest"
+    );
 }
 
 #[gpui_kit::test]

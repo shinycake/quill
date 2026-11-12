@@ -537,6 +537,10 @@ impl QuillApp {
         if logged_out {
             self.restart_live_connection(cx);
         }
+        // Everything drained is applied: whoever reads the applied state
+        // (the quick replies box) wakes now, not on the receive thread's
+        // earlier poke.
+        quill::wake::APPLIED.poke();
         budget_hit
     }
 

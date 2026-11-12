@@ -12,7 +12,7 @@
 use crate::state::fetch::Fetch;
 use crate::telegram::envelope::{MessageSender, StickerContent, parse_sticker_value};
 pub use feature::{BusinessFeature, PremiumFeature};
-pub use lists::{ReceivedGifts, StarsHistory, StarsView};
+pub use lists::{PacksView, ReceivedGifts, StarsHistory, StarsView};
 use serde_json::Value;
 
 fn int(value: Option<&Value>) -> i64 {

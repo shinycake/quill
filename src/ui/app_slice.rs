@@ -412,8 +412,13 @@ impl QuillApp {
     /// Redraw only the conversation (state that nothing else shows
     /// changed); the whole app before the slices exist.
     pub(super) fn notify_conversation(&self, cx: &mut Context<Self>) {
+        self.redraw_view(self.conversation_view_id(), cx);
+    }
+
+    /// The view that draws the conversation; `None` before the slices exist.
+    pub(super) fn conversation_view_id(&self) -> Option<EntityId> {
         let slice = self.slices.window.conversation.as_ref();
-        self.redraw_view(slice.map(|parts| parts.slice.entity_id()), cx);
+        slice.map(|parts| parts.slice.entity_id())
     }
 
     /// Redraw only the composer (state that only it shows changed, such

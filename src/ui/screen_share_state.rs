@@ -36,9 +36,10 @@ pub(crate) struct ChooserTarget {
 /// shows in is the stage ([`Chooser::Opening`], [`Chooser::Open`]).
 pub(crate) struct OpenChooser {
     pub(super) target: ChooserTarget,
-    /// Tells a thumbnail that arrives later whether this chooser is still
-    /// the one it was loaded for.
-    pub(super) generation: u64,
+    /// Captures the thumbnails one by one. The chooser owns the task, so a
+    /// chooser that closed or was replaced stops it and no picture lands in
+    /// a later one.
+    pub(super) _thumbnails: Task<()>,
     pub(super) sources: Vec<ChooserSource>,
     pub(super) selected: Option<SourceId>,
     /// The chooser's "Share System Audio" box (Windows only).
@@ -51,13 +52,15 @@ pub(crate) struct OpenChooser {
 pub(crate) enum Chooser {
     #[default]
     Closed,
-    /// The sources are being listed. Tagged with the screen it started on:
-    /// the listing's continuation is dropped when the screen changes, so a
-    /// listing from an earlier screen is no listing now.
+    /// The sources are being listed by `_list`, which the stage owns: a
+    /// closed or replaced chooser drops it, so only the live listing's
+    /// answer arrives. Tagged with the screen it started on: the task is
+    /// dropped when the screen changes, so a listing from an earlier screen
+    /// is no listing now.
     Listing {
         target: ChooserTarget,
         epoch: super::on_screen::ScreenEpoch,
-        generation: u64,
+        _list: Task<()>,
     },
     /// The sources are in and the chooser's window is being made (tdesktop
     /// opens it as a window of its own). The task opens it and moves the
@@ -173,9 +176,6 @@ pub(crate) struct DemoShare {
 #[derive(Default)]
 pub(crate) struct ScreenShareUi {
     pub(super) chooser: Chooser,
-    /// The next listing's number: a listing or thumbnail of an earlier
-    /// number is dropped.
-    pub(super) generation: u64,
     /// A backend used instead of the OS one (demos, tests).
     pub(super) backend: Option<Arc<dyn ScreenBackend>>,
     /// The demo's running share (live calls ask the driver).

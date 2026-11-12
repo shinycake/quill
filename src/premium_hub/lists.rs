@@ -11,16 +11,31 @@ use super::{ReceivedGift, StarTx, TxFilter};
 use crate::state::fetch::ListOp;
 use crate::telegram::envelope::MessageSender;
 
+/// "Buy more Stars" in the Stars box: folded, or expanded to the pack list.
+/// It lives inside the open stages of [`StarsView`], so closing the box
+/// folds it again without a second reset.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PacksView {
+    #[default]
+    Folded,
+    Expanded,
+}
+
 /// What the Stars box shows: closed, the list, or one transaction's details.
-/// The selection exists only while the box is open, so closing takes it
-/// along.
+/// The selection and the packs section exist only while the box is open, so
+/// closing takes them along.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum StarsView {
     #[default]
     Closed,
-    List,
-    /// The details box of the transaction with this id.
-    Detail(String),
+    List {
+        packs: PacksView,
+    },
+    /// The details box of the transaction with this id, over the list.
+    Detail {
+        id: String,
+        packs: PacksView,
+    },
 }
 
 /// The Stars history of one filter. A filter change replaces it whole
@@ -46,11 +61,13 @@ impl StarsHistory {
 
     pub fn open(&mut self) {
         if self.view == StarsView::Closed {
-            self.view = StarsView::List;
+            self.view = StarsView::List {
+                packs: PacksView::Folded,
+            };
         }
     }
 
-    /// Close the box; a transaction's details go with it.
+    /// Close the box; a transaction's details and the packs go with it.
     pub fn close(&mut self) {
         self.view = StarsView::Closed;
     }
@@ -58,29 +75,66 @@ impl StarsHistory {
     /// The transaction whose details are showing.
     pub fn selected(&self) -> Option<&str> {
         match &self.view {
-            StarsView::Detail(id) => Some(id),
-            StarsView::Closed | StarsView::List => None,
+            StarsView::Detail { id, .. } => Some(id),
+            StarsView::Closed | StarsView::List { .. } => None,
         }
     }
 
     /// Show (`Some`) or hide (`None`) a transaction's details. Nothing to
     /// show while the box is closed.
     pub fn select(&mut self, id: Option<String>) {
-        if self.view == StarsView::Closed {
+        let Some(packs) = self.packs() else {
             return;
-        }
+        };
         self.view = match id {
-            Some(id) => StarsView::Detail(id),
-            None => StarsView::List,
+            Some(id) => StarsView::Detail { id, packs },
+            None => StarsView::List { packs },
         };
     }
 
+    /// The packs section of the open box.
+    fn packs(&self) -> Option<PacksView> {
+        match &self.view {
+            StarsView::Closed => None,
+            StarsView::List { packs } | StarsView::Detail { packs, .. } => Some(*packs),
+        }
+    }
+
+    /// "Buy more Stars" shows its packs.
+    pub fn packs_expanded(&self) -> bool {
+        self.packs() == Some(PacksView::Expanded)
+    }
+
+    /// Fold or expand the packs; returns whether they show now. Nothing to
+    /// do while the box is closed.
+    pub fn toggle_packs(&mut self) -> bool {
+        let expand = !self.packs_expanded();
+        self.set_packs(if expand {
+            PacksView::Expanded
+        } else {
+            PacksView::Folded
+        });
+        self.packs_expanded()
+    }
+
+    /// Expand the packs of the open box (a reaction that needs more Stars).
+    pub fn expand_packs(&mut self) {
+        self.set_packs(PacksView::Expanded);
+    }
+
+    fn set_packs(&mut self, to: PacksView) {
+        match &mut self.view {
+            StarsView::Closed => {}
+            StarsView::List { packs } | StarsView::Detail { packs, .. } => *packs = to,
+        }
+    }
+
     /// Another tab: the history starts over, still open if it was, with no
-    /// transaction selected.
+    /// transaction selected and the packs as they were.
     pub fn switch_filter(&mut self, filter: TxFilter) {
-        let view = match self.view {
-            StarsView::Closed => StarsView::Closed,
-            StarsView::List | StarsView::Detail(_) => StarsView::List,
+        let view = match self.packs() {
+            None => StarsView::Closed,
+            Some(packs) => StarsView::List { packs },
         };
         *self = Self {
             view,

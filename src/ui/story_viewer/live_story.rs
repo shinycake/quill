@@ -380,12 +380,12 @@ impl QuillApp {
         )));
         self.open_stars(cx);
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.payments.star_packs.open = true;
+            live.driver.session.payments.hub.stars.expand_packs();
             let _ = live.driver.maybe_fetch_star_packs();
         } else if let Some(session) = self.demo_session.as_mut() {
             // box-host: open_stars above named the window
             session.payments.hub.stars.open();
-            session.payments.star_packs.open = true;
+            session.payments.hub.stars.expand_packs();
         }
         cx.notify();
         true

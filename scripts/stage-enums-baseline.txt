@@ -43,6 +43,7 @@ bare:Leg::Pending 1
 bare:LinkHandlerState::Checking 1
 bare:LinkStatus::Pending 1
 bare:ListStatus::Loading 1
+bare:LookStage::Rendering 1
 bare:Lookup::Pending 1
 bare:Lookup::Waiting 1
 bare:MediaFile::Downloading 1
@@ -110,7 +111,6 @@ optional:SetStage::Resolving 1
 optional:SupergroupMembersFetch::Loading 1
 optional:TrendingSets::Loading 1
 rawid:BotUsernameCheck::Checking 1
-rawid:Chooser::Listing 1
 rawid:EditorStage::Encoding 1
 rawid:EditorStage::Reading 1
 rawid:LimitNotice::Box 1

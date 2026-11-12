@@ -10,6 +10,8 @@ use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::composer::EditRender;
 use quill::lang::{keys, tr};
+use quill::scratch::TempFile;
+use quill::task_hold::TaskHold;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -54,21 +56,22 @@ impl QuillApp {
                     return;
                 }
                 let number = NEXT_RENDER.fetch_add(1, Ordering::Relaxed);
-                if let Some(edit) = self.chat_ui.pending_edit_mut() {
-                    edit.media_edit.render = EditRender::Rendering(number);
-                }
                 let job = editor.into_render_job();
                 let render = cx.background_spawn(async move {
-                    super::edit_media_tools::write_edited_png(&job.render())
+                    super::edit_media_tools::write_edited_png(&job.render()).map(TempFile::new)
                 });
-                self.spawn_scoped(cx, async move |app, cx| {
-                    let saved = render.await;
+                // The stage owns the task: a newer Done, a cancelled edit or
+                // a screen change drops it, which cancels the render, and a
+                // file it already wrote goes with the dropped result.
+                let task = self.spawn_scoped(cx, async move |app, cx| {
+                    let saved = render.await.map(TempFile::claim);
                     let kept = saved.clone();
                     let landed = app.update(cx, |this, cx| {
                         if this.edited_message() == Some(edit_of)
-                            && this.chat_ui.pending_edit().is_some_and(|edit| {
-                                edit.media_edit.render == EditRender::Rendering(number)
-                            })
+                            && this
+                                .chat_ui
+                                .pending_edit()
+                                .is_some_and(|edit| edit.media_edit.render.waits_for(number))
                         {
                             if let Some(edit) = this.chat_ui.pending_edit_mut() {
                                 edit.media_edit.render = EditRender::Idle;
@@ -83,8 +86,13 @@ impl QuillApp {
                     {
                         let _ = std::fs::remove_file(kept);
                     }
-                })
-                .detach();
+                });
+                if let Some(edit) = self.chat_ui.pending_edit_mut() {
+                    edit.media_edit.render = EditRender::Rendering {
+                        number,
+                        hold: TaskHold::new(task),
+                    };
+                }
             }
             EditorPurpose::Set { set_id, kind, edit } => {
                 // The turn, the canvas render and the fit run off the UI
@@ -106,19 +114,13 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let render = NEXT_RENDER.fetch_add(1, Ordering::Relaxed);
-        let marked = self.composer_sends.update_item(&item, |attachment| {
-            attachment.extras.begin_render(render);
-        });
-        if marked.is_none() {
-            return;
-        }
         let job = editor.into_render_job();
-        let task =
-            cx.background_spawn(
-                async move { super::edit_media_tools::write_edited_png(&job.render()) },
-            );
-        self.spawn_scoped_in(window, cx, async move |app, cx| {
-            let saved = task.await;
+        let task = cx.background_spawn(async move {
+            super::edit_media_tools::write_edited_png(&job.render()).map(TempFile::new)
+        });
+        let item_slot = item.clone();
+        let landing = self.spawn_scoped_in(window, cx, async move |app, cx| {
+            let saved = task.await.map(TempFile::claim);
             let kept = saved.clone();
             let landed = app.update_in(cx, |this, window, cx| {
                 let landed = this.land_attachment_edit(&item.slot, render, saved, cx);
@@ -169,8 +171,16 @@ impl QuillApp {
             {
                 let _ = std::fs::remove_file(kept);
             }
-        })
-        .detach();
+        });
+        // The item owns the render: a newer Done, the card going or the tray
+        // going drops the task, which cancels the render.
+        // A card already gone takes nothing: the task is dropped here, before
+        // it ever ran.
+        let _ = self.composer_sends.update_item(&item_slot, |attachment| {
+            attachment
+                .extras
+                .begin_render(render, TaskHold::new(landing));
+        });
     }
 
     /// A held Send can go only from its own chat: when that chat is no
