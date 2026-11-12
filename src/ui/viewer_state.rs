@@ -62,8 +62,6 @@ pub(crate) struct ViewerUi {
     pub(super) hdr: super::hdr_image::HdrViewer,
     /// The header's album Pin or Unpin, kept while the history is unchanged.
     pub(super) album_pin: quill::album_pin::AlbumPins,
-    /// Counts viewer opens; keys the 200 ms fade-in so each open animates.
-    pub(super) open_gen: u64,
     /// A media-timestamp link opened this message's video; the viewer
     /// starts it at the given second once the clip is ready.
     /// Keyed by chat and message: a bare id matched a later clip of
@@ -127,7 +125,6 @@ impl ViewerUi {
             reorient,
             hdr,
             album_pin: _,
-            open_gen: _,
             pending_seek: _,
             last_activity: _,
             visibility: _,
@@ -163,7 +160,6 @@ impl ViewerUi {
             reorient,
             hdr,
             album_pin: _,
-            open_gen: _,
             pending_seek,
             last_activity: _,
             visibility: _,
@@ -207,7 +203,6 @@ impl ViewerUi {
             video_layer: None,
             reorient: Default::default(),
             hdr: Default::default(),
-            open_gen: 0,
             pending_seek: None,
             last_activity: std::time::Instant::now(),
             visibility: Default::default(),

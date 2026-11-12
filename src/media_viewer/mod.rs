@@ -274,6 +274,27 @@ impl Origin {
     }
 }
 
+/// Which open of the viewer this is. Every `MediaViewer::open*` mints a
+/// new one, so a caller never has to remember to count; a closed viewer
+/// keeps the last one, so a wait that stamped it can tell that a viewer
+/// was opened and closed since. Fresh ones are never 0 (a viewer never
+/// opened).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ViewerOpen(u64);
+
+impl ViewerOpen {
+    fn mint() -> Self {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static MINTED: AtomicU64 = AtomicU64::new(0);
+        Self(MINTED.fetch_add(1, Ordering::Relaxed).saturating_add(1))
+    }
+
+    /// The id as a number (to key an animation).
+    pub fn get(self) -> u64 {
+        self.0
+    }
+}
+
 /// Viewer state: the open chat's media list plus the current position.
 /// Closed while it has no origin ([`Origin::Closed`]).
 #[derive(Debug, Clone, Default)]
@@ -286,6 +307,8 @@ pub struct MediaViewer {
     arrived_from: Option<usize>,
     /// Steps taken since opening, to key the strip's slide.
     steps: u64,
+    /// The open this is, or the last one when closed.
+    opened: ViewerOpen,
 }
 
 impl MediaViewer {
@@ -305,12 +328,23 @@ impl MediaViewer {
         } else {
             Origin::Chat
         };
+        let opened = if items.is_empty() {
+            ViewerOpen::default()
+        } else {
+            ViewerOpen::mint()
+        };
         Self {
             items,
             index,
             origin,
+            opened,
             ..Self::default()
         }
+    }
+
+    /// Which open this viewer is (the last one when closed).
+    pub fn opened(&self) -> ViewerOpen {
+        self.opened
     }
 
     /// Open over a Shared Media list (oldest first). `total` is the tab's
@@ -381,7 +415,11 @@ impl MediaViewer {
     }
 
     pub fn close(&mut self) {
-        *self = Self::default();
+        let opened = self.opened;
+        *self = Self {
+            opened,
+            ..Self::default()
+        };
     }
 
     /// Whether the previous / next arrow has an item to go to.
@@ -607,6 +645,24 @@ mod tests {
         assert!(!shared.is_open());
         assert_eq!(shared.position(), None);
         assert!(!shared.wants_older());
+    }
+
+    #[test]
+    fn every_open_is_a_new_one_and_a_closed_viewer_remembers_the_last() {
+        let never = MediaViewer::closed().opened();
+        let mut first = MediaViewer::open(vec![item(MediaViewerKind::Photo, 10)], 0);
+        let second = MediaViewer::open_poll(item(MediaViewerKind::Photo, 11));
+        assert_ne!(first.opened(), never);
+        assert_ne!(first.opened(), second.opened());
+        let id = first.opened();
+        first.close();
+        assert!(!first.is_open());
+        assert_eq!(first.opened(), id, "the last open stays after a close");
+        assert_eq!(
+            MediaViewer::open(Vec::new(), 0).opened(),
+            never,
+            "an empty list is not an open"
+        );
     }
 
     #[test]

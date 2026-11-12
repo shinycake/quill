@@ -300,7 +300,7 @@ impl QuillApp {
         };
         let geometry = self.viewer_geometry(&item, window, cx);
         let layer = self.update_viewer_layer(&item, geometry, cx);
-        let open_gen = self.viewer.open_gen as usize;
+        let open_gen = self.viewer.state.opened().get() as usize;
         div()
             .id("media-viewer-overlay")
             .occlude()
@@ -364,7 +364,7 @@ impl QuillApp {
         if let Some(player) = self.viewer.clip.player() {
             player.set_orientation(self.viewer.reorient.orientation().turns, false);
         }
-        let open_gen = self.viewer.open_gen;
+        let open_gen = self.viewer.state.opened().get();
         let layer = self
             .viewer
             .video_layer

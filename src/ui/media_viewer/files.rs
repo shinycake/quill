@@ -64,7 +64,6 @@ impl QuillApp {
             return false;
         };
         self.viewer.state = MediaViewer::open(items, index);
-        self.viewer.open_gen += 1;
         self.viewer_note_activity(cx);
         self.reset_viewer_item_state(cx);
         cx.notify();

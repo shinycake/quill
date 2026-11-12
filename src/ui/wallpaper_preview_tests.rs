@@ -185,3 +185,33 @@ fn changing_blur_drops_a_share_still_out(cx: &mut TestAppContext) {
         assert_eq!(preview.blur, Some(true));
     });
 }
+
+/// Cancel while Share is out: the link that arrives later belongs to no
+/// box, and the next drain drops it instead of keeping it in the session.
+#[gpui_kit::test]
+fn a_share_link_arriving_after_cancel_is_dropped(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, _, cx| {
+        app.open_wallpaper_preview_at(
+            PreviewSource::File("/tmp/a.jpg".into()),
+            PreviewStage::Sharing {
+                request: RequestId(31),
+            },
+            cx,
+        );
+        app.close_wallpaper_preview(cx);
+        if let Some(session) = app.demo_session.as_deref_mut() {
+            session
+                .chats_state
+                .background_answers
+                .push(RequestId(31), Ok(BackgroundOutcome::Link("t.me/bg".into())));
+        }
+        app.drain_wallpaper_preview(cx);
+        let kept = app
+            .demo_session
+            .as_deref()
+            .is_some_and(|session| session.chats_state.background_answers.is_empty());
+        assert!(kept, "the late link was dropped, not kept");
+    });
+}
