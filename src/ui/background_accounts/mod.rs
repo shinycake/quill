@@ -70,19 +70,128 @@ const POLL_PACE: PollPace = PollPace {
 /// One account that is not on screen.
 pub(super) struct BackgroundClient {
     pub(super) key: AccountKey,
-    /// `None` once the client was closed (needs sign-in, signed out, or
-    /// could not start).
-    pub(super) live: Option<LiveConnect>,
-    pub(super) status: BackgroundStatus,
+    /// The client and how far it is, or why there is none: one value, so a
+    /// status never names a client that is not there.
+    pub(super) stage: ClientStage,
     pub(super) unread: AccountUnread,
 }
 
+/// Why a background account has no client (it was closed): the account
+/// needs the sign-in flow, was signed out, or could not start.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum Down {
+    NeedsSignIn,
+    SignedOut,
+    Failed(String),
+}
+
+impl Down {
+    /// The stopping status `status` names, if it is one.
+    fn of(status: &BackgroundStatus) -> Option<Self> {
+        match status {
+            BackgroundStatus::NeedsSignIn => Some(Self::NeedsSignIn),
+            BackgroundStatus::SignedOut => Some(Self::SignedOut),
+            BackgroundStatus::Failed(message) => Some(Self::Failed(message.clone())),
+            BackgroundStatus::Connecting | BackgroundStatus::Ready => None,
+        }
+    }
+
+    fn status(&self) -> BackgroundStatus {
+        match self {
+            Self::NeedsSignIn => BackgroundStatus::NeedsSignIn,
+            Self::SignedOut => BackgroundStatus::SignedOut,
+            Self::Failed(message) => BackgroundStatus::Failed(message.clone()),
+        }
+    }
+}
+
+/// A background account's client and how far it is.
+pub(super) enum ClientStage {
+    /// Restoring the session: no updates yet.
+    Connecting(LiveConnect),
+    /// Signed in and receiving updates.
+    Ready(LiveConnect),
+    /// No client: closed, until the user switches to the account (a
+    /// failed one is started again by the next pass).
+    Down(Down),
+}
+
+impl ClientStage {
+    fn live(&self) -> Option<&LiveConnect> {
+        match self {
+            Self::Connecting(live) | Self::Ready(live) => Some(live),
+            Self::Down(_) => None,
+        }
+    }
+
+    fn live_mut(&mut self) -> Option<&mut LiveConnect> {
+        match self {
+            Self::Connecting(live) | Self::Ready(live) => Some(live),
+            Self::Down(_) => None,
+        }
+    }
+
+    fn into_live(self) -> Option<LiveConnect> {
+        match self {
+            Self::Connecting(live) | Self::Ready(live) => Some(live),
+            Self::Down(_) => None,
+        }
+    }
+
+    /// What the account's row says.
+    pub(super) fn status(&self) -> BackgroundStatus {
+        match self {
+            Self::Connecting(_) => BackgroundStatus::Connecting,
+            Self::Ready(_) => BackgroundStatus::Ready,
+            Self::Down(down) => down.status(),
+        }
+    }
+
+    /// The client `status` says it is: a running one moves between
+    /// connecting and ready, one told to stop is returned (to be closed)
+    /// with the stage left `Down`. `None` when nothing was taken.
+    fn follow(&mut self, status: &BackgroundStatus) -> Option<LiveConnect> {
+        let down = Down::of(status);
+        let stage = std::mem::replace(self, Self::Down(Down::NeedsSignIn));
+        match (stage, down) {
+            (Self::Connecting(live) | Self::Ready(live), Some(down)) => {
+                *self = Self::Down(down);
+                Some(live)
+            }
+            (Self::Connecting(live) | Self::Ready(live), None) => {
+                *self = if *status == BackgroundStatus::Ready {
+                    Self::Ready(live)
+                } else {
+                    Self::Connecting(live)
+                };
+                None
+            }
+            (down @ Self::Down(_), _) => {
+                *self = down;
+                None
+            }
+        }
+    }
+}
+
 impl BackgroundClient {
+    pub(super) fn live(&self) -> Option<&LiveConnect> {
+        self.stage.live()
+    }
+
+    pub(super) fn live_mut(&mut self) -> Option<&mut LiveConnect> {
+        self.stage.live_mut()
+    }
+
+    pub(super) fn into_live(self) -> Option<LiveConnect> {
+        self.stage.into_live()
+    }
+
     /// The client could not start, or died: the account is started again
     /// by the next pass. One that needs a sign-in, or was signed out, is
     /// not.
     pub(super) fn retryable(&self) -> bool {
-        self.live.is_none() && matches!(self.status, BackgroundStatus::Failed(_))
+        matches!(self.stage, ClientStage::Down(Down::Failed(_)))
     }
 }
 
@@ -140,7 +249,7 @@ pub(crate) struct BackgroundAccounts {
     quit_close: Option<Subscription>,
     /// Accounts whose folder is being deleted (`deleting`): nothing opens
     /// them.
-    pub(super) deleting: HashSet<AccountKey>,
+    pub(super) deleting: deleting::Deleting,
     pub(super) local: LocalData,
     /// The keychain the account database keys live in.
     pub(super) secrets: deleting::SecretsFactory,
@@ -165,7 +274,7 @@ impl BackgroundAccounts {
             close_waiters: Default::default(),
             restarts: restart::Restarts::default(),
             quit_close: None,
-            deleting: HashSet::new(),
+            deleting: Default::default(),
             local: LocalData::Fresh,
             secrets: deleting::live_secrets(),
             #[cfg(test)]
@@ -219,7 +328,7 @@ impl BackgroundAccounts {
     fn has_work(&self) -> bool {
         self.prepare.any_wanted()
             || !self.closing.is_empty()
-            || self.clients.iter().any(|client| client.live.is_some())
+            || self.clients.iter().any(|client| client.live().is_some())
             || self.clients.iter().any(BackgroundClient::retryable)
     }
 
@@ -327,7 +436,7 @@ impl QuillApp {
         *self.background.clients_mut() = keep;
         for client in gone {
             self.background.restarts.forget(&client.key);
-            if let Some(live) = client.live {
+            if let Some(live) = client.stage.into_live() {
                 self.close_later(client.key, live, false, cx);
             }
         }
@@ -368,13 +477,11 @@ impl QuillApp {
             if !AccountPaths::for_root(&root, &key).database_exists() {
                 self.background.clients_mut().push(BackgroundClient {
                     key,
-                    live: None,
-                    status: BackgroundStatus::NeedsSignIn,
+                    stage: ClientStage::Down(Down::NeedsSignIn),
                     unread: AccountUnread::default(),
                 });
                 continue;
             }
-            let token = self.background.prepare.begin(&key);
             let prepare_root = root.clone();
             let prepare_key = key.clone();
             let prepare_credentials = credentials.clone();
@@ -390,16 +497,16 @@ impl QuillApp {
             });
             let credentials = credentials.clone();
             let root = root.clone();
-            // screen-scope: a background start belongs to the app's account list, not to the account on screen; a stop leaves it `Cancelled`, which ends it unstarted.
-            let held_key = key.clone();
-            let held_token = token.clone();
-            let worker = Self::spawn_app(cx, async move |this, cx| {
-                let prepared = prepared.await;
-                let _ = this.update(cx, |this, cx| {
-                    this.finish_background_prepare(key, &token, root, credentials, prepared, cx)
-                });
+            let worker_key = key.clone();
+            // screen-scope: a background start belongs to the app's account list, not to the account on screen; a stop leaves it `Cancelled`, which ends it unstarted, and only the account's newest worker takes a start.
+            self.background.prepare.begin(&worker_key, |token| {
+                Self::spawn_app(cx, async move |this, cx| {
+                    let prepared = prepared.await;
+                    let _ = this.update(cx, |this, cx| {
+                        this.finish_background_prepare(key, &token, root, credentials, prepared, cx)
+                    });
+                })
             });
-            self.background.prepare.hold(&held_key, &held_token, worker);
         }
         self.spawn_background_poll(cx);
     }
@@ -463,11 +570,11 @@ impl QuillApp {
         started: Result<LiveConnect, ConnectBlocker>,
         cx: &mut Context<Self>,
     ) {
-        let (live, status) = match started {
+        let stage = match started {
             Ok(mut live) => {
                 self.disk.seed(&mut live.driver);
                 live.bridge.wake_with(&quill::wake::BACKGROUND_UPDATES);
-                (Some(live), BackgroundStatus::Connecting)
+                ClientStage::Connecting(live)
             }
             Err(ConnectBlocker::DiskFull) => {
                 self.background.prepare.refuse(&key);
@@ -475,16 +582,12 @@ impl QuillApp {
             }
             Err(_) => {
                 self.background.restarts.failed(&key, Instant::now());
-                (
-                    None,
-                    BackgroundStatus::Failed(tr(keys::Q_STARTUP_FAILED_TITLE).into()),
-                )
+                ClientStage::Down(Down::Failed(tr(keys::Q_STARTUP_FAILED_TITLE).into()))
             }
         };
         self.background.clients_mut().push(BackgroundClient {
             key,
-            live,
-            status,
+            stage,
             unread: AccountUnread::default(),
         });
         self.spawn_background_poll(cx);
@@ -504,7 +607,7 @@ impl QuillApp {
             .position(|client| &client.key == key)
         {
             let client = self.background.clients_mut().remove(index);
-            if let Some(live) = client.live {
+            if let Some(live) = client.stage.into_live() {
                 self.close_later(client.key, live, false, cx);
             }
         }
@@ -615,7 +718,8 @@ impl QuillApp {
         let mut failed: Vec<AccountKey> = Vec::new();
         let mut clients = self.background.clients_mut();
         for client in clients.iter_mut() {
-            let Some(live) = client.live.as_mut() else {
+            let before = client.stage.status();
+            let Some(live) = client.stage.live_mut() else {
                 continue;
             };
             live.driver.session.app_active = app_active;
@@ -670,13 +774,12 @@ impl QuillApp {
             if status == BackgroundStatus::Ready {
                 ready.push(client.key.clone());
             }
-            if status == BackgroundStatus::Ready && client.status != BackgroundStatus::Ready {
+            if status == BackgroundStatus::Ready && before != BackgroundStatus::Ready {
                 // tdesktop `Updates::updateOnline`: only the account in an
                 // active window is online.
                 let _ = live.driver.set_online(false);
             }
-            if status != client.status {
-                client.status = status.clone();
+            if status != before {
                 changed = true;
             }
             if matches!(
@@ -685,9 +788,8 @@ impl QuillApp {
             ) {
                 signed_out.push(client.key.clone());
             }
-            if status.stops_client()
-                && let Some(live) = client.live.take()
-            {
+            // The stage follows the status; a client told to stop leaves it.
+            if let Some(live) = client.stage.follow(&status) {
                 if matches!(status, BackgroundStatus::Failed(_)) {
                     failed.push(client.key.clone());
                 }

@@ -10,11 +10,12 @@ use std::sync::Arc;
 
 /// One preparation running for an account. The token names it: the worker
 /// hands it back when it ends, so the stage drops exactly that one. The
-/// task is the worker's continuation, held here for as long as it runs.
+/// task is the worker's continuation, held here for as long as it runs; it
+/// is made with the worker, so no worker exists without its task.
 #[derive(Debug)]
 struct Worker {
     token: Arc<()>,
-    task: Option<Task<()>>,
+    _task: Task<()>,
 }
 
 /// The preparations running for one account.
@@ -35,8 +36,10 @@ impl Workers {
 /// One account's preparation.
 #[derive(Debug)]
 enum Prepare {
-    /// A client starts when a worker ends; the `workers` are running.
-    Wanted { workers: Workers },
+    /// A client starts when the `starter` worker ends; the `workers` (the
+    /// starter among them) are running. A worker begun earlier, before a
+    /// cancel, ends without starting one.
+    Wanted { workers: Workers, starter: Arc<()> },
     /// The account was removed, stopped or switched to meanwhile: nothing
     /// starts, but the `workers` still run.
     Cancelled { workers: Workers },
@@ -49,7 +52,7 @@ enum Prepare {
 impl Prepare {
     fn workers(&self) -> &Workers {
         match self {
-            Self::Wanted { workers }
+            Self::Wanted { workers, .. }
             | Self::Cancelled { workers }
             | Self::DiskRefused { workers } => workers,
         }
@@ -57,7 +60,7 @@ impl Prepare {
 
     fn into_workers(self) -> Workers {
         match self {
-            Self::Wanted { workers }
+            Self::Wanted { workers, .. }
             | Self::Cancelled { workers }
             | Self::DiskRefused { workers } => workers,
         }
@@ -71,10 +74,12 @@ pub(super) struct PrepareSet {
 }
 
 impl PrepareSet {
-    /// A worker prepares `key`, and a client starts from it. The returned
-    /// token names the worker: it is handed back to [`Self::finished`], and
-    /// the worker's task is given to [`Self::hold`].
-    pub(super) fn begin(&mut self, key: &AccountKey) -> Arc<()> {
+    /// A worker prepares `key`, and a client starts from it: it is the
+    /// account's starter from now on, and a worker begun before is not.
+    /// `spawn` makes the worker's task from the token that names it, which
+    /// it hands back to [`Self::finished`]; the stage keeps the task until
+    /// the worker ends.
+    pub(super) fn begin(&mut self, key: &AccountKey, spawn: impl FnOnce(Arc<()>) -> Task<()>) {
         let token = Arc::new(());
         let mut workers = self
             .accounts
@@ -83,29 +88,15 @@ impl PrepareSet {
             .unwrap_or_default();
         workers.0.push(Worker {
             token: token.clone(),
-            task: None,
+            _task: spawn(token.clone()),
         });
-        self.accounts
-            .insert(key.clone(), Prepare::Wanted { workers });
-        token
-    }
-
-    /// The worker `token` names runs as `task`, which the stage keeps until
-    /// the worker ends.
-    pub(super) fn hold(&mut self, key: &AccountKey, token: &Arc<()>, task: Task<()>) {
-        let Some(prepare) = self.accounts.get_mut(key) else {
-            return;
-        };
-        let (Prepare::Wanted { workers }
-        | Prepare::Cancelled { workers }
-        | Prepare::DiskRefused { workers }) = prepare;
-        if let Some(worker) = workers
-            .0
-            .iter_mut()
-            .find(|worker| Arc::ptr_eq(&worker.token, token))
-        {
-            worker.task = Some(task);
-        }
+        self.accounts.insert(
+            key.clone(),
+            Prepare::Wanted {
+                workers,
+                starter: token,
+            },
+        );
     }
 
     /// A client is wanted for `key`, so the account is not started twice.
@@ -185,7 +176,7 @@ impl PrepareSet {
     /// No client starts for `key` any more; its workers run on.
     pub(super) fn cancel(&mut self, key: &AccountKey) {
         match self.accounts.remove(key) {
-            Some(Prepare::Wanted { workers }) => {
+            Some(Prepare::Wanted { workers, .. }) => {
                 self.accounts
                     .insert(key.clone(), Prepare::Cancelled { workers });
             }
@@ -208,7 +199,7 @@ impl PrepareSet {
         let before = std::mem::take(&mut self.accounts);
         for (key, prepare) in before {
             let prepare = match prepare {
-                Prepare::Wanted { workers } => Prepare::Cancelled { workers },
+                Prepare::Wanted { workers, .. } => Prepare::Cancelled { workers },
                 other => other,
             };
             self.accounts.insert(key, prepare);
@@ -216,15 +207,24 @@ impl PrepareSet {
     }
 
     /// The worker `token` names ended for `key`. `true` when a client was
-    /// wanted: the first worker to end takes the start, a later one finds
-    /// none.
+    /// wanted and this is its starter: the newest worker takes the start;
+    /// one begun before it (a cancel and a new begin between) ends without
+    /// one, and a later end finds none.
     pub(super) fn finished(&mut self, key: &AccountKey, token: &Arc<()>) -> bool {
         let Some(prepare) = self.accounts.remove(key) else {
             return false;
         };
         match prepare {
-            Prepare::Wanted { mut workers } => {
+            Prepare::Wanted {
+                mut workers,
+                starter,
+            } => {
                 workers.end(token);
+                if !Arc::ptr_eq(&starter, token) {
+                    self.accounts
+                        .insert(key.clone(), Prepare::Wanted { workers, starter });
+                    return false;
+                }
                 if !workers.is_empty() {
                     self.accounts
                         .insert(key.clone(), Prepare::Cancelled { workers });
@@ -259,26 +259,61 @@ mod tests {
         AccountKey(name.to_string())
     }
 
+    /// A token for a test worker: the stage keeps its task and hands the
+    /// token back.
+    fn begin(set: &mut PrepareSet, name: &str) -> Arc<()> {
+        let mut made = None;
+        set.begin(&key(name), |token| {
+            made = Some(token);
+            Task::ready(())
+        });
+        made.expect("the worker was made")
+    }
+
     #[test]
-    fn the_first_worker_to_end_takes_the_start() {
+    fn the_newest_worker_takes_the_start() {
         let mut set = PrepareSet::default();
-        let first = set.begin(&key("a"));
-        let second = set.begin(&key("a"));
+        let first = begin(&mut set, "a");
+        let second = begin(&mut set, "a");
         assert!(set.wanted(&key("a")) && set.running(&key("a")));
         assert!(
-            set.finished(&key("a"), &first),
-            "the start goes to the first"
+            !set.finished(&key("a"), &first),
+            "an older worker ends without the start"
         );
-        assert!(!set.wanted(&key("a")) && set.running(&key("a")));
-        assert!(!set.finished(&key("a"), &second), "a later one finds none");
-        assert!(!set.running(&key("a")));
+        assert!(
+            set.wanted(&key("a")) && set.running(&key("a")),
+            "still wanted"
+        );
+        assert!(set.finished(&key("a"), &second), "the newest starts it");
+        assert!(!set.wanted(&key("a")) && !set.running(&key("a")));
+    }
+
+    /// A worker begun before a cancel never starts the client the new
+    /// begin asked for, whichever of the two ends first.
+    #[test]
+    fn a_worker_begun_before_a_cancel_does_not_start_the_client() {
+        let mut set = PrepareSet::default();
+        let before = begin(&mut set, "a");
+        set.cancel(&key("a"));
+        let after = begin(&mut set, "a");
+        assert!(!set.finished(&key("a"), &before), "cancelled: no start");
+        assert!(set.wanted(&key("a")), "the new begin still wants it");
+        assert!(set.finished(&key("a"), &after));
+        // The other order: the newer worker ends first and takes it, the
+        // older finds none.
+        let before = begin(&mut set, "b");
+        set.cancel(&key("b"));
+        let after = begin(&mut set, "b");
+        assert!(set.finished(&key("b"), &after));
+        assert!(!set.finished(&key("b"), &before));
+        assert!(!set.running(&key("b")));
     }
 
     #[test]
     fn a_cancelled_start_keeps_blocking_deletion_until_its_worker_ends() {
         let mut set = PrepareSet::default();
-        let a = set.begin(&key("a"));
-        let b = set.begin(&key("b"));
+        let a = begin(&mut set, "a");
+        let b = begin(&mut set, "b");
         set.cancel(&key("a"));
         assert!(!set.wanted(&key("a")) && set.running(&key("a")));
         assert!(set.any_wanted());
@@ -304,14 +339,14 @@ mod tests {
         set.cancel(&key("b"));
         assert!(!set.any_refused());
         // A worker still running keeps its stage.
-        let _c = set.begin(&key("c"));
+        let _c = begin(&mut set, "c");
         set.refuse(&key("c"));
         assert!(set.wanted(&key("c")) && !set.any_refused());
         // A cancel and a re-begin left two workers; the first one's start
         // is refused: the refusal is kept while the second still runs.
-        let d1 = set.begin(&key("d"));
+        let d1 = begin(&mut set, "d");
         set.cancel(&key("d"));
-        let d2 = set.begin(&key("d"));
+        let d2 = begin(&mut set, "d");
         set.cancel(&key("d"));
         assert!(!set.finished(&key("d"), &d1), "cancelled: no start");
         set.refuse(&key("d"));

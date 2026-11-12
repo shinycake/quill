@@ -17,7 +17,9 @@ use quill::platform::SecretStore;
 use quill::settings::{
     begin_remove_account, delete_account_folder, finish_pending_delete, mark_for_deletion,
 };
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 /// Opens the keychain that holds the account database keys (tests use an
 /// in-memory one). Called on workers.
@@ -25,6 +27,59 @@ pub(in crate::ui) type SecretsFactory = Arc<dyn Fn() -> Box<dyn SecretStore> + S
 
 pub(in crate::ui) fn live_secrets() -> SecretsFactory {
     Arc::new(quill::platform::live_secret_store)
+}
+
+/// The accounts whose folders are being deleted: nothing opens them. Each
+/// stands as `Waiting` for its clients to close, then `Running` under the
+/// continuation that finishes the deletion, which the stage holds, so a
+/// deletion cannot outlive its entry or be left unowned.
+#[derive(Default)]
+pub(super) struct Deleting {
+    accounts: HashMap<AccountKey, DeleteStage>,
+}
+
+enum DeleteStage {
+    /// Waiting for the clients that may have the folder open to close.
+    Waiting,
+    /// The worker runs, and `_task` finishes the deletion when it ends
+    /// (shared by the accounts of one deletion).
+    Running { _task: Rc<Task<()>> },
+}
+
+impl Deleting {
+    pub(super) fn contains(&self, key: &AccountKey) -> bool {
+        self.accounts.contains_key(key)
+    }
+
+    pub(super) fn keys(&self) -> impl Iterator<Item = &AccountKey> {
+        self.accounts.keys()
+    }
+
+    pub(super) fn is_empty(&self) -> bool {
+        self.accounts.is_empty()
+    }
+
+    fn wait(&mut self, keys: impl IntoIterator<Item = AccountKey>) {
+        for key in keys {
+            self.accounts.entry(key).or_insert(DeleteStage::Waiting);
+        }
+    }
+
+    fn run(&mut self, keys: &[AccountKey], task: Task<()>) {
+        let task = Rc::new(task);
+        for key in keys {
+            self.accounts.insert(
+                key.clone(),
+                DeleteStage::Running {
+                    _task: task.clone(),
+                },
+            );
+        }
+    }
+
+    fn finish(&mut self, key: &AccountKey) {
+        self.accounts.remove(key);
+    }
 }
 
 /// How a deletion ended.
@@ -123,7 +178,7 @@ impl QuillApp {
         }
         self.background.local = LocalData::Swept;
         let root = self.client_accounts_root()?;
-        let mut skip: HashSet<AccountKey> = self.background.deleting.clone();
+        let mut skip: HashSet<AccountKey> = self.background.deleting.keys().cloned().collect();
         skip.extend(self.background.closing.keys());
         skip.extend(self.background.prepare.keys().cloned());
         skip.extend(self.background.clients().iter().map(|c| c.key.clone()));
@@ -294,7 +349,7 @@ impl QuillApp {
         done: impl FnOnce(&mut QuillApp, Deletion, &mut Context<QuillApp>) + 'static,
         cx: &mut Context<Self>,
     ) {
-        self.background.deleting.extend(keys.iter().cloned());
+        self.background.deleting.wait(keys.iter().cloned());
         for key in &keys {
             self.forget_account_sends(key);
         }
@@ -324,7 +379,8 @@ impl QuillApp {
                     }
                     (root, deleted, error)
                 });
-                cx.spawn(async move |this, cx| {
+                let finish_keys = keys.clone();
+                let task = cx.spawn(async move |this, cx| {
                     let (root, deleted, error) = deletion.await;
                     let _ = this.update(cx, |this, cx| {
                         // A folder that failed stays recorded: the next
@@ -332,16 +388,16 @@ impl QuillApp {
                         for key in &deleted {
                             let _ = finish_pending_delete(&root, key);
                         }
-                        for key in &keys {
-                            this.background.deleting.remove(key);
+                        for key in &finish_keys {
+                            this.background.deleting.finish(key);
                         }
                         // Work waiting to open these folders may go now.
                         this.settle_close_waiters(cx);
                         done(this, Deletion::Done { error }, cx);
                         cx.notify();
                     });
-                })
-                .detach();
+                });
+                this.background.deleting.run(&keys, task);
             },
         );
     }
@@ -358,7 +414,7 @@ impl QuillApp {
                 || background.prepare.running(key)
                 || background
                     .client(key)
-                    .is_some_and(|client| client.live.is_some())
+                    .is_some_and(|client| client.live().is_some())
                 || self
                     .live
                     .as_ref()

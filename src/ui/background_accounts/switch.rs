@@ -27,21 +27,24 @@ impl QuillApp {
             let _ = live.driver.set_online(false);
             live.bridge.wake_with(&quill::wake::BACKGROUND_UPDATES);
             let unread = AccountUnread::of(&live.driver.session);
-            self.background.clients_mut().push(BackgroundClient {
-                key,
-                live: Some(live),
-                status,
-                unread,
-            });
+            let stage = if status == BackgroundStatus::Ready {
+                ClientStage::Ready(live)
+            } else {
+                ClientStage::Connecting(live)
+            };
+            self.background
+                .clients_mut()
+                .push(BackgroundClient { key, stage, unread });
         } else {
             self.close_live_later(live, !status.stops_client(), cx);
             if status.stops_client() {
-                self.background.clients_mut().push(BackgroundClient {
-                    key,
-                    live: None,
-                    status,
-                    unread: AccountUnread::default(),
-                });
+                if let Some(down) = Down::of(&status) {
+                    self.background.clients_mut().push(BackgroundClient {
+                        key,
+                        stage: ClientStage::Down(down),
+                        unread: AccountUnread::default(),
+                    });
+                }
             }
         }
     }
@@ -60,20 +63,15 @@ impl QuillApp {
             .clients
             .iter()
             .position(|client| &client.key == key)?;
-        let mut client = self.background.clients_mut().remove(index);
-        let usable = !client.status.stops_client()
-            && client
-                .live
-                .as_ref()
-                .is_some_and(|live| !live.bridge.stopped_unexpectedly());
-        if usable {
-            return client.live.take();
+        let client = self.background.clients_mut().remove(index);
+        let key = client.key.clone();
+        let live = client.into_live()?;
+        if !live.bridge.stopped_unexpectedly() {
+            return Some(live);
         }
         // Closed without waiting; `start_connection` opens the database
         // again only once it is (`closing::closed`).
-        if let Some(live) = client.live.take() {
-            self.close_later(client.key, live, false, cx);
-        }
+        self.close_later(key, live, false, cx);
         None
     }
 

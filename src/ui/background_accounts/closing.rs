@@ -95,7 +95,7 @@ impl BackgroundAccounts {
     pub(in crate::ui) fn live_clients_mut(&mut self) -> impl Iterator<Item = &mut LiveConnect> {
         self.clients
             .iter_mut()
-            .filter_map(|client| client.live.as_mut())
+            .filter_map(|client| client.live_mut())
     }
 
     /// Hand every running client to the closing set and forget them all.
@@ -103,7 +103,7 @@ impl BackgroundAccounts {
     pub(super) fn close_all_later(&mut self) {
         let clients = std::mem::take(&mut *self.clients_mut());
         for client in clients {
-            if let Some(live) = client.live {
+            if let Some(live) = client.stage.into_live() {
                 self.push_closing(client.key, live, false);
             }
         }

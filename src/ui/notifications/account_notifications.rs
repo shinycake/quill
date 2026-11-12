@@ -18,7 +18,7 @@ impl QuillApp {
             || self
                 .background
                 .client(account)
-                .and_then(|client| client.live.as_ref())
+                .and_then(|client| client.live())
                 .is_some_and(|live| !live.driver.session.settings.notify_view.shows_name());
         let notification = if locked {
             queued.for_locked_display()
@@ -30,7 +30,7 @@ impl QuillApp {
         } else {
             self.background
                 .client(account)
-                .and_then(|client| client.live.as_ref())
+                .and_then(|client| client.live())
                 .and_then(|live| live.driver.session.chat_photo_path(notification.chat_id))
                 .map(PathBuf::from)
         };
@@ -56,12 +56,12 @@ impl QuillApp {
         let volume = self
             .background
             .client(account)
-            .and_then(|client| client.live.as_ref())
+            .and_then(|client| client.live())
             .and_then(|live| live.driver.session.notification_volume_override(chat_id));
         let sound = self
             .background
             .client_mut(account)
-            .and_then(|client| client.live.as_mut())
+            .and_then(|client| client.live_mut())
             .map_or(Some(NotificationSound::DefaultTone), |live| {
                 notification_sound(live.driver.resolve_notification_sound(kind))
             });

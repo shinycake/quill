@@ -172,7 +172,7 @@ impl QuillApp {
             _ => self
                 .background
                 .client(account)
-                .and_then(|client| client.live.as_ref())
+                .and_then(|client| client.live())
                 .map(|live| &live.driver.session),
         };
         self.account.passcode.is_locked()

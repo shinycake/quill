@@ -34,10 +34,11 @@ pub(crate) struct ChatAppearanceDialog {
     pub(super) tab: ChatAppearanceTab,
     pub(super) draft: ChatAppearanceDraft,
     pub(super) stage: AppearanceStage,
-    /// How many icon and status stickers were held when their files were
-    /// last asked for: the downloads go out again only when a list grows
-    /// (its answer landed), not on every frame the box draws.
-    files_asked: [usize; 3],
+    /// The icon and status files already asked for: a file is asked once,
+    /// when it first shows up (a list's answer landed), not on every frame
+    /// the box draws, and a list that stays the same length while its
+    /// files change is still followed.
+    files_asked: std::collections::HashSet<quill::ids::FileId>,
 }
 
 /// Where Apply stands. Each request of the plan answers under its own id
@@ -223,7 +224,7 @@ impl QuillApp {
             },
             draft,
             stage: AppearanceStage::Editing,
-            files_asked: [0; 3],
+            files_asked: Default::default(),
         });
         self.open_box(DialogKind::ChatAppearance);
         cx.notify();
@@ -396,36 +397,32 @@ impl QuillApp {
         self.open_group_settings_view(chat_id, GroupSettingsView::Boosts, cx);
     }
 
-    /// Ask for the files of the icon and status choices once their lists
-    /// have grown since the last ask (the answers land after the box
-    /// opens), not on every draw.
+    /// Ask for the files of the icon and status choices that were not
+    /// asked for yet (the answers land after the box opens), not on every
+    /// draw.
     fn ask_chat_appearance_files(&mut self) {
-        let Some(live) = self.live.as_ref() else {
-            return;
+        let fresh: Vec<_> = match (
+            self.live.as_ref(),
+            self.dialogs.chat_appearance_dialog.as_ref(),
+        ) {
+            (Some(live), Some(dialog)) => live
+                .driver
+                .chat_appearance_files()
+                .into_iter()
+                .filter(|file| !dialog.files_asked.contains(file))
+                .collect(),
+            _ => return,
         };
-        let session = &live.driver.session;
-        let held = [
-            session.users_state.background_emoji_icons.items().len(),
-            session.stickers.emoji.chat_default_status_ids.len(),
-            session
-                .stickers
-                .emoji
-                .custom_emoji_stickers
-                .as_slice()
-                .len(),
-        ];
-        let Some(dialog) = self.dialogs.chat_appearance_dialog.as_mut() else {
-            return;
-        };
-        if dialog.files_asked == held {
+        if fresh.is_empty() {
             return;
         }
-        dialog.files_asked = held;
         let Some(live) = self.live.as_mut() else {
             return;
         };
-        live.driver.download_background_emoji_icons();
-        live.driver.download_chat_status_choices();
+        let sent = live.driver.download_thumbnails(&fresh);
+        if let Some(dialog) = self.dialogs.chat_appearance_dialog.as_mut() {
+            dialog.files_asked.extend(sent);
+        }
     }
 
     pub(super) fn build_chat_appearance_dialog(

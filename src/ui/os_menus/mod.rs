@@ -112,7 +112,7 @@ impl QuillApp {
                 } else {
                     self.background.client(key).is_some_and(|client| {
                         matches!(
-                            client.status,
+                            client.stage.status(),
                             quill::notify_accounts::BackgroundStatus::Ready
                                 | quill::notify_accounts::BackgroundStatus::Connecting
                         )

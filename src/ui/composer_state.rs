@@ -151,17 +151,18 @@ impl DraftClear {
         self.stage.spend(message);
     }
 
-    /// A send that has acked or failed one message stops waiting for those
-    /// that can no longer answer: a made message that left the history
-    /// (deleted while it uploaded), an asked one whose request is gone.
-    /// Settled when none is left.
+    /// A send stops waiting for messages that can no longer answer: a made
+    /// message that left the history (deleted while it uploaded), an asked
+    /// one whose request is gone (refused before any answer). Settled when
+    /// none is left: for a send that acked nothing, that is the send over
+    /// with its draft kept.
     pub(super) fn forget_lost(
         &mut self,
         message_exists: impl Fn(ChatId, MessageId) -> bool,
         request_waits: impl Fn(RequestId) -> bool,
     ) -> bool {
         let chat = self.chat_id;
-        if let ClearStage::Spent(messages) = &mut self.stage {
+        if let Some(messages) = self.stage.messages_mut() {
             messages.retain(|m| match *m {
                 SentMessage::Made { message, .. } => message_exists(chat, message),
                 SentMessage::Asked(request) => request_waits(request),
@@ -170,9 +171,9 @@ impl DraftClear {
         self.is_settled()
     }
 
-    /// Every message of the send has acked or failed.
+    /// Every message of the send has acked, failed or been lost.
     pub(super) fn is_settled(&self) -> bool {
-        matches!(&self.stage, ClearStage::Spent(messages) if messages.is_empty())
+        matches!(&self.stage, ClearStage::Armed(messages) | ClearStage::Spent(messages) if messages.is_empty())
     }
 
     /// Whether the ack for `chat_id` may clear its draft, given the
@@ -367,5 +368,30 @@ mod tests {
         assert!(!clear.forget_lost(there, waits), "the part is still there");
         let gone = |_: ChatId, _: MessageId| false;
         assert!(clear.forget_lost(gone, waits), "the part left the history");
+    }
+
+    /// A send that acked nothing: its message deleted while uploading, or
+    /// its request refused before any answer, ends the clear too (the
+    /// draft stays), instead of living until a newer send replaces it.
+    #[test]
+    fn an_armed_clear_settles_when_nothing_can_answer() {
+        let chat = ChatId(5);
+        let exists = |_: ChatId, message: MessageId| message == MessageId(-10);
+        let waits = |request: RequestId| request == RequestId(2);
+        // Refused before any answer: the request is gone.
+        let mut refused = DraftClear::whole_composer(chat).asked([RequestId(1)]);
+        assert!(!refused.forget_lost(exists, |_| true), "still waiting");
+        assert!(refused.forget_lost(exists, waits), "its request is gone");
+        // Deleted while uploading: the made message left the history.
+        let mut deleted = DraftClear::whole_composer(chat).asked([RequestId(2)]);
+        deleted.answered(RequestId(2), MessageId(-11));
+        assert!(deleted.forget_lost(exists, waits), "the message is gone");
+        // One of two lost: the other still waits.
+        let mut album = DraftClear::whole_composer(chat).asked([RequestId(1), RequestId(2)]);
+        assert!(!album.forget_lost(exists, waits));
+        assert!(
+            album.ack(MessageId(-99)),
+            "the draft clears on the first ack"
+        );
     }
 }

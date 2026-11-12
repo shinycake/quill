@@ -116,7 +116,7 @@ impl QuillApp {
     fn preview_path(&self, account: Option<&AccountKey>, file: FileId) -> Option<PathBuf> {
         let live = match account {
             None => self.live.as_ref(),
-            Some(key) => self.background.client(key)?.live.as_ref(),
+            Some(key) => self.background.client(key)?.live(),
         }?;
         live.driver
             .session
@@ -135,7 +135,7 @@ impl QuillApp {
             Some(key) => self
                 .background
                 .client_mut(key)
-                .and_then(|client| client.live.as_mut()),
+                .and_then(|client| client.live_mut()),
         };
         let Some(live) = live else {
             return false;

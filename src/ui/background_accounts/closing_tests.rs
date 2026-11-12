@@ -366,7 +366,12 @@ fn a_preparation_that_ends_settles_the_work_waiting_for_it(cx: &mut TestAppConte
     let ran_in = ran.clone();
     let key = account(1);
     let token = app.update_in(&mut vcx, |app, _, cx| {
-        let token = app.background.prepare.begin(&key);
+        let mut made = None;
+        app.background.prepare.begin(&key, |token| {
+            made = Some(token);
+            gpui_kit::Task::ready(())
+        });
+        let token = made.expect("the worker was made");
         // The account is removed meanwhile: the worker runs on, unwanted.
         app.background.prepare.cancel(&key);
         app.after_closing(
