@@ -225,3 +225,36 @@ fn the_main_window_leaving_a_chat_keeps_a_chat_windows_no_media_note() {
     assert!(search.date_jump_note(Some(ALICE)).is_some());
     assert!(search.date_jump_note(None).is_none());
 }
+
+#[test]
+fn a_chat_windows_reply_strip_gets_its_senders_background_emoji() {
+    let mut h = Harness::two_chats();
+    let main_page = h.driver.select_chat(BOB).unwrap().unwrap();
+    h.answer(BOB, main_page, &(1..=3).collect::<Vec<_>>());
+    let window_page = h.driver.open_chat_window(ALICE).unwrap().unwrap();
+    h.ingest(
+        r#"{"@type":"updateUser","user":{"@type":"user","id":31,"first_name":"Ada","last_name":"","accent_color_id":0,"background_custom_emoji_id":777,"is_contact":true,"type":{"@type":"userTypeRegular"}}}"#,
+    );
+    let from_ada = message_json(ALICE.0, 55, false).replacen(
+        r#""is_outgoing""#,
+        r#""sender_id":{"@type":"messageSenderUser","user_id":31},"is_outgoing""#,
+        1,
+    );
+    let reply = message_json(ALICE.0, 56, false).replacen(
+        r#""is_outgoing""#,
+        &format!(
+            r#""reply_to":{{"@type":"messageReplyToMessage","chat_id":{},"message_id":55,"quote":null,"checklist_task_id":0,"poll_option_id":""}},"is_outgoing""#,
+            ALICE.0
+        ),
+        1,
+    );
+    h.ingest(&format!(
+        r#"{{"@type":"messages","@extra":"{}","total_count":2,"messages":[{reply},{from_ada}]}}"#,
+        window_page.0
+    ));
+    assert_eq!(
+        h.driver.session.reply_background_emoji_ids(),
+        vec![777],
+        "the window's reply strip is resolved though the main window shows another chat"
+    );
+}

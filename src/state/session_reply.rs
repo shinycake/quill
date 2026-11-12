@@ -853,17 +853,10 @@ impl Session {
         wanted
     }
 
-    /// Custom emoji behind the reply strips of the open chat.
+    /// Custom emoji behind the reply strips of every message on screen: the
+    /// main window's chat, each chat window's, and their threads.
     pub fn reply_background_emoji_ids(&self) -> Vec<i64> {
-        let Some(history) = self
-            .open_chat_id()
-            .and_then(|chat| self.histories.get(&chat.0))
-        else {
-            return Vec::new();
-        };
-        history
-            .messages
-            .values()
+        self.shown_messages()
             .filter_map(|message| self.reply_background_emoji(message))
             .collect()
     }
