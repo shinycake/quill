@@ -9817,3 +9817,25 @@ kept until sent, a refused refetch does not repeat), `state/account_notices`
 `connect/tests/stories.rs` (tray refresh on ingest),
 `connect/tests/chat_list/folder_removals.rs` (leaving a folder stops the
 retry; no wall clock), `state/tests/history_prune.rs` (translations pruned).
+
+### Sweep fixes (r3-08)
+
+| Ids | What changed |
+| --- | --- |
+| 15-002, 16-001 | `FolderLoad::Merging(RequestId)`. `start_folder_editor_merge` asks through `ask_chat_folder` (the same send as Loading, which also finds a fetch already out) and keeps the request in the stage. `settle_folder_editor_merge` waits on that request only: the spec arriving merges and saves, the folder's error or its own request ending with nothing puts the form back with the line (Retry is Save again). It no longer sends from upkeep and no longer asks `has_purpose_for_folder`, so another box's `GetChatFolder` is not its answer. `Merging` joins the in-flight names of `check-stage-enums.py`, so a bare one is rejected. |
+| 15-003 | `DiskUi::refused: Refused` (`Nobody`, `Screen`, `Starts`, `ScreenAndStarts`) replaces `screen_refused` and `start_refused`. Two clients can be refused at once, each leaves on its own retry, and the value changes only through `with_*` / `without_*`. `scripts/app-wide-fields.txt` lists `disk.refused`. |
+| 15-004 | `EarnLayer` is no longer `Closed`/`Open`: whether an earn page is open is the session's info column (`earn_layer_open`), and the layer keeps only what that column does not (back stack, covered panel, fade, refused page). Leaving, or opening over another panel, replaces the whole value (`EarnLayer::idle`, `covering`), so there is no second copy of "open" to drift. |
+| 16-007 | `DestRow::saved` leaves `scripts/implicit-state-baseline.txt`: the allow line already says it is a fact about the chat, read when the rows are built. |
+| 16-006 | `PasswordField` keeps the `ShowingView` it drew last frame instead of a two-variant `FieldStage`; it takes the keyboard on the frame the box turns `Idle`. |
+| 16-005 | `GifTab::Asking { wanted, request }` (a request went out) settles to `GifTab::Asked(wanted)` when that request is gone from the session (`settle_gif_ask`, run by `gif_tab_upkeep`), whatever ended it, so another window's search cancelling it does not leave the tab waiting. A send with nothing to wait for is `Asked` at once. Asked only after the send went out; a send that failed is `Wants` again, as before. |
+| 14-004 | `take_draft_clear` takes the acked slot's own clear and nothing else. The chat-id fallback (HashMap order) is gone, so a send that set no clear cannot take another topic's. The ack names its slot with the same `draft_slot_of_message` the composer sends from. A TDLib ack carries no `RequestId` of the send (`updateMessageSendSucceeded` names the temporary message id), so the key stays the slot; keying by request would need the message id of each send recorded when its answer lands, which no path does yet. |
+| 15-001 | Not a bug as described: `PlaybackUi` lives in `OnScreen`, which an account switch replaces whole, so another account never reads or drops this account's seek (test `a_seek_does_not_follow_an_account_switch`). |
+| 15-005 | `DialogKind::DeepLinkInfo` is a per-window kind and its text is `MessageUi::deep_link_info`, set in the window the link was clicked in (`show_deep_link_info`; the main window when that one has closed). Two links resolved for two windows each keep their own text. The host-machinery tests that used it as their session-wide example use `BotAlert`. |
+| 16-002, 16-003 | Closing the Add folder box while the add is out, or the Share folder box while a link save or delete is out, hands the request to `FolderUi::closed_asks` (`ClosedAsk::{FolderAdded, LinkChange}`). `settle_closed_folder_asks` (run from `settle_folder_share`) takes the answer and ends in the same toast as the open box: failure line, "added" text with the chats joined, nothing for a limit hit (its box says it). The map is in the account's `OnScreen`. |
+| 16-004 | `TopicAction::Waiting(Vec<TopicWait>)`: each topic menu action keeps its own request, and the last answer leaves the stage (`Idle`). A second action no longer replaces the first one's wait. |
+
+Tests: `folders::box_stage_tests` (merge waits for its own request; closed
+add and closed link save), `composer_sends_tests` (an ack never takes a
+neighbour's clear), `chat_window::asker_tests` (gif ask settles; two
+windows keep their own link text), `forum_extras::tests` (both answer
+orders), `deep_link_routes_tests` (seek stays with its account).

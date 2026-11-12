@@ -8,7 +8,7 @@ request's, and still cannot cancel its work when it is replaced. The
 re-sweep of 2026-11-11 recorded 205 such renames.
 
 This check reads every enum outside test code. A variant whose name says
-work is in flight (`Loading`, `Asking`, `Sending`, `Sent`, `Waiting`,
+work is in flight (`Loading`, `Asking`, `Merging`, `Sending`, `Sent`, `Waiting`,
 `Pending`, `Running`, `Resolving`, ...: the `IN_FLIGHT` list below) must
 hold what ends it:
 
@@ -61,7 +61,7 @@ IN_FLIGHT = set(
     "Joining Leaving Connecting Probing Preparing Starting Stopping Opening Closing Running "
     "Busy InFlight Applying Verifying Refreshing Syncing Creating Deleting Looking Searching "
     "Importing Exporting Queued InProgress Mutating Processing Retrying Reading Writing "
-    "Installing Paying Buying Transferring Upgrading Lingering Decoding Clearing".split()
+    "Installing Paying Buying Transferring Upgrading Lingering Decoding Clearing Merging".split()
 )
 CARRIER = re.compile(
     r"\b(?:RequestId|Task|JoinHandle|Subscription|Receiver|Sender|Instant|SystemTime)\b"

@@ -42,4 +42,3 @@ poll:VideoPlayer::spawn_open_poll 1
 poll:poll_answer_unless 1
 poll:scan 1
 poll:spawn_menu_sync 1
-poll:watch 1
