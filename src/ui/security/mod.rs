@@ -131,15 +131,15 @@ impl QuillApp {
             let error = session
                 .as_ref()
                 .and_then(|s| s.settings.sessions.error().map(str::to_string));
-            let current = sessions.iter().find(|s| s.is_current);
+            let current = sessions.iter().find(|s| s.is_current());
             let mut incomplete: Vec<&ParsedSession> = sessions
                 .iter()
-                .filter(|s| !s.is_current && s.is_password_pending)
+                .filter(|s| !s.is_current() && s.is_password_pending())
                 .collect();
             incomplete.sort_by_key(|a| std::cmp::Reverse(a.last_active_date));
             let mut others: Vec<&ParsedSession> = sessions
                 .iter()
-                .filter(|s| !s.is_current && !s.is_password_pending)
+                .filter(|s| !s.is_current() && !s.is_password_pending())
                 .collect();
             others.sort_by_key(|a| std::cmp::Reverse(a.last_active_date));
 
@@ -286,7 +286,7 @@ impl QuillApp {
                     );
                 }
                 let has_current = current.is_some();
-                let any_other = sessions.iter().any(|s| !s.is_current);
+                let any_other = sessions.iter().any(|s| !s.is_current());
                 if let Some(current) = current {
                     let mut rows = vec![this.session_row(current, mutating, cx)];
                     if any_other {

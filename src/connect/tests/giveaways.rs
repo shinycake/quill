@@ -8,7 +8,7 @@ use crate::platform::MemorySecretStore;
 use crate::state::GiveawayLaunch;
 use crate::telegram::client::copy_and_parse;
 use crate::telegram::envelope::{
-    GiveawayInfoData, GiveawayPrize, GiveawaySummary, ParsedPrepaidGiveaway,
+    GiveawayCard, GiveawayInfoData, GiveawayPrize, GiveawaySummary, ParsedPrepaidGiveaway,
 };
 use serde_json::json;
 use std::sync::Arc;
@@ -39,17 +39,14 @@ fn count_sent(recorder: &RecordingSender, ty: &str) -> usize {
 fn summary() -> GiveawaySummary {
     GiveawaySummary {
         boosted_chat_id: -100,
-        info_message_id: 0,
         additional_chat_count: 0,
         selection_date: NOW + 1000,
         only_new_members: false,
         has_public_winners: true,
         prize_description: String::new(),
         winner_count: 3,
-        unclaimed_count: 0,
         prize: GiveawayPrize::Premium { month_count: 3 },
-        finished: false,
-        was_refunded: false,
+        card: GiveawayCard::Start,
     }
 }
 

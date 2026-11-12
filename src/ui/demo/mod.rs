@@ -14,7 +14,7 @@ use quill::state::{RequestPurpose, Session, effective_preview};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{
     ChatFolderInfo, ChatFolderSpec, ChatNotificationSettings, ConnectionState, MessageContent,
-    ParsedSession, ParsedWebsite, StickerFormat, StickerItem, StorageFileTypeStats, StorageStats,
+    ParsedSession, ParsedWebsite, SessionKind, StickerFormat, StickerItem, StorageFileTypeStats, StorageStats,
 };
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -826,8 +826,7 @@ pub(super) fn demo_sessions() -> Vec<ParsedSession> {
     vec![
         ParsedSession {
             id: 987654321,
-            is_current: true,
-            is_password_pending: false,
+            kind: SessionKind::Current,
             is_unconfirmed: false,
             can_accept_secret_chats: false,
             can_accept_calls: true,
@@ -845,8 +844,7 @@ pub(super) fn demo_sessions() -> Vec<ParsedSession> {
         },
         ParsedSession {
             id: 123456789,
-            is_current: false,
-            is_password_pending: false,
+            kind: SessionKind::Other,
             is_unconfirmed: false,
             can_accept_secret_chats: true,
             can_accept_calls: false,
@@ -864,8 +862,7 @@ pub(super) fn demo_sessions() -> Vec<ParsedSession> {
         },
         ParsedSession {
             id: 555111222,
-            is_current: false,
-            is_password_pending: false,
+            kind: SessionKind::Other,
             is_unconfirmed: false,
             can_accept_secret_chats: false,
             can_accept_calls: true,
@@ -883,8 +880,7 @@ pub(super) fn demo_sessions() -> Vec<ParsedSession> {
         },
         ParsedSession {
             id: 999888777,
-            is_current: false,
-            is_password_pending: true,
+            kind: SessionKind::PasswordPending,
             is_unconfirmed: false,
             can_accept_secret_chats: false,
             can_accept_calls: false,

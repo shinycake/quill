@@ -19,12 +19,12 @@ pub enum TranslateTarget {
 /// refusal); then the message keeps its original text until the person asks.
 pub const TRANSLATE_PUMP_ATTEMPTS: u8 = 3;
 
-/// A translation: asked for (by job number), finished, or failed.
+/// A translation: asked for (by its request), finished, or failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Translation {
-    /// The request of job `job` is out; its answer finds this entry.
-    /// `attempts` are the failures before it.
-    Pending { job: u64, attempts: u8 },
+    /// `request` is out; its answer finds this entry. `attempts` are the
+    /// failures before it.
+    Pending { request: RequestId, attempts: u8 },
     Done {
         text: String,
         entities: Vec<TextEntity>,
@@ -54,10 +54,9 @@ pub struct TranslateState {
     /// Supergroups with `supergroup.has_automatic_translation` (channels
     /// that show their messages translated for everyone).
     pub auto_translate_supergroups: HashSet<i64>,
-    pub next_job: u64,
     pub messages: HashMap<MessageTranslationKey, Translation>,
-    /// Selection translations by job number.
-    pub texts: HashMap<u64, Translation>,
+    /// Selection translations by the request that asked.
+    pub texts: HashMap<RequestId, Translation>,
     /// The language each chat is shown translated into.
     pub chat_to: HashMap<i64, String>,
     /// Bumped on every change a rendered row could depend on.
@@ -65,20 +64,20 @@ pub struct TranslateState {
 }
 
 impl TranslateState {
-    /// The job numbers of the translations still asking.
-    pub fn pending_jobs(&self) -> impl Iterator<Item = u64> + '_ {
+    /// The requests of the translations still asking.
+    pub fn pending_requests(&self) -> impl Iterator<Item = RequestId> + '_ {
         self.messages
             .values()
             .chain(self.texts.values())
             .filter_map(|translation| match translation {
-                Translation::Pending { job, .. } => Some(*job),
+                Translation::Pending { request, .. } => Some(*request),
                 _ => None,
             })
     }
 
     /// How many translations are in flight.
     pub fn in_flight(&self) -> usize {
-        self.pending_jobs().count()
+        self.pending_requests().count()
     }
 }
 
@@ -129,16 +128,18 @@ impl Session {
         self.payments.premium_option.unwrap_or(false)
     }
 
-    /// Register a translation job and the TDLib request that serves it.
-    /// Returns the job number and the request id to send with.
+    /// Register a translation and the TDLib request that serves it. Returns
+    /// the request id to send with; it also names a selection's translation.
     pub fn begin_translation(
         &mut self,
         target: TranslateTarget,
         to_language: &str,
         chat_id: Option<ChatId>,
-    ) -> (u64, RequestId) {
-        self.messages.translate.next_job += 1;
-        let job = self.messages.translate.next_job;
+    ) -> RequestId {
+        let request = self.request(
+            RequestPurpose::Messages(MessagesPurpose::TranslateJob),
+            chat_id,
+        );
         match &target {
             TranslateTarget::Message {
                 chat_id,
@@ -152,27 +153,26 @@ impl Session {
                 self.messages
                     .translate
                     .messages
-                    .insert(key, Translation::Pending { job, attempts });
+                    .insert(key, Translation::Pending { request, attempts });
             }
             TranslateTarget::Text => {
-                self.messages
-                    .translate
-                    .texts
-                    .insert(job, Translation::Pending { job, attempts: 0 });
+                self.messages.translate.texts.insert(
+                    request,
+                    Translation::Pending {
+                        request,
+                        attempts: 0,
+                    },
+                );
             }
         }
         self.messages.translate.revision += 1;
-        let extra = self.request(
-            RequestPurpose::Messages(MessagesPurpose::TranslateJob { job }),
-            chat_id,
-        );
-        (job, extra)
+        request
     }
 
-    /// Roll back a job whose request could not be sent.
-    pub fn abandon_translation(&mut self, job: u64, extra: RequestId) {
-        self.requests.take(extra);
-        self.finish_translation(job, Translation::failed("send"));
+    /// Roll back a translation whose request could not be sent.
+    pub fn abandon_translation(&mut self, request: RequestId) {
+        self.requests.take(request);
+        self.finish_translation(request, Translation::failed("send"));
     }
 
     /// "Load full message" of this message is out.
@@ -183,34 +183,32 @@ impl Session {
             .is_some_and(|load| load.is_loading())
     }
 
-    /// Jobs whose request is gone without an answer (a dropped
+    /// Translations whose request is gone without an answer (a dropped
     /// continuation, a restarted client) fail, so they stop holding a place
     /// in the pump's in-flight cap and their messages are not "pending"
     /// for good.
     pub fn fail_orphaned_translations(&mut self) {
-        let orphans: Vec<u64> = self
+        let orphans: Vec<RequestId> = self
             .messages
             .translate
-            .pending_jobs()
-            .filter(|job| {
-                !self.requests.has_purpose(RequestPurpose::Messages(
-                    MessagesPurpose::TranslateJob { job: *job },
-                ))
-            })
+            .pending_requests()
+            .filter(|request| self.requests.get(*request).is_none())
             .collect();
-        for job in orphans {
-            self.finish_translation(job, Translation::failed("lost"));
+        for request in orphans {
+            self.finish_translation(request, Translation::failed("lost"));
         }
     }
 
-    /// Record the answer (or failure) of a job.
-    pub(crate) fn finish_translation(&mut self, job: u64, result: Translation) {
+    /// Record the answer (or failure) of `request`; an entry another
+    /// request has replaced ignores it.
+    pub(crate) fn finish_translation(&mut self, request: RequestId, result: Translation) {
         let translate = &mut self.messages.translate;
-        let is_job =
-            |slot: &Translation| matches!(slot, Translation::Pending { job: j, .. } if *j == job);
-        let slot = match translate.texts.get_mut(&job) {
-            Some(slot) if is_job(slot) => Some(slot),
-            _ => translate.messages.values_mut().find(|slot| is_job(slot)),
+        let is_mine = |slot: &Translation| {
+            matches!(slot, Translation::Pending { request: asked, .. } if *asked == request)
+        };
+        let slot = match translate.texts.get_mut(&request) {
+            Some(slot) if is_mine(slot) => Some(slot),
+            _ => translate.messages.values_mut().find(|slot| is_mine(slot)),
         };
         let Some(slot) = slot else {
             return;
@@ -258,14 +256,15 @@ impl Session {
         dropped
     }
 
-    /// The translation of a selection job.
-    pub fn text_translation(&self, job: u64) -> Option<&Translation> {
-        self.messages.translate.texts.get(&job)
+    /// The translation a selection request asked for.
+    pub fn text_translation(&self, request: RequestId) -> Option<&Translation> {
+        self.messages.translate.texts.get(&request)
     }
 
-    /// Forget a finished selection translation.
-    pub fn drop_text_translation(&mut self, job: u64) {
-        self.messages.translate.texts.remove(&job);
+    /// Forget a selection translation; its answer, if still to come,
+    /// finds nothing.
+    pub fn drop_text_translation(&mut self, request: RequestId) {
+        self.messages.translate.texts.remove(&request);
     }
 
     /// The language the chat is shown translated into, if it is.

@@ -273,8 +273,10 @@ impl Session {
             }
             // A failed translation shows "Translate failed." where the text
             // would have gone, in the box and in the translated bubble alike.
-            Some(RequestPurpose::Messages(MessagesPurpose::TranslateJob { job })) => {
-                self.finish_translation(job, Translation::failed(error_reason(err)));
+            Some(RequestPurpose::Messages(MessagesPurpose::TranslateJob)) => {
+                if let Some(request) = pending.map(|p| p.id) {
+                    self.finish_translation(request, Translation::failed(error_reason(err)));
+                }
             }
             // M1 fix-up: a failed `resendMessages` surfaces in the
             // status note instead of vanishing into `_ => {}` —

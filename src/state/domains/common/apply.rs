@@ -328,17 +328,12 @@ impl Session {
                 }
             }
             CommonPayload::FormattedText { text, entities }
-                if matches!(
-                    pending.map(|p| p.purpose),
-                    Some(RequestPurpose::Messages(
-                        MessagesPurpose::TranslateJob { .. }
-                    ))
-                ) =>
+                if pending.is_some_and(|p| {
+                    p.purpose == RequestPurpose::Messages(MessagesPurpose::TranslateJob)
+                }) =>
             {
-                if let Some(RequestPurpose::Messages(MessagesPurpose::TranslateJob { job })) =
-                    pending.map(|p| p.purpose)
-                {
-                    self.finish_translation(job, Translation::Done { text, entities });
+                if let Some(request) = pending.map(|p| p.id) {
+                    self.finish_translation(request, Translation::Done { text, entities });
                 }
             }
             CommonPayload::FormattedText { text, entities } => {

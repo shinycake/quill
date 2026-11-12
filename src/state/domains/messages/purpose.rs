@@ -254,10 +254,9 @@ pub enum MessagesPurpose {
     /// 15202). Response is `ok`; `updateSupergroup` carries the flag.
     ToggleSupergroupAutoTranslate,
     /// `translateText` / `translateMessageText` (schema 1.8.67). Response
-    /// is `formattedText`; `job` indexes `Session::translate.jobs`.
-    TranslateJob {
-        job: u64,
-    },
+    /// is `formattedText`; the request's id finds the translation it asked
+    /// for (`Translation::Pending`).
+    TranslateJob,
     /// Slice msg-richtext-ai-tools: `fixTextWithAi` (schema 1.8.67,
     /// :12172). Response is `fixedText`; the fixed text replaces the
     /// open chat's composer draft.

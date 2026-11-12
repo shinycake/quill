@@ -3,6 +3,7 @@
 //! page's fields and a transition moves the data it carries.
 
 use super::TranslateSource;
+use quill::ids::RequestId;
 use gpui_kit::component::input::TextareaState;
 use gpui_kit::{Entity, Subscription};
 
@@ -15,7 +16,7 @@ pub(super) enum TranslateAsk {
     /// key), or not yet.
     Idle,
     /// A selection's job.
-    Job(u64),
+    Job(RequestId),
     /// The request could not be sent.
     Refused,
 }
@@ -77,7 +78,7 @@ impl TranslateDialog {
     }
 
     /// The selection job the box waits on, to drop when the dialog goes.
-    pub(super) fn job(&self) -> Option<u64> {
+    pub(super) fn job(&self) -> Option<RequestId> {
         match self.current_box()?.ask {
             TranslateAsk::Job(job) => Some(job),
             TranslateAsk::Idle | TranslateAsk::Refused => None,
