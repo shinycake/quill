@@ -10220,3 +10220,31 @@ add and closed link save), `composer_sends_tests` (an ack never takes a
 neighbour's clear), `chat_window::asker_tests` (gif ask settles; two
 windows keep their own link text), `forum_extras::tests` (both answer
 orders), `deep_link_routes_tests` (seek stays with its account).
+
+### Sweep fixes (r4-12)
+
+| Ids | What changed |
+| --- | --- |
+| 23-008 | `StoryOpen::Waiting` holds `StoryAsk`: `Out(RequestId)` (the `getStory` the press is waiting on, found with `request_for_story_in_flight` after the send; the demo records the ask it would have sent) or `NoneOut` (nothing went out). `resolve_pending_story_open` ends the wait with the failure note when that request left flight with no story and no error recorded (a dropped request), and when none went out. Test `an_open_whose_request_was_dropped_ends_with_the_failure_note`. |
+| 23-001 | `ToastQueue` keeps `Footer::{Plain(note), Toasted(note)}` instead of a copy of the note reset by `advance`. `note()` reads a toasted note only while its toast is on screen or waiting (`holds`), so the note ends with its toast; `drop_toasts` turns it into a plain note (the footer keeps it without a session). |
+| 23-004, 23-005 | `EditorStage::Reading` and `Encoding` carry no `serial`: the stage holds the task that would answer, so a replaced stage cannot be answered (`is_reading()`, `is_encoding()`, `can_encode()`); `next_editor_serial` and its static are gone. Opening an editor over another goes through `release_video_editor`, which deletes the old cover file (test `opening_an_editor_over_another_deletes_the_first_ones_cover_file`). The avatar encode names its file by time. |
+| 23-006, g-431..g-433 | The release recheck is one timer task held in `preferences.update_recheck` (each fire arms the next; replacing or dropping ends it). The download's 250 ms redraw loop is gone: the title-bar pill asks for 4 frames a second on the frame clock while it draws a download, so nothing ticks once it is not drawn. `UpdateControl::Downloading` is `Progress` (a derived view of `UpdateState::Downloading`, which owns the task). |
+| 23-007 | `MediaViewer` carries `ViewerOpen`, minted by every `MediaViewer::open*` and kept by `close`; `ViewerUi::open_gen` and its six hand bumps are gone. `PendingGallery` holds the `ViewerOpen` it was asked over. Test `every_open_is_a_new_one_and_a_closed_viewer_remembers_the_last`. |
+| 23-009, 24-009, g-439..g-446 | `Cell`/`try_borrow_mut` in place of `RefCell` borrows: the dialog bodies (`Rc<Cell<Option<_>>>` and `take()`), `text_reveal::CURRENT`, `window_frame::APPLIED`. |
+| 23-010 | A `StripFrame::Failed` slot paints its nearest cut neighbour (the one before, else the one after), so one bad timestamp leaves no hole (tests in `frames.rs`). |
+| 24-001, 24-003, 24-004 | Popups have a `PopupId`; `show_popup` returns it, `popups` is keyed by it, and `AccessStage::Asking`, `WriteAccess::Asking`, `PhoneFlow::Asking` and `SetStage::Confirming` hold the id of the popup they opened. An answer from any other popup leaves the stage (test `an_access_answer_from_another_popup_leaves_the_stage`). `check-stage-enums.py` counts `PopupId` as what ends such a stage. |
+| 24-002 | `SetStage::Resolving { request: Option }` is `Deferred` (the shared lookup was busy; asked again each tick until the timeout) and `Resolving { request }`. |
+| 24-005 | `LaunchFlow::take_lost`: a wait whose request left flight with no answer ends with the "couldn't start" note, so the mini-app poll stops waiting (test `a_wait_whose_request_left_flight_is_given_up`). |
+| 24-006 | `MiniApps::generation` is gone; the poll task is held in `MiniApps::poll` and ends itself. |
+| 24-007 | `Poll::Asking { request, asked }`: `schedule_widget_polls` makes a poll whose request left flight `Due` after a period, and looks again when a period has passed without an answer (test `a_poll_whose_request_was_dropped_is_due_again`). |
+| 24-011 | `VoiceCapture::drop` removes the file of a capture nobody ended (after the encoder ends, off the UI thread); a fixture's and a handed-on file are kept (tests in `voice.rs`). |
+| 24-008 | Not a leak: `Answers::take_for` drops every answer it is not asked for, and the preview's drain runs on every poll, so a link arriving after Cancel is dropped at once (test `a_share_link_arriving_after_cancel_is_dropped`). |
+| 23-002 | Skipped (plausible): the dropped order is held only until the model shows it (`Echo::Caught` ends it), and the driver's optimistic reorder puts the dropped order into the model before the send returns, so a later server refusal rolls back a hold that is already over. Only a refusal before any sync saw the dropped order would hold it, and `reorder_refused` covers the synchronous refusals. No Touch Bar on Linux to drive it. |
+| 23-003 | Skipped: tdesktop seeks the viewer's video while the slider moves (`playbackControlsSeekProgress`), as the comment at `Command::ViewerSeek` says. |
+| 23-011 | Skipped: the retry on reopen is the documented choice (a pass that retried would hammer a connection that is down); a backoff retry needs a clock the pump does not have, and tdesktop's source was not at hand to copy its rule. |
+| g-403..g-430, g-434..g-438 | Names that said work was in flight on values that hold none: `Decoding::Active`, `Stage::Claimed`, `LookStage::Coming`, `Phase::Intact`/`Percent`/`NoPicture`, `PlayState::NotOpen`, `PictureState::{Spinner, Progress}`, `LiveOverlay::Placeholder`, `WaitingCheck::ShowAfter`, `Echo::OldOrder`, `PickerFill::Held`, `Unavailable::Undecided`, `Kind::HelperHolds`, `ToldStage::Untold`, `SendResult`, `ExtractionStage::{NoChild, Spawned}`, `VcardImport::Picked`, `Assembly::Partial`, `Cancellation::Active`. The open poll of `VideoPlayer` is gone: `Player::on_open` runs a wake from the decode thread when the file opens, and a capture's still waits on a condvar (`wait_open`, `wait_frame`). The caBLE scan waits on a stop signal instead of a 200 ms flag check. `run_poll_loop`'s gap is `throttle`. |
+
+Tests: `story_viewer::open_tests`, `profile_photo_sources::tests`,
+`video_editor_timeline::frames`, `web_app_ui::{emoji_status_tests,
+launch_flow}`, `widgets_lock_tests`, `wallpaper_preview_tests`, `voice`,
+`media_viewer`, `video_decode::tests`.
