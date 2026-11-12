@@ -12,11 +12,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self
-            .session
-            .requests
-            .has_purpose(RequestPurpose::GetSupportUser)
-        {
+        if self.session.settings.support_user.is_loading() {
             return Ok(false);
         }
         let extra = self.session.request(RequestPurpose::GetSupportUser, None);
@@ -24,6 +20,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        let ask = &mut self.session.settings.support_user;
+        ask.begin();
+        ask.sent(extra);
         Ok(true)
     }
 
@@ -37,10 +36,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         let EnvelopePayload::Users(UsersPayload::Me { user_id, .. }) = &envelope.payload else {
             return None;
         };
-        let purpose = envelope
+        // Only the answer of the ask the row holds opens the chat.
+        let asked = envelope
             .extra
-            .and_then(|id| self.session.requests.purpose(id))?;
-        (purpose == RequestPurpose::GetSupportUser).then_some(*user_id)
+            .filter(|id| self.session.settings.support_user.waits_for(*id))?;
+        (self.session.requests.purpose(asked)? == RequestPurpose::GetSupportUser)
+            .then_some(*user_id)
     }
 
     /// Open the private chats an answer named: the support user's, and a

@@ -448,7 +448,7 @@ fn suggest_emoji_settles_by_its_own_request(cx: &mut TestAppContext) {
             return;
         };
         let lookups = &mut session.stickers.emoji.keyword_lookups;
-        lookups.failed(RequestId(1));
+        lookups.failed(RequestId(1), true);
         lookups.sent(RequestId(2), "pizza".to_string());
         lookups.answered(RequestId(2), Vec::new());
         app.answer_asked_word(cx);
@@ -471,7 +471,7 @@ fn suggest_emoji_says_so_when_the_lookup_fails(cx: &mut TestAppContext) {
         let lookups = &mut session.stickers.emoji.keyword_lookups;
         for id in [1, 2] {
             lookups.sent(RequestId(id), "zzzz".to_string());
-            lookups.failed(RequestId(id));
+            lookups.failed(RequestId(id), true);
         }
         app.composer_ui.emoji_words.bar = WordBar::Asking {
             range: 0..4,

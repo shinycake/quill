@@ -172,6 +172,47 @@ fn adding_a_new_sticker_uploads_it_and_refreshes_the_set() {
     drop(dir);
 }
 
+/// Sweep r4-03 round 2 (item 9): only the refresh the box waits for lands.
+/// An edit confirmed while a refresh is out makes it stale: its answer is
+/// dropped and a new one is asked.
+#[test]
+fn a_set_answer_that_is_not_the_refresh_waited_for_is_dropped() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    open_owned_set(&mut driver, &seq, &sink, true);
+
+    let first = driver
+        .add_new_sticker_to_set(77, "/tmp/s.png", "😀", StickerFormat::Webp)
+        .unwrap();
+    feed(&mut driver, &seq, &sink, ok(first));
+    let refresh = driver.sync_sticker_set_view().unwrap().unwrap();
+    let second = driver
+        .add_new_sticker_to_set(77, "/tmp/t.png", "😀", StickerFormat::Webp)
+        .unwrap();
+    feed(&mut driver, &seq, &sink, ok(second));
+    assert!(edits(&driver).refresh_needed(), "the refresh out is stale");
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        set_payload(&refresh.as_extra(), true, &[1, 2, 3, 9]),
+    );
+    assert_eq!(viewed_ids(&driver), vec![1, 2, 3], "its answer is dropped");
+    let again = driver.sync_sticker_set_view().unwrap().unwrap();
+    assert_ne!(again, refresh);
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        set_payload(&again.as_extra(), true, &[1, 2, 3, 4, 5]),
+    );
+    assert_eq!(viewed_ids(&driver), vec![1, 2, 3, 4, 5]);
+    drop(dir);
+}
+
 #[test]
 fn a_failed_upload_shows_tdesktops_wording() {
     let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
@@ -434,8 +475,14 @@ fn the_refetch_after_an_edit_replaces_a_list_request_asked_before_it() {
     feed(&mut driver, &seq, &sink, ok(rename));
     driver.sync_sticker_set_view().unwrap();
     assert!(
-        driver.session.requests.get(before).is_none(),
-        "the request asked before the edit is dropped"
+        !driver
+            .session
+            .stickers
+            .stickers
+            .lists
+            .installed
+            .waits_for(before),
+        "the request asked before the edit is not the one the list waits for"
     );
     let asked = recorder
         .snapshot()

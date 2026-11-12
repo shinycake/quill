@@ -520,6 +520,13 @@ pub enum NewChatPrivacyState {
     /// The first fetch is out; only its answer (or error) leaves the stage.
     Loading(RequestId),
     Ready(NewChatPrivacy),
+    /// A refresh of the value shown is out as `request`: the row keeps
+    /// `value`, a save takes the stage over, and the refresh's answer or
+    /// error ends only this stage.
+    Refreshing {
+        value: NewChatPrivacy,
+        request: RequestId,
+    },
     /// Saves are out over the confirmed value; the row shows the newest.
     Saving(crate::state::saves::Saves<NewChatPrivacy>),
     Failed,
@@ -529,7 +536,7 @@ impl NewChatPrivacyState {
     /// What the row shows, once a value is known.
     pub fn value(&self) -> Option<NewChatPrivacy> {
         match self {
-            Self::Ready(value) => Some(*value),
+            Self::Ready(value) | Self::Refreshing { value, .. } => Some(*value),
             Self::Saving(saves) => Some(saves.value()),
             Self::Loading(_) | Self::Failed => None,
         }
@@ -546,7 +553,10 @@ impl NewChatPrivacyState {
     /// A save goes out under `request` over the value shown.
     pub fn save(&mut self, request: RequestId, next: NewChatPrivacy) {
         match self {
-            Self::Ready(confirmed) => {
+            Self::Ready(confirmed)
+            | Self::Refreshing {
+                value: confirmed, ..
+            } => {
                 *self = Self::Saving(crate::state::saves::Saves::first(*confirmed, request, next));
             }
             Self::Saving(saves) => saves.push(request, next),
@@ -572,20 +582,37 @@ impl NewChatPrivacyState {
         }
     }
 
-    /// The fetch `fetch` answered `server`: it replaces what is shown
-    /// unless a save asked after it is still out. The first fetch of this
-    /// stage always lands.
+    /// The fetch `fetch` answered `server`: only the stage that waits for
+    /// it takes it. A save taking the stage over (`Saving`) left the fetch
+    /// behind: it was asked before the save.
     pub fn fetched(&mut self, fetch: RequestId, server: NewChatPrivacy) {
         match self {
             Self::Loading(live) if *live == fetch => *self = Self::Ready(server),
-            Self::Ready(_) => *self = Self::Ready(server),
-            Self::Saving(saves) => {
-                if let Some(value) = saves.fetched(fetch, server) {
-                    *self = Self::Ready(value);
-                }
+            Self::Refreshing { request, .. } if *request == fetch => {
+                *self = Self::Ready(server);
             }
-            Self::Loading(_) | Self::Failed => {}
+            _ => {}
         }
+    }
+
+    /// `fetch` was refused: the first fetch fails the row, a refresh leaves
+    /// the value the row already shows.
+    pub fn fetch_failed(&mut self, fetch: RequestId) {
+        match self {
+            Self::Loading(live) if *live == fetch => *self = Self::Failed,
+            Self::Refreshing { value, request } if *request == fetch => {
+                *self = Self::Ready(*value);
+            }
+            _ => {}
+        }
+    }
+
+    /// A fetch is out for this stage, or a save is (nothing is asked over it).
+    pub fn is_busy(&self) -> bool {
+        matches!(
+            self,
+            Self::Loading(_) | Self::Refreshing { .. } | Self::Saving(_)
+        )
     }
 }
 
@@ -639,7 +666,8 @@ mod tests {
     use super::*;
     use crate::diagnostics::{DiagnosticSink, MemorySink};
     use crate::ids::AccountKey;
-    use crate::state::SettingsPurpose;
+    use crate::state::fetch::Fetch;
+    use crate::state::{BlockedList, SettingsPurpose};
     use crate::state::{ReadDate, RequestPurpose, Session};
     use crate::telegram::client::copy_and_parse;
     use crate::telegram::requests_privacy::PrivacySettingKey;
@@ -656,6 +684,38 @@ mod tests {
         let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
         let owned = copy_and_parse(json, seq, &dyn_sink).unwrap();
         session.apply(owned);
+    }
+
+    #[test]
+    fn a_fetch_answer_is_taken_only_by_the_stage_that_waits_for_it() {
+        let v = NewChatPrivacy {
+            allow_from_unknown: true,
+            incoming_paid_message_star_count: 0,
+        };
+        let other = NewChatPrivacy {
+            allow_from_unknown: false,
+            incoming_paid_message_star_count: 0,
+        };
+        assert_ne!(v, other);
+        let mut ready = NewChatPrivacyState::Ready(v);
+        ready.fetched(RequestId(9), other);
+        assert_eq!(ready, NewChatPrivacyState::Ready(v));
+        let mut refreshing = NewChatPrivacyState::Refreshing {
+            value: v,
+            request: RequestId(5),
+        };
+        refreshing.fetched(RequestId(6), other);
+        assert_eq!(
+            refreshing,
+            NewChatPrivacyState::Refreshing {
+                value: v,
+                request: RequestId(5)
+            }
+        );
+        refreshing.fetch_failed(RequestId(6));
+        assert!(matches!(refreshing, NewChatPrivacyState::Refreshing { .. }));
+        refreshing.fetch_failed(RequestId(5));
+        assert_eq!(refreshing, NewChatPrivacyState::Ready(v));
     }
 
     #[test]
@@ -994,55 +1054,109 @@ mod tests {
         assert_eq!(session.settings.read_date, ReadDate::Known(false));
     }
 
-    /// A page of a list that restarted since (or whose data was dropped)
-    /// never extends the new one (05-132).
+    fn blocked_json(extra: RequestId, total: i32, ids: &[i64]) -> String {
+        let senders: Vec<String> = ids
+            .iter()
+            .map(|id| format!(r#"{{"@type":"messageSenderUser","user_id":{id}}}"#))
+            .collect();
+        format!(
+            r#"{{"@type":"messageSenders","@extra":"{}","total_count":{total},"senders":[{}]}}"#,
+            extra.0,
+            senders.join(",")
+        )
+    }
+
+    fn ask_page(session: &mut Session, offset: i32) -> RequestId {
+        let extra = session.request(
+            RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders { offset }),
+            None,
+        );
+        session.settings.blocked_senders.begin();
+        session.settings.blocked_senders.sent(extra);
+        extra
+    }
+
+    /// A page that no longer waits (a newer ask replaced it) never lands on
+    /// the list, and its error does not fail the newer page.
     #[test]
-    fn a_late_blocked_page_is_matched_to_its_list() {
+    fn a_replaced_blocked_page_is_matched_by_its_request() {
         let (mut session, sink) = session();
         let seq = AtomicU64::new(0);
-        let old = session.request(
-            RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders {
-                offset: 2,
-                generation: 0,
-            }),
-            None,
-        );
-        // The list restarted: page 0 of generation 1 is in.
-        session.settings.restart_blocked_list();
-        session.settings.blocked_senders.succeed(vec![61, 62]);
-        session.settings.blocked_total = 2;
-        apply_json(
-            &mut session,
-            &seq,
-            &sink,
-            &format!(
-                r#"{{"@type":"messageSenders","@extra":"{}","total_count":9,"senders":[{{"@type":"messageSenderUser","user_id":62}},{{"@type":"messageSenderUser","user_id":70}}]}}"#,
-                old.0,
-            ),
-        );
-        assert_eq!(session.settings.blocked_senders.data(), Some(&vec![61, 62]));
-        assert_eq!(session.settings.blocked_total, 2);
+        let old = ask_page(&mut session, 0);
+        let live = ask_page(&mut session, 0);
+        apply_json(&mut session, &seq, &sink, &blocked_json(old, 9, &[70]));
+        assert_eq!(session.settings.blocked_senders.data(), None);
+        assert!(session.settings.blocked_senders.is_loading());
+        session
+            .settings
+            .blocked_senders
+            .failed(Some(old), "late", false);
+        assert!(session.settings.blocked_senders.is_loading());
+        apply_json(&mut session, &seq, &sink, &blocked_json(live, 3, &[61, 62]));
+        assert_eq!(session.settings.blocked_ids(), &[61, 62]);
+        assert_eq!(session.settings.blocked_total(), 3);
         // A page of the live list appends without repeating an id.
-        let live = session.request(
-            RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders {
-                offset: 2,
-                generation: session.settings.blocked_generation,
+        let next = ask_page(&mut session, 2);
+        apply_json(&mut session, &seq, &sink, &blocked_json(next, 3, &[62, 63]));
+        assert_eq!(session.settings.blocked_ids(), &[61, 62, 63]);
+    }
+
+    /// An unblock sent while page 0 is out takes the page's place: the page
+    /// asked before the change no longer lands, and the change's `ok` marks
+    /// the list for a fresh first page.
+    #[test]
+    fn an_unblock_during_the_refresh_is_not_undone_by_it() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.settings.blocked_senders = Fetch::Ready(BlockedList {
+            ids: vec![61, 62],
+            total: 2,
+        });
+        let page = ask_page(&mut session, 0);
+        let unblock = session.request(
+            RequestPurpose::Settings(SettingsPurpose::SetSenderBlockList {
+                user_id: 61,
+                block: false,
             }),
             None,
+        );
+        session.settings.block_change_sent(unblock, 61, false);
+        assert_eq!(session.settings.blocked_ids(), &[62]);
+        apply_json(&mut session, &seq, &sink, &blocked_json(page, 2, &[61, 62]));
+        assert_eq!(
+            session.settings.blocked_ids(),
+            &[62],
+            "the old page is dropped"
         );
         apply_json(
             &mut session,
             &seq,
             &sink,
-            &format!(
-                r#"{{"@type":"messageSenders","@extra":"{}","total_count":3,"senders":[{{"@type":"messageSenderUser","user_id":62}},{{"@type":"messageSenderUser","user_id":63}}]}}"#,
-                live.0,
-            ),
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, unblock.0),
         );
-        assert_eq!(
-            session.settings.blocked_senders.data(),
-            Some(&vec![61, 62, 63])
-        );
+        assert!(session.settings.blocked_senders.is_outdated());
+        assert_eq!(session.settings.blocked_ids(), &[62]);
+    }
+
+    /// A refused unblock fails its own stand-in; one that fails while a
+    /// different page is out asks for the list again instead of ending it.
+    #[test]
+    fn a_refused_block_change_does_not_end_a_page_in_flight() {
+        let (mut session, _sink) = session();
+        session.settings.blocked_senders = Fetch::Ready(BlockedList {
+            ids: vec![61],
+            total: 1,
+        });
+        let page = ask_page(&mut session, 1);
+        session
+            .settings
+            .block_change_failed(None, "never sent".into(), false);
+        assert!(session.settings.blocked_senders.waits_for(page));
+        session
+            .settings
+            .block_change_failed(Some(RequestId(999)), "refused".into(), true);
+        assert!(session.settings.blocked_senders.is_outdated());
+        assert_eq!(session.settings.blocked_ids(), &[61]);
     }
 
     /// Slice S3: blocked-senders paging — page 0 replaces, later pages
@@ -1051,46 +1165,20 @@ mod tests {
     fn blocked_senders_pages_append() {
         let (mut session, sink) = session();
         let seq = AtomicU64::new(0);
-        let extra = session.request(
-            RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders {
-                offset: 0,
-                generation: 0,
-            }),
-            None,
-        );
+        let extra = ask_page(&mut session, 0);
         apply_json(
             &mut session,
             &seq,
             &sink,
-            &format!(
-                r#"{{"@type":"messageSenders","@extra":"{}","total_count":3,"senders":[{{"@type":"messageSenderUser","user_id":61}},{{"@type":"messageSenderUser","user_id":62}}]}}"#,
-                extra.0,
-            ),
+            &blocked_json(extra, 3, &[61, 62]),
         );
-        assert_eq!(session.settings.blocked_senders.data(), Some(&vec![61, 62]));
-        assert_eq!(session.settings.blocked_total, 3);
+        assert_eq!(session.settings.blocked_ids(), &[61, 62]);
+        assert_eq!(session.settings.blocked_total(), 3);
         assert!(!session.settings.blocked_senders.is_loading());
 
-        let extra = session.request(
-            RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders {
-                offset: 2,
-                generation: 0,
-            }),
-            None,
-        );
-        apply_json(
-            &mut session,
-            &seq,
-            &sink,
-            &format!(
-                r#"{{"@type":"messageSenders","@extra":"{}","total_count":3,"senders":[{{"@type":"messageSenderUser","user_id":63}}]}}"#,
-                extra.0,
-            ),
-        );
-        assert_eq!(
-            session.settings.blocked_senders.data(),
-            Some(&vec![61, 62, 63])
-        );
+        let extra = ask_page(&mut session, 2);
+        apply_json(&mut session, &seq, &sink, &blocked_json(extra, 3, &[63]));
+        assert_eq!(session.settings.blocked_ids(), &[61, 62, 63]);
     }
 }
 

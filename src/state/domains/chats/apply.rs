@@ -296,7 +296,11 @@ impl Session {
                 let kind_unknown = matches!(chat.kind, ChatKind::Unknown);
                 let scope = scope_for_chat_kind(&chat.kind);
                 let fully_default = notification_settings == ChatNotificationSettings::default();
-                chat.notification_settings = notification_settings;
+                // While a save of ours is out the update is its echo, and
+                // what shows is already the newest edit.
+                if !self.settings.chat_saves.is_saving(&chat_id) {
+                    chat.notification_settings = notification_settings;
+                }
                 // Parity slice: the exceptions list for the chat's scope is
                 // stale now. A reset to the scope default (e.g. our own
                 // "Reset to default") just prunes the chat from the cached

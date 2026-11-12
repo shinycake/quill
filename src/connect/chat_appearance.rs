@@ -48,17 +48,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         let _ = self.load_group_sticker_choices(chat_id);
         self.load_background_emoji_icons()?;
         self.session.stickers.emoji.status_picker = crate::emoji::StatusPicker::ChatAppearance;
-        let purpose = RequestPurpose::GetDefaultChatEmojiStatuses;
         if self
             .session
             .stickers
             .emoji
-            .chat_default_status_ids
-            .is_empty()
-            && !self.session.requests.has_purpose(purpose)
+            .lists
+            .chat_default_statuses
+            .can_ask()
         {
-            let extra = self.session.request(purpose, None);
-            self.send_json_request(extra, &get_default_chat_emoji_statuses(extra))?;
+            self.emoji_set_request(
+                RequestPurpose::GetDefaultChatEmojiStatuses,
+                get_default_chat_emoji_statuses,
+            )?;
         }
         Ok(())
     }
@@ -191,7 +192,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn download_chat_status_choices(&mut self) {
         let emoji = &self.session.stickers.emoji;
         let files: Vec<FileId> = emoji
-            .chat_default_status_ids
+            .chat_default_status_ids()
             .iter()
             .filter_map(|id| {
                 emoji

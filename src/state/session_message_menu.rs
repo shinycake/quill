@@ -225,20 +225,29 @@ pub enum SetChangeStage {
 }
 
 impl StickerSetView {
-    /// A view that is still loading its set.
-    pub fn loading(set_id: i64) -> Self {
+    /// A view that is loading its set, as `request`.
+    pub fn loading(set_id: i64, request: RequestId) -> Self {
         Self {
             set_id,
-            stage: StickerSetViewStage::Loading,
+            stage: StickerSetViewStage::Loading { request },
             edits: StickerSetEdits::default(),
             change: SetChangeStage::Idle,
         }
+    }
+
+    /// The first load of the set is out as `request` and nothing else.
+    pub fn waits_for_load(&self, request: Option<RequestId>) -> bool {
+        matches!(self.stage, StickerSetViewStage::Loading { request: asked } if Some(asked) == request)
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StickerSetViewStage {
-    Loading,
+    /// The set's first `getStickerSet` is out as `request`: only its answer
+    /// or error leaves the stage.
+    Loading {
+        request: RequestId,
+    },
     Ready {
         title: String,
         /// The set's short name, for its `t.me` link (empty if unknown).
@@ -362,27 +371,40 @@ impl Session {
     }
 
     /// The set's contents arrived (`stage` is the `Ready` stage).
-    pub(crate) fn accept_sticker_set_view(&mut self, set_id: i64, stage: StickerSetViewStage) {
+    pub(crate) fn accept_sticker_set_view(
+        &mut self,
+        set_id: i64,
+        request: Option<RequestId>,
+        stage: StickerSetViewStage,
+    ) {
         if let Some(view) = self.stickers.sticker_set_view.as_mut()
             && view.set_id == set_id
         {
-            view.stage = stage;
-            // An edit still in flight (a move applied locally) may have
-            // changed the set after this answer was built: ask again once
-            // it is answered.
-            view.edits.set_arrived();
+            // Only the answer of the load the box waits for, or of the
+            // refresh it waits for, lands.
+            if view.waits_for_load(request) {
+                view.stage = stage;
+                view.edits.set_arrived();
+            } else if view.edits.refresh_arrived(request) {
+                view.stage = stage;
+            }
         }
     }
 
     /// The box's load failed. A refetch after an edit (a rename, an add,
     /// a remove) that took is not a failed load: the box keeps what it
     /// shows.
-    pub(crate) fn fail_sticker_set_view(&mut self, set_id: i64) {
-        if let Some(view) = self.stickers.sticker_set_view.as_mut()
-            && view.set_id == set_id
-            && matches!(view.stage, StickerSetViewStage::Loading)
-        {
+    pub(crate) fn fail_sticker_set_view(&mut self, set_id: i64, request: Option<RequestId>) {
+        let Some(view) = self.stickers.sticker_set_view.as_mut() else {
+            return;
+        };
+        if view.set_id != set_id {
+            return;
+        }
+        if view.waits_for_load(request) {
             view.stage = StickerSetViewStage::Failed;
+        } else {
+            view.edits.refresh_failed(request);
         }
     }
 

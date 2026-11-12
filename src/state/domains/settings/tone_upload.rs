@@ -16,13 +16,20 @@ impl Session {
     /// A `setAccountTtl` or `deleteAccount` is out: one write at a time. A
     /// `getAccountTtl` in flight does not block a write.
     pub fn account_ttl_write_pending(&self) -> bool {
-        self.requests.pending.values().any(|pending| {
-            matches!(
-                pending.purpose,
-                RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { .. })
-                    | RequestPurpose::DeleteAccount
-            )
-        })
+        // The stages hold their requests: a delete is out, or the TTL stage
+        // waits for a write (a `getAccountTtl` it may wait for is no write).
+        self.settings.account_delete.is_loading()
+            || self
+                .settings
+                .account_ttl
+                .asked()
+                .and_then(|request| self.requests.purpose(request))
+                .is_some_and(|purpose| {
+                    matches!(
+                        purpose,
+                        RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { .. })
+                    )
+                })
     }
 
     /// The saved-sound list is owed a fetch: it changed, and no request

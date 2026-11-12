@@ -157,7 +157,10 @@ impl Session {
             }
             SettingsPayload::NetworkStatistics(usage) => {
                 if purpose == Some(RequestPurpose::GetNetworkStatistics) {
-                    self.settings.privacy_data.network.succeed(usage.clone());
+                    self.settings
+                        .privacy_data
+                        .network
+                        .answered(pending.map(|p| p.id), usage.clone());
                 }
                 true
             }
@@ -187,18 +190,9 @@ impl Session {
     /// `ok` of this block's purposes.
     pub(crate) fn apply_privacy_data_ok(&mut self, pending: Option<&PendingRequest>) {
         match pending.map(|p| p.purpose) {
-            Some(RequestPurpose::ResetNetworkStatistics) => {
-                // The old numbers are gone; the next open refetches.
-                let network = &mut self.settings.privacy_data.network;
-                *network = if network.is_loading() {
-                    crate::state::fetch::Fetch::Loading {
-                        stale: None,
-                        request: None,
-                    }
-                } else {
-                    crate::state::fetch::Fetch::Idle
-                };
-            }
+            // The reset sender already dropped the old numbers and asked
+            // again behind it; the refetch holds its own request.
+            Some(RequestPurpose::ResetNetworkStatistics) => {}
             Some(RequestPurpose::HideCheckPasswordSuggestion) => {
                 self.chat_list
                     .suggestions
@@ -291,11 +285,10 @@ impl Session {
             // Only the first fetch can fail the row; a refresh that fails
             // leaves the value the row already shows.
             RequestPurpose::GetNewChatPrivacy => {
-                if matches!(
-                    data.new_chat,
-                    Some(NewChatPrivacyState::Loading(live)) if Some(live) == pending.map(|p| p.id)
-                ) {
-                    data.new_chat = Some(NewChatPrivacyState::Failed);
+                if let Some(id) = pending.map(|p| p.id)
+                    && let Some(state) = data.new_chat.as_mut()
+                {
+                    state.fetch_failed(id);
                 }
             }
             RequestPurpose::Settings(SettingsPurpose::SetNewChatPrivacy) => {
@@ -368,8 +361,11 @@ impl Session {
                 }
             }
             RequestPurpose::GetNetworkStatistics => {
-                data.network
-                    .fail(sessions_error_line("load the network usage", err));
+                data.network.failed(
+                    pending.map(|p| p.id),
+                    sessions_error_line("load the network usage", err),
+                    false,
+                );
             }
             RequestPurpose::ResetNetworkStatistics => {
                 data.network

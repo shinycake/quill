@@ -727,16 +727,20 @@ fn the_chooser_lists_saved_gifs_except_when_adapting(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.stickers.gifs.saved_answered(vec![AnimationItem {
-                duration: 2,
-                width: 320,
-                height: 240,
-                file_name: "dance.mp4".into(),
-                mime_type: "video/mp4".into(),
-                file_id: FileId(9_001),
-                thumb: quill::telegram::envelope::Thumb::of(None, 0, 0, true),
-                minithumbnail: None,
-            }]);
+            session.stickers.gifs.saved_asked(quill::ids::RequestId(1));
+            session.stickers.gifs.saved_answered(
+                Some(quill::ids::RequestId(1)),
+                vec![AnimationItem {
+                    duration: 2,
+                    width: 320,
+                    height: 240,
+                    file_name: "dance.mp4".into(),
+                    mime_type: "video/mp4".into(),
+                    file_id: FileId(9_001),
+                    thumb: quill::telegram::envelope::Thumb::of(None, 0, 0, true),
+                    minithumbnail: None,
+                }],
+            );
         }
         app.sticker_box
             .editing

@@ -286,6 +286,25 @@ impl Session {
             .insert(scope, settings.clone());
     }
 
+    /// A chat's notification settings went out: they show at once, so the
+    /// next edit of the chat starts from them (the request carries the
+    /// whole object) and never reverts this one.
+    pub fn show_chat_save(
+        &mut self,
+        chat_id: ChatId,
+        request: RequestId,
+        settings: &ChatNotificationSettings,
+    ) {
+        let Some(chat) = self.chats.get_mut(&chat_id.0) else {
+            return;
+        };
+        let shown = chat.notification_settings.clone();
+        chat.notification_settings = settings.clone();
+        self.settings
+            .chat_saves
+            .begin(chat_id, request, settings.clone(), || Some(shown));
+    }
+
     /// The same for the reaction notification settings.
     pub fn show_reaction_save(
         &mut self,
@@ -325,6 +344,19 @@ impl Session {
                             self.settings.scope_notification_settings.remove(&scope);
                         }
                     }
+                }
+            }
+            RequestPurpose::SetChatNotificationSettings => {
+                let Some(chat_id) = pending.chat_id else {
+                    return;
+                };
+                if let Some(Some(previous)) = self
+                    .settings
+                    .chat_saves
+                    .settle(&chat_id, pending.id, refused)
+                    && let Some(chat) = self.chats.get_mut(&chat_id.0)
+                {
+                    chat.notification_settings = previous;
                 }
             }
             RequestPurpose::SetReactionNotificationSettings => {

@@ -8,7 +8,7 @@
 //! ranks them the way `EmojiKeywords::LangPack::query` does.
 #![deny(clippy::indexing_slicing)]
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 
 use crate::ids::RequestId;
 use crate::telegram::envelope_emoji::EmojiKeyword;
@@ -19,125 +19,198 @@ const ANSWER_CAP: usize = 2048;
 /// answers.
 pub const IN_FLIGHT_CAP: usize = 8;
 /// Failed requests for one query before it is left alone for the session
-/// (offline, or the keyword pack would not load).
+/// (the keyword pack would not load).
 const ATTEMPTS: u8 = 2;
-/// Request outcomes kept for readers that waited on one.
-const ENDED_KEPT: usize = 64;
 
-/// How a keyword request ended.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Outcome {
-    Answered,
-    Failed,
+/// Where one query's lookup stands.
+#[derive(Debug, Clone)]
+enum Lookup {
+    /// `request` is out; `failures` earlier attempts failed.
+    Asking { request: RequestId, failures: u8 },
+    /// Answered by `request`; `age` orders the entries when the oldest are
+    /// forgotten.
+    Answered {
+        request: RequestId,
+        age: u64,
+        keywords: Vec<EmojiKeyword>,
+    },
+    /// Failed with the connection up, `failures` times in all; asked again
+    /// until [`ATTEMPTS`] have failed.
+    Failed { failures: u8 },
+    /// Failed while the connection was not ready: nothing is asked until
+    /// it is back ([`KeywordLookups::forgive_failures`]).
+    Offline,
 }
 
-/// `searchEmojis` answers by lowercased query.
+/// `searchEmojis` answers by lowercased query, each query one stage.
 #[derive(Debug, Clone, Default)]
 pub struct KeywordLookups {
-    answers: HashMap<String, (u64, Vec<EmojiKeyword>)>,
-    in_flight: HashMap<RequestId, String>,
-    failures: HashMap<String, u8>,
-    /// How the last requests ended, so a reader that waited for one asks
-    /// what became of that request and not of its word.
-    ended: VecDeque<(RequestId, Outcome)>,
+    entries: HashMap<String, Lookup>,
     /// Bumped on every answer or failure, so readers can tell when to
     /// look again (and ask again for what the cap turned away).
     pub generation: u64,
 }
 
 impl KeywordLookups {
+    fn asking(&self) -> usize {
+        self.entries
+            .values()
+            .filter(|lookup| matches!(lookup, Lookup::Asking { .. }))
+            .count()
+    }
+
     /// The answer for `query` (normalized), if it arrived.
     pub fn answer(&self, query: &str) -> Option<&[EmojiKeyword]> {
-        self.answers.get(query).map(|(_, list)| list.as_slice())
+        match self.entries.get(query) {
+            Some(Lookup::Answered { keywords, .. }) => Some(keywords.as_slice()),
+            _ => None,
+        }
     }
 
-    /// Whether `query` still needs a request: no answer, not in flight
-    /// and room for one more.
+    /// Whether `query` still needs a request: no answer, not in flight,
+    /// attempts left, and room for one more.
     pub fn wants(&self, query: &str) -> bool {
-        !self.answers.contains_key(query)
-            && self.failures.get(query).copied().unwrap_or(0) < ATTEMPTS
-            && self.in_flight.len() < IN_FLIGHT_CAP
-            && !self.in_flight.values().any(|q| q == query)
+        match self.entries.get(query) {
+            None => self.asking() < IN_FLIGHT_CAP,
+            Some(Lookup::Failed { failures }) => {
+                *failures < ATTEMPTS && self.asking() < IN_FLIGHT_CAP
+            }
+            Some(Lookup::Asking { .. } | Lookup::Answered { .. } | Lookup::Offline) => false,
+        }
     }
 
-    /// `query` has no answer and will get none: every attempt failed and
-    /// nothing is in flight for it.
+    /// `query` has no answer and will get none for now: every attempt
+    /// failed, or it failed while offline, and nothing is in flight for it.
     pub fn gave_up(&self, query: &str) -> bool {
-        !self.answers.contains_key(query)
-            && self.failures.get(query).copied().unwrap_or(0) >= ATTEMPTS
-            && !self.in_flight.values().any(|q| q == query)
+        match self.entries.get(query) {
+            Some(Lookup::Failed { failures }) => *failures >= ATTEMPTS,
+            Some(Lookup::Offline) => true,
+            _ => false,
+        }
     }
 
     /// The request in flight for `query`, if one is.
     pub fn request_for(&self, query: &str) -> Option<RequestId> {
-        self.in_flight
-            .iter()
-            .find_map(|(id, asked)| (asked == query).then_some(*id))
+        match self.entries.get(query) {
+            Some(Lookup::Asking { request, .. }) => Some(*request),
+            _ => None,
+        }
+    }
+
+    /// The request whose answer `query` holds: a reader that waited for
+    /// that request knows its own lookup answered, not another one's.
+    pub fn answered_by(&self, query: &str) -> Option<RequestId> {
+        match self.entries.get(query) {
+            Some(Lookup::Answered { request, .. }) => Some(*request),
+            _ => None,
+        }
     }
 
     /// Whether request `id` is still in flight.
     pub fn waits_for(&self, id: RequestId) -> bool {
-        self.in_flight.contains_key(&id)
+        self.query_of(id).is_some()
     }
 
-    /// How request `id` ended, while it is among the last ones.
-    pub fn outcome(&self, id: RequestId) -> Option<Outcome> {
-        self.ended
-            .iter()
-            .find_map(|(ended, outcome)| (*ended == id).then_some(*outcome))
+    fn query_of(&self, id: RequestId) -> Option<&String> {
+        self.entries.iter().find_map(|(query, lookup)| {
+            matches!(lookup, Lookup::Asking { request, .. } if *request == id).then_some(query)
+        })
     }
 
-    fn end(&mut self, id: RequestId, outcome: Outcome) {
-        if self.ended.len() >= ENDED_KEPT {
-            self.ended.pop_front();
-        }
-        self.ended.push_back((id, outcome));
-    }
-
+    /// `id` went out for `query`; failures it had before carry over.
     pub fn sent(&mut self, id: RequestId, query: String) {
-        self.in_flight.insert(id, query);
+        let failures = match self.entries.get(&query) {
+            Some(Lookup::Failed { failures }) => *failures,
+            _ => 0,
+        };
+        self.entries.insert(
+            query,
+            Lookup::Asking {
+                request: id,
+                failures,
+            },
+        );
     }
 
     /// Request `id` failed: its slot frees and the query may be asked
-    /// again, up to [`ATTEMPTS`] times.
-    pub fn failed(&mut self, id: RequestId) {
-        let Some(query) = self.in_flight.remove(&id) else {
+    /// again, up to [`ATTEMPTS`] times. `connected` is whether the
+    /// connection was ready: a failure while it was not waits for it.
+    pub fn failed(&mut self, id: RequestId, connected: bool) {
+        let Some(query) = self.query_of(id).cloned() else {
             return;
         };
-        *self.failures.entry(query).or_default() += 1;
-        self.end(id, Outcome::Failed);
+        let failures = match self.entries.get(&query) {
+            Some(Lookup::Asking { failures, .. }) => failures.saturating_add(1),
+            _ => return,
+        };
+        let next = if connected {
+            Lookup::Failed { failures }
+        } else {
+            Lookup::Offline
+        };
+        self.entries.insert(query, next);
         self.generation += 1;
     }
 
     /// The answer for request `id`.
     pub fn answered(&mut self, id: RequestId, keywords: Vec<EmojiKeyword>) {
-        let Some(query) = self.in_flight.remove(&id) else {
+        let Some(query) = self.query_of(id).cloned() else {
             return;
         };
-        self.end(id, Outcome::Answered);
-        if self.answers.len() >= ANSWER_CAP {
-            let mut ages: Vec<u64> = self.answers.values().map(|(age, _)| *age).collect();
+        if self.entries.len() >= ANSWER_CAP {
+            let mut ages: Vec<u64> = self
+                .entries
+                .values()
+                .filter_map(|lookup| match lookup {
+                    Lookup::Answered { age, .. } => Some(*age),
+                    _ => None,
+                })
+                .collect();
             ages.sort_unstable();
             let cutoff = ages.get(ages.len() / 2).copied().unwrap_or(u64::MAX);
-            self.answers.retain(|_, (age, _)| *age > cutoff);
+            self.entries.retain(|_, lookup| match lookup {
+                Lookup::Answered { age, .. } => *age > cutoff,
+                Lookup::Asking { .. } => true,
+                Lookup::Failed { .. } | Lookup::Offline => false,
+            });
         }
         self.generation += 1;
-        self.answers.insert(query, (self.generation, keywords));
+        self.entries.insert(
+            query,
+            Lookup::Answered {
+                request: id,
+                age: self.generation,
+                keywords,
+            },
+        );
+    }
+
+    /// The connection is back: queries that failed while it was down are
+    /// asked again, and readers look again.
+    pub fn forgive_failures(&mut self) {
+        let before = self.entries.len();
+        self.entries
+            .retain(|_, lookup| !matches!(lookup, Lookup::Offline));
+        if self.entries.len() != before {
+            self.generation += 1;
+        }
     }
 
     /// Forget requests that will never answer (swept, or the account
     /// went away), so they do not hold a flight slot. Each counts as a
     /// failed attempt, so a query that is never answered is given up on
     /// after [`ATTEMPTS`] instead of being asked after every sweep.
-    pub fn retain_in_flight(&mut self, live: impl Fn(RequestId) -> bool) {
+    pub fn retain_in_flight(&mut self, live: impl Fn(RequestId) -> bool, connected: bool) {
         let gone: Vec<RequestId> = self
-            .in_flight
-            .keys()
-            .copied()
-            .filter(|id| !live(*id))
+            .entries
+            .values()
+            .filter_map(|lookup| match lookup {
+                Lookup::Asking { request, .. } if !live(*request) => Some(*request),
+                _ => None,
+            })
             .collect();
         for id in gone {
-            self.failed(id);
+            self.failed(id, connected);
         }
     }
 }
@@ -288,20 +361,53 @@ mod tests {
             lookups.sent(RequestId(100 + n as u64), format!("q{n}"));
         }
         assert!(!lookups.wants("other"));
-        lookups.retain_in_flight(|id| id.0 < 100);
+        lookups.retain_in_flight(|id| id.0 < 100, true);
         assert!(lookups.wants("other"));
+    }
+
+    #[test]
+    fn a_query_that_failed_its_attempts_stays_given_up_when_the_connection_returns() {
+        let mut lookups = KeywordLookups::default();
+        for round in 1..=u64::from(ATTEMPTS) {
+            lookups.sent(RequestId(round), "fire".into());
+            lookups.failed(RequestId(round), true);
+        }
+        assert!(lookups.gave_up("fire") && !lookups.wants("fire"));
+        // Online failures stay given up: the pack itself would not load.
+        lookups.forgive_failures();
+        assert!(lookups.gave_up("fire"));
+    }
+
+    #[test]
+    fn a_query_that_failed_offline_is_asked_again_when_the_connection_returns() {
+        let mut lookups = KeywordLookups::default();
+        lookups.sent(RequestId(1), "fire".into());
+        lookups.failed(RequestId(1), false);
+        assert!(lookups.gave_up("fire") && !lookups.wants("fire"));
+        lookups.forgive_failures();
+        assert!(!lookups.gave_up("fire") && lookups.wants("fire"));
+    }
+
+    #[test]
+    fn a_success_leaves_no_failures_behind() {
+        let mut lookups = KeywordLookups::default();
+        lookups.sent(RequestId(1), "fire".into());
+        lookups.failed(RequestId(1), true);
+        lookups.sent(RequestId(2), "fire".into());
+        lookups.answered(RequestId(2), Vec::new());
+        assert!(lookups.answer("fire").is_some() && !lookups.gave_up("fire"));
     }
 
     #[test]
     fn a_failed_query_is_asked_again_a_bounded_number_of_times() {
         let mut lookups = KeywordLookups::default();
         lookups.sent(RequestId(1), "fire".into());
-        lookups.failed(RequestId(1));
+        lookups.failed(RequestId(1), true);
         assert!(lookups.answer("fire").is_none());
         assert!(lookups.wants("fire"));
         assert_eq!(lookups.generation, 1);
         lookups.sent(RequestId(2), "fire".into());
-        lookups.failed(RequestId(2));
+        lookups.failed(RequestId(2), true);
         assert!(!lookups.wants("fire"));
     }
 
@@ -309,10 +415,10 @@ mod tests {
     fn a_swept_request_counts_as_a_failed_attempt() {
         let mut lookups = KeywordLookups::default();
         lookups.sent(RequestId(1), "fire".into());
-        lookups.retain_in_flight(|_| false);
+        lookups.retain_in_flight(|_| false, true);
         assert!(lookups.wants("fire"), "one attempt left");
         lookups.sent(RequestId(2), "fire".into());
-        lookups.retain_in_flight(|_| false);
+        lookups.retain_in_flight(|_| false, true);
         assert!(lookups.gave_up("fire"));
         assert!(!lookups.wants("fire"));
     }
@@ -326,7 +432,7 @@ mod tests {
         }
         assert!(lookups.answer("q0").is_none());
         assert!(lookups.answer(&format!("q{ANSWER_CAP}")).is_some());
-        assert!(lookups.answers.len() <= ANSWER_CAP / 2 + 2);
+        assert!(lookups.entries.len() <= ANSWER_CAP / 2 + 2);
     }
 
     #[test]
@@ -334,11 +440,11 @@ mod tests {
         let mut lookups = KeywordLookups::default();
         lookups.sent(RequestId(1), "zz".into());
         assert!(!lookups.gave_up("zz"), "still in flight");
-        lookups.failed(RequestId(1));
+        lookups.failed(RequestId(1), true);
         assert!(!lookups.gave_up("zz"), "one attempt left");
         lookups.sent(RequestId(2), "zz".into());
         assert!(!lookups.gave_up("zz"), "in flight again");
-        lookups.failed(RequestId(2));
+        lookups.failed(RequestId(2), true);
         assert!(lookups.gave_up("zz"));
         assert!(!lookups.wants("zz"));
         lookups.sent(RequestId(3), "ok".into());

@@ -31,6 +31,14 @@ impl Session {
         }
         self.apply_profile_music_ok(pending);
         self.apply_proxy_ok(pending);
+        if let Some(pending) = pending
+            && matches!(
+                pending.purpose,
+                RequestPurpose::Settings(SettingsPurpose::SetSenderBlockList { .. })
+            )
+        {
+            self.settings.block_change_landed(Some(pending.id));
+        }
         if let Some(request) = extra
             && matches!(
                 pending.map(|p| p.purpose),
@@ -207,7 +215,9 @@ impl Session {
             pending.map(|p| p.purpose),
             Some(RequestPurpose::DeleteAccount)
         ) {
-            self.settings.account_delete = crate::state::fetch::Fetch::Idle;
+            self.settings
+                .account_delete
+                .answered(pending.map(|p| p.id), ());
         }
         // Slice A8: a `checkPhoneNumberCode` succeeded — the
         // server completed the number change of the number the
@@ -327,12 +337,18 @@ impl Session {
             Some(RequestPurpose::AddFavoriteSticker | RequestPurpose::RemoveFavoriteSticker)
         ) {
             self.stickers.stickers.favorites.clear();
+            // A fetch out from before the change would carry the old list.
+            self.stickers.stickers.lists.favorites = crate::state::fetch::Fetch::Idle;
         }
         if matches!(
             pending.map(|p| p.purpose),
             Some(RequestPurpose::ClearRecentStickers)
         ) {
             self.stickers.stickers.recent.clear();
+            self.stickers.stickers.lists.recent = crate::state::fetch::Fetch::Idle;
+        }
+        if let Some(pending) = pending {
+            self.stickers.stickers.changes.settled(pending.id);
         }
         if matches!(
             pending.map(|p| p.purpose),
@@ -360,6 +376,7 @@ impl Session {
             }
             self.stickers.stickers.sets.clear();
             self.stickers.stickers.lists.installed = crate::state::fetch::Fetch::Idle;
+            self.stickers.stickers.lists.archived = crate::state::fetch::Fetch::Idle;
             self.stickers.stickers.archived.clear();
             self.stickers.stickers.archived_has_more = false;
             self.stickers.stickers.archived_next_offset = 0;

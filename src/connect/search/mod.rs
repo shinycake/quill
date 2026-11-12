@@ -405,11 +405,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.search.search.top_chats_disabled
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetTopChats)
+        let search = &self.session.search.search;
+        if search.top_chats_disabled
+            || search.top_chats.is_loading()
+            || search.top_chats.error().is_some()
         {
             return Ok(None);
         }
@@ -419,8 +418,17 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&get_top_chats_users(extra, TOP_CHATS_LIMIT))
         {
             self.session.requests.take(extra);
+            // Not asked again until the search is closed and opened.
+            self.session
+                .search
+                .search
+                .top_chats
+                .fail("The frequent contacts request was not sent.");
             return Err(err);
         }
+        let top_chats = &mut self.session.search.search.top_chats;
+        top_chats.begin();
+        top_chats.sent(extra);
         Ok(Some(extra))
     }
 
@@ -436,7 +444,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .search
             .search
-            .top_chats
+            .top_chat_ids()
             .iter()
             .position(|id| *id == chat_id);
         if !self.session.search.search.remove_top_chat(chat_id) {
@@ -486,7 +494,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let previous = self.session.search.search.top_chats_disabled;
         let top_chats = if disabled {
-            std::mem::take(&mut self.session.search.search.top_chats)
+            self.session
+                .search
+                .search
+                .top_chats
+                .take_data()
+                .unwrap_or_default()
         } else {
             Vec::new()
         };

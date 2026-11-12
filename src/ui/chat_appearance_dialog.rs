@@ -849,7 +849,7 @@ impl QuillApp {
             .child(div().text_xs().text_color(muted).child(icon_about));
 
         // Emoji status of the chat (both tabs).
-        let status_ids = session.stickers.emoji.chat_default_status_ids.clone();
+        let status_ids = session.stickers.emoji.chat_default_status_ids().to_vec();
         let status_empty = status_ids.is_empty();
         let status_grid = self.chat_appearance_emoji_grid(
             "chat-appearance-status",

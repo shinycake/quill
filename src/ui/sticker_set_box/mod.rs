@@ -400,7 +400,7 @@ impl QuillApp {
                     .on_close(on_close);
             };
             let (title, body, footer): (String, AnyElement, Option<AnyElement>) = match view.stage {
-                StickerSetViewStage::Loading => (
+                StickerSetViewStage::Loading { .. } => (
                     tr(keys::Q_MEDIA_STICKER_SET).into(),
                     div()
                         .text_sm()

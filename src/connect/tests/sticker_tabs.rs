@@ -65,7 +65,13 @@ fn sticker_tabs_requests_failures_and_confirmed_mutations() {
         sent_request(&recorder, "addFavoriteSticker")["sticker"]["id"],
         41
     );
-    assert_eq!(driver.set_favorite_sticker(FileId(42), true).unwrap(), None);
+    // A second favorite goes out under its own request; nothing is dropped.
+    assert!(
+        driver
+            .set_favorite_sticker(FileId(42), true)
+            .unwrap()
+            .is_some()
+    );
     // A successful mutation replaces an older pending fetch; its late answer is ignored.
     let fetch = sent_request(&recorder, "getFavoriteStickers");
     driver
@@ -236,11 +242,9 @@ fn sticker_search_and_set_management_use_latest_confirmed_state() {
     assert_eq!(sent_request(&recorder, "getStickerSet")["set_id"], "77");
     driver.select_sticker_tab(StickerTab::Search).unwrap();
     assert_eq!(driver.session.stickers.stickers.selection.set_id, None);
-    assert!(
-        !driver
-            .session
-            .requests
-            .has_purpose(RequestPurpose::GetStickerSet)
+    assert_eq!(
+        driver.session.stickers.stickers.selection.stage,
+        crate::state::StickerSetStage::Idle
     );
     assert!(driver.manage_sticker_set(77, true, true).is_err());
     let install = driver.manage_sticker_set(77, true, false).unwrap().unwrap();
@@ -329,8 +333,10 @@ fn sticker_search_and_set_management_use_latest_confirmed_state() {
     assert!(
         !driver
             .session
-            .requests
-            .has_purpose(RequestPurpose::SearchStickers)
+            .stickers
+            .stickers
+            .lists
+            .tab_loading(StickerTab::Search)
     );
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -507,11 +513,9 @@ fn archived_sticker_paging_and_restore_ignore_pre_mutation_fetches() {
         .unwrap();
     assert!(driver.session.stickers.stickers.archived.is_empty());
     assert_eq!(driver.session.stickers.stickers.selection.set_id, None);
-    assert!(
-        !driver
-            .session
-            .requests
-            .has_purpose(RequestPurpose::GetStickerSet)
+    assert_eq!(
+        driver.session.stickers.stickers.selection.stage,
+        crate::state::StickerSetStage::Idle
     );
     let fresh = sent_request(&recorder, "getArchivedStickerSets")["@extra"].clone();
     assert_ne!(fresh, json!(old.as_extra()));
@@ -979,4 +983,45 @@ fn gif_search_pages_and_saved_mutations_use_current_confirmed_state() {
     driver.session.auth = crate::telegram::envelope::AuthorizationState::WaitPhoneNumber;
     assert!(driver.set_gif_saved(FileId(9), true).is_err());
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A refused send leaves the open set box, the attached sets and the
+/// earlier suggestion ask as they were.
+#[test]
+fn a_refused_send_leaves_the_open_set_box_and_the_earlier_asks_alone() {
+    use crate::state::{AttachedSets, StickerSetView, StickerSetViewStage, SuggestFor};
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let mut view = StickerSetView::loading(77, crate::ids::RequestId(800));
+    view.stage = StickerSetViewStage::Ready {
+        title: "Set".into(),
+        name: "set".into(),
+        installed: false,
+        is_emoji: false,
+        is_owned: false,
+        stickers: Vec::new(),
+        files: crate::state::SetFiles::Unasked,
+    };
+    driver.session.stickers.sticker_set_view = Some(view.clone());
+    let ready = driver.session.stickers.sticker_set_view.clone();
+    recorder.refuse_sends(true);
+    assert!(driver.view_sticker_set(78).is_err());
+    assert_eq!(driver.session.stickers.sticker_set_view, ready);
+    let attached = driver.session.stickers.stickers.attached;
+    assert!(driver.fetch_attached_sticker_sets(FileId(5)).is_err());
+    assert_eq!(driver.session.stickers.sticker_set_view, ready);
+    assert_eq!(driver.session.stickers.stickers.attached, attached);
+    assert!(matches!(attached, AttachedSets::Idle));
+    // A suggestion ask that cannot go out leaves the earlier one standing.
+    let earlier = SuggestFor::Asked {
+        emoji: "😀".into(),
+        request: crate::ids::RequestId(900),
+    };
+    driver.session.stickers.stickers.suggest_for = earlier.clone();
+    assert!(driver.update_sticker_suggestions("🔥").is_err());
+    assert_eq!(driver.session.stickers.stickers.suggest_for, earlier);
+    drop(dir);
 }

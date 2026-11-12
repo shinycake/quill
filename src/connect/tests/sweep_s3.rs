@@ -115,23 +115,28 @@ fn a_deep_link_answer_after_the_flow_ended_is_dropped() {
     assert_eq!(driver.session.chats_state.deep_link, None);
 }
 
-/// Sweep 05-231: a calendar's generation never repeats after the box
-/// closes, so an earlier calendar's late page cannot match the next one.
+/// Sweep 05-231: a closed calendar's late page cannot land in the calendar
+/// opened after it, whose own pages carry other request ids.
 #[test]
-fn a_reopened_calendar_has_a_new_generation() {
+fn a_closed_calendars_late_page_does_not_land_in_the_next_one() {
     let (_dir, mut driver, _sender, _sink, _seq) = toggle_driver();
     driver.session.open = crate::state::OpenView::of(Some(crate::ids::ChatId(5)));
-    let first = driver
-        .session
-        .open_history_calendar(0)
-        .map(|calendar| calendar.generation);
+    assert!(driver.session.open_history_calendar(0).is_some());
+    let late = crate::ids::RequestId(1);
+    if let Some(calendar) = driver.session.search.history_calendar.as_mut() {
+        calendar.begin_page(late);
+    }
     driver.session.close_history_calendar();
-    let second = driver
-        .session
-        .open_history_calendar(0)
-        .map(|calendar| calendar.generation);
-    assert!(first.is_some() && second.is_some());
-    assert_ne!(first, second);
+    assert!(driver.session.open_history_calendar(0).is_some());
+    let day = crate::telegram::envelope::CalendarDay {
+        total_count: 1,
+        message_id: crate::ids::MessageId(5 << 20),
+        date: 1_700_000_000,
+    };
+    if let Some(calendar) = driver.session.search.history_calendar.as_mut() {
+        calendar.accept(Some(late), vec![day]);
+        assert!(calendar.days.is_empty(), "the late page matches nothing");
+    }
 }
 
 /// Sweep 06-005: a deletion in another chat does not make the search

@@ -65,7 +65,7 @@ fn selected(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<Searc
 fn strip(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Vec<ChatId> {
     app.update(vcx, |app, _| {
         app.session()
-            .map(|s| s.search.search.top_chats.clone())
+            .map(|s| s.search.search.top_chat_ids().to_vec())
             .unwrap_or_default()
     })
 }

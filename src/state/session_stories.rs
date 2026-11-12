@@ -187,8 +187,12 @@ impl Session {
 
     /// Phase 9.2+: store `getCustomEmojiStickers` answers for the story
     /// reaction picker — keyed by sticker id (= custom emoji id).
-    pub fn accept_story_custom_emoji_stickers(&mut self, stickers: Vec<StickerItem>) {
-        self.stories.custom_emoji_fetch = CustomEmojiFetch::Idle;
+    pub fn accept_story_custom_emoji_stickers(
+        &mut self,
+        request: Option<RequestId>,
+        stickers: Vec<StickerItem>,
+    ) {
+        self.stories.custom_emoji_fetch.answered(request);
         // Bounded: when this answer would pass the cap, the cache restarts
         // empty before any of it goes in (never in the middle of the
         // batch); the story viewer refetches the ids it still shows.

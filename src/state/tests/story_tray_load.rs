@@ -101,7 +101,7 @@ fn an_error_for_the_story_emoji_fetch_is_counted_and_backs_off() {
             .stories
             .custom_emoji_fetch_waiting(before + STORIES_RETRY_FIRST + Duration::from_secs(1))
     );
-    session.accept_story_custom_emoji_stickers(Vec::new());
+    session.accept_story_custom_emoji_stickers(None, Vec::new());
     assert!(!session.stories.custom_emoji_fetch_waiting(before));
 }
 
@@ -111,11 +111,11 @@ fn an_error_for_the_story_emoji_fetch_is_counted_and_backs_off() {
 fn a_custom_emoji_answer_ends_the_backoff_and_the_failure_count() {
     let (mut session, _sink) = session();
     let now = std::time::Instant::now();
-    session.stories.custom_emoji_fetch_failed(now);
-    session.stories.custom_emoji_fetch_failed(now);
+    session.stories.custom_emoji_fetch_failed(None, now);
+    session.stories.custom_emoji_fetch_failed(None, now);
     assert_eq!(session.stories.custom_emoji_fetch.failures(), 2);
     assert!(session.stories.custom_emoji_fetch_waiting(now));
-    session.accept_story_custom_emoji_stickers(Vec::new());
+    session.accept_story_custom_emoji_stickers(None, Vec::new());
     assert_eq!(session.stories.custom_emoji_fetch.failures(), 0);
     assert!(!session.stories.custom_emoji_fetch_waiting(now));
 }

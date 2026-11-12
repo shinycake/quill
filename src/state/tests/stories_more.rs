@@ -887,7 +887,7 @@ fn story_custom_emoji_stickers_are_bounded() {
     };
     let total = crate::state::STORY_CUSTOM_EMOJI_CAP as i64 * 3;
     for id in 1..=total {
-        session.accept_story_custom_emoji_stickers(vec![sticker(id)]);
+        session.accept_story_custom_emoji_stickers(None, vec![sticker(id)]);
         assert!(
             session.stories.custom_emoji_stickers.len() <= crate::state::STORY_CUSTOM_EMOJI_CAP
         );
@@ -897,9 +897,9 @@ fn story_custom_emoji_stickers_are_bounded() {
     // An answer that crosses the cap keeps every sticker it brought.
     let cap = crate::state::STORY_CUSTOM_EMOJI_CAP as i64;
     session.stories.custom_emoji_stickers.clear();
-    session.accept_story_custom_emoji_stickers((1..cap - 1).map(sticker).collect());
+    session.accept_story_custom_emoji_stickers(None, (1..cap - 1).map(sticker).collect());
     let batch: Vec<_> = (1_000..1_005).map(sticker).collect();
-    session.accept_story_custom_emoji_stickers(batch);
+    session.accept_story_custom_emoji_stickers(None, batch);
     for id in 1_000..1_005 {
         assert!(session.stories.custom_emoji_stickers.contains_key(&id));
     }

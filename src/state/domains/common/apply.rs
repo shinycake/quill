@@ -67,7 +67,7 @@ impl Session {
                 {
                     self.search.search.top_chats_disabled = *off;
                     if *off {
-                        self.search.search.top_chats.clear();
+                        self.search.search.top_chats = Default::default();
                     }
                 }
                 if name == "my_id"
@@ -223,6 +223,9 @@ impl Session {
                     self.threads.saved.retry_after_reconnect();
                     // So do sticker and emoji sets whose load failed.
                     self.media.media_library.forget_failures();
+                    // And the keyword searches given up while offline.
+                    self.stickers.emoji.keyword_lookups.forgive_failures();
+                    self.stickers.emoji.keyword_emojis.forgive_failures();
                 }
                 self.connection = state;
             }

@@ -98,8 +98,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if self
             .session
-            .requests
-            .has_purpose_for_chat(RequestPurpose::GetChatActiveStories, chat_id)
+            .stories
+            .asks
+            .chat_out(chat_id.0, &self.session.requests)
         {
             return Ok(None);
         }
@@ -110,7 +111,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             .sender
             .send_json(&get_chat_active_stories(extra, chat_id))
         {
-            Ok(()) => Ok(Some(extra)),
+            Ok(()) => {
+                self.session
+                    .stories
+                    .asks
+                    .chat_sent(chat_id.0, extra, &self.session.requests);
+                Ok(Some(extra))
+            }
             Err(err) => {
                 self.session.requests.take(extra);
                 Err(err)
@@ -219,11 +226,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let stories = &self.session.stories;
         if stories.stories.contains_key(&(chat_id.0, story_id))
             || stories.story_fetch_waiting((chat_id.0, story_id), std::time::Instant::now())
-            || self.session.requests.has_purpose_for_story(
-                RequestPurpose::GetStory,
-                chat_id,
-                story_id,
-            )
+            || stories
+                .asks
+                .story_out((chat_id.0, story_id), &self.session.requests)
         {
             return Ok(None);
         }
@@ -231,7 +236,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request_for_story(RequestPurpose::GetStory, chat_id, story_id);
         match self.sender.send_json(&get_story(extra, chat_id, story_id)) {
-            Ok(()) => Ok(Some(extra)),
+            Ok(()) => {
+                self.session.stories.asks.story_sent(
+                    (chat_id.0, story_id),
+                    extra,
+                    &self.session.requests,
+                );
+                Ok(Some(extra))
+            }
             Err(err) => {
                 self.session.requests.take(extra);
                 Err(err)
@@ -307,12 +319,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if !self.session.stories.available_reactions.can_ask()
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetStoryAvailableReactions)
-        {
+        if !self.session.stories.available_reactions.can_ask() {
             return Ok(None);
         }
         let extra = self
@@ -345,11 +352,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self
-            .session
-            .requests
-            .has_purpose(RequestPurpose::GetStoryCustomEmojiStickers)
-        {
+        if self.session.stories.custom_emoji_fetch.is_asking() {
             return Ok(None);
         }
         let ids: Vec<i64> = ids
@@ -367,11 +370,26 @@ impl<S: JsonSender> ConnectDriver<S> {
             .sender
             .send_json(&get_story_custom_emoji_stickers_request(extra, &ids))
         {
-            Ok(()) => Ok(Some(extra)),
+            Ok(()) => {
+                self.session.stories.custom_emoji_fetch.asked(extra);
+                Ok(Some(extra))
+            }
             Err(err) => {
                 self.session.requests.take(extra);
                 Err(err)
             }
+        }
+    }
+
+    /// [`Self::maybe_fetch_story_custom_emoji_stickers`] for the viewer's
+    /// warm-up: whether its ids are settled. A fetch sent, or nothing left
+    /// to fetch, is; a fetch refused, or one still out for other ids, is
+    /// not, so the viewer asks again (it is no-op'd while the fetch is out).
+    pub fn warm_story_custom_emoji_stickers(&mut self, ids: &[i64]) -> bool {
+        match self.maybe_fetch_story_custom_emoji_stickers(ids) {
+            Ok(Some(_)) => true,
+            Ok(None) => !self.session.stories.custom_emoji_fetch.is_asking(),
+            Err(_) => false,
         }
     }
 

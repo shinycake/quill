@@ -26,7 +26,7 @@ impl BotsPurpose {
             | Self::GetAttachmentMenuBot { .. }
             | Self::GetGrossingWebAppBots
             | Self::GetBotEditText { .. }
-            | Self::GetWidgetQueryAnswer { .. }
+            | Self::GetWidgetQueryAnswer
             | Self::GetWidgetPublicData => RequestKind::Lookup,
             Self::GroupBotUser
             | Self::StopPendingMessage { .. }
@@ -47,8 +47,8 @@ impl BotsPurpose {
             | Self::SetBotName { .. }
             | Self::SetBotAbout { .. }
             | Self::SetBotPhoto { .. }
-            | Self::CheckBotUsername { .. }
-            | Self::CreateBot { .. } => RequestKind::UserAction,
+            | Self::CheckBotUsername
+            | Self::CreateBot => RequestKind::UserAction,
         }
     }
 }

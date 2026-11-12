@@ -11,6 +11,9 @@ impl Session {
         _extra: Option<RequestId>,
         _seq: u64,
     ) {
+        if let Some(pending) = pending {
+            self.stickers.stickers.changes.settled(pending.id);
+        }
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::EmojiAnimations) => self.stickers.animations.failed(),
             Some(RequestPurpose::GetStickerCategories) => {
@@ -39,7 +42,10 @@ impl Session {
             }
             Some(RequestPurpose::SearchEmojis) => {
                 if let Some(pending) = pending {
-                    self.stickers.emoji.keyword_lookups.failed(pending.id);
+                    self.stickers
+                        .emoji
+                        .keyword_lookups
+                        .failed(pending.id, self.connection == ConnectionState::Ready);
                 }
             }
             Some(RequestPurpose::Stickers(StickersPurpose::GetMessageEffect { effect_id })) => {
@@ -61,7 +67,7 @@ impl Session {
                 }
             }
             Some(RequestPurpose::Stickers(StickersPurpose::ViewStickerSet { set_id })) => {
-                self.fail_sticker_set_view(set_id)
+                self.fail_sticker_set_view(set_id, pending.map(|p| p.id))
             }
             Some(RequestPurpose::Stickers(StickersPurpose::CustomEmojiPack { .. })) => {
                 if let Some(pending) = pending {
@@ -78,7 +84,7 @@ impl Session {
                     .waits_for(pending.map(|p| p.id))
                 {
                     self.stickers.stickers.attached = AttachedSets::Idle;
-                    self.fail_sticker_set_view(0);
+                    self.fail_sticker_set_view(0, pending.map(|p| p.id));
                 }
             }
             // The lookup's ids are asked for again. A rate limit is no
@@ -184,11 +190,12 @@ impl Session {
                 .animated
                 .failed_request(pending.map(|p| p.id));
         }
-        if let Some(list) = emoji_purpose.and_then(|p| self.stickers.emoji.lists.for_purpose(p)) {
-            list.failed(
+        if let Some(purpose) = emoji_purpose {
+            self.stickers.emoji.lists.request_failed(
+                purpose,
                 pending.map(|p| p.id),
-                crate::lang::tr(crate::lang::keys::Q_MEDIA_COULD_NOT_UPDATE_EMOJI_PACKS),
-                false,
+                crate::lang::tr(crate::lang::keys::Q_MEDIA_COULD_NOT_UPDATE_EMOJI_PACKS)
+                    .to_string(),
             );
         }
         if matches!(
@@ -241,7 +248,9 @@ impl Session {
             self.stickers.gifs.saved_mutation_failed();
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSavedAnimations) {
-            self.stickers.gifs.saved_failed();
+            self.stickers
+                .gifs
+                .saved_request_failed(pending.map(|p| p.id));
         }
     }
 }

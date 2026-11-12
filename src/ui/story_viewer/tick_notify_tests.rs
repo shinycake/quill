@@ -113,7 +113,7 @@ fn a_tdlib_error_for_the_emoji_fetch_makes_the_next_tick_fetch_again(cx: &mut Te
     // TDLib answers the request with an error.
     app.update(vcx, |app, _| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.stories.custom_emoji_fetch_failed(now);
+            session.stories.custom_emoji_fetch_failed(None, now);
         }
     });
     assert!(!warm(&app, vcx, now), "the retry waits out its backoff");

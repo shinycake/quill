@@ -17,15 +17,14 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// How a [`NotificationSoundKind`] resolves to something playable
-/// (parity slice: notification sounds).
+/// (parity slice: notification sounds). A sound whose file is still being
+/// downloaded resolves to nothing; it plays on completion via
+/// `Session::pending_sound_plays`.
 pub enum SoundResolution {
     /// Play the app default tone (synthesized in-process).
     DefaultTone,
     /// Play this downloaded MP3.
     FilePath(std::path::PathBuf),
-    /// The sound file is being downloaded; it plays on completion via
-    /// `Session::pending_sound_plays`.
-    Pending,
 }
 
 /// Unigram `OutputChatActionManager` default delay and `ChatTextBox` keystroke

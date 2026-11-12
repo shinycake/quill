@@ -49,6 +49,11 @@ fn a_switch_closes_the_boxes_whose_flag_is_the_sessions(cx: &mut TestAppContext)
             session.open_chat(CHAT);
             session.stickers.masks.set_dialog_open(true);
             session.stickers.emoji.open = true;
+            // The stickers manager, the sticker panel it opens and the GIF
+            // gate are the session's too.
+            session.stickers.stickers.open = true;
+            session.stickers.manager.open = true;
+            session.stickers.gifs.open = true;
             session.chat_list.archive_settings_open = true;
             session.calls.rtmp_start = Some(RtmpStart::new(CHAT, quill::ids::RequestId(1)));
             session.groups.boost_box = Some(BoostBoxState::new(CHAT.0, false));
@@ -75,6 +80,9 @@ fn a_switch_closes_the_boxes_whose_flag_is_the_sessions(cx: &mut TestAppContext)
         let session = app.session().expect("the demo session");
         assert!(!session.stickers.masks.dialog_open(), "Manage masks");
         assert!(!session.stickers.emoji.open, "Emoji sets");
+        assert!(!session.stickers.stickers.open, "Sticker panel");
+        assert!(!session.stickers.manager.open, "Stickers manager");
+        assert!(!session.stickers.gifs.open, "GIF gate");
         assert!(!session.chat_list.archive_settings_open, "Archive settings");
         assert!(session.calls.rtmp_start.is_none(), "RTMP start");
         assert!(session.groups.boost_box.is_none(), "Boost box");

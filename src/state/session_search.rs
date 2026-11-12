@@ -10,18 +10,11 @@ impl Session {
         id
     }
 
-    pub fn request_chat_search(
-        &mut self,
-        purpose: RequestPurpose,
-        chat_id: ChatId,
-        search_generation: u64,
-    ) -> RequestId {
-        self.requests.register_chat_search(
-            self.account_generation,
-            purpose,
-            chat_id,
-            search_generation,
-        )
+    pub fn request_chat_search(&mut self, purpose: RequestPurpose, chat_id: ChatId) -> RequestId {
+        // The bar waits for the first page of a query only once it went out
+        // (`ChatSearchState::searching`, from the sender's `Ok` arm).
+        self.requests
+            .register_chat_search(self.account_generation, purpose, chat_id)
     }
 
     pub fn request_history_around(&mut self, chat_id: ChatId, message_id: MessageId) -> RequestId {

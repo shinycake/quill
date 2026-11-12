@@ -157,8 +157,8 @@ impl SearchState {
     }
 
     /// `getRecommendedChats` answer.
-    pub(crate) fn accept_recommended(&mut self, chat_ids: Vec<ChatId>) {
-        self.tabs.recommended.succeed(chat_ids);
+    pub(crate) fn accept_recommended(&mut self, request: Option<RequestId>, chat_ids: Vec<ChatId>) {
+        self.tabs.recommended.answered(request, chat_ids);
     }
 }
 

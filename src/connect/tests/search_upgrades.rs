@@ -179,9 +179,10 @@ fn opening_search_loads_frequent_contacts_unless_disabled() {
 #[test]
 fn removing_a_frequent_contact_is_optimistic() {
     let mut fx = Fixture::new();
-    fx.driver.session.search.search.top_chats = vec![ChatId(11), ChatId(12)];
+    fx.driver.session.search.search.top_chats =
+        crate::state::fetch::Fetch::Ready(vec![ChatId(11), ChatId(12)]);
     fx.driver.remove_top_chat(ChatId(11)).unwrap();
-    assert_eq!(fx.driver.session.search.search.top_chats, vec![ChatId(12)]);
+    assert_eq!(fx.driver.session.search.search.top_chat_ids(), [ChatId(12)]);
     let sent = fx.requests("removeTopChat");
     assert_eq!(sent.len(), 1);
     assert_eq!(sent[0]["chat_id"], 11);
@@ -219,7 +220,8 @@ fn a_refused_removal_of_a_recent_or_frequent_chat_puts_it_back() {
     let mut fx = Fixture::new();
     fx.driver.session.search.search.surface = crate::state::SearchSurface::Recents;
     fx.driver.session.search.search.chat_ids = vec![ChatId(7), ChatId(8)];
-    fx.driver.session.search.search.top_chats = vec![ChatId(11), ChatId(12)];
+    fx.driver.session.search.search.top_chats =
+        crate::state::fetch::Fetch::Ready(vec![ChatId(11), ChatId(12)]);
     fx.driver.remove_recent_search(ChatId(7)).unwrap();
     fx.driver.remove_top_chat(ChatId(11)).unwrap();
     error_for(&mut fx, "removeRecentlyFoundChat");
@@ -229,22 +231,40 @@ fn a_refused_removal_of_a_recent_or_frequent_chat_puts_it_back() {
         vec![ChatId(7), ChatId(8)]
     );
     assert_eq!(
-        fx.driver.session.search.search.top_chats,
-        vec![ChatId(11), ChatId(12)]
+        fx.driver.session.search.search.top_chat_ids(),
+        [ChatId(11), ChatId(12)]
     );
 }
 
 #[test]
 fn a_refused_frequent_contacts_switch_goes_back_with_its_strip() {
     let mut fx = Fixture::new();
-    fx.driver.session.search.search.top_chats = vec![ChatId(11), ChatId(12)];
+    fx.driver.session.search.search.top_chats =
+        crate::state::fetch::Fetch::Ready(vec![ChatId(11), ChatId(12)]);
     fx.driver.set_top_chats_disabled(true).unwrap();
     assert!(fx.driver.session.search.search.top_chats_disabled);
-    assert!(fx.driver.session.search.search.top_chats.is_empty());
+    assert!(fx.driver.session.search.search.top_chat_ids().is_empty());
     error_for(&mut fx, "setOption");
     assert!(!fx.driver.session.search.search.top_chats_disabled);
     assert_eq!(
-        fx.driver.session.search.search.top_chats,
-        vec![ChatId(11), ChatId(12)]
+        fx.driver.session.search.search.top_chat_ids(),
+        [ChatId(11), ChatId(12)]
     );
+}
+
+/// Sweep r4-03 round 2 (item 9): a refused `getTopChats` fails the strip's
+/// fetch, and the next recents list does not ask again; closing the search
+/// and opening it again does.
+#[test]
+fn a_refused_frequent_contacts_fetch_is_not_asked_again_until_the_next_open() {
+    let mut fx = Fixture::new();
+    fx.driver.open_search().unwrap();
+    assert_eq!(fx.requests("getTopChats").len(), 1);
+    error_for(&mut fx, "getTopChats");
+    assert!(fx.driver.session.search.search.top_chats.error().is_some());
+    fx.driver.fetch_top_chats().unwrap();
+    assert_eq!(fx.requests("getTopChats").len(), 1, "not asked from render");
+    fx.driver.close_search();
+    fx.driver.open_search().unwrap();
+    assert_eq!(fx.requests("getTopChats").len(), 2);
 }

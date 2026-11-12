@@ -45,14 +45,13 @@ impl Session {
                 ) {
                     // B11: "Attached Stickers" of a photo or video, for the
                     // request the box waits for.
-                    if self
-                        .stickers
-                        .stickers
-                        .attached
-                        .waits_for(pending.map(|p| p.id))
+                    if let Some(request) = pending.map(|p| p.id)
+                        && self.stickers.stickers.attached.waits_for(Some(request))
                     {
-                        self.stickers.stickers.attached =
-                            AttachedSets::Answered(sets.first().map(|set| set.id));
+                        self.stickers.stickers.attached = AttachedSets::Answered {
+                            request,
+                            first: sets.first().map(|set| set.id),
+                        };
                     }
                 } else if pending.map(|p| p.purpose)
                     == Some(RequestPurpose::GetInstalledStickerSets)
@@ -63,7 +62,10 @@ impl Session {
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetArchivedStickerSets)
                 {
                     if current {
-                        self.accept_archived_sticker_sets(sets);
+                        self.accept_archived_sticker_sets(
+                            pending.map_or(0, PendingRequest::page_from),
+                            sets,
+                        );
                     }
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::SearchStickerSets) {
                     // Slice S8: `searchStickerSets` answers with `stickerSets`.
@@ -83,11 +85,6 @@ impl Session {
                 {
                     // Slice S10: emoji `stickerSets` land in the emoji panel (see emoji.rs).
                     self.accept_installed_emoji_sets(pending.map(|p| p.id), sets);
-                } else if let Some(RequestPurpose::Stickers(
-                    StickersPurpose::GetArchivedEmojiSets { first_page },
-                )) = pending.map(|p| p.purpose)
-                {
-                    self.accept_archived_emoji_sets(sets, first_page);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::SearchEmojiSets) {
                     self.accept_found_emoji_sets(pending.map(|p| p.id), sets);
                 }
@@ -155,7 +152,11 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetTrendingStickerSets) {
                     if current {
                         self.stickers.stickers.trending_total = total_count.max(0) as usize;
-                        self.accept_trending_sticker_sets(sets, is_premium);
+                        self.accept_trending_sticker_sets(
+                            pending.map_or(0, PendingRequest::page_from).max(0) as usize,
+                            sets,
+                            is_premium,
+                        );
                     }
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetTrendingEmojiSets) {
                     // Slice S10: emoji `trendingStickerSets` land in the emoji panel (see emoji.rs).
@@ -223,7 +224,7 @@ impl Session {
                 } else if purpose == Some(RequestPurpose::GetStoryCustomEmojiStickers) {
                     // Phase 9.2+: story reaction picker visuals — keyed by
                     // sticker id (= custom emoji id).
-                    self.accept_story_custom_emoji_stickers(stickers);
+                    self.accept_story_custom_emoji_stickers(pending.map(|p| p.id), stickers);
                 } else if purpose
                     == Some(RequestPurpose::Stories(StoriesPurpose::Live(
                         LiveStoryPurpose::GetBursts,
@@ -293,6 +294,7 @@ impl Session {
                     self.remember_files(&files);
                     self.accept_sticker_set_view(
                         set_id,
+                        pending.map(|p| p.id),
                         StickerSetViewStage::Ready {
                             title,
                             name,
@@ -346,7 +348,7 @@ impl Session {
             StickersPayload::Animations { animations, files } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSavedAnimations) {
                     self.remember_files(&files);
-                    self.accept_saved_animations(animations);
+                    self.accept_saved_animations(pending.map(|p| p.id), animations);
                 }
             }
             StickersPayload::UpdateSavedAnimations { .. } => {

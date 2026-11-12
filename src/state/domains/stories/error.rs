@@ -108,7 +108,7 @@ impl Session {
             }
             Some(RequestPurpose::GetStoryCustomEmojiStickers) => {
                 self.stories
-                    .custom_emoji_fetch_failed(std::time::Instant::now());
+                    .custom_emoji_fetch_failed(pending.map(|p| p.id), std::time::Instant::now());
             }
             Some(RequestPurpose::SearchPublicStories) => {
                 if let Some(pending) = pending {

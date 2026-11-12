@@ -26,7 +26,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::emoji_sets_style::catalog::{
-    EmojiSetId, SetState, has_saved_choice, load_current, save_current, set_dir,
+    EmojiSetId, SetRowView, has_saved_choice, load_current, save_current, set_dir,
 };
 use quill::emoji_sets_style::download::Progress;
 use quill::emoji_sets_style::pack::{SpritePack, is_ready};
@@ -297,7 +297,7 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn emoji_set_state(&self, id: EmojiSetId) -> SetState {
+    fn emoji_set_state(&self, id: EmojiSetId) -> SetRowView {
         let state = &self.preferences.emoji_style;
         let loading = match &state.stage {
             SetStage::Downloading { id, progress, .. } => Some((*id, progress.received())),
@@ -307,7 +307,7 @@ impl QuillApp {
             SetStage::Failed { id, why } => Some((*id, why.as_str())),
             _ => None,
         };
-        SetState::of(
+        SetRowView::of(
             id,
             state.current,
             state.ready.contains(&id),
@@ -319,18 +319,18 @@ impl QuillApp {
     /// A row was clicked (tdesktop `Row::setupHandler`).
     pub(super) fn choose_emoji_set(&mut self, id: EmojiSetId, cx: &mut Context<Self>) {
         match self.emoji_set_state(id) {
-            SetState::Ready => self.switch_emoji_set(id, false, cx),
-            SetState::Available(_) | SetState::Failed(_) => self.download_emoji_set(id, cx),
+            SetRowView::Ready => self.switch_emoji_set(id, false, cx),
+            SetRowView::Available(_) | SetRowView::Failed(_) => self.download_emoji_set(id, cx),
             // Choosing the set in use again leaves a download of another
             // one: the choice is what it was.
-            SetState::Active => {
+            SetRowView::Active => {
                 let state = &mut self.preferences.emoji_style;
                 if matches!(state.stage, SetStage::Downloading { .. }) {
                     state.stage.replace(SetStage::Idle);
                     cx.notify();
                 }
             }
-            SetState::Loading { .. } => {}
+            SetRowView::Loading { .. } => {}
         }
     }
 
@@ -537,8 +537,8 @@ impl QuillApp {
             self.request_animation_tick(30, cx);
         }
         let status_color = match &state {
-            SetState::Active => cx.theme().primary,
-            SetState::Failed(_) => cx.theme().danger,
+            SetRowView::Active => cx.theme().primary,
+            SetRowView::Failed(_) => cx.theme().danger,
             _ => cx.theme().muted_foreground,
         };
         let status = state.description();
@@ -551,7 +551,7 @@ impl QuillApp {
                 .small()
                 .into_any_element(),
             None => Radio::new(("emoji-set-radio", id as usize))
-                .checked(state == SetState::Active)
+                .checked(state == SetRowView::Active)
                 .tab_stop(false)
                 .accessibility_label(label.clone())
                 .into_any_element(),

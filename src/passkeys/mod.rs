@@ -678,6 +678,23 @@ impl PasskeysState {
         }
     }
 
+    /// A request the registration waits for is no longer pending and
+    /// nothing answered it (a dropped connection): the stage ends, and a
+    /// lost `addLoginPasskey` makes the list fetched again, since the
+    /// server may have added the passkey.
+    pub fn drop_lost_register(&mut self, pending: impl Fn(RequestId) -> bool) {
+        match &self.add {
+            PasskeyAdd::FetchingOptions(id) if !pending(*id) => self.add = PasskeyAdd::Idle,
+            PasskeyAdd::Sending(id) if !pending(*id) => {
+                self.add = PasskeyAdd::Idle;
+                if matches!(self.list, PasskeyList::Known { .. }) {
+                    self.list = PasskeyList::Stale(self.list.take_shown());
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// The request `id` of the registration failed (error, unreadable
     /// answer, or lost): the stage waiting for it ends and the options are
     /// dropped (tdesktop does); the box shows `error`. `false` when `id` is

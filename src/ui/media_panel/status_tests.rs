@@ -377,9 +377,9 @@ fn the_demo_seed_is_premium_with_every_status_resolved() {
     assert_eq!(session.payments.premium_option, Some(true));
     let emoji = &session.stickers.emoji;
     for id in emoji
-        .themed_status_ids
+        .themed_status_ids()
         .iter()
-        .chain(&emoji.default_status_ids)
+        .chain(emoji.default_status_ids())
     {
         assert!(emoji.custom_emoji_stickers.lookup(*id).is_some());
     }

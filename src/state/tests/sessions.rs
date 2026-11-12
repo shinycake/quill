@@ -288,6 +288,44 @@ fn terminate_session_error_surfaces_honestly() {
     );
 }
 
+/// Sweep r4-03 round 2 (item 11): a terminate refused while the refetch of
+/// the list is out does not end that refetch; its answer still lands and
+/// the refusal is told as a toast.
+#[test]
+fn a_refused_terminate_does_not_end_the_refetch_out() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let terminate = session.request(
+        RequestPurpose::Settings(SettingsPurpose::TerminateSession { session_id: 22 }),
+        None,
+    );
+    session.settings.sessions_op.begin(terminate);
+    let refetch = session.request(RequestPurpose::GetActiveSessions, None);
+    session.settings.sessions.begin();
+    session.settings.sessions.sent(refetch);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"SESSION_REVOKED"}}"#,
+            terminate.0
+        ),
+    );
+    assert!(session.settings.sessions.waits_for(refetch));
+    assert!(!session.chats_state.chat_action_error.is_empty());
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"sessions","@extra":"{}","sessions":[{{"@type":"session","id":11,"is_current":true,"device_model":"X"}}]}}"#,
+            refetch.0
+        ),
+    );
+    assert_eq!(session.settings.sessions.data().map(Vec::len), Some(1));
+}
+
 #[test]
 fn a_failed_write_keeps_the_refetch_that_went_stale_meanwhile() {
     let (mut session, sink) = session();

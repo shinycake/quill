@@ -293,7 +293,7 @@ impl Session {
             }
             return;
         }
-        if self.search.chat_search.matches_generation(pending)
+        if self.search.chat_search.waits_for_more(pending)
             && pending.map(|p| p.purpose) == Some(RequestPurpose::SearchChatMessagesMore)
         {
             for message in &messages {
@@ -304,7 +304,7 @@ impl Session {
                 .chat_search
                 .append_hits(hits, total_count, next_from_message_id);
         }
-        if self.search.chat_search.matches_generation(pending)
+        if self.search.chat_search.waits_for_search(pending)
             && pending.map(|p| p.purpose) == Some(RequestPurpose::SearchChatMessages)
         {
             for message in &messages {

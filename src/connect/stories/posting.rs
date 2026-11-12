@@ -8,7 +8,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let purpose = RequestPurpose::GetCloseFriends;
-        if self.session.requests.has_purpose(purpose) {
+        if self.session.stories.close_friends.is_loading() {
             return Ok(None);
         }
         let extra = self.session.request(purpose, None);
@@ -159,11 +159,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             Some(state) => matches!(state.page, crate::state::PageFetch::Loading { request }
                 if self.session.requests.get(request).is_some()),
-            None => self.session.requests.has_purpose_for_story(
-                RequestPurpose::GetStoryInteractions,
-                chat_id,
-                story_id,
-            ),
+            // No panel state yet: the first page is the one that opens it
+            // (`story_viewers_sent`), so nothing is out to wait for.
+            None => false,
         };
         if waiting {
             return Ok(None);
@@ -254,8 +252,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// `schema/td_api.tl:13702`) for the given chat — the user's own
     /// story chat or an eligible channel / supergroup from
     /// `getChatsToPostStories`. The composer calls this before every
-    /// post; the answer lands in `Session::story_post.check`.
-    /// Deduped per chat while a check is in flight.
+    /// post; the answer lands in `Session::story_post.check`. Every call
+    /// sends a check.
     pub fn check_can_post_story(&mut self, chat_id: ChatId) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
@@ -353,11 +351,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self
-            .session
-            .requests
-            .has_purpose(RequestPurpose::GetChatsToPostStories)
-        {
+        if self.session.stories.post_as.is_loading() {
             return Ok(None);
         }
         let extra = self

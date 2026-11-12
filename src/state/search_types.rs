@@ -189,7 +189,9 @@ pub struct SearchState {
     /// the status: the server answer is a supplement, not a requirement.
     pub server_chats: crate::state::fetch::Fetch<Vec<ChatId>>,
     /// "Frequent contacts" (`getTopChats` users), shown on an empty search.
-    pub top_chats: Vec<ChatId>,
+    /// Only the answer of the `getTopChats` the strip waits for fills it; a
+    /// failed one is not asked again until the search is closed.
+    pub top_chats: crate::state::fetch::Fetch<Vec<ChatId>>,
     /// TDLib option `disable_top_chats` (tdesktop "Suggest frequent
     /// contacts" off): the strip is hidden and nothing is fetched.
     pub top_chats_disabled: bool,
@@ -224,7 +226,7 @@ impl Default for SearchState {
             community_filter: None,
             filters: crate::search_filters::GlobalSearchFilters::default(),
             server_chats: Default::default(),
-            top_chats: Vec::new(),
+            top_chats: Default::default(),
             top_chats_disabled: false,
             confirm: None,
             top_view: Default::default(),
@@ -301,8 +303,15 @@ impl SearchState {
         self.filters = Default::default();
         self.confirm = None;
         self.top_view = Default::default();
+        // A failed frequent-contacts fetch is tried again at the next open.
+        self.top_chats.clear_error();
         self.bump_epoch();
         self.clear_results();
+    }
+
+    /// The frequent contacts held, in `getTopChats` order.
+    pub fn top_chat_ids(&self) -> &[ChatId] {
+        self.top_chats.items()
     }
 
     pub fn clear_query(&mut self) {
@@ -542,18 +551,23 @@ impl SearchState {
 
     /// Put a frequent contact back (the server refused `removeTopChat`).
     pub fn restore_top_chat(&mut self, chat_id: ChatId, index: usize) {
-        if self.top_chats_disabled || self.top_chats.contains(&chat_id) {
+        if self.top_chats_disabled || self.top_chat_ids().contains(&chat_id) {
             return;
         }
-        self.top_chats
-            .insert(index.min(self.top_chats.len()), chat_id);
+        self.top_chats.insert_data_if_missing(Vec::new);
+        if let Some(list) = self.top_chats.data_mut() {
+            list.insert(index.min(list.len()), chat_id);
+        }
     }
 
     /// Drop one frequent contact (`removeTopChat`).
     pub fn remove_top_chat(&mut self, chat_id: ChatId) -> bool {
-        let before = self.top_chats.len();
-        self.top_chats.retain(|id| *id != chat_id);
-        self.top_chats.len() != before
+        let Some(list) = self.top_chats.data_mut() else {
+            return false;
+        };
+        let before = list.len();
+        list.retain(|id| *id != chat_id);
+        list.len() != before
     }
 }
 

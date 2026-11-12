@@ -66,7 +66,6 @@ fn user_download_send_failure_marks_failed_download() {
 #[test]
 fn a_sound_whose_download_cannot_be_sent_is_not_left_waiting() {
     // 02-210: the pending marker is kept only while the download is out.
-    use crate::connect::SoundResolution;
     use crate::notify::NotificationSoundKind;
     use crate::telegram::envelope::{NotificationSound, ParsedFile};
     let store = MemorySecretStore::new();
@@ -116,7 +115,7 @@ fn a_sound_whose_download_cannot_be_sent_is_not_left_waiting() {
             },
         }]);
     let resolved = driver.resolve_notification_sound(NotificationSoundKind::Custom(7));
-    assert!(matches!(resolved, SoundResolution::Pending));
+    assert!(resolved.is_none());
     assert!(driver.session.settings.pending_sound_downloads.is_empty());
     assert!(driver.session.settings.sound_file_ids.is_empty());
     let _ = std::fs::remove_dir_all(&dir);

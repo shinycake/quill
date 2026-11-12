@@ -27,16 +27,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         // answer (or error) ends it.
         let is_change = purpose == RequestPurpose::Settings(SettingsPurpose::MutateQuickReplies);
         let subject = if is_change { Some(build("")) } else { subject };
-        // The request registry is the one record of what is on its way: the
-        // request carries what it is for, so nothing here outlives it.
-        if let Some(subject) = &subject
-            && self.session.requests.pending.values().any(|p| {
-                p.purpose == purpose
-                    && p.chat_id == chat_id
-                    && p.subject_id() == Some(subject.as_str())
-            })
-        {
-            return Ok(None);
+        // The write's own record says whether it is on its way: its request
+        // is looked up by the id the record holds, and one that was answered
+        // is spent.
+        let key = subject
+            .clone()
+            .map(|subject| (chat_id.map(|c| c.0), subject));
+        if let Some(key) = &key {
+            let requests = &self.session.requests;
+            let writes = &mut self.session.settings.quick_replies.writes;
+            writes.retain(|_, request| requests.get(*request).is_some());
+            if writes.contains_key(key) {
+                return Ok(None);
+            }
         }
         let extra = match &subject {
             Some(subject) => self
@@ -45,7 +48,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             None => self.session.request(purpose, chat_id),
         };
         let json = build(&extra.as_extra());
-        self.send_json_request(extra, &json).map(Some)
+        let sent = self.send_json_request(extra, &json)?;
+        if let Some(key) = key {
+            self.session.settings.quick_replies.writes.insert(key, sent);
+        }
+        Ok(Some(sent))
     }
 
     /// `loadQuickReplyShortcuts`, once per session unless a load failed.
@@ -60,8 +67,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             qr::load_shortcuts_request,
         );
         // A send that did not leave stays unasked: the next look asks again.
-        if sent.is_ok() {
-            self.session.settings.quick_replies.shortcuts_load.begin();
+        if let Ok(Some(request)) = sent {
+            let load = &mut self.session.settings.quick_replies.shortcuts_load;
+            load.begin();
+            load.sent(request);
         }
         sent.map(|_| ())
     }

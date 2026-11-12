@@ -180,6 +180,16 @@ impl super::on_screen::Farewell for SettingsUi {
         if archive {
             app.set_archive_settings_open(false);
         }
+        // The sticker panel and the manager's flag may outlive the box that
+        // set them (the business start page's sticker pick opens the panel
+        // too): neither stays open in the background session.
+        if let Some(live) = app.live.as_mut() {
+            live.driver.close_sticker_panel();
+            live.driver.set_sticker_manager_open(false);
+        } else if let Some(session) = app.demo_session.as_mut() {
+            session.stickers.stickers.close();
+            session.stickers.manager.open = false;
+        }
         if let Some(page) = app.settings.page() {
             app.leave_settings_page(page);
         }

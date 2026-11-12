@@ -29,6 +29,12 @@ pub struct QuickRepliesState {
     pub message_count_max: Option<usize>,
     /// Counter for `sendQuickReplyShortcutMessages.sending_id`.
     pub next_sending_id: i32,
+    /// The writes on their way, by what they change (the change itself, or
+    /// the shortcut sent to a chat) and chat: the same write is not sent
+    /// twice while its request is out, so a double click on Add does not
+    /// create the message twice. An entry whose request has been answered
+    /// (it left the request table) is spent.
+    pub writes: HashMap<(Option<i64>, String), RequestId>,
 }
 
 impl QuickRepliesState {
@@ -188,7 +194,10 @@ impl Session {
         if let Some(RequestPurpose::Settings(SettingsPurpose::LoadQuickReplyShortcuts)) =
             pending.map(|p| p.purpose)
         {
-            self.settings.quick_replies.shortcuts_load.succeed(());
+            self.settings
+                .quick_replies
+                .shortcuts_load
+                .answered(pending.map(|p| p.id), ());
         }
         // TDLib reports the messages as an update before this answer: a load
         // still waiting here had nothing to report.
@@ -212,7 +221,9 @@ impl Session {
         let state = &mut self.settings.quick_replies;
         match purpose {
             Some(RequestPurpose::Settings(SettingsPurpose::LoadQuickReplyShortcuts)) => {
-                state.shortcuts_load.fail(error_reason(err));
+                state
+                    .shortcuts_load
+                    .failed(request, error_reason(err), false);
             }
             Some(RequestPurpose::Settings(SettingsPurpose::LoadQuickReplyMessages {
                 shortcut_id,

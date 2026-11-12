@@ -162,10 +162,12 @@ fn s9_gif_backend_purpose_gated_dispatch() {
 
     // An addSavedAnimation `ok` clears the saved-GIF cache so it
     // refetches the server-confirmed list.
-    with_purpose
-        .stickers
-        .gifs
-        .saved_answered(with_purpose.stickers.gifs.search_results().to_vec());
+    let saved = with_purpose.request(RequestPurpose::GetSavedAnimations, None);
+    with_purpose.stickers.gifs.saved_asked(saved);
+    with_purpose.stickers.gifs.saved_answered(
+        Some(saved),
+        with_purpose.stickers.gifs.search_results().to_vec(),
+    );
     let extra = with_purpose.request(RequestPurpose::AddSavedAnimation, None);
     apply_json(
         &mut with_purpose,
@@ -176,10 +178,12 @@ fn s9_gif_backend_purpose_gated_dispatch() {
     assert!(with_purpose.stickers.gifs.animations.is_empty());
 
     // A removeSavedAnimation `ok` invalidates the same way.
-    with_purpose
-        .stickers
-        .gifs
-        .saved_answered(with_purpose.stickers.gifs.search_results().to_vec());
+    let saved = with_purpose.request(RequestPurpose::GetSavedAnimations, None);
+    with_purpose.stickers.gifs.saved_asked(saved);
+    with_purpose.stickers.gifs.saved_answered(
+        Some(saved),
+        with_purpose.stickers.gifs.search_results().to_vec(),
+    );
     let extra = with_purpose.request(RequestPurpose::RemoveSavedAnimation, None);
     apply_json(
         &mut with_purpose,
@@ -312,14 +316,18 @@ fn gif_panel_downloads_stills_then_preview_loops_then_unpreviewed_clips() {
         thumb: crate::telegram::envelope::Thumb::of(thumb.map(FileId), 160, 90, still),
         minithumbnail: None,
     };
-    session.stickers.gifs.saved_answered(vec![
-        // An MP4 preview loop: the loop plays, the GIF itself waits.
-        gif(1, Some(11), false),
-        // A still JPEG and no loop: the GIF itself plays.
-        gif(2, Some(12), true),
-        // Nothing but the GIF.
-        gif(3, None, true),
-    ]);
+    session.stickers.gifs.saved_asked(RequestId(1));
+    session.stickers.gifs.saved_answered(
+        Some(RequestId(1)),
+        vec![
+            // An MP4 preview loop: the loop plays, the GIF itself waits.
+            gif(1, Some(11), false),
+            // A still JPEG and no loop: the GIF itself plays.
+            gif(2, Some(12), true),
+            // Nothing but the GIF.
+            gif(3, None, true),
+        ],
+    );
     // A closed panel fetches nothing.
     assert!(session.gif_panel_file_ids_to_download().is_empty());
     session.stickers.gifs.open = true;
@@ -341,8 +349,8 @@ fn attached_sticker_sets_fail_the_box_and_drop_an_earlier_answer() {
     let seq = AtomicU64::new(0);
     let purpose = RequestPurpose::Stickers(StickersPurpose::GetAttachedStickerSets { file_id: 1 });
     let ask = |session: &mut Session| {
-        session.stickers.sticker_set_view = Some(StickerSetView::loading(0));
         let extra = session.request(purpose, None);
+        session.stickers.sticker_set_view = Some(StickerSetView::loading(0, extra));
         session.stickers.stickers.attached = crate::state::AttachedSets::Asked(extra);
         extra
     };
@@ -382,7 +390,10 @@ fn attached_sticker_sets_fail_the_box_and_drop_an_earlier_answer() {
     apply_json(&mut session, &seq, &sink, &sets(later));
     assert_eq!(
         session.stickers.stickers.attached,
-        crate::state::AttachedSets::Answered(None)
+        crate::state::AttachedSets::Answered {
+            request: later,
+            first: None
+        }
     );
 }
 
@@ -400,10 +411,10 @@ fn a_failed_refetch_keeps_the_shown_sticker_set() {
         stickers: Vec::new(),
         files: Default::default(),
     };
-    let mut view = StickerSetView::loading(5);
+    let mut view = StickerSetView::loading(5, RequestId(1));
     view.stage = ready.clone();
     session.stickers.sticker_set_view = Some(view);
-    session.fail_sticker_set_view(5);
+    session.fail_sticker_set_view(5, None);
     let stage = |session: &Session| {
         session
             .stickers
@@ -412,8 +423,14 @@ fn a_failed_refetch_keeps_the_shown_sticker_set() {
             .map(|v| v.stage.clone())
     };
     assert_eq!(stage(&session), Some(ready));
-    session.stickers.sticker_set_view = Some(StickerSetView::loading(5));
-    session.fail_sticker_set_view(5);
+    session.stickers.sticker_set_view = Some(StickerSetView::loading(5, RequestId(1)));
+    // Another request's error leaves the load waiting.
+    session.fail_sticker_set_view(5, Some(RequestId(2)));
+    assert!(matches!(
+        stage(&session),
+        Some(StickerSetViewStage::Loading { .. })
+    ));
+    session.fail_sticker_set_view(5, Some(RequestId(1)));
     assert_eq!(stage(&session), Some(StickerSetViewStage::Failed));
 }
 
@@ -433,23 +450,22 @@ fn saved_gif(id: i32) -> crate::telegram::envelope::AnimationItem {
 #[test]
 fn an_update_during_the_request_survives_its_answer_and_asks_again() {
     let mut gifs = crate::state::GifPanel::default();
-    gifs.saved_asked();
+    gifs.saved_asked(RequestId(1));
+    gifs.saved_answered(Some(RequestId(1)), vec![saved_gif(1)]);
+    gifs.saved_asked(RequestId(2));
     // `updateSavedAnimations` while the request is out: the answer may
-    // predate the change.
+    // predate the change, so it is dropped and the list asked for again.
     gifs.saved_outdated();
-    gifs.saved_answered(vec![saved_gif(1)]);
-    assert!(
-        gifs.loaded() && gifs.saved_is_outdated(),
-        "the list is asked for again"
-    );
+    gifs.saved_answered(Some(RequestId(2)), vec![saved_gif(2)]);
+    assert!(gifs.saved_is_outdated(), "the list is asked for again");
     assert_eq!(gifs.animations.len(), 1, "the list does not blank");
     // The failure of the ask that predates the change keeps the mark.
-    gifs.saved_failed();
+    gifs.saved_request_failed(Some(RequestId(2)));
     assert!(gifs.loaded() && gifs.saved_is_outdated());
     // A failure of the new ask keeps the list and counts as loaded until
     // the next opening.
-    gifs.saved_asked();
-    gifs.saved_failed();
+    gifs.saved_asked(RequestId(3));
+    gifs.saved_request_failed(Some(RequestId(3)));
     assert!(gifs.failed() && gifs.loaded());
     assert_eq!(gifs.animations.len(), 1);
     gifs.saved_retry();

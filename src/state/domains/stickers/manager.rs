@@ -130,6 +130,11 @@ impl ManagerCommit {
         }
     }
 
+    /// The next request is the new order.
+    pub fn next_is_reorder(&self) -> bool {
+        matches!(self.steps.front(), Some(CommitStep::Reorder(_)))
+    }
+
     /// The next request, taking it off the commit.
     pub fn next_step(&mut self) -> CommitStep {
         self.steps.pop_front().unwrap_or(CommitStep::Done)

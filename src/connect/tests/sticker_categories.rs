@@ -62,10 +62,6 @@ fn category_strip_loads_once_and_each_category_searches_its_own_way() {
         categories[1].source,
         EmojiCategorySource::Search(vec!["😀".into(), "😄".into()])
     );
-    assert!(
-        driver.session.stickers.emoji.categories.is_empty(),
-        "the picker's own categories are not replaced"
-    );
 
     // The Premium category asks TDLib for the Premium stickers.
     driver

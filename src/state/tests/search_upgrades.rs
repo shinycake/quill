@@ -152,13 +152,20 @@ fn frequent_contacts_load_and_the_option_hides_them() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetTopChats, None);
+    // An answer of a request the strip did not ask for fills nothing.
     apply_json(&mut session, &seq, &sink, &chats_json(extra, "[11,12]"));
+    assert!(session.search.search.top_chat_ids().is_empty());
+    let extra = session.request(RequestPurpose::GetTopChats, None);
+    session.search.search.top_chats.begin();
+    session.search.search.top_chats.sent(extra);
+    apply_json(&mut session, &seq, &sink, &chats_json(extra, "[11,12]"));
+    assert!(!session.search.search.top_chats.is_loading());
     assert_eq!(
-        session.search.search.top_chats,
-        vec![ChatId(11), ChatId(12)]
+        session.search.search.top_chat_ids(),
+        [ChatId(11), ChatId(12)]
     );
     assert!(session.search.search.remove_top_chat(ChatId(11)));
-    assert_eq!(session.search.search.top_chats, vec![ChatId(12)]);
+    assert_eq!(session.search.search.top_chat_ids(), [ChatId(12)]);
     assert!(!session.search.search.remove_top_chat(ChatId(11)));
 
     apply_json(
@@ -168,11 +175,11 @@ fn frequent_contacts_load_and_the_option_hides_them() {
         r#"{"@type":"updateOption","name":"disable_top_chats","value":{"@type":"optionValueBoolean","value":true}}"#,
     );
     assert!(session.search.search.top_chats_disabled);
-    assert!(session.search.search.top_chats.is_empty());
+    assert!(session.search.search.top_chat_ids().is_empty());
     // A reply that was already in flight must not bring the strip back.
     let late = session.request(RequestPurpose::GetTopChats, None);
     apply_json(&mut session, &seq, &sink, &chats_json(late, "[12]"));
-    assert!(session.search.search.top_chats.is_empty());
+    assert!(session.search.search.top_chat_ids().is_empty());
 }
 
 #[test]
@@ -229,7 +236,8 @@ fn top_people_lists_known_chats_by_first_name_and_hides_when_disabled() {
         apply_json(&mut session, &seq, &sink, json);
     }
     // 99 is not a chat the account knows: tdesktop skips inaccessible users.
-    session.search.search.top_chats = vec![ChatId(31), ChatId(99), ChatId(32)];
+    session.search.search.top_chats =
+        crate::state::fetch::Fetch::Ready(vec![ChatId(31), ChatId(99), ChatId(32)]);
     let people = crate::top_people::top_people(&session);
     let names: Vec<&str> = people.iter().map(|p| p.name.as_str()).collect();
     assert_eq!(names, vec!["Ada", "Grace"]);

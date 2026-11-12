@@ -53,10 +53,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if (self.session.settings.sessions.data().is_some()
             && !self.session.settings.sessions_op.is_stale())
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetActiveSessions)
+            || self.session.settings.sessions.is_loading()
         {
             return Ok(None);
         }
@@ -170,15 +167,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.session.settings.account_ttl.clear_error();
         let extra = self.session.request(RequestPurpose::DeleteAccount, None);
-        self.session.settings.account_delete.begin();
+        self.session.settings.account_delete.clear_error();
         match self
             .sender
             .send_json(&delete_account(extra, reason, password))
         {
-            Ok(()) => Ok(extra),
+            Ok(()) => {
+                // Only a request that went out is waited for.
+                let delete = &mut self.session.settings.account_delete;
+                delete.begin();
+                delete.sent(extra);
+                Ok(extra)
+            }
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.account_delete.cancel();
                 Err(err)
             }
         }
@@ -198,14 +200,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetDefaultAutoDelete, None);
-        self.session.settings.default_auto_delete.begin();
-        self.session.settings.default_auto_delete.sent(extra);
         let json = crate::telegram::requests::get_default_message_auto_delete_time(extra);
         match self.sender.send_json(&json) {
-            Ok(()) => Ok(Some(extra)),
+            Ok(()) => {
+                // Only a request that went out is waited for.
+                let auto_delete = &mut self.session.settings.default_auto_delete;
+                auto_delete.begin();
+                auto_delete.sent(extra);
+                Ok(Some(extra))
+            }
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.default_auto_delete.cancel();
                 Err(err)
             }
         }
@@ -225,14 +230,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Settings(SettingsPurpose::SetDefaultAutoDelete { seconds }),
             None,
         );
-        self.session.settings.default_auto_delete.begin();
-        self.session.settings.default_auto_delete.sent(extra);
         let json = crate::telegram::requests::set_default_message_auto_delete_time(extra, seconds);
         match self.sender.send_json(&json) {
-            Ok(()) => Ok(extra),
+            Ok(()) => {
+                let auto_delete = &mut self.session.settings.default_auto_delete;
+                auto_delete.begin();
+                auto_delete.sent(extra);
+                Ok(extra)
+            }
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.default_auto_delete.cancel();
                 Err(err)
             }
         }
@@ -251,13 +258,15 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let extra = self.session.request(RequestPurpose::GetAccountTtl, None);
-        self.session.settings.account_ttl.begin();
-        self.session.settings.account_ttl.sent(extra);
         match self.sender.send_json(&get_account_ttl(extra)) {
-            Ok(()) => Ok(Some(extra)),
+            Ok(()) => {
+                let ttl = &mut self.session.settings.account_ttl;
+                ttl.begin();
+                ttl.sent(extra);
+                Ok(Some(extra))
+            }
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.account_ttl.cancel();
                 Err(err)
             }
         }
@@ -275,13 +284,15 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { days }),
             None,
         );
-        self.session.settings.account_ttl.begin();
-        self.session.settings.account_ttl.sent(extra);
         match self.sender.send_json(&set_account_ttl(extra, days)) {
-            Ok(()) => Ok(extra),
+            Ok(()) => {
+                let ttl = &mut self.session.settings.account_ttl;
+                ttl.begin();
+                ttl.sent(extra);
+                Ok(extra)
+            }
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.account_ttl.cancel();
                 Err(err)
             }
         }
@@ -388,10 +399,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if (self.session.settings.connected_websites.data().is_some()
             && !self.session.settings.websites_op.is_stale())
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetConnectedWebsites)
+            || self.session.settings.connected_websites.is_loading()
         {
             return Ok(None);
         }

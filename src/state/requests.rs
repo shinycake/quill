@@ -520,12 +520,10 @@ impl RequestRegistry {
         account_generation: AccountGeneration,
         purpose: RequestPurpose,
         chat_id: ChatId,
-        search_generation: u64,
     ) -> RequestId {
         let blank = self.blank(account_generation, purpose);
         self.insert(PendingRequest {
             chat_id: Some(chat_id),
-            correlation: Correlation::Search(search_generation),
             ..blank
         })
     }

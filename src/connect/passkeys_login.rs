@@ -39,8 +39,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let state = &self.session.settings.passkeys;
         let blocked = !self.passkey_login_state()
             || !state.login_link_shown()
-            || matches!(state.login.stage, LoginStage::Checking(_))
-            || self.session.requests.has_auth_submit();
+            || matches!(state.login.stage, LoginStage::Checking(_));
         if blocked {
             return Err(ConnectSendError::InvalidRequest);
         }
