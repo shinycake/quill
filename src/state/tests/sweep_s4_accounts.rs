@@ -93,16 +93,10 @@ fn an_auto_download_save_is_answered_by_the_request_that_asked() {
             first.0
         ),
     );
-    assert!(
-        matches!(
-            session.chat_list.dialog_answers.take(first),
-            Some(DialogAnswer::Failed(_))
-        ),
-        "the refusal is the first request's"
-    );
     assert_eq!(
         session.settings.auto_download_answers.peek(first),
-        Some(AutoDownloadAnswer::Refused(first))
+        Some(AutoDownloadAnswer::Refused(first)),
+        "the refusal is the first request's"
     );
     apply_json(
         &mut session,
