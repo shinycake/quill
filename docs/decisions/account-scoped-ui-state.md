@@ -8082,6 +8082,7 @@ proxy. Every entry of the bundle is fixed or shown false:
 | review nits | `scripts/dialog-hosts.txt` and `scripts/session-dialogs.txt` name `auth.proxy_list_open` (was `proxy.list_box`). |
 | 12-A008 (nit) | Turning Limit Duration off forgets the chosen deadline on purpose: `close: Option<PollClose>` is the one value, and re-enabling starts from the default period like a fresh box. Remembering it would be a second field kept beside the stage. |
 | 12-A007 (nit) | Turning multiple answers off in a quiz keeps the first marked row by position. The box stores no click order, and the tdesktop `CreatePollBox` source is not in the sandbox to say which row it keeps; this is the smallest safe choice. |
+| fresh review | Re-read from the top after the fix round, with the re-sweep criteria (implicit stages, renames, answers not matched by `RequestId`, detached tasks, re-asks from render, crash risks): `premium_hub/gift_view.rs`, `gift_manage/state.rs`, `state/domains/payments/{state,gift_manage}.rs`, `connect/gift_manage.rs`, `ui/{gift_manage_ui,gift_owner_actions,premium_ui/mod}.rs`, `proxy.rs`, `state/session_proxy.rs`, `connect/proxy.rs`, `ui/proxy/{mod,build_proxy_edit_dialog}.rs`, `ui/settings_state.rs` (the link box closes in the account's farewell). 0 findings left in each; no new `unwrap`/`expect`/indexing, no new `RefCell` borrow, no timer, and the four shape guards pass with no new hits and nothing baselined. |
 
 ### Sweep fixes (r2-05)
 
