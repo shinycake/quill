@@ -517,7 +517,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                 return Ok(None);
             };
             next
-        } else if matches!(trending.page, crate::state::TrendingPage::Asking { from: 0, .. }) {
+        } else if matches!(
+            trending.page,
+            crate::state::TrendingPage::Asking { from: 0, .. }
+        ) {
             return Ok(None);
         } else {
             0

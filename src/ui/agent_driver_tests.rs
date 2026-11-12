@@ -619,10 +619,7 @@ fn a_tool_that_gave_up_gets_nothing_injected(cx: &mut TestAppContext) {
         },
     )
     .unwrap_or_else(|_| panic!("posted"));
-    assert_eq!(
-        ticket.give_up(),
-        Err(BridgeError::Timeout)
-    );
+    assert_eq!(ticket.give_up(), Err(BridgeError::Timeout));
     // Withdrawn from the queue: nothing to start.
     pump(&app, vcx);
     // Taken, then cancelled: posted, taken by the tick, then given up on
@@ -639,10 +636,7 @@ fn a_tool_that_gave_up_gets_nothing_injected(cx: &mut TestAppContext) {
             app.agent_driver_tick(window, cx);
         })
     });
-    assert_eq!(
-        ticket.give_up(),
-        Err(BridgeError::Timeout)
-    );
+    assert_eq!(ticket.give_up(), Err(BridgeError::Timeout));
     settle(vcx);
     settle(vcx);
     let value = read_tree(&app, vcx)

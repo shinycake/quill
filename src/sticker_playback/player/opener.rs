@@ -31,14 +31,7 @@ pub(super) fn run(index: usize, shared: &Shared) {
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
             }
         };
-        open(
-            shared,
-            &mut scratch,
-            (key, id),
-            taking,
-            decode,
-            &cancel,
-        );
+        open(shared, &mut scratch, (key, id), taking, decode, &cancel);
         shared.wake();
         shared.work.notify_all();
     }
