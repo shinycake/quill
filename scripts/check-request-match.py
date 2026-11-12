@@ -29,6 +29,10 @@ the re-sweep of 2026-11-11, more in round 3), and this check counts them:
   the same function. The stage reads Loading but holds no request, so
   `answered` and `failed` can never take its own answer and every answer is
   matched by purpose instead (round 3 found it again in six senders).
+- `pushed`: a call to `Fetch::pushed`, which sets the value whatever
+  request was in flight. It is for a server push (`updateXxx`) that carries
+  the whole value; a local value goes through `Fetch::set_local`. Every
+  caller is in scripts/request-match-allow.txt with its reason.
 - `generation`: a call to `matches_generation`, which takes an answer
   because it carries the generation counter (`u64`) of the query on screen
   instead of the `RequestId` its stage holds. A second ask inside one
@@ -83,6 +87,7 @@ PURPOSE = re.compile(r"\.\s*(?:has_purpose|take_purpose|has_auth_submit)\s*\(")
 # is not an answer match.
 PURPOSE_FOR_CHAT = re.compile(r"\.\s*(?:has_purpose|take_purpose)_for_chat\s*\(")
 SUCCEED = re.compile(r"\.\s*succeed\s*\(")
+PUSHED = re.compile(r"\.\s*pushed\s*\(")
 BEGIN = re.compile(r"\.\s*begin\s*\(\s*\)")
 SENT = re.compile(r"\.\s*sent\s*\(")
 AFTER = 400
@@ -135,10 +140,11 @@ def hits(root):
         purpose = "_purpose" in text or "has_auth_submit" in text
         succeed = ".succeed" in text
         counter = "Purpose" in text and COUNTER.search(text)
+        pushed = ".pushed" in text and path != "src/state/fetch.rs"
         begin = ".begin(" in text
         generation = "matches_generation" in text
         stamped = path not in KEY_OWNERS and ("Correlation" in text or ".correlate" in text)
-        if not (purpose or succeed or counter or begin or generation or stamped):
+        if not (purpose or succeed or pushed or counter or begin or generation or stamped):
             continue
         scopes = shape_guard.Scopes(path, text)
         if counter:
@@ -156,6 +162,10 @@ def hits(root):
             for match in SUCCEED.finditer(text):
                 line = shape_guard.line_of(text, match.start())
                 yield f"unmatched:{scopes.at(match.start())}", path, line
+        if pushed:
+            for match in PUSHED.finditer(text):
+                line = shape_guard.line_of(text, match.start())
+                yield f"pushed:{scopes.at(match.start())}", path, line
         if begin:
             for match in BEGIN.finditer(text):
                 if SENT.search(text, match.end(), match.end() + AFTER):

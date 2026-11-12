@@ -129,7 +129,13 @@ impl Session {
                 None => fetch.pushed(tags),
             }
         } else {
-            self.threads.saved.topic_tags.insert(topic_id, tags);
+            let fetch = self.threads.saved.topic_tags.entry(topic_id).or_default();
+            match request {
+                Some(_) => {
+                    fetch.answered(request, tags);
+                }
+                None => fetch.pushed(tags),
+            }
         }
         self.view_generation.bump();
     }
@@ -354,6 +360,7 @@ impl Session {
             .saved
             .topic_tags
             .get(&view.topic_id)
+            .and_then(crate::state::fetch::Fetch::data)
             .map(|tags| {
                 tags.iter()
                     .map(|tag| {

@@ -405,7 +405,11 @@ fn a_stop_gives_up_on_a_receive_that_does_not_return() {
     let _client = hub.bridge(1);
     entered.recv().unwrap();
     assert!(!hub.stop_within(Duration::ZERO));
+    // The timed-out stop kept the handle: the receive returning lets a
+    // later stop join the thread.
     drop(release);
+    assert!(hub.stop_within(Duration::from_secs(30)));
+    assert!(hub.run.stop_requested());
 }
 
 #[test]

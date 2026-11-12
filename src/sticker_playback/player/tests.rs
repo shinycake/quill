@@ -972,6 +972,58 @@ fn video_stickers_open_when_no_opener_thread_starts() {
 }
 
 #[test]
+fn only_the_worker_that_took_a_clip_lands_its_open() {
+    let started = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let kept = started.clone();
+    let spawn = move |name: String, body: Box<dyn FnOnce() + Send>| {
+        if name.starts_with("quill-sticker-open") {
+            return Err(std::io::Error::other("no more threads"));
+        }
+        crate::locks::lock_or_recover(&kept).push(body);
+        Ok(())
+    };
+    let engine = engine::Engine::start(1, 64 << 20, &spawn);
+    let key = key(1, 16);
+    engine.open(key, Origin::Lottie(std::path::PathBuf::from("missing.tgs")));
+    let job = crate::locks::lock_or_recover(&engine.shared().state).next_job(0);
+    let Some(engine::Job::Open {
+        id, path, worker, ..
+    }) = job
+    else {
+        panic!("the worker takes the clip to open it");
+    };
+    assert_eq!(worker, 0);
+    // An open that names another worker lands nowhere.
+    let other = engine::Job::Open {
+        key,
+        id,
+        path: path.clone(),
+        worker: worker + 1,
+    };
+    worker::work(
+        engine.shared(),
+        &mut std::collections::HashMap::new(),
+        &mut Scratch::default(),
+        other,
+    );
+    assert!(matches!(engine.state(&key), Some(ClipView::Opening)));
+    // The worker that took it lands it (a missing file fails the clip).
+    let own = engine::Job::Open {
+        key,
+        id,
+        path,
+        worker,
+    };
+    worker::work(
+        engine.shared(),
+        &mut std::collections::HashMap::new(),
+        &mut Scratch::default(),
+        own,
+    );
+    assert!(matches!(engine.state(&key), Some(ClipView::Failed(_))));
+}
+
+#[test]
 fn a_frame_that_cannot_be_drawn_fails_the_clip_instead_of_being_asked_again() {
     // The worker "starts" without running; its body is kept, as a started
     // thread keeps it.

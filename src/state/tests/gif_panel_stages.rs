@@ -82,7 +82,7 @@ fn the_saved_list_is_loaded_after_an_answer_or_a_failure_and_asked_again_after_a
     // A refresh runs over the answer: still loaded, and loading.
     panel.saved_asked(RequestId(2));
     assert!(panel.loaded() && panel.loading());
-    panel.saved_failed();
+    panel.saved_failed(RequestId(2));
     assert!(panel.loaded() && panel.failed() && !panel.loading());
     // Opening the panel again after a failure asks from scratch.
     panel.saved_retry();
@@ -144,7 +144,7 @@ fn a_saved_list_marked_out_of_date_drops_the_older_answer_and_is_asked_again() {
         !panel.loaded() || panel.saved_is_outdated(),
         "the answer predates the change"
     );
-    panel.saved_failed();
+    panel.saved_failed(RequestId(1));
     assert!(
         !panel.loaded() || panel.saved_is_outdated(),
         "a failure keeps the mark"
@@ -166,4 +166,29 @@ fn a_saved_answer_nobody_waits_for_is_dropped() {
     );
     panel.saved_answered(Some(RequestId(2)), Vec::new());
     assert!(panel.loaded() && !panel.loading());
+}
+
+/// An error of a fetch asked before a forget does not fail the fetch asked
+/// after it, and an answer of one asked before a forget is not shown.
+#[test]
+fn an_older_saved_error_or_answer_leaves_the_newer_ask_alone() {
+    let mut panel = GifPanel::default();
+    panel.saved_asked(RequestId(1));
+    panel.saved_forgotten();
+    panel.saved_asked(RequestId(2));
+    panel.saved_failed(RequestId(1));
+    assert!(panel.loading() && !panel.failed());
+    panel.saved_answered(Some(RequestId(1)), vec![]);
+    assert!(panel.loading());
+    panel.saved_answered(Some(RequestId(2)), vec![]);
+    assert!(panel.loaded() && !panel.loading() && !panel.failed());
+
+    // The same through an `updateSavedAnimations` after a forget.
+    let mut panel = GifPanel::default();
+    panel.saved_asked(RequestId(1));
+    panel.saved_forgotten();
+    panel.saved_outdated();
+    panel.saved_answered(Some(RequestId(1)), vec![]);
+    assert!(!panel.loaded(), "the answer of a fetch forgotten earlier");
+    assert!(panel.saved_is_outdated());
 }

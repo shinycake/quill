@@ -195,6 +195,22 @@ impl ChangeNumber {
         out
     }
 
+    /// The check `request` succeeded: the number it confirmed and the send
+    /// or resend still out (see [`ChangeNumber::finish`]), the flow being
+    /// over. `None` for an answer of any other request, which changes
+    /// nothing.
+    pub fn checked(&mut self, request: RequestId) -> Option<(String, Vec<RequestId>)> {
+        let phone = match self {
+            Self::Checking {
+                request: asked,
+                code,
+                ..
+            } if *asked == request => code.phone.clone(),
+            _ => return None,
+        };
+        Some((phone, self.finish()))
+    }
+
     /// `request` ended: `error` is why it failed, `None` when it never left.
     fn settle(&mut self, request: RequestId, error: Option<String>) {
         let code = self.sent().cloned();
@@ -315,5 +331,18 @@ mod tests {
         flow.abort(A);
         assert_eq!(flow, ChangeNumber::Idle);
         assert!(!flow.can_resend() && !flow.can_check(), "no code yet");
+    }
+
+    #[test]
+    fn only_the_check_the_flow_waits_for_finishes_it() {
+        let mut flow = ChangeNumber::Idle;
+        flow.begin_send(A);
+        flow.code_sent(A, code());
+        flow.begin_check(B);
+        assert_eq!(flow.checked(C), None, "another request's ok");
+        assert!(flow.is_checking());
+        assert_eq!(flow.checked(B), Some(("+15550199".to_string(), Vec::new())));
+        assert_eq!(flow, ChangeNumber::Idle);
+        assert_eq!(flow.checked(B), None, "a second ok of the same check");
     }
 }

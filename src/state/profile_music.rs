@@ -321,7 +321,6 @@ mod tests {
     #[test]
     fn a_check_is_settled_by_its_own_request_and_asked_again_when_it_fails_or_is_lost() {
         let mut session = session_with(&[1]);
-        session.my_user_id = Some(7);
         let ask = |session: &mut Session| {
             let id = session.request(
                 RequestPurpose::Media(MediaPurpose::IsProfileAudio { file_id: 5 }),
@@ -348,7 +347,6 @@ mod tests {
         assert_eq!(session.profile_audio_known(FileId(5)), Some(true));
         // A request lost with no answer is asked again.
         let lost = ask(&mut session);
-        session.media.profile_audio_ids.remove(&6);
         session.requests.take(lost);
         assert!(session.needs_profile_audio_check(FileId(5)));
     }

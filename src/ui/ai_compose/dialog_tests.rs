@@ -419,6 +419,65 @@ fn the_shortcuts_answer_skips_a_draft_typed_on_meanwhile(cx: &mut TestAppContext
     assert_eq!(composer, "Typed on after pressing");
 }
 
+/// A style waiting to be selected when the list has it is dropped when the
+/// list changes without it, instead of waiting for good.
+#[gpui_kit::test]
+fn a_refreshed_style_list_without_the_name_drops_the_wait(cx: &mut TestAppContext) {
+    use crate::ui::ai_compose_state::AiComposeView;
+    let (app, mut main) = open_main(cx);
+    app.update_in(&mut main, |app, window, cx| {
+        if let Some(open) = app.ai_compose.open.as_mut() {
+            open.view = AiComposeView::Card {
+                select_on_arrival: Some("no-such-style".into()),
+            };
+            // The list the box last saw differs from the session's.
+            open.style_names = vec!["stale".into()];
+        }
+        app.refresh_ai_compose_styles(window, cx);
+        let waiting = app.ai_compose.open.as_ref().map(|open| open.view.clone());
+        assert_eq!(
+            waiting,
+            Some(AiComposeView::Card {
+                select_on_arrival: None
+            })
+        );
+    });
+}
+
+/// An answer filed and not yet landed (its window's upkeep has not run) is
+/// still the shortcut's rewrite: another press elsewhere must not
+/// overwrite what waits for it.
+#[gpui_kit::test]
+fn the_shortcut_is_in_flight_until_its_answer_lands(cx: &mut TestAppContext) {
+    use crate::ui::ai_compose_state::ApplyInPlace;
+    let (app, mut main) = open_main(cx);
+    close_box(&app, &mut main);
+    app.update(&mut main, |app, _| {
+        let conversation = app.open_conversation().expect("a chat is open");
+        app.ai_compose.apply_in_place = Some(ApplyInPlace {
+            request: quill::ids::RequestId(43),
+            account: quill::ids::AccountKey::primary(),
+            field: String::new(),
+            conversation,
+            window: Some(quill::ids::ChatId(999)),
+            selection: None,
+            cursor: 0,
+        });
+        assert!(
+            !app.ai_apply_in_flight(),
+            "no request in the table, no answer filed"
+        );
+        if let Some(session) = app.demo_session.as_mut() {
+            session
+                .messages
+                .ai_compose
+                .apply_answers
+                .push(quill::ids::RequestId(43), Ok(("x".into(), Vec::new())));
+        }
+        assert!(app.ai_apply_in_flight(), "the answer waits for its window");
+    });
+}
+
 /// A request that cannot go out (the connection is being replaced, and it
 /// is not a screenshot demo) fails the card instead of leaving it loading.
 /// Read in the same update: with no session the box closes right after.

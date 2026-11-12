@@ -451,7 +451,15 @@ fn archived_sticker_paging_and_restore_ignore_pre_mutation_fetches() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.stickers.stickers.archived_has_more);
+    assert!(
+        driver
+            .session
+            .stickers
+            .stickers
+            .archived
+            .next_offset()
+            .is_some()
+    );
     assert!(driver.session.open_chat_id().is_none());
     let preview = driver.select_sticker_set(1).unwrap().unwrap();
     driver.ingest(copy_and_parse(&json!({"@type":"stickerSet","@extra":preview.as_extra(),"id":"1","stickers":[{"@type":"sticker","id":"900","set_id":"1","emoji":"😀","format":{"@type":"stickerFormatWebp"},"sticker":{"@type":"file","id":901,"local":{"@type":"localFile","can_be_downloaded":true},"remote":{"@type":"remoteFile"}}}]}).to_string(),&seq,&sink).unwrap()).unwrap();
@@ -465,10 +473,18 @@ fn archived_sticker_paging_and_restore_ignore_pre_mutation_fetches() {
     driver
         .ingest(copy_and_parse(&sets(json!(more.as_extra()), vec![100, 101]), &seq, &sink).unwrap())
         .unwrap();
-    assert_eq!(driver.session.stickers.stickers.archived.len(), 101);
-    assert!(!driver.session.stickers.stickers.archived_has_more);
+    assert_eq!(driver.session.stickers.stickers.archived.sets.len(), 101);
+    assert!(
+        !driver
+            .session
+            .stickers
+            .stickers
+            .archived
+            .next_offset()
+            .is_some()
+    );
     assert_eq!(driver.fetch_archived_stickers(true).unwrap(), None);
-    let before = driver.session.stickers.stickers.archived.clone();
+    let before = driver.session.stickers.stickers.archived.sets.clone();
     let restore = driver.manage_sticker_set(1, true, false).unwrap().unwrap();
     assert_eq!(
         sent_request(&recorder, "changeStickerSet")["is_archived"],
@@ -485,7 +501,7 @@ fn archived_sticker_paging_and_restore_ignore_pre_mutation_fetches() {
             .unwrap(),
         )
         .unwrap();
-    assert_eq!(driver.session.stickers.stickers.archived, before);
+    assert_eq!(driver.session.stickers.stickers.archived.sets, before);
     let old = driver.fetch_archived_stickers(false).unwrap().unwrap();
     driver.select_sticker_set(2).unwrap();
     assert!(
@@ -505,7 +521,7 @@ fn archived_sticker_paging_and_restore_ignore_pre_mutation_fetches() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.stickers.stickers.archived.is_empty());
+    assert!(driver.session.stickers.stickers.archived.sets.is_empty());
     assert_eq!(driver.session.stickers.stickers.selection.set_id(), None);
     assert!(
         !driver
@@ -518,11 +534,11 @@ fn archived_sticker_paging_and_restore_ignore_pre_mutation_fetches() {
     driver
         .ingest(copy_and_parse(&sets(json!(old.as_extra()), vec![1]), &seq, &sink).unwrap())
         .unwrap();
-    assert!(driver.session.stickers.stickers.archived.is_empty());
+    assert!(driver.session.stickers.stickers.archived.sets.is_empty());
     driver
         .ingest(copy_and_parse(&sets(fresh, vec![2]), &seq, &sink).unwrap())
         .unwrap();
-    assert_eq!(driver.session.stickers.stickers.archived[0].id, 2);
+    assert_eq!(driver.session.stickers.stickers.archived.sets[0].id, 2);
     let archive = driver.manage_sticker_set(2, false, true).unwrap().unwrap();
     assert_eq!(
         sent_request(&recorder, "changeStickerSet")["is_installed"],
@@ -543,7 +559,7 @@ fn archived_sticker_paging_and_restore_ignore_pre_mutation_fetches() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.stickers.stickers.archived.is_empty());
+    assert!(driver.session.stickers.stickers.archived.sets.is_empty());
     drop(driver);
     let _ = std::fs::remove_dir_all(dir);
 }

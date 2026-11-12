@@ -25,9 +25,6 @@ pub struct CallsState {
     /// ([`CallsState::take_group_call_fetch_failure`]), so a failure ends
     /// the wish of that call and no other.
     pub group_call_fetch_failures: Vec<i32>,
-    /// The mute toggles of group call participants on their way, each
-    /// under its request.
-    pub participant_mutes: crate::state::ParticipantMuteToggles,
     /// Phase C1: incoming calls that arrived while another call was
     /// active — the driver discards them (busy) via `discardCall`.
     /// Entries are `(call_id, user_id, is_video)` so the decline
@@ -191,7 +188,6 @@ impl CallsState {
             error: None,
             group_call_error: None,
             group_call_fetch_failures: Vec::new(),
-            participant_mutes: Default::default(),
             busy_decline_queue: Vec::new(),
             created_call_discards: Vec::new(),
             busy_declined_calls: std::collections::VecDeque::new(),

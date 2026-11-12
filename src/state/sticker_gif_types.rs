@@ -359,16 +359,67 @@ impl StickerSearchResults {
     }
 }
 
+/// The archived sets and how far their paging got, one value: a restart
+/// leaves both at once.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ArchivedSets {
+    pub sets: Vec<StickerSetInfo>,
+    pub page: ArchivedPage,
+}
+
+/// Where the archived sets' paging stands; the next ask's offset is in the
+/// variant.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ArchivedPage {
+    /// The first page is not in (not asked, or being asked): its answer
+    /// replaces the list.
+    #[default]
+    First,
+    /// The last page was full: the next one starts after set `next`.
+    More { next: i64 },
+    /// The last page was short, or made no progress.
+    End,
+}
+
+impl ArchivedSets {
+    /// The next page's offset, when there is one.
+    pub fn next_offset(&self) -> Option<i64> {
+        match self.page {
+            ArchivedPage::More { next } => Some(next),
+            ArchivedPage::First | ArchivedPage::End => None,
+        }
+    }
+
+    /// A page answered: the first replaces the list, a later one adds the
+    /// sets it does not have yet.
+    pub fn accept(&mut self, page: Vec<StickerSetInfo>) {
+        let asked = match self.page {
+            ArchivedPage::First => {
+                self.sets.clear();
+                None
+            }
+            ArchivedPage::More { next } => Some(next),
+            ArchivedPage::End => return,
+        };
+        let last = page.last().map_or(0, |set| set.id);
+        self.page = if page.len() == 100 && last > 0 && Some(last) != asked {
+            ArchivedPage::More { next: last }
+        } else {
+            ArchivedPage::End
+        };
+        let mut ids: std::collections::HashSet<_> = self.sets.iter().map(|set| set.id).collect();
+        self.sets
+            .extend(page.into_iter().filter(|set| ids.insert(set.id)));
+    }
+}
+
 /// Composer sticker panel (Unigram `StickerDrawerViewModel` installed regular sets).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StickerPanel {
     pub open: bool,
     pub tab: StickerTab,
     pub sets: Vec<StickerSetInfo>,
-    pub archived: Vec<StickerSetInfo>,
-    pub archived_offset: i64,
-    pub archived_next_offset: i64,
-    pub archived_has_more: bool,
+    pub archived: ArchivedSets,
     /// The selected set: its id, `getStickerSet` stage and stickers, one
     /// value replaced whole when the mode or the set changes.
     pub selection: StickerSelection,
@@ -508,9 +559,9 @@ impl GifPanel {
         match &self.saved {
             Fetch::Idle => false,
             Fetch::Ready(()) => true,
-            Fetch::Outdated(stale) | Fetch::Loading { stale, .. } | Fetch::Failed { stale, .. } => {
-                stale.is_some()
-            }
+            Fetch::Outdated { held: stale, .. }
+            | Fetch::Loading { stale, .. }
+            | Fetch::Failed { stale, .. } => stale.is_some(),
         }
     }
 
@@ -559,19 +610,24 @@ impl GifPanel {
         animations: Vec<AnimationItem>,
     ) {
         // The answer of the request the list waits for, or of the one an
-        // `updateSavedAnimations` outdated while it was out (the mark
-        // dropped its request).
-        let waits = request.is_some_and(|request| self.saved.waits_for(request));
-        if !waits && !self.saved.is_outdated() {
+        // `updateSavedAnimations` outdated while it was out.
+        let Some(request) = request else {
+            return;
+        };
+        let waits = self.saved.waits_for(request);
+        if !waits && !self.saved.asked_before_change(request) {
             return;
         }
         self.animations = animations;
         // Kept `Outdated` (now with a list held) when
         // `updateSavedAnimations` arrived meanwhile: asked for again.
         if waits {
-            self.saved.answered(request, ());
+            self.saved.answered(Some(request), ());
         } else {
-            self.saved = Fetch::Outdated(Some(()));
+            self.saved = Fetch::Outdated {
+                held: Some(()),
+                asked: None,
+            };
         }
     }
 
@@ -586,11 +642,12 @@ impl GifPanel {
         self.saved.is_outdated()
     }
 
-    /// `getSavedAnimations` failed, or could not be sent: counted as loaded,
-    /// so nothing asks again until the panel is opened. A list marked out
-    /// of date stays marked.
-    pub fn saved_failed(&mut self) {
-        if self.saved.is_outdated() {
+    /// `getSavedAnimations` `request` failed, or could not be sent: counted
+    /// as loaded, so nothing asks again until the panel is opened. Only the
+    /// fetch the list waits for fails; a list marked out of date stays
+    /// marked, and a fetch asked after a forget is not this one's.
+    pub fn saved_failed(&mut self, request: crate::ids::RequestId) {
+        if !self.saved.waits_for(request) {
             return;
         }
         self.saved = Fetch::Failed {
@@ -626,7 +683,7 @@ impl GifPanel {
     /// The list is out of date: the next ask fetches it again.
     pub fn saved_forgotten(&mut self) {
         self.saved = match std::mem::take(&mut self.saved) {
-            Fetch::Idle | Fetch::Ready(()) | Fetch::Outdated(_) => Fetch::Idle,
+            Fetch::Idle | Fetch::Ready(()) | Fetch::Outdated { .. } => Fetch::Idle,
             // A fetch out asked before the change: its answer predates it, so
             // it is dropped and the next ask goes out afresh.
             Fetch::Loading { .. } => Fetch::Idle,

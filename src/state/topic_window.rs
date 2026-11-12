@@ -230,7 +230,7 @@ impl Session {
                 // The page the window waits for fails it; the failure of
                 // another page (the window moved, a newer ask is out) does
                 // not.
-                if entry.settle_older(pending.id) || !entry.asking_older() {
+                if entry.settle_older(pending.id) {
                     entry.fail_older();
                 }
             }

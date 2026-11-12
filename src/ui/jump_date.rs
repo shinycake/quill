@@ -237,7 +237,9 @@ impl QuillApp {
                 )],
             )
         };
-        let note = self.session().and_then(|s| s.search.date_jump_note());
+        let note = self
+            .session()
+            .and_then(|s| s.search.date_jump_note(s.view_in_place()));
         div()
             .id("jump-date")
             .mx_auto()

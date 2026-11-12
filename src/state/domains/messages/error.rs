@@ -37,6 +37,19 @@ impl Session {
             );
         }
         if let Some(pending) = pending
+            && pending.purpose == RequestPurpose::GetChatScheduledMessages
+        {
+            self.messages.scheduled_messages.failed(pending);
+        }
+        if let Some(pending) = pending
+            && matches!(
+                pending.purpose,
+                RequestPurpose::Messages(MessagesPurpose::JumpToUnread { .. })
+            )
+        {
+            self.fail_unread_jump(Some(pending));
+        }
+        if let Some(pending) = pending
             && let RequestPurpose::GetRepliedMessage {
                 chat_id,
                 message_id,

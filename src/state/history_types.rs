@@ -128,7 +128,7 @@ pub struct HistoryMessage {
     /// in-bubble timestamp. `0` when the source didn't carry one.
     pub date: i32,
     pub content: MessageContent,
-    /// Where the send stands: delivered, still sending, or failed.
+    /// Where the send stands: delivered, not yet confirmed by the server, or failed.
     pub send: SendState,
     pub reply_to: Option<MessageReplyTo>,
     pub forward_info: Option<MessageForwardInfo>,
@@ -167,7 +167,7 @@ pub struct HistoryMessage {
 }
 
 impl HistoryMessage {
-    /// Not on the server yet: still sending, or its send failed.
+    /// Not on the server yet: not yet confirmed, or its send failed.
     pub fn pending(&self) -> bool {
         self.send != SendState::Delivered
     }

@@ -286,3 +286,24 @@ fn the_poll_stops_while_the_window_is_inactive(cx: &mut TestAppContext) {
         );
     });
 }
+
+/// The tick that finds the page closed ends the poll: the page no longer
+/// reads as running with a finished task.
+#[gpui_kit::test]
+fn a_poll_tick_on_a_closed_page_stops_the_poll(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, _, cx| {
+        app.open_group_settings_view(CHANNEL, GroupSettingsView::RecentActions, cx);
+        app.event_log_page_for(CHANNEL).poll = EventLogPoll::Running {
+            _timer: cx.spawn(async |_, _| {}),
+        };
+        app.admin.group_settings_dialog = None;
+        assert!(!app.event_log_poll_tick(CHANNEL, cx));
+        assert!(
+            app.admin
+                .event_log_page
+                .as_ref()
+                .is_some_and(|p| !p.poll.is_running())
+        );
+    });
+}

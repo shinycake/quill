@@ -187,9 +187,16 @@ impl Session {
         };
         if Some(thread.origin_chat_id) != origin_chat
             || thread.origin_message_id.0 != message_id
-            || !thread.status.takes_page_of(pending.id)
+            || if newer {
+                !thread.status.takes_newer_page()
+            } else {
+                !thread.takes_older_page(pending.id)
+            }
         {
             return;
+        }
+        if !newer {
+            thread.history.settle_older(pending.id);
         }
         let empty = messages.is_empty();
         let mut added = 0usize;
@@ -244,6 +251,14 @@ impl Session {
         }
     }
 
+    /// An older (or first) page of the open thread went out as `request`:
+    /// the window waits for it.
+    pub fn thread_older_asked(&mut self, request: RequestId) {
+        if let Some(thread) = self.threads.thread.as_mut() {
+            thread.history.ask_older(request);
+        }
+    }
+
     /// A thread request failed.
     pub(crate) fn fail_thread(&mut self, pending: Option<&PendingRequest>, line: String) {
         let Some(pending) = pending else {
@@ -275,10 +290,13 @@ impl Session {
                 thread.status = ThreadStatus::Failed(line);
             }
         } else if thread.status.is_loaded() {
-            thread.history.fail_older();
+            if thread.history.settle_older(pending.id) {
+                thread.history.fail_older();
+            }
         } else if matches!(thread.status, ThreadStatus::LoadingHistory(_))
-            && thread.status.takes_page_of(pending.id)
+            && thread.takes_older_page(pending.id)
         {
+            thread.history.settle_older(pending.id);
             thread.status = ThreadStatus::Failed(line);
         }
     }

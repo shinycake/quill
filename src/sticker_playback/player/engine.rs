@@ -68,10 +68,12 @@ pub(super) struct Clip {
 pub(super) enum Stage {
     /// Not taken yet: a worker takes `Origin` to open it.
     Waiting(Origin),
-    /// A draw worker has taken it and is opening it (or decoding it, with
-    /// no opener thread running). The worker's `WorkerEnd` fails it if the
-    /// thread ends first.
-    Taken,
+    /// Draw worker `worker` has taken it and is opening it (or decoding
+    /// it, with no opener thread running). The worker's `WorkerEnd` fails
+    /// it if the thread ends first, and only that worker's open lands.
+    Opening {
+        worker: usize,
+    },
     /// Opener thread `opener` is decoding it.
     Decoding {
         opener: usize,
@@ -114,7 +116,7 @@ impl Stage {
     /// What the UI sees: a clip not open yet is opening.
     pub(super) fn state(&self) -> ClipView {
         match self {
-            Self::Waiting(_) | Self::Taken | Self::Decoding { .. } => ClipView::Opening,
+            Self::Waiting(_) | Self::Opening { .. } | Self::Decoding { .. } => ClipView::Opening,
             Self::Ready(open) | Self::Drawing { open, .. } => ClipView::Ready(open.info),
             Self::Failed(error) => ClipView::Failed(error.clone()),
         }
@@ -124,7 +126,7 @@ impl Stage {
     pub(super) fn busy(&self) -> bool {
         matches!(
             self,
-            Self::Taken | Self::Decoding { .. } | Self::Drawing { .. }
+            Self::Opening { .. } | Self::Decoding { .. } | Self::Drawing { .. }
         )
     }
 
@@ -224,6 +226,8 @@ pub(super) enum Job {
         key: ClipKey,
         id: u64,
         path: PathBuf,
+        /// The worker that took it.
+        worker: usize,
     },
     /// Decode a clip whose frames all come up front: on the opener
     /// threads, or on its worker when none started.
@@ -788,11 +792,18 @@ impl State {
         let key = opening?;
         let clip = self.clips.get_mut(&key)?;
         let id = clip.id;
-        let Stage::Waiting(origin) = std::mem::replace(&mut clip.stage, Stage::Taken) else {
+        let Stage::Waiting(origin) =
+            std::mem::replace(&mut clip.stage, Stage::Opening { worker: me })
+        else {
             return None;
         };
         match origin {
-            Origin::Lottie(path) => Some(Job::Open { key, id, path }),
+            Origin::Lottie(path) => Some(Job::Open {
+                key,
+                id,
+                path,
+                worker: me,
+            }),
             Origin::Decoded(decode) => Some(Job::Decode {
                 key,
                 id,

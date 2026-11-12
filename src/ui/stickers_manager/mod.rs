@@ -387,7 +387,7 @@ impl QuillApp {
                 live.driver.fetch_trending_stickers(true).map(drop)
             }
             (Kind::Stickers, ManagerTab::Archived)
-                if session.stickers.stickers.archived_has_more =>
+                if session.stickers.stickers.archived.next_offset().is_some() =>
             {
                 live.driver.fetch_archived_stickers(true).map(drop)
             }

@@ -654,10 +654,12 @@ fn reschedule_ok_rewrites_the_scheduled_entry() {
     session
         .messages
         .scheduled_messages
+        .rows
         .push(scheduled_entry(70, 1000));
     session
         .messages
         .scheduled_messages
+        .rows
         .push(scheduled_entry(71, 2000));
     let extra = session.request(
         RequestPurpose::Messages(MessagesPurpose::EditMessageSchedulingState {
@@ -673,14 +675,14 @@ fn reschedule_ok_rewrites_the_scheduled_entry() {
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
     assert_eq!(
-        session.messages.scheduled_messages[0].scheduling_state,
+        session.messages.scheduled_messages.rows[0].scheduling_state,
         Some(MessageSchedulingState::SendAtDate {
             send_date: 5000,
             repeat_period: 0
         })
     );
     assert_eq!(
-        session.messages.scheduled_messages[1].scheduling_state,
+        session.messages.scheduled_messages.rows[1].scheduling_state,
         Some(MessageSchedulingState::SendAtDate {
             send_date: 2000,
             repeat_period: 0
@@ -696,10 +698,12 @@ fn send_now_ok_drops_the_scheduled_entry() {
     session
         .messages
         .scheduled_messages
+        .rows
         .push(scheduled_entry(70, 1000));
     session
         .messages
         .scheduled_messages
+        .rows
         .push(scheduled_entry(71, 2000));
     let extra = session.request(
         RequestPurpose::Messages(MessagesPurpose::EditMessageSchedulingState {
@@ -717,6 +721,7 @@ fn send_now_ok_drops_the_scheduled_entry() {
     let ids: Vec<i64> = session
         .messages
         .scheduled_messages
+        .rows
         .iter()
         .map(|m| m.id.0)
         .collect();
@@ -731,6 +736,7 @@ fn scheduling_edit_error_keeps_the_entry_and_surfaces() {
     session
         .messages
         .scheduled_messages
+        .rows
         .push(scheduled_entry(70, 1000));
     let extra = session.request(
         RequestPurpose::Messages(MessagesPurpose::EditMessageSchedulingState {
@@ -748,7 +754,7 @@ fn scheduling_edit_error_keeps_the_entry_and_surfaces() {
             extra.0
         ),
     );
-    assert_eq!(session.messages.scheduled_messages.len(), 1);
+    assert_eq!(session.messages.scheduled_messages.rows.len(), 1);
     let err = session
         .messages
         .resend_error

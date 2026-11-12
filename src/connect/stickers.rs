@@ -479,16 +479,18 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .requests
             .has_purpose(RequestPurpose::GetArchivedStickerSets)
-            || more && !self.session.stickers.stickers.archived_has_more
         {
             return Ok(None);
         }
         let offset = if more {
-            self.session.stickers.stickers.archived_next_offset
+            let Some(next) = self.session.stickers.stickers.archived.next_offset() else {
+                return Ok(None);
+            };
+            next
         } else {
+            self.session.stickers.stickers.archived.page = crate::state::ArchivedPage::First;
             0
         };
-        self.session.stickers.stickers.archived_offset = offset;
         self.sticker_request(RequestPurpose::GetArchivedStickerSets, |id| {
             get_archived_sticker_sets(id, offset)
         })
@@ -885,7 +887,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session.requests.take(extra);
                 // A refetch owed after an update stays owed.
                 if !owed {
-                    self.session.stickers.gifs.saved_failed();
+                    self.session.stickers.gifs.saved_asked(extra);
+                    self.session.stickers.gifs.saved_failed(extra);
                 }
                 Err(err)
             }

@@ -362,16 +362,21 @@ impl Session {
         set_id: i64,
         stage: StickerSetViewStage,
     ) {
-        if let Some(view) = self.stickers.sticker_set_view.as_mut()
-            && view.set_id == set_id
-            && !matches!(view.stage, StickerSetViewStage::Loading { request: waiting } if waiting != request)
-        {
-            view.stage = stage;
-            // An edit still in flight (a move applied locally) may have
-            // changed the set after this answer was built: ask again once
-            // it is answered.
-            view.edits.set_arrived();
+        let Some(view) = self.stickers.sticker_set_view.as_mut() else {
+            return;
+        };
+        if view.set_id != set_id {
+            return;
         }
+        // The load the box waits for, or the refresh after an edit: any
+        // other answer (an older load, an older refresh) is not this box's.
+        let loading = matches!(view.stage, StickerSetViewStage::Loading { request: waiting } if waiting == request);
+        if loading {
+            view.edits.load_arrived();
+        } else if !view.edits.refresh_arrived(request) {
+            return;
+        }
+        view.stage = stage;
     }
 
     /// The box's load failed. A refetch after an edit (a rename, an add,
@@ -382,6 +387,10 @@ impl Session {
             && matches!(view.stage, StickerSetViewStage::Loading { request: waiting } if waiting == request)
         {
             view.stage = StickerSetViewStage::Failed;
+        } else if let Some(view) = self.stickers.sticker_set_view.as_mut() {
+            // A refresh after an edit that failed: the box keeps what it
+            // shows.
+            view.edits.refresh_failed(request);
         }
     }
 

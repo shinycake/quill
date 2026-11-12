@@ -244,8 +244,8 @@ impl Session {
         ) {
             self.stickers.gifs.saved_mutation_failed();
         }
-        if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSavedAnimations) {
-            self.stickers.gifs.saved_failed();
+        if let Some(pending) = pending.filter(|p| p.purpose == RequestPurpose::GetSavedAnimations) {
+            self.stickers.gifs.saved_failed(pending.id);
         }
     }
 }

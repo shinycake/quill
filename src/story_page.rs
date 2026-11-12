@@ -130,7 +130,8 @@ pub struct StoryPageOp {
     pub chat_id: Option<ChatId>,
 }
 
-/// Most story-page ops kept; past it the oldest go, finished ones first.
+/// Most story-page ops kept; past it the oldest finished one goes, and a
+/// call still in flight stays (only past twice this does the oldest go).
 const STORY_PAGE_OPS_CAP: usize = 64;
 
 /// Every story-page call the session is tracking, one entry per request:

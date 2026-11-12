@@ -267,6 +267,16 @@ impl QuillApp {
     /// One poll step; `false` once the page is closed or the app is inactive.
     fn event_log_poll_tick(&mut self, chat_id: ChatId, cx: &mut Context<Self>) -> bool {
         if self.event_log_open_chat() != Some(chat_id) {
+            // The page closed: the task ends here, and the page (if it is
+            // still held for this chat) has no poll.
+            if let Some(page) = self
+                .admin
+                .event_log_page
+                .as_mut()
+                .filter(|page| page.chat == chat_id)
+            {
+                page.poll = EventLogPoll::Stopped;
+            }
             return false;
         }
         if !self.frame.window_active.get() {

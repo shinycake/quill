@@ -289,6 +289,9 @@ fn tag_updates_and_sublist_tag_names() {
     assert_eq!(session.threads.saved.tag_list()[0].label, "Love");
     session.open_saved_sublist(77);
     let extra = session.request(RequestPurpose::GetSavedMessagesTags { topic_id: 77 }, None);
+    let fetch = session.threads.saved.topic_tags.entry(77).or_default();
+    fetch.begin();
+    fetch.sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -303,6 +306,63 @@ fn tag_updates_and_sublist_tag_names() {
     assert_eq!(choices.len(), 1);
     assert_eq!(choices[0].label, "Love");
     assert_eq!(choices[0].count, 2);
+}
+
+/// A sublist's tags are taken from the ask that is out for it: an older ask
+/// answering after a newer one began, and one nobody asked, change nothing.
+#[test]
+fn a_sublist_takes_only_the_tags_it_asked_for() {
+    let (mut session, sink, seq) = saved_session();
+    let tags = |count: i32| {
+        format!(
+            r#""tags":[{{"tag":{{"@type":"reactionTypeEmoji","emoji":"❤"}},"label":"","count":{count}}}]"#
+        )
+    };
+    let ask = |session: &mut Session| {
+        let extra = session.request(RequestPurpose::GetSavedMessagesTags { topic_id: 77 }, None);
+        let fetch = session.threads.saved.topic_tags.entry(77).or_default();
+        fetch.begin();
+        fetch.sent(extra);
+        extra
+    };
+    let older = ask(&mut session);
+    let newer = ask(&mut session);
+    for (request, count) in [(older, 1), (newer, 2)] {
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"savedMessagesTags","@extra":"{}",{}}}"#,
+                request.0,
+                tags(count)
+            ),
+        );
+        let held = session
+            .threads
+            .saved
+            .topic_tags
+            .get(&77)
+            .and_then(|f| f.data());
+        assert_eq!(held.map(|t| t[0].count), (count == 2).then_some(2));
+    }
+    // An update is the server's current list, whatever the fetch.
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"updateSavedMessagesTags","saved_messages_topic_id":"77","tags":{{"@type":"savedMessagesTags",{}}}}}"#,
+            tags(5)
+        ),
+    );
+    let held = session
+        .threads
+        .saved
+        .topic_tags
+        .get(&77)
+        .and_then(|f| f.data());
+    assert_eq!(held.map(|t| t[0].count), Some(5));
 }
 
 #[test]

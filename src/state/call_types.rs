@@ -576,6 +576,10 @@ pub struct ActiveGroupCall {
     /// once per tracked call (a failure leaves the picker out, the join
     /// goes ahead as yourself); empty when there are no alternatives.
     pub join_as_options: crate::state::fetch::Fetch<Vec<MessageSender>>,
+    /// The mute toggles of participants that went out, each under its
+    /// request; removed by that request's answer or error, and gone with
+    /// the call.
+    pub mute_toggles: std::collections::HashMap<MessageSender, RequestId>,
     /// The identity the next join uses; `None` joins as yourself.
     pub join_as: Option<MessageSender>,
     /// How the joined call carries media, from the engine after the native
@@ -817,6 +821,7 @@ impl ActiveGroupCall {
             record_duration: 0,
             is_video_recorded: false,
             join_as_options: Default::default(),
+            mute_toggles: Default::default(),
             join_as: None,
             media: Default::default(),
             viewer_count: 0,

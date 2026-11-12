@@ -420,6 +420,56 @@ fn a_failed_refetch_keeps_the_shown_sticker_set() {
     assert_eq!(stage(&session), Some(StickerSetViewStage::Failed));
 }
 
+/// An open box takes the answer of the refresh it asked after an edit, and
+/// no other `getStickerSet` answer of that set.
+#[test]
+fn a_shown_sticker_set_takes_only_the_refresh_it_asked() {
+    let (mut session, _sink) = session();
+    let stage = |title: &str| StickerSetViewStage::Ready {
+        title: title.into(),
+        name: "cats".into(),
+        installed: true,
+        is_emoji: false,
+        is_owned: true,
+        stickers: Vec::new(),
+    };
+    let title = |session: &Session| match session.stickers.sticker_set_view.as_ref() {
+        Some(StickerSetView {
+            stage: StickerSetViewStage::Ready { title, .. },
+            ..
+        }) => title.clone(),
+        _ => String::new(),
+    };
+    let mut view = StickerSetView::loading(5, RequestId(50));
+    view.stage = stage("Cats");
+    view.edits.need_refresh();
+    view.edits.refreshing(RequestId(60));
+    session.stickers.sticker_set_view = Some(view);
+    // An answer nobody asked for, and the load that is over, change nothing.
+    session.accept_sticker_set_view(RequestId(61), 5, stage("Stray"));
+    session.accept_sticker_set_view(RequestId(50), 5, stage("Old load"));
+    assert_eq!(title(&session), "Cats");
+    // An edit confirmed meanwhile makes the refresh stale: it asks again.
+    if let Some(view) = session.stickers.sticker_set_view.as_mut() {
+        view.edits.need_refresh();
+    }
+    session.accept_sticker_set_view(RequestId(60), 5, stage("Stale"));
+    assert_eq!(title(&session), "Cats");
+    if let Some(view) = session.stickers.sticker_set_view.as_mut() {
+        assert!(view.edits.refresh_needed());
+        view.edits.refreshing(RequestId(62));
+    }
+    session.accept_sticker_set_view(RequestId(62), 5, stage("Fresh"));
+    assert_eq!(title(&session), "Fresh");
+    assert!(
+        session
+            .stickers
+            .sticker_set_view
+            .as_ref()
+            .is_some_and(|view| !view.edits.busy() && !view.edits.refresh_needed())
+    );
+}
+
 /// The saved list asked for and answered, as the driver would.
 fn seed_saved(
     gifs: &mut crate::state::GifPanel,
@@ -456,12 +506,12 @@ fn an_update_during_the_request_survives_its_answer_and_asks_again() {
     );
     assert_eq!(gifs.animations.len(), 1, "the list does not blank");
     // The failure of the ask that predates the change keeps the mark.
-    gifs.saved_failed();
+    gifs.saved_failed(RequestId(1));
     assert!(gifs.loaded() && gifs.saved_is_outdated());
     // A failure of the new ask keeps the list and counts as loaded until
     // the next opening.
     gifs.saved_asked(RequestId(2));
-    gifs.saved_failed();
+    gifs.saved_failed(RequestId(2));
     assert!(gifs.failed() && gifs.loaded());
     assert_eq!(gifs.animations.len(), 1);
     gifs.saved_retry();

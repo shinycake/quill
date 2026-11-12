@@ -77,24 +77,7 @@ impl Session {
     }
 
     pub fn accept_archived_sticker_sets(&mut self, sets: Vec<StickerSetInfo>) {
-        let next = sets.last().map(|set| set.id).unwrap_or(0);
-        self.stickers.stickers.archived_has_more =
-            sets.len() == 100 && next > 0 && next != self.stickers.stickers.archived_offset;
-        self.stickers.stickers.archived_next_offset = next;
-        if self.stickers.stickers.archived_offset == 0 {
-            self.stickers.stickers.archived.clear();
-        }
-        let mut ids: HashSet<_> = self
-            .stickers
-            .stickers
-            .archived
-            .iter()
-            .map(|set| set.id)
-            .collect();
-        self.stickers
-            .stickers
-            .archived
-            .extend(sets.into_iter().filter(|set| ids.insert(set.id)));
+        self.stickers.stickers.archived.accept(sets);
     }
 
     /// The installed sets the load that waits for them answered (the

@@ -78,16 +78,10 @@ impl ThreadStatus {
         )
     }
 
-    /// A history page answered by `request` may be applied. While the
-    /// first page is out (`LoadingHistory`) only that request's answer
-    /// counts; any other page is from a view that is gone. (The driver
-    /// enters `LoadingHistory` in the same step that sends the page, so
-    /// nothing answers during `ChatOpen`.)
-    pub fn takes_page_of(&self, request: RequestId) -> bool {
-        match self {
-            Self::LoadingHistory(waiting) => *waiting == request,
-            _ => true,
-        }
+    /// A newer history page may be applied: not while the first page is
+    /// out (a newer one then is from a view that is gone).
+    pub fn takes_newer_page(&self) -> bool {
+        !matches!(self, Self::LoadingHistory(_))
     }
 
     /// The first page landed: the thread shows rows (or the reload of its
@@ -338,6 +332,17 @@ impl ThreadView {
         true
     }
 
+    /// Whether the older (or first) page answered by `request` is the one
+    /// the thread waits for: the first page is held by the status, later
+    /// pages by the window's older end. Any other is from a window that is
+    /// gone.
+    pub(crate) fn takes_older_page(&self, request: RequestId) -> bool {
+        match self.status {
+            ThreadStatus::LoadingHistory(waiting) => waiting == request,
+            _ => self.history.older == OlderEnd::Asking(request),
+        }
+    }
+
     /// Drop the loaded replies so the newest page can load; the root rows
     /// stay (they are the pinned bar), own sends still in flight stay (they
     /// belong to the newest end, as tdesktop's `appendClientSideMessages`),
@@ -351,7 +356,10 @@ impl ThreadView {
         self.history.next_from_message_id = MessageId(0);
         self.history.reader = ReaderPosition::Tail;
         self.history.newer = NewerEnd::AtLatest;
-        self.history.older = OlderEnd::Open;
+        // Every way out of the older end: the page out is forgotten, a
+        // failure is forgiven.
+        self.history.forget_older();
+        self.history.reopen_older();
         if self.status == ThreadStatus::Ready {
             self.status = ThreadStatus::ReloadNeeded;
         }

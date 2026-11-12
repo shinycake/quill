@@ -39,14 +39,11 @@ impl Session {
             && pending.purpose == RequestPurpose::GetChatScheduledMessages
         {
             // The list holds each chat's rows; an answer replaces only the
-            // rows of the chat it was asked for.
-            let chat = pending.chat_id;
+            // rows of the chat it was asked for, and only the ask the chat
+            // waits for.
             self.messages
                 .scheduled_messages
-                .retain(|m| Some(m.chat_id) != chat);
-            self.messages
-                .scheduled_messages
-                .extend(messages.iter().filter(|m| Some(m.chat_id) == chat).cloned());
+                .answered(pending, &messages);
             return;
         }
         if let Some(pending) = pending
@@ -271,8 +268,7 @@ impl Session {
                 MessagesPurpose::JumpToUnread { .. }
             ))
         ) {
-            self.messages.unread_jump = oldest_message_id(messages.iter().map(|m| m.id))
-                .and_then(|id| ViewJump::for_request(pending, id, DateJumpMode::Exact));
+            self.accept_unread_jump(oldest_message_id(messages.iter().map(|m| m.id)), pending);
             return;
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPinnedMessages) {
@@ -420,6 +416,7 @@ impl Session {
         if let Some(slot) = self
             .messages
             .scheduled_messages
+            .rows
             .iter_mut()
             .find(|m| m.chat_id == chat_id && m.id == message_id)
         {

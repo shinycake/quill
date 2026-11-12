@@ -25,7 +25,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .sets
             .iter()
             .chain(&stickers.stickers.trending)
-            .chain(&stickers.stickers.archived)
+            .chain(&stickers.stickers.archived.sets)
             .chain(stickers.masks.installed.items())
             .chain(stickers.masks.archived_sets())
         {

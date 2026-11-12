@@ -62,6 +62,13 @@ pub enum StickerSetEdits {
     /// the box shows the server's set. `out` are the edits still being
     /// answered; the ask waits for them.
     NeedsRefresh { out: Vec<RequestId> },
+    /// The `getStickerSet` refresh is out as `refresh`; only its answer
+    /// updates the box. An edit confirmed meanwhile makes it stale
+    /// (`NeedsRefresh` again).
+    Refreshing {
+        refresh: RequestId,
+        out: Vec<RequestId>,
+    },
     /// `deleteStickerSet` was confirmed: the box closes.
     Deleted,
 }
@@ -70,7 +77,9 @@ impl StickerSetEdits {
     /// An edit is still being answered.
     pub fn busy(&self) -> bool {
         match self {
-            Self::InFlight(out) | Self::NeedsRefresh { out } => !out.is_empty(),
+            Self::InFlight(out) | Self::NeedsRefresh { out } | Self::Refreshing { out, .. } => {
+                !out.is_empty()
+            }
             Self::Idle | Self::Deleted => false,
         }
     }
@@ -78,7 +87,7 @@ impl StickerSetEdits {
     /// The edits still being answered.
     pub fn in_flight(&self) -> &[RequestId] {
         match self {
-            Self::InFlight(out) | Self::NeedsRefresh { out } => out,
+            Self::InFlight(out) | Self::NeedsRefresh { out } | Self::Refreshing { out, .. } => out,
             Self::Idle | Self::Deleted => &[],
         }
     }
@@ -97,7 +106,9 @@ impl StickerSetEdits {
     pub fn begin(&mut self, request: RequestId) {
         match self {
             Self::Idle => *self = Self::InFlight(vec![request]),
-            Self::InFlight(out) | Self::NeedsRefresh { out } => out.push(request),
+            Self::InFlight(out) | Self::NeedsRefresh { out } | Self::Refreshing { out, .. } => {
+                out.push(request);
+            }
             Self::Deleted => {}
         }
     }
@@ -107,15 +118,24 @@ impl StickerSetEdits {
     pub fn need_refresh(&mut self) {
         match std::mem::take(self) {
             Self::Idle => *self = Self::NeedsRefresh { out: Vec::new() },
-            Self::InFlight(out) | Self::NeedsRefresh { out } => {
+            // The refresh out predates the edit: its answer is not taken.
+            Self::InFlight(out) | Self::NeedsRefresh { out } | Self::Refreshing { out, .. } => {
                 *self = Self::NeedsRefresh { out };
             }
             Self::Deleted => *self = Self::Deleted,
         }
     }
 
-    /// The refresh went out.
-    pub fn refreshed(&mut self) {
+    /// The refresh went out as `refresh`.
+    pub fn refreshing(&mut self, refresh: RequestId) {
+        if let Self::NeedsRefresh { out } = std::mem::take(self) {
+            *self = Self::Refreshing { refresh, out };
+        }
+    }
+
+    /// The refresh never went out: it is over, and not asked again from
+    /// every poll.
+    pub fn refresh_skipped(&mut self) {
         if let Self::NeedsRefresh { out } = std::mem::take(self) {
             *self = if out.is_empty() {
                 Self::Idle
@@ -125,17 +145,60 @@ impl StickerSetEdits {
         }
     }
 
-    /// The set's contents arrived. An edit still in flight (a move applied
-    /// locally) may have changed the set after this answer was built, so
-    /// the box asks again once it is answered; otherwise the answer is
-    /// current.
-    pub fn set_arrived(&mut self) {
-        *self = match std::mem::take(self) {
-            Self::InFlight(out) | Self::NeedsRefresh { out } if !out.is_empty() => {
-                Self::NeedsRefresh { out }
+    /// Whether `request` is the refresh this stage waits for.
+    pub fn waits_for_refresh(&self, request: RequestId) -> bool {
+        matches!(self, Self::Refreshing { refresh, .. } if *refresh == request)
+    }
+
+    /// The set's contents arrived as the refresh `request`. An edit still
+    /// in flight (a move applied locally) may have changed the set after
+    /// this answer was built, so the box asks again once it is answered;
+    /// otherwise the answer is current. `false` (nothing changes) for any
+    /// other request.
+    pub fn refresh_arrived(&mut self, request: RequestId) -> bool {
+        if !self.waits_for_refresh(request) {
+            return false;
+        }
+        self.settle_refresh();
+        true
+    }
+
+    /// The refresh failed: the box keeps what it shows.
+    pub fn refresh_failed(&mut self, request: RequestId) {
+        if self.waits_for_refresh(request) {
+            let Self::Refreshing { out, .. } = std::mem::take(self) else {
+                return;
+            };
+            *self = if out.is_empty() {
+                Self::Idle
+            } else {
+                Self::InFlight(out)
+            };
+        }
+    }
+
+    /// The set's contents arrived under the load stage of the box (the
+    /// first answer): edits out make the answer stale.
+    pub fn load_arrived(&mut self) {
+        match std::mem::take(self) {
+            Self::InFlight(out) | Self::NeedsRefresh { out } | Self::Refreshing { out, .. }
+                if !out.is_empty() =>
+            {
+                *self = Self::NeedsRefresh { out };
             }
-            Self::Deleted => Self::Deleted,
-            _ => Self::Idle,
+            Self::Deleted => *self = Self::Deleted,
+            _ => *self = Self::Idle,
+        }
+    }
+
+    fn settle_refresh(&mut self) {
+        let Self::Refreshing { out, .. } = std::mem::take(self) else {
+            return;
+        };
+        *self = if out.is_empty() {
+            Self::Idle
+        } else {
+            Self::NeedsRefresh { out }
         };
     }
 
@@ -159,6 +222,10 @@ impl StickerSetEdits {
             Self::NeedsRefresh { mut out } => {
                 out.retain(|held| Some(*held) != request);
                 *self = Self::NeedsRefresh { out };
+            }
+            Self::Refreshing { refresh, mut out } => {
+                out.retain(|held| Some(*held) != request);
+                *self = Self::Refreshing { refresh, out };
             }
             other => *self = other,
         }

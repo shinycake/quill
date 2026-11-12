@@ -171,7 +171,7 @@ impl QuillApp {
                 )));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.settings.default_auto_delete.pushed(seconds);
+            session.settings.default_auto_delete.set_local(seconds);
         }
         cx.notify();
     }

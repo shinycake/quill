@@ -549,7 +549,11 @@ fn a_calendar_day_with_no_media_keeps_the_box_open_with_a_note() {
     fx.driver.jump_to_date(19_000).unwrap();
     let search = &fx.driver.session.search;
     assert!(search.history_calendar.is_some());
-    assert!(search.date_jump_note().is_some());
+    assert!(
+        search
+            .date_jump_note(fx.driver.session.view_in_place())
+            .is_some()
+    );
     assert!(fx.requests("searchChatMessages").is_empty());
 }
 

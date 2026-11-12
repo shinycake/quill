@@ -333,7 +333,9 @@ enum RunStage {
     Died,
     /// A stop was requested; the loop ends at its next check.
     Stopping,
-    /// The thread was joined.
+    /// The thread was joined. This is the one stage with no handle in
+    /// `TdHub::thread`; every other stage keeps it there, also after a
+    /// timed-out `stop_within`.
     Joined,
 }
 
@@ -604,6 +606,10 @@ impl TdHub {
             std::thread::sleep(Duration::from_millis(2));
         }
         if !thread.is_finished() {
+            // Still running: the handle stays with the hub, so the stage
+            // `Stopping` keeps the thread it waits for and a later stop
+            // can join it.
+            *lock(&self.thread) = Some(thread);
             return false;
         }
         let _ = thread.join();

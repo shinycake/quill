@@ -1018,3 +1018,23 @@ fn r2_clear_all_answers_only_by_its_own_request_and_keeps_the_list_until_ok() {
     assert!(session.calls.recent_calls.rows().is_empty());
     assert_eq!(session.calls.recent_calls.next_offset(), "");
 }
+
+/// A close-friends load that never went out (no connection) fails the list
+/// so the panel shows Retry; a list already held, or a load out, stays.
+#[test]
+fn a_close_friends_load_that_cannot_start_fails_the_list() {
+    let (mut session, _sink) = session();
+    session.stories.close_friends.refused();
+    assert!(session.stories.close_friends.failed_without_list());
+    let load = RequestId(5);
+    session.stories.close_friends.begin_load(load);
+    session.stories.close_friends.refused();
+    assert!(session.stories.close_friends.ids().is_none());
+    assert!(!session.stories.close_friends.failed_without_list());
+    session
+        .stories
+        .close_friends
+        .answered(Some(load), vec![1, 2]);
+    session.stories.close_friends.refused();
+    assert_eq!(session.stories.close_friends.ids(), Some(&vec![1, 2]));
+}

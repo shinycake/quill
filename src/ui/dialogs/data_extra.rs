@@ -136,8 +136,13 @@ impl QuillApp {
         let usage: Option<NetworkUsage> =
             session.and_then(|s| s.settings.privacy_data.network.data().cloned());
         let loading = session.is_some_and(|s| s.settings.privacy_data.network.is_loading());
-        let error =
-            session.and_then(|s| s.settings.privacy_data.network.error().map(str::to_string));
+        let error = session.and_then(|s| {
+            let data = &s.settings.privacy_data;
+            data.network_reset
+                .error()
+                .or(data.network.error())
+                .map(str::to_string)
+        });
         let mut section = div().flex().flex_col().gap_2().px_3().py_2();
         if let Some(line) = error {
             section = section.child(div().text_xs().text_color(cx.theme().danger).child(line));

@@ -78,7 +78,14 @@ impl QuillApp {
             stickers.stickers.sets.iter().take(3).cloned().collect(),
         );
         stickers.masks.archived = quill::state::fetch::Fetch::Ready(quill::state::ArchivedMasks {
-            sets: stickers.stickers.archived.iter().take(1).cloned().collect(),
+            sets: stickers
+                .stickers
+                .archived
+                .sets
+                .iter()
+                .take(1)
+                .cloned()
+                .collect(),
             next_offset: None,
         });
         stickers.masks.set_dialog_open(true);
@@ -135,7 +142,7 @@ impl QuillApp {
         stickers.trending_total = trending.len();
         stickers.trending_next_offset = trending.len();
         stickers.trending = trending;
-        stickers.archived = archived;
+        stickers.archived.sets = archived;
         stickers.open = true;
         stickers.tab = StickerTab::Installed;
         session.stickers.manager.open = true;

@@ -724,7 +724,7 @@ impl QuillApp {
                 StickerTab::Installed if panel.sets.is_empty() => {
                     Some(tr(keys::Q_MEDIA_NO_STICKER_SETS_YET).into())
                 }
-                StickerTab::Archived if panel.archived.is_empty() => {
+                StickerTab::Archived if panel.archived.sets.is_empty() => {
                     Some(tr(keys::Q_MEDIA_NO_ARCHIVED_STICKER_SETS).into())
                 }
                 StickerTab::Recent if panel.recent.is_empty() => {

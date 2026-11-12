@@ -116,7 +116,6 @@ mod session_apply_queries;
 mod session_apply_users;
 mod session_boost_settings;
 mod session_calls;
-pub use session_calls::ParticipantMuteToggles;
 mod session_chat_caps;
 mod session_chat_look;
 mod session_chat_search;
@@ -124,7 +123,7 @@ mod session_chatlist;
 mod session_composer_topic;
 mod session_connection;
 mod session_date_jump;
-pub use session_date_jump::DateAsks;
+pub use session_date_jump::JumpLookups;
 mod session_direct_messages;
 mod session_drafts;
 mod session_files;
@@ -264,7 +263,7 @@ pub use session_message_menu::{
 pub use session_message_story::{
     StoryCardView, StoryPreview, media_unlocked_note, message_story_key,
 };
-pub use session_privacy_data::{PasswordCheck, PrivacyControl, PrivacyData};
+pub use session_privacy_data::{NetworkReset, PasswordCheck, PrivacyControl, PrivacyData};
 pub use session_reply::story_thumb_candidates;
 pub use session_reply::{
     ForwardHeader, ForwardLink, MAX_REPLY_TARGETS_OUTSIDE_WINDOW, ReplyHeader, ReplyTarget,

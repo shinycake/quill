@@ -209,33 +209,29 @@ impl Session {
         ) {
             self.settings.account_delete = crate::state::fetch::Fetch::Idle;
         }
-        // Slice A8: a `checkPhoneNumberCode` succeeded — the
-        // server completed the number change of the number the
-        // code was sent to, so the own user's `phone_number` is
-        // updated directly (not an optimistic guess — the `ok`
-        // confirms it; the authoritative `updateUser` that
-        // follows lands the same value idempotently). The
-        // code-entry step clears and any stale error goes with
-        // it.
-        if matches!(
-            pending.map(|p| p.purpose),
-            Some(RequestPurpose::CheckPhoneNumberCode)
-        ) {
-            if let Some(target) = self.auth_state.change_number.phone().map(str::to_string)
-                && let Some(my_id) = self.my_user_id
+        // Slice A8: a `checkPhoneNumberCode` succeeded: the server
+        // completed the number change of the number the code was sent to,
+        // so the own user's `phone_number` is updated directly (not an
+        // optimistic guess: the `ok` confirms it; the authoritative
+        // `updateUser` that follows lands the same value idempotently).
+        // Only the check the flow waits for ends it. The send or resend
+        // still out is dropped: a late answer must not resurrect the
+        // completed flow (re-write phone/timeout or park a phantom error
+        // after the number already changed).
+        if let Some(pending) = pending
+            && pending.purpose == RequestPurpose::CheckPhoneNumberCode
+            && let Some((target, out)) = self.auth_state.change_number.checked(pending.id)
+        {
+            if let Some(my_id) = self.my_user_id
                 && let Some(me) = self.users.get_mut(&my_id)
             {
                 me.phone_number = target;
             }
-            // The send/resend answers are dropped below, so nothing else
-            // would end a send in flight.
-            // A8: drop the send or resend still out — a late answer must
-            // not resurrect the completed flow (re-write phone/timeout or
-            // park a phantom error after the number already changed).
-            for request in self.auth_state.change_number.finish() {
+            for request in out {
                 self.requests.take(request);
             }
         }
+        self.settle_participant_mute_toggle(pending);
         // Slice S4: a `setAutoDownloadSettings` succeeded — apply
         // the confirmed sent settings (the `ok` carries none, so
         // they ride the purpose); the error clears and the driver
@@ -356,10 +352,9 @@ impl Session {
                 }
             }
             self.stickers.stickers.sets.clear();
-            self.stickers.stickers.lists.installed = crate::state::fetch::Fetch::Idle;
-            self.stickers.stickers.archived.clear();
-            self.stickers.stickers.archived_has_more = false;
-            self.stickers.stickers.archived_next_offset = 0;
+            // A fetch out asked before the change: its answer predates it.
+            self.stickers.stickers.lists.installed.outdate();
+            self.stickers.stickers.archived = Default::default();
             if self.stickers.stickers.tab == StickerTab::Archived {
                 self.stickers.stickers.selection = StickerSelection::default();
             }

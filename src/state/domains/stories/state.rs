@@ -67,6 +67,15 @@ impl CloseFriendsList {
         false
     }
 
+    /// A load could not go out at all (no request was made): a list never
+    /// loaded is `Failed`, so the panel offers Retry instead of waiting for
+    /// an answer that is not coming. A list held, or a load out, is left.
+    pub fn refused(&mut self) {
+        if matches!(self, Self::NotLoaded) {
+            *self = Self::Failed { stale: None };
+        }
+    }
+
     /// The send of the load failed, or TDLib's error for `request`
     /// arrived: only the load in flight under that id fails.
     pub fn fail_load(&mut self, request: RequestId) {

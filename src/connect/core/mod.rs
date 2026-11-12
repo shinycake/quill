@@ -757,11 +757,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         // Corner "@" / heart buttons and jump to date: run in the window
         // that asked, for its chat. A failed jump (closed chat) drops it.
-        let unread = self.session.messages.unread_jump.take();
-        for jump in [unread, self.session.search.take_date_jump()]
-            .into_iter()
-            .flatten()
-        {
+        for jump in self.session.search.jump_lookups.take_resolved() {
             let _ = self.run_view_jump(jump);
         }
         // M1 fix-up: "Share link" gate — chain to `getMessageLink` only

@@ -269,13 +269,31 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// it fresh) or for one sublist.
     pub fn load_saved_tags(&mut self, topic_id: i64) -> Sent {
         let purpose = RequestPurpose::GetSavedMessagesTags { topic_id };
-        if self.session.requests.has_purpose(purpose) {
-            return Ok(None);
-        }
         if topic_id != 0 {
-            return self.send_purpose(purpose, None, |extra| {
+            // Each opening of the sublist asks again; the fetch of the
+            // sublist records the ask, so a second open while it is out
+            // does not send another.
+            let tags = self
+                .session
+                .threads
+                .saved
+                .topic_tags
+                .entry(topic_id)
+                .or_default();
+            if tags.is_loading() {
+                return Ok(None);
+            }
+            tags.begin();
+            let sent = self.send_purpose(purpose, None, |extra| {
                 get_saved_messages_tags(extra, topic_id)
             });
+            if let Some(tags) = self.session.threads.saved.topic_tags.get_mut(&topic_id) {
+                match &sent {
+                    Ok(Some(extra)) => tags.sent(*extra),
+                    _ => tags.cancel(),
+                }
+            }
+            return sent;
         }
         // All of Saved Messages: the list's fetch records the ask, so a
         // send that fails lands in `Failed` (the pump waits for the

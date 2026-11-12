@@ -66,6 +66,7 @@ impl Session {
             .instant_view_fallbacks
             .retain(|fallback| fallback.window != Some(chat_id));
         let was_window = self.window_chats.remove(&chat_id);
+        self.forget_window_jump_lookup(chat_id);
         if was_window {
             self.release_chat_history(chat_id);
         }

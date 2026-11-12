@@ -100,10 +100,7 @@ pub fn refresh() {
 pub fn pending() -> bool {
     #[cfg(target_os = "linux")]
     {
-        matches!(
-            *crate::locks::lock_or_recover(&LINUX),
-            AccentRead::Reading { .. }
-        )
+        crate::locks::lock_or_recover(&LINUX).pending(std::time::Instant::now())
     }
     #[cfg(not(target_os = "linux"))]
     {
@@ -111,13 +108,13 @@ pub fn pending() -> bool {
     }
 }
 
-/// How long after a read that found nothing the next one may start.
 /// Both queries of a read end within their limit; past twice that the read
 /// is lost.
 #[cfg(target_os = "linux")]
 const READ_LOST_AFTER: std::time::Duration =
     std::time::Duration::from_secs(2 * crate::child_timeout::DESKTOP_QUERY_LIMIT.as_secs() + 1);
 
+/// How long after a read that found nothing the next one may start.
 #[cfg(target_os = "linux")]
 const RETRY_AFTER: std::time::Duration = std::time::Duration::from_secs(30);
 
@@ -129,10 +126,12 @@ enum AccentRead {
     Idle {
         last: Option<u32>,
     },
-    /// A read is running. Its two queries each end within
+    /// Read `read` is running. Its two queries each end within
     /// `DESKTOP_QUERY_LIMIT`; a read still out at `deadline` is taken for
-    /// lost and a new one may start.
+    /// lost and a new one may start. Only `read` settles it: a lost
+    /// read's late end changes nothing.
     Reading {
+        read: u64,
         last: Option<u32>,
         deadline: std::time::Instant,
     },
@@ -151,24 +150,40 @@ impl AccentRead {
         }
     }
 
-    /// A read may start at `now`: move to `Reading` and say so.
-    fn begin(&mut self, now: std::time::Instant) -> bool {
+    /// A read is running at `now` and may still answer: a lost one (past
+    /// its deadline) is not waited for.
+    fn pending(&self, now: std::time::Instant) -> bool {
+        matches!(self, Self::Reading { deadline, .. } if now < *deadline)
+    }
+
+    /// A read may start at `now`: move to `Reading` and return its token.
+    fn begin(&mut self, now: std::time::Instant) -> Option<u64> {
         let last = match *self {
             Self::Idle { last } => last,
             Self::Failed { last, retry_at } if now >= retry_at => last,
-            Self::Reading { last, deadline } if now >= deadline => last,
-            Self::Reading { .. } | Self::Failed { .. } => return false,
+            Self::Reading { last, deadline, .. } if now >= deadline => last,
+            Self::Reading { .. } | Self::Failed { .. } => return None,
         };
+        let read = NEXT_READ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         *self = Self::Reading {
+            read,
             last,
             deadline: now + READ_LOST_AFTER,
         };
-        true
+        Some(read)
     }
 
-    /// The read ended at `now` with `value` (`None`: it found nothing).
-    fn finish(&mut self, value: Option<u32>, now: std::time::Instant) {
-        if let Self::Reading { last, .. } = *self {
+    /// Read `read` ended at `now` with `value` (`None`: it found nothing).
+    /// Another read's end, or a second end of the same one, changes
+    /// nothing.
+    fn finish(&mut self, read: u64, value: Option<u32>, now: std::time::Instant) {
+        if let Self::Reading {
+            read: running,
+            last,
+            ..
+        } = *self
+            && running == read
+        {
             *self = match value {
                 Some(value) => Self::Idle { last: Some(value) },
                 None => Self::Failed {
@@ -181,33 +196,37 @@ impl AccentRead {
 }
 
 #[cfg(target_os = "linux")]
+static NEXT_READ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+#[cfg(target_os = "linux")]
 static LINUX: std::sync::Mutex<AccentRead> = std::sync::Mutex::new(AccentRead::Idle { last: None });
 
-/// Ends a read: a read that panicked counts as one that found nothing. A
-/// finished read has already left `Reading`.
+/// Ends read `.0`: a read that panicked counts as one that found nothing. A
+/// finished read has already left `Reading`, and a newer read is not its
+/// to settle.
 #[cfg(target_os = "linux")]
-struct ReadDone;
+struct ReadDone(u64);
 
 #[cfg(target_os = "linux")]
 impl Drop for ReadDone {
     fn drop(&mut self) {
-        crate::locks::lock_or_recover(&LINUX).finish(None, std::time::Instant::now());
+        crate::locks::lock_or_recover(&LINUX).finish(self.0, None, std::time::Instant::now());
     }
 }
 
 #[cfg(target_os = "linux")]
 fn linux_refresh() {
     let mut state = crate::locks::lock_or_recover(&LINUX);
-    if !state.begin(std::time::Instant::now()) {
+    let Some(read) = state.begin(std::time::Instant::now()) else {
         return;
-    }
-    let spawned = crate::thread_guard::spawn_guarded("system-accent", || {
-        let _done = ReadDone;
+    };
+    let spawned = crate::thread_guard::spawn_guarded("system-accent", move || {
+        let _done = ReadDone(read);
         let value = read_native().map(|rgb| rgb.max(1));
-        crate::locks::lock_or_recover(&LINUX).finish(value, std::time::Instant::now());
+        crate::locks::lock_or_recover(&LINUX).finish(read, value, std::time::Instant::now());
     });
     if spawned.is_err() {
-        state.finish(None, std::time::Instant::now());
+        state.finish(read, None, std::time::Instant::now());
     }
 }
 
@@ -322,29 +341,40 @@ mod tests {
         use std::time::Instant;
         let t0 = Instant::now();
         let mut read = AccentRead::Idle { last: None };
-        assert!(read.begin(t0));
-        assert!(!read.begin(t0), "one read at a time");
+        let lost = read.begin(t0).unwrap();
+        assert!(read.pending(t0));
         assert!(
-            read.begin(t0 + READ_LOST_AFTER),
-            "a read out past its deadline is taken for lost"
+            !read.pending(t0 + READ_LOST_AFTER),
+            "a lost read is not waited for"
         );
+        assert!(read.begin(t0).is_none(), "one read at a time");
+        let second = read
+            .begin(t0 + READ_LOST_AFTER)
+            .expect("a read out past its deadline is taken for lost");
         let t0 = t0 + READ_LOST_AFTER;
-        read.finish(None, t0);
-        assert!(!read.begin(t0), "not again at once");
-        assert!(!read.begin(t0 + RETRY_AFTER / 2));
-        assert!(read.begin(t0 + RETRY_AFTER), "a later refresh reads again");
-        read.finish(Some(0x3584e4), t0 + RETRY_AFTER);
+        // The lost read answers late: it does not settle the second one.
+        read.finish(lost, None, t0);
+        assert!(matches!(read, AccentRead::Reading { read: running, .. } if running == second));
+        read.finish(second, None, t0);
+        assert!(read.begin(t0).is_none(), "not again at once");
+        assert!(read.begin(t0 + RETRY_AFTER / 2).is_none());
+        let third = read
+            .begin(t0 + RETRY_AFTER)
+            .expect("a later refresh reads again");
+        read.finish(third, Some(0x3584e4), t0 + RETRY_AFTER);
         assert_eq!(read.last(), Some(0x3584e4));
-        assert!(
-            read.begin(t0 + RETRY_AFTER),
-            "a found accent is read afresh"
-        );
-        read.finish(None, t0 + RETRY_AFTER);
+        let fourth = read
+            .begin(t0 + RETRY_AFTER)
+            .expect("a found accent is read afresh");
+        read.finish(fourth, None, t0 + RETRY_AFTER);
         assert_eq!(
             read.last(),
             Some(0x3584e4),
             "the last value survives a miss"
         );
+        // A second end of a settled read changes nothing.
+        read.finish(fourth, Some(1), t0 + RETRY_AFTER);
+        assert_eq!(read.last(), Some(0x3584e4));
     }
 
     #[test]

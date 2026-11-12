@@ -11,6 +11,7 @@ impl Session {
         extra: Option<RequestId>,
         _seq: u64,
     ) {
+        self.settle_participant_mute_toggle(pending);
         // "Stream with...": a failed URL request of the process is shown
         // as a toast by the UI (tdesktop shows the server error), not on a
         // call overlay.

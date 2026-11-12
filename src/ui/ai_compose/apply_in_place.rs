@@ -14,13 +14,17 @@ use quill::lang::{keys, tr};
 
 impl QuillApp {
     /// A rewrite asked by the shortcut is still out: its request is in the
-    /// session's table.
+    /// session's table, or it answered and the answer waits in
+    /// `apply_answers` for the asking window's upkeep to land it.
     pub(in crate::ui) fn ai_apply_in_flight(&self) -> bool {
         self.ai_compose
             .apply_in_place
             .as_ref()
             .zip(self.session())
-            .is_some_and(|(asked, session)| session.requests.get(asked.request).is_some())
+            .is_some_and(|(asked, session)| {
+                session.requests.get(asked.request).is_some()
+                    || session.messages.ai_compose.apply_answers.has(asked.request)
+            })
     }
 
     pub(in crate::ui) fn ai_compose_apply_by_key(

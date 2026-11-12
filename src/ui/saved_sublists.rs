@@ -367,11 +367,7 @@ impl QuillApp {
         if session.threads.saved.waiting_to_retry() {
             return;
         }
-        if session.threads.saved.tags.is_idle()
-            && !session
-                .requests
-                .has_purpose(quill::state::RequestPurpose::GetSavedMessagesTags { topic_id: 0 })
-        {
+        if session.threads.saved.tags.is_idle() {
             let _ = live.driver.load_saved_tags(0);
         }
         let session = &live.driver.session;

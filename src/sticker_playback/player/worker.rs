@@ -61,8 +61,13 @@ pub(super) fn work(
     job: Job,
 ) -> bool {
     match job {
-        Job::Open { key, id, path } => {
-            open(shared, sources, key, id, &path);
+        Job::Open {
+            key,
+            id,
+            path,
+            worker,
+        } => {
+            open(shared, sources, key, id, worker, &path);
             true
         }
         Job::Decode {
@@ -96,12 +101,16 @@ fn open(
     sources: &mut HashMap<ClipKey, Source>,
     key: ClipKey,
     id: u64,
+    worker: usize,
     path: &Path,
 ) {
     let opened = Source::lottie(path, key);
     let mut state = lock_or_recover(&shared.state);
-    let Some(clip) = state.clip_mut(&key, id) else {
-        // Closed meanwhile.
+    let Some(clip) = state
+        .clip_mut(&key, id)
+        .filter(|clip| matches!(clip.stage, Stage::Opening { worker: taken } if taken == worker))
+    else {
+        // Closed meanwhile, or no longer opened by this worker.
         return;
     };
     match opened {

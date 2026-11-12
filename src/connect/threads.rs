@@ -253,6 +253,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        self.session.thread_older_asked(extra);
         if let Some(thread) = self.session.threads.thread.as_mut()
             && thread.status == ThreadStatus::ReloadNeeded
         {

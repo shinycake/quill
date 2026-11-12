@@ -117,6 +117,7 @@ fn driver_edit_scheduled_message_uses_scheduled_list() {
         .session
         .messages
         .scheduled_messages
+        .rows
         .push(ParsedMessage {
             sender: None,
             id: MessageId(70),
@@ -526,6 +527,7 @@ fn driver_edit_scheduled_message_sends_scheduling_state() {
         .session
         .messages
         .scheduled_messages
+        .rows
         .push(ParsedMessage {
             sender: None,
             id: MessageId(70),

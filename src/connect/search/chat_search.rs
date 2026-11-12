@@ -513,7 +513,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             crate::search_filters::before_day_date(day_number),
         )) {
             Ok(()) => {
-                self.session.begin_date_ask(extra);
+                self.session.begin_jump_ask(extra);
                 Ok(Some(extra))
             }
             Err(err) => {

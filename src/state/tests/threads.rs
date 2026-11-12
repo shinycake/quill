@@ -39,10 +39,7 @@ fn the_root_is_followed_by_the_discussion_divider_once_loaded() {
             .rows()
             .is_empty()
     );
-    let page = session.request(
-        RequestPurpose::GetMessageThreadHistory { message_id: 101 },
-        Some(ChatId(13)),
-    );
+    let page = asked_thread_page(&mut session, 101, 13);
     apply_json(
         &mut session,
         &seq,
@@ -54,10 +51,7 @@ fn the_root_is_followed_by_the_discussion_divider_once_loaded() {
             msg(502, 14, 501, "a")
         ),
     );
-    let page = session.request(
-        RequestPurpose::GetMessageThreadHistory { message_id: 101 },
-        Some(ChatId(13)),
-    );
+    let page = asked_thread_page(&mut session, 101, 13);
     apply_json(
         &mut session,
         &seq,
@@ -84,10 +78,7 @@ fn the_root_is_followed_by_the_discussion_divider_once_loaded() {
 #[test]
 fn a_thread_without_replies_says_no_comments_yet() {
     let (mut session, sink, seq) = resolved();
-    let page = session.request(
-        RequestPurpose::GetMessageThreadHistory { message_id: 101 },
-        Some(ChatId(13)),
-    );
+    let page = asked_thread_page(&mut session, 101, 13);
     apply_json(
         &mut session,
         &seq,
@@ -119,10 +110,7 @@ fn thread_info_fills_the_view_and_hides_the_root_until_complete() {
         assert_eq!(thread.root_message().unwrap().id, MessageId(501));
         assert!(thread.is_root(MessageId(501)));
     }
-    let page = session.request(
-        RequestPurpose::GetMessageThreadHistory { message_id: 101 },
-        Some(ChatId(13)),
-    );
+    let page = asked_thread_page(&mut session, 101, 13);
     apply_json(
         &mut session,
         &seq,
@@ -255,10 +243,7 @@ fn unread_thread_places_the_divider_anchor_and_failed_pages_keep_ready() {
     assert!(!thread.is_comments(), "same chat");
     assert_eq!(thread.subtitle(), "5 replies");
     // The first page lands, then a later page fails: the view stays Ready.
-    let page = session.request(
-        RequestPurpose::GetMessageThreadHistory { message_id: 40 },
-        Some(ChatId(14)),
-    );
+    let page = asked_thread_page(&mut session, 40, 14);
     apply_json(
         &mut session,
         &seq,
@@ -269,10 +254,7 @@ fn unread_thread_places_the_divider_anchor_and_failed_pages_keep_ready() {
             msg(49, 14, 40, "newest")
         ),
     );
-    let older = session.request(
-        RequestPurpose::GetMessageThreadHistory { message_id: 40 },
-        Some(ChatId(14)),
-    );
+    let older = asked_thread_page(&mut session, 40, 14);
     apply_json(
         &mut session,
         &seq,
@@ -347,6 +329,9 @@ fn thread_page(
         RequestPurpose::GetMessageThreadHistory { message_id: 40 }
     };
     let extra = session.request(purpose, Some(ChatId(14)));
+    if !newer {
+        session.thread_older_asked(extra);
+    }
     let rows: Vec<String> = ids
         .iter()
         .map(|id| msg(*id, 14, 40, &format!("reply {id}")))
@@ -456,10 +441,7 @@ fn an_own_send_while_newer_replies_are_unloaded_replaces_the_window() {
     );
     // An older page is in flight when the window is replaced: its answer
     // is dropped.
-    let stale = session.request(
-        RequestPurpose::GetMessageThreadHistory { message_id: 40 },
-        Some(ChatId(14)),
-    );
+    let stale = asked_thread_page(&mut session, 40, 14);
     apply_json(
         &mut session,
         &seq,
@@ -543,10 +525,7 @@ fn reading_comments_clears_the_posts_unread_dot_and_follows_server_read_marks() 
         ),
     );
     session.open_chat(ChatId(14));
-    let page = session.request(
-        RequestPurpose::GetMessageThreadHistory { message_id: 101 },
-        Some(ChatId(13)),
-    );
+    let page = asked_thread_page(&mut session, 101, 13);
     apply_json(
         &mut session,
         &seq,
@@ -675,10 +654,7 @@ fn a_page_on_the_way_past_a_live_trim_does_not_land_across_a_gap() {
         .unwrap()
         .history
         .reopen_oldest();
-    let older = session.request(
-        RequestPurpose::GetMessageThreadHistory { message_id: 40 },
-        Some(ChatId(14)),
-    );
+    let older = asked_thread_page(&mut session, 40, 14);
     apply_json(&mut session, &seq, &sink, &reply(40 + cap));
     apply_json(
         &mut session,
@@ -760,14 +736,8 @@ fn a_page_on_the_way_past_a_page_trim_does_not_land_across_a_gap() {
 #[test]
 fn only_the_first_pages_own_answer_or_error_leaves_loading_history() {
     let (mut session, sink, seq) = resolved();
-    let first = session.request(
-        RequestPurpose::GetMessageThreadHistory { message_id: 101 },
-        Some(ChatId(13)),
-    );
-    let other = session.request(
-        RequestPurpose::GetMessageThreadHistory { message_id: 101 },
-        Some(ChatId(13)),
-    );
+    let first = asked_thread_page(&mut session, 101, 13);
+    let other = asked_thread_page(&mut session, 101, 13);
     let status = |session: &Session| session.threads.thread.as_ref().unwrap().status.clone();
     if let Some(thread) = session.threads.thread.as_mut() {
         thread.status = ThreadStatus::LoadingHistory(first);
@@ -783,10 +753,7 @@ fn only_the_first_pages_own_answer_or_error_leaves_loading_history() {
         ),
     );
     assert_eq!(status(&session), ThreadStatus::LoadingHistory(first));
-    let again = session.request(
-        RequestPurpose::GetMessageThreadHistory { message_id: 101 },
-        Some(ChatId(13)),
-    );
+    let again = asked_thread_page(&mut session, 101, 13);
     apply_json(
         &mut session,
         &seq,
@@ -813,10 +780,7 @@ fn only_the_first_pages_own_answer_or_error_leaves_loading_history() {
 #[test]
 fn a_page_asked_by_a_replaced_view_does_not_land_in_the_new_one() {
     let (mut session, sink, seq) = resolved();
-    let page = session.request(
-        RequestPurpose::GetMessageThreadHistory { message_id: 101 },
-        Some(ChatId(13)),
-    );
+    let page = asked_thread_page(&mut session, 101, 13);
     // The same post is opened again before the first page answered.
     let again = session.begin_thread(ChatId(13), MessageId(101));
     apply_json(

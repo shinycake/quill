@@ -409,10 +409,7 @@ fn a_thread_restores_its_draft_from_message_thread_info() {
     assert_eq!(session.chats.get(&14).unwrap().draft_preview(), None);
 
     // The replied-to message lives in the thread's history, not the chat's.
-    let page = session.request(
-        RequestPurpose::GetMessageThreadHistory { message_id: 101 },
-        Some(ChatId(13)),
-    );
+    let page = asked_thread_page(&mut session, 101, 13);
     apply_json(
         &mut session,
         &seq,
