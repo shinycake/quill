@@ -142,9 +142,13 @@ pub enum PhotoPrep {
     /// unreadable, animated, or too narrow), so "Compress" is not offered.
     FileOnly,
     /// A photo edit is rendering into a new file for this one: the latest
-    /// Done's number. Until it lands the file must not be sent. If the
-    /// render fails, `before` is what the picture was.
-    Rendering { render: u64, before: Box<PhotoPrep> },
+    /// Done's job, which the stage owns (leaving the stage cancels the
+    /// render). Until it lands the file must not be sent. If the render
+    /// fails, `before` is what the picture was.
+    Rendering {
+        job: RenderJob,
+        before: Box<PhotoPrep>,
+    },
 }
 
 impl PhotoPrep {
@@ -235,9 +239,9 @@ impl AttachmentExtras {
     }
 
     /// The render of a photo edit in flight for this file.
-    pub fn photo_render(&self) -> Option<u64> {
-        match self.photo {
-            PhotoPrep::Rendering { render, .. } => Some(render),
+    pub fn photo_render(&self) -> Option<&RenderToken> {
+        match &self.photo {
+            PhotoPrep::Rendering { job, .. } => Some(job.token()),
             _ => None,
         }
     }
@@ -252,9 +256,9 @@ impl AttachmentExtras {
     }
 
     /// A render of an edit starts (the latest Done replaces an earlier one).
-    pub fn begin_render(&mut self, render: u64) {
+    pub fn begin_render(&mut self, job: RenderJob) {
         let before = Box::new(self.photo.settled().clone());
-        self.photo = PhotoPrep::Rendering { render, before };
+        self.photo = PhotoPrep::Rendering { job, before };
     }
 
     /// The render ended without a file: the picture is as it was.

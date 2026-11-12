@@ -34,14 +34,12 @@ pub enum AiComposePurpose {
     DeleteStyle,
     RemoveStyle,
     AddStyle,
-    /// `searchTextCompositionStyle` (the `addstyle/<name>` link).
-    SearchStyle {
-        token: u64,
-    },
-    /// `getTextCompositionStyleExample`.
-    GetExample {
-        token: u64,
-    },
+    /// `searchTextCompositionStyle` (the `addstyle/<name>` link); its
+    /// answer is taken by the request the lookup stage holds.
+    SearchStyle,
+    /// `getTextCompositionStyleExample`; its answer is taken by the request
+    /// the example stage holds.
+    GetExample,
 }
 
 /// Limits from `updateOption` (named in the method docs at
@@ -102,11 +100,20 @@ pub enum StyleError {
 /// A request that runs, then answers once, with a value or the error.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StyleReply<T> {
-    Running,
+    /// Waiting for the answer of `request`; a lost request settles it as
+    /// an error (`RequestPurpose::is_sweepable`).
+    Running {
+        request: RequestId,
+    },
     Answered(Result<T, StyleError>),
 }
 
 impl<T> StyleReply<T> {
+    /// Waiting for the answer of `request`.
+    pub fn waits_for(&self, request: RequestId) -> bool {
+        matches!(self, Self::Running { request: asked } if *asked == request)
+    }
+
     pub fn is_done(&self) -> bool {
         matches!(self, Self::Answered(_))
     }
@@ -114,14 +121,14 @@ impl<T> StyleReply<T> {
     /// The answer, once there is one.
     pub fn done(self) -> Option<Result<T, StyleError>> {
         match self {
-            Self::Running => None,
+            Self::Running { .. } => None,
             Self::Answered(outcome) => Some(outcome),
         }
     }
 
     pub fn answer(&self) -> Option<&Result<T, StyleError>> {
         match self {
-            Self::Running => None,
+            Self::Running { .. } => None,
             Self::Answered(outcome) => Some(outcome),
         }
     }
@@ -292,9 +299,9 @@ impl Session {
                 state.styles.set_server(styles);
             }
             AiComposePayload::Style(style) => match asked {
-                Some(AiComposePurpose::SearchStyle { token }) => {
+                Some(AiComposePurpose::SearchStyle) => {
                     if let Some(lookup) = state.style_lookup.as_mut()
-                        && lookup.token == token
+                        && pending.is_some_and(|p| lookup.outcome.waits_for(p.id))
                     {
                         lookup.outcome = StyleReply::Answered(Ok(style));
                     }
@@ -311,9 +318,9 @@ impl Session {
                 _ => {}
             },
             AiComposePayload::StyleExample(example) => {
-                if let Some(AiComposePurpose::GetExample { token }) = asked
+                if let Some(AiComposePurpose::GetExample) = asked
                     && let Some(answer) = state.example.as_mut()
-                    && answer.token == token
+                    && pending.is_some_and(|p| answer.outcome.waits_for(p.id))
                 {
                     answer.outcome = StyleReply::Answered(Ok(example));
                 }
@@ -462,16 +469,16 @@ impl Session {
             AiComposePurpose::DeleteStyle => {
                 state.style_op_failures.extend(pending.map(|p| p.id));
             }
-            AiComposePurpose::SearchStyle { token } => {
+            AiComposePurpose::SearchStyle => {
                 if let Some(lookup) = state.style_lookup.as_mut()
-                    && lookup.token == token
+                    && pending.is_some_and(|p| lookup.outcome.waits_for(p.id))
                 {
                     lookup.outcome = StyleReply::Answered(Err(error));
                 }
             }
-            AiComposePurpose::GetExample { token } => {
+            AiComposePurpose::GetExample => {
                 if let Some(answer) = state.example.as_mut()
-                    && answer.token == token
+                    && pending.is_some_and(|p| answer.outcome.waits_for(p.id))
                 {
                     answer.outcome = StyleReply::Answered(Err(error));
                 }

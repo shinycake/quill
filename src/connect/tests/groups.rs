@@ -362,7 +362,7 @@ fn driver_mutation_confirmed_refetches_dropped_cache() {
         driver.session.groups.welcome_messages.get(&13),
         Some(crate::state::fetch::Fetch::Loading {
             stale: None,
-            request: None
+            request: Some(_)
         })
     ));
     assert!(

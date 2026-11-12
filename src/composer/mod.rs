@@ -26,6 +26,7 @@ mod markup_parser;
 mod media_options;
 mod media_prep;
 mod placeholder;
+mod render_job;
 mod reply;
 pub mod reply_item;
 pub(crate) mod scan_work;
@@ -77,6 +78,7 @@ pub use media_prep::{
 pub use placeholder::{
     ComposerPlaceholder, PlaceholderFacts, TopicPlaceholder, edit_text_changed, inline_bot_hint,
 };
+pub use render_job::{RenderJob, RenderToken};
 pub use reply::ReplyItem;
 pub use reply::{ComposerReplyTo, QuoteSelection, cancel_reply_draft, quote_position};
 pub use send::{

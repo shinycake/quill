@@ -507,7 +507,7 @@ impl PhotoEditorSlot {
     #[cfg(test)]
     pub(super) fn deferred(&self) -> Option<DeferredOpen> {
         match self {
-            Self::Deferred(open) => Some(*open),
+            Self::Deferred(open) => Some(open.clone()),
             _ => None,
         }
     }
@@ -520,13 +520,16 @@ impl PhotoEditorSlot {
     }
 
     /// Take the deferred open when it is for `render`.
-    pub(super) fn take_deferred_for(&mut self, render: u64) -> Option<DeferredOpen> {
-        match *self {
-            Self::Deferred(open) if open.render == render => {
-                *self = Self::Closed;
-                Some(open)
+    pub(super) fn take_deferred_for(
+        &mut self,
+        render: &quill::composer::RenderToken,
+    ) -> Option<DeferredOpen> {
+        match std::mem::take(self) {
+            Self::Deferred(open) if open.render == *render => Some(open),
+            other => {
+                *self = other;
+                None
             }
-            _ => None,
         }
     }
 }

@@ -43,12 +43,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.fail_welcome_load_send(chat_id);
             return Err(err);
         }
-        self.session
+        let pack = self
+            .session
             .groups
             .welcome_messages
             .entry(chat_id.0)
-            .or_default()
-            .begin();
+            .or_default();
+        pack.begin();
+        pack.sent(extra);
         Ok(Some(extra))
     }
 

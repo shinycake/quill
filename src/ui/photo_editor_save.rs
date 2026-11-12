@@ -8,13 +8,9 @@ use super::photo_editor::{EditorPurpose, PhotoEditor};
 use super::send_box_media_check::check_photo;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
-use quill::composer::EditRender;
+use quill::composer::{EditRender, RenderJob, RenderToken};
 use quill::lang::{keys, tr};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
-
-/// Numbers each attachment render, so the latest Done of a photo wins.
-static NEXT_RENDER: AtomicU64 = AtomicU64::new(1);
 
 impl QuillApp {
     /// The editor's Masks strip is wanted while some window's editor is in
@@ -53,22 +49,21 @@ impl QuillApp {
                 if self.edited_message() != Some(edit_of) {
                     return;
                 }
-                let number = NEXT_RENDER.fetch_add(1, Ordering::Relaxed);
-                if let Some(edit) = self.chat_ui.pending_edit_mut() {
-                    edit.media_edit.render = EditRender::Rendering(number);
-                }
+                let token = RenderToken::new();
+                let landing = token.clone();
                 let job = editor.into_render_job();
                 let render = cx.background_spawn(async move {
                     super::edit_media_tools::write_edited_png(&job.render())
                 });
-                self.spawn_scoped(cx, async move |app, cx| {
+                let task = self.spawn_scoped(cx, async move |app, cx| {
                     let saved = render.await;
                     let kept = saved.clone();
                     let landed = app.update(cx, |this, cx| {
                         if this.edited_message() == Some(edit_of)
-                            && this.chat_ui.pending_edit().is_some_and(|edit| {
-                                edit.media_edit.render == EditRender::Rendering(number)
-                            })
+                            && this
+                                .chat_ui
+                                .pending_edit()
+                                .is_some_and(|edit| edit.media_edit.render.waits_for(&landing))
                         {
                             if let Some(edit) = this.chat_ui.pending_edit_mut() {
                                 edit.media_edit.render = EditRender::Idle;
@@ -83,8 +78,14 @@ impl QuillApp {
                     {
                         let _ = std::fs::remove_file(kept);
                     }
-                })
-                .detach();
+                });
+                // The edit owns the render: ending it (or a later Done)
+                // drops the task.
+                if let Some(edit) = self.chat_ui.pending_edit_mut() {
+                    edit.media_edit.render = EditRender::Rendering {
+                        job: RenderJob::new(token, task),
+                    };
+                }
             }
             EditorPurpose::Set { set_id, kind, edit } => {
                 // The turn, the canvas render and the fit run off the UI
@@ -105,23 +106,22 @@ impl QuillApp {
         window: &Window,
         cx: &mut Context<Self>,
     ) {
-        let render = NEXT_RENDER.fetch_add(1, Ordering::Relaxed);
-        let marked = self.composer_sends.update_item(&item, |attachment| {
-            attachment.extras.begin_render(render);
-        });
-        if marked.is_none() {
+        if !self.composer_sends.holds_item(&item) {
             return;
         }
+        let token = RenderToken::new();
+        let landing = token.clone();
+        let tray_item = item.clone();
         let job = editor.into_render_job();
         let task =
             cx.background_spawn(
                 async move { super::edit_media_tools::write_edited_png(&job.render()) },
             );
-        self.spawn_scoped_in(window, cx, async move |app, cx| {
+        let render_task = self.spawn_scoped_in(window, cx, async move |app, cx| {
             let saved = task.await;
             let kept = saved.clone();
             let landed = app.update_in(cx, |this, window, cx| {
-                let landed = this.land_attachment_edit(&item.slot, render, saved, cx);
+                let landed = this.land_attachment_edit(&item.slot, &landing, saved, cx);
                 let here = this.send_slot().as_ref() == Some(&item.slot);
                 let view = this
                     .session()
@@ -130,7 +130,7 @@ impl QuillApp {
                 let opens = this
                     .viewer
                     .photo_editor
-                    .take_deferred_for(render)
+                    .take_deferred_for(&landing)
                     .is_some_and(|open| open.view == view);
                 match landed.held {
                     // The tray goes now, so no editor opens on it.
@@ -157,9 +157,9 @@ impl QuillApp {
                 && app
                     .app()
                     .update(cx, |this, cx| {
-                        this.viewer.photo_editor.take_deferred_for(render);
+                        this.viewer.photo_editor.take_deferred_for(&landing);
                         let landed =
-                            this.land_attachment_edit(&item.slot, render, kept.clone(), cx);
+                            this.land_attachment_edit(&item.slot, &landing, kept.clone(), cx);
                         if landed.held.is_some() {
                             this.note_held_send_dropped();
                         }
@@ -169,8 +169,13 @@ impl QuillApp {
             {
                 let _ = std::fs::remove_file(kept);
             }
-        })
-        .detach();
+        });
+        // The tray item owns the render: removing the photo, or a later
+        // Done, drops the task.
+        let job = RenderJob::new(token, render_task);
+        self.composer_sends.update_item(&tray_item, |attachment| {
+            attachment.extras.begin_render(job);
+        });
     }
 
     /// A held Send can go only from its own chat: when that chat is no
@@ -190,12 +195,12 @@ impl QuillApp {
     /// Render `render` in the tray of `slot` finished. Its PNG replaces
     /// the photo that render was started for while that photo is still in
     /// the tray and no later Done started; otherwise the PNG goes. The
-    /// render number finds the photo, so cards removed or moved meanwhile
+    /// render token finds the photo, so cards removed or moved meanwhile
     /// do not matter.
     fn land_attachment_edit(
         &mut self,
         slot: &SendSlot,
-        render: u64,
+        render: &RenderToken,
         saved: Option<PathBuf>,
         cx: &mut Context<Self>,
     ) -> super::composer_sends::Landed {

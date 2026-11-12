@@ -65,8 +65,18 @@ impl StyleList {
     }
 
     /// A new list from the server; the recent custom styles keep the front.
+    /// A remembered name the old list did not hold yet (an added style the
+    /// server has not listed) stays remembered until a list holds it.
     pub fn set_server(&mut self, styles: Vec<TextCompositionStyle>) {
-        self.styles = styles;
+        let before = std::mem::replace(&mut self.styles, styles);
+        let styles = &self.styles;
+        self.recent.retain(|name| {
+            let listed = styles.iter().find(|style| style.name == *name);
+            match listed {
+                Some(style) => style.is_custom,
+                None => !before.iter().any(|style| style.name == *name),
+            }
+        });
         self.reapply_recent();
     }
 
@@ -108,7 +118,6 @@ impl StyleList {
             .into_iter()
             .partition(|style| style.is_custom && self.recent.contains(&style.name));
         front.sort_by_key(|style| self.recent.iter().position(|name| *name == style.name));
-        self.recent = front.iter().map(|style| style.name.clone()).collect();
         front.extend(rest);
         self.styles = front;
     }
@@ -180,6 +189,30 @@ mod tests {
         assert_eq!(list.names(), ["formal"]);
         list.set_server(vec![style("formal", false), style("shared", true)]);
         assert_eq!(list.names(), ["shared", "formal"]);
+    }
+
+    #[test]
+    fn added_style_keeps_its_place_across_an_unrelated_list_first() {
+        let mut list = StyleList::default();
+        list.set_server(vec![style("formal", false), style("pirate", true)]);
+        list.promote_name("shared");
+        list.set_server(vec![style("formal", false), style("pirate", true)]);
+        list.set_server(vec![
+            style("formal", false),
+            style("pirate", true),
+            style("shared", true),
+        ]);
+        assert_eq!(list.names(), ["shared", "formal", "pirate"]);
+    }
+
+    #[test]
+    fn listed_style_the_server_later_drops_leaves_the_order() {
+        let mut list = StyleList::default();
+        list.set_server(vec![style("formal", false), style("pirate", true)]);
+        list.promote_name("pirate");
+        list.set_server(vec![style("formal", false)]);
+        list.set_server(vec![style("formal", false), style("pirate", true)]);
+        assert_eq!(list.names(), ["formal", "pirate"]);
     }
 
     #[test]

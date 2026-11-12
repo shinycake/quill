@@ -49,7 +49,7 @@ impl Session {
                     .entry(folder_id)
                     .or_default()
                     .links
-                    .fail(error_reason(err));
+                    .failed(pending_id, error_reason(err), false);
             }
             // The Delete folder box ends in the error with a Retry instead
             // of waiting for a list that never comes.

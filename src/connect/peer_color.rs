@@ -69,7 +69,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let json = get_wearable_gifts(extra, MessageSender::User { user_id: me }, 50);
         let sent = self.send_json_request(extra, &json).map(Some);
         if sent.is_ok() {
-            self.session.users_state.wearable_gifts.begin();
+            let gifts = &mut self.session.users_state.wearable_gifts;
+            gifts.begin();
+            gifts.sent(extra);
         }
         sent
     }

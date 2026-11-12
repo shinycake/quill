@@ -19,6 +19,7 @@ use super::composer::LeftSend;
 use super::composer_state::DraftClear;
 use quill::composer::{
     ComposerAttachment, ComposerScheduling, DraftKey, LinkPreviewChoice, PreviewMediaSize,
+    RenderToken,
 };
 use quill::ids::{AccountKey, ChatId, RequestId};
 use quill::telegram::envelope::AuthorizationState;
@@ -67,7 +68,7 @@ pub(super) enum TraySend {
     Held {
         text: String,
         once: SendOnce,
-        waiting: Vec<u64>,
+        waiting: Vec<RenderToken>,
     },
 }
 
@@ -128,10 +129,10 @@ impl PendingSend {
     }
 
     /// The renders in flight in this tray.
-    fn renders(&self) -> Vec<u64> {
+    fn renders(&self) -> Vec<RenderToken> {
         self.attachments
             .iter()
-            .filter_map(|attachment| attachment.extras.photo_render())
+            .filter_map(|attachment| attachment.extras.photo_render().cloned())
             .collect()
     }
 
@@ -154,7 +155,11 @@ impl PendingSend {
     /// `None` when it failed. The held Send goes out once no render is
     /// left, and a failed render of one it waits on drops it (it would
     /// carry the unedited photo).
-    pub(super) fn end_render(&mut self, render: u64, saved: Option<&Path>) -> Option<Landed> {
+    pub(super) fn end_render(
+        &mut self,
+        render: &RenderToken,
+        saved: Option<&Path>,
+    ) -> Option<Landed> {
         let waited = self.send_is_held();
         let attachment = self
             .attachments
@@ -199,8 +204,8 @@ impl PendingSend {
     }
 
     /// Whether the held Send waits on the render `render`.
-    fn waits_on(&self, render: u64) -> bool {
-        matches!(&self.send, TraySend::Held { waiting, .. } if waiting.contains(&render))
+    fn waits_on(&self, render: &RenderToken) -> bool {
+        matches!(&self.send, TraySend::Held { waiting, .. } if waiting.contains(render))
     }
 
     /// A Send is held for the renders: one it waits on still renders.
@@ -211,7 +216,7 @@ impl PendingSend {
                 attachment
                     .extras
                     .photo_render()
-                    .is_some_and(|render| waiting.contains(&render))
+                    .is_some_and(|render| waiting.contains(render))
             }),
         }
     }

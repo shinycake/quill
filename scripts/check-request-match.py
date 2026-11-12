@@ -16,6 +16,10 @@ the re-sweep of 2026-11-11), and this check counts both:
 - `unmatched`: a call to `Fetch::succeed`, which sets the answer whatever
   request it came from. An older request's late answer overwrites a newer
   one.
+- `unsent`: a call to `Fetch::begin()` with no `.sent(request)` after it in
+  the same function. The stage reads Loading but holds no request, so
+  `answered` and `failed` can never take its own answer and every answer is
+  matched by purpose instead (round 3 found it again in six senders).
 
 Screenshot-demo and fixture files seed state this way and are not checked.
 
@@ -53,6 +57,9 @@ ADVICE = (
 OWNER = "src/state/requests.rs"
 PURPOSE = re.compile(r"\.\s*(?:has_purpose|take_purpose|has_auth_submit)\s*\(")
 SUCCEED = re.compile(r"\.\s*succeed\s*\(")
+BEGIN = re.compile(r"\.\s*begin\s*\(\s*\)")
+SENT = re.compile(r"\.\s*sent\s*\(")
+AFTER = 400
 
 
 def hits(root):
@@ -61,7 +68,8 @@ def hits(root):
             continue
         purpose = "_purpose" in text or "has_auth_submit" in text
         succeed = ".succeed" in text
-        if not purpose and not succeed:
+        begin = ".begin(" in text
+        if not purpose and not succeed and not begin:
             continue
         scopes = shape_guard.Scopes(path, text)
         if purpose:
@@ -72,6 +80,12 @@ def hits(root):
             for match in SUCCEED.finditer(text):
                 line = shape_guard.line_of(text, match.start())
                 yield f"unmatched:{scopes.at(match.start())}", path, line
+        if begin:
+            for match in BEGIN.finditer(text):
+                if SENT.search(text, match.end(), match.end() + AFTER):
+                    continue
+                line = shape_guard.line_of(text, match.start())
+                yield f"unsent:{scopes.at(match.start())}", path, line
 
 
 if __name__ == "__main__":

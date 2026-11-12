@@ -845,6 +845,12 @@ fn a_background_accounts_failed_preparation_does_not_toast_the_screen(cx: &mut T
     });
 }
 
+/// A render in flight: its token, and the job a tray photo holds.
+fn rendering() -> (quill::composer::RenderToken, quill::composer::RenderJob) {
+    let token = quill::composer::RenderToken::new();
+    (token.clone(), quill::composer::RenderJob::new(token, ()))
+}
+
 /// 09-003: a Send held for a photo edit goes with that render, and a tray
 /// that lost the rendering photo never lets a later render revive it.
 #[test]
@@ -852,11 +858,12 @@ fn a_held_send_holds_only_while_its_render_runs() {
     use crate::ui::composer_sends::{PendingSend, SendOnce};
     let mut send = PendingSend::default();
     send.attachments.push(photo("held-a.png"));
-    send.attachments[0].extras.begin_render(7);
+    let (first, job) = rendering();
+    send.attachments[0].extras.begin_render(job);
     assert!(send.hold_send("caption".into(), SendOnce::default()));
     assert!(send.send_is_held());
     let landed = send
-        .end_render(7, Some(std::path::Path::new("/tmp/held-a-edited.png")))
+        .end_render(&first, Some(std::path::Path::new("/tmp/held-a-edited.png")))
         .expect("the render is in the tray");
     assert_eq!(
         landed.held.map(|(text, _)| text),
@@ -868,13 +875,15 @@ fn a_held_send_holds_only_while_its_render_runs() {
     // The rendering photo is removed: nothing holds, and the entry can go.
     let mut send = PendingSend::default();
     send.attachments.push(photo("held-b.png"));
-    send.attachments[0].extras.begin_render(8);
+    let (_second, job) = rendering();
+    send.attachments[0].extras.begin_render(job);
     assert!(send.hold_send("gone".into(), SendOnce::default()));
     send.attachments.clear();
     assert!(!send.send_is_held());
     // A render started later is not the one the Send waited on.
     send.attachments.push(photo("held-c.png"));
-    send.attachments[0].extras.begin_render(9);
+    let (_third, job) = rendering();
+    send.attachments[0].extras.begin_render(job);
     assert!(!send.send_is_held(), "no revival by another render");
 }
 
@@ -884,9 +893,52 @@ fn a_failed_render_drops_the_held_send() {
     use crate::ui::composer_sends::{PendingSend, SendOnce};
     let mut send = PendingSend::default();
     send.attachments.push(photo("held-d.png"));
-    send.attachments[0].extras.begin_render(3);
+    let (failing, job) = rendering();
+    send.attachments[0].extras.begin_render(job);
     assert!(send.hold_send("text".into(), SendOnce::default()));
-    let landed = send.end_render(3, None).expect("the render is in the tray");
+    let landed = send
+        .end_render(&failing, None)
+        .expect("the render is in the tray");
     assert!(landed.held.is_none());
     assert!(!send.send_is_held());
+}
+
+/// 02-002: the tray photo owns its render, so removing the photo (or a
+/// later Done) drops the job and cancels the render.
+#[test]
+fn a_rendering_photo_owns_its_job() {
+    use crate::ui::composer_sends::PendingSend;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    struct Cancelled(Arc<AtomicBool>);
+    impl Drop for Cancelled {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+    let job = |flag: &Arc<AtomicBool>| {
+        quill::composer::RenderJob::new(
+            quill::composer::RenderToken::new(),
+            Cancelled(flag.clone()),
+        )
+    };
+    let removed = Arc::new(AtomicBool::new(false));
+    let mut send = PendingSend::default();
+    send.attachments.push(photo("owned-a.png"));
+    send.attachments[0].extras.begin_render(job(&removed));
+    assert!(!removed.load(Ordering::SeqCst));
+    send.attachments.clear();
+    assert!(removed.load(Ordering::SeqCst), "removing the photo cancels");
+
+    let first = Arc::new(AtomicBool::new(false));
+    let mut send = PendingSend::default();
+    send.attachments.push(photo("owned-b.png"));
+    send.attachments[0].extras.begin_render(job(&first));
+    send.attachments[0]
+        .extras
+        .begin_render(job(&Arc::new(AtomicBool::new(false))));
+    assert!(
+        first.load(Ordering::SeqCst),
+        "a later Done cancels the first"
+    );
 }

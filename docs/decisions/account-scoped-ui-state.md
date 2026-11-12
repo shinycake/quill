@@ -9817,3 +9817,23 @@ kept until sent, a refused refetch does not repeat), `state/account_notices`
 `connect/tests/stories.rs` (tray refresh on ingest),
 `connect/tests/chat_list/folder_removals.rs` (leaving a folder stops the
 retry; no wall clock), `state/tests/history_prune.rs` (translations pruned).
+
+### Sweep fixes (r3-01)
+
+| ids | fix |
+| --- | --- |
+| 01-001 | `StyleList::set_server` prunes `recent` only for a name the old list held and the new one dropped (or lists as built-in); a remembered name no list has held yet (an added style) keeps its front place until a list holds it or `forget`. |
+| 02-001, 02-002 | `quill::composer::RenderJob { token, task }` (an opaque, droppable owner of the render's task) replaces the `NEXT_RENDER` counter. `EditRender::Rendering { job }` and `PhotoPrep::Rendering { job, before }` hold it, so a cancelled edit, a removed photo or a later Done drops the job and cancels the render. The identity others keep (the held Send's `waiting`, the deferred editor open) is the `RenderToken`, matched at landing (`EditRender::waits_for`, `end_render`, `take_deferred_for`). A render whose write had already started when it was cancelled leaves its PNG in the scratch folder (`quill-edits`), which the temp sweep removes. |
+| 03-001 | `OwnerClaim::Unsaved { user, retry_at }`: a failed owner-file write is retried by the first ingest at or after `retry_at` (`OWNER_RETRY`, 30 s), not on every update; `claim_account_owner` takes `now`, so the test drives it without a clock. |
+| 03-002 | The Share Folder `links` list records its request (`sent`) and takes its answer and error by it (`answered`/`failed`), like `chats`. |
+| 03-003 | The welcome pack and the group picker's installed sticker and emoji lists record their request after `begin()`; the pack's error and the emoji answer are matched by it. (The sticker list's answer still goes through the baselined `succeed`: it has six senders outside this bundle.) |
+| 03-004 | `StyleReply::Running { request }`; the style lookup and example answers and errors are taken only from the request the stage holds, and `SearchStyle`/`GetExample` are sweepable (`is_style_preview_lookup`), so a lost request fails the stage. The UI token stays: it names which preview asked, not which request answers. |
+| 03-005, 03-006 | The Star packs list, the sign-in app config and the wearable gifts list record their request and take answer and error by it. |
+| 04-001 | `send_web_app_custom_request` records the `custom_requests` entry after the send went out; a refused send leaves none. |
+| 04-002 | A refused `getMessagePublicForwards` send ends the list in `Failed` (`forwards_send_failed`); the page draws Retry when the first page failed (nothing to page from). |
+| 04-003 | A release that times out in the section path is a leftover (`Err(Tdlib)` is ignored), as in the chat path; only `Cancelled` and `Io` end the export. |
+| 04-004 | Skipped. `ExportView` is the user's show/hide choice and the worker's progress is the export's stage: they are written by different parties, every combination is valid, and nothing resets one when the other moves (the poll reads both once). It is not a stage kept in step by hand. |
+
+Guard: `check-request-match.py` has a third rule, `unsent`: a `Fetch::begin()` with no `.sent(..)` after it in the same function. The 21 hits in the tree are in its baseline; the senders of this bundle are off it.
+
+Tests: `composer::render_job`, `connect/tests/sweep_r3_01.rs` (late links answer, requests held, style lookup by request and lost, refused forwards, refused custom request), `connect/tests/sweep_r2_03.rs` (owner retry deadline), `ai_compose::style`, `export/account/tests.rs` (a release that never answers), `ui/composer_sends_tests.rs` (the tray photo owns its job).

@@ -675,10 +675,11 @@ impl Session {
                 .welcome_messages
                 .entry(chat_id.0)
                 .or_default()
-                .fail(call_request_error_line(
-                    err,
-                    "Could not load welcome messages",
-                ));
+                .failed(
+                    pending.map(|p| p.id),
+                    call_request_error_line(err, "Could not load welcome messages"),
+                    false,
+                );
         }
         // A failed slots read or `boostChat` returns the boost box to its
         // counters with the reason (tdesktop shows the error as a toast),

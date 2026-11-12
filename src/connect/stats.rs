@@ -186,10 +186,17 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let extra = self.session.request(purpose, Some(chat_id));
-        self.send_json_request(
+        if let Err(err) = self.send_json_request(
             extra,
             &get_message_public_forwards(extra, chat_id, message_id, offset, FORWARDS_PAGE),
-        )?;
+        ) {
+            self.session.groups.stats.forwards_send_failed(
+                chat_id.0,
+                message_id.0,
+                err.stage_line(),
+            );
+            return Err(err);
+        }
         self.session.groups.stats.forwards_requested(
             chat_id.0,
             message_id.0,

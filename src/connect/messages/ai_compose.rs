@@ -185,14 +185,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         if name.is_empty() || !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let extra =
-            self.send_ai_compose(AiComposePurpose::SearchStyle { token }, None, |extra| {
-                text_composition_style_by_name(extra, StyleByName::Search, name)
-            })?;
+        let extra = self.send_ai_compose(AiComposePurpose::SearchStyle, None, |extra| {
+            text_composition_style_by_name(extra, StyleByName::Search, name)
+        })?;
         self.session.messages.ai_compose.style_lookup = Some(StyleLookup {
             token,
             name: name.to_string(),
-            outcome: StyleReply::Running,
+            outcome: StyleReply::Running { request: extra },
         });
         Ok(extra)
     }
@@ -212,14 +211,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         if name.is_empty() || !in_range || !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let extra =
-            self.send_ai_compose(AiComposePurpose::GetExample { token }, None, |extra| {
-                get_text_composition_style_example(extra, name, example_number)
-            })?;
+        let extra = self.send_ai_compose(AiComposePurpose::GetExample, None, |extra| {
+            get_text_composition_style_example(extra, name, example_number)
+        })?;
         self.session.messages.ai_compose.example = Some(ExampleAnswer {
             token,
             style_name: name.to_string(),
-            outcome: StyleReply::Running,
+            outcome: StyleReply::Running { request: extra },
         });
         Ok(extra)
     }

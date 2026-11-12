@@ -255,8 +255,8 @@ fn a_refused_playlist_change_loads_the_list_again() {
 }
 
 #[test]
-fn a_failed_owner_save_is_retried_by_the_next_ingest_without_a_new_claim() {
-    use crate::connect::types::OwnerClaim;
+fn a_failed_owner_save_is_retried_after_its_deadline_without_a_new_claim() {
+    use crate::connect::types::{OWNER_RETRY, OwnerClaim};
     use crate::settings::AccountPaths;
     let app = std::env::temp_dir().join(format!("quill-r2-03-{}", std::process::id()));
     let mut t = Flaky::new();
@@ -265,10 +265,20 @@ fn a_failed_owner_save_is_retried_by_the_next_ingest_without_a_new_claim() {
     // The folder's place is taken by a file: the owner file cannot be saved.
     std::fs::create_dir_all(folder.parent().unwrap()).unwrap();
     std::fs::write(&folder, b"in the way").unwrap();
-    t.driver.claim_account_owner();
-    assert_eq!(t.driver.owner_claim, OwnerClaim::Unsaved(7));
+    let start = std::time::Instant::now();
+    t.driver.claim_account_owner(start);
+    assert_eq!(
+        t.driver.owner_claim,
+        OwnerClaim::Unsaved {
+            user: 7,
+            retry_at: start + OWNER_RETRY
+        }
+    );
     std::fs::remove_file(&folder).unwrap();
-    t.driver.claim_account_owner();
+    // Updates before the deadline do not touch the folder again.
+    t.driver.claim_account_owner(start + OWNER_RETRY / 2);
+    assert!(!folder.join("owner.json").exists());
+    t.driver.claim_account_owner(start + OWNER_RETRY);
     assert_eq!(t.driver.owner_claim, OwnerClaim::Saved(7));
     assert!(folder.join("owner.json").exists());
     let _ = std::fs::remove_dir_all(&app);

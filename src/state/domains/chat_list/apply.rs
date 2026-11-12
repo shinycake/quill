@@ -170,7 +170,7 @@ impl Session {
                         .entry(folder_id)
                         .or_default()
                         .links
-                        .succeed(links);
+                        .answered(pending.map(|p| p.id), links);
                 }
             }
             ChatListPayload::PremiumLimit {

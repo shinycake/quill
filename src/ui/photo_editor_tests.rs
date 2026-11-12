@@ -567,8 +567,13 @@ fn a_send_cancels_a_tap_on_a_rendering_card(cx: &mut TestAppContext) {
         app.photo_editor_mut(PhotoEditor::rotate, cx);
         app.save_photo_editor(window, cx);
         // The second card's Done is still rendering when the first lands.
-        app.update_pending_attachments(|tray| tray[1].extras.begin_render(u64::MAX))
-            .expect("an open chat");
+        app.update_pending_attachments(|tray| {
+            let token = quill::composer::RenderToken::new();
+            tray[1]
+                .extras
+                .begin_render(quill::composer::RenderJob::new(token, ()))
+        })
+        .expect("an open chat");
         app.open_photo_editor(0, cx);
         app.submit_composer(String::new(), Default::default(), window, cx);
     });

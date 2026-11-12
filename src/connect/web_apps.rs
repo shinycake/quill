@@ -388,12 +388,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         parameters: &str,
     ) -> Result<RequestId, ConnectSendError> {
         let extra = self.web_app_extra(RequestPurpose::SendWebAppCustomRequest, None)?;
+        let json = send_web_app_custom_request(extra, bot_user_id, method, parameters);
+        let sent = self.send_json_request(extra, &json)?;
+        // Recorded once the send went out, so a refused one leaves no entry
+        // (its answer cannot arrive before this returns).
         self.session
             .bots
             .web_apps
             .custom_requests
             .insert(extra.0, (launch_id, req_id.to_string()));
-        let json = send_web_app_custom_request(extra, bot_user_id, method, parameters);
-        self.send_json_request(extra, &json)
+        Ok(sent)
     }
 }

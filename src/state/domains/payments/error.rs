@@ -123,10 +123,11 @@ impl Session {
                 );
             }
             Some(RequestPurpose::GetStarPackOptions) => {
-                self.payments
-                    .star_packs
-                    .options
-                    .fail_dropping_data(format!("Couldn't load Star packs: {}", error_reason(err)));
+                self.payments.star_packs.options.failed(
+                    extra,
+                    format!("Couldn't load Star packs: {}", error_reason(err)),
+                    true,
+                );
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::AddPendingPaidReaction { .. })) => {
                 if let Some(id) = extra {
@@ -180,7 +181,9 @@ impl Session {
                 }
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::GetWearableGifts)) => {
-                self.users_state.wearable_gifts.fail(error_reason(err));
+                self.users_state
+                    .wearable_gifts
+                    .failed(extra, error_reason(err), false);
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::GetReceivedGifts { .. })) => {
                 // Only the newest page's error counts (an older page's is

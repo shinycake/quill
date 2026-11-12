@@ -225,7 +225,8 @@ impl Session {
                         .flat_map(|gift| gift.gift.files.iter().cloned())
                         .collect();
                     self.remember_files(&files);
-                    self.users_state.wearable_gifts.succeed(
+                    self.users_state.wearable_gifts.answered(
+                        Some(p.id),
                         page.gifts
                             .into_iter()
                             .filter(|gift| gift.gift.colors.is_some())
@@ -283,7 +284,7 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStarGiftOptions) {
                     self.payments.stars_gift.answer(extra, options);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStarPackOptions) {
-                    self.payments.star_packs.options.succeed(options);
+                    self.payments.star_packs.options.answered(extra, options);
                 }
             }
             PaymentsPayload::GiftManage(payload) => self.apply_gift_manage(payload, pending),
