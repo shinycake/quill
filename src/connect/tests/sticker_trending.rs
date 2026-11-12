@@ -23,7 +23,7 @@ fn a_first_page_asked_while_a_later_one_is_out_replaces_it() {
     let recorder = Arc::new(RecordingSender::new());
     let seq = AtomicU64::new(0);
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
-    let mut ingest = |driver: &mut ConnectDriver<_>, json: String| {
+    let ingest = |driver: &mut ConnectDriver<_>, json: String| {
         driver
             .ingest(copy_and_parse(&json, &seq, &sink).unwrap())
             .unwrap();
@@ -43,7 +43,10 @@ fn a_first_page_asked_while_a_later_one_is_out_replaces_it() {
     ingest(&mut driver, page(second, 4, &["3", "4"]));
     let trending = &driver.session.stickers.stickers.trending;
     assert_eq!(trending.sets.len(), 2, "page two did not land");
-    assert!(matches!(trending.page, TrendingPage::Asking { from: 0, .. }));
+    assert!(matches!(
+        trending.page,
+        TrendingPage::Asking { from: 0, .. }
+    ));
     // The first page lands and replaces the list.
     ingest(&mut driver, page(restart, 3, &["7"]));
     let trending = &driver.session.stickers.stickers.trending;
