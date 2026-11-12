@@ -507,6 +507,7 @@ impl QuillApp {
             self.check_playing_track(cx);
             // A contact change invalidated the list the Contacts tab shows.
             self.refetch_open_contacts();
+            self.refetch_open_folder_links();
             // The tray, the badge and the OS menus follow what was applied.
             quill::wake::CHROME.poke();
         }

@@ -12,6 +12,12 @@ impl Session {
         _extra: Option<RequestId>,
         _seq: u64,
     ) {
+        // The installed sets are taken only by the load that waits for them:
+        // read before the answer ends its list's fetch below.
+        let installed_wanted = pending.is_some_and(|pending| {
+            pending.purpose == RequestPurpose::GetInstalledStickerSets
+                && self.stickers.stickers.lists.installed.waits_for(pending.id)
+        });
         // An answer ends its list's fetch, when it is the request the list
         // waits for; an update carries no request.
         if let Some(pending) = pending
@@ -48,7 +54,9 @@ impl Session {
                 } else if pending.map(|p| p.purpose)
                     == Some(RequestPurpose::GetInstalledStickerSets)
                 {
-                    self.accept_installed_sticker_sets(sets);
+                    if installed_wanted {
+                        self.accept_installed_sticker_sets(sets);
+                    }
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetArchivedStickerSets)
                 {
                     self.accept_archived_sticker_sets(sets);

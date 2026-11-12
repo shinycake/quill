@@ -867,6 +867,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if sticker_set_changed {
             self.drop_in_flight(RequestPurpose::GetInstalledStickerSets);
+            // The load that was out asked before the change: the list is
+            // fetched again whether or not the panel is open.
+            self.session.stickers.stickers.lists.installed.outdate();
             if self.session.stickers.stickers.open {
                 self.refresh_installed_sticker_sets()?;
             }

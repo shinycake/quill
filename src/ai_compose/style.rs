@@ -40,8 +40,25 @@ pub struct StyleExample {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StyleList {
     styles: Vec<TextCompositionStyle>,
-    /// Names of recently promoted custom styles, newest first.
-    recent: Vec<String>,
+    /// Recently promoted custom styles, newest first.
+    recent: Vec<Recent>,
+}
+
+/// A promoted style, and whether the server's lists have held it yet. A
+/// created or added style is `Unlisted` until a list names it; only a
+/// `Listed` one that a new list no longer holds was removed elsewhere.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Recent {
+    Unlisted(String),
+    Listed(String),
+}
+
+impl Recent {
+    fn name(&self) -> &str {
+        match self {
+            Self::Unlisted(name) | Self::Listed(name) => name,
+        }
+    }
 }
 
 impl StyleList {
@@ -65,28 +82,38 @@ impl StyleList {
     }
 
     /// A new list from the server; the recent custom styles keep the front.
-    /// A remembered name the old list did not hold yet (an added style the
-    /// server has not listed) stays remembered until a list holds it.
+    /// A style the server has not listed yet (just created or added) stays
+    /// remembered until a list holds it; once listed, a list without it
+    /// drops it.
     pub fn set_server(&mut self, styles: Vec<TextCompositionStyle>) {
-        let before = std::mem::replace(&mut self.styles, styles);
+        self.styles = styles;
         let styles = &self.styles;
-        self.recent.retain(|name| {
-            let listed = styles.iter().find(|style| style.name == *name);
-            match listed {
-                Some(style) => style.is_custom,
-                None => !before.iter().any(|style| style.name == *name),
-            }
-        });
+        self.recent = std::mem::take(&mut self.recent)
+            .into_iter()
+            .filter_map(
+                |recent| match styles.iter().find(|style| style.name == recent.name()) {
+                    Some(style) if style.is_custom => match recent {
+                        Recent::Unlisted(name) | Recent::Listed(name) => Some(Recent::Listed(name)),
+                    },
+                    Some(_) => None,
+                    None => matches!(recent, Recent::Unlisted(_)).then_some(recent),
+                },
+            )
+            .collect();
         self.reapply_recent();
     }
 
     /// A custom style just created, edited or added goes to the front
     /// (tdesktop `promoteCustomTone`). Built-in styles keep their place.
     pub fn promote_front(&mut self, style: TextCompositionStyle) {
+        self.promote(style, false);
+    }
+
+    fn promote(&mut self, style: TextCompositionStyle, listed: bool) {
         if !style.is_custom {
             return;
         }
-        self.remember(&style.name);
+        self.remember(&style.name, listed);
         self.styles.retain(|known| known.name != style.name);
         self.styles.insert(0, style);
     }
@@ -96,28 +123,46 @@ impl StyleList {
     /// server's next list includes it.
     pub fn promote_name(&mut self, name: &str) {
         match self.find(name).cloned() {
-            Some(style) => self.promote_front(style),
-            None => self.remember(name),
+            Some(style) => self.promote(style, true),
+            None => self.remember(name, false),
         }
     }
 
     /// A removed or deleted style leaves the list and the recent order.
     pub fn forget(&mut self, name: &str) {
         self.styles.retain(|style| style.name != name);
-        self.recent.retain(|recent| recent != name);
+        self.recent.retain(|recent| recent.name() != name);
     }
 
-    fn remember(&mut self, name: &str) {
-        self.recent.retain(|recent| recent != name);
-        self.recent.insert(0, name.to_string());
+    /// `listed`: the server's list held it when it was promoted. A name
+    /// already remembered keeps what is known about it.
+    fn remember(&mut self, name: &str, listed: bool) {
+        let known = self.recent.iter().find(|recent| recent.name() == name);
+        let was_listed = match known {
+            Some(recent) => matches!(recent, Recent::Listed(_)),
+            None => listed,
+        };
+        self.recent.retain(|recent| recent.name() != name);
+        let name = name.to_string();
+        let recent = if was_listed {
+            Recent::Listed(name)
+        } else {
+            Recent::Unlisted(name)
+        };
+        self.recent.insert(0, recent);
     }
 
     fn reapply_recent(&mut self) {
         let styles = std::mem::take(&mut self.styles);
+        let place = |style: &TextCompositionStyle| {
+            self.recent
+                .iter()
+                .position(|recent| recent.name() == style.name)
+        };
         let (mut front, rest): (Vec<_>, Vec<_>) = styles
             .into_iter()
-            .partition(|style| style.is_custom && self.recent.contains(&style.name));
-        front.sort_by_key(|style| self.recent.iter().position(|name| *name == style.name));
+            .partition(|style| style.is_custom && place(style).is_some());
+        front.sort_by_key(|style| place(style));
         front.extend(rest);
         self.styles = front;
     }
@@ -171,6 +216,29 @@ mod tests {
             style("new", true),
         ]);
         assert_eq!(list.names(), ["pirate", "poet", "formal", "new"]);
+    }
+
+    #[test]
+    fn created_style_keeps_the_front_across_a_list_that_lacks_it() {
+        let mut list = StyleList::default();
+        list.set_server(vec![style("formal", false), style("pirate", true)]);
+        list.promote_front(style("new", true));
+        assert_eq!(list.names(), ["new", "formal", "pirate"]);
+        list.set_server(vec![style("formal", false), style("pirate", true)]);
+        list.set_server(vec![
+            style("formal", false),
+            style("pirate", true),
+            style("new", true),
+        ]);
+        assert_eq!(list.names(), ["new", "formal", "pirate"]);
+        // Once listed, a list without it drops it.
+        list.set_server(vec![style("formal", false), style("pirate", true)]);
+        list.set_server(vec![
+            style("formal", false),
+            style("pirate", true),
+            style("new", true),
+        ]);
+        assert_eq!(list.names(), ["formal", "pirate", "new"]);
     }
 
     #[test]

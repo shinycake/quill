@@ -34,7 +34,7 @@ impl Session {
             && pending.purpose == RequestPurpose::GetPaidReactionSenders
             && let Some(chat) = pending.chat_id
         {
-            self.payments.paid.senders_failed(chat.0);
+            self.payments.paid.senders_failed(chat.0, Some(pending.id));
         }
         if matches!(
             pending.map(|p| p.purpose),

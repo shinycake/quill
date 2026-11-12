@@ -46,6 +46,73 @@ fn a_late_links_answer_does_not_replace_a_list_a_failed_delete_dropped() {
     );
 }
 
+fn link(url: &str) -> serde_json::Value {
+    json!({"@type":"chatFolderInviteLink","invite_link":url,"name":"","chat_ids":[1]})
+}
+
+fn link_urls(t: &Flaky) -> Vec<String> {
+    t.driver.session.chat_list.folder_shares[&3]
+        .links
+        .data()
+        .map(|links| links.iter().map(|l| l.invite_link.clone()).collect())
+        .unwrap_or_default()
+}
+
+#[test]
+fn a_late_links_answer_does_not_bring_back_a_link_deleted_meanwhile() {
+    let mut t = Flaky::new();
+    t.driver.fetch_folder_share(3).unwrap();
+    t.driver
+        .delete_folder_invite_link(3, "https://t.me/addlist/a")
+        .unwrap();
+    // The list is fetched again, past the delete.
+    assert_eq!(t.sender.count("getChatFolderInviteLinks"), 2);
+    t.answer_nth(
+        "getChatFolderInviteLinks",
+        0,
+        json!({"@type":"chatFolderInviteLinks",
+            "invite_links":[link("https://t.me/addlist/a"), link("https://t.me/addlist/b")]}),
+    );
+    assert!(
+        t.driver.session.chat_list.folder_shares[&3]
+            .links
+            .is_loading()
+    );
+    t.answer_nth(
+        "getChatFolderInviteLinks",
+        1,
+        json!({"@type":"chatFolderInviteLinks","invite_links":[link("https://t.me/addlist/b")]}),
+    );
+    assert_eq!(link_urls(&t), ["https://t.me/addlist/b"]);
+}
+
+#[test]
+fn a_late_links_answer_does_not_drop_a_link_created_meanwhile() {
+    let mut t = Flaky::new();
+    t.driver.fetch_folder_share(3).unwrap();
+    t.driver.create_folder_invite_link(3, "", &[1]).unwrap();
+    t.answer("createChatFolderInviteLink", link("https://t.me/addlist/n"));
+    t.driver.refetch_outdated_folder_links(3);
+    assert_eq!(t.sender.count("getChatFolderInviteLinks"), 2);
+    t.answer_nth(
+        "getChatFolderInviteLinks",
+        0,
+        json!({"@type":"chatFolderInviteLinks","invite_links":[]}),
+    );
+    assert_eq!(link_urls(&t), ["https://t.me/addlist/n"]);
+    t.answer_nth(
+        "getChatFolderInviteLinks",
+        1,
+        json!({"@type":"chatFolderInviteLinks","invite_links":[link("https://t.me/addlist/n")]}),
+    );
+    assert_eq!(link_urls(&t), ["https://t.me/addlist/n"]);
+    assert!(
+        !t.driver.session.chat_list.folder_shares[&3]
+            .links
+            .is_loading()
+    );
+}
+
 #[test]
 fn star_packs_and_wearable_gifts_wait_for_their_own_request() {
     let mut t = Flaky::new();
@@ -189,4 +256,53 @@ fn a_refused_mini_app_custom_request_leaves_no_entry() {
             .get(&request.0),
         Some(&(1, "r2".to_string()))
     );
+}
+
+#[test]
+fn an_older_installed_sets_answer_does_not_replace_a_newer_load() {
+    let mut t = Flaky::new();
+    let sets = |id: &str| {
+        json!({"@type":"stickerSets","sets":[{"@type":"stickerSetInfo","id":id,"title":"T",
+            "name":"T","size":0,"is_installed":true}]})
+    };
+    t.driver.open_sticker_panel().unwrap();
+    // A change drops the load that was out and asks again.
+    let first = t.sender.nth("getInstalledStickerSets", 0).unwrap()["@extra"].clone();
+    drop(
+        t.driver
+            .session
+            .requests
+            .take_purpose(crate::state::RequestPurpose::GetInstalledStickerSets),
+    );
+    t.driver.session.stickers.stickers.lists.installed.outdate();
+    t.driver.refresh_installed_sticker_sets().unwrap();
+    let asked = t.sender.count("getInstalledStickerSets");
+    assert!(asked >= 2);
+    // The older answer finds a load that no longer waits for it.
+    let mut older = sets("11");
+    older["@extra"] = first;
+    t.feed(older);
+    assert!(t.driver.session.stickers.stickers.sets.is_empty());
+    t.answer("getInstalledStickerSets", sets("22"));
+    let ids: Vec<_> = t
+        .driver
+        .session
+        .stickers
+        .stickers
+        .sets
+        .iter()
+        .map(|set| set.id)
+        .collect();
+    assert_eq!(ids, [22]);
+}
+
+#[test]
+fn a_failed_paid_reaction_senders_ask_may_be_asked_again() {
+    let mut t = Flaky::new();
+    t.driver
+        .maybe_fetch_paid_reaction_senders(ChatId(5))
+        .unwrap();
+    assert!(!t.driver.session.payments.paid.can_ask_senders(5));
+    t.fail("getChatAvailablePaidMessageReactionSenders", "BAD");
+    assert!(t.driver.session.payments.paid.can_ask_senders(5));
 }

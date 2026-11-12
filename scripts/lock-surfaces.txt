@@ -120,6 +120,7 @@ src/ui/notifications/mod.rs::poll_live -> drain_account_notices | runs-locked | 
 src/ui/notifications/mod.rs::poll_live -> check_video_pip | runs-locked | closes Picture-in-Picture whose message went
 src/ui/notifications/mod.rs::poll_live -> check_playing_track | runs-locked | stops the player when its track or chat went
 src/ui/notifications/mod.rs::poll_live -> refetch_open_contacts | runs-locked | asks again for a contact list that was invalidated; shows nothing
+src/ui/notifications/mod.rs::poll_live -> refetch_open_folder_links | runs-locked | asks again for a link list a link edit outdated; shows nothing
 src/ui/notifications/mod.rs::poll_live -> poll_chat_export_progress | runs-locked | an export's progress, for the redraw; the export keeps running under the lock
 src/ui/notifications/mod.rs::poll_live -> finish_successful_sends | runs-locked | clears the drafts of messages that were sent
 src/ui/notifications/mod.rs::poll_live -> progress_inline_mode | runs-locked | sends an inline query that waited for its bot; its results are drawn after the unlock

@@ -47,8 +47,10 @@ impl fmt::Debug for RenderToken {
 }
 
 /// A render in flight: its token, and the task that runs it. Dropping the
-/// last copy of the job drops the task, which cancels the render. Only the
-/// stage clones it (a tray copy); the identity others keep is the token.
+/// last copy of the job drops the task, which cancels the render. A copy
+/// keeps the render alive, so nothing outside the stage holds one (the edit
+/// bar follows [`crate::composer::ComposerEdit::for_display`]); the identity
+/// others keep is the token.
 /// One pointer wide, so the stage that holds it stays small.
 #[derive(Clone)]
 pub struct RenderJob(Arc<Held>);

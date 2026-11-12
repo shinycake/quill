@@ -137,6 +137,17 @@ pub enum HistoryPreload {
 }
 
 impl ChatListState {
+    /// A link edit landed on the folder's cached list while its fetch was
+    /// out: that fetch asked before the edit, so its answer is dropped and
+    /// the list is fetched again (`ConnectDriver::refetch_outdated_folder_links`).
+    pub(crate) fn outdate_loading_links(&mut self, folder_id: i32) {
+        if let Some(share) = self.folder_shares.get_mut(&folder_id)
+            && share.links.is_loading()
+        {
+            share.links.outdate();
+        }
+    }
+
     /// The folder's paging stage; `More` until a page answers.
     pub fn folder_paging_of(&self, folder_id: i32) -> ListPaging {
         self.folder_paging
