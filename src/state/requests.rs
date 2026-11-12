@@ -139,6 +139,7 @@ impl RequestPurpose {
                 | RequestPurpose::GetLinkPreview
                 // A story list's page: a lost one ends as a failure the
                 // list waits out and pages again.
+                | RequestPurpose::LoadDirectMessagesChatTopics
                 | RequestPurpose::LoadActiveStories
                 | RequestPurpose::LoadHiddenStories
                 | RequestPurpose::Messages(MessagesPurpose::GetComposerReplyTarget { .. })

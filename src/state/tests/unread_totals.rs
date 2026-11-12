@@ -111,7 +111,7 @@ fn badge_adds_forum_topic_unreads_on_top_of_totals() {
             r#"{{"info":{{"@type":"forumTopicInfo","chat_id":41,"forum_topic_id":{id},"name":"T{id}","icon":{{"@type":"forumTopicIcon","color":0,"custom_emoji_id":"0"}},"is_general":false,"is_closed":false,"is_hidden":false}},"last_message":{{"id":{last},"chat_id":41,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"x","entities":[]}}}}}},"order":"{id}","is_pinned":false,"unread_count":{unread},"last_read_inbox_message_id":{read}}}"#,
         )
     };
-    let extra = session.request(RequestPurpose::GetForumTopics, Some(ChatId(41)));
+    let extra = session.ask_forum_topics(ChatId(41));
     let topics = [
         topic(482317, 11, 505806848000, 505859276800),
         topic(477080, 1, 500306018304, 505744982016),

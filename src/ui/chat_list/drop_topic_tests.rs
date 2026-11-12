@@ -483,10 +483,7 @@ fn a_topics_request_that_fails_leaves_loading_for_the_error_line(cx: &mut TestAp
     app.update(vcx, |app, _| {
         let sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> = app.demo_ui.sink.clone();
         if let Some(session) = app.demo_session.as_mut() {
-            let extra = session.request(
-                quill::state::RequestPurpose::GetForumTopics,
-                Some(ChatId(73)),
-            );
+            let extra = session.ask_forum_topics(ChatId(73));
             let json = format!(
                 r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHANNEL_INVALID"}}"#,
                 extra.0

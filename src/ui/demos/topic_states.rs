@@ -74,7 +74,7 @@ fn seed_forum(session: &mut Session, app: &QuillApp) {
         .iter()
         .map(|(id, name)| topic_json(*id, name))
         .collect();
-    let extra = session.request(RequestPurpose::GetForumTopics, Some(ChatId(FORUM)));
+    let extra = session.ask_forum_topics(ChatId(FORUM));
     let answer = format!(
         r#"{{"@type":"forumTopics","@extra":"{}","total_count":{},"topics":[{}],"next_offset_date":0,"next_offset_message_id":0,"next_offset_forum_topic_id":0}}"#,
         extra.0,

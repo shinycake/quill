@@ -101,7 +101,6 @@ bare:SuggestedPostState::Pending 1
 bare:ThreadStatus::Resolving 1
 bare:ThreadStatus::Starting 1
 bare:ToldStage::Loading 1
-bare:TopicsLoad::Asked 1
 bare:TransportState::Connecting 1
 bare:TypeSave::Sent 1
 bare:Unavailable::Checking 1

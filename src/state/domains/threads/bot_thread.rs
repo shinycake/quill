@@ -9,18 +9,58 @@ use crate::telegram::envelope::ServiceAction;
 /// The id of the "New Thread" card's row, past every real message id.
 pub const NEW_BOT_THREAD_ROW_ID: i64 = -9_000_000_002;
 
-/// How many answers wait for a window to take them. A window takes its
-/// own at once; one whose view went away before the answer never does.
-const KEPT_ANSWERS: usize = 8;
+/// How many answers of one window wait for it to take them. A window holds
+/// one waiting stage and takes its own answer at once, so only a few
+/// answers of abandoned asks can ever sit beside the live one.
+const KEPT_PER_WINDOW: usize = 4;
 
-/// The answer to a `createForumTopic` the composer sent for a bot's new
-/// thread.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BotThreadStarted {
-    pub request: RequestId,
-    /// The new thread's `forum_topic_id`, or the line saying why there is
-    /// none.
-    pub outcome: Result<i32, String>,
+/// Answers kept for the window that asked, each under its `RequestId`.
+/// Another window's answers never push one out; the answers of a window
+/// that closed go with it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AnswerBox<T> {
+    held: Vec<(AskingView, RequestId, T)>,
+}
+
+impl<T> Default for AnswerBox<T> {
+    fn default() -> Self {
+        Self { held: Vec::new() }
+    }
+}
+
+impl<T> AnswerBox<T> {
+    /// Keep `value` for the window `view` that asked `request`; `open` says
+    /// whether a view still exists.
+    pub fn put(
+        &mut self,
+        view: AskingView,
+        request: RequestId,
+        value: T,
+        open: impl Fn(AskingView) -> bool,
+    ) {
+        self.held.retain(|(held, ..)| open(*held));
+        self.held.push((view, request, value));
+        let same = self.held.iter().filter(|(held, ..)| *held == view).count();
+        if same > KEPT_PER_WINDOW
+            && let Some(oldest) = self.held.iter().position(|(held, ..)| *held == view)
+        {
+            self.held.remove(oldest);
+        }
+    }
+
+    /// The answer to `request`, once.
+    pub fn take(&mut self, request: RequestId) -> Option<T> {
+        let at = self.held.iter().position(|(_, asked, _)| *asked == request)?;
+        Some(self.held.remove(at).2)
+    }
+
+    pub fn len(&self) -> usize {
+        self.held.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.held.is_empty()
+    }
 }
 
 impl Session {
@@ -67,37 +107,41 @@ impl Session {
 
     /// The answer to the new-thread request `request`, once it landed.
     pub fn take_bot_thread_start(&mut self, request: RequestId) -> Option<Result<i32, String>> {
-        let at = self
-            .threads
-            .bot_thread_starts
-            .iter()
-            .position(|start| start.request == request)?;
-        Some(self.threads.bot_thread_starts.remove(at).outcome)
+        self.threads.bot_thread_starts.take(request)
     }
 
     /// How the topic action `request` ended, once it did.
     pub fn take_topic_action_answer(&mut self, request: RequestId) -> Option<bool> {
-        let at = self
-            .threads
-            .topic_action_answers
-            .iter()
-            .position(|(asked, _)| *asked == request)?;
-        Some(self.threads.topic_action_answers.remove(at).1)
+        self.threads.topic_action_answers.take(request)
     }
 
-    /// Keep how the topic action `request` ended for its window.
-    pub(crate) fn topic_action_answered(&mut self, request: RequestId, ok: bool) {
-        let answers = &mut self.threads.topic_action_answers;
-        answers.push((request, ok));
-        let over = answers.len().saturating_sub(KEPT_ANSWERS);
-        answers.drain(..over);
+    /// Whether the window `view` is still there to take an answer.
+    fn view_is_open(&self, view: AskingView) -> bool {
+        match view {
+            AskingView::Main => true,
+            AskingView::Window { chat, opening } => {
+                self.window_chats.contains(&chat) && self.window_chats.opening_of(chat) == opening
+            }
+        }
     }
 
-    /// Keep the answer to the new-thread request `request` for its window.
-    pub(crate) fn bot_thread_answered(&mut self, request: RequestId, outcome: Result<i32, String>) {
-        let starts = &mut self.threads.bot_thread_starts;
-        starts.push(BotThreadStarted { request, outcome });
-        let over = starts.len().saturating_sub(KEPT_ANSWERS);
-        starts.drain(..over);
+    /// Keep how the topic action `request` of `view` ended for its window.
+    pub(crate) fn topic_action_answered(&mut self, request: RequestId, view: AskingView, ok: bool) {
+        let mut answers = std::mem::take(&mut self.threads.topic_action_answers);
+        answers.put(view, request, ok, |view| self.view_is_open(view));
+        self.threads.topic_action_answers = answers;
+    }
+
+    /// Keep the answer to the new-thread request `request` of `view` for
+    /// its window.
+    pub(crate) fn bot_thread_answered(
+        &mut self,
+        request: RequestId,
+        view: AskingView,
+        outcome: Result<i32, String>,
+    ) {
+        let mut starts = std::mem::take(&mut self.threads.bot_thread_starts);
+        starts.put(view, request, outcome, |view| self.view_is_open(view));
+        self.threads.bot_thread_starts = starts;
     }
 }

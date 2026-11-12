@@ -258,3 +258,120 @@ fn a_lost_story_page_waits_and_pages_again() {
         ActiveStoriesPaging::Waiting { .. }
     ));
 }
+
+#[test]
+fn another_windows_answers_never_push_out_the_waiting_one() {
+    let (mut session, _sink) = session();
+    assert!(session.open_window_chat(ChatId(5)));
+    let waiting = AskingView::Window {
+        chat: ChatId(5),
+        opening: session.window_chats.opening_of(ChatId(5)),
+    };
+    session.topic_action_answered(RequestId(1), waiting, true);
+    // Far more answers of the main window than any cap, none taken.
+    for id in 100..140 {
+        session.topic_action_answered(RequestId(id), AskingView::Main, true);
+    }
+    assert_eq!(session.take_topic_action_answer(RequestId(1)), Some(true));
+    // The main window keeps its newest answers, not all of them.
+    assert_eq!(session.take_topic_action_answer(RequestId(139)), Some(true));
+    assert_eq!(session.take_topic_action_answer(RequestId(100)), None);
+}
+
+#[test]
+fn the_answers_of_a_closed_window_go_with_it() {
+    let (mut session, _sink) = session();
+    assert!(session.open_window_chat(ChatId(5)));
+    let window = AskingView::Window {
+        chat: ChatId(5),
+        opening: session.window_chats.opening_of(ChatId(5)),
+    };
+    session.bot_thread_answered(RequestId(1), window, Ok(12));
+    assert!(session.close_window_chat(ChatId(5)));
+    session.bot_thread_answered(RequestId(2), AskingView::Main, Ok(13));
+    assert_eq!(session.take_bot_thread_start(RequestId(1)), None);
+    assert_eq!(session.take_bot_thread_start(RequestId(2)), Some(Ok(13)));
+    assert!(session.threads.bot_thread_starts.is_empty());
+}
+
+#[test]
+fn a_late_forum_topics_error_does_not_fail_a_loaded_list() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let chat = ChatId(16);
+    let old = session.request(RequestPurpose::GetForumTopics, Some(chat));
+    let new = session.ask_forum_topics(chat);
+    let answer = format!(
+        r#"{{"@type":"forumTopics","@extra":"{}","total_count":0,"topics":[],"next_offset_date":0,"next_offset_message_id":0,"next_offset_forum_topic_id":0}}"#,
+        new.0
+    );
+    apply_json(&mut session, &seq, &sink, &answer);
+    assert!(session.threads.forum_topics.contains_key(&16));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":500,"message":"x"}}"#,
+            old.0
+        ),
+    );
+    assert!(!session.threads.forum_topics.failed(16));
+    assert!(session.threads.forum_topics.contains_key(&16));
+}
+
+#[test]
+fn a_forum_topics_answer_nobody_waits_for_is_dropped() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let chat = ChatId(16);
+    // The list was forgotten (a topic was created) while the ask was out.
+    let ask = session.ask_forum_topics(chat);
+    session.threads.forum_topics.remove(&16);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"forumTopics","@extra":"{}","total_count":0,"topics":[],"next_offset_date":0,"next_offset_message_id":0,"next_offset_forum_topic_id":0}}"#,
+            ask.0
+        ),
+    );
+    assert!(!session.threads.forum_topics.asked(16));
+}
+
+#[test]
+fn only_the_direct_messages_page_in_flight_ends_the_list() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let chat = ChatId(9);
+    let old = session.request(RequestPurpose::LoadDirectMessagesChatTopics, Some(chat));
+    session.threads.direct.page_asked(9, old);
+    let ok = |extra: RequestId| format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0);
+    apply_json(&mut session, &seq, &sink, &ok(old));
+    assert!(!session.threads.direct.loading(9));
+    let new = session.request(RequestPurpose::LoadDirectMessagesChatTopics, Some(chat));
+    session.threads.direct.page_asked(9, new);
+    // The older page's 404 arrives after the newer page went out.
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":404,"message":"x"}}"#,
+            old.0
+        ),
+    );
+    assert!(!session.threads.direct.exhausted(9));
+    assert!(session.threads.direct.loading(9));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":404,"message":"x"}}"#,
+            new.0
+        ),
+    );
+    assert!(session.threads.direct.exhausted(9));
+}

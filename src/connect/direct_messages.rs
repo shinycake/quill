@@ -84,7 +84,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let purpose = RequestPurpose::LoadDirectMessagesChatTopics;
         if self.session.threads.direct.exhausted(chat_id.0)
-            || self.session.requests.has_purpose_for_chat(purpose, chat_id)
+            || self.session.threads.direct.loading(chat_id.0)
         {
             return Ok(None);
         }
@@ -92,7 +92,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let json = load_direct_messages_chat_topics(extra, chat_id, DIRECT_TOPICS_PAGE);
         let sent = self.send_json_request(extra, &json).map(Some);
         if sent.is_ok() {
-            self.session.threads.direct.page_asked(chat_id.0);
+            self.session.threads.direct.page_asked(chat_id.0, extra);
         }
         sent
     }
