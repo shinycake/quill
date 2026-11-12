@@ -26,13 +26,9 @@ impl QuillApp {
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(tr(keys::PROXY_SETTINGS)))
                 .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body)));
+                    let body = Rc::new(std::cell::Cell::new(Some(body)));
                     move |content, _, _| {
-                        content.child(
-                            body.borrow_mut()
-                                .take()
-                                .unwrap_or_else(|| div().into_any_element()),
-                        )
+                        content.child(body.take().unwrap_or_else(|| div().into_any_element()))
                     }
                 }))
                 .on_close(on_close)

@@ -204,6 +204,10 @@ pub static MINI_APPS: Signal = Signal::new();
 /// (`crate::agent`).
 pub static AGENT: Signal = Signal::new();
 
+/// A passkey ceremony's worker has an event for the dialog (a sheet to
+/// show, a PIN to ask, the result).
+pub static PASSKEY: Signal = Signal::new();
+
 /// The main window came to the front (or the OS resumed): everything that
 /// sleeps on a long timeout re-checks now, since monotonic timers pause in
 /// system sleep and time-driven work (presence, auto-lock) may be overdue.

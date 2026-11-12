@@ -10305,3 +10305,48 @@ notification edits), `connect::tests::sticker_tabs` / `sticker_creator` (the sta
 | 4 | The `SetRowView` comment names tdesktop's `SetState`. |
 | 5 | The `support_chat_answer` comment says what the filter does. |
 | 6 | The video demo registers the saved-GIF request first and calls `saved_asked` once. |
+### Sweep fixes (r4-10)
+
+| Ids | What changed |
+| --- | --- |
+| 21-003, 21-004 | The password forms read only the inputs they draw. `PasswordForm::{Enable, Change, Disable}` (`security/twofa_form.rs`) builds the `setPassword` arguments: Change refuses an empty new password (it used to send `""`, which turns two-step verification off), Turn off sends an empty new password and hint on purpose and ignores the other forms' text, Enable ignores a stale current password, and only Enable carries the recovery email. Back clears the shared inputs. Tests in `twofa_form`. |
+| 20-003, 20-004 | `SendTarget` carries the `SendSlot` fixed when Send was tapped; the voice and round-video sends register their draft clear under it (`composer_sends.set_draft_clear(&target.slot, ..)`), not under whichever chat is open when the file is ready. |
+| 20-006 | `SourceStage::Picking { _pick: Task }`: the "Photo or video" picker and the clipboard decode are held by the sources of the box that asked (`hold_photo_pick`), so closing the box or opening another source drops them. A landing pick is taken only while that stage is the one waiting (`end_photo_pick`); a cancelled picker ends the stage. |
+| 20-007 | `PollView::{Voters { option }, Stats { option }}` replaces `show_stats` beside `selected_option`. |
+| 20-001 | The Premium `/start` is queued only when a resolve went out (its `RequestId`); the `RequestId(0)` sentinel is gone. Without a driver (demos) nothing is queued. |
+| 20-008 | `PullUi` is reset in three methods (`retarget`, `abandon_jump`, `end_slide`); no call site touches `slide` or the machine's restart. The slide cannot live inside the machine's `Jumping` stage: it is drawn after the jump ends and the chat change restarts the machine. `g-337`: the jump waits on `wake::APPLIED` (with the stage deadline as the timeout) instead of a 100 ms timer (`JUMP_POLL_MS` is gone). |
+| 21-006 | `SettingsSearch` has no `Finished` marker. Closing Settings drops the search field with its text, and the next open makes a new one; `selected` is a plain field. Test `closing_settings_drops_the_search_text_for_the_next_open`. |
+| 21-005 | The anchor text's message is kept as one entry in the window's `WindowSelected` (`anchor_owner`), replacing the thread-local table of every painted text (cleared at 50,000 entries). |
+| 21-001 | A media check that lands after its give-up removes the JPEG it made. |
+| 21-007 | Tile buttons and menu items hold the `TrayItem` they were drawn for and act on its current index (`act_on_tile`); a file that left the tray makes the click do nothing. |
+| 21-002 | `MenuActions` records an ask in flight (`Know::Asked(RequestId)`), and a gallery hover asks only when no ask is out and none failed. Tests in `menu_actions`. |
+| g-327 | `Lookup::Waiting` is gone: a waiting draw gets `Lookup::Now(None)`. |
+| g-288, g-289 | `CeremonyRun::{Probing, Connecting}` hold the worker; `CeremonySheet` is only the sheets that draw, and `CeremonyView` is the derived view. |
+| g-299 | The passkey ticker rests on `wake::APPLIED` and the new `wake::PASSKEY` (poked by the ceremony worker's `Link::emit`, a panicked worker included), with no timer (fix round 3), instead of a 100 ms timer. |
+| g-323 | `pump_saved_messages` no longer asks the request table by purpose; the tags fetch (`Fetch`) is the gate. |
+| g-286 | The demo storage stats are set as `Fetch::Ready` instead of `Fetch::succeed`. |
+| g-300 | Not in the baseline: `selection_drag_loop` is in `owned-timers-allow.txt` with a reason (a held pointer beyond the list's edge sends no event; the drag stage owns the task). |
+| g-344 … g-367 (refcell) | The one-shot dialog bodies are `Cell<Option<_>>` with `take()`; `platform_cursor` holds a `Cell<Option<Weak<_>>>`; `selection_bar` uses `try_borrow`. |
+| Fix round 2 (21-001) | `check_photo` returns `MediaCheck::Jpeg(TempFile)`; the tray keeps a `MediaFound` after `claim()`. An answer whose read the give-up, a restart or `forget` settled is dropped with its file. The `media_check_jobs` number stays only to tell a restarted read in `Reads` (the tasks in the stage already cancel the old one). |
+| Fix round 2 (21-004) | `goto_twofa_view(view, window, cx)` empties every two-step input (`clear_twofa_inputs`, one list, also used by `close_twofa`) on each view change; `twofa_form_buttons` takes `TwofaForm::{Password(PasswordForm), Email}`, so its match is total. The poll's `twofa_step_done` has no window; the next `goto_twofa_view` empties the inputs. |
+| Fix round 2 (20-006) | The camera shot's decode and the crop's "Set Photo" render are held by the box's sources (`hold_photo_pick`) and land only through `end_photo_pick()`. |
+| Fix round 2 (21-002) | `MenuActions::answered`/`fail` take the `RequestId` and apply only when no newer ask waits; every ask records `Asked(request)` in `ask_message_menu_actions`. A tick after a refusal forgets it and asks (`AskFor::Tick`); a hover does not. |
+| Fix round 2 (20-003, 20-004) | A recording reserves its slot's draft clear when Send is tapped (`ClearStage::Reserved(Reservation)`), and arms it with its request when the file is ready; a send made meanwhile replaces the reservation, so the recording never replaces a newer send's clear. `SendTarget::is_open` compares the slot (chat and topic). |
+| Fix round 2 (IS) | `RecordStage::{Idle, Asking, Opening, Recording(Capture)}` replaces `start` beside `capture`. |
+| Fix round 2 (21-007) | `tray_index_of` gives up when the tile's index no longer holds its file. |
+| 20-002 | Skipped: `op` (username or photo) and `save` (name and bio) are two independent operations, each settled on its own request and shown in its own place; they can overlap. |
+| 20-005 | Skipped: lock, discard row and "Play once" are user toggles of one recording, dropped with the `Capture`; none waits for an answer. |
+| Fix round 3 (recording regression) | `with_device_access` shows the OS prompt only while `recording.busy()` is false, so no prompt is up with nobody waiting for its answer. `DeviceOs` is the seam a test sets. |
+| Fix round 3 (21-007) | `ComposerAttachment` has an `AttachmentId` assigned when it joins a tray; `TrayItem` holds it and `tray_index_of` finds the entry by it. The same photo attached twice is two entries. |
+| Fix round 3 (selection) | `Session::shown_history` follows the view's order: the open comment thread's replies (a failed thread falls through), then the open topic's page, then the chat's history; `QuillApp::shown_history` adds the Saved Messages sublist or tag filter's own page. `loaded_selectable_ids`, `message_still_sending` and the selection's text, media, report and delete readers use it. |
+| Fix round 4 | Grams Retry after a failed next page asks that page again (`ConnectDriver::retry_grams`) and keeps the rows; the passkey worker test joins the worker before it asserts the poke; the Premium `/start` queue, the Edit Profile reopen, the poll voters upkeep, the saved topics restart, the quick replies farewell and the Calls privacy Retry each have a test on their real path (`PremiumHub::take_auto_start`, `refresh_stale_poll_voters`, `restart_saved_topics` hold the logic the UI called inline). |
+| Fix round 3 (link tooltip) | A history scroll, a mouse exit and a paint that finds the text no longer hovered end the link tooltip. |
+| Fix round 3 (polls) | `updatePoll` marks voters entries `PollVotersFetch::Stale`; `poll_voters_upkeep` asks the shown one again; a refused ask ends `Failed`. The stats Retry only resends the graph (`retry_poll_stats`). |
+| Fix round 3 (Grams) | `GramsView::{Closed, List, Receipt(key)}` replaces `open` and `selected`. A failed page is drawn with a Retry. |
+| Fix round 3 (Premium /start) | `ChatReady` carries the flow's request; `PremiumAutoStart::is_for` takes the start only for that flow. |
+| Fix round 3 (profile) | `open_edit_profile_dialog` ends an open box through `close_edit_profile_dialog`, which also resets the username check. |
+| Fix round 3 (show-or-premium) | Reopening the box while its change is out keeps `Saving(request)` for the same kind. |
+| Fix round 3 (IS) | `DragSelect.mode` is `Press::{PickUp, Range { drag: RangePress }}`. |
+| Fix round 3 (calls privacy) | Each key draws its own stage with a Retry; a refused ask records `Failed` (`refuse_privacy_load`). |
+| Fix round 3 (saved topics) | `saved_asked` resets where the list starts over. |
+| Fix round 3 (farewell) | `SettingsUi::farewell` closes the proxy editor and `DialogUi::farewell` the quick replies box; a second identical change returns the request in flight. |

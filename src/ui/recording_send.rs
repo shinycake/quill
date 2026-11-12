@@ -10,12 +10,13 @@
 
 use super::account_job::StartedOn;
 use super::app::QuillApp;
-use super::composer_state::DraftClear;
+use super::composer_sends::SendSlot;
+use super::composer_state::Reservation;
 use super::recording_state::{CaptureFor, CaptureMedia, StartId};
 use super::status_note::StatusNote;
 use gpui_kit::*;
 use quill::composer::{AttachmentKind, ComposerAttachment, ComposerReplyTo};
-use quill::ids::ChatId;
+use quill::ids::{ChatId, RequestId};
 use quill::lang::{keys, tr};
 use quill::telegram::SendReply;
 use quill::video::{VideoNoteCapture, VideoNoteDraft};
@@ -29,26 +30,42 @@ pub(super) struct SendTarget {
     /// switched to.
     account: StartedOn,
     chat_id: ChatId,
+    /// The composer slot (account, chat and topic) the recording consumed:
+    /// its draft clear is registered here, whichever chat is open when the
+    /// file is ready.
+    slot: SendSlot,
     /// The topic and thread inside the chat, fixed at the tap too.
     place: quill::connect::SendPlace,
     reply: Option<ComposerReplyTo>,
     caption: String,
+    /// The draft clear held for this recording from the tap until its send
+    /// goes out or is given up (`settle_claim`).
+    claim: Option<Reservation>,
 }
 
 impl SendTarget {
     pub(super) fn new(
         account: StartedOn,
         chat_id: ChatId,
+        slot: SendSlot,
         reply: Option<ComposerReplyTo>,
         caption: &str,
     ) -> Self {
         Self {
             account,
             chat_id,
+            slot,
             place: Default::default(),
             reply,
             caption: caption.trim().to_owned(),
+            claim: None,
         }
+    }
+
+    /// The target with the claim its tap made on the slot's draft clear.
+    fn claiming(mut self, claim: Reservation) -> Self {
+        self.claim = Some(claim);
+        self
     }
 
     /// The topic and thread of the chat the send goes to.
@@ -63,10 +80,10 @@ impl SendTarget {
         self.reply.as_ref()?.send_target(self.chat_id)
     }
 
-    /// The composer on screen is the target chat's, so it holds its
-    /// reply, draft and caption.
-    fn is_open(&self, open: Option<ChatId>) -> bool {
-        open == Some(self.chat_id)
+    /// The composer on screen is the target's own slot (chat and topic), so
+    /// it holds its reply, draft and caption.
+    fn is_open(&self, open: Option<&SendSlot>) -> bool {
+        open == Some(&self.slot)
     }
 
     /// What a failed send puts back into the composer: only into the
@@ -74,7 +91,7 @@ impl SendTarget {
     /// touched since Send (text typed or a reply picked meanwhile stays).
     fn restore_plan(
         &self,
-        open: Option<ChatId>,
+        open: Option<&SendSlot>,
         composer_text: &str,
         reply: Option<&ComposerReplyTo>,
     ) -> Restore {
@@ -105,6 +122,7 @@ impl QuillApp {
     ) -> Option<SendTarget> {
         let account = self.started_on()?;
         let chat_id = self.open_chat_id()?;
+        let slot = self.send_slot()?;
         if self.slow_mode_blocked(chat_id, cx) {
             return None;
         }
@@ -114,7 +132,7 @@ impl QuillApp {
             .as_ref()
             .map(|live| live.driver.send_place(chat_id))
             .unwrap_or_default();
-        Some(SendTarget::new(account, chat_id, reply, caption).at(place))
+        Some(SendTarget::new(account, chat_id, slot, reply, caption).at(place))
     }
 
     /// The recording consumes the composer when Send is tapped, not when
@@ -139,6 +157,30 @@ impl QuillApp {
         }
     }
 
+    /// Send was tapped: the slot's draft clear is held for the recording
+    /// until its file is ready, so a text sent from the slot meanwhile
+    /// keeps its own.
+    fn reserve_draft_clear_for(&mut self, target: SendTarget) -> SendTarget {
+        let claim = self
+            .composer_sends
+            .reserve_draft_clear(&target.slot, target.chat_id);
+        target.claiming(claim)
+    }
+
+    /// The recording's send went out as `request` (its clear waits for the
+    /// ack), or did not go (the clear it held goes).
+    fn settle_claim(&mut self, target: &SendTarget, request: Option<RequestId>) {
+        let Some(claim) = target.claim.as_ref() else {
+            return;
+        };
+        match request {
+            Some(request) => self
+                .composer_sends
+                .arm_draft_clear(&target.slot, claim, request),
+            None => self.composer_sends.release_draft_clear(&target.slot, claim),
+        }
+    }
+
     /// The send failed: put the caption and reply back unless the user
     /// started something new in the meantime.
     fn restore_composer_after_failed_send(
@@ -148,7 +190,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let text = self.composer.read(cx).value().to_string();
-        let plan = target.restore_plan(self.open_chat_id(), &text, self.chat_ui.reply());
+        let plan = target.restore_plan(self.send_slot().as_ref(), &text, self.chat_ui.reply());
         if plan.reply {
             self.chat_ui.set_reply(target.reply.clone());
         }
@@ -174,6 +216,7 @@ impl QuillApp {
         let Some(capture) = self.take_voice_capture() else {
             return;
         };
+        let target = self.reserve_draft_clear_for(target);
         self.consume_composer_for_send(&target, true, window, cx);
         let finish = capture.close_microphone();
         self.sync_voice_action();
@@ -214,6 +257,7 @@ impl QuillApp {
         if let Some(path) = path {
             let _ = std::fs::remove_file(path);
         }
+        self.settle_claim(target, None);
         let key = if self.on_screen(&target.account) {
             window_closed
         } else {
@@ -231,13 +275,27 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let request = self.send_voice_draft(result, target, play_once, window, cx);
+        self.settle_claim(target, request);
+    }
+
+    /// The request the voice note went out as, `None` when it did not go.
+    fn send_voice_draft(
+        &mut self,
+        result: Result<VoiceDraft, String>,
+        target: &SendTarget,
+        play_once: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<RequestId> {
+        let mut sent_as = None;
         let draft = match result {
             Ok(draft) => draft,
             Err(err) => {
                 self.restore_composer_after_failed_send(target, window, cx);
                 self.set_note(StatusNote::error(err));
                 cx.notify();
-                return;
+                return None;
             }
         };
         if let Some(live) = self.live.as_mut() {
@@ -251,7 +309,7 @@ impl QuillApp {
             );
             if let Ok(request) = sent {
                 self.set_note(StatusNote::silent(tr(keys::Q_MISC_SENDING_VOICE_NOTE)));
-                self.expect_draft_clear(DraftClear::whole_composer(target.chat_id), request);
+                sent_as = Some(request);
             } else {
                 let _ = std::fs::remove_file(&draft.path);
                 self.restore_composer_after_failed_send(target, window, cx);
@@ -260,7 +318,7 @@ impl QuillApp {
                 )));
             }
         } else if self.demo_session.is_some() {
-            if target.is_open(self.open_chat_id()) {
+            if target.is_open(self.send_slot().as_ref()) {
                 self.apply_demo_voice(&draft, &target.caption, target.reply.as_ref());
                 self.set_note(StatusNote::silent(tr(
                     keys::Q_MISC_DEMO_VOICE_NOTE_APPLIED_LOCALLY,
@@ -278,6 +336,7 @@ impl QuillApp {
             )));
         }
         cx.notify();
+        sent_as
     }
 
     /// Send the finished recording, whichever mode is active, from the
@@ -308,6 +367,7 @@ impl QuillApp {
         let Some(capture) = self.recording.take_video() else {
             return;
         };
+        let target = self.reserve_draft_clear_for(target);
         self.consume_composer_for_send(&target, false, window, cx);
         self.sync_voice_action();
         cx.notify();
@@ -340,13 +400,26 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let request = self.send_video_note_draft(result, target, window, cx);
+        self.settle_claim(target, request);
+    }
+
+    /// The request the round video went out as, `None` when it did not go.
+    fn send_video_note_draft(
+        &mut self,
+        result: Result<VideoNoteDraft, String>,
+        target: &SendTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<RequestId> {
+        let mut sent_as = None;
         let draft = match result {
             Ok(draft) => draft,
             Err(err) => {
                 self.restore_composer_after_failed_send(target, window, cx);
                 self.set_note(StatusNote::error(err));
                 cx.notify();
-                return;
+                return None;
             }
         };
         if let Some(live) = self.live.as_mut() {
@@ -358,7 +431,7 @@ impl QuillApp {
             );
             if let Ok(request) = sent {
                 self.set_note(StatusNote::silent(tr(keys::Q_MISC_SENDING_VIDEO_NOTE)));
-                self.expect_draft_clear(DraftClear::whole_composer(target.chat_id), request);
+                sent_as = Some(request);
             } else {
                 let _ = std::fs::remove_file(&draft.path);
                 self.restore_composer_after_failed_send(target, window, cx);
@@ -367,7 +440,7 @@ impl QuillApp {
                 )));
             }
         } else if self.demo_session.is_some() {
-            if !target.is_open(self.open_chat_id()) {
+            if !target.is_open(self.send_slot().as_ref()) {
                 let _ = std::fs::remove_file(&draft.path);
                 self.set_note(StatusNote::silent(tr(
                     keys::Q_NOTES_RECORDING_NOT_SENT_CHAT_CHANGED,
@@ -392,6 +465,7 @@ impl QuillApp {
             )));
         }
         cx.notify();
+        sent_as
     }
 
     /// Start a round video capture for `purpose`. Finding the encoder and
@@ -442,7 +516,7 @@ impl QuillApp {
     ) {
         let wanted = self.recording.finish_start(start);
         match result {
-            Ok(capture) if wanted && !self.recording_active() => {
+            Ok(capture) if wanted => {
                 self.hold_capture(CaptureMedia::Video(capture), purpose);
                 self.spawn_voice_tick(cx);
                 let note = match purpose {
@@ -535,8 +609,19 @@ mod start_tests;
 mod tests {
     use super::{Restore, SendTarget};
     use crate::ui::account_job::StartedOn;
-    use quill::composer::ComposerReplyTo;
-    use quill::ids::{ChatId, MessageId};
+    use crate::ui::composer_sends::SendSlot;
+    use quill::composer::{ComposerReplyTo, DraftKey, DraftTopic};
+    use quill::ids::{AccountKey, ChatId, MessageId};
+
+    fn slot_in(chat: i64) -> SendSlot {
+        SendSlot {
+            account: AccountKey::primary(),
+            draft: DraftKey {
+                chat_id: chat,
+                topic: DraftTopic::Chat,
+            },
+        }
+    }
 
     fn on_screen() -> StartedOn {
         StartedOn::new(Default::default())
@@ -548,19 +633,37 @@ mod tests {
 
     #[test]
     fn the_target_keeps_the_chat_it_was_fixed_for() {
-        let target = SendTarget::new(on_screen(), ChatId(1), None, "  hi ");
-        assert!(target.is_open(Some(ChatId(1))));
+        let target = SendTarget::new(on_screen(), ChatId(1), slot_in(1), None, "  hi ");
+        assert!(target.is_open(Some(&slot_in(1))));
         // The user opened another chat while the file was finished.
-        assert!(!target.is_open(Some(ChatId(2))));
+        assert!(!target.is_open(Some(&slot_in(2))));
         assert!(!target.is_open(None));
+        // Or another topic of the same chat.
+        let topic = SendSlot {
+            account: AccountKey::primary(),
+            draft: DraftKey {
+                chat_id: 1,
+                topic: DraftTopic::Forum(5),
+            },
+        };
+        assert!(!target.is_open(Some(&topic)));
         assert_eq!(target.chat_id, ChatId(1));
         assert_eq!(target.caption, "hi");
+        // The draft clear is registered under the slot fixed at the tap.
+        assert_eq!(target.slot, slot_in(1));
     }
 
     #[test]
     fn a_failed_send_puts_back_what_the_user_has_not_replaced() {
-        let target = SendTarget::new(on_screen(), ChatId(1), Some(reply_in(1)), " caption ");
-        let open = Some(ChatId(1));
+        let target = SendTarget::new(
+            on_screen(),
+            ChatId(1),
+            slot_in(1),
+            Some(reply_in(1)),
+            " caption ",
+        );
+        let slot = slot_in(1);
+        let open = Some(&slot);
         // Composer still empty: both come back.
         assert_eq!(
             target.restore_plan(open, "", None),
@@ -587,9 +690,15 @@ mod tests {
 
     #[test]
     fn a_failed_send_restores_nothing_into_another_chat() {
-        let target = SendTarget::new(on_screen(), ChatId(1), Some(reply_in(1)), "caption");
+        let target = SendTarget::new(
+            on_screen(),
+            ChatId(1),
+            slot_in(1),
+            Some(reply_in(1)),
+            "caption",
+        );
         assert_eq!(
-            target.restore_plan(Some(ChatId(2)), "", None),
+            target.restore_plan(Some(&slot_in(2)), "", None),
             Restore::default()
         );
         assert_eq!(target.restore_plan(None, "", None), Restore::default());
@@ -597,9 +706,9 @@ mod tests {
 
     #[test]
     fn a_video_without_caption_restores_only_the_reply() {
-        let target = SendTarget::new(on_screen(), ChatId(1), Some(reply_in(1)), "");
+        let target = SendTarget::new(on_screen(), ChatId(1), slot_in(1), Some(reply_in(1)), "");
         assert_eq!(
-            target.restore_plan(Some(ChatId(1)), "", None),
+            target.restore_plan(Some(&slot_in(1)), "", None),
             Restore {
                 caption: false,
                 reply: true
@@ -609,9 +718,9 @@ mod tests {
 
     #[test]
     fn the_reply_belongs_to_the_target_chat_only() {
-        let target = SendTarget::new(on_screen(), ChatId(1), Some(reply_in(1)), "");
+        let target = SendTarget::new(on_screen(), ChatId(1), slot_in(1), Some(reply_in(1)), "");
         assert_eq!(target.reply_to().map(|r| r.message_id), Some(MessageId(40)));
-        let elsewhere = SendTarget::new(on_screen(), ChatId(2), Some(reply_in(1)), "");
+        let elsewhere = SendTarget::new(on_screen(), ChatId(2), slot_in(2), Some(reply_in(1)), "");
         assert!(elsewhere.reply_to().is_none());
     }
 }

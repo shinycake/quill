@@ -61,7 +61,9 @@ fn hub_state(
 }
 
 #[gpui_kit::test]
-fn the_bot_from_the_app_config_gets_the_ref_and_the_dialog_closes(cx: &mut TestAppContext) {
+fn the_bot_from_the_app_config_closes_the_dialog_and_queues_no_start_without_a_driver(
+    cx: &mut TestAppContext,
+) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     open_premium(
@@ -78,10 +80,8 @@ fn the_bot_from_the_app_config_gets_the_ref_and_the_dialog_closes(cx: &mut TestA
         app.start_premium_payment(window, cx);
     });
     vcx.run_until_parked();
-    assert_eq!(
-        hub_state(&app, vcx),
-        (false, Some(("premiumbot".into(), "double_limits".into())))
-    );
+    // No driver in a demo: nothing was asked, so no `/start` is queued.
+    assert_eq!(hub_state(&app, vcx), (false, None));
 }
 
 #[gpui_kit::test]
@@ -128,8 +128,17 @@ fn the_queued_start_does_not_outlive_the_screen(cx: &mut TestAppContext) {
             invoice_slug: String::new(),
         },
     );
-    app.update_in(vcx, |app, window, cx| app.start_premium_payment(window, cx));
-    vcx.run_until_parked();
+    // A demo sends no resolve, so the start a live resolve would queue is
+    // set here, tied to a request.
+    app.update_in(vcx, |app, _, _| {
+        if let Some(hub) = app.hub_mut() {
+            hub.auto_start = Some(quill::premium_hub::PremiumAutoStart {
+                username: "premiumbot".into(),
+                start_ref: "double_limits".into(),
+                request: quill::ids::RequestId(1),
+            });
+        }
+    });
     assert!(hub_state(&app, vcx).1.is_some());
     app.update_in(vcx, |app, window, cx| {
         crate::ui::payments_state::PaymentUi::farewell(app, window, cx)

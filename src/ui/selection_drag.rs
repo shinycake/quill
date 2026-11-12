@@ -77,21 +77,51 @@ pub(crate) struct DragSelect {
     /// The row pressed. Whether it is still being sent (not selectable) is
     /// read when the button is released, not when it went down.
     press: MessageId,
-    origin: Point<Pixels>,
-    /// Selection mode: a release without a drag toggles the press row
-    /// (`needItemSelectionToggle`). Outside it a click does nothing.
-    click_toggles: bool,
-    /// The press landed on a selected row: moving picks the selection up
-    /// for a chat row instead of selecting a range (`uponSelected`).
-    forward: bool,
-    /// Set once the pointer moved onto other rows.
-    range: Option<DragRange>,
+    mode: Press,
+}
+
+/// What the press can become.
+#[derive(Debug, Clone)]
+enum Press {
+    /// The press landed on a selected row in selection mode: moving picks
+    /// the selection up for a chat row instead of selecting a range
+    /// (`uponSelected`). A release without a lift is a click that toggles.
+    PickUp { origin: Point<Pixels> },
+    /// A press that may select a range.
+    Range {
+        origin: Point<Pixels>,
+        /// Selection mode: a release without a drag toggles the press row
+        /// (`needItemSelectionToggle`). Outside it a click does nothing.
+        click_toggles: bool,
+        drag: RangePress,
+    },
+}
+
+/// A range press before and after the pointer moved onto other rows.
+#[derive(Debug, Clone, Copy)]
+enum RangePress {
+    Pressed,
+    Dragging(DragRange),
 }
 
 impl DragSelect {
     /// The rows a drag covers right now, for the row preview.
     pub(crate) fn range(&self) -> Option<DragRange> {
-        self.range
+        match self.mode {
+            Press::Range {
+                drag: RangePress::Dragging(range),
+                ..
+            } => Some(range),
+            _ => None,
+        }
+    }
+
+    /// Whether a release without a drag toggles the pressed row.
+    fn click_toggles(&self) -> bool {
+        match self.mode {
+            Press::PickUp { .. } => true,
+            Press::Range { click_toggles, .. } => click_toggles,
+        }
     }
 }
 
@@ -138,13 +168,20 @@ impl QuillApp {
                 .forward
                 .draft()
                 .is_some_and(|draft| draft.from_chat_id == chat && draft.contains(message_id));
+        let origin = event.position;
+        let mode = if forward {
+            Press::PickUp { origin }
+        } else {
+            Press::Range {
+                origin,
+                click_toggles,
+                drag: RangePress::Pressed,
+            }
+        };
         let drag = DragSelect {
             chat,
             press: message_id,
-            origin: event.position,
-            click_toggles,
-            forward,
-            range: None,
+            mode,
         };
         let pump = self.selection_drag_loop(window, cx);
         self.message_ui.selection_drag = SelectionDrag::Active { drag, _pump: pump };
@@ -167,12 +204,19 @@ impl QuillApp {
             self.chat_ui.swipe_reply.clear();
             return None;
         }
-        if drag.forward {
+        let Press::Range {
+            origin,
+            click_toggles,
+            drag: started,
+        } = drag.mode
+        else {
             return None;
-        }
-        let (chat, press, origin, click_toggles) =
-            (drag.chat, drag.press, drag.origin, drag.click_toggles);
-        let mut range = drag.range;
+        };
+        let (chat, press) = (drag.chat, drag.press);
+        let mut range = match started {
+            RangePress::Pressed => None,
+            RangePress::Dragging(range) => Some(range),
+        };
         if range.is_none() {
             if !click_toggles && TextSelection::has_selection(window, cx) {
                 // The press landed on text: that drag selects text.
@@ -229,8 +273,10 @@ impl QuillApp {
             }
             Some(_) => {}
         }
-        if let Some(drag) = self.message_ui.selection_drag.get_mut() {
-            drag.range = range;
+        if let (Some(drag), Some(range)) = (self.message_ui.selection_drag.get_mut(), range)
+            && let Press::Range { drag: started, .. } = &mut drag.mode
+        {
+            *started = RangePress::Dragging(range);
         }
         (beyond != 0).then(|| autoscroll_step(beyond) as f32)
     }
@@ -257,9 +303,9 @@ impl QuillApp {
         let Some(drag) = self.message_ui.selection_drag.take() else {
             return;
         };
-        if drag.forward {
+        if let Press::PickUp { origin } = drag.mode {
             let moved = moved_enough(
-                (f32::from(drag.origin.x), f32::from(drag.origin.y)),
+                (f32::from(origin.x), f32::from(origin.y)),
                 (f32::from(pointer.x), f32::from(pointer.y)),
             );
             if moved {
@@ -271,7 +317,7 @@ impl QuillApp {
             // the lifted picture goes back.
             cx.stop_active_drag(window);
         }
-        match drag.range {
+        match drag.range() {
             Some(range) => {
                 let ids = self.loaded_selectable_ids(drag.chat);
                 let selected: Vec<MessageId> = self
@@ -286,7 +332,7 @@ impl QuillApp {
                 self.set_selection_anchor(range.to);
                 self.chat_ui.focus = A11yFocus::Row(range.to);
             }
-            None if drag.click_toggles => {
+            None if drag.click_toggles() => {
                 let pending = self.message_still_sending(drag.chat, drag.press);
                 self.toggle_forward_select(drag.chat, drag.press, pending, cx);
                 self.set_selection_anchor(drag.press);
@@ -389,10 +435,9 @@ impl QuillApp {
 
     /// Whether the message is not on the server yet (or is gone), as it
     /// stands now.
-    fn message_still_sending(&self, chat: ChatId, id: MessageId) -> bool {
-        self.session()
-            .and_then(|session| session.histories.get(&chat.0))
-            .and_then(|history| history.messages.get(&id.0))
+    pub(super) fn message_still_sending(&self, chat: ChatId, id: MessageId) -> bool {
+        self.shown_history(chat)
+            .and_then(|messages| messages.get(&id.0))
             .is_none_or(|message| message.pending())
     }
 

@@ -129,3 +129,42 @@ fn cancel_closes_without_saving(cx: &mut TestAppContext) {
     frames(vcx);
     assert!(app.read_with(vcx, |app, _| app.dialogs.edit_profile_dialog.is_none()));
 }
+
+/// Sweep r4-10 round 4: opening the box again while an operation of the
+/// open one is out forgets that wait and starts the username check over.
+#[gpui_kit::test]
+fn reopening_the_box_forgets_its_wait_and_its_username_check(cx: &mut TestAppContext) {
+    use crate::ui::dialogs::edit_profile::SectionOp;
+    use quill::ids::RequestId;
+    use quill::state::Answer;
+    let (app, _shell, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    let id = RequestId(51);
+    app.update(vcx, |app, _| {
+        if let Some(session) = app.session_mut() {
+            session.acks.expect(id);
+            session
+                .users_state
+                .username_check
+                .begin(RequestId(52), "nick");
+        }
+        if let Some(dialog) = app.dialogs.edit_profile_dialog.as_mut() {
+            dialog.op = SectionOp::Sending(id);
+        }
+    });
+    vcx.update(|window, cx| app.update(cx, |app, cx| app.open_edit_profile_dialog(window, cx)));
+    app.update(vcx, |app, _| {
+        let Some(session) = app.session_mut() else {
+            return;
+        };
+        assert_eq!(session.users_state.username_check.pending(), None);
+        session.acks.settle(id, Answer::Done);
+        assert!(session.acks.take(id).is_none(), "the old wait is forgotten");
+    });
+    assert!(app.read_with(vcx, |app, _| {
+        app.dialogs
+            .edit_profile_dialog
+            .as_ref()
+            .is_some_and(|dialog| matches!(dialog.op, SectionOp::Idle))
+    }));
+}

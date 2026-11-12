@@ -22,7 +22,12 @@ impl QuillApp {
         slide: f32,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let count = self.frame.motion.selection.borrow().last_count;
+        let count = self
+            .frame
+            .motion
+            .selection
+            .try_borrow()
+            .map_or(0, |fx| fx.last_count);
         div()
             .id("selection-bar")
             .absolute()

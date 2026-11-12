@@ -210,3 +210,20 @@ fn closing_the_editor_stops_the_encode_it_waits_for(cx: &mut TestAppContext) {
         app.update(vcx, |app, cx| app.close_video_editor(cx));
     }
 }
+
+#[test]
+fn a_pick_lands_only_while_the_sources_still_wait_for_it() {
+    use crate::ui::profile_photo_sources::PhotoSources;
+    let mut sources = PhotoSources::default();
+    // Nothing was picked: a stray answer lands on nothing.
+    assert!(!sources.end_pick());
+    sources.begin_pick(gpui_kit::Task::ready(()));
+    assert!(!sources.is_open(), "a pick in flight shows no panel");
+    assert!(sources.end_pick());
+    // Taken once: the same answer cannot land twice.
+    assert!(!sources.end_pick());
+    // The box closing, or another source opening, drops the pick.
+    sources.begin_pick(gpui_kit::Task::ready(()));
+    sources.close();
+    assert!(!sources.end_pick());
+}

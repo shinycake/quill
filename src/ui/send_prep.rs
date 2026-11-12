@@ -558,6 +558,7 @@ mod tests {
 
     fn photo(path: &str) -> ComposerAttachment {
         ComposerAttachment {
+            id: Default::default(),
             path: PathBuf::from(path),
             kind: AttachmentKind::Photo,
             file_name: path.into(),

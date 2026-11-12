@@ -700,6 +700,7 @@ fn photo_in_tray(app: &Entity<QuillApp>, cx: &mut VisualTestContext) {
     app.update(cx, |app, _| {
         app.update_pending_attachments(|tray| {
             tray.push(ComposerAttachment {
+                id: Default::default(),
                 path: std::env::temp_dir().join("sweep-tray.jpg"),
                 kind: AttachmentKind::Photo,
                 file_name: "sweep-tray.jpg".into(),

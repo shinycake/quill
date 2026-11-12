@@ -22,7 +22,7 @@ use gpui_kit::*;
 use quill::gift_manage::ExportError;
 use quill::lang::{keys, tr};
 use quill::premium_hub::ton::{GramWithdraw, GramsEvent, WithdrawOutcome};
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 
 crate::ui::shell::register_dialogs! {
@@ -31,7 +31,7 @@ crate::ui::shell::register_dialogs! {
         3804,
         |app| {
             app.session().is_some_and(|s| {
-                s.payments.hub.grams.open
+                s.payments.hub.grams.view.is_open()
                     && s.payments
                         .hub
                         .grams
@@ -145,7 +145,7 @@ impl QuillApp {
 
     fn forgot_grams_withdraw_password(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.cancel_grams_withdraw(window, cx);
-        self.recover_cloud_password(cx);
+        self.recover_cloud_password(window, cx);
     }
 
     fn set_password_for_grams_withdraw(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -163,7 +163,7 @@ impl QuillApp {
     ) {
         let (outcome, showing, ready) = match self.grams_mut() {
             Some(grams) => {
-                let showing = grams.open
+                let showing = grams.view.is_open()
                     && grams
                         .withdraw
                         .as_ref()
@@ -245,15 +245,12 @@ impl QuillApp {
                     .render(cx),
                 ),
             };
-            let body = Rc::new(RefCell::new(Some(body)));
+            let body = Rc::new(Cell::new(Some(body)));
             dialog
                 .title(crate::ui::shell::dialog_title(title))
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     },
                 ))

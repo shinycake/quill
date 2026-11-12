@@ -283,6 +283,71 @@ fn choosing_the_open_chat_again_keeps_the_recording(cx: &mut TestAppContext) {
     });
 }
 
+/// Sweep r4-10: a start and a recording are one stage, so a press cannot
+/// begin a start over a recording that runs, and cancelling a start leaves
+/// the recording alone.
+#[gpui_kit::test]
+fn a_start_cannot_replace_or_cancel_a_running_recording(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_chat(cx);
+    let _opens = fake_microphone(&app, &mut vcx);
+    start(&app, CaptureFor::Message, &mut vcx);
+    vcx.run_until_parked();
+    app.update(&mut vcx, |app, _| {
+        assert!(app.recording_active());
+        let ask = app.recording.next_start_id();
+        app.recording.begin_asking(ask, gpui_kit::Task::ready(()));
+        assert!(!app.recording.starting(), "no start behind a recording");
+        app.recording.cancel_start();
+        assert!(app.recording_active(), "cancelling a start keeps it");
+    });
+}
+
+/// Sweep r4-10: a camera prompt during a recording would show the system
+/// dialog with nobody waiting for its answer, so none is shown.
+#[gpui_kit::test]
+fn no_device_prompt_is_shown_while_a_recording_runs(cx: &mut TestAppContext) {
+    use crate::ui::capture_access::Access;
+    let (app, mut vcx) = open_chat(cx);
+    let _opens = fake_microphone(&app, &mut vcx);
+    start(&app, CaptureFor::Message, &mut vcx);
+    vcx.run_until_parked();
+    let prompts = Arc::new(AtomicUsize::new(0));
+    let counted = prompts.clone();
+    app.update(&mut vcx, |app, cx| {
+        app.recording.device_os.access = Arc::new(|_| Access::Undetermined);
+        app.recording.device_os.request = Arc::new(move |_, _| {
+            counted.fetch_add(1, Ordering::SeqCst);
+        });
+        assert!(app.recording_active());
+        app.with_camera_access(|_, _| {}, cx);
+        assert!(app.recording_active(), "the recording is untouched");
+        assert!(!app.recording.asking());
+    });
+    assert_eq!(
+        prompts.load(Ordering::SeqCst),
+        0,
+        "no prompt with nobody waiting"
+    );
+}
+
+/// An idle press that finds the device undecided does show the prompt.
+#[gpui_kit::test]
+fn an_undecided_device_prompts_when_nothing_records(cx: &mut TestAppContext) {
+    use crate::ui::capture_access::Access;
+    let (app, mut vcx) = open_chat(cx);
+    let prompts = Arc::new(AtomicUsize::new(0));
+    let counted = prompts.clone();
+    app.update(&mut vcx, |app, cx| {
+        app.recording.device_os.access = Arc::new(|_| Access::Undetermined);
+        app.recording.device_os.request = Arc::new(move |_, _| {
+            counted.fetch_add(1, Ordering::SeqCst);
+        });
+        app.with_camera_access(|_, _| {}, cx);
+        assert!(app.recording.asking());
+    });
+    assert_eq!(prompts.load(Ordering::SeqCst), 1);
+}
+
 /// Sweep 08-105: a chat change that goes around `enter_chat_ui` (the chat
 /// replaced by the reducer, another device) ends what the old chat owed at
 /// the next frame like any other: a recording cannot go to the new chat.

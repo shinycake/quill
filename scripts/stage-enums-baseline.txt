@@ -12,8 +12,6 @@ bare:CallWindow::Opening 2
 bare:CandidateStatus::Loading 1
 bare:CarrierStage::Closing 1
 bare:CarrierStage::Starting 1
-bare:CeremonySheet::Connecting 1
-bare:CeremonySheet::Probing 1
 bare:ClipState::Opening 1
 bare:CloseProgress::Pending 1
 bare:CodeLanguageStage::Opening 1
@@ -34,7 +32,6 @@ bare:LinkStatus::Pending 1
 bare:ListStatus::Loading 1
 bare:LookStage::Rendering 1
 bare:Lookup::Pending 1
-bare:Lookup::Waiting 1
 bare:MediaFile::Downloading 1
 bare:MenuSend::Sent 1
 bare:MuteState::Connecting 1

@@ -57,6 +57,11 @@ impl<T> Reads<T> {
         self.0.insert(path, Read::Reading { job, _tasks: tasks });
     }
 
+    /// Job `job` is the one reading `path` now.
+    pub(super) fn is_current(&self, path: &Path, job: u64) -> bool {
+        matches!(self.0.get(path), Some(Read::Reading { job: current, .. }) if *current == job)
+    }
+
     /// Job `job` found `found` for `path`: whether it was the current job
     /// (a stale one, from a removed and re-added file, changes nothing).
     pub(super) fn finish(&mut self, path: &Path, job: u64, found: T) -> bool {
@@ -112,7 +117,7 @@ pub(crate) struct TrayReads {
     pub(super) thumbnail_jobs: u64,
     /// Photos and videos being read as they join a tray, or read
     /// (`send_box_media_check.rs`), with the job that reads each.
-    pub(super) media: Reads<super::send_box_media_check::MediaCheck>,
+    pub(super) media: Reads<super::send_box_media_check::MediaFound>,
     pub(super) media_check_jobs: u64,
     /// The first frame and length of tray videos (`send_card/video_preview.rs`).
     pub(super) previews: Reads<super::send_card::VideoPreview>,

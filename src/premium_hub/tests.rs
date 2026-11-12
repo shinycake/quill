@@ -356,3 +356,41 @@ fn opening_gifts_of_another_owner_replaces_the_list_but_keeps_a_change_in_flight
     closed.view.select(Some("x".into()));
     assert!(closed.view.selected().is_none());
 }
+
+/// Sweep r4-10: the Premium `/start` goes only for the flow that resolved
+/// the bot; a second link to the same bot is another flow.
+#[test]
+fn the_premium_start_belongs_to_the_flow_that_resolved_the_bot() {
+    let auto = PremiumAutoStart {
+        username: "premiumbot".into(),
+        start_ref: "x".into(),
+        request: crate::ids::RequestId(5),
+    };
+    assert!(auto.is_for("PremiumBot", Some(crate::ids::RequestId(5))));
+    assert!(!auto.is_for("PremiumBot", Some(crate::ids::RequestId(6))));
+    assert!(!auto.is_for("PremiumBot", None));
+    assert!(!auto.is_for("other", Some(crate::ids::RequestId(5))));
+}
+
+/// Sweep r4-10 round 4: the queue the deep-link open takes the `/start`
+/// from. A chat opened by another flow takes nothing and ends the queue.
+#[test]
+fn another_flows_chat_takes_no_start_and_clears_it() {
+    use crate::ids::RequestId;
+    let queued = || PremiumHub {
+        auto_start: Some(PremiumAutoStart {
+            username: "premiumbot".into(),
+            start_ref: "x".into(),
+            request: RequestId(1),
+        }),
+        ..PremiumHub::default()
+    };
+    let mut hub = queued();
+    assert_eq!(hub.take_auto_start("PremiumBot", Some(RequestId(2))), None);
+    assert_eq!(hub.auto_start, None, "the flow is over");
+    assert_eq!(hub.take_auto_start("PremiumBot", Some(RequestId(1))), None);
+    let mut hub = queued();
+    let taken = hub.take_auto_start("PremiumBot", Some(RequestId(1)));
+    assert_eq!(taken.map(|auto| auto.start_ref), Some("x".to_string()));
+    assert_eq!(hub.auto_start, None, "taken once");
+}

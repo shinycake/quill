@@ -890,6 +890,7 @@ fn a_link_resolved_after_the_step_opens_a_granted_chat_only(cx: &mut TestAppCont
                     chat_id: ChatId(chat),
                     action: start(param),
                     from_agent,
+                    flow: None,
                 },
                 None,
             ));
@@ -954,6 +955,7 @@ fn a_share_the_user_picks_replaces_an_agents_waiting_open(cx: &mut TestAppContex
                     story_id: None,
                 },
                 from_agent: true,
+                flow: None,
             },
             None,
         ));

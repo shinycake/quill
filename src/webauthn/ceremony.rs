@@ -107,6 +107,9 @@ pub struct Ceremony {
     commands: Sender<CeremonyCommand>,
     cancel: Arc<AtomicBool>,
     on_cancel: Option<OnCancel>,
+    /// The worker, so a test can wait for it to finish (its poke included).
+    #[cfg(test)]
+    pub(super) worker: Option<std::thread::JoinHandle<Option<()>>>,
 }
 
 /// The ceremony runs and its events are read, or it has said its last
@@ -176,14 +179,19 @@ impl Ceremony {
             commands: command_rx,
             cancel: cancel.clone(),
         };
-        let spawned = crate::thread_guard::spawn_guarded("quill-passkey", move || {
-            let last = work(&link);
-            let _ = link.events.send(last);
+        let worker = crate::thread_guard::spawn_guarded("quill-passkey", move || {
+            // A worker that panics still tells the dialog (it reads events
+            // when `wake::PASSKEY` pokes, never on a timer).
+            let last = crate::thread_guard::run_guarded(|| work(&link)).unwrap_or_else(|| {
+                CeremonyEvent::Failed(CeremonyError::Other("the worker stopped".into()))
+            });
+            link.emit(last);
         });
-        if spawned.is_err() {
+        if worker.is_err() {
             let _ = event_tx.send(CeremonyEvent::Failed(CeremonyError::Other(
                 "could not start the worker".into(),
             )));
+            crate::wake::PASSKEY.poke();
         }
         Self {
             state: CeremonyState::Running(events),
@@ -191,6 +199,8 @@ impl Ceremony {
             commands,
             cancel,
             on_cancel,
+            #[cfg(test)]
+            worker: worker.ok(),
         }
     }
 
@@ -331,6 +341,13 @@ fn map_error<T>(error: CtapError) -> Attempt<T> {
 }
 
 impl Link {
+    /// Tell the dialog something happened: it reads the event when
+    /// `wake::PASSKEY` pokes, so it never has to look on a timer.
+    pub(super) fn emit(&self, event: CeremonyEvent) {
+        let _ = self.events.send(event);
+        crate::wake::PASSKEY.poke();
+    }
+
     pub(super) fn cancelled(&self) -> bool {
         self.cancel.load(Ordering::SeqCst)
     }
@@ -372,7 +389,7 @@ impl Link {
         // A PIN sent while none was asked answers nothing: only one typed
         // after this ask's event counts.
         while self.pins.try_recv().is_ok() {}
-        let _ = self.events.send(CeremonyEvent::NeedPin { invalid });
+        self.emit(CeremonyEvent::NeedPin { invalid });
         loop {
             if self.cancelled() {
                 return Err(CeremonyError::Cancelled);

@@ -29,7 +29,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         let subject = if is_change { Some(build("")) } else { subject };
         // The write's own record says whether it is on its way: its request
         // is looked up by the id the record holds, and one that was answered
-        // is spent.
+        // is spent. The caller gets that request back, so its screen waits
+        // for the one answer instead of entering no stage at all.
         let key = subject
             .clone()
             .map(|subject| (chat_id.map(|c| c.0), subject));
@@ -37,8 +38,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             let requests = &self.session.requests;
             let writes = &mut self.session.settings.quick_replies.writes;
             writes.retain(|_, request| requests.get(*request).is_some());
-            if writes.contains_key(key) {
-                return Ok(None);
+            if let Some(flying) = writes.get(key) {
+                return Ok(Some(*flying));
             }
         }
         let extra = match &subject {
@@ -110,7 +111,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Add a text message; the shortcut `name` is created when new.
-    /// The request, or `None` when the same change is already on its way.
+    /// The request; the same change already on its way answers for this one.
     pub fn add_quick_reply_text(
         &mut self,
         name: &str,
@@ -180,7 +181,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         .map(|_| ())
     }
 
-    /// The request, or `None` when the same delete is already on its way.
+    /// The request; the same delete already on its way answers for this one.
     pub fn delete_quick_reply_shortcut(
         &mut self,
         shortcut_id: i32,

@@ -130,6 +130,7 @@ mod session_forum;
 mod session_main_profile_tab;
 mod session_topic_load;
 mod session_video_chat_caps;
+mod shown_history;
 mod sponsored_state;
 mod sponsored_types;
 mod submit;

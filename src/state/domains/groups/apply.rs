@@ -911,9 +911,11 @@ impl Session {
                     && slot == request
                 {
                     self.chats_state.enter_deep_link_stage(match result {
-                        ChatJoinResult::Success { chat_id } => {
-                            DeepLinkState::ChatReady { chat_id, action }
-                        }
+                        ChatJoinResult::Success { chat_id } => DeepLinkState::ChatReady {
+                            chat_id,
+                            action,
+                            request,
+                        },
                         ChatJoinResult::RequestSent => DeepLinkState::ShowText(
                             "Join request sent — the admins need to approve it.".into(),
                         ),

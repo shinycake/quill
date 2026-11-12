@@ -208,7 +208,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&crate::telegram::requests::get_message_properties(
                 extra, chat_id, message_id,
             )) {
-            Ok(()) => Ok(extra),
+            Ok(()) => {
+                // Only this ask's answer or error lands on the message.
+                self.session
+                    .messages
+                    .menu_actions
+                    .asked(chat_id, message_id, extra);
+                Ok(extra)
+            }
             Err(err) => {
                 self.session.requests.take(extra);
                 Err(err)

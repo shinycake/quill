@@ -311,7 +311,11 @@ impl QuillApp {
             .and_then(|s| s.auth_state.password_state.get())
             .is_some_and(|state| state.has_recovery_email_address);
         self.open_twofa(cx);
-        self.goto_twofa_view(crate::ui::dialogs::callback_password::TwofaView::Recover);
+        self.goto_twofa_view(
+            crate::ui::dialogs::callback_password::TwofaView::Recover,
+            window,
+            cx,
+        );
         if has_email
             && let Some(live) = self.live.as_mut()
             && live.driver.request_password_recovery().is_err()

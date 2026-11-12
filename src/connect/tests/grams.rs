@@ -86,7 +86,7 @@ fn the_probe_fills_the_balance_once_and_the_screen_pages() {
         ),
     );
     let grams = &driver.session.payments.hub.grams;
-    assert!(grams.open && grams.load == crate::gift_market::PageLoad::Ready);
+    assert!(grams.view.is_open() && grams.load == crate::gift_market::PageLoad::Ready);
     assert_eq!(grams.rows.len(), 11);
     assert_eq!(grams.balance_nano, Some(12_750_000_000));
     assert_eq!(
@@ -243,4 +243,54 @@ fn a_failed_probe_is_a_stage_and_is_asked_again_on_the_next_open() {
         "the first try's answer is dropped"
     );
     assert_eq!(grams.balance_nano, None);
+}
+
+/// Sweep r4-10 round 4: Retry after a failed *next* page asks that page
+/// again and keeps the rows; after a failed first page it starts over.
+#[test]
+fn retry_after_a_failed_next_page_keeps_the_rows() {
+    let store = MemorySecretStore::new();
+    let (_dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: String| {
+        driver
+            .ingest(copy_and_parse(&json, &seq, &sink).unwrap())
+            .unwrap();
+    };
+    let refused = json!({"@type": "error", "code": 400, "message": "BAD_REQUEST"});
+
+    driver.open_grams(false).unwrap();
+    let first = sent_request(&recorder, "getTonTransactions");
+    // A first page that fails has no rows: Retry starts the tab over.
+    ingest(&mut driver, answer(&first["@extra"], refused.clone()));
+    assert!(driver.session.payments.hub.grams.load.error().is_some());
+    assert!(driver.retry_grams().unwrap().is_some());
+    let again = sent_request(&recorder, "getTonTransactions");
+    assert_eq!(again["offset"], "");
+    ingest(
+        &mut driver,
+        answer(
+            &again["@extra"],
+            serde_json::from_str::<Value>(FIXTURE).unwrap(),
+        ),
+    );
+    let loaded = driver.session.payments.hub.grams.rows.len();
+    assert_eq!(loaded, 11);
+    assert!(driver.retry_grams().unwrap().is_none(), "nothing failed");
+
+    // The next page fails: Retry asks it again and the rows stay.
+    driver.fetch_more_grams().unwrap();
+    let more = sent_request(&recorder, "getTonTransactions");
+    assert_eq!(more["offset"], "page-2");
+    ingest(&mut driver, answer(&more["@extra"], refused));
+    assert!(driver.session.payments.hub.grams.load.error().is_some());
+    assert!(driver.retry_grams().unwrap().is_some());
+    let retried = sent_request(&recorder, "getTonTransactions");
+    assert_eq!(retried["offset"], "page-2");
+    let grams = &driver.session.payments.hub.grams;
+    assert_eq!(grams.rows.len(), loaded, "the loaded rows are kept");
+    assert!(grams.load.is_loading());
 }

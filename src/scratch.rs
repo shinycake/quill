@@ -58,6 +58,11 @@ impl TempFile {
         Self(Some(path))
     }
 
+    /// Where the file is (empty once claimed).
+    pub fn path(&self) -> &std::path::Path {
+        self.0.as_deref().unwrap_or(std::path::Path::new(""))
+    }
+
     /// The file is someone's to keep or remove now.
     pub fn claim(mut self) -> PathBuf {
         self.0.take().unwrap_or_default()

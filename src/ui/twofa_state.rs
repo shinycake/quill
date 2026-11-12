@@ -201,9 +201,17 @@ impl QuillApp {
         self.twofa_forget_flow();
     }
 
-    /// Switch the 2FA view; a fresh form starts with no local notice line,
-    /// and the status screen with no half-finished step.
-    pub(super) fn goto_twofa_view(&mut self, view: TwofaView) {
+    /// Switch the 2FA view; a fresh form starts with no local notice line
+    /// and empty inputs (text typed in one view never shows in another),
+    /// and the status screen with no half-finished step. Every move
+    /// between views the user makes goes through here.
+    pub(super) fn goto_twofa_view(
+        &mut self,
+        view: TwofaView,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.clear_twofa_inputs(window, cx);
         self.twofa.goto(view);
         if view == TwofaView::Status {
             self.twofa_forget_flow();
@@ -213,7 +221,9 @@ impl QuillApp {
     }
 
     /// A recovery / reset / login-email step finished: the box moves to the
-    /// status screen, which reports the step's notice once.
+    /// status screen, which reports the step's notice once. The poll that
+    /// calls this has no window, so the inputs are emptied by the next
+    /// `goto_twofa_view`, which every form is entered through.
     pub(super) fn twofa_step_done(&mut self) {
         self.twofa.goto(TwofaView::Status);
     }

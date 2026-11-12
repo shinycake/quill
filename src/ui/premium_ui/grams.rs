@@ -31,7 +31,7 @@ use quill::premium_hub::ton::{
 use quill::state::Session;
 use quill::telegram::envelope::MessageSender;
 use quill::text::LinkTarget;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -44,7 +44,7 @@ crate::ui::shell::register_dialogs! {
     /// Settings → My Grams.
     Grams => DialogSpec::new(
         3805,
-        |app| app.session().is_some_and(|s| s.payments.hub.grams.open),
+        |app| app.session().is_some_and(|s| s.payments.hub.grams.view.is_open()),
         QuillApp::build_grams_dialog,
     )
     .close(|app, _, cx| app.close_grams(cx)),
@@ -143,13 +143,13 @@ impl QuillApp {
             // A failed first page shows its error inside the open dialog;
             // the status line covers the case where it could not open.
             if live.driver.open_grams(is_dark).is_err()
-                && !live.driver.session.payments.hub.grams.open
+                && !live.driver.session.payments.hub.grams.view.is_open()
             {
                 self.set_note(StatusNote::error(tr(keys::Q_GRAMS_COULD_NOT_LOAD)));
             }
         } else if let Some(grams) = self.grams_mut() {
             // box-host: GramsWithdraw shows only once a withdrawal is set, which start_grams_withdraw names
-            grams.open = true;
+            grams.open_list();
         }
         // A reopened list asks its first look again, whatever length it had.
         self.payments.grams_asked.reset();
@@ -173,10 +173,22 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Retry of a failed page: the first page starts over, a later page is
+    /// asked again with the loaded rows kept.
+    fn retry_grams(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.retry_grams();
+        }
+        cx.notify();
+    }
+
     /// Show the receipt of the row with `key` (`TonTx::key`), or the list.
     pub(in crate::ui) fn select_grams_tx(&mut self, key: Option<String>, cx: &mut Context<Self>) {
         if let Some(grams) = self.grams_mut() {
-            grams.selected = key;
+            match key {
+                Some(key) => grams.show_receipt(key),
+                None => grams.show_list(),
+            }
         }
         cx.notify();
     }
@@ -247,17 +259,14 @@ impl QuillApp {
                 None => overview(session, grams, &roots, cx),
             };
             let scroll = this.payments.grams_scroll.clone();
-            let body = Rc::new(RefCell::new(Some(
+            let body = Rc::new(Cell::new(Some(
                 watch(body, cx, Self::grams_more).into_any_element(),
             )));
             dialog
                 .content(crate::ui::shell::scrollable_dialog_content_tracked(
                     Some(scroll),
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     },
                 ))
@@ -360,7 +369,16 @@ fn history(
     let muted = cx.theme().muted_foreground;
     let mut col = div().flex().flex_col().gap_1().pt_3();
     if let Some(error) = grams.load.error() {
-        col = col.child(div().text_sm().child(error.to_string()));
+        col = col.child(div().text_sm().child(error.to_string())).child(
+            div().debug_selector(|| "grams-retry".to_string()).child(
+                Button::new("grams-retry")
+                    .label(tr(keys::Q_CHAT_RETRY))
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.retry_grams(cx);
+                    })),
+            ),
+        );
     }
     // tdesktop shows no history section until it has rows.
     if grams.rows.is_empty() && !grams.shows_tabs() {

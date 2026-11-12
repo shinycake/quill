@@ -172,13 +172,9 @@ impl QuillApp {
                     tr(keys::PROXY_ADD)
                 }))
                 .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    let body = Rc::new(std::cell::Cell::new(Some(body.into_any_element())));
                     move |content, _, _| {
-                        content.child(
-                            body.borrow_mut()
-                                .take()
-                                .unwrap_or_else(|| div().into_any_element()),
-                        )
+                        content.child(body.take().unwrap_or_else(|| div().into_any_element()))
                     }
                 }))
                 .footer(footer)
@@ -381,13 +377,9 @@ impl QuillApp {
                     keys::PROXY_BOX_TABLE_TITLE,
                 )))
                 .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    let body = Rc::new(std::cell::Cell::new(Some(body.into_any_element())));
                     move |content, _, _| {
-                        content.child(
-                            body.borrow_mut()
-                                .take()
-                                .unwrap_or_else(|| div().into_any_element()),
-                        )
+                        content.child(body.take().unwrap_or_else(|| div().into_any_element()))
                     }
                 }))
                 .footer(footer)

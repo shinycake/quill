@@ -160,8 +160,10 @@ impl super::on_screen::Farewell for SettingsUi {
         if app.settings.box_open(SettingsBox::Stickers) {
             app.close_stickers_manager(cx);
         }
-        // The proxy-link box (its draft and check) is the session's.
+        // The proxy-link box (its draft and check) is the session's, and
+        // so is the editor's wait for its save: it ends with the account.
         app.close_proxy_link(cx);
+        app.close_proxy_editor(cx);
         // These boxes keep their open flags in the session, which goes to
         // the background with the account.
         let (masks, emoji, archive) = app.session().map_or((false, false, false), |session| {

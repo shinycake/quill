@@ -193,13 +193,18 @@ impl QuillApp {
                 self.screen.links.invite_box.show(request);
                 self.cancel_inline_opening();
             }
-            DeepLinkState::ChatReady { chat_id, action } => {
+            DeepLinkState::ChatReady {
+                chat_id,
+                action,
+                request,
+            } => {
                 self.cancel_inline_opening_unless_chat(chat_id);
                 self.hold_resolved_link(
                     ResolvedStep::Open(PendingOpen {
                         chat_id,
                         action,
                         from_agent,
+                        flow: Some(request),
                     }),
                     from_window,
                     cx,
@@ -370,10 +375,11 @@ impl QuillApp {
             chat_id,
             action,
             from_agent,
+            flow,
         } = open;
         self.agent_step(from_agent, |this| {
             if !from_agent || this.agent_may_open(chat_id) {
-                this.open_deep_link_chat_now(chat_id, &action, window, cx);
+                this.open_deep_link_chat_now(chat_id, &action, flow, window, cx);
             }
         });
     }
@@ -382,6 +388,7 @@ impl QuillApp {
         &mut self,
         chat_id: ChatId,
         action: &DeepLinkAction,
+        flow: Option<RequestId>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -427,7 +434,7 @@ impl QuillApp {
         // A chat in a window of its own opens there, with what the link
         // asks for.
         if self.windows.has_window(chat_id) {
-            let premium = self.take_premium_auto_start(chat_id, action, cx);
+            let premium = self.take_premium_auto_start(chat_id, action, flow, cx);
             let mut routed =
                 super::chat_window::ChatOpen::new(chat_id).with_inline_return(inline_return);
             if let Some(message_id) = jump_to {
@@ -508,7 +515,7 @@ impl QuillApp {
         // pressed it); a link's `start=` only prefills `/start <param>`,
         // the user confirms.
         let started = self.take_inline_start(chat_id, cx)
-            || self.take_premium_auto_start(chat_id, action, cx);
+            || self.take_premium_auto_start(chat_id, action, flow, cx);
         if !started
             && let DeepLinkAction::OpenUsername {
                 start_param: Some(param),

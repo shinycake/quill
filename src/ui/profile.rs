@@ -153,9 +153,10 @@ impl QuillApp {
                 )
             })
             .unwrap_or_default();
-        if let Some(live) = self.live.as_mut() {
-            live.driver.session.users_state.username_check = Default::default();
-        }
+        // A box still open (another entry point opened Profile again) ends
+        // first: its operation's answer is no longer waited for, and the
+        // username check starts over with the new box.
+        self.close_edit_profile_dialog(cx);
         self.dialogs.edit_profile_dialog = Some(EditProfileDialog::new(
             window, cx, &first, &last, &bio, &username,
         ));
@@ -174,8 +175,12 @@ impl QuillApp {
             .edit_profile_dialog
             .take()
             .and_then(|dialog| dialog.op.in_flight());
-        if let (Some(id), Some(live)) = (waiting, self.live.as_mut()) {
-            live.driver.session.acks.forget(id);
+        if let Some(session) = self.session_mut() {
+            if let Some(id) = waiting {
+                session.acks.forget(id);
+            }
+            // The check belongs to the box: it goes with it.
+            session.users_state.username_check = Default::default();
         }
         cx.notify();
     }

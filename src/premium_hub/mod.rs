@@ -760,6 +760,15 @@ pub struct PremiumAutoStart {
     pub request: crate::ids::RequestId,
 }
 
+impl PremiumAutoStart {
+    /// Whether the chat a flow resolved is the one this start was queued
+    /// for: the same bot, reached by the flow that resolved it. Another
+    /// link to the same bot is another flow, and sends nothing.
+    pub fn is_for(&self, domain: &str, flow: Option<crate::ids::RequestId>) -> bool {
+        self.username.eq_ignore_ascii_case(domain) && flow == Some(self.request)
+    }
+}
+
 /// Per-surface state of the hub dialogs. Lives in `Session` so the poll loop
 /// and reducer own every transition (the Subscriptions-dialog pattern).
 #[derive(Debug, Clone, Default)]
@@ -811,6 +820,26 @@ pub struct PremiumHub {
 }
 
 impl PremiumHub {
+    /// A chat of `domain` opened by `flow`: the queued `/start`, when it is
+    /// this flow's. Any other chat opening ends the Premium link's flow, so
+    /// its `/start` is dropped here and cannot wait for a later visit.
+    pub fn take_auto_start(
+        &mut self,
+        domain: &str,
+        flow: Option<crate::ids::RequestId>,
+    ) -> Option<PremiumAutoStart> {
+        if self
+            .auto_start
+            .as_ref()
+            .is_some_and(|auto| auto.is_for(domain, flow))
+        {
+            self.auto_start.take()
+        } else {
+            self.auto_start = None;
+            None
+        }
+    }
+
     pub fn apply_transactions(&mut self, page: StarTxPage, append: bool) {
         self.stars.page = page_stage::PageStage::Ready;
         self.balance = Some(page.balance);

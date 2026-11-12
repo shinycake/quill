@@ -213,3 +213,23 @@ fn the_show_box_settles_on_its_own_request(cx: &mut TestAppContext) {
         assert!(app.profile_cover.show_or_premium.is_none());
     });
 }
+
+/// Sweep r4-10: opening the box again while its change is out keeps the
+/// wait (the answer's toast is not lost); another kind starts fresh.
+#[gpui_kit::test]
+fn reopening_the_show_box_keeps_a_change_in_flight(cx: &mut TestAppContext) {
+    use crate::ui::profile_cover::ShowStage;
+    let (app, _shell, mut vcx) = new_app(cx, "ready-info-cover-last-seen");
+    click(&mut vcx, "profile-cover-when");
+    app.update_in(&mut vcx, |app, _, cx| {
+        let request = quill::ids::RequestId(41);
+        if let Some(open) = app.profile_cover.show_or_premium.as_mut() {
+            open.stage = ShowStage::Saving(request);
+        }
+        let stage = |app: &QuillApp| app.profile_cover.show_or_premium.map(|open| open.stage);
+        app.open_show_or_premium(ShowOrPremium::LastSeen, 7, cx);
+        assert_eq!(stage(app), Some(ShowStage::Saving(request)), "same kind");
+        app.open_show_or_premium(ShowOrPremium::ReadTime, 7, cx);
+        assert_eq!(stage(app), Some(ShowStage::Choosing), "another kind");
+    });
+}

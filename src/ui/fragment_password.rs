@@ -263,13 +263,17 @@ impl QuillApp {
     /// `PasscodeBox::recoverByEmail`): the two-step verification page's
     /// recovery; with a recovery email the code is sent at once. The
     /// caller closes its box first.
-    pub(super) fn recover_cloud_password(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn recover_cloud_password(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let has_email = self
             .session()
             .and_then(|s| s.auth_state.password_state.get())
             .is_some_and(|state| state.has_recovery_email_address);
         self.open_twofa(cx);
-        self.goto_twofa_view(crate::ui::dialogs::callback_password::TwofaView::Recover);
+        self.goto_twofa_view(
+            crate::ui::dialogs::callback_password::TwofaView::Recover,
+            window,
+            cx,
+        );
         if has_email
             && let Some(live) = self.live.as_mut()
             && live.driver.request_password_recovery().is_err()

@@ -130,7 +130,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let grams = &mut self.session.payments.hub.grams;
-        grams.open = true;
+        grams.open_list();
         grams.restart(TxFilter::All);
         let page = match self.fetch_grams_page(false) {
             Ok(page) => page,
@@ -156,6 +156,20 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         self.fetch_grams_page(true).map(Some)
+    }
+
+    /// The Retry of a failed page: a failed first page starts the tab over,
+    /// a failed later page asks that page again and keeps the rows loaded.
+    pub fn retry_grams(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        let grams = &self.session.payments.hub.grams;
+        if grams.load.error().is_none() {
+            return Ok(None);
+        }
+        if grams.rows.is_empty() {
+            let filter = grams.filter;
+            return self.set_grams_filter(filter);
+        }
+        self.fetch_more_grams()
     }
 
     /// Switch the All / Incoming / Outgoing tab and refetch from the top.
@@ -206,7 +220,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Only while the screen is open with an available amount.
     pub fn start_gram_withdrawal(&mut self) -> Result<(), ConnectSendError> {
         let grams = &self.session.payments.hub.grams;
-        if !self.chats_path_active() || !grams.open || grams.withdrawable().is_none() {
+        if !self.chats_path_active() || !grams.view.is_open() || grams.withdrawable().is_none() {
             return Err(ConnectSendError::InvalidRequest);
         }
         if grams.withdraw.is_some() {
@@ -238,7 +252,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<RequestId, ConnectSendError> {
         let grams = &self.session.payments.hub.grams;
         if password.is_empty()
-            || !grams.open
+            || !grams.view.is_open()
             || !grams
                 .withdraw
                 .as_ref()

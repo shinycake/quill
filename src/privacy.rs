@@ -390,6 +390,25 @@ impl crate::state::SettingsState {
         true
     }
 
+    /// A load that could not even be asked (no connection to ask on): the
+    /// key reads as failed, with a Retry, instead of loading for good. A
+    /// load already in flight is left alone.
+    pub fn refuse_privacy_load(&mut self, key: PrivacySettingKey) {
+        if self
+            .privacy
+            .get(&key)
+            .is_some_and(|state| state.request().is_some())
+        {
+            return;
+        }
+        let stale = self
+            .privacy
+            .get(&key)
+            .and_then(PrivacyKeyState::detail)
+            .cloned();
+        self.privacy.insert(key, PrivacyKeyState::Failed { stale });
+    }
+
     /// The load under `request` was refused or never left: only the key's
     /// live load fails, and the rule held before it stays.
     pub fn fail_privacy_load(&mut self, key: PrivacySettingKey, request: Option<RequestId>) {
@@ -684,6 +703,29 @@ mod tests {
         let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
         let owned = copy_and_parse(json, seq, &dyn_sink).unwrap();
         session.apply(owned);
+    }
+
+    /// Sweep r4-10: a rule whose ask could not go out reads as failed (with
+    /// a Retry), not as loading for the whole visit; a load in flight and
+    /// the rule held before are kept.
+    #[test]
+    fn a_load_that_could_not_be_asked_reads_as_failed() {
+        let (mut session, _sink) = session();
+        let key = PrivacySettingKey::AllowCalls;
+        session.settings.refuse_privacy_load(key);
+        assert!(matches!(
+            session.settings.privacy.get(&key),
+            Some(PrivacyKeyState::Failed { stale: None })
+        ));
+        assert!(session.settings.begin_privacy_load(key, RequestId(3)));
+        session.settings.refuse_privacy_load(key);
+        assert!(
+            matches!(
+                session.settings.privacy.get(&key),
+                Some(PrivacyKeyState::Loading { .. })
+            ),
+            "a load in flight is not failed by a later refusal"
+        );
     }
 
     #[test]
