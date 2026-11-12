@@ -91,3 +91,10 @@ src/connect/messages/mod.rs 601 read
 src/connect/messages/rich_html.rs 89 read
 src/connect/messages/send_place.rs 69 read
 src/connect/mod.rs 136 read
+src/connect/moderation/admins.rs 456 read
+src/connect/moderation/invites.rs 297 read
+src/connect/moderation/members.rs 487 read
+src/connect/moderation/members_more.rs 82 read
+src/connect/moderation/mod.rs 365 read
+src/connect/moderation/ownership_open.rs 63 read
+src/connect/moderation/permissions.rs 87 read
