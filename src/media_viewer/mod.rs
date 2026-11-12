@@ -234,16 +234,48 @@ impl MediaViewerItem {
     }
 }
 
+/// Where an open viewer's list comes from, with what only that source
+/// has, and `Closed` for no viewer at all (the one value for "open or
+/// not": the viewer is open exactly when it has an origin).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum Origin {
+    #[default]
+    Closed,
+    Chat,
+    /// The tab's total count, so the header can say "Photo 120 of 340"
+    /// while only a prefix of the list is loaded.
+    Shared { total: usize },
+    /// The photos not loaded yet count in `total`.
+    Profile { owner: PhotoOwner, total: usize },
+    Poll,
+}
+
+impl Origin {
+    fn source(self) -> ViewerSource {
+        match self {
+            Self::Closed | Self::Chat => ViewerSource::Chat,
+            Self::Shared { .. } => ViewerSource::SharedMedia,
+            Self::Profile { owner, .. } => ViewerSource::Profile(owner),
+            Self::Poll => ViewerSource::Poll,
+        }
+    }
+
+    /// The source's own count (`0` for a source that has none).
+    fn total(self) -> usize {
+        match self {
+            Self::Shared { total } | Self::Profile { total, .. } => total,
+            Self::Closed | Self::Chat | Self::Poll => 0,
+        }
+    }
+}
+
 /// Viewer state: the open chat's media list plus the current position.
-/// Empty items = closed.
+/// Closed while it has no origin ([`Origin::Closed`]).
 #[derive(Debug, Clone, Default)]
 pub struct MediaViewer {
     items: Vec<MediaViewerItem>,
     index: usize,
-    source: ViewerSource,
-    /// Shared Media only: the tab's total count, so the header can say
-    /// "Photo 120 of 340" while only a prefix of the list is loaded.
-    total: usize,
+    origin: Origin,
     /// The item the last step (arrow, wheel, swipe or thumb) left, which
     /// the album strip slides from.
     arrived_from: Option<usize>,
@@ -257,15 +289,21 @@ impl MediaViewer {
     }
 
     pub fn is_open(&self) -> bool {
-        !self.items.is_empty()
+        self.origin != Origin::Closed
     }
 
     /// Open on `index`, clamped into range. An empty list stays closed.
     pub fn open(items: Vec<MediaViewerItem>, index: usize) -> Self {
         let index = index.min(items.len().saturating_sub(1));
+        let origin = if items.is_empty() {
+            Origin::Closed
+        } else {
+            Origin::Chat
+        };
         Self {
             items,
             index,
+            origin,
             ..Self::default()
         }
     }
@@ -274,8 +312,9 @@ impl MediaViewer {
     /// full count (items older than the loaded prefix are not listed yet).
     pub fn open_shared(items: Vec<MediaViewerItem>, index: usize, total: usize) -> Self {
         let mut viewer = Self::open(items, index);
-        viewer.source = ViewerSource::SharedMedia;
-        viewer.total = total;
+        if viewer.is_open() {
+            viewer.origin = Origin::Shared { total };
+        }
         viewer
     }
 
@@ -288,18 +327,17 @@ impl MediaViewer {
         total: usize,
     ) -> Self {
         let mut viewer = Self::open(items, index);
-        viewer.source = ViewerSource::Profile(owner);
-        viewer.total = total;
+        if viewer.is_open() {
+            viewer.origin = Origin::Profile { owner, total };
+        }
         viewer
     }
 
     /// Profile photos: the viewer is close enough to the end of the loaded
     /// photos that the next page should be requested.
     pub fn wants_more_photos(&self) -> bool {
-        self.is_open()
-            && self.source.is_profile()
+        matches!(self.origin, Origin::Profile { total, .. } if total > self.items.len())
             && self.index + VIEWER_PROFILE_PHOTOS_AROUND >= self.items.len()
-            && self.total > self.items.len()
     }
 
     /// Profile photos: take the gallery as it now stands (newest first).
@@ -307,9 +345,9 @@ impl MediaViewer {
     /// and the total updated; any other change is left for the next open.
     /// Returns how many were added.
     pub fn extend_photos(&mut self, gallery: Vec<MediaViewerItem>, total: usize) -> usize {
-        if !self.source.is_profile() || !self.is_open() {
+        let Origin::Profile { owner, .. } = self.origin else {
             return 0;
-        }
+        };
         let prefix = self.items.len() <= gallery.len()
             && self
                 .items
@@ -319,7 +357,7 @@ impl MediaViewer {
         if !prefix {
             return 0;
         }
-        self.total = total;
+        self.origin = Origin::Profile { owner, total };
         let added: Vec<MediaViewerItem> = gallery.into_iter().skip(self.items.len()).collect();
         let count = added.len();
         self.items.extend(added);
@@ -329,12 +367,12 @@ impl MediaViewer {
     /// Open on the media of one poll option.
     pub fn open_poll(item: MediaViewerItem) -> Self {
         let mut viewer = Self::open(vec![item], 0);
-        viewer.source = ViewerSource::Poll;
+        viewer.origin = Origin::Poll;
         viewer
     }
 
     pub fn source(&self) -> ViewerSource {
-        self.source
+        self.origin.source()
     }
 
     pub fn close(&mut self) {
@@ -355,10 +393,8 @@ impl MediaViewer {
     /// ask repeatedly; the state layer drops a request while one is in
     /// flight or the list is complete).
     pub fn wants_older(&self) -> bool {
-        self.is_open()
-            && self.source == ViewerSource::SharedMedia
+        matches!(self.origin, Origin::Shared { total } if total > self.items.len())
             && self.index < VIEWER_PRELOAD_AHEAD
-            && self.total > self.items.len()
     }
 
     /// Shared Media: merge the tab's loaded list (oldest first, possibly
@@ -366,10 +402,12 @@ impl MediaViewer {
     /// first one are taken, in front, and the position follows the item
     /// the user is on. Returns how many were added.
     pub fn merge_older(&mut self, all_oldest_first: Vec<MediaViewerItem>, total: usize) -> usize {
-        if self.source != ViewerSource::SharedMedia || !self.is_open() {
+        if !matches!(self.origin, Origin::Shared { .. }) {
             return 0;
         }
-        self.total = total.max(self.items.len());
+        self.origin = Origin::Shared {
+            total: total.max(self.items.len()),
+        };
         let Some(first) = self.items.first().map(|item| item.message_id) else {
             return 0;
         };
@@ -471,11 +509,11 @@ impl MediaViewer {
     /// Shared Media list the total is the tab's count and the position
     /// counts the older items that are not loaded yet.
     pub fn position(&self) -> Option<(usize, usize)> {
-        let total = self.total.max(self.items.len());
+        let total = self.origin.total().max(self.items.len());
         // Shared Media lists oldest first, so the unloaded items come
         // before; profile photos list newest first, so they come after.
-        let unloaded = match self.source {
-            ViewerSource::Profile(_) => 0,
+        let unloaded = match self.origin {
+            Origin::Profile { .. } => 0,
             _ => total - self.items.len(),
         };
         self.is_open().then(|| (unloaded + self.index + 1, total))
@@ -514,6 +552,7 @@ impl MediaViewer {
         self.arrived_from = None;
         if self.items.is_empty() {
             self.index = 0;
+            self.origin = Origin::Closed;
             return true;
         }
         self.index = (self.index - removed_before).min(self.items.len() - 1);
@@ -558,6 +597,26 @@ mod tests {
     fn open_empty_stays_closed() {
         let viewer = MediaViewer::open(Vec::new(), 0);
         assert!(!viewer.is_open());
+        // A source with a count does not open an empty list either.
+        let shared = MediaViewer::open_shared(Vec::new(), 0, 40);
+        assert!(!shared.is_open());
+        assert_eq!(shared.position(), None);
+        assert!(!shared.wants_older());
+    }
+
+    #[test]
+    fn deleting_the_last_item_closes_the_viewer_with_its_source() {
+        let mut viewer = MediaViewer::open_shared(
+            vec![item(MediaViewerKind::Photo, 10)],
+            0,
+            3,
+        );
+        assert!(viewer.is_open() && viewer.source() == ViewerSource::SharedMedia);
+        assert!(viewer.retain(|_| false));
+        assert!(!viewer.is_open());
+        assert_eq!(viewer.source(), ViewerSource::Chat);
+        assert_eq!(viewer.position(), None);
+        assert!(!viewer.wants_older(), "a closed viewer never pages");
     }
 
     #[test]
