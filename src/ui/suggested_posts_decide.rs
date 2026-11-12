@@ -21,7 +21,7 @@ use quill::suggested_posts::{
     DECLINE_REASON_MAX, DirectMessagesRole, LOW_TON_BUTTON, LOW_TON_TEXT, LOW_TON_URL, SuggestMode,
     SuggestTerms, SuggestedPostInfo, SuggestedPostState, accept_text, decline_text, low_ton_title,
 };
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 
 /// What the boxes need to know about one suggestion.
@@ -422,15 +422,13 @@ impl QuillApp {
         dialog: Dialog,
         on_close: impl Fn(&ClickEvent, &mut Window, &mut App) + Clone + 'static,
     ) -> Dialog {
-        let body = Rc::new(RefCell::new(Some(body)));
+        let body = Rc::new(Cell::new(Some(body)));
         dialog
             .overlay(true)
             .title(crate::ui::shell::dialog_title(title))
             .content(crate::ui::shell::scrollable_dialog_content(
                 move |content, _, _| {
-                    let body = body
-                        .borrow_mut()
-                        .take()
+                    let body = body.take()
                         .unwrap_or_else(|| div().into_any_element());
                     content.child(body)
                 },
@@ -605,15 +603,13 @@ impl QuillApp {
                         })),
                 )
                 .into_any_element();
-            let body = Rc::new(RefCell::new(Some(body)));
+            let body = Rc::new(Cell::new(Some(body)));
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(title))
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
+                        let body = body.take()
                             .unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     },

@@ -11,7 +11,6 @@ QuillApp::build_direct_messages_dialog::body.borrow_mut 1
 QuillApp::build_fact_check_dialog::body.borrow_mut 1
 QuillApp::build_gifts_dialog::body.borrow_mut 1
 QuillApp::build_grams_dialog::body.borrow_mut 1
-QuillApp::build_grams_needed_dialog::body.borrow_mut 1
 QuillApp::build_grams_withdraw_dialog::body.borrow_mut 1
 QuillApp::build_live_delete_dialog::body.borrow_mut 1
 QuillApp::build_live_stars_dialog::body.borrow_mut 1
@@ -32,10 +31,6 @@ QuillApp::build_show_or_premium_box::body.borrow_mut 1
 QuillApp::build_sponsored_about_dialog::body.borrow_mut 1
 QuillApp::build_stars_dialog::body.borrow_mut 1
 QuillApp::build_start_files_dialog::body.borrow_mut 1
-QuillApp::build_suggest_price_dialog::body.borrow_mut 1
-QuillApp::build_suggest_time_dialog::body.borrow_mut 1
-QuillApp::build_text_box::body.borrow_mut 1
-QuillApp::build_wallet_notice_dialog::body.borrow_mut 1
 QuillApp::emoji_effect_overlay::active.borrow 3
 QuillApp::emoji_effect_overlay::active.borrow_mut 1
 QuillApp::media_panel_reveal::media_panel.borrow_mut 1
@@ -52,7 +47,6 @@ build_community_hub_dialog::body.borrow_mut 1
 build_create_community_dialog::body.borrow_mut 1
 char_width::cache.borrow 1
 char_width::cache.borrow_mut 1
-current::current.borrow 1
 current_agent::agent.borrow 1
 display_of::displays.borrow 1
 fit::window.borrow_mut 1
@@ -77,5 +71,4 @@ retain_community_chats::chat.borrow 1
 reveal_fade::reveals.borrow 1
 revealing::reveals.borrow 1
 set_display::displays.borrow_mut 1
-sync::applied.borrow_mut 2
 take_text_painted::painted.borrow_mut 1

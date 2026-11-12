@@ -59,14 +59,20 @@ pub(crate) fn sync(window: &mut Window, cx: &App, native: bool) {
     set_native(native);
     let id = window.window_handle().window_id();
     let (changed, first) = APPLIED.with(|applied| {
-        let mut applied = applied.borrow_mut();
+        let Ok(mut applied) = applied.try_borrow_mut() else {
+            return (false, false);
+        };
         let before = applied.insert(id, native);
         (before != Some(native), before.is_none())
     });
     if first {
         // The entry goes with its window.
         super::window_control::when_window_goes(window, cx, move |_| {
-            APPLIED.with(|applied| applied.borrow_mut().remove(&id));
+            APPLIED.with(|applied| {
+                if let Ok(mut applied) = applied.try_borrow_mut() {
+                    applied.remove(&id);
+                }
+            });
         });
     }
     if changed {
