@@ -59,6 +59,3 @@ src/ui/settings_window/agent_activity.rs 576 read
 src/ui/settings_window/agent_activity_demo.rs 113 read
 src/ui/settings_window/agent_grants.rs 493 read
 src/ui/settings_window/agent_grants_demo.rs 46 read
-src/ui/settings_window/agent_page.rs 621 read
-src/ui/settings_window/agent_switch.rs 89 read
-src/ui/settings_window/agent_tools.rs 578 read
