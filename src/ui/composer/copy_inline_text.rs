@@ -57,6 +57,16 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let as_file = self.chat_ui.edit_replace_as_file();
+        self.stage_edit_replacement(path, as_file, cx);
+    }
+
+    /// Stage `path` as the edit's replacement, as a document when `as_file`.
+    fn stage_edit_replacement(
+        &mut self,
+        path: &std::path::Path,
+        as_file: bool,
+        cx: &mut Context<Self>,
+    ) {
         let Some(edit) = self.screen.chat_ui.pending_edit_mut() else {
             return;
         };
@@ -141,7 +151,6 @@ impl QuillApp {
             Ok(probe) => replacement.probe = quill::composer::ReplacementProbe::Ready(probe),
             Err(reason) => {
                 edit.media_edit.replacement = None;
-                self.chat_ui.set_edit_replace_as_file(false);
                 self.set_note(StatusNote::error(reason));
             }
         }
@@ -153,7 +162,6 @@ impl QuillApp {
         if let Some(edit) = self.chat_ui.pending_edit_mut() {
             edit.media_edit.replacement = None;
         }
-        self.chat_ui.set_edit_replace_as_file(false);
         self.set_note(StatusNote::silent(tr(keys::Q_CHAT_REPLACEMENT_CLEARED)));
         cx.notify();
     }
@@ -161,14 +169,13 @@ impl QuillApp {
     /// B5: tdesktop's "Send as a document" checkbox on the replacement.
     pub(in crate::ui) fn toggle_edit_replace_as_file(&mut self, cx: &mut Context<Self>) {
         let next = !self.chat_ui.edit_replace_as_file();
-        self.chat_ui.set_edit_replace_as_file(next);
         let path = self
             .chat_ui
             .pending_edit()
             .and_then(|e| e.media_edit.replacement.as_ref())
             .map(|r| r.path.clone());
         if let Some(path) = path {
-            self.set_edit_replacement(&path, cx);
+            self.stage_edit_replacement(&path, next, cx);
         }
     }
 

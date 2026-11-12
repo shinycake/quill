@@ -387,9 +387,7 @@ impl QuillApp {
             Self::spawn_app(cx, async move |this, cx| {
                 let prepared = prepared.await;
                 let _ = this.update(cx, |this, cx| {
-                    this.finish_background_prepare(key, generation, root, credentials, prepared, cx);
-                    // A deletion may wait on this preparation ending.
-                    this.settle_close_waiters(cx);
+                    this.finish_background_prepare(key, generation, root, credentials, prepared, cx)
                 });
             })
             .detach();
@@ -397,10 +395,24 @@ impl QuillApp {
         self.spawn_background_poll(cx);
     }
 
-    /// A background preparation answered: start the client when it is
-    /// still wanted. Every exit leaves the preparation settled; the caller
-    /// then settles the close waiters.
+    /// A background preparation answered. Whatever came of it, the work
+    /// waiting on a preparation ending (a deletion) is settled.
     fn finish_background_prepare(
+        &mut self,
+        key: AccountKey,
+        generation: u64,
+        root: std::path::PathBuf,
+        credentials: quill::credentials::TelegramCredentials,
+        prepared: Result<quill::connect::PreparedConnect, ConnectBlocker>,
+        cx: &mut Context<Self>,
+    ) {
+        self.apply_background_prepare(key, generation, root, credentials, prepared, cx);
+        self.settle_close_waiters(cx);
+    }
+
+    /// Start the client when it is still wanted. Every exit leaves the
+    /// preparation settled.
+    fn apply_background_prepare(
         &mut self,
         key: AccountKey,
         generation: u64,

@@ -29,6 +29,7 @@ preferences.keybinding.capture | the action being recorded
 preferences.keybinding.refusals | the chords the page refused, per row; gone with the page, a lock or an account change
 preferences.keybinding.keymap | the account whose overrides the process keymap carries
 preferences.appearance_applied | the theme, accent and font last applied to the windows
+preferences.night_clock * | the wake for scheduled auto-night: the schedule is an app-wide setting, so its timer is the process's, held by this stage and dropped when the schedule is off
 preferences.app_theme * | the app theme: custom themes, palettes, the theme editor, Omarchy; files on disk, not per account
 preferences.system_accent | the OS accent color
 preferences.system_accent.Read.0 | the OS accent color once read

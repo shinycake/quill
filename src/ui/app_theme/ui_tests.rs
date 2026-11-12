@@ -319,3 +319,51 @@ fn switching_between_two_custom_themes_never_shows_the_other(cx: &mut TestAppCon
         let _ = store::delete(&dir, name);
     }
 }
+
+/// A custom theme file that could not be read stands for one appearance
+/// pass only: the pass after it reads the file again, instead of the
+/// session keeping the built-in fallback.
+#[test]
+fn a_failed_theme_read_is_read_again_by_the_next_pass() {
+    let mut themes = super::AppThemeUi::default();
+    let palette = BuiltinTheme::QuillLight.palette_with_accent(None);
+    themes.cache_palette("Mine".into(), None);
+    assert!(
+        themes.cached_palette("Mine").is_some_and(|p| p.is_none()),
+        "the pass that read it sees the failure"
+    );
+    themes.forget_failed("Mine");
+    assert!(themes.cached_palette("Mine").is_none(), "the next pass reads it");
+    // A read that worked stays cached.
+    themes.cache_palette("Mine".into(), Some(palette));
+    themes.forget_failed("Mine");
+    assert!(themes.cached_palette("Mine").is_some_and(|p| p.is_some()));
+}
+
+/// Scheduled auto-night waits on one timer held by its stage; turning the
+/// schedule off drops it, and nothing else wakes the app.
+#[gpui_kit::test]
+fn scheduled_auto_night_holds_one_timer_and_off_drops_it(cx: &mut TestAppContext) {
+    use crate::ui::appearance::NightClock;
+    use quill::settings::AutoNight;
+    let (app, mut vcx) = new_app(cx);
+    app.update(&mut vcx, |app, cx| {
+        app.appearance.auto_night = AutoNight::Scheduled;
+        app.appearance.night_start_minutes = 0;
+        app.appearance.night_end_minutes = 720;
+        app.apply_appearance(cx);
+        assert!(matches!(
+            app.preferences.night_clock,
+            NightClock::Waiting { .. }
+        ));
+        app.appearance.auto_night = AutoNight::Off;
+        app.apply_appearance(cx);
+        assert!(matches!(app.preferences.night_clock, NightClock::Idle));
+        // The empty window never changes: nothing to wait for.
+        app.appearance.auto_night = AutoNight::Scheduled;
+        app.appearance.night_start_minutes = 600;
+        app.appearance.night_end_minutes = 600;
+        app.apply_appearance(cx);
+        assert!(matches!(app.preferences.night_clock, NightClock::Idle));
+    });
+}

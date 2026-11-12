@@ -9817,3 +9817,35 @@ kept until sent, a refused refetch does not repeat), `state/account_notices`
 `connect/tests/stories.rs` (tray refresh on ingest),
 `connect/tests/chat_list/folder_removals.rs` (leaving a folder stops the
 retry; no wall clock), `state/tests/history_prune.rs` (translations pruned).
+
+### Sweep fixes (r3-07)
+
+Round 3 bundle for the audio engine, the account and appearance upkeep, the
+call sounds, the checklist and community boxes. Entries 12-001 (a twin of
+04-004, owned by r3-01) is not changed here.
+
+| Entry | What changed |
+| --- | --- |
+| 12-001 | Not changed: `ExportView` lives in `src/export/handle.rs`, where r3-01 folds it into the export's own stage (04-004, the same mechanism). The account box only reads and writes it through `set_account_export_view` and the `DialogSpec` predicate, so folding it in the UI here would collide with that change. Needs r3-01's fold. |
+| 12-006 | `agent_driver_surface::window_closed` drops what the queue holds for a chat window when `chat_window_closed` runs, so a later window for the same chat never takes the entry. |
+| 12-003 | The minute loop in `app_demo.rs` is gone. Scheduled auto-night holds one timer to the next boundary in `PreferencesUi::night_clock` (`NightClock::Waiting { _task }`, armed by every appearance pass, dropped when the schedule is off; `secs_until_night_change`). The OS light/dark setting is an observer (`observe_window_appearance`) and the OS accent already refreshed on window activation. `check-owned-timers.py` no longer skips `app_demo.rs` (`shape_guard.is_seeder`); the demo-only redraw loop is in the allow list. |
+| 12-004 | The theme cache holds `CachedPalette::{Ready, Failed}`. A failed read stands for the pass that read it and is forgotten right after (`forget_failed`), so the next appearance pass reads the file again; the startup read does not cache a failure. |
+| 12-005 | `AudioEngine`'s `track`, `building`, `backend` and `standing` are one `Playback::{Settled(Sound), Building { build, sound }, Simulated(SimRun)}` with `Sound::{Empty, Current, Stale, Failed}` holding the track. `fault` stays: it is the last-error log the row reads and is independent of the stage (a failed seek leaves the old sound playing). The build pieces moved to `engine_build.rs` (the file was at the size limit). |
+| 13-001 | `finish_background_prepare` settles the close waiters after every end of a preparation, so a deletion waiting on it is not left to the 60 s cap. |
+| 13-002 | `EditStage::Loading { asked }` holds the two requests of its load; `begin_bot_edit` returns them, `BotEditTexts::asked` carries them, and the fields fill only from that load. Baseline line `bare:EditStage::Loading` dropped. |
+| 13-003 | `sync_call_sounds` without a session keeps only a ring of another account, and the call screen's `Farewell` stops the loop, so a lost session never leaves the ring and its output hold. |
+| 13-004 | A device-access press dropped while another recording starts says "Finish the recording first" (the note `toggle_record_mode` already uses). Not driven by a test: the device-access answer (`capture_access::access`) is the platform's, and has no fake. |
+| 14-002 | `EditMode::replace_as_file` is gone: `ComposerEdit::replacement_as_file` reads the choice from the staged replacement (a document of a photo or video file), so dropping the replacement drops the choice. |
+| 14-001 | `ChecklistDialog::send` and `PollAddOption::send` are `DialogSend::{Editing, Sending { request }}`. Create / Add / Save keeps the box open with what was typed (the button shows loading); the request's answer (`session.acks`) closes it, a refusal returns it to editing with a note; closing the box or leaving the chat forgets the wait. tdesktop closes the box when it sends; this keeps the typed text on a refusal, the smallest safe choice (the tdesktop source was not at hand). |
+| 14-003 | `CommunityBox::{Create, CreateVisibility}` hold `CreateStep::{Choosing, Creating { request }}`; the busy state and the answers read that request. `CommunityOutcome::{Created, CreateFailed}` carry the request. `check-request-match.py` also counts `has_purpose_for_chat` / `take_purpose_for_chat` in `src/ui`; the three hits already there are in the baseline. |
+| 14-005 | A waiting community ban whose answer lands while a box other than the one it was pressed from is open ends there (no warning pops up for a forgotten press); it is not sent. |
+
+Tests: `ui/audio/engine.rs` (the existing transition tests, on the new
+stage), `ui/communities/flow_tests.rs` (create waits for its own request;
+ban dropped), `ui/background_accounts/closing_tests.rs` (a preparation that
+ends settles its waiters), `ui/background_accounts/tests.rs` (ring ends with
+the session), `ui/agent_driver_hard_tests.rs` (blocked entry ends with its
+window), `ui/app_theme/ui_tests.rs` (failed theme read; night clock),
+`settings/appearance.rs` (`secs_until_night_change`), `composer/edit.rs`
+(as-file choice), `ui/dialogs/checklist.rs` (`DialogSend`),
+`connect/tests/owned_bots.rs` (asked requests).

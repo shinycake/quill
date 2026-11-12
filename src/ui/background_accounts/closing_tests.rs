@@ -355,3 +355,45 @@ fn a_screen_worker_that_ends_wakes_the_work_waiting_for_it(cx: &mut TestAppConte
     vcx.run_until_parked();
     assert_eq!(ran.get(), Some(true));
 }
+
+/// A preparation that ends after its account was removed (nothing is
+/// wanted any more, so no client starts) still ends the wait of the work
+/// that watched it, instead of leaving it to the 60 s cap.
+#[gpui_kit::test]
+fn a_preparation_that_ends_settles_the_work_waiting_for_it(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let ran = Rc::new(Cell::new(None));
+    let ran_in = ran.clone();
+    let key = account(1);
+    app.update_in(&mut vcx, |app, _, cx| {
+        app.background.prepare.begin(&key);
+        // The account is removed meanwhile: the worker runs on, unwanted.
+        app.background.prepare.cancel(&key);
+        app.after_closing(
+            cx,
+            |app| {
+                if app.background.prepare.running(&account(1)) {
+                    CloseWait::Wait
+                } else {
+                    CloseWait::Go
+                }
+            },
+            move |_, go, _| ran_in.set(Some(go)),
+        );
+    });
+    vcx.run_until_parked();
+    assert_eq!(ran.get(), None, "the worker still runs");
+    app.update_in(&mut vcx, |app, _, cx| {
+        let generation = app.background.generation;
+        app.finish_background_prepare(
+            key.clone(),
+            generation,
+            std::path::PathBuf::new(),
+            super::deleting_tests::credentials(),
+            Err(quill::connect::ConnectBlocker::StoreError),
+            cx,
+        );
+    });
+    vcx.run_until_parked();
+    assert_eq!(ran.get(), Some(true), "settled at once, not at the cap");
+}

@@ -90,10 +90,6 @@ pub(super) struct EditMode {
     pub(super) stashed_draft: String,
     /// Reply that belonged to the stashed draft, restored with it on leaving.
     pub(super) stashed_reply: Option<ComposerReplyTo>,
-    /// B5: "Send as a document" for the replacement file while editing
-    /// media (tdesktop `EditCaptionBox::_asFile`). The edit's own choice:
-    /// another edit starts without it.
-    pub(super) replace_as_file: bool,
 }
 
 /// One edit, told apart from every other (an edit cancelled and one started
@@ -479,21 +475,15 @@ impl ChatUi {
             edit,
             stashed_draft,
             stashed_reply,
-            replace_as_file: false,
         });
     }
 
-    /// "Send as a document" ticked for the replacement of the edit in place.
+    /// "Send as a document" ticked for the replacement of the edit in place
+    /// (tdesktop `EditCaptionBox::_asFile`): the staged replacement's own
+    /// choice.
     pub(super) fn edit_replace_as_file(&self) -> bool {
-        self.edit_mode
-            .as_ref()
-            .is_some_and(|mode| mode.replace_as_file)
-    }
-
-    pub(super) fn set_edit_replace_as_file(&mut self, on: bool) {
-        if let Some(mode) = self.edit_mode.as_mut() {
-            mode.replace_as_file = on;
-        }
+        self.pending_edit()
+            .is_some_and(ComposerEdit::replacement_as_file)
     }
 
     /// Leave edit mode (and with it the cancel box), handing back what was

@@ -317,6 +317,15 @@ impl ComposerEdit {
             && direct_media_kind_for(&replacement.path).is_some()
     }
 
+    /// Whether "Send as a document" is ticked for the staged replacement: it
+    /// is the replacement's own choice, read from what was staged, so
+    /// dropping the replacement drops the choice with it.
+    pub fn replacement_as_file(&self) -> bool {
+        self.media_edit.replacement.as_ref().is_some_and(|rep| {
+            self.can_toggle_as_file(rep) && rep.kind == EditMediaKind::Document
+        })
+    }
+
     /// Whether the (possibly replaced) media carries the caption-position flag.
     pub fn caption_position_applies(&self) -> bool {
         match self.media_edit.replacement.as_ref() {
@@ -526,6 +535,26 @@ mod tests {
         let mut scheduled = edit_with(Some(EditableMedia::Photo), false);
         scheduled.scheduled = true;
         assert!(!scheduled.allows_replace());
+    }
+
+    #[test]
+    fn the_as_file_choice_goes_with_the_staged_replacement() {
+        let mut edit = edit_with(Some(EditableMedia::Document), false);
+        assert!(!edit.replacement_as_file(), "nothing staged");
+        let png = temp_file("e.png");
+        edit.media_edit.replacement = edit.replacement_for(&png, true).ok();
+        assert!(edit.replacement_as_file());
+        edit.media_edit.replacement = edit.replacement_for(&png, false).ok();
+        assert!(!edit.replacement_as_file());
+        // A plain file is a document without the box being ticked.
+        let txt = temp_file("f.txt");
+        edit.media_edit.replacement = edit.replacement_for(&txt, false).ok();
+        assert!(!edit.replacement_as_file());
+        // Dropping the replacement drops the choice: the next file starts
+        // unticked.
+        edit.media_edit.replacement = edit.replacement_for(&png, true).ok();
+        edit.media_edit.replacement = None;
+        assert!(!edit.replacement_as_file());
     }
 
     #[test]

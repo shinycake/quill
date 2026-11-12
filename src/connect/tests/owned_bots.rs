@@ -52,9 +52,14 @@ fn answer(extra: &str, body: &str) -> String {
 #[test]
 fn opening_the_editor_asks_for_the_name_and_the_about_text() {
     let (mut driver, recorder, sink, seq) = driver_parts();
-    driver.begin_bot_edit(21).unwrap();
+    let asked = driver.begin_bot_edit(21).unwrap();
     let name = sent_request(&recorder, "getBotName");
     let about = sent_request(&recorder, "getBotInfoShortDescription");
+    // The dialog fills its fields only from the load it started.
+    assert_eq!(
+        driver.session.bots.owned.edit.as_ref().map(|edit| edit.asked),
+        Some(asked)
+    );
     assert_eq!(name["bot_user_id"], 21);
     assert_eq!(about["language_code"], "");
     feed(

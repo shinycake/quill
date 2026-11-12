@@ -98,6 +98,32 @@ fn a_dismissed_prompt_stops_ringing_in_the_app(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn a_ring_ends_when_the_screen_loses_its_session(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, _, _| {
+        app.calls.sounds.keep_looping(Some(CallSound::Incoming));
+        assert_eq!(app.calls.sounds.looping(), Some(CallSound::Incoming));
+        // The account logs out: no session, and no ring of another account.
+        app.demo_session = None;
+        app.live = None;
+        app.sync_call_sounds();
+        assert_eq!(app.calls.sounds.looping(), None, "the ring and its hold end");
+    });
+}
+
+#[gpui_kit::test]
+fn a_session_less_screen_keeps_another_accounts_ring(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, _, _| {
+        app.demo_session = None;
+        app.live = None;
+        app.background.ringing = Some(ring());
+        app.sync_call_sounds();
+        assert_eq!(app.calls.sounds.looping(), Some(CallSound::Incoming));
+    });
+}
+
+#[gpui_kit::test]
 fn the_tick_loops_another_accounts_ringtone_with_no_poll(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     app.update_in(&mut vcx, |app, _, cx| {

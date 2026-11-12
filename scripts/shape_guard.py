@@ -213,10 +213,15 @@ def source(root="."):
             yield rel, strip_tests(blank(raw[rel]))
 
 
+# `app_demo.rs` builds the real app (`QuillApp::new_with_demo`), demo or not:
+# its timers and observers are the app's, so it is checked like any file.
+_RUNS_THE_APP = ("src/ui/app_demo.rs",)
+
+
 def is_seeder(path):
     """A screenshot-demo or fixture file: it seeds state, it does not run
     the app."""
-    return bool(_SEEDER.search(path))
+    return path not in _RUNS_THE_APP and bool(_SEEDER.search(path))
 
 
 def body_start(text, start):

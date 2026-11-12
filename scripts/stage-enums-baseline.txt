@@ -33,7 +33,6 @@ bare:DeviceRun::Opening 1
 bare:DownloadStatus::Downloading 1
 bare:Draft::Waiting 1
 bare:Echo::Waiting 1
-bare:EditStage::Loading 1
 bare:EngineState::Loading 1
 bare:Entry::Pending 1
 bare:Entry::Probing 1
