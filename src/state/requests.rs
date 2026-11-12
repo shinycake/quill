@@ -569,13 +569,6 @@ impl RequestRegistry {
         }
     }
 
-    /// The ids of the requests still out. A stage that holds its own
-    /// request id asks this to see its request was dropped (a reconnect, a
-    /// restart); it never asks which purpose is in flight.
-    pub fn out_ids(&self) -> std::collections::HashSet<RequestId> {
-        self.pending.values().map(|pending| pending.id).collect()
-    }
-
     pub fn take(&mut self, id: RequestId) -> Option<PendingRequest> {
         self.remove(id.0)
     }
@@ -668,7 +661,9 @@ impl RequestRegistry {
         self.pending.len()
     }
 
-    /// The ids in flight now, oldest first.
+    /// The ids of the requests still out, oldest first. A stage that holds
+    /// its own request id asks this to see its request was dropped (a
+    /// reconnect, a restart); it never asks which purpose is in flight.
     pub fn pending_ids(&self) -> Vec<RequestId> {
         let mut ids: Vec<RequestId> = self.pending.values().map(|p| p.id).collect();
         ids.sort_by_key(|id| id.0);

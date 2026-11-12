@@ -200,6 +200,16 @@ fn shutdown_ends_every_helper_at_once() {
     assert_eq!(reports_until_threads_end(&mut host), Vec::new());
 }
 
+/// With no account folder configured, a host that was shut down still
+/// refuses to open: no helper starts after `shutdown()`.
+#[test]
+fn an_open_after_shutdown_starts_no_helper_without_an_account_folder() {
+    let (mut host, _) = host(Some(stand_in("stays-up.sh")));
+    host.shutdown();
+    assert_eq!(host.open(&request(5)), Err(CarrierError::Terminated));
+    assert!(host.carriers.is_empty(), "no helper was spawned");
+}
+
 #[test]
 fn a_shutdown_with_nothing_running_or_exiting_has_nothing_to_wait_for() {
     let (mut host, _) = host(Some(stand_in("stays-up.sh")));

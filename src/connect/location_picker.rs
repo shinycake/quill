@@ -45,7 +45,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         // A request a reconnect dropped fails here, after the answers that
         // did arrive were applied.
-        let pending = self.session.requests.out_ids();
+        let pending: std::collections::HashSet<_> =
+            self.session.requests.pending_ids().into_iter().collect();
         self.session.location.forget_dropped(&pending);
         for request in self.session.location.next_requests() {
             let chat_id = match &request {

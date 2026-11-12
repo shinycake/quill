@@ -115,7 +115,8 @@ STAMP = re.compile(r"\bCorrelation\s*::|\.\s*correlate\s*\(")
 # A walk over the request table: `requests.pending.values()` however the
 # receiver is split across lines.
 SCAN = re.compile(
-    r"\brequests\s*\.\s*pending\s*\.\s*(?:values|values_mut|iter|iter_mut|keys|retain|drain)\s*\("
+    r"\brequests\s*(?:\(\s*\))?\s*\.\s*pending\s*\.\s*"
+    r"(?:values|values_mut|iter|iter_mut|into_iter|keys|retain|drain)\s*\("
 )
 
 
@@ -220,6 +221,8 @@ def self_test():
     assert scans("session.requests.pending.values_mut().filter(f);\n") == [1]
     assert scans("for (id, p) in self.requests.pending.iter() {}\n") == [1]
     assert scans("self.requests.pending.retain(|_, p| p.live);\n") == [1]
+    assert scans("for (id, p) in self.requests.pending.into_iter() {}\n") == [1]
+    assert scans("self.requests().pending.values().count();\n") == [1]
     assert not scans("self.requests.pending.contains_key(&id.0);\n")
     assert not scans("let p = self.requests.pending.get(&id.0);\n")
     assert not scans("self.pending.values().any(|queued| queued.is_failed());\n")

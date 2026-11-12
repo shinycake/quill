@@ -757,6 +757,12 @@ fn the_pages_own_stats_failure_leaves_the_probes_button_and_a_failed_probe_asks_
         .unwrap();
     error(&mut p, "getStarRevenueStatistics", "BROKEN");
     assert!(p.0.session.payments.earn.self_stats.data().is_some());
+    // And the probe's own stage is untouched: not failed, still answered.
+    assert!(p.0.session.payments.earn.self_stats.error().is_none());
+    assert!(matches!(
+        p.0.session.payments.earn.self_stats,
+        crate::state::fetch::Fetch::Ready(_)
+    ));
 
     // A failed probe is asked again on the next open.
     let mut q = parts();

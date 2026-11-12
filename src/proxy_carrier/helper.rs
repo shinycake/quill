@@ -404,6 +404,11 @@ impl HelperCarrierHost {
     /// tried again, at most every [`CLAIM_BACKOFF`], and until one works no
     /// carrier opens (TDLib may try again).
     fn data_dir_arg(&mut self) -> Result<Option<String>, CarrierError> {
+        // After `shutdown()` no helper starts, with an account folder or
+        // without one.
+        if matches!(self.folder, Folder::Stopped) {
+            return Err(CarrierError::Terminated);
+        }
         let Some(root) = &self.root else {
             return Ok(None);
         };

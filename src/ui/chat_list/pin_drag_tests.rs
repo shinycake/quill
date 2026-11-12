@@ -209,7 +209,9 @@ fn a_bulk_pin_over_the_limit_opens_the_limit_box_and_pins_nothing(cx: &mut TestA
             return;
         };
         for chat in session.chats.values_mut() {
-            chat.main.get_or_insert_with(Default::default).is_pinned = false;
+            if let Some(position) = chat.main.as_mut() {
+                position.is_pinned = false;
+            }
         }
         session.chat_list.pinned_chat_count_max = 0;
         let ids: Vec<i64> = session

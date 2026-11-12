@@ -89,6 +89,7 @@ mod sweep_r2_20;
 mod sweep_r3_03;
 mod sweep_r3_04;
 mod sweep_r4_05_fix2;
+mod sweep_r4_05_fix3;
 mod sweep_s4_accounts;
 mod sweep_s4_links_tdlib_1;
 mod threads;

@@ -10,6 +10,11 @@
 use crate::ids::RequestId;
 
 /// The requests one stage has out, each with what it is for.
+///
+/// Every field of this type must be listed in [`Session::settle_held`]: a
+/// `Holds` left off that list is never settled, and its dedup then blocks
+/// for the rest of the session. (`held_requests_all_settle_when_lost` in
+/// `state/tests/sweep_r4_05_fix3.rs` begins one request in each owner.)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Holds<K> {
     items: Vec<(RequestId, K)>,
