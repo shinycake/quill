@@ -713,10 +713,7 @@ mod tests {
         }));
         backend.set_volume(0.5);
         assert!(!backend.options.want_audio, "the reopen was refused");
-        assert!(
-            heard.try_recv().is_ok(),
-            "the wake fires inside set_volume"
-        );
+        assert!(heard.try_recv().is_ok(), "the wake fires inside set_volume");
         assert!(heard.try_recv().is_err(), "once");
     }
 
