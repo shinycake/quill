@@ -226,7 +226,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<RequestId, ConnectSendError> {
         let extra = self.web_app_extra(RequestPurpose::SendWebAppData, None)?;
         let json = send_web_app_data(extra, bot_user_id, button_text, data);
-        self.send_json_request(extra, &json)
+        let sent = self.send_json_request(extra, &json)?;
+        self.session.bots.web_apps.answers_due.begin(sent, ());
+        Ok(sent)
     }
 
     /// `canBotSendMessages`: ok, or 404 when the person must be asked.
@@ -336,7 +338,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         )?;
         let json =
             toggle_bot_is_added_to_attachment_menu(extra, bot_user_id, added, allow_write_access);
-        self.send_json_request(extra, &json)
+        let sent = self.send_json_request(extra, &json)?;
+        self.session.bots.web_apps.answers_due.begin(sent, ());
+        Ok(sent)
     }
 
     /// `getGrossingWebAppBots` for the Apps tab; once per session unless

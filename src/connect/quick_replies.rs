@@ -27,14 +27,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         // answer (or error) ends it.
         let is_change = purpose == RequestPurpose::Settings(SettingsPurpose::MutateQuickReplies);
         let subject = if is_change { Some(build("")) } else { subject };
-        // The request registry is the one record of what is on its way: the
-        // request carries what it is for, so nothing here outlives it.
+        // The stage holds each request it sent: it leaves with its answer,
+        // its error or its loss.
         if let Some(subject) = &subject
-            && self.session.requests.pending.values().any(|p| {
-                p.purpose == purpose
-                    && p.chat_id == chat_id
-                    && p.subject_id() == Some(subject.as_str())
-            })
+            && self
+                .session
+                .settings
+                .quick_replies
+                .sent
+                .any(|sent| {
+                    sent.purpose == purpose && sent.chat_id == chat_id && sent.subject == *subject
+                })
         {
             return Ok(None);
         }
@@ -45,7 +48,18 @@ impl<S: JsonSender> ConnectDriver<S> {
             None => self.session.request(purpose, chat_id),
         };
         let json = build(&extra.as_extra());
-        self.send_json_request(extra, &json).map(Some)
+        let sent = self.send_json_request(extra, &json)?;
+        if let Some(subject) = subject {
+            self.session.settings.quick_replies.sent.begin(
+                sent,
+                crate::state::QuickReplySend {
+                    purpose,
+                    chat_id,
+                    subject,
+                },
+            );
+        }
+        Ok(Some(sent))
     }
 
     /// `loadQuickReplyShortcuts`, once per session unless a load failed.

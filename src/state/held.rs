@@ -40,9 +40,9 @@ impl<K> Holds<K> {
         self.items.iter().any(|(_, key)| matches(key))
     }
 
-    /// The keys held, oldest first.
-    pub fn keys(&self) -> impl Iterator<Item = &K> {
-        self.items.iter().map(|(_, key)| key)
+    /// The requests held with their keys, oldest first.
+    pub fn iter(&self) -> impl Iterator<Item = (RequestId, &K)> {
+        self.items.iter().map(|(request, key)| (*request, key))
     }
 
     pub fn is_empty(&self) -> bool {

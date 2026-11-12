@@ -9,14 +9,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
         filter: MemberListFilter,
     ) -> bool {
-        self.session.requests.pending.values().any(|pending| {
-            matches!(
-                pending.purpose,
-                RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembersMore {
-                    filter: f, ..
-                }) if f == filter
-            ) && pending.chat_id == Some(chat_id)
-        })
+        self.session
+            .groups
+            .member_more_asking(chat_id.0, filter)
     }
 
     /// `getSupergroupMembers` from `offset` (tdesktop asks 200 per page

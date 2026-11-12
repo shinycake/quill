@@ -117,6 +117,9 @@ pub struct CommunitiesState {
     pub new_community_photo: Option<(RequestId, String)>,
     /// `getCommunityAddChatRequests`, by community id.
     pub add_chat_requests: HashMap<i64, Fetch<AddChatRequestList>>,
+    /// The community requests out (`send_communities_request`), each by its
+    /// own request with its community: what the screens read as in flight.
+    pub sent: crate::state::held::Holds<(i64, CommunitiesPurpose)>,
     /// `getCommunityMemberChats`, by community and member.
     pub member_chats: HashMap<(i64, CommunityMember), Fetch<CommunityMemberChats>>,
     /// The settings each in-flight `setCommunityNotificationSettings`
@@ -141,6 +144,7 @@ impl CommunitiesState {
             owned_bots: Fetch::Idle,
             new_community_photo: None,
             add_chat_requests: HashMap::new(),
+            sent: Default::default(),
             member_chats: HashMap::new(),
             notification_sends: HashMap::new(),
             outcomes: VecDeque::new(),

@@ -898,12 +898,6 @@ impl Session {
             return;
         };
         let sent = *sent;
-        for later in self.requests.pending.values_mut().filter(|p| {
-            p.purpose == RequestPurpose::SetChatPermissions && p.chat_id == Some(chat_id)
-        }) {
-            if let Some(RequestRollback::ChatPermissions { previous, .. }) = &mut later.rollback {
-                *previous = Some(sent);
-            }
-        }
+        self.requests.rebase_permission_rollbacks(chat_id, sent);
     }
 }

@@ -20,12 +20,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         if self.session.calls.active_call.is_some()
-            || self.session.requests.pending.values().any(|pending| {
-                matches!(
-                    pending.purpose,
-                    RequestPurpose::Calls(CallsPurpose::CreateCall { .. })
-                )
-            })
+            || !self.session.calls.creates.is_empty()
         {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -46,6 +41,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        self.session.calls.creates.begin(extra, ());
         self.decline_ringing_invite(None);
         Ok(extra)
     }

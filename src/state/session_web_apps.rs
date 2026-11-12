@@ -7,13 +7,7 @@ impl Session {
     /// its answer is reported when it lands, so the mini-app poll keeps
     /// running after the window that sent it has closed.
     pub fn web_app_answer_due(&self) -> bool {
-        self.requests.pending.values().any(|pending| {
-            matches!(
-                pending.purpose,
-                RequestPurpose::SendWebAppData
-                    | RequestPurpose::Bots(BotsPurpose::ToggleBotInAttachmentMenu { .. })
-            )
-        })
+        !self.bots.web_apps.answers_due.is_empty()
     }
 
     /// A mini-app payload (`webAppInfo`, `webAppUrl`, `mainWebApp`,

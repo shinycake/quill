@@ -174,6 +174,10 @@ pub struct DataSent {
 /// Everything mini-app related on the session.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WebApps {
+    /// The data sends and menu removals waiting for TDLib, each by its
+    /// request: their answers are reported when they land, so the poll
+    /// runs until the last one is answered, failed or lost.
+    pub answers_due: crate::state::held::Holds<()>,
     /// The open call in flight and what its answer is for. A newer launch
     /// replaces it: the older answer opens nothing.
     pub opening: Option<WebAppPending>,

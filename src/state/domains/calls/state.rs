@@ -4,6 +4,9 @@
 use crate::state::*;
 
 pub struct CallsState {
+    /// The `createCall` asks out: one at a time, until the answer, the
+    /// error or the loss of its own request.
+    pub creates: crate::state::held::Holds<()>,
     /// Phase C1: the tracked live call, if any. **Signaling only** —
     /// TDLib transports no audio/video (official clients use
     /// libtgvoip); real media transport is the C2 spike.
@@ -189,6 +192,7 @@ impl CallsState {
 
     pub(crate) fn new() -> Self {
         Self {
+            creates: Default::default(),
             active_call: None,
             summary: None,
             error: None,

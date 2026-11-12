@@ -8,6 +8,15 @@ use crate::state::fetch::Fetch;
 use crate::state::*;
 use std::collections::HashMap;
 
+/// What a quick-reply request out is for: its purpose and chat, and the
+/// subject (the change's body, or the shortcut an album sends).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QuickReplySend {
+    pub purpose: RequestPurpose,
+    pub chat_id: Option<ChatId>,
+    pub subject: String,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct QuickRepliesState {
     /// Shortcut ids in the order TDLib sent (`updateQuickReplyShortcuts`).
@@ -27,6 +36,9 @@ pub struct QuickRepliesState {
     /// `quick_reply_shortcut_message_count_max`, once reported.
     pub shortcut_count_max: Option<usize>,
     pub message_count_max: Option<usize>,
+    /// The changes and quick-reply sends out, each by its own request: the
+    /// same change is not sent twice while the first is on its way.
+    pub sent: crate::state::held::Holds<QuickReplySend>,
     /// Counter for `sendQuickReplyShortcutMessages.sending_id`.
     pub next_sending_id: i32,
 }

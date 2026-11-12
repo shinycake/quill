@@ -53,13 +53,10 @@ impl Session {
         let Some(call) = self.calls.active_group_call.as_ref() else {
             return false;
         };
-        let purpose = RequestPurpose::Calls(CallsPurpose::JoinVideoChat {
-            group_call_id: call.id,
-        });
         call.is_joined
             || call.reconnecting()
             || joining == Some(call.id)
-            || self.requests.pending.values().any(|p| p.purpose == purpose)
+            || call.transport.joining()
     }
 
     /// The call that a new video chat would take the place of (tdesktop

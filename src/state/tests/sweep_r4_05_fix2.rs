@@ -263,3 +263,56 @@ fn an_unpin_outdates_a_pinned_list_fetch_in_flight() {
     assert!(fetch.is_outdated(), "asked again, not answered with the old");
     assert!(!fetch.waits_for(ask));
 }
+
+/// A request a stage holds as out leaves with its answer, its error or its
+/// loss, and only its own: the dedup of the next send reads the stage, not
+/// the request table.
+#[test]
+fn held_requests_leave_with_their_answer_error_or_loss() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let create = |s: &mut Session| {
+        let id = s.request(
+            RequestPurpose::Calls(CallsPurpose::CreateCall { is_video: false }),
+            None,
+        );
+        s.calls.creates.begin(id, ());
+        id
+    };
+    let answered = create(&mut session);
+    let other = session.request(RequestPurpose::GetActiveSessions, None);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, other.0),
+    );
+    assert!(!session.calls.creates.is_empty(), "another request's answer");
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, answered.0),
+    );
+    assert!(session.calls.creates.is_empty());
+
+    let refused = create(&mut session);
+    apply_json(&mut session, &seq, &sink, &error_json(refused));
+    assert!(session.calls.creates.is_empty());
+
+    let lost = create(&mut session);
+    let pending = session.requests.take(lost).expect("registered");
+    session.settle_lost_request(pending);
+    assert!(session.calls.creates.is_empty());
+
+    // The same for a web-app answer and a sticker edit.
+    let data = session.request(RequestPurpose::SendWebAppData, None);
+    session.bots.web_apps.answers_due.begin(data, ());
+    assert!(session.web_app_answer_due());
+    apply_json(&mut session, &seq, &sink, &error_json(data));
+    assert!(!session.web_app_answer_due());
+    let edit = session.request(RequestPurpose::ReorderInstalledStickerSets, None);
+    session.stickers.edits.begin(edit, ());
+    apply_json(&mut session, &seq, &sink, &error_json(edit));
+    assert!(session.stickers.edits.is_empty());
+}

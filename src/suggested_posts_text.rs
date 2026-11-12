@@ -139,3 +139,39 @@ pub fn delete_warning(ton: bool) -> (&'static str, &'static str) {
 
 /// `lng_suggest_warn_delete_anyway`.
 pub const DELETE_ANYWAY: &str = "Delete Anyway";
+
+/// "12.5" or "12,5" Grams as Gram cents; more than two decimals is not a
+/// valid price.
+pub fn parse_gram_cents(text: &str) -> Option<i64> {
+    let text = text.trim().replace(',', ".");
+    let (whole, fraction) = text.split_once('.').unwrap_or((text.as_str(), ""));
+    if fraction.len() > 2
+        || !whole.chars().all(|c| c.is_ascii_digit())
+        || !fraction.chars().all(|c| c.is_ascii_digit())
+        || (whole.is_empty() && fraction.is_empty())
+    {
+        return None;
+    }
+    let whole: i64 = if whole.is_empty() {
+        0
+    } else {
+        whole.parse().ok()?
+    };
+    let cents: i64 = match fraction.len() {
+        0 => 0,
+        1 => fraction.parse::<i64>().ok()?.saturating_mul(10),
+        _ => fraction.parse().ok()?,
+    };
+    whole.checked_mul(100)?.checked_add(cents)
+}
+
+/// The text a price field shows for `price` in its own currency.
+pub fn field_text(price: Option<SuggestedPrice>) -> String {
+    match price {
+        Some(SuggestedPrice::Stars(count)) => count.to_string(),
+        Some(price @ SuggestedPrice::TonCents(_)) => {
+            crate::ton_wallet::format_gram_amount(price.nanos()).replace(',', "")
+        }
+        None => String::new(),
+    }
+}

@@ -44,7 +44,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request_for_community(RequestPurpose::Communities(purpose), community_id);
-        self.send_json_request(extra, &build(extra)).map(Some)
+        let sent = self.send_json_request(extra, &build(extra))?;
+        self.session
+            .communities
+            .sent
+            .begin(sent, (community_id, purpose));
+        Ok(Some(sent))
     }
 
     /// The accessible community (an inaccessible one "can't be passed to

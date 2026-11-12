@@ -213,6 +213,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some(list) = self.session.stickers.stickers.lists.for_purpose(purpose) {
             list.begin_with(extra);
         }
+        if matches!(
+            purpose,
+            RequestPurpose::Stickers(StickersPurpose::ManageStickerSet { .. })
+                | RequestPurpose::ReorderInstalledStickerSets
+        ) {
+            self.session.stickers.edits.begin(extra, ());
+        }
         Ok(Some(extra))
     }
 
@@ -338,13 +345,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || set_ids.is_empty() || set_ids.iter().any(|id| *id <= 0) {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.requests.pending.values().any(|p| {
-            matches!(
-                p.purpose,
-                RequestPurpose::Stickers(StickersPurpose::ManageStickerSet { .. })
-                    | RequestPurpose::ReorderInstalledStickerSets
-            )
-        }) {
+        if !self.session.stickers.edits.is_empty() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let mut seen = std::collections::HashSet::new();
@@ -442,14 +443,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         if from == to
-            || self.session.requests.pending.values().any(|pending| {
-                matches!(
-                    pending.purpose,
-                    RequestPurpose::Stickers(StickersPurpose::ManageStickerSet { .. })
-                        | RequestPurpose::ReorderInstalledStickerSets
-                        | RequestPurpose::GetInstalledStickerSets
-                )
-            })
+            || !self.session.stickers.edits.is_empty()
+            || self.session.stickers.stickers.lists.installed.is_loading()
         {
             return Ok(None);
         }

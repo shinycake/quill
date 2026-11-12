@@ -4,7 +4,7 @@
 docs/contributing/state-machines.md, rule 3. A stage that waits for an
 answer holds the `RequestId` of its request and takes only that answer
 (`Fetch::sent` / `answered` / `failed`, `ListOp::begin`, `RequestAcks`).
-Six shortcuts kept coming back in the state sweeps (about 175 entries in
+Seven shortcuts kept coming back in the state sweeps (about 175 entries in
 the re-sweep of 2026-11-11, more in round 3), and this check counts them:
 
 - `purpose`: a call to `Requests::has_purpose*`, `take_purpose*` or
@@ -39,6 +39,18 @@ the re-sweep of 2026-11-11, more in round 3), and this check counts them:
   answer is about is recorded by `Session::request_for_*`, one correlation
   per request; a sender that stamps its own (or forgets to) leaves the
   answer to be dropped silently.
+
+- `scan`: a hand-written walk over the request table, `requests.pending
+  .values()` (or `.iter()`, `.keys()`, `.values_mut()`, `.retain()`)
+  outside src/state/requests.rs. It is `has_purpose` written out where the
+  `purpose` rule's regex cannot see it, and it is as wrong: "some request
+  of this purpose (or for this chat, or with this subject) is out" is not
+  "my request is out". The stage that sent the request holds its
+  `RequestId` (`Fetch::Loading { request }`, a write stage such as
+  `MaskChange`, or `state::held::Holds` for a request that only needs to
+  be known out) and ends it with the answer, the error or the loss.
+  Matching one entry by its own id (`pending.get(&id)`, `contains_key`) is
+  not a walk and is not counted.
 
 Screenshot-demo and fixture files seed state this way and are not checked.
 
@@ -100,6 +112,11 @@ KEY_OWNERS = {
     "src/state/request_correlation.rs",
 }
 STAMP = re.compile(r"\bCorrelation\s*::|\.\s*correlate\s*\(")
+# A walk over the request table: `requests.pending.values()` however the
+# receiver is split across lines.
+SCAN = re.compile(
+    r"\brequests\s*\.\s*pending\s*\.\s*(?:values|values_mut|iter|iter_mut|keys|retain|drain)\s*\("
+)
 
 
 def stamp_hits(text):
@@ -138,7 +155,8 @@ def hits(root):
         begin = ".begin(" in text
         generation = "matches_generation" in text
         stamped = path not in KEY_OWNERS and ("Correlation" in text or ".correlate" in text)
-        if not (purpose or succeed or counter or begin or generation or stamped):
+        scan = "pending" in text and SCAN.search(text)
+        if not (purpose or succeed or counter or begin or generation or stamped or scan):
             continue
         scopes = shape_guard.Scopes(path, text)
         if counter:
@@ -166,6 +184,10 @@ def hits(root):
             for match in GENERATION.finditer(text):
                 line = shape_guard.line_of(text, match.start())
                 yield f"generation:{scopes.at(match.start())}", path, line
+        if scan:
+            for match in SCAN.finditer(text):
+                line = shape_guard.line_of(text, match.start())
+                yield f"scan:{scopes.at(match.start())}", path, line
         if stamped:
             for offset in stamp_hits(text):
                 line = shape_guard.line_of(text, offset)
@@ -189,6 +211,18 @@ def self_test():
     ]
     assert not found("    Plain { request: u64 },\n    Id(u64),\n    Unit,\n")
     assert not list(counter_hits("pub enum Stage { Jump { generation: u64 } }\n"))
+
+    def scans(text):
+        return [shape_guard.line_of(text, m.start()) for m in SCAN.finditer(text)]
+
+    assert scans("self.requests.pending.values().any(|p| p.purpose == x)\n") == [1]
+    assert scans("self\n    .session\n    .requests\n    .pending\n    .values()\n") == [3]
+    assert scans("session.requests.pending.values_mut().filter(f);\n") == [1]
+    assert scans("for (id, p) in self.requests.pending.iter() {}\n") == [1]
+    assert scans("self.requests.pending.retain(|_, p| p.live);\n") == [1]
+    assert not scans("self.requests.pending.contains_key(&id.0);\n")
+    assert not scans("let p = self.requests.pending.get(&id.0);\n")
+    assert not scans("self.pending.values().any(|queued| queued.is_failed());\n")
 
     def stamps(text):
         return [shape_guard.line_of(text, o) for o in stamp_hits(text)]

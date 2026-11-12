@@ -551,6 +551,31 @@ impl RequestRegistry {
         })
     }
 
+    /// A permissions save of `chat_id` was confirmed with `sent`: the saves
+    /// still out for the chat roll back to those values, not to the ones
+    /// from before it. The table owns its entries' rollbacks, so this is
+    /// not an answer matched by purpose.
+    pub(crate) fn rebase_permission_rollbacks(
+        &mut self,
+        chat_id: ChatId,
+        sent: crate::telegram::envelope::ChatPermissions,
+    ) {
+        for later in self.pending.values_mut().filter(|p| {
+            p.purpose == RequestPurpose::SetChatPermissions && p.chat_id == Some(chat_id)
+        }) {
+            if let Some(RequestRollback::ChatPermissions { previous, .. }) = &mut later.rollback {
+                *previous = Some(sent);
+            }
+        }
+    }
+
+    /// The ids of the requests still out. A stage that holds its own
+    /// request id asks this to see its request was dropped (a reconnect, a
+    /// restart); it never asks which purpose is in flight.
+    pub fn out_ids(&self) -> std::collections::HashSet<RequestId> {
+        self.pending.values().map(|pending| pending.id).collect()
+    }
+
     pub fn take(&mut self, id: RequestId) -> Option<PendingRequest> {
         self.remove(id.0)
     }

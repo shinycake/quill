@@ -221,6 +221,14 @@ impl GroupsState {
         }
     }
 
+    /// The next page of `chat`'s `filter` list is out: the list's own stage
+    /// holds its request.
+    pub fn member_more_asking(&self, chat: i64, filter: MemberListFilter) -> bool {
+        self.supergroup_members
+            .get(&(chat, filter))
+            .is_some_and(|list| matches!(list.more, MoreMembers::Asking { .. }))
+    }
+
     /// A next-page request for `key` at `offset` was sent: it extends the
     /// page the list shows.
     pub(crate) fn note_member_more(&mut self, key: Key, request: RequestId, offset: i32) {

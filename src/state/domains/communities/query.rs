@@ -8,13 +8,12 @@ impl Session {
     fn community_pending(
         &self,
         community_id: i64,
-    ) -> impl Iterator<Item = (&PendingRequest, CommunitiesPurpose)> {
-        self.requests.pending.values().filter_map(move |pending| {
-            let RequestPurpose::Communities(purpose) = pending.purpose else {
-                return None;
-            };
-            (pending.community_id() == Some(community_id)).then_some((pending, purpose))
-        })
+    ) -> impl Iterator<Item = (RequestId, CommunitiesPurpose)> + '_ {
+        self.communities
+            .sent
+            .iter()
+            .filter(move |(_, (community, _))| *community == community_id)
+            .map(|(request, (_, purpose))| (request, *purpose))
     }
 
     /// Whether a request of this community matching `matches` is in
@@ -33,10 +32,8 @@ impl Session {
     pub fn community_chats_collapsed(&self, community_id: i64) -> bool {
         let asked = self
             .community_pending(community_id)
-            .filter_map(|(pending, purpose)| match purpose {
-                CommunitiesPurpose::ToggleCollapsed { collapsed } => {
-                    Some((pending.id.0, collapsed))
-                }
+            .filter_map(|(request, purpose)| match purpose {
+                CommunitiesPurpose::ToggleCollapsed { collapsed } => Some((request.0, collapsed)),
                 _ => None,
             })
             .max_by_key(|(id, _)| *id)
