@@ -8,7 +8,7 @@
 
 use super::app::QuillApp;
 use super::chat_theme::fill_muted;
-use super::gift_market_state::{FileAskOutcome, MarketBox};
+use super::gift_market_state::MarketBox;
 use super::premium_ui::sticker_tile;
 use super::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
@@ -300,42 +300,14 @@ impl QuillApp {
         let mut files = self.market_sticker_files();
         files.sort_unstable_by_key(|file| file.0);
         files.dedup();
-        let asked = self.gift_market.requested_files.clone();
-        let same_set = asked.len() == files.len()
-            && asked
-                .iter()
-                .zip(&files)
-                .all(|((file, _), next)| file == next);
-        let next: Vec<(quill::ids::FileId, FileAskOutcome)> = match self.live.as_mut() {
-            Some(live) => {
-                let _ = live.driver.follow_gift_auction(follow);
-                // Each file is asked once: a refused send is marked, and
-                // tried again only when the set of files changes (or the
-                // boxes are reopened), never at every upkeep.
-                files
-                    .iter()
-                    .map(|file| {
-                        let ask = match asked.iter().find(|(asked, _)| asked == file) {
-                            Some((_, FileAskOutcome::Sent)) => FileAskOutcome::Sent,
-                            Some((_, FileAskOutcome::Refused)) if same_set => {
-                                FileAskOutcome::Refused
-                            }
-                            _ if live.driver.download_file(*file, 8).is_ok() => {
-                                FileAskOutcome::Sent
-                            }
-                            _ => FileAskOutcome::Refused,
-                        };
-                        (*file, ask)
-                    })
-                    .collect()
+        // The session's own file state decides what is asked: a file that is
+        // downloading, downloaded or already refused is skipped there, and a
+        // send that failed is simply asked again on the next upkeep.
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.follow_gift_auction(follow);
+            for file in &files {
+                let _ = live.driver.download_file(*file, 8);
             }
-            None => files
-                .iter()
-                .map(|file| (*file, FileAskOutcome::Sent))
-                .collect(),
-        };
-        if next != self.gift_market.requested_files {
-            self.gift_market.requested_files = next;
         }
     }
 

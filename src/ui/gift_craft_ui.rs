@@ -24,6 +24,7 @@ use quill::gift_market::{
     CRAFT_SLOTS, CraftGate, CraftGift, CraftResult, CraftRun, CraftSession, GiftMarketState,
     attribute_chances, craft_colors, craft_failed_text, format_percent, shows_craftable_link,
 };
+use quill::ids::RequestId;
 use quill::lang::{keys, tr, tr_with};
 use quill::local_time::{civil_local, hhmm, month_name, now_unix};
 use quill::premium_hub::ReceivedGift;
@@ -212,15 +213,15 @@ impl QuillApp {
     /// The craft button: `craftGift`, and the forge starts.
     pub(super) fn craft_now(&mut self, cx: &mut Context<Self>) {
         let started = match self.live.as_mut() {
-            Some(live) => live.driver.craft_gift().is_ok(),
+            Some(live) => live.driver.craft_gift().ok(),
             // The demo crafts nothing; the forge ends in a failure.
-            None => self.craft_mut().is_some_and(|craft| {
+            None => self.craft_mut().map(|craft| {
                 craft.run = CraftRun::Crafting { request: 0 };
-                true
+                RequestId(0)
             }),
         };
-        if started {
-            self.gift_market.craft.start_forge(Instant::now());
+        if let Some(request) = started {
+            self.gift_market.craft.start_forge(Instant::now(), request);
         } else {
             self.set_note(StatusNote::error(tr(keys::Q_MONEY_COULDNT_CRAFT_THE_GIFT)));
         }
@@ -255,7 +256,10 @@ impl QuillApp {
 
     /// Ends the forge once it ran its time and the answer is in.
     pub(super) fn craft_frame_upkeep(&mut self, cx: &mut Context<Self>) {
-        let Some(started) = self.gift_market.craft.forge_since() else {
+        let (Some(started), Some(request)) = (
+            self.gift_market.craft.forge_since(),
+            self.gift_market.craft.forge_request(),
+        ) else {
             return;
         };
         if started.elapsed().as_secs_f32() < FORGE_SECONDS {
@@ -267,10 +271,10 @@ impl QuillApp {
             self.after_craft_pop();
             return;
         };
-        if demo && craft.crafting() {
+        let waiting = craft.run == (CraftRun::Crafting { request: request.0 });
+        if demo && waiting {
             craft.run = CraftRun::Done(CraftResult::Fail);
-        }
-        if craft.crafting() {
+        } else if waiting {
             return;
         }
         let result = craft.result().cloned();
@@ -325,9 +329,7 @@ impl QuillApp {
         }
         // Closing the boxes while the forge runs leaves the craft in
         // flight: its outcome still opens the result box.
-        if self.gift_market.craft.forge_since().is_some()
-            || self.craft_session().is_some_and(|craft| craft.crafting())
-        {
+        if self.gift_market.craft.forge_since().is_some() {
             return;
         }
         self.gift_market.craft = CraftStage::Idle;

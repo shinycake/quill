@@ -179,6 +179,14 @@ impl State {
         self.retire(|key, windows| survives(key, windows, pass))
     }
 
+    /// Whether opening `key` from `path` already failed (not asked again
+    /// until the path changes).
+    pub(super) fn refused(&self, key: Key, path: &std::path::Path) -> bool {
+        self.unopenable
+            .get(&key)
+            .is_some_and(|failed| failed == path)
+    }
+
     /// The slots of `list` (`None`: of every list) leave `window`.
     fn leave(&mut self, window: Option<ChatId>, list: Option<List>) -> HashMap<Key, Slot> {
         self.expire_waiting_demands(window, list);

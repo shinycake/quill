@@ -17,14 +17,39 @@ const CAPACITY: usize = 1024;
 /// How long an unreadable file waits before it is probed again.
 const RETRY_AFTER: Duration = Duration::from_secs(30);
 
+/// How long a probe may run before it counts as lost (a stalled network
+/// drive): the file is then probed again, so one hung read never turns the
+/// tag off for good.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(60);
+
 enum Entry {
-    Probing,
+    /// The probe job started at `since`; it records its own answer.
+    Probing {
+        since: Instant,
+    },
     Known(bool),
     Unreadable(Instant),
 }
 
 static PROBED: LazyLock<Mutex<HashMap<PathBuf, Entry>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// What a cache entry says to do now.
+#[derive(Debug, PartialEq, Eq)]
+enum Lookup {
+    Answer(bool),
+    Wait,
+    Probe,
+}
+
+fn lookup(entry: Option<&Entry>) -> Lookup {
+    match entry {
+        Some(Entry::Known(hdr)) => Lookup::Answer(*hdr),
+        Some(Entry::Probing { since }) if since.elapsed() < PROBE_TIMEOUT => Lookup::Wait,
+        Some(Entry::Unreadable(at)) if at.elapsed() < RETRY_AFTER => Lookup::Wait,
+        Some(Entry::Probing { .. } | Entry::Unreadable(_)) | None => Lookup::Probe,
+    }
+}
 
 /// Whether the file at `path` carries HDR data. The first ask starts a
 /// background probe and answers `false`; the bubble repaints when it
@@ -36,16 +61,20 @@ pub(crate) fn has_hdr(path: &Path, cx: &mut Context<QuillApp>) -> bool {
     let Ok(mut probed) = PROBED.lock() else {
         return false;
     };
-    match probed.get(path) {
-        Some(Entry::Known(hdr)) => return *hdr,
-        Some(Entry::Probing) => return false,
-        Some(Entry::Unreadable(at)) if at.elapsed() < RETRY_AFTER => return false,
-        Some(Entry::Unreadable(_)) | None => {}
+    match lookup(probed.get(path)) {
+        Lookup::Answer(hdr) => return hdr,
+        Lookup::Wait => return false,
+        Lookup::Probe => {}
     }
     if probed.len() >= CAPACITY {
         probed.clear();
     }
-    probed.insert(path.to_path_buf(), Entry::Probing);
+    probed.insert(
+        path.to_path_buf(),
+        Entry::Probing {
+            since: Instant::now(),
+        },
+    );
     drop(probed);
     let path = path.to_path_buf();
     // The job records its own answer, so `Probing` leaves even when the
@@ -72,4 +101,24 @@ pub(crate) fn has_hdr(path: &Path, cx: &mut Context<QuillApp>) -> bool {
     })
     .detach();
     false
+}
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod tests {
+    use super::{Entry, Lookup, PROBE_TIMEOUT, lookup};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn a_probe_that_never_returns_is_asked_again() {
+        let now = Instant::now();
+        let fresh = Entry::Probing { since: now };
+        assert_eq!(lookup(Some(&fresh)), Lookup::Wait);
+        if let Some(since) = now.checked_sub(PROBE_TIMEOUT + Duration::from_secs(1)) {
+            let lost = Entry::Probing { since };
+            assert_eq!(lookup(Some(&lost)), Lookup::Probe);
+        }
+        assert_eq!(lookup(Some(&Entry::Known(true))), Lookup::Answer(true));
+        assert_eq!(lookup(None), Lookup::Probe);
+    }
 }

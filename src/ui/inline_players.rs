@@ -323,9 +323,8 @@ impl Slot {
 #[derive(Default)]
 struct State {
     players: HashMap<Key, Slot>,
-    /// Clips whose file did not open (unreadable, unsupported), with the
-    /// path that failed: a tile asks for a new player only once its path
-    /// changes, not on every frame. Emptied with the players.
+    /// Clips whose file did not open, with that path: asked again only
+    /// when the path changes. Emptied with the players.
     unopenable: HashMap<Key, PathBuf>,
     /// Each window's pass counts, of its history and of each panel
     /// (`None`: the main window's).
@@ -888,10 +887,7 @@ impl InlineVideos {
             return None;
         }
         let path = path()?;
-        if self
-            .with(|state| state.unopenable.get(&key) == Some(&path))
-            .unwrap_or(false)
-        {
+        if self.with(|state| state.refused(key, &path)) == Some(true) {
             return None;
         }
         let Ok(player) = VideoPlayer::open(&path, Purpose::Inline { max_edge }, duration, cx)

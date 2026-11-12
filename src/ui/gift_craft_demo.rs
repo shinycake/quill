@@ -110,7 +110,9 @@ impl QuillApp {
                     craft.run = quill::gift_market::CraftRun::Crafting { request: 0 };
                 }
                 if let Some(since) = Instant::now().checked_sub(Duration::from_millis(1_400)) {
-                    self.gift_market.craft.start_forge(since);
+                    self.gift_market
+                        .craft
+                        .start_forge(since, quill::ids::RequestId(0));
                 }
             }
             "success" | "failed" => {

@@ -209,22 +209,10 @@ impl MarketFlow {
     }
 }
 
-/// How the market's ask for a sticker file ended: the request went out,
-/// or the send was refused (not asked again until the set of
-/// files changes or the boxes are reopened).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum FileAskOutcome {
-    Sent,
-    Refused,
-}
-
 pub(crate) struct GiftMarketUi {
     pub(super) stack: Vec<MarketBox>,
     /// Who a bid is for, "Hide My Name", and an auction waiting to open.
     pub(super) flow: MarketFlow,
-    /// The sticker files asked for, each sent or refused; downloads go out
-    /// once per file, not every frame.
-    pub(super) requested_files: Vec<(quill::ids::FileId, FileAskOutcome)>,
     /// How often the chat-list bar opened its box (one tap, one open).
     #[cfg(test)]
     pub(super) bar_opens: usize,
@@ -242,10 +230,12 @@ pub(crate) enum CraftStage {
     /// The gift the craft info box was opened for.
     Chosen(CraftGift),
     /// The forge runs at least `FORGE_SECONDS` from `since`; it ends when
-    /// its answer is in, and `primary` is kept for the boxes below.
+    /// the answer to `request` (the `craftGift` it was started for) is in,
+    /// and `primary` is kept for the boxes below.
     Forging {
         primary: Option<CraftGift>,
         since: Instant,
+        request: quill::ids::RequestId,
     },
 }
 
@@ -276,10 +266,22 @@ impl CraftStage {
         true
     }
 
-    /// The forge starts (or restarts) at `since`.
-    pub(super) fn start_forge(&mut self, since: Instant) {
+    /// The request the running forge waits for.
+    pub(super) fn forge_request(&self) -> Option<quill::ids::RequestId> {
+        match self {
+            Self::Forging { request, .. } => Some(*request),
+            _ => None,
+        }
+    }
+
+    /// The forge starts (or restarts) at `since`, for `request`.
+    pub(super) fn start_forge(&mut self, since: Instant, request: quill::ids::RequestId) {
         let primary = self.primary().cloned();
-        *self = Self::Forging { primary, since };
+        *self = Self::Forging {
+            primary,
+            since,
+            request,
+        };
     }
 
     /// The forge ended: the chosen gift stays for the boxes below.
@@ -314,7 +316,6 @@ impl GiftMarketUi {
         Self {
             stack: Vec::new(),
             flow: MarketFlow::default(),
-            requested_files: Vec::new(),
             #[cfg(test)]
             bar_opens: 0,
             craft: CraftStage::Idle,
@@ -341,14 +342,12 @@ impl GiftMarketUi {
     }
 
     /// What only the open boxes owned goes with the last of them, however
-    /// it left (back, replace, clear): the recipient, a pending open and
-    /// the file asks. "Hide My Name" belongs to the send, change and bid
+    /// it left (back, replace, clear): the recipient and a pending open. "Hide My Name" belongs to the send, change and bid
     /// boxes of one bid: when the last of those leaves, it goes, so the
     /// next auction starts clean.
     fn drop_orphans(&mut self) {
         if self.stack.is_empty() {
             self.flow = MarketFlow::default();
-            self.requested_files.clear();
         }
         let naming = self.stack.iter().any(|entry| {
             matches!(
