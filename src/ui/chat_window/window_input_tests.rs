@@ -226,6 +226,7 @@ fn each_window_owns_the_timer_of_its_typed_chat_search(cx: &mut TestAppContext) 
             std::future::pending::<()>().await;
         });
     });
+    cx.run_until_parked();
     scoped(&h, None, cx, |app, _| {
         app.search_ui.debounce.chat = gpui_kit::Task::ready(());
     });

@@ -324,7 +324,7 @@ fn settle_asked_word(
     if lookups.waits_for(request) {
         return Settle::Wait(request);
     }
-    if lookups.answer(word).is_some() {
+    if lookups.answered_by(word) == Some(request) {
         return Settle::Open;
     }
     match lookups.request_for(word) {

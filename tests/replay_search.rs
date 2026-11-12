@@ -164,6 +164,7 @@ fn replay_chat_search_generation_jump_and_empty() {
     session.search.chat_search.begin_query("hello");
     let extra =
         session.request_chat_search(RequestPurpose::SearchChatMessages, quill::ids::ChatId(7));
+    session.search.chat_search.searching(extra);
     apply_all_seq(
         &mut session,
         &sink,

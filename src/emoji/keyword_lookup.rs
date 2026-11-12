@@ -27,8 +27,10 @@ const ATTEMPTS: u8 = 2;
 enum Lookup {
     /// `request` is out; `failures` earlier attempts failed.
     Asking { request: RequestId, failures: u8 },
-    /// Answered; `age` orders the entries when the oldest are forgotten.
+    /// Answered by `request`; `age` orders the entries when the oldest are
+    /// forgotten.
     Answered {
+        request: RequestId,
         age: u64,
         keywords: Vec<EmojiKeyword>,
     },
@@ -91,6 +93,15 @@ impl KeywordLookups {
     pub fn request_for(&self, query: &str) -> Option<RequestId> {
         match self.entries.get(query) {
             Some(Lookup::Asking { request, .. }) => Some(*request),
+            _ => None,
+        }
+    }
+
+    /// The request whose answer `query` holds: a reader that waited for
+    /// that request knows its own lookup answered, not another one's.
+    pub fn answered_by(&self, query: &str) -> Option<RequestId> {
+        match self.entries.get(query) {
+            Some(Lookup::Answered { request, .. }) => Some(*request),
             _ => None,
         }
     }
@@ -167,6 +178,7 @@ impl KeywordLookups {
         self.entries.insert(
             query,
             Lookup::Answered {
+                request: id,
                 age: self.generation,
                 keywords,
             },
