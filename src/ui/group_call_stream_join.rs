@@ -3,7 +3,7 @@
 //! stage (`GroupTransport`) until it lands, fails or times out.
 
 use super::app::QuillApp;
-use super::group_call_state::StreamJoining;
+use super::group_call_state::{JoinSent, StreamJoining};
 use super::group_call_stream_layout::{StreamJoinIntent, uses_stream_layout};
 use gpui_kit::*;
 use quill::lang::{keys, tr};
@@ -17,13 +17,13 @@ impl QuillApp {
     /// join you asked for.
     pub(super) fn join_stream(&mut self, id: i32, cx: &mut Context<Self>) {
         self.dismiss_group_call_error(cx);
-        if self.send_group_call_join() {
+        if let Some(sent) = self.send_group_call_join() {
             let timeout = self.spawn_screen(cx, async move |this, cx| {
                 cx.background_executor().timer(JOIN_TIMEOUT).await;
                 let _ = this.update(cx, |app, cx| app.stream_join_ended(id, cx));
             });
             self.group_call_screen
-                .start_join(StreamJoining::new(id, timeout));
+                .start_join(StreamJoining::new(id, sent, timeout));
         } else {
             self.stream_join_failed();
         }
@@ -44,15 +44,28 @@ impl QuillApp {
     /// The join on its way landed or failed: stop waiting, and say so when
     /// it failed. Run with the window sync, outside the draw.
     pub(super) fn settle_stream_join(&mut self) {
-        let Some(joining) = self.group_call_screen.joining_call() else {
+        let Some(joining) = self.group_call_screen.joining() else {
             return;
         };
+        let (joining_call, sent) = (joining.call, joining.sent);
         let Some(facts) = self.group_call_stream_facts() else {
             return;
         };
-        if joining != facts.id {
+        if joining_call != facts.id {
             self.stream_join_failed();
         } else if facts.joined {
+            self.group_call_screen.clear_stream_joining();
+        } else if self.session().is_some_and(|session| {
+            // The transport now waits on another join's request (a rejoin
+            // took its place): this join's request is no longer the one in
+            // flight, so it ends with no failure of its own.
+            matches!(sent, JoinSent::Request(mine) if session
+                .calls
+                .active_group_call
+                .as_ref()
+                .and_then(|call| call.transport.join_request())
+                .is_some_and(|waits| waits != mine))
+        }) {
             self.group_call_screen.clear_stream_joining();
         } else if self.session().is_some_and(|session| {
             // The call's transport failed: a join clears it, so while a

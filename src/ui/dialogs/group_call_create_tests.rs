@@ -173,9 +173,7 @@ fn in_other_call(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, joined: bo
         if !joined {
             // The join went out and waits for its answer.
             app.group_call_screen.stream_watch = crate::ui::group_call_state::StreamWatch::Joining(
-                crate::ui::group_call_state::StreamJoining::new(
-                    OTHER_CALL,
-                    gpui_kit::Task::ready(()),
+                crate::ui::group_call_state::StreamJoining::new(OTHER_CALL, crate::ui::group_call_state::JoinSent::Demo, gpui_kit::Task::ready(()),
                 ),
             );
         }

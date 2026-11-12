@@ -301,7 +301,7 @@ fn a_join_and_a_wish_keep_each_other(cx: &mut TestAppContext) {
     app.update_in(vcx, |app, _, _| {
         let screen = &mut app.group_call_screen;
         screen.want_stream(StreamJoinIntent::Call(5), None);
-        screen.start_join(StreamJoining::new(77, gpui_kit::Task::ready(())));
+        screen.start_join(StreamJoining::new(77, crate::ui::group_call_state::JoinSent::Demo, gpui_kit::Task::ready(())));
         assert!(screen.stream_wish().is_some(), "the wish for call 5 stays");
         assert_eq!(screen.joining_call(), Some(77));
         screen.want_stream(StreamJoinIntent::Call(6), None);

@@ -198,17 +198,28 @@ pub(crate) struct GroupCallScreen {
     pub(super) stream_watch: StreamWatch,
 }
 
-/// A stream join on its way: the call and the task that gives up on it
-/// when it neither lands nor fails. Dropping it ends the wait.
+/// A join that went out: its `joinVideoChat` request, or the screenshot
+/// demo's, which has none.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum JoinSent {
+    Request(quill::ids::RequestId),
+    Demo,
+}
+
+/// A stream join on its way: the call, the request that joins it, and the
+/// task that gives up on it when it neither lands nor fails. Dropping it
+/// ends the wait.
 pub(super) struct StreamJoining {
     pub(super) call: i32,
+    pub(super) sent: JoinSent,
     _timeout: Task<()>,
 }
 
 impl StreamJoining {
-    pub(super) fn new(call: i32, timeout: Task<()>) -> Self {
+    pub(super) fn new(call: i32, sent: JoinSent, timeout: Task<()>) -> Self {
         Self {
             call,
+            sent,
             _timeout: timeout,
         }
     }
@@ -235,16 +246,21 @@ pub(super) enum StreamWatch {
 }
 
 impl GroupCallScreen {
-    /// The call whose join is on its way, if any.
-    pub(super) fn joining_call(&self) -> Option<i32> {
+    /// The join on its way, if any.
+    pub(super) fn joining(&self) -> Option<&StreamJoining> {
         match &self.stream_watch {
             StreamWatch::Joining(joining)
             | StreamWatch::Wanted {
                 joining: Some(joining),
                 ..
-            } => Some(joining.call),
+            } => Some(joining),
             StreamWatch::Idle | StreamWatch::Wanted { joining: None, .. } => None,
         }
+    }
+
+    /// The call whose join is on its way, if any.
+    pub(super) fn joining_call(&self) -> Option<i32> {
+        self.joining().map(|joining| joining.call)
     }
 
     /// The stream you asked for and the call tracked when you asked, until

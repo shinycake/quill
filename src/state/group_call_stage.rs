@@ -47,6 +47,14 @@ impl GroupTransport {
         matches!(self, Self::NoTransport)
     }
 
+    /// The `joinVideoChat` request this transport waits on.
+    pub fn join_request(&self) -> Option<RequestId> {
+        match self {
+            Self::Joining { request } => Some(*request),
+            _ => None,
+        }
+    }
+
     /// A join press was taken and its request is out.
     pub fn joining(&self) -> bool {
         matches!(self, Self::Joining { .. })

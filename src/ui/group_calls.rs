@@ -74,16 +74,17 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Send the join for the tracked call. False when it could not be
-    /// sent (no call, a 1:1 call is on, the connection refused it).
-    pub(super) fn send_group_call_join(&mut self) -> bool {
+    /// Send the join for the tracked call, and the request that carries it.
+    /// `None` when it could not be sent (no call, a 1:1 call is on, the
+    /// connection refused it).
+    pub(super) fn send_group_call_join(&mut self) -> Option<super::group_call_state::JoinSent> {
         let id = self
             .session()
             .and_then(|s| s.calls.active_group_call.as_ref())
             .map(|c| c.id);
         let Some(id) = id else {
             self.set_note(StatusNote::silent(tr(keys::Q_AV_NO_VOICE_CHAT_TO_JOIN)));
-            return false;
+            return None;
         };
         // Push-to-talk joins with the microphone closed.
         let ptt_on = self
@@ -94,7 +95,10 @@ impl QuillApp {
             // join goes out, and a join that never leaves (refused, or its
             // offer failing) leaves the call as it was.
             let result = live.driver.join_video_chat_with(id, ptt_on);
-            let sent = result.is_ok();
+            let sent = result
+                .as_ref()
+                .ok()
+                .map(|request| super::group_call_state::JoinSent::Request(*request));
             self.set_note(match result {
                 Ok(_) => StatusNote::silent(tr(keys::Q_AV_JOINING_VOICE_CHAT)),
                 Err(err) => {
@@ -114,9 +118,9 @@ impl QuillApp {
             self.set_note(StatusNote::silent(tr(
                 keys::Q_AV_SCREENSHOT_DEMO_VOICE_CHAT_NO,
             )));
-            true
+            Some(super::group_call_state::JoinSent::Demo)
         } else {
-            false
+            None
         }
     }
 
