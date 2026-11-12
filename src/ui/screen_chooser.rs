@@ -21,13 +21,14 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::frame_clock::follow_app;
 use super::group_call_panel::{MEMBER_MUTED_ICON, MEMBERS_BG, MEMBERS_BG_OVER};
-use super::screen_share_state::{Chooser, ChooserSource, ChooserTarget, OpenChooser, ScreenFor};
+use super::screen_share_state::{
+    Chooser, ChooserSource, ChooserTarget, DemoShare, OpenChooser, ScreenFor,
+};
 use crate::ui::status_note::StatusNote;
+use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::button::{Button, ButtonCustomVariant, ButtonVariants};
 use gpui_kit::component::checkbox::Checkbox;
-use gpui_kit::component::{ActiveTheme, Root};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::calls::capture::screen::{
@@ -37,6 +38,9 @@ use quill::calls::capture::screen::{
 use quill::lang::{keys, tr, tr_with};
 use smallvec::SmallVec;
 use std::sync::Arc;
+
+#[path = "screen_chooser_window.rs"]
+mod chooser_window;
 
 /// tdesktop `desktopCaptureMargins`.
 const MARGIN_LEFT: f32 = 12.;
@@ -168,7 +172,11 @@ impl QuillApp {
                     screen.chosen().filter(|_| sharing).cloned()
                 })
             }
-            None => self.screen_share.demo_active.clone(),
+            None => self
+                .screen_share
+                .demo_active
+                .as_ref()
+                .map(|share| share.source.clone()),
         }
     }
 
@@ -186,7 +194,11 @@ impl QuillApp {
     fn active_screen_audio(&self) -> bool {
         match self.live.as_ref() {
             Some(live) => live.driver.call_screen().with_audio(),
-            None => self.screen_share.demo_active_audio,
+            None => self
+                .screen_share
+                .demo_active
+                .as_ref()
+                .is_some_and(|share| share.with_audio),
         }
     }
 
@@ -230,13 +242,15 @@ impl QuillApp {
         // A second ask while a chooser is up or being made retargets it
         // (the old `for_call` was set on every ask).
         match &mut self.screen_share.chooser {
-            Chooser::Open(open) => {
-                open.target = target;
-                if let Some(handle) = open.window {
-                    // tdesktop `activate()`: one chooser per call, brought forward.
-                    let _ = handle.update(cx, |_, window, _| window.activate_window());
-                }
-                // Without a window yet, it is being made.
+            Chooser::Open { sheet, window } => {
+                sheet.target = target;
+                // tdesktop `activate()`: one chooser per call, brought forward.
+                let _ = window.update(cx, |_, window, _| window.activate_window());
+                return true;
+            }
+            // The window is being made: the chooser is retargeted.
+            Chooser::Opening { sheet, .. } => {
+                sheet.target = target;
                 return true;
             }
             // Listing on this screen already. One started on an earlier
@@ -324,10 +338,9 @@ impl QuillApp {
         let selected = initial_selection(&sources, active.as_ref());
         let with_audio = active.is_some() && self.active_screen_audio();
         let labels = source_labels(&sources);
-        self.screen_share.chooser = Chooser::Open(OpenChooser {
+        let sheet = OpenChooser {
             target,
             generation,
-            window: None,
             selected,
             with_audio,
             sources: sources
@@ -339,71 +352,10 @@ impl QuillApp {
                     thumbnail: None,
                 })
                 .collect(),
-        });
-        self.open_screen_chooser_window(cx);
+        };
+        let open = self.open_screen_chooser_window(cx);
+        self.screen_share.chooser = Chooser::Opening { sheet, _open: open };
         true
-    }
-
-    fn open_screen_chooser_window(&mut self, cx: &mut Context<Self>) {
-        let owner = cx.entity();
-        let screen = self.screen_epoch();
-        cx.defer(move |cx| {
-            // Another account came on screen first: open nothing for it.
-            if owner.read(cx).screen_epoch() != screen {
-                return;
-            }
-            let weak = owner.downgrade();
-            let render_owner = owner.clone();
-            let bounds = Bounds::centered(None, window_size(), cx);
-            let result = cx.open_window(
-                WindowOptions {
-                    window_bounds: Some(WindowBounds::Windowed(bounds)),
-                    titlebar: Some(TitlebarOptions {
-                        title: None,
-                        appears_transparent: true,
-                        traffic_light_position: Some(point(px(10.), px(8.))),
-                    }),
-                    is_resizable: false,
-                    focus: true,
-                    show: true,
-                    ..Default::default()
-                },
-                move |window, cx| {
-                    window.activate_window();
-                    super::window_control::set_always_on_top(window, true);
-                    window.on_window_should_close(cx, move |_, cx| {
-                        let _ = weak.update(cx, |app, cx| {
-                            app.in_screen_scope(screen, cx, |app, cx| app.screen_chooser_closed(cx))
-                        });
-                        true
-                    });
-                    let view = cx.new(|cx| ScreenChooserView {
-                        owner: render_owner.downgrade(),
-                        _observe: follow_app(&render_owner, cx),
-                    });
-                    cx.new(|cx| Root::new(view, window, cx))
-                },
-            );
-            owner.update(cx, |app, cx| {
-                app.in_screen_scope(screen, cx, |app, cx| {
-                    match result {
-                        Ok(handle) => match app.screen_share.chooser.open_mut() {
-                            Some(open) => open.window = Some(handle.into()),
-                            // The chooser was closed while its window was
-                            // being made: the window goes too.
-                            None => {
-                                cx.defer(move |cx| {
-                                    let _ =
-                                        handle.update(cx, |_, window, _| window.remove_window());
-                                });
-                            }
-                        },
-                        Err(_) => app.screen_chooser_closed(cx),
-                    }
-                    cx.notify();
-                });
-            });
-        });
     }
 
     /// The window is gone: forget the chooser.
@@ -526,8 +478,10 @@ impl QuillApp {
                 self.start_screen_share(for_call, cx);
             }
         } else {
-            self.screen_share.demo_active = Some(id);
-            self.screen_share.demo_active_audio = with_audio;
+            self.screen_share.demo_active = Some(DemoShare {
+                source: id,
+                with_audio,
+            });
             self.set_demo_screen_sharing(for_call, true);
         }
         self.close_screen_chooser(cx);
@@ -546,7 +500,6 @@ impl QuillApp {
             self.stop_screen_share(for_call, cx);
         } else {
             self.screen_share.demo_active = None;
-            self.screen_share.demo_active_audio = false;
             self.set_demo_screen_sharing(for_call, false);
         }
         self.close_screen_chooser(cx);

@@ -91,7 +91,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.close_message_menu();
-        self.chat_list.menu.close();
+        self.chat_list.overlay.close_menu();
         self.folders.tab_menu = Some(FolderTabMenu {
             folder_id,
             position,

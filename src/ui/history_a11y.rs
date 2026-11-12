@@ -203,7 +203,7 @@ impl QuillApp {
                     return;
                 };
                 self.chat_ui.focus = A11yFocus::Row(id);
-                self.chat_ui.selection_anchor = Some(id);
+                self.set_selection_anchor(id);
                 ix
             }
         };

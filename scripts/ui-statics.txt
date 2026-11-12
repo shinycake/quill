@@ -17,7 +17,7 @@ src/ui/selectable_text.rs OWNERS | keyed by text entity, which lives in one wind
 src/ui/image_budget.rs WHOLE | keyed by window scope (None: the main window)
 src/ui/image_budget.rs SLICES | keyed by slice entity, each with its own window
 src/ui/send_fly.rs CELLS | keyed by window scope and file
-src/ui/send_fly.rs FLY | the flight names its window; only that window draws it
+src/ui/send_fly.rs FLIGHT | the flight names its window; only that window draws it, and the account leaving or the lock ends it
 src/ui/send_fly.rs SOURCE,TARGET,ORIGIN | the one flight's ends, drawn only in its window
 src/ui/sticker_player/display.rs DISPLAYS | keyed by window scope
 src/ui/emoji_effect.rs ANCHORS,ACTIVE | keyed by chat and message; a chat shows in one window
@@ -67,7 +67,7 @@ src/ui/early_connect.rs FIRST | the first client, main thread only
 src/ui/location_picker/geolocation/macos.rs RUNNING | the one location request
 src/ui/location_picker/demo.rs NEXT_EXTRA | an id counter
 src/ui/platform_cursor.rs OS_PLATFORM | the platform handle
-src/ui/startup_failure.rs QUIT,GPU_GONE,QUIT_ASKED | app quit state
+src/ui/startup_failure.rs QUIT,GPU_GONE,QUIT_STAGE | app quit state
 src/ui/touch_bar/mac/mod.rs HOST,INBOX,SYNC_SCHEDULER,BAR_SCREEN,APPLIED,BINDING | the one Touch Bar, bound to the main window (BINDING names it)
 src/ui/video_player/mod.rs NEXT | an id counter
 src/ui/video_player/decoder_load.rs LOADS,REFRESHES | counters

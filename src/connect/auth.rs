@@ -131,17 +131,18 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Fetch the IP-based default country once.
     pub fn fetch_country_code(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        if self.session.auth_state.guessed_country_iso.is_some()
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetCountryCode)
-        {
+        if !self.session.auth_state.guessed_country.is_idle() {
             return Ok(None);
         }
         let extra = self.session.request(RequestPurpose::GetCountryCode, None);
+        self.session.auth_state.guessed_country.begin();
+        self.session.auth_state.guessed_country.sent(extra);
         if let Err(err) = self.sender.send_json(&get_country_code(extra)) {
             self.session.requests.take(extra);
+            self.session
+                .auth_state
+                .guessed_country
+                .failed(Some(extra), "not sent", false);
             return Err(err);
         }
         Ok(Some(extra))

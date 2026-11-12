@@ -225,7 +225,6 @@ impl QuillApp {
                 // M1: `cx.listener` closures must be `'static`, so the
                 // row's ids are copied out of the message first.
                 let (row_chat, row_msg) = (message.chat_id, message.id);
-                let message_pending = message.pending();
                 let wide_right = look.wide.then(|| {
                     let limit = crate::ui::history::bubble_width::message_width_limit(
                         cx,
@@ -241,8 +240,7 @@ impl QuillApp {
                         .map_or(f32::MAX, |view| f32::from(view.size.width));
                     quill::chat_wide::selection_right(limit, width)
                 });
-                let selection =
-                    self.selection_row(row_chat, row_msg, message.pending(), wide_right, cx);
+                let selection = self.selection_row(row_chat, row_msg, wide_right, cx);
                 let (selection_overlay, selection_tint, selection_slide) =
                     (selection.overlay, selection.tint, selection.slide);
                 // The side the bubble sits on (`hasRightLayout`): the wide
@@ -306,14 +304,7 @@ impl QuillApp {
                             // (`selection_drag`). In selection mode the
                             // row's overlay takes the press instead.
                             if !this.selecting_in(row_chat) {
-                                this.selection_press_row(
-                                    row_chat,
-                                    row_msg,
-                                    message_pending,
-                                    event,
-                                    window,
-                                    cx,
-                                );
+                                this.selection_press_row(row_chat, row_msg, event, window, cx);
                             }
                             cx.notify();
                         }),

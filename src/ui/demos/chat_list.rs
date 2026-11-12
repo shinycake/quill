@@ -53,7 +53,7 @@ impl QuillApp {
         let menu = self
             .demo_chat_menu_variant()
             .unwrap_or_else(|| ChatMenuState::at(ChatId(11), Point::new(px(120.), px(770.))));
-        self.chat_list.menu.open_row(menu);
+        self.chat_list.overlay.open_row(menu);
         self.set_note(StatusNote::silent(
             "screenshot demo — mentions · reactions · multi-select · report · block",
         ));

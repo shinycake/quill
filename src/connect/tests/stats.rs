@@ -847,3 +847,21 @@ fn a_stale_post_answer_does_not_settle_the_row() {
         PostFetch::Loading { .. }
     ));
 }
+
+/// A refresh that cannot go (the client is not ready) leaves the panel
+/// failed, not `Loaded` in the old theme, so the poll that checks the theme
+/// does not ask on every pass.
+#[test]
+fn a_statistics_refresh_that_cannot_go_ends_in_failed() {
+    let mut rig = Rig::new();
+    rig.driver.session.auth = crate::telegram::envelope::AuthorizationState::WaitPhoneNumber;
+    assert!(
+        rig.driver
+            .refresh_chat_statistics(ChatId(-100), true)
+            .is_err()
+    );
+    assert!(matches!(
+        rig.driver.session.groups.chat_statistics.get(&-100),
+        Some(ChatStatisticsFetch::Failed(_))
+    ));
+}

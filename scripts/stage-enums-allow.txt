@@ -42,3 +42,4 @@ bare:OutboxReceipt::Sent src/state/chat_types.rs: a mark derived at draw time fr
 bare:RowStatus::Sending src/state/chat_types.rs: a mark derived at draw time from the last message's `MessageSendState::Pending` (`ChatSummary::row_status`); the send itself is tracked by its own request elsewhere
 bare:RowStatus::Sent src/state/chat_types.rs: a mark derived at draw time from the outbox receipt (`ChatSummary::row_status`); delivered, not yet read
 bare:WithdrawalState::Pending src/premium_hub/ton.rs: TDLib's `RevenueWithdrawalState` of a Fragment withdrawal mirrored as is (the server's own state of the payout); Quill started nothing
+bare:MenuFile::Downloading a fact about the row's file read while a menu is built (the download stage lives in the downloads table); nothing is held or waited for

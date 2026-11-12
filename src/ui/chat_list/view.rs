@@ -5,7 +5,7 @@
 //! laid-out rows), so no caller ends them by hand.
 
 use super::*;
-use crate::ui::chat_list_state::{ChatListUi, PeekPreview, PinStage, SidebarTab};
+use crate::ui::chat_list_state::{ChatListUi, PinStage, SidebarTab};
 
 /// The chat list's view: the category and the folder tab (`None` is Main),
 /// one value so they never change apart. Only `ChatListUi::show_view` writes
@@ -62,7 +62,7 @@ impl ChatListUi {
     /// peek preview shows over it.
     pub(in crate::ui) fn begin_pin_drag(&mut self, stage: PinStage) {
         self.pin = stage;
-        self.peek = PeekPreview::Idle;
+        self.overlay.close_peek();
     }
 
     /// A new list pass starts: rows not drawn in it age out of the

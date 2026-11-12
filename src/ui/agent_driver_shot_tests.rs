@@ -524,7 +524,7 @@ fn a_chat_menu_is_cut_with_its_row(cx: &mut TestAppContext) {
         let anchor = row_anchor(vcx, chat as u64);
         app.update(vcx, |app, cx| {
             app.chat_list
-                .menu
+                .overlay
                 .open_row(ChatMenuState::at(ChatId(chat), anchor));
             cx.notify();
         });
@@ -543,7 +543,7 @@ fn a_chat_menu_is_cut_with_its_row(cx: &mut TestAppContext) {
             "chat {chat}'s menu in the picture"
         );
         app.update(vcx, |app, cx| {
-            app.chat_list.menu.close();
+            app.chat_list.overlay.close_menu();
             cx.notify();
         });
         settle(vcx);
@@ -569,7 +569,7 @@ fn a_secret_chat_peek_is_cut_with_all_chats_on(cx: &mut TestAppContext) {
     settle(vcx);
     for (chat, shown) in [(SECRET, false), (12, true)] {
         app.update(vcx, |app, cx| {
-            app.chat_list.peek = crate::ui::chat_list_state::PeekPreview::Open(ChatPreviewState {
+            app.chat_list.overlay.open_peek(ChatPreviewState {
                 chat_id: ChatId(chat),
                 anchor: gpui_kit::point(gpui_kit::px(40.), gpui_kit::px(200.)),
             });
@@ -616,7 +616,7 @@ fn a_secret_chat_peek_is_cut_with_all_chats_on(cx: &mut TestAppContext) {
             "chat {chat}'s peek in the picture"
         );
         app.update(vcx, |app, cx| {
-            app.chat_list.peek = crate::ui::chat_list_state::PeekPreview::Idle;
+            app.chat_list.overlay.close_peek();
             cx.notify();
         });
         settle(vcx);

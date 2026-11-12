@@ -339,6 +339,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         refresh: bool,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
+            // A refresh that cannot go leaves the panel failed, with Retry:
+            // left `Loaded` in the other theme, the poll would ask again
+            // every pass.
+            if refresh {
+                self.fail_chat_statistics(chat_id, keys::Q_MONEY_STATISTICS_SEND_FAILED);
+            }
             return Err(ConnectSendError::InvalidRequest);
         }
         let supergroup_id = self

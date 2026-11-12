@@ -412,7 +412,7 @@ impl QuillApp {
     /// The menus only the main window draws: the chat list's row, archive
     /// and story menus, a playlist's and a folder tab's.
     fn main_menu_open(&self) -> bool {
-        self.chat_list.menu.is_open()
+        self.chat_list.overlay.menu_open()
             || self.admin.community.flow.row_menu.is_some()
             || self.chat_list.global.story_menu.is_some()
             || self.playback.playlist.menu().is_some()
@@ -440,7 +440,7 @@ impl QuillApp {
         self.close_message_menu();
         if !self.windows.in_window() {
             self.playback.playlist.close_menu();
-            self.chat_list.menu.close();
+            self.chat_list.overlay.close_menu();
             self.admin.community.flow.row_menu = None;
             self.chat_list.global.story_menu = None;
             self.folders.tab_menu = None;
@@ -484,7 +484,7 @@ impl QuillApp {
             return None;
         }
         match (
-            self.chat_list.menu.row(),
+            self.chat_list.overlay.row(),
             &self.admin.community.flow.row_menu,
         ) {
             (Some(menu), _) => menu.submenu,
