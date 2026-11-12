@@ -39,7 +39,7 @@ impl QuillApp {
         let hidden = !self.frame.sidebar.hidden();
         self.frame
             .sidebar
-            .set_hidden(hidden, animate(), crate::ui::sidebar_reveal::now());
+            .set_hidden(hidden, animate(), self.frame.sidebar.now());
         if hidden {
             self.release_sidebar_focus(window, cx);
         }
@@ -58,7 +58,7 @@ impl QuillApp {
         if self
             .frame
             .sidebar
-            .dismiss(animate(), crate::ui::sidebar_reveal::now())
+            .dismiss(animate(), self.frame.sidebar.now())
         {
             self.release_sidebar_focus(window, cx);
             cx.notify();
@@ -94,7 +94,7 @@ impl QuillApp {
         window: &Window,
         cx: &mut Context<Self>,
     ) {
-        let now = crate::ui::sidebar_reveal::now();
+        let now = self.frame.sidebar.now();
         if self.sidebar_hideable(layout) {
             let held = self.sidebar_peek_held(window, cx);
             self.frame.sidebar.settle(held, animate(), now);
@@ -111,7 +111,7 @@ impl QuillApp {
         if self
             .frame
             .sidebar
-            .pointer_entered(animate(), crate::ui::sidebar_reveal::now())
+            .pointer_entered(animate(), self.frame.sidebar.now())
         {
             cx.notify();
         }
@@ -120,11 +120,7 @@ impl QuillApp {
     /// The pointer moved over the window outside the peeking column (which
     /// blocks the mouse from what is under it): start the grace period.
     pub(super) fn sidebar_pointer_moved_away(&mut self, cx: &mut Context<Self>) {
-        if !self
-            .frame
-            .sidebar
-            .pointer_left(crate::ui::sidebar_reveal::now())
-        {
+        if !self.frame.sidebar.pointer_left(self.frame.sidebar.now()) {
             return;
         }
         // The wake is held by the `Leaving` stage: dropped with it.
@@ -182,7 +178,7 @@ impl QuillApp {
         }
         let full = layout.list? + self.folder_rail_width();
         let pointer = self.frame.sidebar.pointer();
-        let shown = self.frame.sidebar.peek(crate::ui::sidebar_reveal::now());
+        let shown = self.frame.sidebar.peek(self.frame.sidebar.now());
         if pointer == Peek::Off && shown <= 0. {
             return Some(
                 div()

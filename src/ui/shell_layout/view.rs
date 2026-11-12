@@ -48,7 +48,7 @@ impl QuillApp {
             topic_open: session.is_some_and(|s| s.open_forum_topic().is_some()),
             panels: side_panels_width(self.drawn_panels()),
             docked: if self.pane_mode() == PaneView::Ready {
-                self.frame.sidebar.docked(crate::ui::sidebar_reveal::now())
+                self.frame.sidebar.docked(self.frame.sidebar.now())
             } else {
                 1.
             },

@@ -9,7 +9,7 @@ use crate::ui::app::QuillApp;
 use crate::ui::keybindings::{SIDEBAR_CHORD, bind_keys};
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
-use crate::ui::sidebar_reveal::{LEAVE_GRACE, Peek, SLIDE_DURATION, test_clock};
+use crate::ui::sidebar_reveal::{LEAVE_GRACE, Peek, SLIDE_DURATION};
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
@@ -26,13 +26,17 @@ fn frames(vcx: &mut VisualTestContext) {
 }
 
 /// Wait for a slide to land (the motion runs on the wall clock).
-fn slide(vcx: &mut VisualTestContext) {
-    test_clock::advance(SLIDE_DURATION + Duration::from_millis(60));
+fn slide(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
+    advance(app, vcx, SLIDE_DURATION + Duration::from_millis(60));
     frames(vcx);
 }
 
+/// Move the column's clock, which the test holds still.
+fn advance(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, by: Duration) {
+    app.update(vcx, |app, _| app.frame.sidebar.advance(by));
+}
+
 fn open(cx: &mut TestAppContext, width: f32) -> (Entity<QuillApp>, VisualTestContext) {
-    test_clock::pin();
     cx.update(gpui_kit::init);
     cx.update(bind_keys);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
@@ -46,6 +50,7 @@ fn open(cx: &mut TestAppContext, width: f32) -> (Entity<QuillApp>, VisualTestCon
     });
     let app: Entity<QuillApp> = slot.borrow().clone().expect("app");
     let mut vcx = VisualTestContext::from_window(handle.into(), cx);
+    app.update(&mut vcx, |app, _| app.frame.sidebar.pin());
     frames(&mut vcx);
     (app, vcx)
 }
@@ -56,7 +61,7 @@ fn toggle(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
         app.composer.update(cx, |input, cx| input.focus(window, cx));
     });
     vcx.simulate_keystrokes(SIDEBAR_CHORD);
-    slide(vcx);
+    slide(&app, vcx);
 }
 
 fn chat(vcx: &mut VisualTestContext) -> Bounds<Pixels> {
@@ -112,7 +117,7 @@ fn the_left_edge_peeks_the_column_over_the_chat(cx: &mut TestAppContext) {
     assert!(vcx.debug_bounds("sidebar-peek").is_none());
 
     move_to(vcx, 2.);
-    slide(vcx);
+    slide(&app, vcx);
     let peek = vcx.debug_bounds("sidebar-peek").expect("peeking");
     assert_eq!(peek.origin.x, px(0.));
     assert_eq!(peek.size.width, column);
@@ -128,18 +133,18 @@ fn the_left_edge_peeks_the_column_over_the_chat(cx: &mut TestAppContext) {
     });
     // The grace is measured on the column's clock, and the redraw after it
     // is a timer on the executor's: both are moved by hand.
-    test_clock::advance(LEAVE_GRACE);
+    advance(&app, vcx, LEAVE_GRACE);
     vcx.executor()
         .advance_clock(LEAVE_GRACE + Duration::from_millis(20));
-    slide(vcx);
+    slide(&app, vcx);
     assert!(vcx.debug_bounds("sidebar-peek").is_none());
     assert!(vcx.debug_bounds("sidebar-reveal-edge").is_some());
 
     // Escape closes it at once.
     move_to(vcx, 2.);
-    slide(vcx);
+    slide(&app, vcx);
     vcx.simulate_keystrokes("escape");
-    slide(vcx);
+    slide(&app, vcx);
     assert!(vcx.debug_bounds("sidebar-peek").is_none());
     app.read_with(vcx, |app, _| {
         assert_eq!(app.frame.sidebar.pointer(), Peek::Off);

@@ -171,7 +171,7 @@ impl FrameUi {
             ),
             sidebar: super::sidebar_reveal::SidebarReveal::new(
                 stored.is_some_and(|state| state.sidebar_hidden),
-                super::sidebar_reveal::now(),
+                std::time::Instant::now(),
             ),
             panels: super::panel_reveal::PanelReveal::new(std::time::Instant::now()),
             surfaces: super::surface_reveal::Surfaces::new(std::time::Instant::now()),

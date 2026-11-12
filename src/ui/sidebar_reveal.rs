@@ -23,36 +23,6 @@ use std::time::{Duration, Instant};
 /// How long the column takes to slide all the way in or out (Kit's
 /// `Sheet` slides in 150 ms; this column is wider).
 pub(crate) const SLIDE_DURATION: Duration = Duration::from_millis(200);
-/// The instant the column's motion is measured against: the wall clock, or
-/// in a test a clock the test moves by hand, so a slow machine cannot end a
-/// grace period or a slide early.
-pub(crate) fn now() -> Instant {
-    #[cfg(test)]
-    if let Some(pinned) = test_clock::PINNED.with(std::cell::Cell::get) {
-        return pinned;
-    }
-    Instant::now()
-}
-
-#[cfg(test)]
-pub(crate) mod test_clock {
-    use std::time::{Duration, Instant};
-
-    thread_local! {
-        pub(super) static PINNED: std::cell::Cell<Option<Instant>> =
-            const { std::cell::Cell::new(None) };
-    }
-
-    /// Hold the clock at now; it moves only through [`advance`].
-    pub(crate) fn pin() {
-        PINNED.with(|pinned| pinned.set(Some(Instant::now())));
-    }
-
-    pub(crate) fn advance(by: Duration) {
-        PINNED.with(|pinned| pinned.set(pinned.get().map(|at| at + by)));
-    }
-}
-
 /// How long the pointer may be away from the peeking column before it
 /// slides back out.
 pub(crate) const LEAVE_GRACE: Duration = Duration::from_millis(280);
@@ -94,6 +64,10 @@ pub(crate) struct SidebarReveal {
     wake: Wake,
     docked: Glide,
     peek: Glide,
+    /// A test holds the clock still and moves it by hand, so a slow
+    /// machine cannot end a grace period or a slide early.
+    #[cfg(test)]
+    pinned: Option<Instant>,
 }
 
 #[derive(Default)]
@@ -125,7 +99,30 @@ impl SidebarReveal {
             },
             docked: Glide::settled(if hidden { 0. } else { 1. }, now, ease_out_cubic),
             peek: Glide::settled(0., now, ease_out_cubic),
+            #[cfg(test)]
+            pinned: None,
         }
+    }
+
+    /// The instant the column's motion is measured against: the wall
+    /// clock, or in a test the clock it holds.
+    pub(crate) fn now(&self) -> Instant {
+        #[cfg(test)]
+        if let Some(pinned) = self.pinned {
+            return pinned;
+        }
+        Instant::now()
+    }
+
+    /// Hold the clock at now; it moves only through [`Self::advance`].
+    #[cfg(test)]
+    pub(crate) fn pin(&mut self) {
+        self.pinned = Some(Instant::now());
+    }
+
+    #[cfg(test)]
+    pub(crate) fn advance(&mut self, by: Duration) {
+        self.pinned = self.pinned.map(|at| at + by);
     }
 
     /// The one place the mode changes: the grace wake belongs to the
