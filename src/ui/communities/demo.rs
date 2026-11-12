@@ -255,11 +255,13 @@ impl QuillApp {
                 back: Some(Back::Pick {
                     chat_id: OWN_CHANNEL,
                 }),
+                ask: Ask::Idle,
             }),
             "confirm-add" => Some(CommunityBox::ConfirmAdd {
                 community_id: RUSTACEANS,
                 chat_id: OWN_CHANNEL,
                 hidden: false,
+                ask: Ask::Idle,
             }),
             "remove" => Some(CommunityBox::ConfirmRemove {
                 community_id: GUILD,

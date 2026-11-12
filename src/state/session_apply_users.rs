@@ -35,8 +35,9 @@ impl Session {
                     self.upsert_file(file, false);
                     id
                 });
-                self.users_state.user_full_infos.insert(
+                self.users_state.user_full_infos.answered(
                     user_id,
+                    Some(pending.id),
                     UserFullInfoData {
                         bio,
                         photo_file_id,

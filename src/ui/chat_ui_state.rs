@@ -265,8 +265,12 @@ pub(crate) struct ChatUi {
     /// the stashed query is inserted on Confirm. It lives with the chat
     /// that asked, so another chat never confirms it.
     pub(super) bot_alert: super::inline_mode::BotAlert,
+    /// A command picked from the `/` menu that the paid guard holds for Pay.
+    pub(super) menu_send: super::composer::send_bot_command::MenuSendStage,
     /// A bot's Restart whose unblock is out (`bottom_action`).
     pub(super) restart: super::bottom_action::BotRestart,
+    /// What the chat's action bar sent (report, hide, unarchive, block), until its requests are answered.
+    pub(super) bar_work: super::bar_report::BarWork,
     /// What the last rich send took out of the field, until TDLib answers.
     pub(super) sent_text: super::composer::SentText,
     /// The draft the last AI composer action was asked about.
@@ -557,6 +561,20 @@ impl ChatUi {
         self.edit_mode.take()
     }
 
+    /// A refused send's text goes in front of the draft set aside for the
+    /// edit in place. `false` when no message is being edited.
+    pub(super) fn put_before_stashed_draft(&mut self, markup: &str) -> bool {
+        let Some(mode) = self.edit_mode.as_mut() else {
+            return false;
+        };
+        mode.stashed_draft = if mode.stashed_draft.is_empty() {
+            markup.to_string()
+        } else {
+            format!("{markup}\n{}", mode.stashed_draft)
+        };
+        true
+    }
+
     pub(super) fn stashed_draft(&self) -> Option<&str> {
         self.edit_mode
             .as_ref()
@@ -695,6 +713,11 @@ impl QuillApp {
             && let Some(live) = self.live.as_mut()
         {
             live.driver.session.acks.forget(request);
+        }
+        if let Some(session) = self.session_mut() {
+            for request in old.bar_work.requests() {
+                session.acks.forget(*request);
+            }
         }
         for delete in &old.scheduled_deletes {
             if let Some(live) = self.live.as_mut() {

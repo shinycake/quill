@@ -743,7 +743,7 @@ fn pre_block(run: &TextRun, id: &str, font: Pixels, cx: &mut Context<QuillApp>) 
         run.style.language.as_deref().unwrap_or_default(),
         &code,
     ) {
-        (super::code_highlight::Lookup::Ready(spans), _) => {
+        (super::code_highlight::LookupView::Ready(spans), _) => {
             super::code_highlight::styled(&code, &spans, background).into_any_element()
         }
         (_, job) => {

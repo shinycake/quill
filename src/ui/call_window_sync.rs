@@ -29,7 +29,7 @@ pub(in crate::ui) enum CallWindowTarget {
         id: i32,
     },
     /// The summary of a line that was busy.
-    Busy {
+    BusyLine {
         id: i32,
     },
     /// A conference invitation rings, under its invite key.
@@ -43,9 +43,10 @@ impl CallWindowTarget {
     pub(in crate::ui) fn id(self) -> Option<i32> {
         match self {
             Self::None => None,
-            Self::Active { id } | Self::Ringing { id } | Self::Ended { id } | Self::Busy { id } => {
-                Some(id)
-            }
+            Self::Active { id }
+            | Self::Ringing { id }
+            | Self::Ended { id }
+            | Self::BusyLine { id } => Some(id),
             Self::Invite { key } => Some(key),
         }
     }
@@ -59,9 +60,22 @@ impl CallWindowTarget {
         }
     }
 
+    /// The window of the ended call may still show: its linger is on, or
+    /// it is a busy line's summary (which stays until Cancel or Redial)
+    /// that this screen has not seen before.
+    fn lingers(self, end: &CallEnd) -> bool {
+        match self {
+            Self::Ended { id } => {
+                matches!(end, CallEnd::Lingering { call_id, .. } if *call_id == id)
+            }
+            Self::BusyLine { id } => end.call_id() != Some(id),
+            _ => false,
+        }
+    }
+
     /// The call has ended (its summary shows).
     fn ended(self) -> bool {
-        matches!(self, Self::Ended { .. } | Self::Busy { .. })
+        matches!(self, Self::Ended { .. } | Self::BusyLine { .. })
     }
 }
 
@@ -88,7 +102,7 @@ impl QuillApp {
             self.call_screen.wanted = WindowWanted::Open;
         }
         let ended = target.ended();
-        let lingering = self.call_screen.end.lingers();
+        let lingering = target.lingers(&self.call_screen.end);
         let wanted = call_id.filter(|id| {
             (!ended || lingering) && window_allowed(*id, self.call_screen.wanted, second.is_some())
         });
@@ -112,21 +126,33 @@ impl QuillApp {
     }
 
     /// The window's ended call: it lingers on "call ended" under a timer
-    /// the stage holds (a busy line stays until its buttons dismiss it); a
-    /// call still going, or none, ends the stage and drops the timer.
+    /// the stage holds; a call still going, or none, ends the stage and
+    /// drops the timer. A busy line's summary runs no timer: its stage is
+    /// `NotEnded` while the summary shows, until Cancel or Redial
+    /// (`CallWindowTarget::lingers`).
     fn follow_call_end(&mut self, target: CallWindowTarget, cx: &mut Context<Self>) {
+        let end = &self.call_screen.end;
+        if matches!(end, CallEnd::Unobserved) {
+            self.call_screen.end = match target {
+                CallWindowTarget::Ended { id } | CallWindowTarget::BusyLine { id } => {
+                    CallEnd::Over { call_id: id }
+                }
+                _ => CallEnd::NotEnded,
+            };
+            return;
+        }
         match target {
-            CallWindowTarget::Ended { id } if self.call_screen.end.call_id() != Some(id) => {
+            CallWindowTarget::Ended { id } if end.call_id() != Some(id) => {
                 self.call_screen.end = CallEnd::Lingering {
                     call_id: id,
                     _timer: self.linger_timer(cx),
                 };
             }
-            CallWindowTarget::Busy { id } if self.call_screen.end.call_id() != Some(id) => {
-                self.call_screen.end = CallEnd::Busy { call_id: id };
+            CallWindowTarget::BusyLine { id } if end.call_id() != Some(id) => {
+                self.call_screen.end = CallEnd::NotEnded;
             }
-            CallWindowTarget::Ended { .. } | CallWindowTarget::Busy { .. } => {}
-            _ => self.call_screen.end = CallEnd::Running,
+            CallWindowTarget::Ended { .. } | CallWindowTarget::BusyLine { .. } => {}
+            _ => self.call_screen.end = CallEnd::NotEnded,
         }
     }
 
@@ -177,7 +203,7 @@ impl QuillApp {
                 CallWindowTarget::Ringing { id: call.id }
             }
             (Some(call), _) => CallWindowTarget::Active { id: call.id },
-            (None, Some(summary)) if summary.busy() => CallWindowTarget::Busy {
+            (None, Some(summary)) if summary.busy() => CallWindowTarget::BusyLine {
                 id: summary.call_id,
             },
             (None, Some(summary)) => CallWindowTarget::Ended {
@@ -238,7 +264,7 @@ mod tests {
         assert_eq!(CallWindowTarget::Ringing { id: 3 }.ringing(), Some(3));
         assert_eq!(CallWindowTarget::Invite { key: 9 }.ringing(), Some(9));
         assert_eq!(CallWindowTarget::Invite { key: 9 }.id(), Some(9));
-        assert!(CallWindowTarget::Busy { id: 4 }.ended());
+        assert!(CallWindowTarget::BusyLine { id: 4 }.ended());
         assert!(CallWindowTarget::Ended { id: 4 }.ended());
         assert!(!CallWindowTarget::Ringing { id: 4 }.ended());
     }

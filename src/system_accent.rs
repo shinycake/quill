@@ -73,8 +73,9 @@ pub fn effective(custom_rgb: u32, use_system: bool, system: Option<u32>) -> u32 
 ///
 /// macOS and Windows read it directly (cheap calls). Linux runs `gdbus` and
 /// `gsettings`, so a lookup never waits for them: this returns the last
-/// value a background read stored and starts nothing. [`refresh`] starts a
-/// read; poll [`pending`] to learn when it has finished.
+/// value a background read stored and starts nothing. [`refresh_then`]
+/// starts a read and tells its caller when it has ended; [`pending`] says
+/// whether one runs.
 pub fn read() -> Option<u32> {
     #[cfg(target_os = "linux")]
     {
@@ -87,13 +88,25 @@ pub fn read() -> Option<u32> {
 }
 
 /// Starts a background read of the accent (Linux only; the other
-/// platforms read in [`read`]). Nothing starts while one runs, and after
-/// one failed (neither tool, no accent, or the session bus not up yet) the
-/// next one waits [`RETRY_AFTER`], so opening Appearance or focusing the
-/// window later reads again without every frame spawning `gdbus`.
-pub fn refresh() {
+/// platforms read in [`read`]) and tells the caller when it has ended.
+/// Nothing starts while one runs, and after one failed (neither tool, no
+/// accent, or the session bus not up yet) the next one waits
+/// [`RETRY_AFTER`], so opening Appearance or focusing the window later
+/// reads again without every frame spawning `gdbus`. Returns whether a read
+/// started: then `done` runs when it ends, or is dropped if the read thread
+/// dies, so a caller that waits on a channel wakes either way. When nothing
+/// started (a read already runs, the last one failed moments ago, or this
+/// platform reads in [`read`]) `done` is dropped now.
+pub fn refresh_then(done: impl FnOnce() + Send + 'static) -> bool {
     #[cfg(target_os = "linux")]
-    linux_refresh();
+    {
+        linux_refresh(Box::new(done))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        drop(done);
+        false
+    }
 }
 
 /// Whether a background read is still running (Linux only).
@@ -173,10 +186,20 @@ impl AccentRead {
 #[cfg(target_os = "linux")]
 static LINUX: std::sync::Mutex<AccentRead> = std::sync::Mutex::new(AccentRead::Idle { last: None });
 
-/// Ends a read: a read that panicked counts as one that found nothing. A
-/// finished read has already left `Reading`.
+/// The one end of a read. [`ReadDone::finish`] ends it with what it found;
+/// a read that panics drops the guard instead, which counts as one that
+/// found nothing. Exactly one of the two runs, so a read started right
+/// after this one ended is never ended by this one's drop.
 #[cfg(target_os = "linux")]
 struct ReadDone;
+
+#[cfg(target_os = "linux")]
+impl ReadDone {
+    fn finish(self, value: Option<u32>) {
+        crate::locks::lock_or_recover(&LINUX).finish(value, std::time::Instant::now());
+        std::mem::forget(self);
+    }
+}
 
 #[cfg(target_os = "linux")]
 impl Drop for ReadDone {
@@ -185,20 +208,28 @@ impl Drop for ReadDone {
     }
 }
 
+/// The read thread's body: read, end the read with the value, then tell
+/// the caller.
 #[cfg(target_os = "linux")]
-fn linux_refresh() {
+fn run_read(read: impl FnOnce() -> Option<u32>, done: impl FnOnce()) {
+    let guard = ReadDone;
+    guard.finish(read().map(|rgb| rgb.max(1)));
+    done();
+}
+
+#[cfg(target_os = "linux")]
+fn linux_refresh(done: Box<dyn FnOnce() + Send>) -> bool {
     let mut state = crate::locks::lock_or_recover(&LINUX);
     if !state.begin(std::time::Instant::now()) {
-        return;
+        return false;
     }
-    let spawned = crate::thread_guard::spawn_guarded("system-accent", || {
-        let _done = ReadDone;
-        let value = read_native().map(|rgb| rgb.max(1));
-        crate::locks::lock_or_recover(&LINUX).finish(value, std::time::Instant::now());
-    });
+    let spawned =
+        crate::thread_guard::spawn_guarded("system-accent", move || run_read(read_native, done));
     if spawned.is_err() {
         state.finish(None, std::time::Instant::now());
+        return false;
     }
+    true
 }
 
 #[cfg(all(target_os = "macos", feature = "ui"))]
@@ -266,6 +297,32 @@ fn read_native() -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A read that starts the moment the previous one has ended (its
+    /// `done` runs, and the main thread begins another) is not ended by
+    /// the first: the first ended once, with its value.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_read_started_after_one_ended_is_not_ended_by_it() {
+        *crate::locks::lock_or_recover(&LINUX) = AccentRead::Idle { last: None };
+        assert!(crate::locks::lock_or_recover(&LINUX).begin(std::time::Instant::now()));
+        run_read(
+            || Some(0x3584e4),
+            || {
+                // Read B starts between the first's end and its drop.
+                assert!(crate::locks::lock_or_recover(&LINUX).begin(std::time::Instant::now()));
+            },
+        );
+        assert_eq!(
+            *crate::locks::lock_or_recover(&LINUX),
+            AccentRead::Reading {
+                last: Some(0x3584e4)
+            },
+            "B still reads, with A's value kept"
+        );
+        // Leave the global as other tests expect.
+        *crate::locks::lock_or_recover(&LINUX) = AccentRead::Idle { last: None };
+    }
 
     #[test]
     fn unit_components_pack_and_reject_unset() {

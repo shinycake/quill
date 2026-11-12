@@ -590,6 +590,25 @@ impl ComposerSends {
         taken
     }
 
+    /// Upkeep of `account`'s clears: an entry that waits only for messages
+    /// that cannot answer any more (see [`DraftClear::forget_lost`]) goes,
+    /// so a deleted album part does not keep it until a newer send of the
+    /// slot replaces it.
+    pub(super) fn forget_lost_clears(
+        &mut self,
+        account: &AccountKey,
+        message_exists: impl Fn(ChatId, MessageId) -> bool,
+        request_waits: impl Fn(RequestId) -> bool,
+    ) {
+        let Some(sends) = self.accounts.get_mut(account) else {
+            return;
+        };
+        sends
+            .draft_clears
+            .retain(|_, clear| !clear.forget_lost(&message_exists, &request_waits));
+        self.drop_if_empty(account);
+    }
+
     /// The send of `message` failed: its draft stays, and no later ack of
     /// the same send (the rest of an album) clears it.
     pub(super) fn fail_draft_clear(

@@ -45,6 +45,15 @@ impl ChatKind {
         }
     }
 
+    /// `leaveChat` works on a basic group, a supergroup and a channel;
+    /// TDLib refuses it for private and secret chats (`td_api.tl`, `leaveChat`).
+    pub fn can_be_left(&self) -> bool {
+        matches!(
+            self,
+            ChatKind::BasicGroup { .. } | ChatKind::Supergroup { .. }
+        )
+    }
+
     /// `chatTypeSupergroup` with `is_channel: true` (TDLib 1.8.67).
     pub fn is_channel(&self) -> bool {
         matches!(

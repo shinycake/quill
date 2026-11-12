@@ -188,7 +188,7 @@ impl PlaybackTick {
 /// until its chat gains or loses a song.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct TrackShown {
-    state: super::audio::EngineState,
+    state: super::audio::EngineView,
     position_bits: Option<u64>,
     error: Option<super::audio::AudioError>,
     /// Previous / next (`QuillApp::playlist_can_move`): the songs loaded
@@ -414,20 +414,20 @@ impl PlaybackUi {
     pub(super) fn engine_state(
         &self,
         audio: &super::audio::AudioEngine,
-    ) -> super::audio::EngineState {
+    ) -> super::audio::EngineView {
         audio.state()
     }
 
     /// Paused by the user, with no seek waiting to be applied: nothing
     /// changes until a resume, a seek or a new track.
     pub(super) fn held_paused(&self, audio: &super::audio::AudioEngine) -> bool {
-        self.engine_state(audio) == super::audio::EngineState::Paused && !audio.seek_pending()
+        self.engine_state(audio) == super::audio::EngineView::Paused && !audio.seek_pending()
     }
 
     /// The play button: true while the sound is being consumed, or on its
     /// way (tdesktop shows Pause for a track that is starting).
     pub(super) fn is_playing(&self, audio: &super::audio::AudioEngine) -> bool {
-        use super::audio::EngineState::{Loading, Playing};
+        use super::audio::EngineView::{Loading, Playing};
         matches!(self.engine_state(audio), Playing | Loading)
     }
 
@@ -491,7 +491,7 @@ impl super::on_screen::Farewell for PlaybackUi {
 mod tests {
     use super::{ActiveTrack, PlaybackUi, Track};
     use crate::ui::audio::engine::test_support::{RATE, device, pull, track};
-    use crate::ui::audio::{AudioEngine, EngineState, SharedOutput, Simulation};
+    use crate::ui::audio::{AudioEngine, EngineView, SharedOutput, Simulation};
     use quill::ids::MessageId;
     use std::path::Path;
 
@@ -514,7 +514,7 @@ mod tests {
             .start(Path::new("missing.ogg"), 4.0, 1.0, 1.0, 30.0)
             .is_ok();
         assert!(!started);
-        assert_eq!(ui.engine_state(&audio), EngineState::Failed);
+        assert_eq!(ui.engine_state(&audio), EngineView::Failed);
         assert!(!ui.is_playing(&audio));
         assert_eq!(ui.active_position_secs(&audio), Some(4.0));
     }
@@ -527,7 +527,7 @@ mod tests {
         ui.active = ActiveTrack::Audio(Track::new(MessageId(1)).with_length(4.0));
         let path = track("ui-loading.wav", 4);
         audio.start(&path, 2.0, 1.0, 1.0, 4.0).unwrap();
-        assert_eq!(ui.engine_state(&audio), EngineState::Loading);
+        assert_eq!(ui.engine_state(&audio), EngineView::Loading);
         assert!(ui.is_playing(&audio));
         assert_eq!(ui.active_position_secs(&audio), Some(2.0));
     }
@@ -565,7 +565,7 @@ mod tests {
         audio.resume(2.0).unwrap();
         audio.await_landing();
         assert!(!ui.is_playing(&audio));
-        assert_eq!(ui.engine_state(&audio), EngineState::Paused);
+        assert_eq!(ui.engine_state(&audio), EngineView::Paused);
     }
 
     #[test]
@@ -593,7 +593,7 @@ mod tests {
             stall: false,
         }));
         audio.start(Path::new("a.ogg"), 5.0, 1.0, 1.0, 5.0).unwrap();
-        assert_eq!(ui.engine_state(&audio), EngineState::Ended);
+        assert_eq!(ui.engine_state(&audio), EngineView::Ended);
         assert!(!ui.is_playing(&audio));
         assert_eq!(ui.active_position_secs(&audio), Some(5.0));
     }

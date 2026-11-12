@@ -12,7 +12,7 @@ use crate::telegram::requests::{
     get_callback_query_answer, get_callback_query_answer_game,
     get_callback_query_answer_with_password, get_commands, get_game_high_scores,
     get_inline_query_results, get_login_url, get_login_url_info, get_message,
-    get_recent_inline_bots, get_user_full_info, search_public_chat,
+    get_recent_inline_bots, search_public_chat,
     send_bot_start_message as send_bot_start_message_request, send_game as send_game_request,
     send_inline_query_result_message, set_message_sender_block_list, share_chat_with_bot,
     share_users_with_bot,
@@ -36,21 +36,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.bots.bot_info.contains_key(&user_id) {
             return Ok(());
         }
-        if self
-            .session
-            .requests
-            .has_purpose_for_chat(RequestPurpose::GetUserFullInfo, chat_id)
-        {
+        // One ask per bot: out, answered, or failed (the Retry of a box
+        // that shows it asks again), never once per poll.
+        let infos = &self.session.users_state.user_full_infos;
+        if infos.is_loading(&user_id) || infos.failed(&user_id) {
             return Ok(());
         }
-        let extra = self
-            .session
-            .request(RequestPurpose::GetUserFullInfo, Some(chat_id));
-        if let Err(err) = self.sender.send_json(&get_user_full_info(extra, user_id)) {
-            self.session.requests.take(extra);
-            return Err(err);
-        }
-        Ok(())
+        self.send_full_info_request(user_id).map(|_| ())
     }
 
     /// Phase 3.3: `getCommands` for the open bot chat's global commands.

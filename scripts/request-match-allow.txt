@@ -1,6 +1,5 @@
 # Purpose checks and unmatched answers that need no RequestId (scripts/check-request-match.py).
 # One per line: <rule>:<Type::function> <reason>
-purpose:QuillApp::auth_submit_busy a double-submit guard, not an answer match: Enter in a sign-in field is refused while any sign-in submit is in the registry, the same test the driver makes before it sends one (connect/auth.rs). The answers are matched by the step's own request.
 unmatched:MessagesState::pins_cleared a confirmed unpin-all (the `ok` of the request) is the new truth for the chat: the pinned list is empty whichever fetch was in flight, and a late answer of an older fetch finds `Ready` and is dropped because `Fetch::answered` takes only a waiting fetch
 unmatched:GroupsState::welcome_pack_pushed `updateChatWelcomeMessages` is a push that carries the whole pack and answers no request: it replaces the pack whichever fetch was in flight, and a late answer of that fetch finds `Ready` and is dropped because `Fetch::answered` takes only a waiting fetch
 unmatched:LiveStoryState::set_donors the `None` arm is the pushed updateLiveStoryTopDonors, which names no request; the answer to our own getLiveStoryTopDonors is matched by `answered(Some(asked))` in the other arm

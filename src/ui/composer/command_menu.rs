@@ -1,6 +1,6 @@
 //! The bot command menu above the composer.
 
-use super::send_bot_command::MenuSend;
+use super::send_bot_command::{MenuSendOutcome, MenuSendStage, MenuToken};
 use super::*;
 use crate::ui::composer_sends::SendOnce;
 use quill::composer::{commands_with_username, complete_command_at};
@@ -330,37 +330,41 @@ impl QuillApp {
         // The gates run first: a command that cannot go (slow mode, no right
         // to send, a frozen account) stays typed in the field.
         let outcome = self.send_menu_command(&command, cx);
-        if outcome == MenuSend::Refused {
-            return;
+        match &outcome {
+            MenuSendOutcome::Refused => return,
+            // Nothing went out yet: the token and the menu stay for a
+            // declined Pay, and go when the hold ends
+            // (`settle_menu_send`).
+            MenuSendOutcome::Held { request, reply } => {
+                let token = match &source {
+                    PickSource::Token(range) => self
+                        .composer
+                        .read(cx)
+                        .value()
+                        .get(range.clone())
+                        .map(|text| MenuToken {
+                            range: range.clone(),
+                            text: text.to_string(),
+                        }),
+                    PickSource::Button => None,
+                };
+                self.chat_ui.menu_send = MenuSendStage::Held {
+                    request: *request,
+                    reply: reply.clone(),
+                    token,
+                };
+                return;
+            }
+            _ => {}
         }
         self.close_command_menu(cx);
-        match source {
-            // The text after the caret stays in the field (tdesktop keeps
-            // `getTextWithTagsPart(cursor)`), with the caret at its end.
-            PickSource::Token(range) => {
-                self.replace_composer_text(range, "", window, cx);
-                self.composer.update(cx, |input, cx| {
-                    let end = input.value().len();
-                    input.set_selected_range(end..end, cx);
-                    input.focus(window, cx);
-                });
-            }
-            // The Menu button's list never wrote to the field.
-            PickSource::Button => {
-                self.composer
-                    .update(cx, |input, cx| input.focus(window, cx));
-            }
-        }
-        if outcome == MenuSend::Sent {
-            // The send leaves the chat draft alone (`clear_draft` is off for
-            // a menu command); the kept text is saved at once.
-            if self.composer.read(cx).value().is_empty() {
-                if let Some(chat_id) = self.viewed_chat() {
-                    self.forget_local_draft(chat_id);
-                }
-            } else {
-                self.note_open_draft(false, cx);
-            }
+        let token = match source {
+            PickSource::Token(range) => Some(range),
+            PickSource::Button => None,
+        };
+        self.finish_menu_pick(token, window, cx);
+        if outcome == MenuSendOutcome::Sent {
+            self.keep_text_after_menu_send(cx);
             return;
         }
         // Demo and connecting panes have no live send: the composer's own
@@ -379,6 +383,44 @@ impl QuillApp {
 
 impl QuillApp {
     /// The pick's source and the prefix that decides `/command@bot`.
+    /// A picked command is on its way: its token leaves the field (the text
+    /// after the caret stays, tdesktop keeps `getTextWithTagsPart(cursor)`,
+    /// with the caret at its end; the Menu button's list never wrote to the
+    /// field).
+    pub(in crate::ui) fn finish_menu_pick(
+        &mut self,
+        token: Option<Range<usize>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match token {
+            Some(range) => {
+                self.replace_composer_text(range, "", window, cx);
+                self.composer.update(cx, |input, cx| {
+                    let end = input.value().len();
+                    input.set_selected_range(end..end, cx);
+                    input.focus(window, cx);
+                });
+            }
+            None => {
+                self.composer
+                    .update(cx, |input, cx| input.focus(window, cx));
+            }
+        }
+    }
+
+    /// The send leaves the chat draft alone (`clear_draft` is off for a
+    /// menu command); the kept text is saved at once.
+    pub(in crate::ui) fn keep_text_after_menu_send(&mut self, cx: &mut Context<Self>) {
+        if self.composer.read(cx).value().is_empty() {
+            if let Some(chat_id) = self.viewed_chat() {
+                self.forget_local_draft(chat_id);
+            }
+        } else {
+            self.note_open_draft(false, cx);
+        }
+    }
+
     fn command_pick_source(&self, cx: &Context<Self>) -> Option<(PickSource, String)> {
         match self.chat_ui.command_menu {
             CommandMenu::Closed => None,

@@ -195,3 +195,30 @@ fn bot_stream_stop_races_retention_topics_and_expiry() {
     )));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// A second Unblock while one is out sends nothing and names no request:
+/// the request out belongs to whoever sent it (sweep r4 13-004).
+#[test]
+fn a_second_unblock_sends_nothing_and_names_no_request() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let chat = r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Bot","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#;
+    driver
+        .ingest(copy_and_parse(chat, &seq, &sink).unwrap())
+        .unwrap();
+    driver
+        .set_chat_user_blocked(ChatId(7), false)
+        .unwrap()
+        .unwrap();
+    let sent = recorder.snapshot().len();
+    assert_eq!(
+        driver.set_chat_user_blocked(ChatId(7), false).unwrap(),
+        None
+    );
+    assert_eq!(recorder.snapshot().len(), sent, "nothing is sent twice");
+    drop(driver);
+    std::fs::remove_dir_all(dir).unwrap();
+}

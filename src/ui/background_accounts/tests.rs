@@ -2,7 +2,7 @@
 //! click on another account's notification does once it reaches the
 //! render (needs the `demo-capture` feature for gpui-kit's test support).
 use super::calls::{BackgroundRing, RingNotice, RingPrompt};
-use super::{AccountUnread, BackgroundClient, BackgroundStatus, PendingOpen};
+use super::{AccountUnread, BackgroundClient, ClientStage, Down, PendingOpen};
 use crate::ui::app::QuillApp;
 use crate::ui::call_sounds::CallSound;
 use crate::ui::keybindings::bind_keys;
@@ -190,13 +190,46 @@ fn an_older_call_summary_does_not_silence_another_accounts_ring(cx: &mut TestApp
 }
 
 #[gpui_kit::test]
+fn the_end_chime_of_a_call_does_not_cut_another_accounts_ring(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, _, _| {
+        app.screen.call_screen.sound_marks = crate::ui::call_sounds::SoundMarks::connected_call(5);
+        let Some(session) = app.demo_session.as_deref_mut() else {
+            panic!("the demo has a session");
+        };
+        session.calls.active_call = None;
+        session.calls.summary = Some(quill::state::CallSummary {
+            call_id: 5,
+            user_id: 12,
+            is_outgoing: true,
+            is_video: false,
+            duration_secs: 30,
+            had_audio: true,
+            end_line: String::new(),
+            end: quill::state::CallEnd::Ended,
+            rating: quill::state::CallRating::NotNeeded,
+            debug_information: quill::state::CallUpload::NotNeeded,
+            log: quill::state::CallUpload::NotNeeded,
+            final_transport: None,
+            reconnect_attempts: 0,
+            muted: false,
+        });
+        app.background.ringing = Some(ring());
+        // The call ends while the background ring sounds: the hang-up chime
+        // plays over it, and the ring is still what loops afterwards.
+        app.sync_call_sounds();
+        assert_eq!(app.calls.sounds.looping(), Some(CallSound::Incoming));
+        app.sync_call_sounds();
+        assert_eq!(app.calls.sounds.looping(), Some(CallSound::Incoming));
+    });
+}
+
+#[gpui_kit::test]
 fn the_main_menu_counts_the_other_accounts(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     app.update_in(&mut vcx, |app, _, cx| {
         assert!(app.other_accounts_unread().is_none());
-        app.background
-            .clients
-            .push(client(BackgroundStatus::Ready, 4));
+        app.background.clients.push(client(Down::SignedOut, 4));
         assert_eq!(app.other_accounts_unread().map(|u| u.count), Some(4));
         // Not signed in on screen (demo): no account name in the title.
         assert!(app.title_account_name().is_none());
@@ -219,11 +252,10 @@ fn other_account() -> AccountKey {
     AccountKey::new("account-1").unwrap()
 }
 
-fn client(status: BackgroundStatus, count: u32) -> BackgroundClient {
+fn client(down: Down, count: u32) -> BackgroundClient {
     BackgroundClient {
         key: other_account(),
-        live: None,
-        status,
+        stage: ClientStage::Down(down),
         unread: AccountUnread {
             count,
             muted: false,
@@ -237,14 +269,11 @@ fn an_account_row_shows_the_unread_count_or_the_status(cx: &mut TestAppContext) 
     app.update_in(&mut vcx, |app, _, cx| {
         let key = other_account();
         assert!(app.background_account_badge(&key, cx).is_none(), "unknown");
-        app.background
-            .clients
-            .push(client(BackgroundStatus::Ready, 0));
-        assert!(app.background_account_badge(&key, cx).is_none(), "all read");
-        app.background.clients_mut()[0].unread.count = 3;
-        assert!(app.background_account_badge(&key, cx).is_some());
-        app.background.clients_mut()[0].status = BackgroundStatus::NeedsSignIn;
-        assert!(app.background_account_badge(&key, cx).is_some());
+        app.background.clients.push(client(Down::NeedsSignIn, 3));
+        assert!(
+            app.background_account_badge(&key, cx).is_some(),
+            "the status shows"
+        );
         assert_eq!(app.background.total_unread().count, 3);
     });
 }
@@ -307,9 +336,7 @@ fn mark_as_read_on_another_account_never_switches(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let before = app.read_with(&vcx, |app, _| app.session().unwrap().account.clone());
     app.update_in(&mut vcx, |app, _, cx| {
-        app.background
-            .clients
-            .push(client(BackgroundStatus::Ready, 1));
+        app.background.clients.push(client(Down::SignedOut, 1));
         app.background.clicks.lock().unwrap().push(ChatClick {
             account: other_account(),
             chat_id: ChatId(7),
@@ -501,4 +528,23 @@ fn a_call_on_another_account_can_be_answered_from_the_lock_screen(cx: &mut TestA
     });
     vcx.update(|window, cx| window.render_frame(cx));
     assert!(!drawn(&mut vcx, "lock-background-call-answer"));
+}
+
+/// A client that is down says why, in the one value that holds no client:
+/// only a failed one is started again, and each reads as its status.
+#[test]
+fn a_down_client_reads_as_its_status_and_only_a_failed_one_retries() {
+    use quill::notify_accounts::BackgroundStatus;
+    let failed = client(Down::Failed("x".into()), 0);
+    assert!(failed.retryable());
+    assert_eq!(failed.stage.status(), BackgroundStatus::Failed("x".into()));
+    for (down, status) in [
+        (Down::NeedsSignIn, BackgroundStatus::NeedsSignIn),
+        (Down::SignedOut, BackgroundStatus::SignedOut),
+    ] {
+        let one = client(down, 0);
+        assert!(!one.retryable());
+        assert_eq!(one.stage.status(), status);
+        assert!(one.live().is_none(), "no client");
+    }
 }

@@ -15,14 +15,20 @@ use gpui_kit::component::*;
 use quill::new_chat::{NewChatKind, NewChatStep};
 use quill::state::{ProfileChatsFetch, ProfileChatsKind};
 
-/// How the chooser's lists stand: still loading, or why one failed (its
+/// How the chooser's lists stand, computed from the session's fetches on
+/// each draw (nothing stores it): still loading, or why one failed (its
 /// chats are then missing from the list, which says so with a Retry
 /// instead of "No chats found").
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum CandidateStatus {
+pub(crate) enum CandidateView {
     Ready,
     Loading,
     Failed(String),
+}
+
+/// What the box says for a list whose request never went out.
+fn unsent_line() -> String {
+    tr(keys::Q_NOTES_SOMETHING_WENT_WRONG).to_string()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,14 +44,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(live) = self.live.as_mut()
-            && let Err(err) = live
-                .driver
-                .fetch_suitable_community_chats()
-                .and_then(|_| live.driver.fetch_owned_bots())
-        {
-            self.set_note(StatusNote::error(user_error(&err)));
-        }
+        self.ask_community_candidates();
         let search =
             cx.new(|cx| InputState::new(window, cx).placeholder(tr(keys::Q_OPS_SEARCH_CHATS)));
         let typed = cx.subscribe(&search, |_, _, event: &InputEvent, cx| {
@@ -66,9 +65,9 @@ impl QuillApp {
     /// The chats the box offers, by title, filtered by `query`: the
     /// suitable chats, then the owned bots (`getOwnedBots`) that are in
     /// no community. A bot's chat is its user id.
-    pub(crate) fn community_candidates(&self, query: &str) -> (Vec<Candidate>, CandidateStatus) {
+    pub(crate) fn community_candidates(&self, query: &str) -> (Vec<Candidate>, CandidateView) {
         let Some(session) = self.session() else {
-            return (Vec::new(), CandidateStatus::Ready);
+            return (Vec::new(), CandidateView::Ready);
         };
         let query = query.trim().to_lowercase();
         let (suitable, mut status) = match session
@@ -76,23 +75,28 @@ impl QuillApp {
             .profile_chat_lists
             .get(&(ProfileChatsKind::SuitableCommunityChats, 0))
         {
-            Some(ProfileChatsFetch::Loaded { ids, .. }) => (ids.clone(), CandidateStatus::Ready),
-            Some(ProfileChatsFetch::Loading(_)) => (Vec::new(), CandidateStatus::Loading),
+            Some(ProfileChatsFetch::Loaded { ids, .. }) => (ids.clone(), CandidateView::Ready),
+            Some(ProfileChatsFetch::Loading(_)) => (Vec::new(), CandidateView::Loading),
             Some(ProfileChatsFetch::Failed(error)) => {
-                (Vec::new(), CandidateStatus::Failed(error.clone()))
+                (Vec::new(), CandidateView::Failed(error.clone()))
             }
-            None => (Vec::new(), CandidateStatus::Ready),
+            // The box asks as it opens: no entry is a send that did not go
+            // out, not "no chats".
+            None => (Vec::new(), CandidateView::Failed(unsent_line())),
         };
         // The owned bots are the second list: the chooser reads "Loading"
         // while either is on its way, and a failure of either shows once
         // none is left loading.
         let bots_fetch = &session.communities.owned_bots;
-        if bots_fetch.is_loading() && !matches!(status, CandidateStatus::Loading) {
-            status = CandidateStatus::Loading;
-        } else if status == CandidateStatus::Ready
-            && let Some(error) = bots_fetch.error()
-        {
-            status = CandidateStatus::Failed(error.to_string());
+        if bots_fetch.is_loading() && !matches!(status, CandidateView::Loading) {
+            status = CandidateView::Loading;
+        } else if status == CandidateView::Ready {
+            if let Some(error) = bots_fetch.error() {
+                status = CandidateView::Failed(error.to_string());
+            } else if bots_fetch.is_idle() {
+                // Asked as the box opened, and back to idle: not sent.
+                status = CandidateView::Failed(unsent_line());
+            }
         }
         let mut chats: Vec<Candidate> = suitable
             .into_iter()
@@ -128,15 +132,22 @@ impl QuillApp {
 
     /// The chooser's Retry: both lists asked again.
     fn retry_community_candidates(&mut self, cx: &mut Context<Self>) {
-        if let Some(live) = self.live.as_mut()
-            && let Err(err) = live
-                .driver
-                .fetch_suitable_community_chats()
-                .and_then(|_| live.driver.fetch_owned_bots())
-        {
+        self.ask_community_candidates();
+        cx.notify();
+    }
+
+    /// Both lists asked for, each whether the other could be sent or not:
+    /// one that was not sent reads as failed in the box
+    /// ([`Self::community_candidates`]), with its Retry.
+    fn ask_community_candidates(&mut self) {
+        let Some(live) = self.live.as_mut() else {
+            return;
+        };
+        let suitable = live.driver.fetch_suitable_community_chats();
+        let bots = live.driver.fetch_owned_bots();
+        if let Err(err) = suitable.map(|_| ()).and(bots.map(|_| ())) {
             self.set_note(StatusNote::error(user_error(&err)));
         }
-        cx.notify();
     }
 
     /// "Create a New Chat" → New Group / New Channel; the new chat then
@@ -243,7 +254,7 @@ impl QuillApp {
                         .child(div().min_w_0().truncate().child(candidate.title.clone())),
                 );
             }
-            if let CandidateStatus::Failed(error) = &status {
+            if let CandidateView::Failed(error) = &status {
                 list = list.child(
                     div()
                         .py_2()
@@ -262,7 +273,7 @@ impl QuillApp {
                         ),
                 );
             } else if candidates.is_empty() {
-                list = list.child(if status == CandidateStatus::Loading {
+                list = list.child(if status == CandidateView::Loading {
                     div()
                         .py_4()
                         .flex()

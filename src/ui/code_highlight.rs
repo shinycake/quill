@@ -14,7 +14,7 @@
 use super::app::QuillApp;
 use super::chat_theme;
 use gpui_kit::component::highlighter::capture_names;
-use gpui_kit::{Context, HighlightStyle, Hsla, Rgba, StyledText};
+use gpui_kit::{Context, HighlightStyle, Hsla, Rgba, StyledText, Task};
 use std::collections::{HashMap, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::ops::Range;
@@ -204,8 +204,14 @@ fn quoted_strings(line: &str) -> Vec<Range<usize>> {
 }
 
 enum Entry {
-    Pending,
+    /// The tokenizer job runs. The cache holds its task: an entry that is
+    /// dropped cancels it.
+    Pending {
+        _job: Task<()>,
+    },
     Ready(Arc<[Span]>),
+    /// The job panicked: the block stays plain, and is not tried again.
+    Failed,
 }
 
 #[derive(Default)]
@@ -216,7 +222,16 @@ struct Cache {
 
 impl Cache {
     fn finish(&mut self, key: u64, spans: Arc<[Span]>) {
-        self.entries.insert(key, Entry::Ready(spans));
+        self.settle(key, Entry::Ready(spans));
+    }
+
+    fn fail(&mut self, key: u64) {
+        self.settle(key, Entry::Failed);
+    }
+
+    /// The job for `key` ended with `entry`; settled entries evict by age.
+    fn settle(&mut self, key: u64, entry: Entry) {
+        self.entries.insert(key, entry);
         self.order.push_back(key);
         while self.order.len() > CACHE_LIMIT {
             if let Some(oldest) = self.order.pop_front() {
@@ -247,9 +262,9 @@ fn key_of(language: &str, text: &str) -> u64 {
     hasher.finish()
 }
 
-/// What a block should draw now.
-pub(crate) enum Lookup {
-    /// No language: draw the text as it is.
+/// What a block should draw now, read from the cache entry on each draw.
+pub(crate) enum LookupView {
+    /// No language, or no spans to be had: draw the text as it is.
     Plain,
     /// The spans are being worked out: draw plain until they arrive.
     Pending,
@@ -263,28 +278,28 @@ pub(crate) struct Job {
     text: String,
 }
 
-/// The spans of `text` for the block's `language`. The first time a pair is
-/// asked for, a [`Job`] comes back with `Pending`; it is asked for once.
-pub(crate) fn lookup(language: &str, text: &str) -> (Lookup, Option<Job>) {
+/// The spans of `text` for the block's `language`. A pair with no entry yet
+/// comes back `Pending` with a [`Job`], which the caller hands to [`start`]
+/// at once; that is what puts the entry in the cache.
+pub(crate) fn lookup(language: &str, text: &str) -> (LookupView, Option<Job>) {
     let Some(language) = language_for(language) else {
-        return (Lookup::Plain, None);
+        return (LookupView::Plain, None);
     };
     if text.trim().is_empty() {
-        return (Lookup::Plain, None);
+        return (LookupView::Plain, None);
     }
     let key = key_of(&language, text);
-    let mut cache = cache();
-    match cache.entries.get(&key) {
-        Some(Entry::Ready(spans)) => (Lookup::Ready(spans.clone()), None),
-        Some(Entry::Pending) => (Lookup::Pending, None),
+    match cache().entries.get(&key) {
+        Some(Entry::Ready(spans)) => (LookupView::Ready(spans.clone()), None),
+        Some(Entry::Pending { .. }) => (LookupView::Pending, None),
+        Some(Entry::Failed) => (LookupView::Plain, None),
         None => {
-            cache.entries.insert(key, Entry::Pending);
             let job = Job {
                 key,
                 language,
                 text: text.to_owned(),
             };
-            (Lookup::Pending, Some(job))
+            (LookupView::Pending, Some(job))
         }
     }
 }
@@ -302,22 +317,35 @@ pub(crate) fn ready(language: &str, text: &str) -> Option<Arc<[Span]>> {
 
 /// Tokenizes `job` on the background executor, stores the spans and asks the
 /// window to draw again. The text does not change size, so nothing is
-/// measured again.
+/// measured again. The task lives in the cache entry; a tokenizer that
+/// panics leaves a `Failed` entry, so the block is plain on purpose.
 pub(crate) fn start(job: Job, cx: &mut Context<QuillApp>) {
-    cx.spawn(async move |this, cx| {
-        let Job {
-            key,
-            language,
-            text,
-        } = job;
+    let Job {
+        key,
+        language,
+        text,
+    } = job;
+    let mut guard = cache();
+    if guard.entries.contains_key(&key) {
+        return;
+    }
+    let task = cx.spawn(async move |this, cx| {
         let spans = cx
             .background_executor()
-            .spawn(async move { Arc::<[Span]>::from(tokenize(&language, &text)) })
+            .spawn(async move {
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    Arc::<[Span]>::from(tokenize(&language, &text))
+                }))
+                .ok()
+            })
             .await;
-        cache().finish(key, spans);
+        match spans {
+            Some(spans) => cache().finish(key, spans),
+            None => cache().fail(key),
+        }
         let _ = this.update(cx, |_, cx| cx.notify());
-    })
-    .detach();
+    });
+    guard.entries.insert(key, Entry::Pending { _job: task });
 }
 
 impl Token {
@@ -435,7 +463,7 @@ thread_local! {
 
 #[cfg(test)]
 mod tests {
-    use super::{Lookup, Token, language_for, lookup, token_for, tokenize};
+    use super::{LookupView, Token, cache, key_of, language_for, lookup, token_for, tokenize};
 
     fn text_of<'a>(code: &'a str, spans: &[super::Span], token: Token) -> Vec<&'a str> {
         spans
@@ -455,12 +483,22 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_tokenizer_leaves_the_block_plain_and_is_not_asked_again() {
+        let text = "fn failed_job() {}";
+        let language = language_for("rust").unwrap_or_default();
+        cache().fail(key_of(&language, text));
+        let (view, job) = lookup("rust", text);
+        assert!(matches!(view, LookupView::Plain));
+        assert!(job.is_none(), "a failed block is not tokenized again");
+    }
+
+    #[test]
     fn no_language_is_plain() {
         assert_eq!(language_for(""), None);
         assert_eq!(language_for("   "), None);
         assert_eq!(language_for(&"a".repeat(33)), None);
-        assert!(matches!(lookup("", "let x = 1;").0, Lookup::Plain));
-        assert!(matches!(lookup("rust", "  \n").0, Lookup::Plain));
+        assert!(matches!(lookup("", "let x = 1;").0, LookupView::Plain));
+        assert!(matches!(lookup("rust", "  \n").0, LookupView::Plain));
     }
 
     #[test]

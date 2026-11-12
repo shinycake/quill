@@ -154,6 +154,35 @@ fn get_contacts_error_surfaces_retry() {
     assert!(session.contacts_settled());
 }
 
+/// A bot's full info that is asked reads as loading; a failed ask reads
+/// as failed (with its error), and a retry loads again (sweep r4 14-007).
+#[test]
+fn a_full_info_ask_loads_then_fails_then_retries() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let infos = |session: &Session| session.users_state.user_full_infos.shows_loading(&31);
+    assert!(!infos(&session), "nothing was asked: nothing loads");
+    let extra = session.request_for_user(RequestPurpose::GetUserFullInfo, 31);
+    session.users_state.user_full_infos.begin(31, extra);
+    assert!(infos(&session));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":500,"message":"boom"}}"#,
+            extra.0
+        ),
+    );
+    assert!(!infos(&session));
+    assert!(session.users_state.user_full_infos.error(&31).is_some());
+    session.users_state.user_full_infos.forget_failure(&31);
+    let again = session.request_for_user(RequestPurpose::GetUserFullInfo, 31);
+    session.users_state.user_full_infos.begin(31, again);
+    assert!(infos(&session));
+    assert!(session.users_state.user_full_infos.error(&31).is_none());
+}
+
 #[test]
 fn user_full_info_bio_resolves_user() {
     let (mut session, sink) = session();
@@ -510,4 +539,49 @@ fn an_older_contacts_answer_does_not_bring_back_a_dropped_list() {
     );
     assert!(session.users_state.contacts.is_outdated());
     assert!(session.users_state.contacts.data().is_none());
+}
+
+/// A refresh (a userpic ask over held info) that fails leaves the info
+/// shown and no failure behind; a late error of an older request leaves a
+/// newer ask waiting (sweep r4-07).
+#[test]
+fn a_failed_refresh_keeps_the_held_info_and_an_old_error_leaves_the_new_ask() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let fail = |session: &mut Session, extra: crate::ids::RequestId| {
+        apply_json(
+            session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":500,"message":"boom"}}"#,
+                extra.0
+            ),
+        );
+    };
+    let held = |session: &Session| session.users_state.user_full_infos.get(&31).is_some();
+    session
+        .users_state
+        .user_full_infos
+        .insert(31, Default::default());
+    assert!(held(&session));
+    let userpic = session.request_for_user(RequestPurpose::GetUserFullInfo, 31);
+    session.users_state.user_full_infos.begin(31, userpic);
+    fail(&mut session, userpic);
+    let infos = &session.users_state.user_full_infos;
+    assert!(held(&session), "the info stays");
+    assert!(
+        !infos.failed(&31),
+        "a refresh failing is not a failed entry"
+    );
+    assert!(!infos.is_loading(&31));
+    // Two asks: the older one's error leaves the newer waiting.
+    let older = session.request_for_user(RequestPurpose::GetUserFullInfo, 31);
+    session.users_state.user_full_infos.begin(31, older);
+    let newer = session.request_for_user(RequestPurpose::GetUserFullInfo, 31);
+    session.users_state.user_full_infos.begin(31, newer);
+    fail(&mut session, older);
+    assert!(session.users_state.user_full_infos.is_loading(&31));
+    fail(&mut session, newer);
+    assert!(!session.users_state.user_full_infos.is_loading(&31));
 }

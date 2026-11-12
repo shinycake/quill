@@ -614,7 +614,7 @@ impl QuillApp {
                     Button::new("qr-login")
                         .label(tr(keys::Q_CHATLIST_SIGN_IN_WITH_QR_CODE))
                         .ghost()
-                        .disabled(self.session().is_some_and(|s| s.requests.has_auth_submit()))
+                        .disabled(self.auth_submit_busy())
                         .on_click(cx.listener(|this, _, _, cx| this.request_qr_login(cx))),
                 )
             },

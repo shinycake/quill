@@ -22,7 +22,7 @@ impl QuillApp {
             .background
             .clients
             .iter()
-            .filter(|client| client.live.is_some() && !client.status.stops_client())
+            .filter(|client| client.live().is_some())
             .count();
         if !account_name_in_title(1 + others) {
             return None;

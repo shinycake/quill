@@ -452,6 +452,7 @@
 "qll_chat_report_chat" = "Report chat";
 "qll_chat_report_spam" = "Report spam";
 "qll_chat_report_spam_2" = "Report Spam";
+"qll_chat_report_spam_sure_user" = "Are you sure you want to report this chat for spam?";
 "qll_chat_reporting" = "Reporting…";
 "qll_chat_resend" = "Resend";
 "qll_chat_results_for" = "Results for {subject}";

@@ -224,7 +224,7 @@ impl QuillApp {
             .session()
             .filter(|session| &session.account == account)
             .or_else(|| {
-                let live = self.background.client(account)?.live.as_ref()?;
+                let live = self.background.client(account)?.live()?;
                 Some(&live.driver.session)
             });
         session

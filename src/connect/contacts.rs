@@ -47,12 +47,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(Some(extra))
     }
 
-    /// A contact change set the list to `None` (add, delete, import,
-    /// clear): fetch it again for the tab that shows it. A list that
-    /// failed waits for Retry; a send that fails ends the loading with
+    /// A contact change outdated the list (add, delete, import, clear), or
+    /// the list was never loaded: fetch it again for the tab that shows it.
+    /// A list that failed waits for Retry; a send that fails ends the loading with
     /// Retry instead of leaving "Loading contacts..." up.
     pub fn refetch_invalidated_contacts(&mut self) {
-        if !self.session.users_state.contacts.is_outdated() {
+        // A list nothing asked for yet is asked for too (sync off, so the
+        // tab's own open did not): its tab would read "Loading" for good.
+        let contacts = &self.session.users_state.contacts;
+        if !(contacts.is_outdated() || contacts.is_idle()) {
+            return;
+        }
+        // A list nothing asked for stays idle until the path is active:
+        // the tab asks again then, instead of showing a failure for good.
+        if contacts.is_idle() && !self.chats_path_active() {
             return;
         }
         // A fetch out from before the change is no longer waited for
@@ -73,8 +81,9 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Phase 6: user-scoped `getUserFullInfo` for the user info panel
     /// (opened from the contacts list, where there is no chat to resolve
-    /// through). Deduped by the bio cache + in-flight user id; the id-less
-    /// response correlates via `PendingRequest::user_id`.
+    /// through). Deduped by the cached info and the entry's own ask in
+    /// flight (`UserFullInfos::is_loading`); the id-less response
+    /// correlates via `PendingRequest::user_id` and its request id.
     pub fn fetch_user_full_info(
         &mut self,
         user_id: i64,
@@ -109,11 +118,22 @@ impl<S: JsonSender> ConnectDriver<S> {
             .contains_key(&user_id)
             || self
                 .session
-                .requests
-                .has_purpose_for_user(RequestPurpose::GetUserFullInfo, user_id)
+                .users_state
+                .user_full_infos
+                .is_loading(&user_id)
         {
             return Ok(None);
         }
+        self.send_full_info_request(user_id).map(Some)
+    }
+
+    /// `getUserFullInfo` for `user_id`, and the entry that waits for its
+    /// answer: every ask goes through here, so its answer and its error
+    /// find the ask they belong to.
+    pub(crate) fn send_full_info_request(
+        &mut self,
+        user_id: i64,
+    ) -> Result<RequestId, ConnectSendError> {
         let extra = self
             .session
             .request_for_user(RequestPurpose::GetUserFullInfo, user_id);
@@ -121,7 +141,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        Ok(Some(extra))
+        self.session
+            .users_state
+            .user_full_infos
+            .begin(user_id, extra);
+        Ok(extra)
     }
 
     /// The open private chat's `getUserFullInfo`, as tdesktop's
@@ -167,19 +191,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if self
             .session
-            .requests
-            .has_purpose_for_user(RequestPurpose::GetUserFullInfo, user_id)
+            .users_state
+            .user_full_infos
+            .is_loading(&user_id)
             || !self.session.userpic_full_info_due(user_id, now)
         {
             return Ok(None);
         }
-        let extra = self
-            .session
-            .request_for_user(RequestPurpose::GetUserFullInfo, user_id);
-        if let Err(err) = self.sender.send_json(&get_user_full_info(extra, user_id)) {
-            self.session.requests.take(extra);
-            return Err(err);
-        }
+        let extra = self.send_full_info_request(user_id)?;
         self.session.userpic_full_info_sent(user_id, extra);
         Ok(Some(extra))
     }

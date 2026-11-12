@@ -10,10 +10,13 @@ use super::state::{
     PickerDraft, StartPageDraft, View,
 };
 
-/// A section's draft: waiting for the full info it is built from, or ready.
+/// A section's draft: not built yet, or ready. The fetch it is built from
+/// lives in the session (`Fetch`), which owns the request; the draft is
+/// built from it the moment it answers.
 pub(crate) enum Draft<T> {
-    /// The screen shows "Loading…" (or the error that came instead).
-    Waiting,
+    /// The full info has not been reported: the screen shows "Loading…" (or
+    /// the error that came instead).
+    Unbuilt,
     Ready(T),
 }
 
@@ -21,27 +24,27 @@ impl<T> Draft<T> {
     pub(super) fn ready(&self) -> Option<&T> {
         match self {
             Self::Ready(draft) => Some(draft),
-            Self::Waiting => None,
+            Self::Unbuilt => None,
         }
     }
 
     pub(super) fn ready_mut(&mut self) -> Option<&mut T> {
         match self {
             Self::Ready(draft) => Some(draft),
-            Self::Waiting => None,
+            Self::Unbuilt => None,
         }
     }
 
     /// Take the draft out; the section waits until it is put back.
     pub(super) fn take(&mut self) -> Option<T> {
-        match std::mem::replace(self, Self::Waiting) {
+        match std::mem::replace(self, Self::Unbuilt) {
             Self::Ready(draft) => Some(draft),
-            Self::Waiting => None,
+            Self::Unbuilt => None,
         }
     }
 
-    pub(super) fn is_waiting(&self) -> bool {
-        matches!(self, Self::Waiting)
+    pub(super) fn is_unbuilt(&self) -> bool {
+        matches!(self, Self::Unbuilt)
     }
 }
 
@@ -205,20 +208,20 @@ impl Screen {
                 sub: StartPageSub::Stickers,
             },
             (_, View::Greeting) => Self::Greeting {
-                draft: Draft::Waiting,
+                draft: Draft::Unbuilt,
                 picker: None,
             },
             (_, View::Away) => Self::Away {
-                draft: Draft::Waiting,
+                draft: Draft::Unbuilt,
                 picker: None,
             },
             (_, View::Hours) => Self::Hours {
-                draft: Draft::Waiting,
+                draft: Draft::Unbuilt,
                 sub: HoursSub::Week,
             },
-            (_, View::Location) => Self::Location(Draft::Waiting),
+            (_, View::Location) => Self::Location(Draft::Unbuilt),
             (_, View::StartPage) => Self::StartPage {
-                draft: Draft::Waiting,
+                draft: Draft::Unbuilt,
                 sub: StartPageSub::Page,
             },
             (_, View::ChatLinks | View::LinkEdit) => Self::ChatLinks {
@@ -226,7 +229,7 @@ impl Screen {
                 confirm_delete: None,
             },
             (_, View::Chatbots) => Self::Chatbots {
-                draft: Draft::Waiting,
+                draft: Draft::Unbuilt,
                 picker: None,
             },
             // A sub-screen of a section that is not open: stays where it was.
@@ -382,12 +385,12 @@ impl Screen {
     pub(crate) fn draft_missing(&self) -> bool {
         match self {
             Self::Hub | Self::ChatLinks { .. } => false,
-            Self::Greeting { draft, .. } => draft.is_waiting(),
-            Self::Away { draft, .. } => draft.is_waiting(),
-            Self::Hours { draft, .. } => draft.is_waiting(),
-            Self::Location(draft) => draft.is_waiting(),
-            Self::StartPage { draft, .. } => draft.is_waiting(),
-            Self::Chatbots { draft, .. } => draft.is_waiting(),
+            Self::Greeting { draft, .. } => draft.is_unbuilt(),
+            Self::Away { draft, .. } => draft.is_unbuilt(),
+            Self::Hours { draft, .. } => draft.is_unbuilt(),
+            Self::Location(draft) => draft.is_unbuilt(),
+            Self::StartPage { draft, .. } => draft.is_unbuilt(),
+            Self::Chatbots { draft, .. } => draft.is_unbuilt(),
         }
     }
 

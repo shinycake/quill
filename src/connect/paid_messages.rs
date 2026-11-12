@@ -5,7 +5,7 @@
 use super::*;
 use crate::ids::{ChatId, RequestId};
 use crate::paid_messages::PaidTarget;
-use crate::paid_messages_guard::HeldSend;
+use crate::paid_messages_guard::{HeldSend, PaidOutcome};
 use crate::state::{RequestPurpose, unix_ms_now};
 use crate::telegram::envelope::CommonPayload;
 use crate::telegram::envelope::{EnvelopePayload, GroupsPayload, SettingsPayload};
@@ -108,6 +108,25 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.sender.paid_guard()?.held()
     }
 
+    /// Whether the send that went out as `request` is held for the
+    /// user's confirmation, not sent: its `Ok` meant only that the guard
+    /// took it.
+    pub fn paid_send_is_held(&self, request: RequestId) -> bool {
+        self.sender
+            .paid_guard()
+            .is_some_and(|guard| guard.holds(&request.0.to_string()))
+    }
+
+    /// Where the send that went out as `request` stands: held, released,
+    /// or discarded (an ended hold is read once).
+    pub fn paid_send_outcome(&self, request: RequestId) -> PaidOutcome {
+        self.sender
+            .paid_guard()
+            .map_or(PaidOutcome::Unknown, |guard| {
+                guard.outcome(&request.0.to_string())
+            })
+    }
+
     /// The user confirmed: sends the oldest held request with its total,
     /// remembering the price when asked to.
     pub fn release_paid_send(&mut self, remember: bool) -> Result<(), ConnectSendError> {
@@ -120,7 +139,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // confirmation.
         self.sender.send_json(&held.with_price())?;
         if let Some(guard) = self.sender.paid_guard() {
-            guard.take_held();
+            guard.end_held(PaidOutcome::Released);
         }
         if remember {
             self.remember_paid_trust(ChatId(held.chat_id), held.per_message);
@@ -131,7 +150,11 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// The user cancelled: drops the oldest held request and its pending
     /// entry.
     pub fn discard_paid_send(&mut self) {
-        let Some(held) = self.sender.paid_guard().and_then(|guard| guard.take_held()) else {
+        let Some(held) = self
+            .sender
+            .paid_guard()
+            .and_then(|guard| guard.end_held(PaidOutcome::Discarded))
+        else {
             return;
         };
         if let Some(extra) = held.extra().and_then(|e| e.parse::<u64>().ok()) {

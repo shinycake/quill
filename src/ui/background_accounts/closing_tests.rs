@@ -365,8 +365,13 @@ fn a_preparation_that_ends_settles_the_work_waiting_for_it(cx: &mut TestAppConte
     let ran = Rc::new(Cell::new(None));
     let ran_in = ran.clone();
     let key = account(1);
-    app.update_in(&mut vcx, |app, _, cx| {
-        app.background.prepare.begin(&key);
+    let token = app.update_in(&mut vcx, |app, _, cx| {
+        let mut made = None;
+        app.background.prepare.begin(&key, |token| {
+            made = Some(token);
+            gpui_kit::Task::ready(())
+        });
+        let token = made.expect("the worker was made");
         // The account is removed meanwhile: the worker runs on, unwanted.
         app.background.prepare.cancel(&key);
         app.after_closing(
@@ -380,14 +385,14 @@ fn a_preparation_that_ends_settles_the_work_waiting_for_it(cx: &mut TestAppConte
             },
             move |_, go, _| ran_in.set(Some(go)),
         );
+        token
     });
     vcx.run_until_parked();
     assert_eq!(ran.get(), None, "the worker still runs");
     app.update_in(&mut vcx, |app, _, cx| {
-        let generation = app.background.generation;
         app.finish_background_prepare(
             key.clone(),
-            generation,
+            &token,
             std::path::PathBuf::new(),
             super::deleting_tests::credentials(),
             Err(quill::connect::ConnectBlocker::StoreError),

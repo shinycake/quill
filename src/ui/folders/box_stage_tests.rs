@@ -209,6 +209,32 @@ fn the_add_contact_box_closes_on_the_answer_and_shows_a_refusal(cx: &mut TestApp
     });
 }
 
+/// A request lost with no answer kept (a reset, or more answers than the
+/// session keeps) ends the Add button's wait in the refusal.
+#[gpui_kit::test]
+fn a_lost_add_contact_request_ends_in_the_refusal(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        let request = sent(app, RequestPurpose::AddContact, None);
+        let mut dialog = AddContactDialog::new(window, cx, 42, "+1555", "Ada", "");
+        dialog.stage = AddContactStage::Saving(request);
+        app.dialogs.add_contact_dialog = Some(dialog);
+        assert!(!app.settle_add_contact(cx), "still out: it waits");
+        // The session forgets the request with no answer.
+        if let Some(session) = app.session_mut() {
+            session.requests.take(request);
+        }
+        assert!(app.settle_add_contact(cx));
+        assert!(
+            matches!(
+                app.dialogs.add_contact_dialog.as_ref().map(|d| &d.stage),
+                Some(AddContactStage::Failed(_))
+            ),
+            "not a spinner for good"
+        );
+    });
+}
+
 #[gpui_kit::test]
 fn a_save_after_the_folder_changed_goes_onto_the_fresh_folder(cx: &mut TestAppContext) {
     let (app, mut vcx) = open(cx);

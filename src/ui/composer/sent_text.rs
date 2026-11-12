@@ -65,6 +65,19 @@ pub(in crate::ui) enum AiAsk {
     Asked { request: RequestId, markup: String },
 }
 
+/// A send's request can still answer: it is in the session's table, or its
+/// answer is queued for the poll pass that notes it (`finish_successful_sends`;
+/// a background account's stay queued until it is back on screen). A queued
+/// answer is not a lost request: its ack still has to find the clear.
+pub(in crate::ui) fn request_waits(session: &quill::state::Session, request: RequestId) -> bool {
+    session.requests.get(request).is_some()
+        || session
+            .messages
+            .sent_answers
+            .iter()
+            .any(|answer| answer.request == request)
+}
+
 impl QuillApp {
     /// The rich send `request` took `markup` out of the field. A newer
     /// send replaces an older one (its answer no longer restores anything).
@@ -142,6 +155,18 @@ impl QuillApp {
             return;
         };
         let account = live.driver.session.account.clone();
+        // Sends that wait only for messages that cannot answer any more.
+        let session = &live.driver.session;
+        self.composer_sends.forget_lost_clears(
+            &account,
+            |chat, message| {
+                session
+                    .histories
+                    .get(&chat.0)
+                    .is_some_and(|history| history.messages.contains_key(&message.0))
+            },
+            |request| request_waits(session, request),
+        );
         let answered = self
             .composer_sends
             .take_left_sends(&account, |request| live.driver.session.acks.take(request));
@@ -166,8 +191,10 @@ impl QuillApp {
         }
     }
 
-    /// Frame upkeep: a refused rich send puts its text back in the field,
-    /// when the user has typed nothing since; an accepted one lets it go.
+    /// Frame upkeep: a refused rich send puts its text back in the field
+    /// (in front of whatever the user typed since), or, while another
+    /// message is edited, in front of the draft set aside for the edit; an
+    /// accepted one lets it go.
     pub(in crate::ui) fn settle_sent_text(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(request) = self.chat_ui.sent_text.request() else {
             return;
@@ -202,12 +229,25 @@ impl QuillApp {
         if rich && let Some(slot) = self.send_slot() {
             self.composer_sends.set_draft_clear(&slot, None);
         }
-        if self.composer.read(cx).value().is_empty() && !self.chat_ui.is_editing() {
-            self.chat_ui.rich.set_editor(rich);
-            self.set_composer_markup(&markup, window, cx);
-            self.note_open_draft(false, cx);
-            cx.notify();
+        if self.chat_ui.put_before_stashed_draft(&markup) {
+            // The field holds an edit of another message, and the revision
+            // of the slot's draft is consumed while editing: the refused
+            // text waits in front of the draft set aside for the edit, and
+            // cancelling the edit puts it back in the field.
+            return;
         }
+        // The refused text goes back in front of anything typed since, so
+        // neither is lost.
+        let typed = self.composer_markup(cx);
+        let restored = if typed.is_empty() {
+            markup
+        } else {
+            format!("{markup}\n{typed}")
+        };
+        self.chat_ui.rich.set_editor(rich);
+        self.set_composer_markup(&restored, window, cx);
+        self.note_open_draft(false, cx);
+        cx.notify();
     }
 }
 

@@ -34,8 +34,6 @@ pub struct AddPeopleRow {
 /// `PeerListContent`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AddPeopleEmpty {
-    /// `lng_contacts_loading`: the contacts list hasn't come yet.
-    ContactsLoading,
     /// `lng_contacts_not_found`: you have no contacts.
     NoContacts,
     /// `lng_contacts_loading`: nothing matched yet and the server search
@@ -43,6 +41,21 @@ pub enum AddPeopleEmpty {
     SearchLoading,
     /// `lng_blocked_list_not_found`: the search found nobody.
     NoResults,
+}
+
+/// Where the contacts list stands, for the line under the rows when no
+/// contact is listed (the call's other side is a row of its own, so the
+/// box never reads as empty while the contacts are still out).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ContactsView {
+    /// Nothing to say: a contact is listed, a query is typed, or the list
+    /// came (an empty one reads as [`AddPeopleEmpty::NoContacts`]).
+    #[default]
+    Ready,
+    /// `lng_contacts_loading`: the contacts list hasn't come yet.
+    Loading,
+    /// The contacts fetch failed: the box says so, with a Retry.
+    Failed,
 }
 
 /// The box's list for one query.
@@ -57,6 +70,8 @@ pub struct AddPeopleView {
     /// The server's people for the query who aren't in `rows`.
     pub global: Vec<AddPeopleRow>,
     pub empty: Option<AddPeopleEmpty>,
+    /// The contacts list's own state, drawn under the rows.
+    pub contacts: ContactsView,
 }
 
 impl AddPeopleView {
@@ -157,17 +172,28 @@ impl Session {
             (true, true) if self.users_state.contacts.data().is_some() => {
                 Some(AddPeopleEmpty::NoContacts)
             }
-            (true, true) => Some(AddPeopleEmpty::ContactsLoading),
+            (true, true) => None,
             (true, false) if search.query() == query && search.is_searching() => {
                 Some(AddPeopleEmpty::SearchLoading)
             }
             (true, false) => Some(AddPeopleEmpty::NoResults),
+        };
+        let contacts = if !query.is_empty()
+            || !contacts.is_empty()
+            || self.users_state.contacts.data().is_some()
+        {
+            ContactsView::Ready
+        } else if self.users_state.contacts.error().is_some() {
+            ContactsView::Failed
+        } else {
+            ContactsView::Loading
         };
         AddPeopleView {
             searching: !query.is_empty(),
             rows,
             global,
             empty,
+            contacts,
         }
     }
 

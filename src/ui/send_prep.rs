@@ -212,7 +212,7 @@ impl QuillApp {
         } else {
             self.background
                 .client_mut(account)
-                .and_then(|client| client.live.as_mut())
+                .and_then(|client| client.live_mut())
         }
     }
 

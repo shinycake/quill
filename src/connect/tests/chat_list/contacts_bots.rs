@@ -150,10 +150,12 @@ fn bot_info_fetched_once_on_chat_open() {
     let first = info_fetches();
     assert_eq!(first.len(), 1);
     assert!(first[0].contains("\"user_id\":21"));
+    // The ask is the bot user's: its entry waits for the answer.
+    assert!(driver.session.users_state.user_full_infos.is_loading(&21));
     let extra = driver
         .session
         .requests
-        .pending_extra_for(RequestPurpose::GetUserFullInfo, Some(ChatId(21)));
+        .pending_extra_for(RequestPurpose::GetUserFullInfo, None);
 
     // Re-selecting while the fetch is in flight sends nothing new.
     driver.select_chat(ChatId(21)).unwrap();
@@ -855,5 +857,58 @@ fn a_video_userpic_asks_for_the_full_info_once_per_photo() {
     assert!(driver.fetch_userpic_full_info(41).unwrap().is_some());
     assert_eq!(asked(&recorder), 3);
 
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_userpic_ask_out_is_what_a_later_full_info_fetch_waits_for() {
+    // The userpic's `getUserFullInfo` is out when the Add Bot box asks:
+    // the box's fetch sends nothing and waits on the entry, which the
+    // userpic ask's answer (or error) settles (sweep r4-07).
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    for json in [
+        r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+        r#"{"@type":"updateUser","user":{"@type":"user","id":22,"first_name":"Ada","last_name":"","is_premium":true,"profile_photo":{"@type":"profilePhoto","id":"700","small":null,"big":null,"has_animation":true,"is_personal":false},"type":{"@type":"userTypeRegular"}}}"#,
+        r#"{"@type":"updateNewChat","chat":{"id":22,"title":"Ada","type":{"@type":"chatTypePrivate","user_id":22},"unread_count":0}}"#,
+    ] {
+        driver
+            .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+            .unwrap();
+    }
+    let userpic = driver
+        .fetch_userpic_full_info(22)
+        .unwrap()
+        .expect("the userpic ask went out");
+    let sent = recorder.snapshot().len();
+    assert_eq!(driver.fetch_user_full_info(22), Ok(None), "it waits");
+    assert_eq!(recorder.snapshot().len(), sent, "nothing more is sent");
+    let infos = &driver.session.users_state.user_full_infos;
+    assert!(infos.is_loading(&22), "the box reads Loading, not failed");
+    driver
+        .ingest(
+            copy_and_parse(
+                &format!(
+                    r#"{{"@type":"error","@extra":"{}","code":500,"message":"boom"}}"#,
+                    userpic.0
+                ),
+                &seq,
+                &dyn_sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let infos = &driver.session.users_state.user_full_infos;
+    assert!(infos.error(&22).is_some(), "its error lands in the entry");
+    assert!(
+        matches!(driver.fetch_user_full_info(22), Ok(Some(_))),
+        "Retry asks again"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -275,25 +275,28 @@ impl QuillApp {
         if matches!(self.chat_list.swipe.poll, SwipePoll::Running { .. }) {
             return;
         }
-        self.chat_list.swipe.poll = SwipePoll::Running {
-            _task: self.spawn_screen(cx, async move |this, cx| {
-                loop {
-                    cx.background_executor()
-                        .timer(Duration::from_millis(POLL_MS))
-                        .await;
-                    // The chat list is the main window's: so is what a swipe opens.
-                    let Ok(more) = this.update(cx, |this, cx| {
-                        this.as_asked_by(None, |this| this.poll_swipe(cx))
-                    }) else {
-                        return;
-                    };
-                    if !more {
-                        break;
+        self.arm_swipe_beat(cx);
+    }
+
+    /// The next look at the swipe, `POLL_MS` away. The stage holds it; the
+    /// look that finds the gesture over (or the screen gone) arms nothing.
+    fn arm_swipe_beat(&mut self, cx: &mut Context<Self>) {
+        let beat = self.spawn_screen(cx, async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(POLL_MS))
+                .await;
+            // The chat list is the main window's: so is what a swipe opens.
+            let _ = this.update(cx, |this, cx| {
+                this.as_asked_by(None, |this| {
+                    if this.poll_swipe(cx) {
+                        this.arm_swipe_beat(cx);
+                    } else {
+                        this.chat_list.swipe.poll = SwipePoll::Idle;
                     }
-                }
-                let _ = this.update(cx, |this, _| this.chat_list.swipe.poll = SwipePoll::Idle);
-            }),
-        };
+                })
+            });
+        });
+        self.chat_list.swipe.poll = SwipePoll::Running { _task: beat };
     }
 
     /// Run a due action and abandon a gesture that lost its end event.

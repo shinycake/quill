@@ -87,7 +87,7 @@ pub(super) struct ScreenClaim {
 impl ScreenWorkers {
     /// A worker starts: it holds the returned claim until it ends, and the
     /// receiver resolves once the claim is gone.
-    pub(super) fn begin(&mut self) -> (ScreenClaim, oneshot::Receiver<()>) {
+    pub(super) fn enlist(&mut self) -> (ScreenClaim, oneshot::Receiver<()>) {
         self.workers.retain(|worker| worker.strong_count() > 0);
         if self.workers.is_empty() {
             self.watches.clear();
@@ -115,7 +115,7 @@ impl super::app::QuillApp {
     /// when the claim is released, also when the connection that asked for
     /// the worker was replaced and no longer hears of its end.
     pub(super) fn begin_screen_worker(&mut self, cx: &mut gpui_kit::Context<Self>) -> ScreenClaim {
-        let (claim, end) = self.background.screen_workers.begin();
+        let (claim, end) = self.background.screen_workers.enlist();
         // screen-scope: the waiters it settles cover every account's folders, whichever account is on screen.
         let watch = Self::spawn_app(cx, async move |this, cx| {
             // Resolves when the claim is dropped, with or without a send.
@@ -400,8 +400,8 @@ mod tests {
     fn a_worker_holds_the_claim_until_it_ends() {
         let mut workers = ScreenWorkers::default();
         assert!(!workers.running());
-        let (first, mut first_end) = workers.begin();
-        let (second, _second_end) = workers.begin();
+        let (first, mut first_end) = workers.enlist();
+        let (second, _second_end) = workers.enlist();
         assert_eq!(first_end.try_recv(), Ok(None), "the first still runs");
         drop(first);
         assert!(first_end.try_recv().is_err(), "its end is told");

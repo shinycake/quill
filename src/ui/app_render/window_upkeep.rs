@@ -39,6 +39,8 @@ impl QuillApp {
         // An edit TDLib answered leaves edit mode (or goes on, on an error).
         self.settle_edit_send(window, cx);
         self.settle_sent_text(window, cx);
+        // A paid menu command whose Pay went through clears its reply and token.
+        self.settle_menu_send(window, cx);
         self.settle_checklist_dialog(cx);
         self.settle_poll_add_option(cx);
         // The poll the voters box shows changed: its list is asked again.
@@ -48,6 +50,8 @@ impl QuillApp {
         self.settle_scheduled_deletes(cx);
         // A bot's Restart sends its /start once the unblock is answered.
         self.pump_bot_restart(cx);
+        // The spam bar's report says "done" once both requests are answered.
+        self.pump_bar_work(cx);
         // A forced reply for the chat this window shows arms its composer.
         self.arm_force_reply_here(window, cx);
         // The histories every window still reads stay whole.
@@ -81,7 +85,6 @@ impl QuillApp {
         self.ai_compose_window_upkeep(window, cx);
         // The countdowns tick while the chat shows a running one: slow
         // mode on the send button, self-destruct badges, live locations.
-        self.ensure_slow_mode_tick(cx);
         self.ensure_self_destruct_tick(cx);
         self.ensure_live_location_tick(cx);
         // A clicked mention, hashtag, command or link (`entity_links`).

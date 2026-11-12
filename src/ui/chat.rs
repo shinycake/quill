@@ -2,14 +2,12 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use crate::ui::composer_state::SlowModeTick;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
 use quill::state::unix_ms_now;
 use quill::telegram::envelope::ChatKind;
-use std::time::Duration;
 
 impl QuillApp {
     /// Phase A1: slow-mode wait (whole seconds) for a chat, via the
@@ -73,55 +71,5 @@ impl QuillApp {
         self.set_note(StatusNote::info(tr(keys::SLOWMODE_NO_MANY)));
         cx.notify();
         true
-    }
-
-    /// Phase A1: keep the slow-mode countdown re-rendering while the open
-    /// chat is gated. At most one task per open chat (guarded by
-    /// `slow_mode_tick`, mirroring `spawn_voice_tick`); it exits
-    /// when the gate lifts or the open chat changes. Called from
-    /// `render`, which has the `&mut self` the tick needs.
-    pub(super) fn ensure_slow_mode_tick(&mut self, cx: &mut Context<Self>) {
-        let Some(chat_id) = self
-            .session()
-            .and_then(|session| session.open_chat_id())
-            .filter(|id| self.slow_mode_wait_secs_for(*id).is_some())
-        else {
-            return;
-        };
-        if self.composer_ui.slow_mode_tick.ticks_for(chat_id) {
-            return;
-        }
-        let task = self.spawn_scoped(cx, async move |this, cx| {
-            loop {
-                cx.background_executor().timer(Duration::from_secs(1)).await;
-                let cont = this
-                    .update(cx, |this, cx| {
-                        let still_open =
-                            this.session().and_then(|s| s.open_chat_id()) == Some(chat_id);
-                        let still_gated = this.slow_mode_wait_secs_for(chat_id).is_some();
-                        if still_open {
-                            this.notify_tick(super::app_slice::SliceKind::Composer, cx);
-                        }
-                        if still_open && still_gated {
-                            true
-                        } else {
-                            // The tick task is done: the stage goes with it.
-                            if this.composer_ui.slow_mode_tick.ticks_for(chat_id) {
-                                this.composer_ui.slow_mode_tick = SlowModeTick::Idle;
-                            }
-                            false
-                        }
-                    })
-                    .unwrap_or(false);
-                if !cont {
-                    break;
-                }
-            }
-        });
-        // A tick for another chat is replaced, which stops its task.
-        self.composer_ui.slow_mode_tick = SlowModeTick::Ticking {
-            chat: chat_id,
-            _task: task,
-        };
     }
 }

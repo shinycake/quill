@@ -75,6 +75,48 @@ fn a_menu_command_into_a_paid_chat_waits_for_the_confirmation() {
     cleanup(f);
 }
 
+/// The `Ok` of a send into a paid chat only says the guard took it:
+/// `paid_send_is_held` says it waits for the confirmation (a free chat's
+/// send is not held).
+#[test]
+fn a_send_says_whether_the_guard_holds_it() {
+    use crate::composer::ComposerSnapshot;
+    let mut f = fixture();
+    paid_chat(&mut f, 25);
+    let view = f.1.session.view_generation;
+    let snap = ComposerSnapshot::capture(ChatId(600), view, "/cmd");
+    let request = f.1.send_snapshot(&snap).unwrap();
+    assert!(f.1.paid_send_is_held(request), "waits for Pay");
+    f.1.discard_paid_send();
+    assert!(!f.1.paid_send_is_held(request), "cancelled: not held");
+    cleanup(f);
+}
+
+/// The asker of a held send learns how the hold ended: released or
+/// discarded, read once.
+#[test]
+fn a_held_send_reports_how_its_hold_ended() {
+    use crate::composer::ComposerSnapshot;
+    use crate::paid_messages_guard::PaidOutcome;
+    let mut f = fixture();
+    paid_chat(&mut f, 25);
+    let view = f.1.session.view_generation;
+    let snap = ComposerSnapshot::capture(ChatId(600), view, "/cmd");
+    let released = f.1.send_snapshot(&snap).unwrap();
+    assert_eq!(f.1.paid_send_outcome(released), PaidOutcome::Held);
+    f.1.release_paid_send(false).unwrap();
+    assert_eq!(f.1.paid_send_outcome(released), PaidOutcome::Released);
+    assert_eq!(
+        f.1.paid_send_outcome(released),
+        PaidOutcome::Unknown,
+        "read once"
+    );
+    let discarded = f.1.send_snapshot(&snap).unwrap();
+    f.1.discard_paid_send();
+    assert_eq!(f.1.paid_send_outcome(discarded), PaidOutcome::Discarded);
+    cleanup(f);
+}
+
 #[test]
 fn forwards_carry_price_times_messages() {
     let mut f = fixture();

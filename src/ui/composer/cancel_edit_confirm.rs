@@ -6,8 +6,6 @@ use super::*;
 use crate::ui::shell::{DialogKind, QuillShell};
 use gpui_kit::component::dialog::Dialog;
 use quill::composer::edit_text_changed;
-use std::cell::RefCell;
-use std::rc::Rc;
 
 impl QuillApp {
     /// Whether the field differs from the message being edited.
@@ -98,18 +96,9 @@ impl QuillApp {
                             );
                         })),
                 );
-            let body = Rc::new(RefCell::new(Some(body)));
             dialog
                 .overlay(true)
-                .content(crate::ui::shell::scrollable_dialog_content(
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    },
-                ))
+                .content(crate::ui::shell::one_shot_dialog_content(body))
                 .footer(footer)
                 .on_close(on_close)
         })

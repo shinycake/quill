@@ -425,3 +425,39 @@ fn an_ask_made_before_its_request_waits_for_that_request(cx: &mut TestAppContext
         assert_eq!(waits_of(app), Some(AskWaits::Requests(vec![sent_after])));
     });
 }
+
+/// Sweep r4-07 round 4 (item 10): a closed chat window's value goes through
+/// the one writer (`SlotFarewell for ChatUi`), so the acks its bar work
+/// waits on are forgotten with it, and a late answer is kept for nobody.
+#[gpui_kit::test]
+fn closing_a_chat_window_forgets_the_acks_of_its_bar_work(cx: &mut TestAppContext) {
+    use crate::ui::bar_report::{BarKind, BarWork};
+    use quill::ids::RequestId;
+    use quill::state::Answer;
+    let h = new_app(cx);
+    let chat_window = h.open_in_new_window(OTHER, cx);
+    let request = RequestId(4_000_001);
+    h.app.update(cx, |app, cx| {
+        app.in_window_scope(Some(OTHER), cx, |app, _| {
+            app.chat_ui.bar_work = BarWork::Out {
+                kind: BarKind::Report,
+                waiting: vec![request],
+            };
+            if let Some(session) = app.session_mut() {
+                session.acks.expect(request);
+            }
+        })
+    });
+    cx.update_window(chat_window, |_, window, _| window.remove_window())
+        .unwrap();
+    cx.run_until_parked();
+    h.app.update(cx, |app, _| {
+        let session = app.session_mut().expect("a session");
+        session.acks.settle(request, Answer::Done);
+        assert_eq!(
+            session.acks.take(request),
+            None,
+            "nothing waits for it any more"
+        );
+    });
+}

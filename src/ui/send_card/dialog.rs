@@ -314,6 +314,9 @@ impl QuillApp {
         let muted = cx.theme().muted_foreground;
         let kind = self.send_button_kind_now(false, true);
         let wait = self.slow_mode_wait_secs();
+        if wait.is_some() {
+            self.request_animation_tick(1, cx);
+        }
         let label = match kind {
             SendButtonKind::Slowmode => format_slowmode(wait.unwrap_or(0)),
             SendButtonKind::Schedule => tr(keys::SCHEDULE_BUTTON).to_string(),

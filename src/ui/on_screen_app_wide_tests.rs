@@ -142,7 +142,7 @@ fn call_ids_and_video_chat_boxes_do_not_carry_over(cx: &mut TestAppContext) {
         );
         assert!(matches!(
             app.call_screen.end,
-            crate::ui::calls_state::CallEnd::Running
+            crate::ui::calls_state::CallEnd::NotEnded
         ));
         let group = &app.group_call_screen;
         assert_eq!(group.window_closed_by_user, None);

@@ -138,7 +138,7 @@ fn a_failed_full_info_ends_the_loading_wait(cx: &mut TestAppContext) {
             session
                 .users_state
                 .user_full_infos
-                .fail(USER, "unreachable".into());
+                .fail_unsent(USER, "unreachable".into());
         }
     });
     frame(vcx);

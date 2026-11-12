@@ -362,38 +362,27 @@ fn the_mute_submenu_stays_inside_the_window_near_its_edge(cx: &mut TestAppContex
     );
 }
 
+/// Ungroup closes at once on confirm, as tdesktop does: the box does not
+/// wait for the toggle's answer (no busy button, and no press that does
+/// nothing while another change is out).
 #[gpui_kit::test]
-fn ungroup_waits_while_show_as_one_chat_is_changing(cx: &mut TestAppContext) {
+fn ungroup_closes_at_once_on_confirm(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     frames(&mut vcx);
     app.update(&mut vcx, |app, cx| {
-        if let Some(session) = app.demo_session.as_mut() {
-            session.request_for_community(
-                quill::state::RequestPurpose::Communities(
-                    quill::state::CommunitiesPurpose::ToggleCollapsed { collapsed: true },
-                ),
-                RUSTACEANS,
-            );
-        }
         app.show_community_box(
             CommunityBox::Ungroup {
                 community_id: RUSTACEANS,
             },
             cx,
         );
+        assert!(app.admin.community.flow.open.is_some());
         app.confirm_community_box(cx);
+        assert!(
+            app.admin.community.flow.open.is_none(),
+            "closed in the same update"
+        );
     });
-    frames(&mut vcx);
-    let open = app.read_with(&vcx, |app, _| {
-        matches!(
-            app.admin.community.flow.open,
-            Some(CommunityBox::Ungroup { .. })
-        )
-    });
-    assert!(
-        open,
-        "Enter on Ungroup does nothing while the toggle is in flight"
-    );
 }
 
 #[gpui_kit::test]
@@ -615,18 +604,22 @@ fn a_ban_warning_opens_at_once_when_no_box_is_open(cx: &mut TestAppContext) {
 
 #[gpui_kit::test]
 fn the_chooser_reads_loading_while_the_owned_bots_load(cx: &mut TestAppContext) {
-    use super::chooser::CandidateStatus;
+    use super::chooser::CandidateView;
     let (app, mut vcx) = new_app(cx);
     frames(&mut vcx);
     app.update(&mut vcx, |app, _| {
         if let Some(session) = app.demo_session.as_mut() {
+            session.users_state.profile_chat_lists.insert(
+                (quill::state::ProfileChatsKind::SuitableCommunityChats, 0),
+                quill::state::ProfileChatsFetch::complete(Vec::new()),
+            );
             session.communities.owned_bots.begin();
         }
     });
     let status = app.read_with(&vcx, |app, _| app.community_candidates("").1);
     assert_eq!(
         status,
-        CandidateStatus::Loading,
+        CandidateView::Loading,
         "the empty list is not 'No chats found' while the bots are on their way"
     );
     app.update(&mut vcx, |app, _| {
@@ -635,7 +628,98 @@ fn the_chooser_reads_loading_while_the_owned_bots_load(cx: &mut TestAppContext) 
         }
     });
     let status = app.read_with(&vcx, |app, _| app.community_candidates("").1);
-    assert_eq!(status, CandidateStatus::Ready);
+    assert_eq!(status, CandidateView::Ready);
+}
+
+/// A list whose request never went out (no entry, or the bots back to
+/// idle) reads as failed, with Retry, not "No chats found".
+#[gpui_kit::test]
+fn the_chooser_reads_failed_for_a_list_that_was_not_sent(cx: &mut TestAppContext) {
+    use super::chooser::CandidateView;
+    let (app, mut vcx) = new_app(cx);
+    frames(&mut vcx);
+    let status = |app: &Entity<QuillApp>, vcx: &VisualTestContext| {
+        app.read_with(vcx, |app, _| app.community_candidates("").1)
+    };
+    app.update(&mut vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session
+                .users_state
+                .profile_chat_lists
+                .remove(&(quill::state::ProfileChatsKind::SuitableCommunityChats, 0));
+            session.communities.owned_bots = quill::state::fetch::Fetch::Ready(Vec::new());
+        }
+    });
+    assert!(matches!(status(&app, &vcx), CandidateView::Failed(_)));
+    app.update(&mut vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.users_state.profile_chat_lists.insert(
+                (quill::state::ProfileChatsKind::SuitableCommunityChats, 0),
+                quill::state::ProfileChatsFetch::complete(Vec::new()),
+            );
+            session.communities.owned_bots = quill::state::fetch::Fetch::Idle;
+        }
+    });
+    assert!(matches!(status(&app, &vcx), CandidateView::Failed(_)));
+}
+
+/// A box that stays for its answer is busy while its own request is out,
+/// not while some request of the community is: another surface's request
+/// does not disable it, and its own answer (or loss) ends the wait.
+#[gpui_kit::test]
+fn a_confirm_box_is_busy_only_while_its_own_request_is_out(cx: &mut TestAppContext) {
+    use super::{Ask, CommunityBox};
+    use quill::state::{CommunitiesPurpose, RequestPurpose};
+    let (app, mut vcx) = new_app(cx);
+    frames(&mut vcx);
+    app.update(&mut vcx, |app, cx| {
+        app.show_community_box(
+            CommunityBox::ConfirmAdd {
+                community_id: RUSTACEANS,
+                chat_id: OWN_CHANNEL,
+                hidden: false,
+                ask: Ask::Idle,
+            },
+            cx,
+        );
+        let ask_of = |app: &QuillApp| match app.admin.community.flow.open {
+            Some(CommunityBox::ConfirmAdd { ask, .. }) => ask,
+            _ => Ask::Idle,
+        };
+        // Another surface's request of the same community is out.
+        let other = app.demo_session.as_mut().map(|session| {
+            session.request_for_community(
+                RequestPurpose::Communities(CommunitiesPurpose::AddChat {
+                    chat_id: OWN_CHANNEL,
+                    is_hidden: false,
+                }),
+                RUSTACEANS,
+            )
+        });
+        assert!(other.is_some());
+        assert!(!ask_of(app).busy(app.session()), "not this box's request");
+        // The box's own request.
+        let own = app.demo_session.as_mut().map(|session| {
+            session.request_for_community(
+                RequestPurpose::Communities(CommunitiesPurpose::AddChat {
+                    chat_id: OWN_CHANNEL,
+                    is_hidden: true,
+                }),
+                RUSTACEANS,
+            )
+        });
+        if let Some(own) = own {
+            app.hold_community_ask(own);
+            assert!(ask_of(app).busy(app.session()), "its own request is out");
+            if let Some(session) = app.demo_session.as_mut() {
+                session.requests.take(own);
+            }
+            assert!(
+                !ask_of(app).busy(app.session()),
+                "answered or lost: the box is free again"
+            );
+        }
+    });
 }
 
 #[gpui_kit::test]

@@ -126,7 +126,6 @@ calls.window | the call window, opened and closed by the sync with the session o
 calls.sounds * | the call sound output and the loop playing; what a call has already played is the screen's (`call_screen.sound_marks`)
 background.clients * | the accounts running in the background, each with its key: the ids inside are that client's
 background.screen_workers * | the workers preparing a screen client, each held by its own claim, and the task per worker that wakes the waiting work when it ends: the process's, before any account is on screen
-background.generation | which background start may land
 background.poll | the background poll task; dropping it ends the loop
 background.prepare | the accounts whose database key is being read, by key, and the workers still running
 background.restarts | failures in a row and the next start of each background account, keyed by its AccountKey
