@@ -550,10 +550,7 @@ impl QuillApp {
     fn unblock_user(&mut self, user_id: i64, cx: &mut Context<Self>) {
         self.privacy.layer.clear_unblock();
         if let Some(live) = self.live.as_mut() {
-            let result = {
-                live.driver
-                    .unblock_sender(user_id, quill::state::BlockOrigin::PrivacyPage)
-            };
+            let result = { live.driver.unblock_sender(user_id) };
             if let Err(err) = result {
                 self.set_note(StatusNote::error(user_error_for(
                     keys::Q_NOTES_FAILED_UNBLOCK,
