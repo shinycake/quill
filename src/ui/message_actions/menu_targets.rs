@@ -23,7 +23,7 @@ impl QuillApp {
         let chat_menu_gone = !self.windows.in_window()
             && self
                 .chat_list
-                .menu
+                .overlay
                 .row()
                 .is_some_and(|menu| !session.chats.contains_key(&menu.chat_id.0));
         let list_elsewhere = self.history.pinned_list_open.as_ref().is_some_and(|key| {
@@ -36,7 +36,7 @@ impl QuillApp {
             self.close_message_menu();
         }
         if chat_menu_gone {
-            self.chat_list.menu.close();
+            self.chat_list.overlay.close_menu();
         }
     }
 }

@@ -85,6 +85,8 @@ thread_local! {
 
 /// A quit that was asked for and neither refused nor finished by now was
 /// dropped without a word: the windows closing after it are not part of it.
+/// Read where a lost window is told from a quit (Windows, Linux).
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 const QUIT_GRACE: Duration = Duration::from_secs(10);
 
 /// Whether Quill or the system asked to quit or restart: a window closing
@@ -92,6 +94,7 @@ const QUIT_GRACE: Duration = Duration::from_secs(10);
 /// stage ends when the app refuses the quit ([`note_quit_refused`]) or the
 /// quit does not finish within [`QUIT_GRACE`]; one that is allowed ends the
 /// process.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 #[derive(Clone, Copy)]
 enum QuitStage {
     Normal,

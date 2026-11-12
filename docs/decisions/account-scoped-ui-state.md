@@ -8053,7 +8053,7 @@ from the top after its entries; what that found is in the `new-` rows.
 | --- | --- |
 | 12-C006 | The chooser's window is a stage of `Chooser`: `Opening { sheet, _open: Task }` (the task makes the window and moves the stage on) and `Open { sheet, window }`. A chooser closed while its window is made drops the task, so no window is made for it; `OpenChooser.window: Option` is gone. |
 | 12-C007 | `ScreenShareUi.demo_active` is `Option<DemoShare { source, with_audio }>`; `demo_active_audio` is gone. |
-| 11-035 | The timer picker closes before the send (`close_ttl_picker`), as the integration branch has it; this branch's keep-on-refusal variant was dropped in the rebase. |
+| 11-035 | The timer picker closes through its one closer (`close_ttl_picker`, the integration branch's) only once the send went out: a refused send keeps the picker, so the pick can be retried, as the sound and mute pickers do. |
 | 12-D005 | The two-step buttons that send (reset, recovery code, resend, the confirm box's yes) say "request not sent" when the driver refuses, and the confirm box stays open on a refusal. The screens without a form draw the notice line too. |
 | 12-D006 | `WindowSelected.messages` is a map by document order: a text that holds none of the selection lets go, and a read with no selection resets the record. The one message the copy names is the first text in document order that holds the selection. |
 | 12-D007 | `SELECTED`, `OWNERS` (selectable text) and the send-fly tables are `Cell`s taken and put back (`with_taken`); `SelectionFx` and the history row bands use `try_borrow`. `selection_bar.rs:25` is not in this bundle. |
@@ -8064,11 +8064,11 @@ from the top after its entries; what that found is in the `new-` rows.
 | 12-D016 | The flight is one `Flight { Idle, Waiting(Fly), Flying { fly, started } }`; `Fly.started` is gone. It ends with its own landing, its window closing, the account leaving the screen (`end_account_surfaces`) and the lock (`close_for_lock`). A refused sticker send forgets the noted cell. |
 | 12-D017 | `SystemAccent` is `Unread`, `Reading { color, _wait: Task }`, `Read(color)`; `system_accent_poll` is gone. |
 | 12-D018 (and 14-003) | The banner's dismissal is `ChangelogBanner::{Shown, Dismissed}` inside `UpdateState::Installed`, as the integration branch has it; this branch's `update_banner_dismissed_for` was dropped in the rebase. |
-| 13-005 | The ticked destinations stay `ShareUi.selection`, cleared when the box opens and closes, as the integration branch has it (`ForwardStage::Picking { share_at }`); this branch's `ticks` in the stage was dropped in the rebase. |
-| 13-006 | The forward result banner stays `ShareUi.forward_result`, shown by `present_forward_result` as the integration branch has it; this branch's `ChatUi.forward_result` was dropped in the rebase. |
+| 13-005 | The ticked destinations live in the box's stage (`ForwardStage::Picking { ticks }`, beside the integration branch's `share_at`), so every way out of the box drops them; `ShareUi.selection` is gone. What was typed in the box goes once neither it nor the reply chooser (which types in the same search field) is open (`sync_share_inputs`, per window and frame), and a box that opens starts with nothing typed. |
+| 13-006 | The forward result banner is the source chat's (`ChatUi.forward_result`): it is set only where the window shows that chat, and leaving the chat takes it along. A window on another chat gets the status note only. `ShareUi.forward_result` is gone. |
 | 13-013 | `MediaMenuFacts.downloading` and `.local` are one `MenuFile { Remote, Downloading, OnDisk }`. |
-| 13-017 | The gallery's selection opens the forward box through `open_forward_picker`, which closes the reply chooser (`ChatUi`), as the integration branch has it; `ForwardStage::begin_selection` was dropped in the rebase. |
-| 13-016 | The chat list's menu is `ChatListMenu` and the peek `PeekPreview`, as the integration branch has them; this branch's `ChatOverlay` was dropped in the rebase. |
+| 13-017 | The gallery's selection becomes the forward through `ForwardStage::begin_selection` (a box open for an earlier forward goes with it, ticks included), then `open_forward_picker`, which closes the reply chooser (`ChatUi`, as the integration branch has it). |
+| 13-016 | What floats over the chat list is one `ChatOverlay { None, RowMenu, ArchiveMenu, Pressing, Peek }`: the integration branch's `ChatListMenu` (a row's menu or the archive row's) and `PeekPreview` folded into one value, so opening a menu ends a peek and the other way round, and a close ends only its own (`close_menu`, `close_peek`). |
 | 13-018 | The Shift+click range anchor is `ForwardDraft.range_anchor`: it ends with the selection, so a menu "Select" no longer starts from an earlier selection's row. `ChatUi.selection_anchor` is gone. |
 | 13-012 | The shortcuts page reads the keymap with `try_borrow`. |
 | 13-007 | `PhoneLookups` is gone. The IP default is `AuthState.guessed_country: Fetch<String>` (asked once, a refusal or an error leaves it `Failed`, matched by its request); the list was a `Fetch` already. |
@@ -8087,9 +8087,9 @@ from the top after its entries; what that found is in the `new-` rows.
   are sent and not waited for: nothing holds a stage for their answers, and a
   refusal changes nothing the user sees.
 - **Rebase onto the integration branch (r2-followup).** Where both sides fixed the same
-  entry the integration shape stayed (see the rows above): `ChatListMenu`,
-  `ForwardStage::Picking.share_at`, the request-matched sign-in answers, and the
-  refused-delete stop. This branch's own fixes the integration branch has nothing for stayed.
+  entry the integration shape stayed (see the rows above): `ForwardStage::Picking.share_at`,
+  the request-matched sign-in answers, the changelog banner and the refused-delete stop.
+  This branch's own fixes the integration branch has nothing for stayed, built on its shapes.
 - **Files outside the bundle that changed** (the smallest change each): `copy_inline_text.rs`,
   `chat_ui_state.rs`, `history_a11y.rs`, the lock and account closers, and in the core
   crate `composer/actions.rs`, `auth/state.rs`, `profile_panels.rs`, `stats_pages.rs` and

@@ -205,7 +205,7 @@ impl QuillApp {
                             show_attach && !self.pending_attachments().is_empty(),
                             |this| this.child(self.composer_attachment_tray(cx)),
                         )
-                        .when_some(self.share.forward_result.clone(), |this, result| {
+                        .when_some(self.chat_ui.forward_result.clone(), |this, result| {
                             this.child(self.forward_success_banner(&result, cx))
                         })
                         .when(

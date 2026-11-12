@@ -70,7 +70,8 @@ fn continue_in_chat_moves_the_forward_and_comment_to_the_destination(cx: &mut Te
     // ticked and a comment typed.
     in_window(&h, chat_window, Some(OTHER), cx, |app, window, cx| {
         app.share.forward = crate::ui::forward_stage::ForwardStage::Selecting(draft());
-        app.share.selection.toggle(OPEN);
+        app.share.forward.open_picker();
+        app.share.toggle_tick(OPEN);
         app.share
             .comment_input
             .update(cx, |input, cx| input.set_value("look", window, cx));

@@ -217,6 +217,10 @@ pub(crate) struct ChatUi {
     /// "Save as HTML" with "Ask where to save" on: the folder picker of
     /// this chat's selection, while it is open.
     pub(super) html_save: super::selection_html::HtmlSave,
+    /// The banner for the last `forwardMessages` answer of this chat's
+    /// forward (Dismiss or Esc ends it). The chat's own: another chat starts
+    /// without it, and a window that does not show the chat draws none.
+    pub(super) forward_result: Option<quill::state::ForwardResult>,
     /// "Save Selected": waiting for the folder the user picks. The picker's
     /// task lives in the stage, so a chat change drops it with the selection.
     pub(super) save_selection: super::selection_mode::SaveSelection,

@@ -385,7 +385,7 @@ impl QuillApp {
             topic_id: None,
             range_anchor: None,
         };
-        self.share.forward = crate::ui::forward_stage::ForwardStage::Selecting(draft);
+        self.share.forward.begin_selection(draft);
         self.clear_shared_media_selection(cx);
         self.open_forward_picker(window, cx);
     }

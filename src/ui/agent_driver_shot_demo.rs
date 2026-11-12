@@ -84,12 +84,13 @@ fn demo_screenshot(app: &mut QuillApp, window: &mut Window, cx: &mut Context<Qui
     let anchor = point(px(48.), px(200.));
     if let Some(chat_id) = env_chat("QUILL_DEMO_SHOT_MENU") {
         app.chat_list
-            .menu
+            .overlay
             .open_row(ChatMenuState::at(chat_id, anchor));
     }
     if let Some(chat_id) = env_chat("QUILL_DEMO_SHOT_PEEK") {
-        app.chat_list.peek =
-            crate::ui::chat_list_state::PeekPreview::Open(ChatPreviewState { chat_id, anchor });
+        app.chat_list
+            .overlay
+            .open_peek(ChatPreviewState { chat_id, anchor });
     }
     quill::fast_buttons::set_persistence(false);
     access::set_enabled(true);
