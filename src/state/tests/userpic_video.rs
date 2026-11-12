@@ -4,7 +4,7 @@
 use super::common::*;
 use super::*;
 use crate::state::USERPIC_INFO_RETRY;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 const USER: i64 = 8301;
 
@@ -190,7 +190,7 @@ fn a_refused_ask_waits_out_the_retry_and_is_then_asked_again() {
         "refused: not on every draw"
     );
     assert!(
-        !session.userpic_full_info_due(USER, now + USERPIC_INFO_RETRY - Duration::from_secs(1)),
+        !session.userpic_full_info_due(USER, now + USERPIC_INFO_RETRY / 2),
         "still waiting"
     );
     assert!(

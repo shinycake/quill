@@ -269,9 +269,7 @@ impl SetEditing {
 
     /// Stop waiting for the download, handing back what waited.
     pub(crate) fn take_downloading(&mut self) -> Option<PendingVideo> {
-        if self.downloading().is_none() {
-            return None;
-        }
+        self.downloading()?;
         match std::mem::take(self) {
             Self::Waiting(PickWait::Downloading(pending)) => Some(pending),
             _ => None,
