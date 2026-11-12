@@ -44,6 +44,3 @@ src/group_manage.rs 200 read
 src/group_type.rs 503 read
 src/icon_badge.rs 681 read
 src/ids.rs 294 read
-src/inline_grid.rs 652 read
-src/inline_members.rs 329 read
-src/invite_link_form.rs 433 read
