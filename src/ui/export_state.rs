@@ -19,6 +19,8 @@ pub(super) enum ExportBox<D, P> {
     Options(D),
 }
 
+// A derive would demand `D: Default` and `P: Default` of the draft and progress.
+#[allow(clippy::derivable_impls)]
 impl<D, P> Default for ExportBox<D, P> {
     fn default() -> Self {
         Self::Closed
