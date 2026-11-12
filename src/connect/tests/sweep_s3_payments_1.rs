@@ -880,27 +880,37 @@ fn a_gift_mutation_does_not_make_a_failed_first_page_owed_again() {
 }
 
 #[test]
-fn a_stale_proxy_list_whose_refetch_cannot_be_sent_is_not_asked_every_tick() {
+fn a_stale_proxy_list_whose_refetch_cannot_be_sent_is_asked_again_after_the_wait() {
     use crate::proxy::ProxyFetch;
+    use crate::proxy_ops::UNSENT_RETRY_AFTER;
     let mut t = Flaky::new();
+    let now = std::time::Instant::now();
     t.sender.refuse(&["getProxies"]);
     t.driver.session.settings.proxy.ops.invalidate();
-    assert!(t.driver.refresh_proxies_if_stale().is_err());
+    assert!(t.driver.refresh_proxies_if_stale_at(now).is_err());
     assert_eq!(
         t.driver.session.settings.proxy.ops.fetch(),
-        ProxyFetch::FailedStale
+        ProxyFetch::NotSentStale { at: now }
     );
     assert!(
         t.driver.session.settings.proxy.busy(),
         "the held list is not planned on"
     );
-    // The ticks that follow send nothing and report nothing.
+    // The ingests that follow inside the wait send nothing and report nothing.
     for _ in 0..3 {
-        assert!(matches!(t.driver.refresh_proxies_if_stale(), Ok(None)));
-        assert!(matches!(t.driver.maybe_fetch_proxies(), Ok(None)));
+        assert!(matches!(
+            t.driver.refresh_proxies_if_stale_at(now + UNSENT_RETRY_AFTER / 2),
+            Ok(None)
+        ));
     }
-    // The dialog's Refresh is the way out.
-    assert!(t.driver.fetch_proxies().is_err());
+    // Once the wait is over the next ingest asks again: a background account
+    // whose box nobody opens settles by itself.
+    t.sender.refuse(&[]);
+    let sent = t
+        .driver
+        .refresh_proxies_if_stale_at(now + UNSENT_RETRY_AFTER);
+    assert!(matches!(sent, Ok(Some(_))));
+    assert!(t.driver.session.settings.proxy.ops.loading());
 }
 
 /// A Saved Messages tags request that never left lands in `Failed`, so the
