@@ -119,31 +119,21 @@ fn a_trusted_price_whose_write_failed_is_written_again_after_the_wait() {
     use crate::paid_messages::TRUST_RETRY_MS;
     let mut f = fixture();
     paid_chat(&mut f, 10);
+    let now = 1_000;
     // A directory where the file goes: the write fails.
     let file = f.1.paths.root.join("paid_trust.json");
     std::fs::create_dir_all(&file).unwrap();
-    f.1.remember_paid_trust(ChatId(600), 10);
-    let paid = &f.1.session.payments.paid_messages;
-    assert!(paid.trust_save_error().is_some(), "the write failed");
+    f.1.session.payments.paid_messages.remember_trust(600, 10);
+    f.1.paid_trust_tick(now);
+    let failed = |f: &Fixture| f.1.session.payments.paid_messages.trust_save_error().is_some();
+    assert!(failed(&f), "the write failed");
     // Not before the wait is over.
-    f.1.paid_trust_tick(crate::state::unix_ms_now());
-    assert!(
-        f.1.session
-            .payments
-            .paid_messages
-            .trust_save_error()
-            .is_some()
-    );
+    f.1.paid_trust_tick(now + TRUST_RETRY_MS - 1);
+    assert!(failed(&f), "not before the wait");
     // The disk is fine again: the next tick after the wait writes it.
     std::fs::remove_dir_all(&file).unwrap();
-    f.1.paid_trust_tick(crate::state::unix_ms_now() + TRUST_RETRY_MS + 1_000);
-    assert!(
-        f.1.session
-            .payments
-            .paid_messages
-            .trust_save_error()
-            .is_none()
-    );
+    f.1.paid_trust_tick(now + TRUST_RETRY_MS);
+    assert!(!failed(&f), "written after the wait");
     let text = std::fs::read_to_string(&file).unwrap();
     assert!(PaidTrust::from_json(&text).is_trusted(600, 10));
     cleanup(f);

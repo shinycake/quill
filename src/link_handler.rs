@@ -656,8 +656,17 @@ pub enum DemoPin {
 }
 
 /// Screenshot demos: show `pin` instead of reading the OS.
-pub fn demo_pin(pin: DemoPin) {
-    *lock_demo_pin() = pin;
+pub fn demo_pin(pin: impl Into<DemoPin>) {
+    *lock_demo_pin() = pin.into();
+}
+
+impl From<Option<LinkHandlerState>> for DemoPin {
+    fn from(pin: Option<LinkHandlerState>) -> Self {
+        match pin {
+            Some(state) => DemoPin::Is(state),
+            None => DemoPin::Off,
+        }
+    }
 }
 
 static DEMO_PIN: Mutex<DemoPin> = Mutex::new(DemoPin::Off);

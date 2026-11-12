@@ -10322,3 +10322,10 @@ Tests: `location_picker::picker_tests` (typing before a place, a new place stops
 | Unsent proxy retry | `NotSent` and `NotSentStale` carry `tries`, so a retry that could not be sent keeps the failure count. Test: `an_unsent_retry_keeps_the_failure_count`. |
 | `set_new_chat_stage` | Calls `NewChatStage::released_by` like `settle_new_chat_stage`: one decision site. |
 
+#### Fix round 6 (r4-04)
+
+| Review item | Change |
+|---|---|
+| Wall clock in `a_trusted_price_whose_write_failed_is_written_again_after_the_wait` | The test drives fixed times (`now`, `now + TRUST_RETRY_MS - 1`, `now + TRUST_RETRY_MS`) and holds no `unix_ms_now`. |
+| `src/main.rs` (hotspot) | Restored to base. The g-476/g-477 and `main.rs` rows above live on `claude/sweep-r4-04-main` pending the owner's hotspot decision (it needs the `hotspot-ok` label). The base line `detached:run_screenshot_demo 2` is back in `scripts/owned-timers-baseline.txt`. |
+| `src/ui/app_demo.rs` (hotspot) | Restored to base. `link_handler::demo_pin` takes `impl Into<DemoPin>`, with `From<Option<LinkHandlerState>> for DemoPin`. |
