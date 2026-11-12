@@ -88,17 +88,20 @@ impl BarWork {
         let Ok(reported) = driver.report_chat(chat_id) else {
             return Started::Refused;
         };
-        let mut waiting: Vec<RequestId> = reported.into_iter().collect();
+        // A report of this chat is already out (the same chat open in two
+        // windows): that one goes on, and this press sends nothing, no
+        // leave either.
+        let Some(reported) = reported else {
+            return Started::Nothing;
+        };
+        let mut waiting = vec![reported];
         if leave {
             let Ok(left) = driver.leave_channel(chat_id) else {
                 return Started::Refused;
             };
             waiting.push(left);
         }
-        match Self::out(driver, BarKind::Report, waiting) {
-            Started::Nothing => Started::Refused,
-            started => started,
-        }
+        Self::out(driver, BarKind::Report, waiting)
     }
 
     pub(super) fn start_hide<S: JsonSender>(
@@ -359,6 +362,24 @@ mod tests {
             Started::Refused
         );
         assert!(types(&recorder, before).is_empty(), "nothing went out");
+    }
+
+    /// The same chat reported twice before the first answer (open in two
+    /// windows): the second press is deduped by the driver, and reads as
+    /// nothing to do, not as a refusal; a group sends no leave with it.
+    #[test]
+    fn a_report_already_out_sends_nothing() {
+        for (chat, leave) in [(PRIVATE, false), (GROUP, true)] {
+            let (mut driver, recorder) = driver();
+            let first = BarWork::start_report(&mut driver, chat, leave);
+            assert!(matches!(first, Started::Out(_)), "{first:?}");
+            let before = recorder.snapshot().len();
+            assert_eq!(
+                BarWork::start_report(&mut driver, chat, leave),
+                Started::Nothing
+            );
+            assert!(types(&recorder, before).is_empty(), "nothing went out");
+        }
     }
 
     /// Block waits on the block, the report and the removal alike.
