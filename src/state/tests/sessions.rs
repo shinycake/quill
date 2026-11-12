@@ -248,6 +248,7 @@ fn terminate_session_ok_keeps_cache_and_marks_stale() {
         None,
     );
     session.settings.sessions_op.begin(extra);
+    session.settings.sessions_note.begin(extra);
     apply_json(
         &mut session,
         &seq,
@@ -297,6 +298,7 @@ fn a_failed_write_keeps_the_refetch_that_went_stale_meanwhile() {
         None,
     );
     session.settings.sessions_op.begin(extra);
+    session.settings.sessions_note.begin(extra);
     // Another device logs in while the write is out.
     session.settings.sessions_op.mark_stale();
     assert!(session.settings.sessions_op.is_mutating());
@@ -571,6 +573,7 @@ fn disconnect_website_ok_keeps_cache_and_marks_stale() {
         None,
     );
     session.settings.websites_op.begin(extra);
+    session.settings.websites_note.begin(extra);
     apply_json(
         &mut session,
         &seq,
@@ -666,6 +669,7 @@ fn toggle_session_calls_ok_marks_sessions_stale() {
         None,
     );
     session.settings.sessions_op.begin(extra);
+    session.settings.sessions_note.begin(extra);
     apply_json(
         &mut session,
         &seq,
