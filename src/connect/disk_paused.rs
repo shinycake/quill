@@ -11,20 +11,35 @@ use crate::telegram::requests::search_active_file_downloads;
 const SEARCH_LIMIT: i32 = 1000;
 
 impl<S: JsonSender> ConnectDriver<S> {
-    /// The disk paused `file_id`: save the message it came from.
-    pub(super) fn save_disk_pause(&mut self, file_id: i32) {
-        if let Some((chat, message)) = self.session.media.downloads.origin_of(file_id) {
-            let saved = &mut self.session.settings.data_storage.disk_paused;
-            saved.insert((chat.0, message));
-        }
+    /// The disk paused `file_id`: kept, and the message it came from saved.
+    /// `false` when it was paused already.
+    pub(super) fn pause_for_disk(&mut self, file_id: i32) -> bool {
+        let session = &mut self.session;
+        let origin = session
+            .media
+            .downloads
+            .origin_of(file_id)
+            .map(|(chat, message)| (chat.0, message));
+        session.media.disk_paused.pause(
+            file_id,
+            origin,
+            &mut session.settings.data_storage.disk_paused,
+        )
     }
 
     /// The disk's pause of `file_id` is undone.
-    pub(super) fn forget_disk_pause(&mut self, file_id: i32) {
-        if let Some((chat, message)) = self.session.media.downloads.origin_of(file_id) {
-            let saved = &mut self.session.settings.data_storage.disk_paused;
-            saved.remove(&(chat.0, message));
-        }
+    pub(super) fn resume_from_disk(&mut self, file_id: i32) {
+        let session = &mut self.session;
+        let origin = session
+            .media
+            .downloads
+            .origin_of(file_id)
+            .map(|(chat, message)| (chat.0, message));
+        session.media.disk_paused.resume(
+            file_id,
+            origin,
+            &mut session.settings.data_storage.disk_paused,
+        );
     }
 
     /// On a healthy disk: saved pauses this session did not make were made
@@ -71,10 +86,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     pub(super) fn save_disk_pauses_if_changed(&mut self) {
-        let now = self.session.settings.data_storage.disk_paused.clone();
-        if now != self.session.media.disk_paused_persisted && self.save_data_storage_prefs().is_ok()
-        {
-            self.session.media.disk_paused_persisted = now;
+        if self.session.media.disk_paused.needs_save() && self.save_data_storage_prefs().is_ok() {
+            self.session.media.disk_paused.written();
         }
     }
 }

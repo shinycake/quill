@@ -720,6 +720,20 @@ fn a_flow_in_progress_wins_over_another_link() {
             .unwrap(),
         None
     );
+    // So does a pasted text link: it does not replace the flow in flight.
+    assert_eq!(
+        driver
+            .request_deep_link_text_from("https://t.me/userpick", false)
+            .unwrap(),
+        None
+    );
+    assert!(
+        !recorder
+            .snapshot()
+            .iter()
+            .any(|json| json.contains("getDeepLinkInfo")),
+        "no second lookup went out"
+    );
     assert!(
         driver
             .session

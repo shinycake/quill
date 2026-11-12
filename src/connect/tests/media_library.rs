@@ -287,7 +287,7 @@ fn custom_emoji_packs_survive_the_installed_sets_update() {
         r#"{{"@type":"stickerSets","@extra":"{}","total_count":1,"sets":[{{"@type":"stickerSetInfo","id":"7","title":"Retro Font","name":"retro","thumbnail":null,"thumbnail_outline":null,"is_owned":false,"is_installed":true,"is_archived":false,"is_official":false,"sticker_type":{{"@type":"stickerTypeCustomEmoji"}},"needs_repainting":false,"is_allowed_as_chat_emoji_status":false,"is_viewed":true,"size":60,"covers":[]}}]}}"#,
         latest.0
     ));
-    let sets = &h.driver.session.stickers.emoji.installed_sets;
+    let sets = h.driver.session.stickers.emoji.lists.installed.items();
     assert_eq!(sets.len(), 1);
     assert_eq!(sets[0].title, "Retro Font");
 }
@@ -308,6 +308,29 @@ fn message_reaction_options_wait_while_the_request_is_in_flight() {
     let state = &h.driver.session.stickers.message_reaction_options;
     assert!(state.is_loading_for(ChatId(7), MessageId(50)));
     assert!(state.ready_for(ChatId(7), MessageId(50)).is_none());
+}
+
+#[test]
+fn a_lost_emoji_pack_title_request_is_asked_again() {
+    let mut h = menu_harness();
+    h.driver.fetch_emoji_pack_title(77).unwrap();
+    h.driver.fetch_emoji_pack_title(77).unwrap();
+    assert_eq!(h.sent("getStickerSet").len(), 1, "the entry holds the ask");
+    let asked = h
+        .driver
+        .session
+        .stickers
+        .emoji_pack_titles
+        .get(&77)
+        .and_then(|title| match title {
+            crate::state::PackTitle::Asking(id) => Some(*id),
+            _ => None,
+        })
+        .expect("asking");
+    let pending = h.driver.session.requests.take(asked).unwrap();
+    h.driver.session.settle_lost_request(pending);
+    h.driver.fetch_emoji_pack_title(77).unwrap();
+    assert_eq!(h.sent("getStickerSet").len(), 2);
 }
 
 #[test]
@@ -506,7 +529,8 @@ fn reopening_after_a_lost_reply_asks_again() {
         .unwrap()
         .expect("request");
     // The menu closed without a reset and the reply never came.
-    h.driver.session.requests.take(lost);
+    let pending = h.driver.session.requests.take(lost).unwrap();
+    h.driver.session.settle_lost_request(pending);
     let again = h
         .driver
         .fetch_message_reactions(ChatId(7), MessageId(50))
@@ -601,7 +625,8 @@ fn an_older_request_for_the_same_message_cannot_settle_the_newer_ask() {
         .unwrap()
         .expect("request");
     // The first reply never came (its request is gone); the menu asks again.
-    h.driver.session.requests.take(lost);
+    let pending = h.driver.session.requests.take(lost).unwrap();
+    h.driver.session.settle_lost_request(pending);
     let again = h
         .driver
         .fetch_message_reactions(ChatId(7), MessageId(50))
@@ -704,4 +729,43 @@ fn an_accepted_reaction_stays_on_the_bubble() {
         .unwrap();
     h.ingest(&format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0));
     assert!(shows_reaction(&h, "👍"));
+}
+
+fn custom_emoji_asks(h: &Harness) -> Vec<Value> {
+    h.sent("getInstalledStickerSets")
+        .into_iter()
+        .filter(|v| v["sticker_type"]["@type"] == "stickerTypeCustomEmoji")
+        .collect()
+}
+
+fn answer_custom_emoji_empty(h: &mut Harness) {
+    let ask = custom_emoji_asks(h).pop().unwrap();
+    let extra = Harness::extra_of(&ask);
+    h.ingest(&format!(
+        r#"{{"@type":"stickerSets","@extra":"{}","total_count":0,"sets":[]}}"#,
+        extra.0
+    ));
+}
+
+/// An installed list answered as empty is a held answer, not a list to ask
+/// for again each time the panel or the message menu opens.
+#[test]
+fn an_empty_custom_emoji_answer_is_not_asked_again_on_reopen() {
+    let mut h = Harness::ready();
+    h.driver.open_media_panel().unwrap();
+    answer_custom_emoji_empty(&mut h);
+    h.driver.open_media_panel().unwrap();
+    h.driver.fetch_sticker_menu_facts().unwrap();
+    assert_eq!(custom_emoji_asks(&h).len(), 1);
+}
+
+/// A set added on the phone after an empty answer reaches the panel even
+/// while the Emoji Sets box is closed.
+#[test]
+fn a_set_added_after_an_empty_answer_is_asked_for() {
+    let mut h = Harness::ready();
+    h.driver.open_media_panel().unwrap();
+    answer_custom_emoji_empty(&mut h);
+    h.ingest(r#"{"@type":"updateInstalledStickerSets","sticker_type":{"@type":"stickerTypeCustomEmoji"},"sticker_set_ids":["7"]}"#);
+    assert_eq!(custom_emoji_asks(&h).len(), 2);
 }

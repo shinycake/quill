@@ -178,13 +178,16 @@ impl QuillApp {
             let emoji = &mut session.stickers.emoji;
             emoji.tab = EmojiSetTab::Search;
             emoji.search_query = query.to_string();
-            emoji.found_sets = emoji
-                .installed_sets
+            let found = emoji
+                .lists
+                .installed
+                .items()
                 .iter()
                 .chain(emoji.lists.trending.sets())
                 .filter(|set| set.title.to_lowercase().contains(&needle))
                 .cloned()
                 .collect();
+            emoji.lists.search = quill::state::fetch::Fetch::Ready(found);
         }
         cx.notify();
     }
@@ -377,7 +380,7 @@ impl QuillApp {
         let sets: Vec<&StickerSetInfo> = match panel.tab {
             EmojiSetTab::Installed => session.map(|s| s.ordered_emoji_packs()).unwrap_or_default(),
             EmojiSetTab::Trending => panel.lists.trending.sets().iter().collect(),
-            EmojiSetTab::Search => panel.found_sets.iter().collect(),
+            EmojiSetTab::Search => panel.lists.search.items().iter().collect(),
         };
         let rows = sets.iter().fold(v_flex().w_full(), |rows, set| {
             rows.child(self.emoji_pack_row(set, panel.tab, panel.mutation.running(), cx))

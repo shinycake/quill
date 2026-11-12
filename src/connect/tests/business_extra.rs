@@ -308,10 +308,10 @@ fn a_bot_is_saved_and_asked_for_again() {
         sent_request(&recorder, "deleteBusinessConnectedBot")["bot_user_id"],
         42
     );
-    assert_eq!(
-        driver.session.settings.business_extra.connected_bot,
-        Fetch::Ready(None)
-    );
+    // The disconnect shows at once, loading under the save's request.
+    let shown = &driver.session.settings.business_extra.connected_bot;
+    assert!(shown.is_loading());
+    assert_eq!(shown.data(), Some(&None));
 }
 
 /// Round 17 C finding 12: a refused chatbot save does not leave the bot as
@@ -509,15 +509,10 @@ fn a_refused_part_of_the_bot_lookup_lets_the_same_text_ask_again() {
     let (mut driver, recorder, _sink, _seq) = driver_parts();
     recorder.refuse(Some("searchPublicChats"));
     assert!(driver.lookup_business_bot("shop_bot").is_err());
-    assert!(
-        driver
-            .session
-            .settings
-            .business_extra
-            .lookup
-            .query
-            .is_empty()
-    );
+    // The field shows the failure (with a Retry) instead of going blank.
+    let lookup = &driver.session.settings.business_extra.lookup;
+    assert!(lookup.error().is_some());
+    assert!(lookup.done());
     recorder.refuse(None);
     driver.lookup_business_bot("shop_bot").unwrap();
     assert_eq!(count_sent(&recorder, "searchPublicChat"), 2);

@@ -111,7 +111,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Group calls: your own level and speaking state, and the
         // connected transports' camera and mute.
         changed |= self.pump_call_audio(now).unwrap_or(false);
-        self.pump_connected_group_calls();
+        self.pump_connected_group_calls(now);
         // Group calls: the "You are on mute" hint.
         changed |= self.tick_muted_speech_hint(now);
         self.watch_call_sound(now);

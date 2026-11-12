@@ -745,3 +745,19 @@ fn a_refused_ads_link_is_drawn_failed_and_asks_again_only_from_its_retry() {
     p.0.retry_earn_ad_account_url(EarnPeer::User(BOT)).unwrap();
     assert_eq!(count(&p.1, "getStarAdAccountUrl"), 2);
 }
+
+#[test]
+fn a_refused_recipient_list_send_returns_the_senders_error() {
+    let mut p = parts();
+    channel(&mut p, CHANNEL, ChannelMemberStatus::Creator);
+    p.0.open_starref_join(EarnPeer::User(ME)).unwrap();
+    answer(&mut p, "searchAffiliatePrograms", found(&[BOT]));
+    p.1.refuse(Some("getOwnedBots"));
+    let err = p.0.open_affiliate_program(BOT, false).unwrap_err();
+    assert_ne!(
+        err,
+        ConnectSendError::InvalidRequest,
+        "the stage line names the sender's error"
+    );
+    assert!(p.0.session.payments.earn.recipients.list().is_none());
+}

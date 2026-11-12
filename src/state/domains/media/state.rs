@@ -10,16 +10,14 @@ pub struct MediaState {
     pub files: FileMap,
     /// How the disk stands: a low or full one holds automatic downloads.
     pub disk: DiskPressure,
-    /// Listed downloads the low disk paused, resumed when it is healthy.
-    pub disk_paused: HashSet<i32>,
+    /// Listed downloads the low disk paused, resumed when it is healthy, and
+    /// the saved set of their messages (`DiskPauses`).
+    pub disk_paused: DiskPauses,
     /// The search for downloads paused by the disk before this TDLib
     /// instance went out (once per session).
     pub disk_search: DiskSearch,
     /// Downloads that search found, waiting for their resume.
     pub disk_resume_due: Vec<i32>,
-    /// The `settings.data_storage.disk_paused` last written to the
-    /// preferences; the set is saved again when it differs.
-    pub disk_paused_persisted: BTreeSet<(i64, i64)>,
     /// What was asked to download and how each request ended; the status
     /// rows show is `downloads.status(id, &files)`.
     pub downloads: DownloadIntents,
@@ -136,10 +134,9 @@ impl MediaState {
             media_library: MediaLibrary::default(),
             files: FileMap::default(),
             disk: DiskPressure::Healthy,
-            disk_paused: HashSet::new(),
+            disk_paused: DiskPauses::default(),
             disk_search: DiskSearch::NotAsked,
             disk_resume_due: Vec::new(),
-            disk_paused_persisted: BTreeSet::new(),
             downloads: DownloadIntents::default(),
             avatar_file_refs: HashMap::new(),
             avatar_due: AvatarDue::Everything,

@@ -22,7 +22,7 @@ impl Session {
             || self
                 .settings
                 .account_ttl
-                .asked()
+                .request()
                 .and_then(|request| self.requests.purpose(request))
                 .is_some_and(|purpose| {
                     matches!(

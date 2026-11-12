@@ -97,9 +97,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         is_chat_hidden: bool,
         photo: Option<String>,
     ) -> Result<Option<RequestId>, ConnectSendError> {
+        // One picture waits at a time: any second create while one with a
+        // picture is out would take its place, and the first community
+        // would never get its photo.
+        if self.community_photo_create_out() {
+            return Ok(None);
+        }
         let sent = self.create_community(chat_id, name, is_chat_hidden)?;
         if let Some(extra) = sent {
-            self.session.communities.new_community_photo = photo.map(|path| (extra, path));
+            self.session.communities.create = crate::state::CommunityCreate::Creating {
+                request: extra,
+                photo,
+            };
         }
         Ok(sent)
     }
@@ -121,12 +130,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// in the model, and a failed send must not fail the ingest.
     pub(super) fn community_created(&mut self, community_id: i64, extra: RequestId) {
         let _ = self.get_community_full_info(community_id);
-        let photo = self
-            .session
-            .communities
-            .new_community_photo
-            .take_if(|(asked, _)| *asked == extra);
-        if let Some((_, path)) = photo {
+        if let Some(path) = self.session.communities.create.answered(extra) {
             let _ = self.set_community_photo(community_id, Some(&path));
         }
     }

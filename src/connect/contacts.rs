@@ -20,7 +20,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             // nothing will end.
             let contacts = &mut self.session.users_state.contacts;
             if contacts.can_ask() {
-                contacts.fail_dropping_data("could not send the request");
+                contacts.fail_dropping_data(ConnectSendError::InvalidRequest.stage_line());
             }
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -30,8 +30,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !(contacts.can_ask() || contacts.is_outdated()) {
             return Ok(None);
         }
-        self.session.users_state.contacts.begin();
         let extra = self.session.request(RequestPurpose::GetContacts, None);
+        let contacts = &mut self.session.users_state.contacts;
+        contacts.begin();
+        contacts.sent(extra);
         if let Err(err) = self.sender.send_json(&get_contacts(extra)) {
             self.session.requests.take(extra);
             // Nothing is in flight: the tab shows the error and its Retry,
@@ -39,10 +41,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session
                 .users_state
                 .contacts
-                .fail_dropping_data("could not send the request");
+                .fail_dropping_data(err.stage_line());
             return Err(err);
         }
-        self.session.users_state.contacts.sent(extra);
         Ok(Some(extra))
     }
 
@@ -60,11 +61,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         // A fetch refused before it began (the chats path is not active)
         // leaves the list idle: it ends in the error line and its Retry
         // too, not in a tab that stays on "Loading contacts...".
-        if self.fetch_contacts().is_err() && self.session.users_state.contacts.is_outdated() {
+        if let Err(err) = self.fetch_contacts()
+            && self.session.users_state.contacts.is_outdated()
+        {
             self.session
                 .users_state
                 .contacts
-                .fail_dropping_data("could not send the request");
+                .fail_dropping_data(err.stage_line());
         }
     }
 
@@ -344,10 +347,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let purpose = RequestPurpose::ImportContacts;
-        if self.session.requests.has_purpose(purpose) {
+        if self.asked.is_out(&self.session.requests, purpose) {
             return Ok(None);
         }
         let extra = self.session.request(purpose, None);
+        self.asked.sent(&self.session.requests, purpose, extra);
         if let Err(err) = self.sender.send_json(&import_contacts(extra, contacts)) {
             self.session.requests.take(extra);
             return Err(err);
@@ -427,7 +431,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             let extra = self.session.request(RequestPurpose::RemoveContact, None);
             if let Err(err) = self.sender.send_json(&remove_contacts(extra, &ids)) {
                 self.session.requests.take(extra);
-                return Err(err);
+                // The clear is already running: the call did not fail as a
+                // whole. The note the Contacts tab shows says the second
+                // half did not go out.
+                self.session.users_state.contacts_notice = Some(err.stage_line());
+                return Ok(sent);
             }
             sent += 1;
         }

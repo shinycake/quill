@@ -45,7 +45,7 @@ impl Closable for TestClient {
         crate::connect::closing::begin_close_bridged(&mut self.driver, &self.bridge);
     }
 
-    fn drain(&mut self, budget: Duration) -> CloseProgress {
+    fn drain(&mut self, budget: Duration) -> CloseOutcome {
         let progress =
             crate::connect::closing::drain_bridged(&mut self.driver, &self.bridge, budget);
         *self.auth.lock().expect("auth") = self.driver.session.auth.clone();
@@ -392,7 +392,7 @@ fn a_closed_client_gets_no_requests_and_leaves_on_the_first_poll() {
     handle.answer("authorizationStateClosed");
     // Reach Closed before it is handed over.
     let deadline = Instant::now() + Duration::from_secs(2);
-    while client.drain(Duration::from_millis(10)) != CloseProgress::Closed
+    while client.drain(Duration::from_millis(10)) != CloseOutcome::Closed
         && Instant::now() < deadline
     {
         std::thread::sleep(Duration::from_millis(5));

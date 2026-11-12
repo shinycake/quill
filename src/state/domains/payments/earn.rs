@@ -114,7 +114,7 @@ impl Session {
                 stats.status = stats.status.stamped(crate::local_time::now_unix());
                 earn.star_balances.insert(peer, stats.status.current);
                 if me.is_some_and(|me| peer == EarnPeer::User(me)) {
-                    earn.self_stats.succeed(());
+                    earn.self_stats.answered(pending.map(|p| p.id), ());
                 }
                 if let Some(page) = earn.page.as_mut().filter(|p| p.peer == peer)
                     && page.stars.waits_for(pending.map(|p| p.id))
@@ -519,7 +519,7 @@ impl Session {
             }
             EarnPurpose::StarStats { peer } => {
                 if self.my_user_id.is_some_and(|me| peer == EarnPeer::User(me)) {
-                    earn.self_stats.fail(reason.clone());
+                    earn.self_stats.failed(request, reason.clone(), false);
                 }
                 if let Some(page) = earn
                     .page

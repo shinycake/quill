@@ -608,15 +608,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if with_premium {
             self.ask_premium_gift_options();
         }
-        if self.session.payments.gift_text_length_max.is_none()
-            && !self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetGiftTextLimit)
-        {
-            let extra = self.session.request(RequestPurpose::GetGiftTextLimit, None);
-            let _ = self.send_json_request(extra, &rq::get_option(extra, "gift_text_length_max"));
-        }
+        self.ask_gift_text_limit();
         // The balance arrives with the first Stars history page.
         let _ = self.maybe_fetch_star_transactions();
         Ok(())
@@ -628,12 +620,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             None,
         );
         self.session.payments.gifts_manage.send.gifts_fetch = GiftListFetch::Asking(extra);
-        if self
-            .send_json_request(extra, &rq::get_available_gifts(extra))
-            .is_err()
-        {
+        if let Err(err) = self.send_json_request(extra, &rq::get_available_gifts(extra)) {
             let send = &mut self.session.payments.gifts_manage.send;
-            send.gifts_fetch = GiftListFetch::Failed("Couldn't load the gifts.".into());
+            send.gifts_fetch = GiftListFetch::Failed(err.stage_line());
         }
     }
 
@@ -643,12 +632,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             None,
         );
         self.session.payments.gifts_manage.send.premium_fetch = GiftListFetch::Asking(extra);
-        if self
-            .send_json_request(extra, &rq::get_premium_gift_payment_options(extra))
-            .is_err()
+        if let Err(err) =
+            self.send_json_request(extra, &rq::get_premium_gift_payment_options(extra))
         {
             self.session.payments.gifts_manage.send.premium_fetch =
-                GiftListFetch::Failed("Couldn't load the Premium options.".into());
+                GiftListFetch::Failed(err.stage_line());
         }
     }
 

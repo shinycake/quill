@@ -152,6 +152,14 @@ impl TrendingSets {
         };
     }
 
+    /// The page request the list waits for.
+    pub fn request(&self) -> Option<RequestId> {
+        match self {
+            Self::Loading { request, .. } => Some(*request),
+            _ => None,
+        }
+    }
+
     /// `request` is the page this list waits for.
     pub fn waits_for(&self, asked: Option<RequestId>) -> bool {
         matches!(self, Self::Loading { request: waiting, .. } if Some(*waiting) == asked)
@@ -360,6 +368,14 @@ impl AnimatedSuggestion {
 
     pub fn is_idle(&self) -> bool {
         matches!(self, Self::Idle)
+    }
+
+    /// The ask this suggestion waits for.
+    pub fn request(&self) -> Option<RequestId> {
+        match self {
+            Self::Asking { request, .. } => Some(*request),
+            _ => None,
+        }
     }
 
     /// `request` is the ask this suggestion waits for.

@@ -236,8 +236,8 @@ pub fn detect_deep_link_arg(args: &[String]) -> Option<String> {
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// `parity:platform-deep-links`: `getDeepLinkInfo` for a launch link.
-    /// Generation-guarded like `resolve_inline_bot`; a flow already in
-    /// progress wins (one launch link at a time), a finished one is replaced. The flow is the running
+    /// The flow's stage holds the request; only its answer advances it. A
+    /// flow already in progress wins (one launch link at a time), a finished one is replaced. The flow is the running
     /// handler's: an agent's step while the UI driver injects, else the
     /// user's.
     pub fn request_deep_link_info(
@@ -257,21 +257,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        // A flow in flight, or an invite waiting for its answer, wins. A
-        // finished flow nobody consumed (its surface is not drawn: locked,
-        // window closed) gives way to the new link instead of blocking
-        // every later one.
-        if matches!(
-            self.session.chats_state.deep_link_stage(),
-            Some(
-                DeepLinkState::ResolvingInfo { .. }
-                    | DeepLinkState::ResolvingChat { .. }
-                    | DeepLinkState::InvitePreview { .. }
-            )
-        ) {
+        if !self.take_over_deep_link_stage() {
             return Ok(None);
         }
-        self.session.chats_state.end_deep_link_flow();
         // Like tdesktop's `openLocalUrl`, route the link by its shape
         // locally. `getDeepLinkInfo` only knows server-side deep links
         // (it answers 404 for `resolve?domain=` and `t.me/<user>`).
@@ -304,7 +292,29 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        if !self.take_over_deep_link_stage() {
+            return Ok(None);
+        }
         self.send_deep_link_lookup(link, false, from_agent)
+    }
+
+    /// A new link may start: a flow in flight, or an invite waiting for its
+    /// answer, wins (`false`). A finished flow nobody consumed (its surface
+    /// is not drawn: locked, window closed) gives way to the new link
+    /// instead of blocking every later one. The one gate of both lookups.
+    fn take_over_deep_link_stage(&mut self) -> bool {
+        if matches!(
+            self.session.chats_state.deep_link_stage(),
+            Some(
+                DeepLinkState::ResolvingInfo { .. }
+                    | DeepLinkState::ResolvingChat { .. }
+                    | DeepLinkState::InvitePreview { .. }
+            )
+        ) {
+            return false;
+        }
+        self.session.chats_state.end_deep_link_flow();
+        true
     }
 
     /// One lookup in the `ResolvingInfo` slot: `getInternalLinkType`
@@ -345,9 +355,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session.requests.take(extra);
                 self.session
                     .chats_state
-                    .enter_deep_link_stage(DeepLinkState::ShowText(
-                        "Couldn't reach Telegram.".into(),
-                    ));
+                    .enter_deep_link_stage(DeepLinkState::ShowText(err.stage_line()));
                 Err(err)
             }
         }
@@ -391,9 +399,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session.requests.take(extra);
                 self.session
                     .chats_state
-                    .enter_deep_link_stage(DeepLinkState::ShowText(
-                        "Couldn't reach Telegram.".into(),
-                    ));
+                    .enter_deep_link_stage(DeepLinkState::ShowText(err.stage_line()));
                 Err(err)
             }
         }
@@ -476,9 +482,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session.requests.take(extra);
                 self.session
                     .chats_state
-                    .enter_deep_link_stage(DeepLinkState::ShowText(
-                        "Couldn't reach Telegram.".into(),
-                    ));
+                    .enter_deep_link_stage(DeepLinkState::ShowText(err.stage_line()));
                 Err(err)
             }
         }

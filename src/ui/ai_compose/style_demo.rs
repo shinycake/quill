@@ -152,9 +152,11 @@ impl QuillApp {
         let Some(session) = session_mut(self) else {
             return;
         };
-        session.threads.forum_topic_icons = (0..8)
-            .map(|ix| emoji_item(5000 + ix, 0, "\u{2B50}", EMOJI_FILE))
-            .collect();
+        session.threads.forum_topic_icons = quill::state::fetch::Fetch::Ready(
+            (0..8)
+                .map(|ix| emoji_item(5000 + ix, 0, "\u{2B50}", EMOJI_FILE))
+                .collect(),
+        );
         let set: Vec<StickerItem> = [
             "\u{1F3F4}\u{200D}\u{2620}\u{FE0F}",
             "\u{2693}",
@@ -172,18 +174,23 @@ impl QuillApp {
         .map(|(ix, emoji)| emoji_item(6000 + ix as i64, ICON_SET, emoji, FileId(0)))
         .collect();
         session.media.media_library.insert(ICON_SET, set.clone());
-        session.stickers.emoji.installed_sets = vec![StickerSetInfo {
-            id: ICON_SET,
-            title: "High Seas".into(),
-            name: "high_seas".into(),
-            size: i32::try_from(set.len()).unwrap_or(0),
-            is_installed: true,
-            is_official: false,
-            is_owned: false,
-            covers: Vec::new(),
-            cover_files: Vec::new(),
-            is_viewed: true,
-        }];
+        session
+            .stickers
+            .emoji
+            .lists
+            .installed
+            .succeed(vec![StickerSetInfo {
+                id: ICON_SET,
+                title: "High Seas".into(),
+                name: "high_seas".into(),
+                size: i32::try_from(set.len()).unwrap_or(0),
+                is_installed: true,
+                is_official: false,
+                is_owned: false,
+                covers: Vec::new(),
+                cover_files: Vec::new(),
+                is_viewed: true,
+            }]);
     }
 
     pub(super) fn demo_ai_preview(

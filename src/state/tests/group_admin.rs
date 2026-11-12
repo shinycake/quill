@@ -586,7 +586,13 @@ fn refused_toggles_roll_back_and_report() {
     );
     assert_eq!(
         session.chats_state.chat_action_error.last(),
-        Some("could not change the group setting (error 400)")
+        Some(
+            crate::lang::tr_with(
+                crate::lang::keys::Q_GROUP_SETTING_CHANGE_FAILED,
+                &[("code", "400")],
+            )
+            .as_str()
+        )
     );
 
     // Join-to-send with an unknown previous value goes back to unset.

@@ -37,6 +37,21 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(Some(extra))
     }
 
+    /// [`Self::send_purpose`] for a request with no screen stage: the
+    /// driver's `Asked` ledger keeps it busy until it answers.
+    fn send_asked(
+        &mut self,
+        purpose: RequestPurpose,
+        chat_id: Option<ChatId>,
+        build: impl FnOnce(RequestId) -> String,
+    ) -> Sent {
+        let sent = self.send_purpose(purpose, chat_id, build)?;
+        if let Some(extra) = sent {
+            self.asked.sent(&self.session.requests, purpose, extra);
+        }
+        Ok(sent)
+    }
+
     // ---- forums --------------------------------------------------------
 
     /// "View as Topics" / "View as Messages" (`toggleChatViewAsTopics`).
@@ -62,17 +77,21 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// `getForumTopicDefaultIcons` once; the answer fills
     /// `Session::forum_topic_icons`.
     pub fn load_forum_topic_icons(&mut self) -> Sent {
-        if !self.session.threads.forum_topic_icons.is_empty()
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetForumTopicDefaultIcons)
-        {
+        let icons = &mut self.session.threads.forum_topic_icons;
+        if !icons.can_ask() {
             return Ok(None);
         }
-        self.send_purpose(RequestPurpose::GetForumTopicDefaultIcons, None, |extra| {
+        icons.begin();
+        let sent = self.send_purpose(RequestPurpose::GetForumTopicDefaultIcons, None, |extra| {
             get_forum_topic_default_icons(extra)
-        })
+        });
+        let icons = &mut self.session.threads.forum_topic_icons;
+        match &sent {
+            Ok(Some(extra)) => icons.sent(*extra),
+            Ok(None) => icons.fail(ConnectSendError::InvalidRequest.stage_line()),
+            Err(err) => icons.fail(err.stage_line()),
+        }
+        sent
     }
 
     /// Download the picker's icon thumbnails that are not local yet.
@@ -81,6 +100,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .threads
             .forum_topic_icons
+            .items()
             .iter()
             .filter_map(|sticker| sticker.display_file_id())
             .collect();
@@ -182,13 +202,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         if self
-            .session
-            .requests
-            .has_purpose(RequestPurpose::CreateForumTopic)
+            .asked
+            .is_out(&self.session.requests, RequestPurpose::CreateForumTopic)
         {
             return Ok(None);
         }
-        self.send_purpose(RequestPurpose::CreateForumTopic, Some(chat_id), |extra| {
+        self.send_asked(RequestPurpose::CreateForumTopic, Some(chat_id), |extra| {
             create_forum_topic_with_icon(extra, chat_id, name.trim(), color, custom_emoji_id)
         })
     }
@@ -269,11 +288,13 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// it fresh) or for one sublist.
     pub fn load_saved_tags(&mut self, topic_id: i64) -> Sent {
         let purpose = RequestPurpose::GetSavedMessagesTags { topic_id };
-        if self.session.requests.has_purpose(purpose) {
-            return Ok(None);
-        }
+        // All of Saved Messages waits on the list's own fetch (below); a
+        // sublist's tags have no stage, so the ledger keeps them busy.
         if topic_id != 0 {
-            return self.send_purpose(purpose, None, |extra| {
+            if self.asked.is_out(&self.session.requests, purpose) {
+                return Ok(None);
+            }
+            return self.send_asked(purpose, None, |extra| {
                 get_saved_messages_tags(extra, topic_id)
             });
         }
@@ -291,7 +312,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         let tags = &mut self.session.threads.saved.tags;
         match &sent {
             Ok(Some(extra)) => tags.sent(*extra),
-            _ => tags.fail_dropping_data("could not send the request"),
+            Ok(None) => tags.fail_dropping_data(ConnectSendError::InvalidRequest.stage_line()),
+            Err(err) => tags.fail_dropping_data(err.stage_line()),
         }
         sent
     }
@@ -350,10 +372,10 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn toggle_saved_topic_pinned(&mut self, topic_id: i64, pinned: bool) -> Sent {
         let purpose =
             RequestPurpose::Threads(ThreadsPurpose::ToggleSavedMessagesTopicPinned { topic_id });
-        if self.session.requests.has_purpose(purpose) {
+        if self.asked.is_out(&self.session.requests, purpose) {
             return Ok(None);
         }
-        self.send_purpose(purpose, None, |extra| {
+        self.send_asked(purpose, None, |extra| {
             toggle_saved_messages_topic_pinned(extra, topic_id, pinned)
         })
     }
@@ -363,10 +385,10 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn delete_saved_topic_history(&mut self, topic_id: i64) -> Sent {
         let purpose =
             RequestPurpose::Threads(ThreadsPurpose::DeleteSavedMessagesTopicHistory { topic_id });
-        if self.session.requests.has_purpose(purpose) {
+        if self.asked.is_out(&self.session.requests, purpose) {
             return Ok(None);
         }
-        self.send_purpose(purpose, None, |extra| {
+        self.send_asked(purpose, None, |extra| {
             delete_saved_messages_topic_history(extra, topic_id)
         })
     }

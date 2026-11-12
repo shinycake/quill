@@ -304,7 +304,9 @@ impl Session {
         let emoji = self
             .stickers
             .emoji
-            .installed_sets
+            .lists
+            .installed
+            .items()
             .iter()
             .map(|set| (set, true));
         stickers
@@ -326,7 +328,7 @@ impl Session {
             .stickers
             .sets
             .iter()
-            .chain(&self.stickers.emoji.installed_sets)
+            .chain(self.stickers.emoji.lists.installed.items())
             .find(|set| set.id == set_id)
             .map(|set| usize::try_from(set.size).unwrap_or(0))
     }
@@ -336,7 +338,7 @@ impl Session {
     /// Set" / "Add to Emoji Set").
     pub fn owned_sticker_sets(&self, emoji: bool) -> Vec<(i64, String)> {
         let sets = if emoji {
-            &self.stickers.emoji.installed_sets
+            self.stickers.emoji.lists.installed.items()
         } else {
             &self.stickers.stickers.sets
         };

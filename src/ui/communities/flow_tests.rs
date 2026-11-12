@@ -637,3 +637,62 @@ fn the_chooser_reads_loading_while_the_owned_bots_load(cx: &mut TestAppContext) 
     let status = app.read_with(&vcx, |app, _| app.community_candidates("").1);
     assert_eq!(status, CandidateStatus::Ready);
 }
+
+#[gpui_kit::test]
+fn a_create_pressed_while_one_with_a_picture_is_out_tells_the_person(cx: &mut TestAppContext) {
+    use super::create::{CreateRefusal, create_refusal};
+    use quill::connect::{ConnectDriver, RecordingSender, prepare_connect};
+    use quill::credentials::TelegramCredentials;
+    use quill::ids::{AccountKey, ChatId};
+    use quill::platform::MemorySecretStore;
+    use quill::state::Session;
+    let (app, mut vcx) = new_app(cx);
+    frames(&mut vcx);
+    let credentials = TelegramCredentials {
+        api_id: 99,
+        api_hash: "unit-test-hash-not-for-network".into(),
+    };
+    let dir = quill::scratch::unique_dir("quill-community-busy");
+    let prepared = prepare_connect(
+        &dir,
+        AccountKey::primary(),
+        &MemorySecretStore::new(),
+        &credentials,
+    )
+    .expect("prepare");
+    let sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> =
+        std::sync::Arc::new(quill::diagnostics::MemorySink::new());
+    let sender = std::sync::Arc::new(RecordingSender::new());
+    let mut driver = ConnectDriver::new(
+        Session::new(AccountKey::primary(), sink.clone()),
+        sender.clone(),
+        credentials,
+        prepared,
+    );
+    let seq = std::sync::atomic::AtomicU64::new(0);
+    let ready = r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#;
+    let parsed = quill::telegram::client::copy_and_parse(ready, &seq, &sink).expect("parse");
+    driver.ingest(parsed).expect("ingest");
+    driver.session.my_user_id = Some(7);
+    for id in [5, 6] {
+        let chat = format!(
+            r#"{{"@type":"updateNewChat","chat":{{"id":{id},"title":"C","type":{{"@type":"chatTypePrivate","user_id":{id}}},"unread_count":0}}}}"#
+        );
+        let parsed = quill::telegram::client::copy_and_parse(&chat, &seq, &sink).expect("parse");
+        driver.ingest(parsed).expect("ingest");
+    }
+    assert_eq!(create_refusal(&driver, ChatId(6)), CreateRefusal::None);
+    driver
+        .create_community_with_photo(ChatId(5), "A", false, Some("a.png".into()))
+        .expect("send");
+    assert_eq!(create_refusal(&driver, ChatId(5)), CreateRefusal::Own);
+    // A create from another chat's box is refused as busy, and the busy
+    // note reads the busy line.
+    assert_eq!(create_refusal(&driver, ChatId(6)), CreateRefusal::Busy);
+    app.update(&mut vcx, |app, cx| app.note_create_busy(cx));
+    assert_eq!(
+        note_text(&app, &mut vcx),
+        quill::lang::tr(quill::lang::keys::Q_COMMUNITY_CREATE_BUSY)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

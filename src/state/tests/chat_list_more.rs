@@ -521,6 +521,8 @@ fn recommended_folders_and_addlist_check_are_cached() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetRecommendedChatFolders, None);
+    session.chat_list.recommended_folders.begin();
+    session.chat_list.recommended_folders.sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -533,7 +535,7 @@ fn recommended_folders_and_addlist_check_are_cached() {
     let recommended = session
         .chat_list
         .recommended_folders
-        .as_ref()
+        .data()
         .expect("cached");
     assert_eq!(recommended[0].spec.name, "Unread");
     assert_eq!(recommended[0].spec.icon_name.as_deref(), Some("Unread"));

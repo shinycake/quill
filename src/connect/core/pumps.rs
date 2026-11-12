@@ -21,8 +21,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         group_calls_before: [Option<i32>; 2],
     ) -> Result<(), ConnectSendError> {
         let call = self.pump_call_engine(active_call_before, bridge_signaling);
-        let group_call = self.pump_group_call_transport(group_calls_before);
         let now = std::time::Instant::now();
+        let group_call = self.pump_group_call_transport(group_calls_before, now);
         self.pump_call_media(now);
         let parameters = self.maybe_send_parameters();
         let membership = self.probe_membership_everywhere();

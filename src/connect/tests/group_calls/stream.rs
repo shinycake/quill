@@ -636,7 +636,7 @@ fn a_refused_stream_connect_is_a_join_error_not_a_crash() {
     // would accept it now, and the call must still be failed.
     assert!(call.transport.answer().is_empty());
     driver
-        .pump_group_call_transport([Some(555), None])
+        .pump_group_call_transport([Some(555), None], std::time::Instant::now())
         .expect("pump");
     let call = driver
         .session

@@ -129,7 +129,7 @@ fn a_failed_new_chats_fetch_is_asked_again_only_after_the_period() {
     let seq = AtomicU64::new(0);
     // Not ready: the send is refused and the folder is not marked asked.
     assert!(driver.fetch_folder_new_chats(5).is_err());
-    assert!(driver.session.chat_list.folder_new_chats_asked.is_empty());
+    assert!(driver.session.chat_list.folder_new_chats_ask.is_empty());
     seed_ready_alice(&mut driver, &seq, &dyn_sink);
     let folders = format!(
         r#"{{"@type":"updateChatFolders","chat_folders":[{}],"main_chat_list_position":0,"are_tags_enabled":false}}"#,
@@ -142,7 +142,11 @@ fn a_failed_new_chats_fetch_is_asked_again_only_after_the_period() {
         .fetch_folder_new_chats(5)
         .expect("send")
         .expect("request");
-    assert!(driver.session.chat_list.folder_new_chats_asked.is_empty());
+    assert_eq!(
+        driver.fetch_folder_new_chats(5),
+        Ok(None),
+        "not asked again while it is out"
+    );
     let refused = format!(
         r#"{{"@type":"error","@extra":"{}","code":500,"message":"Timeout"}}"#,
         extra.0

@@ -256,7 +256,10 @@ impl Session {
         } else {
             // Custom emoji (mask updates are routed away before this call)
             // route to the emoji panel's installed sets.
-            &mut self.stickers.emoji.installed_sets
+            match self.stickers.emoji.lists.installed.data_mut() {
+                Some(sets) => sets,
+                None => return,
+            }
         };
         if sets.is_empty() || ids.is_empty() {
             return;

@@ -3,6 +3,45 @@
 //! with `new`.
 use crate::state::*;
 
+/// Where one folder's new-chats poll is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NewChatsAsk {
+    /// `getChatFolderNewChats` is out as this request.
+    Out(RequestId),
+    /// It was answered (or failed) at this time: the next waits out the
+    /// update period.
+    Answered(std::time::Instant),
+}
+
+impl ChatListState {
+    /// Whether the folder's new chats may be asked for now: not out, and
+    /// the update period since the last answer has passed.
+    pub fn new_chats_due(&self, folder_id: i32, period: std::time::Duration) -> bool {
+        match self.folder_new_chats_ask.get(&folder_id) {
+            None => true,
+            Some(NewChatsAsk::Out(_)) => false,
+            Some(NewChatsAsk::Answered(at)) => at.elapsed() >= period,
+        }
+    }
+
+    /// The poll went out as `request`.
+    pub(crate) fn new_chats_sent(&mut self, folder_id: i32, request: RequestId) {
+        self.folder_new_chats_ask
+            .insert(folder_id, NewChatsAsk::Out(request));
+    }
+
+    /// `request` answered or failed: only the poll that is out for it ends,
+    /// and the next waits out the update period.
+    pub(crate) fn new_chats_settled(&mut self, folder_id: i32, request: Option<RequestId>) {
+        if let Some(NewChatsAsk::Out(out)) = self.folder_new_chats_ask.get(&folder_id)
+            && Some(*out) == request
+        {
+            self.folder_new_chats_ask
+                .insert(folder_id, NewChatsAsk::Answered(std::time::Instant::now()));
+        }
+    }
+}
+
 /// The Share Folder box's data for one folder: what each of its two
 /// fetches stands at, with the answer inside (`Fetch`).
 #[derive(Debug, Default)]
@@ -47,6 +86,11 @@ pub struct ChatListState {
     /// with the chat dropped from the spec — there is no
     /// `removeChatFromList` in 1.8.67.
     pub folder_remove_queue: Vec<(ChatId, i32)>,
+    /// The `editChatFolder` write in flight per folder (the editor's save
+    /// or a queued removal), by its request. A removal builds its edit from
+    /// the spec as it is now, so it waits while one is out; the answer or
+    /// error of that request (a lost one included) ends it.
+    pub folder_writes: HashMap<i32, RequestId>,
     /// Basic groups whose `leaveChat` was answered: the driver now sends
     /// `deleteChatHistory` with `remove_from_chat_list` for each.
     pub delete_after_leave: Vec<ChatId>,
@@ -56,17 +100,19 @@ pub struct ChatListState {
     /// The Share Folder box's data per folder id: the invite links and the
     /// chats a link may include, each with its own load stage.
     pub folder_shares: HashMap<i32, FolderShare>,
-    /// `getRecommendedChatFolders` result; `None` until fetched.
-    pub recommended_folders: Option<Vec<RecommendedChatFolder>>,
+    /// `getRecommendedChatFolders`: the request in flight, the list, or why
+    /// it failed.
+    pub recommended_folders: crate::state::fetch::Fetch<Vec<RecommendedChatFolder>>,
     /// What the requests a folder or contact box waits on ended in, by
     /// request id ([`DialogAnswers`]).
     pub dialog_answers: DialogAnswers,
     /// `getChatFolderNewChats` answers per shared folder: chats its owner
     /// added since the user last looked (the "N new chats" bar).
     pub folder_new_chats: HashMap<i32, Vec<i64>>,
-    /// When each folder's new chats were last asked for (TDLib wants one
-    /// call per `chat_folder_new_chats_update_period`).
-    pub folder_new_chats_asked: HashMap<i32, std::time::Instant>,
+    /// Where each folder's new-chats poll is: out as a request, or answered
+    /// at a time (TDLib wants one call per
+    /// `chat_folder_new_chats_update_period`).
+    pub folder_new_chats_ask: HashMap<i32, NewChatsAsk>,
     /// Folder limits from TDLib options and `getPremiumLimit`.
     pub folder_limits: crate::folder_limits::FolderLimits,
     /// Folder requests that failed on a limit, oldest first, until the UI
@@ -160,14 +206,22 @@ impl ChatListState {
     /// Opening the folder again asks for its page at once.
     pub fn folder_left(&mut self, folder_id: i32) {
         if let Some(paging) = self.folder_paging.get_mut(&folder_id) {
-            paging.page_ok();
+            paging.cancel_retry();
         }
     }
 
+    /// A folder's `loadChats` page went out as `request`.
+    pub(crate) fn folder_page_sent(&mut self, folder_id: i32, request: RequestId) {
+        self.folder_paging
+            .entry(folder_id)
+            .or_default()
+            .begin(request);
+    }
+
     /// A folder's `loadChats` page went through.
-    pub(crate) fn folder_page_ok(&mut self, folder_id: i32) {
+    pub(crate) fn folder_page_ok(&mut self, folder_id: i32, request: Option<RequestId>) {
         if let Some(paging) = self.folder_paging.get_mut(&folder_id) {
-            paging.page_ok();
+            paging.page_ok(request);
         }
     }
 
@@ -177,11 +231,12 @@ impl ChatListState {
         folder_id: i32,
         code: i32,
         now: std::time::Instant,
+        request: Option<RequestId>,
     ) {
         self.folder_paging
             .entry(folder_id)
             .or_default()
-            .page_failed(code, now);
+            .page_failed(code, now, request);
     }
 
     /// The next channel's history page arrived.
@@ -218,8 +273,40 @@ impl ChatListState {
     }
 
     /// A `getChatFolder` answer: the folder's spec as it is now.
-    pub(crate) fn store_spec(&mut self, folder_id: i32, spec: ChatFolderSpec) {
-        self.folder_specs.insert(folder_id, spec);
+    pub(crate) fn store_spec(
+        &mut self,
+        folder_id: i32,
+        request: Option<RequestId>,
+        spec: ChatFolderSpec,
+    ) {
+        self.folder_specs.answered(folder_id, request, spec);
+    }
+
+    /// An `editChatFolder` for `folder_id` went out as `request`.
+    pub(crate) fn folder_write_sent(&mut self, folder_id: i32, request: RequestId) {
+        self.folder_writes.insert(folder_id, request);
+    }
+
+    /// An edit of `folder_id` is out.
+    pub fn folder_write_out(&self, folder_id: i32) -> bool {
+        self.folder_writes.contains_key(&folder_id)
+    }
+
+    /// `request` answered or failed: it ends the write it started, and no
+    /// other (a newer write for the folder stays).
+    pub(crate) fn folder_write_settled(&mut self, pending: Option<&PendingRequest>) {
+        let Some(pending) = pending else { return };
+        if !matches!(
+            pending.purpose,
+            RequestPurpose::EditChatFolder | RequestPurpose::RemoveChatFromFolder
+        ) {
+            return;
+        }
+        if let Some(folder_id) = pending.folder_id()
+            && self.folder_writes.get(&folder_id) == Some(&pending.id)
+        {
+            self.folder_writes.remove(&folder_id);
+        }
     }
 
     /// Something changed `folder_id`: its cached spec stays for display,
@@ -274,13 +361,14 @@ impl ChatListState {
             chat_lists_for_add: HashMap::new(),
             folder_paging: HashMap::new(),
             folder_remove_queue: Vec::new(),
+            folder_writes: HashMap::new(),
             delete_after_leave: Vec::new(),
             folder_chats_to_leave: HashMap::new(),
             folder_shares: HashMap::new(),
-            recommended_folders: None,
+            recommended_folders: crate::state::fetch::Fetch::Idle,
             dialog_answers: DialogAnswers::default(),
             folder_new_chats: HashMap::new(),
-            folder_new_chats_asked: HashMap::new(),
+            folder_new_chats_ask: HashMap::new(),
             folder_limits: crate::folder_limits::FolderLimits::default(),
             folder_limit_hits: Default::default(),
             // Slice CL1: TDLib's compiled defaults for the pin limits

@@ -321,11 +321,10 @@ pub struct ConnectDriver<S: JsonSender> {
     /// Every picture (group-call tracks, streams, 1:1 calls): one live
     /// feed each, newest frame only (`group_calls/live_feeds.rs`).
     pub(crate) live_feeds: super::group_calls::live_feeds::LiveFeeds,
-    /// Phase C2g: the camera last issued to the engine per group call id
-    /// (`None`: off); the engine is only re-issued on change.
-    pub(crate) group_camera_state: HashMap<i32, Option<String>>,
-    /// Microphone mute state the group-call engine last applied, per call.
-    pub(crate) group_mute_state: HashMap<i32, bool>,
+    /// What the engine last applied for each group call's microphone and
+    /// camera, and the backoff of a change it refused
+    /// (`group_calls/engine_sync.rs`); re-issued only on change or retry.
+    pub(crate) group_engine: HashMap<i32, super::group_calls::GroupEngineSync>,
     pub(crate) group_seen: HashMap<i32, super::group_calls::GroupCallSeen>,
     /// Requests waiting for the join payload the engine is making.
     pub(crate) group_offers:
@@ -378,6 +377,8 @@ pub struct ConnectDriver<S: JsonSender> {
     /// A `getCustomEmojiStickers` rate limit that was not retried: no
     /// lookup goes out before this time (`flood_retry::absorb_flood`).
     pub(crate) custom_emoji_hold: Option<std::time::Instant>,
+    /// The requests this driver has out, for senders with no stage of their own.
+    pub(crate) asked: super::asked::Asked,
     /// R5: when the stale-request sweep last scanned the registry.
     pub(crate) last_request_sweep: Option<std::time::Instant>,
     /// Whether this client follows the OS proxy (`system_proxy`).

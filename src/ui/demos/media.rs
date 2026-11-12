@@ -264,11 +264,11 @@ impl QuillApp {
                     is_viewed: true,
                 }
             };
-            session.stickers.emoji.installed_sets = vec![
+            session.stickers.emoji.lists.installed.succeed(vec![
                 pack(1, "Fun faces", &["😀", "😎", "🤩", "🥳"], true),
                 pack(2, "Animals", &["🐶", "🐱", "🦊", "🐼"], true),
                 pack(3, "Food and drink", &["🍕", "🍣", "🍩", "☕"], true),
-            ];
+            ]);
             session.stickers.emoji.lists.trending = quill::emoji::TrendingSets::ready(vec![
                 pack(4, "Travel", &["✈️", "🏝️", "🗺️", "🚆"], false),
                 pack(5, "Weather", &["☀️", "🌧️", "⛄", "🌈"], false),

@@ -39,23 +39,26 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.session.stickers.stickers.lists.installed.clear_error();
         self.session.stickers.emoji.lists.installed.clear_error();
-        for (purpose, build) in [
-            (
-                RequestPurpose::GetInstalledStickerSets,
-                crate::telegram::requests::get_installed_sticker_sets as fn(RequestId) -> String,
-            ),
-            (
-                RequestPurpose::GetInstalledEmojiSets,
-                crate::telegram::requests_emoji::get_installed_emoji_sets
-                    as fn(RequestId) -> String,
-            ),
-        ] {
-            let fetch = if purpose == RequestPurpose::GetInstalledStickerSets {
-                &mut self.session.stickers.stickers.lists.installed
+        for emoji in [false, true] {
+            let (purpose, build) = if emoji {
+                (
+                    RequestPurpose::GetInstalledEmojiSets,
+                    crate::telegram::requests_emoji::get_installed_emoji_sets
+                        as fn(RequestId) -> String,
+                )
             } else {
-                &mut self.session.stickers.emoji.lists.installed
+                (
+                    RequestPurpose::GetInstalledStickerSets,
+                    crate::telegram::requests::get_installed_sticker_sets
+                        as fn(RequestId) -> String,
+                )
             };
-            if fetch.is_loading() {
+            let loading = if emoji {
+                self.session.stickers.emoji.lists.installed.is_loading()
+            } else {
+                self.session.stickers.stickers.lists.installed.is_loading()
+            };
+            if loading {
                 continue;
             }
             let extra = self.session.request(purpose, None);
@@ -63,13 +66,15 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session.requests.take(extra);
                 return Err(err);
             }
-            let fetch = if purpose == RequestPurpose::GetInstalledStickerSets {
-                &mut self.session.stickers.stickers.lists.installed
+            if emoji {
+                let fetch = &mut self.session.stickers.emoji.lists.installed;
+                fetch.begin();
+                fetch.sent(extra);
             } else {
-                &mut self.session.stickers.emoji.lists.installed
-            };
-            fetch.begin();
-            fetch.sent(extra);
+                let fetch = &mut self.session.stickers.stickers.lists.installed;
+                fetch.begin();
+                fetch.sent(extra);
+            }
         }
         Ok(())
     }
@@ -158,9 +163,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         }
         let Some(my_id) = self.session.my_user_id else {
-            if !self.session.users_state.my_id_probe.is_idle()
-                || self.session.requests.has_purpose(RequestPurpose::GetMe)
-            {
+            if !self.session.users_state.my_id_probe.is_idle() {
                 return Ok(());
             }
             let extra = self.session.request(RequestPurpose::GetMe, None);
@@ -170,7 +173,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session
                     .users_state
                     .my_id_probe
-                    .fail_dropping_data("could not send the request");
+                    .fail_dropping_data(err.stage_line());
                 return Err(err);
             }
             self.session.users_state.my_id_probe.sent(extra);

@@ -10,6 +10,15 @@ impl<S: JsonSender> ConnectDriver<S> {
             .has_purpose_for_chat(RequestPurpose::CreateCommunity, chat_id)
     }
 
+    /// A create that carries a picture is out: no other create goes until
+    /// it is answered (the picture waits in its stage).
+    pub fn community_photo_create_out(&self) -> bool {
+        matches!(
+            self.session.communities.create,
+            crate::state::CommunityCreate::Creating { photo: Some(_), .. }
+        )
+    }
+
     /// Slice (communities backend core): `createCommunity` (schema 1.8.67,
     /// line 11806) — creates a community from an owned chat (owned basic
     /// group / supergroup / channel, or a chat with an owned bot; basic

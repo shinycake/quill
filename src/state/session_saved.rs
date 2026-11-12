@@ -96,11 +96,16 @@ impl Session {
     }
 
     /// `getForumTopicDefaultIcons` answered.
-    pub(crate) fn accept_topic_default_icons(&mut self, stickers: Vec<StickerItem>) {
-        self.threads.forum_topic_icons = stickers
+    pub(crate) fn accept_topic_default_icons(
+        &mut self,
+        request: Option<RequestId>,
+        stickers: Vec<StickerItem>,
+    ) {
+        let icons = stickers
             .into_iter()
             .filter(|sticker| sticker.custom_emoji_id.is_some_and(|id| id > 0))
             .collect();
+        self.threads.forum_topic_icons.answered(request, icons);
     }
 
     // ---- Saved Messages sublists -------------------------------------

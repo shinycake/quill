@@ -64,10 +64,11 @@ impl Session {
             // presentation answer, consumed by the driver pump.
             AuthPayload::Countries { countries } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetCountries) {
+                    let id = pending.map(|p| p.id);
                     if countries.is_empty() {
-                        self.auth_state.countries.fail("empty list");
+                        self.auth_state.countries.failed(id, "empty list", false);
                     } else {
-                        self.auth_state.countries.succeed(countries);
+                        self.auth_state.countries.answered(id, countries);
                     }
                 }
             }

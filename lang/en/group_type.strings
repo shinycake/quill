@@ -66,3 +66,6 @@
 "lng_channels_too_much_public_revoke_confirm_group" = "Are you sure you want to revoke the link {link}?\n\nThe group «{group}» will become private.";
 "lng_channels_too_much_public_revoke_confirm_channel" = "Are you sure you want to revoke the link {link}?\n\nThe channel «{group}» will become private.";
 "qll_group_type_revoke_failed" = "Could not revoke the link";
+"qll_group_upgraded_link_not_saved" = "The group was upgraded, but its link could not be saved";
+"qll_group_ownership_check_failed" = "Could not check whether you can transfer ownership: {reason}";
+"qll_group_setting_change_failed" = "Could not change the group setting (error {code})";

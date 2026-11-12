@@ -51,6 +51,14 @@ impl Session {
                         .push(call_request_error_line(err, "Could not load saved chats"));
                 }
             }
+            // The picker ends in "no icons" and the next open asks again.
+            Some(RequestPurpose::GetForumTopicDefaultIcons) => {
+                self.threads.forum_topic_icons.failed(
+                    pending.map(|p| p.id),
+                    format!("error {}", err.code),
+                    false,
+                );
+            }
             Some(RequestPurpose::GetSavedMessagesTags { topic_id: 0 }) => {
                 self.threads.saved.tags.failed(
                     pending.map(|p| p.id),

@@ -46,6 +46,14 @@ impl GroupTransport {
         matches!(self, Self::Joining { .. })
     }
 
+    /// The join request that waits for its answer.
+    pub fn join_request(&self) -> Option<RequestId> {
+        match self {
+            Self::Joining { request } => Some(*request),
+            _ => None,
+        }
+    }
+
     /// The join `request` was made; a connected call keeps its transport.
     pub fn begin_join(&mut self, request: RequestId) {
         if !self.is_connected() {

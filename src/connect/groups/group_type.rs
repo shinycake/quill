@@ -74,10 +74,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let purpose = purpose(GroupTypePurpose::CheckPublicChatsLimit);
-        if self.session.requests.has_purpose(purpose) {
+        if self.asked.is_out(&self.session.requests, purpose) {
             return Ok(None);
         }
         let extra = self.session.request(purpose, None);
+        self.asked.sent(&self.session.requests, purpose, extra);
         self.send_json_request(extra, &check_created_public_chats_limit(extra))
             .map(Some)
     }
@@ -294,10 +295,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             .upgraded_chat_for(edit.old)
             .is_some_and(|new| self.save_group_type(new, &edit.kind, &edit.info).is_ok());
         if !saved {
-            self.session
-                .chats_state
-                .chat_action_error
-                .push("the group was upgraded, but its link could not be saved".to_string());
+            self.session.chats_state.chat_action_error.push(
+                crate::lang::tr(crate::lang::keys::Q_GROUP_UPGRADED_LINK_NOT_SAVED).to_string(),
+            );
         }
     }
 }

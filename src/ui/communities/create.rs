@@ -16,6 +16,31 @@ use gpui_kit::component::*;
 /// tdesktop `defaultUserpicButton` size.
 const USERPIC: f32 = 76.;
 
+/// What a Create press does given the driver's creates in flight.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum CreateRefusal {
+    /// This chat's own create is out: the press is that one, silently.
+    Own,
+    /// A create with a picture is out for another chat.
+    Busy,
+    None,
+}
+
+pub(super) fn create_refusal<S: quill::connect::JsonSender>(
+    driver: &quill::connect::ConnectDriver<S>,
+    chat_id: quill::ids::ChatId,
+) -> CreateRefusal {
+    // The driver sends one at a time, so a press while this chat's create is
+    // out goes nowhere and tells no "unavailable" note.
+    if driver.community_create_out(chat_id) {
+        CreateRefusal::Own
+    } else if driver.community_photo_create_out() {
+        CreateRefusal::Busy
+    } else {
+        CreateRefusal::None
+    }
+}
+
 /// The "choose photo" userpic: a camera on the accent color.
 fn camera_tile(size: f32) -> AnyElement {
     div()
@@ -128,6 +153,13 @@ impl QuillApp {
         );
     }
 
+    /// A community with a picture is still being created: a second create
+    /// would take its picture's place, so the press says so.
+    pub(super) fn note_create_busy(&mut self, cx: &mut Context<Self>) {
+        self.set_note(StatusNote::error(tr(keys::Q_COMMUNITY_CREATE_BUSY)));
+        cx.notify();
+    }
+
     /// "Create" on the visibility box.
     pub(super) fn submit_new_community(&mut self, cx: &mut Context<Self>) {
         let Some(CommunityBox::CreateVisibility {
@@ -157,15 +189,13 @@ impl QuillApp {
             cx.notify();
             return;
         };
-        // Another box's create for this chat is out: the driver sends one at
-        // a time, so this press goes nowhere and tells no "unavailable" note.
-        // This box is not busy for it; its own request is the only one it
-        // waits for.
-        if live
-            .driver
-            .community_create_out(quill::ids::ChatId(chat_id))
-        {
-            return;
+        match create_refusal(&live.driver, quill::ids::ChatId(chat_id)) {
+            CreateRefusal::Own => return,
+            CreateRefusal::Busy => {
+                self.note_create_busy(cx);
+                return;
+            }
+            CreateRefusal::None => {}
         }
         // The box waits for the answer: it closes on `Created` and stays on
         // a refusal, as tdesktop's does. A send that did not go (the chat

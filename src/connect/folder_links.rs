@@ -32,20 +32,25 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self
-            .session
-            .requests
-            .pending
-            .values()
-            .any(|p| p.purpose == RequestPurpose::GetRecommendedChatFolders)
-        {
+        if self.session.chat_list.recommended_folders.is_loading() {
             return Ok(None);
         }
         let extra = self
             .session
             .request(RequestPurpose::GetRecommendedChatFolders, None);
-        self.send_folder_request(extra, get_recommended_chat_folders(extra))
-            .map(Some)
+        let list = &mut self.session.chat_list.recommended_folders;
+        list.begin();
+        list.sent(extra);
+        match self.send_folder_request(extra, get_recommended_chat_folders(extra)) {
+            Ok(extra) => Ok(Some(extra)),
+            Err(err) => {
+                self.session
+                    .chat_list
+                    .recommended_folders
+                    .fail(err.stage_line());
+                Err(err)
+            }
+        }
     }
 
     /// `getChatFolderInviteLinks` + `getChatsForChatFolderInviteLink`: what
@@ -77,7 +82,19 @@ impl<S: JsonSender> ConnectDriver<S> {
             .folder_shares
             .get(&folder_id)
             .is_some_and(|share| share.links.is_loading());
-        if !links_loading {
+        if !links_loading && self.folder_link_delete_out(folder_id) {
+            // A delete still in flight: queries are not ordered, so the list
+            // could be read before the delete lands and bring the link back.
+            // It waits as out of date and is fetched once the delete answered
+            // (`refetch_outdated_folder_links`).
+            self.session
+                .chat_list
+                .folder_shares
+                .entry(folder_id)
+                .or_default()
+                .links
+                .outdate();
+        } else if !links_loading {
             let extra = self
                 .session
                 .request_for_folder(RequestPurpose::GetChatFolderInviteLinks, folder_id);
@@ -99,11 +116,13 @@ impl<S: JsonSender> ConnectDriver<S> {
                 refused = Some(err);
             }
         }
-        if !self
+        let chats_loading = self
             .session
-            .requests
-            .has_purpose_for_folder(RequestPurpose::GetChatsForFolderInviteLink, folder_id)
-        {
+            .chat_list
+            .folder_shares
+            .get(&folder_id)
+            .is_some_and(|share| share.chats.is_loading());
+        if !chats_loading {
             let extra = self
                 .session
                 .request_for_folder(RequestPurpose::GetChatsForFolderInviteLink, folder_id);
@@ -201,17 +220,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(sent)
     }
 
+    /// A `deleteChatFolderInviteLink` for the folder waits for its answer.
+    fn folder_link_delete_out(&self, folder_id: i32) -> bool {
+        self.session
+            .requests
+            .has_purpose_for_folder(RequestPurpose::DeleteChatFolderInviteLink, folder_id)
+    }
+
     /// A link edit landed on a list whose fetch was still out: that fetch
     /// asked before the edit, so it is fetched again. A refusal ends in the
     /// error line the box draws with its Retry. A delete still in flight
     /// holds the refetch back: queries are not ordered, so the list could
     /// be read before the delete lands.
     pub fn refetch_outdated_folder_links(&mut self, folder_id: i32) {
-        if self
-            .session
-            .requests
-            .has_purpose_for_folder(RequestPurpose::DeleteChatFolderInviteLink, folder_id)
-        {
+        if self.folder_link_delete_out(folder_id) {
             return;
         }
         let due = self
@@ -301,32 +323,26 @@ impl<S: JsonSender> ConnectDriver<S> {
             .chat_folders
             .iter()
             .any(|f| f.id == folder_id && f.is_shareable);
-        if !shared
-            || self
-                .session
-                .requests
-                .has_purpose_for_folder(RequestPurpose::GetChatFolderNewChats, folder_id)
-        {
+        if !shared {
             return Ok(None);
         }
         let period = std::time::Duration::from_secs(
             u64::try_from(self.session.chat_list.folder_limits.new_chats_period_secs())
                 .unwrap_or(3600),
         );
-        if self
-            .session
-            .chat_list
-            .folder_new_chats_asked
-            .get(&folder_id)
-            .is_some_and(|asked| asked.elapsed() < period)
-        {
+        if !self.session.chat_list.new_chats_due(folder_id, period) {
             return Ok(None);
         }
         let extra = self
             .session
             .request_for_folder(RequestPurpose::GetChatFolderNewChats, folder_id);
-        self.send_folder_request(extra, get_chat_folder_new_chats(extra, folder_id))
-            .map(Some)
+        match self.send_folder_request(extra, get_chat_folder_new_chats(extra, folder_id)) {
+            Ok(extra) => {
+                self.session.chat_list.new_chats_sent(folder_id, extra);
+                Ok(Some(extra))
+            }
+            Err(err) => Err(err),
+        }
     }
 
     /// `processChatFolderNewChats`: join the chosen new chats, or dismiss the
@@ -368,7 +384,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let purpose = RequestPurpose::ReadChatList;
-        if self.session.requests.has_purpose(purpose) {
+        if self.asked.is_out(&self.session.requests, purpose) {
             return Ok(None);
         }
         let any_unread = self
@@ -380,6 +396,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let extra = self.session.request(purpose, None);
+        self.asked.sent(&self.session.requests, purpose, extra);
         self.send_folder_request(extra, read_chat_folder(extra, folder_id))
             .map(Some)
     }

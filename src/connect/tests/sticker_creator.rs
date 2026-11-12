@@ -377,12 +377,8 @@ fn an_emoji_set_toasts_emoji_added_even_without_a_box() {
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
     // An owned emoji set known only from the installed list ("Add to Emoji
     // Set" in a message's menu).
-    driver
-        .session
-        .stickers
-        .emoji
-        .installed_sets
-        .push(crate::telegram::envelope::StickerSetInfo {
+    driver.session.stickers.emoji.lists.installed.succeed(vec![
+        crate::telegram::envelope::StickerSetInfo {
             id: 88,
             title: "My emoji".into(),
             name: "my_emoji_by_me".into(),
@@ -393,7 +389,8 @@ fn an_emoji_set_toasts_emoji_added_even_without_a_box() {
             covers: Vec::new(),
             cover_files: Vec::new(),
             is_viewed: true,
-        });
+        },
+    ]);
     assert_eq!(
         driver.session.owned_sticker_set(88),
         Some(("my_emoji_by_me".to_string(), true))

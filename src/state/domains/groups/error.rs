@@ -56,6 +56,17 @@ impl Session {
         ) {
             self.note_premium_limit(err, pending);
         }
+        // The save that waited on a lost or refused upgrade has nothing to
+        // wait for: it ends with the failure note below, and its entry goes
+        // (an answered one was taken when the answer came).
+        if let Some(pending) = pending
+            && pending.purpose == RequestPurpose::UpgradeBasicGroup
+        {
+            self.groups
+                .group_type
+                .after_upgrade
+                .retain(|(id, _)| *id != pending.id);
+        }
         // A create whose dialog was closed and whose request was lost has no
         // answer to wait for: its row goes (an answered one was settled
         // when the answer came).
@@ -81,9 +92,9 @@ impl Session {
             Some(RequestPurpose::CanTransferOwnership) => {
                 self.groups.ownership.check.failed(
                     pending.map(|p| p.id),
-                    format!(
-                        "Could not check whether you can transfer ownership: {}",
-                        error_reason(err)
+                    crate::lang::tr_with(
+                        crate::lang::keys::Q_GROUP_OWNERSHIP_CHECK_FAILED,
+                        &[("reason", error_reason(err).as_str())],
                     ),
                     true,
                 );
@@ -107,7 +118,7 @@ impl Session {
             // tdesktop toasts a refused create; the box stays, and the
             // photo waiting for the community goes.
             Some(RequestPurpose::CreateCommunity) => {
-                self.communities.new_community_photo = None;
+                self.communities.create.failed(pending.map(|p| p.id));
                 if let Some(pending) = pending {
                     self.communities.outcomes.push_back(
                         crate::state::CommunityOutcome::CreateFailed {
@@ -179,10 +190,12 @@ impl Session {
                 | RequestPurpose::SetChatDiscussionGroup
                 | RequestPurpose::UpgradeBasicGroup,
             ) => {
-                self.chats_state.chat_action_error.push(format!(
-                    "could not change the group setting (error {})",
-                    err.code
-                ));
+                self.chats_state
+                    .chat_action_error
+                    .push(crate::lang::tr_with(
+                        crate::lang::keys::Q_GROUP_SETTING_CHANGE_FAILED,
+                        &[("code", err.code.to_string().as_str())],
+                    ));
             }
             Some(
                 RequestPurpose::SetSupergroupStickerSet

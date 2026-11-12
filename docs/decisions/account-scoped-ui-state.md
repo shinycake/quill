@@ -10376,3 +10376,94 @@ notification edits), `connect::tests::sticker_tabs` / `sticker_creator` (the sta
 | g-302 | The stealth box owns no timer. Its draw asks the frame clock for a tick a second (`request_animation_tick(1)`) only while the button shows a countdown (`StealthButton::Cooldown`); an Enable or Unlock button asks for nothing, and the clock stops when the box closes or the countdown is over. `StealthBox::_tick` and `stealth_box_tick` are gone. Test `the_frame_clock_runs_only_while_the_box_shows_a_countdown`. |
 | 22-006, g-298 | The story viewer has no timer: `StoryTick` and `story_tick_task` are gone. The viewer runs on the frame clock (`request_app_tick`, 10 frames a second like `kPhotoProgressInterval`), which only ticks while the window is shown. Each frame's main-window upkeep (`story_viewer_upkeep`, in `tick_rest.rs`) does what a wake did (video sync, pause state, close friends, live, segment end, emoji warm-up, toast end), redraws the overlay's slice when it changed, and asks for the next frame only while something moves (`story_tick_rests`). A held story (Space, a panel, the window behind another app) counts only what is really out: a close-friends save, or a load the session has in flight (`CloseFriendsList::Loading`; `NotLoaded` and `Failed` rest, Retry redraws); a custom emoji whose file is requested or downloading (an emoji the server does not know, or whose download is not running, is retried by the next redraw, not waited on); a live story that is watched, or one due to be joined (a refused one is not); a showing stealth toast. A live PiP behind an ordinary story keeps the work going but does not redraw the held overlay (`live_story_shown`). What resumes a story (`refresh_story_pause`, open, step) asks again. Tests in `tick_rest_tests.rs`, including `a_close_friends_panel_with_no_load_out_lets_the_clock_rest` and `a_held_story_with_a_custom_emoji_that_never_resolves_rests`. |
 | new-01 | The set box's two detached tasks are stages of `SetEditing`: `Choosing { _task }` (the open-file dialog for a new sticker's image; a second press replaces it, the answer or a cancel ends it) and `Writing { _task }` (the edited image's write; the box replaces it when it lands, a failed or stale write ends it). Test `the_image_dialog_and_write_stages_end_with_their_answer_or_another_flow`. |
+### Sweep fixes (r4-02)
+
+| Ids | What changed |
+| --- | --- |
+| g-181 | `ask_countries` records its request (`Fetch::sent`) and the answer and the error take it through `answered` / `failed` by `RequestId`. |
+| g-170, g-120, g-154 | `ConnectDriver::asked` (`connect/asked.rs`) holds the `RequestId` of each request the driver sent for a sender with no stage of its own, keyed by purpose. "Is my request out" is the recorded id looked up in the registry, never "some request with this purpose is in flight": another sender's request of the same purpose does not count, and a request the answer, the error, the sweep or an auth change took out of the registry is out no longer, so nothing needs clearing by hand. `login_request`, `submit_phone` and `request_qr_login` use it (`auth_submit_out` for "any sign-in submit"). |
+| g-166, g-123, g-094, g-163, g-124, g-186, g-116, g-098, g-097, g-118, g-119, g-173, g-100, g-092, g-088, g-142, g-125, g-145, g-138 | The same ledger replaces `has_purpose` in `set_pinned_chat_order`, `mark_all_chats_as_read`, `clear_recently_found_chats`, `set_archive_chat_list_settings`, `mark_folder_as_read`, `import_contacts`, the forum and Saved Messages senders (`send_purpose` records), `check_public_chats_limit`, the gift text limit (one `ask_gift_text_limit` for the marketplace and the send-gift box), `mask_request`, `parameters_sent` and the chat default statuses. Guards that repeated a stage (`media_library`, `message_menu`, the earn app config, `maybe_probe_channel_membership`) were deleted: the callee or the stage already refuses. |
+| g-132, g-131 | `ListPaging::Loading { request, after }` is the page in flight (main, archive and each folder). `begin` follows a successful send; `page_ok` and `page_failed` act only for the request the list waits for, and the failure wait keeps doubling through `after`. `folder_left` is `cancel_retry`. The senders ask `is_loading()` instead of the registry. |
+| g-185, 03-001 | `chat_lists_for_add` records its request (`begin` + `sent`) and answers and fails by `RequestId`; the in-flight check is the stage. |
+| g-191, 03-002 | `probe_self_star_stats` records its request in `self_stats` and only that request's answer or error settles it; the purpose guards beside the stage were redundant and are gone. |
+| g-167, g-168, g-093, 03-003 | `StatusChange` is `Idle` / `Setting { request, emoji }` / `Clearing { request }`; the collectible path and "clear recents" enter it too (one `send_status_change`), the stage is the busy check, and `answered` / `failed` end it by request on every path. |
+| g-099 | A custom emoji lookup is out while `custom_lookups` holds its request (`custom_emoji_lookup_in_flight`), not while the registry has the purpose. |
+| g-103, g-161, g-156, g-155, g-148, g-149, g-174, g-175 | `emoji_set_request` is busy by the list's own fetch (lists) or the ledger (the rest). Every "replace the pending one" drops the request its stage holds (`Fetch::request`, `TrendingSets::request`, `KeywordEmojis::request`, `AnimatedSuggestion::request`, `drop_request`) before the stage is replaced. |
+| g-136, g-137, g-115, g-091, g-164, g-165 | The GIF search waits on its own request (`GifPanel::search_request`, `gif_search_out`: the id still in the registry), cancels it by that id, and the save and remove of a GIF use the ledger. |
+| g-101 | `drop_in_flight` is a bulk cancel through `RequestRegistry::supersede`: the reducer outdates a list's fetch (dropping its request) before the driver runs, so no stage names the superseded request any more. Not an answer match; flagged for the reviewer. |
+| g-189 | The live story extras begin their stage once the send went out (begin and `sent` together), so a refused send leaves the stage idle for the next ingest. |
+| g-117 | Leaving a live story drops the join request its transport stage holds (`GroupTransport::join_request`). |
+| g-105, g-106, g-090 | The marketplace gift asks the purchase's own stage (`GiftPurchase::is_busy`); the buy button's purpose guard was redundant with the `Quoted` check. |
+| g-139, g-140, g-141, g-108, g-109 | See above: the callee refuses a second ask. |
+| g-180 | A bot save writes the bot ahead as `Fetch::written_ahead(bot, request)` (loading under the save's request, bot visible), and only that save's answer or refusal forgets it. `ConnectedBotSave` and `bot_save` are gone. |
+| g-194 | `CloseProgress` is a return value (what a drain found), never stored: renamed `CloseOutcome`. |
+| 03-006 | A `close` the sender refuses is held (`HoldingClose`) and sent again by the next drain (`send_close`); the client no longer waits for a Closed nothing asked for. Test `a_refused_close_is_held_and_sent_again_on_the_next_drain`. |
+| 03-011 | `CommunityCreate::{Idle, Creating { request, photo }}` replaces the one-shot photo slot; the answer takes the photo for its request only and a refusal of that request drops it. |
+| 03-009 | Both deep link lookups pass the same gate (`take_over_deep_link_stage`), so a pasted text link no longer replaces a flow in flight or an open invite preview. |
+| 03-004 | `fetch_folder_share` holds the links list back as out of date while a delete of that folder's link is out; the ingest refetch asks once the delete answered. Test `reopening_share_folder_waits_for_a_delete_in_flight`. |
+| 03-005 | `group_engine` (`group_calls/engine_sync.rs`) replaces `group_mute_state` and `group_camera_state`: per call and per setting `Unset` / `Applied(value)` / `Refused { wanted, retry_at, wait }`. A refused change waits 1 s, 2 s, 4 s, up to 5 s when the periodic poll finds it, and is asked again at once when the wanted value changes or an update arrives. |
+| 03-010 | Not a bug as described: the revoke records its first request before the second goes (`PublicLinkStage::Revoking`), the refused second moves it to `RevokingFailed`, and the first request's answer settles it with the note and a fresh list (test `a_half_sent_revoke_is_recorded_and_settles`). |
+| 03-007 | `DiskPauses` (`state/domains/media/disk_pauses.rs`) owns the paused files, the saved messages (changed together by `pause` / `resume`) and whether the saved set was written (`PauseSave`). `disk_paused_persisted`, the second copy compared by equality, is gone. |
+| 03-008 | The poll option menu begins with its request (`begin_poll_option_menu(…, request)`), answers and fails by `RequestId`, and a refused send ends in the error the page draws. Test `a_refused_poll_option_menu_request_ends_in_an_error`. |
+
+Tests: `connect/tests/sweep_r4_02.rs`, `closing_refused.rs`, `communities.rs`
+(older create), `deep_link_routing.rs` (a text link beside a flow), `asked.rs`,
+`paging.rs`, `disk_pauses.rs`, `engine_sync.rs`.
+
+#### Fix round 2 (review of r4-02)
+
+| What | Change |
+| --- | --- |
+| Guard housekeeping | Removed the `Session::apply_earn` and `drop_in_flight` allow lines and pruned the request-match baseline. `RequestRegistry::supersede` carries the reason a purpose sweep is right for session-wide lists. |
+| Recommended folders, share box chats, delete box chats | Each is a `Fetch` (`recommended_folders`, `share.chats`, `folder_chats_to_leave`) and the sender tests `is_loading()` instead of the registry. |
+| `getChatFolder` | `FolderSpecs` holds one `Fetch<ChatFolderSpec>` per folder (`Ready` is fresh, `Outdated` is stale, `Loading` holds the request). The answer and error are matched by `RequestId`; `updateChatFolders`, an edit answer and a removal outdate it, so an answer that predates the change is dropped. |
+| Folder removal | `ChatListState::folder_writes` holds the `editChatFolder` request per folder (the editor's save and a queued removal); the answer or error of that request ends it. A removal waits while it is set. |
+| New-chats poll | `NewChatsAsk::{Out(request), Answered(at)}` replaces the answer-time map plus the registry test. |
+| Community create | A second create with a picture is refused while one is out, so the first keeps its photo. |
+| Close | `ShutdownPhase::CloseRefused { retry_at }` backs off (`CLOSE_RETRY_BACKOFF`); `release_close` resends only at `retry_at`. |
+| Disk pauses | `DiskPauses::forget_unheld` does the retain and marks the save itself. |
+| Group-call engine retry | `Wake` is gone: `EngineApply::due(wanted, now)` takes the caller's clock, so updates and polls both wait out the backoff. |
+| Status lists, topic icons | The recent, themed, default, chat-default and upgraded-gift status lists and the forum topic icons are `Fetch` values (`EmojiPanel::status_list_*`), matched by request id, failing on error, and asked again after a failure. The `Asked` ledger stays only for stage-less mutations. `emoji_set_request` is busy by the list's fetch, the status stage or `SetMutation`. |
+| Saved tags (topic 0) | Busy by `saved.tags`, not the ledger. |
+| Business bot lookup, contacts delete, earn recipients | A refused lookup send fails each part (the field shows the error with Retry); a half-sent contacts delete returns `Ok` with the second send's error as the contacts note; the recipient list returns the sender's error. |
+
+Tests: `sweep_r4_02_round2.rs`, `chat_list/folder_removals.rs`,
+`closing_refused.rs`, `earn.rs`, `folder_followups.rs`, `camera_join.rs`, and
+the `engine_sync` and `disk_pauses` unit tests.
+
+#### Fix round 3 (review of r4-02)
+
+| What | Change |
+| --- | --- |
+| Community create | Any create is refused while one that carries a picture is out (`community_photo_create_out`), and the identity box says so (`qll_community_create_busy`) instead of doing nothing. |
+| Live story commit | A commit that could not be sent notes the send's own line, not "not enough Stars". |
+| Group type upgrade | The upgrade's error path (a lost request and logout settle through it) removes the `after_upgrade` entry that waited on it. |
+| Emoji set lists | `lists.installed` and `lists.search` are `Fetch<Vec<StickerSetInfo>>`; `installed_sets` and `found_sets` are gone. The media library and the message menu ask when the list `can_ask` or is outdated, not when it is empty (an account with no sets no longer re-asks). Round 4 changes the refresh rule. |
+| Mask reorder | Busy is `mask_change_pending()` or the installed `Fetch` loading. |
+| Reaction options, pack title | Busy is the stage alone; the error paths (lost requests included) take the entry out. |
+| `moderate_message` | A refusal after a step went out is a note; only a refused first step fails the call. |
+| Docs, send lines | Stale doc lines fixed; send failures show `ConnectSendError::stage_line()` instead of English literals. |
+
+Tests: `sweep_r4_02_round2.rs`, `sweep_r4_02_round3.rs`, `group_type.rs`,
+`live_story.rs`, `message_menu.rs`, `media_library.rs`, `masks.rs`.
+
+#### Fix round 4 (review of r4-02)
+
+| What | Change |
+| --- | --- |
+| Emoji set lists | `refresh_emoji_pack_catalog` asks again when `lists.installed` is not `Idle`, so an empty `Ready` list is asked again on `updateInstalledStickerSets`. The panel and the menu still ask only on `can_ask` or `is_outdated`. |
+| Community create | `create_refusal` returns `Own`, `Busy` or `None`, and the busy press shows `qll_community_create_busy` through `note_create_busy`. |
+| Send lines | Chat links, the chatbot and the Premium options use `err.stage_line()`. |
+| Group strings | `qll_group_upgraded_link_not_saved`, `qll_group_ownership_check_failed` and `qll_group_setting_change_failed` replace the English literals in group_type.rs and groups/error.rs. |
+
+Tests: `media_library.rs` (`an_empty_custom_emoji_answer_is_not_asked_again_on_reopen`,
+`a_set_added_after_an_empty_answer_is_asked_for`), `sweep_r4_02_round3.rs`,
+`communities/flow_tests.rs`, `group_type.rs` and `group_admin.rs`.
+
+#### Fix round 5 (review of r4-02)
+
+| What | Change |
+| --- | --- |
+| Hotspot | The `ShutdownPhase::CloseRefused` doc in `src/state/session.rs` is one line, so the file's change fits `max:4` with no `Hotspot-change:` trailer. |
+| Community create test | The flow test no longer counts `createCommunity` sends (it only confirmed the first). The second press is asserted through `create_refusal` (`Busy`) and the note it shows. |
+| Decision doc | Round 4 and round 5 entries added; the round-3 emoji row points to round 4. |
