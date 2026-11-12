@@ -421,14 +421,16 @@ fn call_transport_retries_same_params_three_times_then_stops() {
 
 /// A retry the engine never reports on does not stay `Reconnecting`: at its
 /// deadline it counts as a failed report, so the budget runs out and the
-/// call shows the failure.
+/// call shows the failure. The clock is the test's own.
 #[test]
 fn a_silent_retry_runs_out_at_its_deadline_and_spends_the_budget() {
     use crate::state::{CALL_RECONNECT_WINDOW, MAX_CALL_RECONNECT_ATTEMPTS};
+    use std::time::Duration;
     let (dir, mut driver, handle, sink, seq) = ready_call_driver();
     ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+    let t0 = std::time::Instant::now();
     handle.emit_transport_state(77, TransportState::Failed);
-    ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+    assert!(driver.request_tick(t0));
     let state = |driver: &ConnectDriver<_>| {
         driver
             .session
@@ -440,22 +442,35 @@ fn a_silent_retry_runs_out_at_its_deadline_and_spends_the_budget() {
             .state()
     };
     assert_eq!(state(&driver), Some(TransportState::Reconnecting));
-    let start = std::time::Instant::now();
     // Before its deadline the retry is left alone.
-    assert!(!driver.expire_call_reconnect(start));
+    assert!(!driver.expire_call_reconnect(t0 + CALL_RECONNECT_WINDOW - Duration::from_secs(1)));
     assert_eq!(handle.connects().len(), 2);
     // Each silent retry that passes its deadline asks again, until the
     // budget is spent.
-    let mut now = start;
+    let mut now = t0;
     for _ in 1..MAX_CALL_RECONNECT_ATTEMPTS {
-        now += CALL_RECONNECT_WINDOW + std::time::Duration::from_secs(1);
+        now += CALL_RECONNECT_WINDOW;
         assert!(driver.expire_call_reconnect(now));
         assert_eq!(state(&driver), Some(TransportState::Reconnecting));
     }
-    now += CALL_RECONNECT_WINDOW + std::time::Duration::from_secs(1);
+    now += CALL_RECONNECT_WINDOW;
     assert!(driver.expire_call_reconnect(now));
     assert_eq!(state(&driver), Some(TransportState::Failed));
     assert_eq!(handle.connects().len(), 1 + MAX_CALL_RECONNECT_ATTEMPTS);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The poll loop sleeps no longer than a silent retry has left.
+#[test]
+fn the_poll_loop_wakes_for_a_silent_retrys_deadline() {
+    use crate::state::CALL_RECONNECT_WINDOW;
+    let (dir, mut driver, handle, sink, seq) = ready_call_driver();
+    ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+    let t0 = std::time::Instant::now();
+    assert_eq!(driver.next_deadline(t0, 0), None);
+    handle.emit_transport_state(77, TransportState::Failed);
+    assert!(driver.request_tick(t0));
+    assert_eq!(driver.next_deadline(t0, 0), Some(CALL_RECONNECT_WINDOW));
     let _ = std::fs::remove_dir_all(&dir);
 }
 

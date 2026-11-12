@@ -11,9 +11,6 @@ pub struct FolderShare {
     pub links: crate::state::fetch::Fetch<Vec<ChatFolderInviteLink>>,
     /// `getChatsForChatFolderInviteLink`: the chats a link may include.
     pub chats: crate::state::fetch::Fetch<Vec<i64>>,
-    /// The refusal of the last link delete, beside the list: a links
-    /// fetch in flight keeps its place and answers.
-    pub links_note: crate::state::fetch::ChangeNote,
 }
 
 pub struct ChatListState {

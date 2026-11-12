@@ -71,10 +71,9 @@ impl Session {
             Some((RequestPurpose::DeleteChatFolderInviteLink, Some(folder_id))) => {
                 // The link left the list at send time, so what the box holds
                 // is wrong now: the list is outdated (a fetch in flight keeps
-                // its place and answers), and the refusal is the delete's own
-                // line, with a Retry that asks the list again.
+                // its place and answers) and is asked again. The refusal
+                // reaches the box as the delete's own answer.
                 let share = self.chat_list.folder_shares.entry(folder_id).or_default();
-                share.links_note.refused(pending_id, error_reason(err));
                 if !share.links.is_loading() {
                     share.links.outdate();
                 }
@@ -98,7 +97,6 @@ impl Session {
             {
                 self.chats_state.chat_action_error.push(error_reason(err));
             }
-            Some((RequestPurpose::GetRecommendedChatFolders, _)) => {}
             _ => {}
         }
         // The Add to folder box ends in the error with a Retry.

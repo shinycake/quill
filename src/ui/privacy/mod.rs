@@ -87,6 +87,15 @@ impl QuillApp {
         self.privacy.layer.close_all();
     }
 
+    /// The Privacy page is left: its layers close, and the refusal line of
+    /// a block goes with the page.
+    pub(crate) fn leave_privacy(&mut self) {
+        self.close_privacy_layers();
+        if let Some(session) = self.session_mut() {
+            session.settings.leave_blocked_list();
+        }
+    }
+
     /// Live: all privacy rules, the read-date setting, the first blocked
     /// page, new-chat and archive settings, unguarded (always fresh). Demo:
     /// the `ReadyPrivacy` fixture seeds state directly.

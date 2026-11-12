@@ -9,6 +9,19 @@
 //! request.
 use crate::ids::RequestId;
 
+impl crate::state::Session {
+    /// `request` came back (answer or error) or was lost: every stage that
+    /// holds it as out lets it go.
+    pub(crate) fn settle_held(&mut self, request: RequestId) {
+        self.settings.quick_replies.sent.settle(request);
+        self.stories.page_asks.settle(request);
+        self.calls.creates.settle(request);
+        self.stickers.edits.settle(request);
+        self.bots.web_apps.answers_due.settle(request);
+        self.communities.sent.settle(request);
+    }
+}
+
 /// The requests one stage has out, each with what it is for.
 ///
 /// Every field of this type must be listed in [`Session::settle_held`]: a

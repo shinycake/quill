@@ -565,13 +565,7 @@ impl QuillApp {
             .session()
             .and_then(|s| s.chat_list.folder_shares.get(&folder_id));
         let links = share.and_then(|share| share.links.data().cloned());
-        let links_error = share.and_then(|share| {
-            share
-                .links
-                .error()
-                .or(share.links_note.line())
-                .map(str::to_owned)
-        });
+        let links_error = share.and_then(|share| share.links.error().map(str::to_owned));
         let chats_error = share.and_then(|share| share.chats.error().map(str::to_owned));
         let mut body = div().flex().flex_col().gap_3();
         if let Some(error) = state.view.op().error().map(str::to_owned) {

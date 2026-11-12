@@ -126,3 +126,90 @@ fn a_switch_closes_the_earn_layer(cx: &mut TestAppContext) {
         assert!(!app.earn_layer_open());
     });
 }
+
+/// A refused change's line belongs to the screen it was shown on: leaving
+/// the page (or closing the box) ends it, so a reopen hours later shows a
+/// clean screen instead of a stale refusal.
+#[gpui_kit::test]
+fn a_refused_changes_line_ends_with_its_screen(cx: &mut TestAppContext) {
+    use quill::settings_catalog::Page;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    frames(vcx);
+    let refuse = |app: &mut QuillApp| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.settings.block_note.refused(None, "block refused");
+            session
+                .settings
+                .sessions_note
+                .refused(None, "terminate refused");
+            session
+                .settings
+                .websites_note
+                .refused(None, "disconnect refused");
+            session.stickers.masks.set_dialog_open(true);
+            session
+                .stickers
+                .masks
+                .change_note
+                .refused(None, "masks refused");
+        }
+    };
+    let notes = |app: &QuillApp| {
+        let session = app.demo_session.as_ref().expect("the demo session");
+        [
+            session.settings.block_note.line().is_some(),
+            session.settings.sessions_note.line().is_some(),
+            session.settings.websites_note.line().is_some(),
+            session.stickers.masks.change_note.line().is_some(),
+        ]
+    };
+    app.update_in(vcx, |app, _, _| refuse(app));
+    app.read_with(vcx, |app, _| assert_eq!(notes(app), [true; 4]));
+    // The blocked list's page.
+    app.update_in(vcx, |app, _, _| app.leave_settings_page(Page::Privacy));
+    app.read_with(vcx, |app, _| {
+        assert_eq!(notes(app), [false, true, true, true])
+    });
+    // The Devices page.
+    app.update_in(vcx, |app, _, _| app.leave_settings_page(Page::Devices));
+    app.read_with(vcx, |app, _| {
+        assert_eq!(notes(app), [false, false, true, true])
+    });
+    // The connected websites box.
+    app.update_in(vcx, |app, _, cx| app.close_websites(cx));
+    app.read_with(vcx, |app, _| {
+        assert_eq!(notes(app), [false, false, false, true])
+    });
+    // The mask manager.
+    app.update_in(vcx, |app, _, cx| app.close_mask_sets(cx));
+    app.read_with(vcx, |app, _| assert_eq!(notes(app), [false; 4]));
+    // Each screen reopens without its old line.
+    app.update_in(vcx, |app, _, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.stickers.masks.set_dialog_open(true);
+        }
+    });
+    app.read_with(vcx, |app, _| assert_eq!(notes(app), [false; 4]));
+}
+
+/// The account's farewell closes the connected websites box too.
+#[gpui_kit::test]
+fn the_farewell_ends_the_websites_refusal(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    frames(vcx);
+    app.update_in(vcx, |app, _, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session
+                .settings
+                .websites_note
+                .refused(None, "disconnect refused");
+        }
+    });
+    app.update_in(vcx, |app, window, cx| app.farewell_screen(window, cx));
+    app.read_with(vcx, |app, _| {
+        let session = app.demo_session.as_ref().expect("the demo session");
+        assert!(session.settings.websites_note.line().is_none());
+    });
+}

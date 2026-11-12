@@ -10237,20 +10237,20 @@ orders), `deep_link_routes_tests` (seek stays with its account).
 | g-032 | `spell_download::Progress::start()` returns the progress and a `Worker`; the stage is `Running { ended: Receiver }`, `Cancelling { ended }`, `Done`, `Cancelled`, settled when the worker's end drops (return, panic, or a job that never ran). The atomic byte and `finish()` are gone; the emoji set download uses the same pair. |
 | g-047 | `BotStopStage::Streaming { can_stop }`: TDLib's own pending state, not a request of ours. |
 | g-027, g-028 | `CallRating::Rated` and `CallUpload::Uploaded` are the finished states. |
-| g-049 | `CallTransport::Attempt(CallLink)`: the engine's own report, ended by its next state report. |
+| g-049 | `CallTransport::Attempt(CallLink)`: the engine's own report, ended by its next state report. `Reconnecting { link, deadline }` (fix 3, below) carries the time the retry runs out. |
 | 07-007 | `settle_lost_request` removes the `InstantViewAsk` of a lost `getWebPageInstantView` and queues the browser fallback, as an error answer does (test `a_swept_instant_view_request_falls_back_to_the_browser`). |
 | g-035, g-039, g-040 | `OutboxReceiptView` and `RowStatusIcon`: marks derived on every draw. |
-| g-031, g-050 | `ConferenceStage::Standalone` and `Handover(ConferenceUpgrade)`. |
+| g-031, g-050 | `ConferenceStage::Standalone` and `Handover { upgrade, fetch: HandoverFetch }` (`Unsent` / `Asked(RequestId)`), with `HandoverFailed` as its end (fix 3, below). |
 | g-017 | The countries fetch records its request (`begin_with`) and the answer is taken through `answered`. |
-| 08-003 | `BotText` names the request of each stage (`Loading`, `Loaded`, `Saved`, `Failed`); `BotEditTexts::asked` and the `saved` counter are derived from them (`asked()`, `has_saved()`). |
+| 08-003 | `BotText` names the request of each stage (`Loading`, `Loaded`, `Failed`); `BotEditTexts::asked` is derived from them. A save's end is `BotEditTexts::confirmed: Vec<RequestId>`, one entry pushed per answer; `BotSave::Saved` and the derived `has_saved()` are gone (fix 3, below). |
 | 08-001, g-045, g-048, g-051, g-001, g-002 | `BotUsernameCheck::Checking { request, username }` and `CreateStage::Creating { request, submission }`; `CheckBotUsername` / `CreateBot` purposes carry nothing, and the three generation counters are gone. A reset replaces the state, so an older answer finds no request (test `each_create_waits_for_its_own_request_and_a_reset_never_adopts_an_older_one`). |
 | g-003 | Widget queries are answered by `WidgetAnswer::Query { request }`; the UI maps the request to the runtime's token (`Live::queries`). The process-wide token counter is gone. |
 | g-018 | `chat_lists_for_add` records its request and takes the answer through `answered`. |
 | 08-004 | `ChatListState::archive_settings_open` is gone: the box is `SettingsBox::ArchiveSettings` in the account's `SettingsUi`, which the farewell closes. |
 | 08-005 | A handled add-chat request is marked only while a page is out and the mark goes with that page's answer, so a chat that asks again is listed (test `a_chat_that_asks_again_after_being_handled_is_listed`). |
-| g-042 | `TypeSave` stages name their request; `NewChatState::type_saves` is a private list with `watch_type_save`, `type_save_done`, `type_save_failed`. |
+| g-042 | `TypeSave::Sent(RequestId)` names its request; `NewChatState` watches and forgets Saves through `watch_type_save` / `forget_type_save` and records an answer with `type_save_done`. `session_apply_error.rs` is unchanged from the base, so the hotspot check passes without a trailer. |
 | g-011 | `PrivateSharingState::answering` records each Accept / Reject under its request; the answer, error or loss frees the buttons. |
-| 08-018 | `GroupsState::member_actions` (`MemberActions { since, error, add_failed }`) replaces `add_members_failed` and `member_action_error`; the dialog opening sets `since`, and a failure of an earlier request lands nowhere (test `a_late_member_action_error_never_lands_on_a_newer_dialog`). |
+| 08-018 | `GroupsState::member_actions` (`MemberActions { since, sent, error, add_failed }`; `sent` is written by `send_member_action` once the send succeeded) replaces `add_members_failed` and `member_action_error`; the dialog opening sets `since`, and a failure of an earlier request lands nowhere (test `a_late_member_action_error_never_lands_on_a_newer_dialog`). |
 | g-014, g-016, g-019, g-015, g-021, g-020 | Pushed truth (`welcome pack`, `unpin all`, `donors`, `ton wallet state`) is `Fetch::pushed`; answers (`earn` self stats, quick reply shortcuts) are taken by `answered` with the request their sender records. |
 | g-036, g-033 | `Phase::Wanted` (an intent, not a request) and `DownloadStatusView` (derived). |
 | 08-006 | `DiskSearch::Failed { until, wait }` backs off (doubling) instead of going back to `NotAsked` (test `a_refused_saved_pause_search_backs_off`). |
@@ -10275,4 +10275,22 @@ orders), `deep_link_routes_tests` (seek stays with its account).
 
 Guards: nothing added; `Fetch::pushed` is the named path for pushed values, so `succeed` stays counted by `check-request-match.py`.
 
-Hotspot note (r4-05): `src/state/session_apply_error.rs` changes by three lines: the new-chat type Save's refusal now goes through `NewChatState::type_save_failed` (the list of saves is private), so the reason is still worded where the error is applied.
+Hotspots (r4-05): no file on `scripts/hotspots.txt` carries an edit beyond its rule, and no commit carries a `Hotspot-change:` trailer (the squash check passes with no label and no trailer). `Session::settle_held` lives in `src/state/held.rs`, with one call at the top of `apply_payload_in_asking_view` for every answer, error and loss that has a pending request; `session_apply.rs` and `session_apply_error.rs` equal their base.
+
+### Fix rounds 2, 3 and 4 (r4-05)
+
+| Round | What changed |
+| --- | --- |
+| 2 | `Holds<K>` (`src/state/held.rs`): each stage that sent a request holds it by `RequestId` (`quick_replies.sent`, `stories.page_asks`, `calls.creates`, `stickers.edits`, `bots.web_apps.answers_due`, `communities.sent`). `Session::settle_held` lets a request go on its answer, error or loss; nothing scans the request table by purpose any more. Test `held_requests_all_settle_when_lost` begins one in each owner. |
+| 2 | `check-request-match.py`: the `scan` rule. A scan of the session's requests (`requests()`, `.into_iter(`) by purpose is rejected; the self-test has a line for each. |
+| 2 | `ChatSummary` `main` / `archive` positions replace the order-in-a-vec readers of the chat list. |
+| 2 | `AccountWrite` is the one write record of the account's settings (delete, TTL): `account_delete` is gone, `Refused` holds the line, and a TTL write no longer touches `account_ttl`. |
+| 2 | `ChangeNote` (`src/state/fetch.rs`): a refused change (block, terminate, disconnect, mask reorder) has its own line beside the list, named by the change's request; the list's fetch is never turned into `Failed` by it. `fail_unless_loading` is deleted. |
+| 3 | `BotEditTexts::confirmed` and `Handover { upgrade, fetch }` / `HandoverFailed` replace `has_saved` and the bare handover stage (see the rows above); `group_call_fetch_ended` acts only for the request it asked. |
+| 3 | A pinned message unpinned while the pinned list is loading is retained out of the held data and the list is outdated; an unpin refetches when it outdated the chat's fetch. |
+| 3 | Member actions: `send_member_action` records `sent` after the send returns `Ok`, at all 11 send sites; the purpose match left `Session::request`. |
+| 3 | The call transport moved to `src/state/call_transport.rs` (file size). |
+| 4 | Reconnect: the deadline of a silent retry comes from the driver's `now` (`pump_call_engine_reports(now)`, `apply_transport_report(state, now)`, `CallTransport::reported(state, link, now)`), and `next_deadline` includes `CallTransport::reconnect_deadline()` so the poll loop wakes for it. Tests `a_silent_retry_runs_out_at_its_deadline_and_spends_the_budget` (a fixed `t0`, no later wall-clock read) and `the_poll_loop_wakes_for_a_silent_retrys_deadline`. |
+| 4 | `FolderShare::links_note` is deleted: a refused folder-link delete reaches the box as `LinkOp::Failed` through its answer, so the note recorded the same refusal twice. The refusal arm only outdates the list. |
+| 4 | The notes of a refused change end with their screen: the blocked list's note with the Privacy page (`leave_privacy`), the sessions note with the Devices page (`leave_devices`), the websites note with the box (`close_websites`, also at the farewell), and the masks note with the manager (`set_dialog_open(false)`). The notes stay in the domain state that holds the screen's data (`SettingsState`, `MasksPanel`), where the reducer writes them. Test `a_refused_changes_line_ends_with_its_screen` reopens each. |
+| 4 | Hotspots: `settle_held` moved to `held.rs` and `NewChatState` keeps the base's `type_saves` map, so both hotspot files equal their base and the `Hotspot-change:` trailer is gone. |

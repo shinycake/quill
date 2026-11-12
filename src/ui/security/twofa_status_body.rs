@@ -451,6 +451,9 @@ impl QuillApp {
     /// confirmation.
     pub(in crate::ui) fn close_websites(&mut self, cx: &mut Context<Self>) {
         self.privacy.websites.close();
+        if let Some(session) = self.session_mut() {
+            session.settings.leave_websites();
+        }
         cx.notify();
     }
 

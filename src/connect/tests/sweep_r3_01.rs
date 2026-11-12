@@ -23,8 +23,6 @@ fn a_late_links_answer_does_not_replace_a_list_a_failed_delete_dropped() {
     // The refusal is the delete's own line; the list is not failed, and is
     // due to be asked again.
     let share = &t.driver.session.chat_list.folder_shares[&3];
-    assert!(share.links_note.line().is_some());
-    assert!(share.links_note.request().is_some());
     assert!(share.links.error().is_none() && share.links.is_outdated());
     // The older list answer finds a list that no longer waits for it.
     t.answer_nth(
@@ -34,7 +32,6 @@ fn a_late_links_answer_does_not_replace_a_list_a_failed_delete_dropped() {
     );
     let share = &t.driver.session.chat_list.folder_shares[&3];
     assert!(share.links.is_outdated(), "the old answer landed nowhere");
-    assert!(share.links_note.line().is_some());
     t.driver.refetch_outdated_folder_links(3);
     assert_eq!(t.sender.count("getChatFolderInviteLinks"), 2, "asked again");
 }

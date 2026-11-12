@@ -580,6 +580,9 @@ impl QuillApp {
     pub(crate) fn leave_devices(&mut self) {
         self.leave_device_link();
         self.privacy.devices.close_all();
+        if let Some(session) = self.session_mut() {
+            session.settings.leave_sessions();
+        }
     }
 
     /// Something over the Devices list that Esc peels first.

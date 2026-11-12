@@ -634,6 +634,21 @@ fn dedup_ids(mut list: Vec<i64>, more: Vec<i64>) -> Vec<i64> {
 }
 
 impl SettingsState {
+    /// The Privacy page was left: a refusal of a block shown there goes.
+    pub fn leave_blocked_list(&mut self) {
+        self.block_note.clear();
+    }
+
+    /// The Devices page was left: a refusal of a sessions change goes.
+    pub fn leave_sessions(&mut self) {
+        self.sessions_note.clear();
+    }
+
+    /// The connected websites box was closed: its refusal goes.
+    pub fn leave_websites(&mut self) {
+        self.websites_note.clear();
+    }
+
     /// A terminate or a device link is out (`sessions_op`): the sessions
     /// buttons stay disabled.
     pub fn sessions_busy(&self) -> bool {

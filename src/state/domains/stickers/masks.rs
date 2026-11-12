@@ -113,7 +113,12 @@ impl MasksPanel {
         self.wanted.strip_wanted()
     }
 
+    /// The manage dialog opens or closes; closing it drops the line of a
+    /// refused change, so a reopen shows none.
     pub fn set_dialog_open(&mut self, open: bool) {
+        if !open {
+            self.change_note.clear();
+        }
         self.wanted = MasksWanted::with(open, self.strip_wanted());
     }
 

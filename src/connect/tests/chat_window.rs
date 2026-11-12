@@ -524,7 +524,7 @@ fn an_unpin_during_the_pinned_fetch_asks_again_and_the_message_stays_gone() {
             .and_then(|fetch| fetch.data())
             .map(|rows| rows.iter().map(|row| row.id.0).collect::<Vec<_>>())
     };
-    assert_ne!(held(&h), Some(vec![61, 60]), "the old answer is dropped");
+    assert_eq!(held(&h), None, "the old answer is dropped");
     h.ingest(&answer(&new, &[61]));
     assert_eq!(held(&h), Some(vec![61]), "the unpinned message is gone");
 }

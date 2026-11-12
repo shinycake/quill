@@ -127,16 +127,24 @@ impl CallTransport {
         matches!(self, Self::Reconnecting { deadline, .. } if *deadline <= now)
     }
 
+    /// When the running retry is overdue, if one runs.
+    pub fn reconnect_deadline(&self) -> Option<Instant> {
+        match self {
+            Self::Reconnecting { deadline, .. } => Some(*deadline),
+            _ => None,
+        }
+    }
+
     /// A live phase the engine reported, carrying `link`. `Failed` is not
     /// one: a reported failure goes through the reconnect decision.
-    pub fn reported(state: TransportState, link: CallLink) -> Option<Self> {
+    pub fn reported(state: TransportState, link: CallLink, now: Instant) -> Option<Self> {
         match state {
             TransportState::Connecting => Some(Self::Attempt(link)),
             TransportState::Connected => Some(Self::Connected(CallLink {
                 reconnect_attempts: 0,
                 ..link
             })),
-            TransportState::Reconnecting => Some(Self::reconnecting(link, Instant::now())),
+            TransportState::Reconnecting => Some(Self::reconnecting(link, now)),
             TransportState::Closed => Some(Self::Closed(link)),
             TransportState::Failed => None,
         }

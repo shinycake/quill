@@ -172,7 +172,7 @@ impl QuillApp {
             Page::Account => self
                 .settings
                 .set_box(crate::ui::settings_state::SettingsBox::LogOut, false),
-            Page::Privacy => self.close_privacy_layers(),
+            Page::Privacy => self.leave_privacy(),
             Page::Notifications => self.leave_notification_settings(),
             Page::Language => self.leave_language_settings(),
             Page::Devices => self.leave_devices(),

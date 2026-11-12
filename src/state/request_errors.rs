@@ -174,7 +174,6 @@ impl Session {
         // the link stays busy and no further export request goes out.
         self.settings.fail_lost_export(pending.purpose, extra);
         self.acks.settle_lost(extra);
-        self.settle_held(extra);
         self.settle_lost_instant_view(&pending);
         self.apply_payload_in_asking_view(
             EnvelopePayload::Error(error),
