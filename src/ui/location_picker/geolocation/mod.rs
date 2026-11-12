@@ -3,14 +3,53 @@
 //! address of a point where the platform has a keyless geocoder, and the
 //! system country the map starts in without a fix.
 //!
-//! Each lookup answers once on a channel; the picker polls it from a UI
-//! task, so nothing here blocks the UI thread.
+//! Each lookup answers once on a channel; the picker awaits it from a UI
+//! task, which the answer wakes, so nothing here blocks the UI thread.
 #![deny(clippy::indexing_slicing)]
 
 use quill::location_picker::{GeoOutcome, GeoPoint};
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
-use std::sync::mpsc::Receiver;
+
+/// The receiving end of a lookup: it resolves once with the answer, or
+/// with `Canceled` when every [`Answer`] went away without one.
+pub(in crate::ui) type Receiver<T> = futures_channel::oneshot::Receiver<T>;
+
+/// The sending end of a lookup. Cloneable (a platform keeps a spare for a
+/// failed thread spawn); the first `send` answers, later ones are refused.
+pub(in crate::ui) struct Answer<T>(
+    std::sync::Arc<Mutex<Option<futures_channel::oneshot::Sender<T>>>>,
+);
+
+impl<T> Clone for Answer<T> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl<T> Answer<T> {
+    /// Answer the lookup; hands `value` back when it was answered already or
+    /// the receiver is gone.
+    pub(in crate::ui) fn send(&self, value: T) -> Result<(), T> {
+        let Ok(mut slot) = self.0.lock() else {
+            return Err(value);
+        };
+        match slot.take() {
+            Some(sender) => sender.send(value),
+            None => Err(value),
+        }
+    }
+}
+
+/// A lookup's two ends.
+pub(in crate::ui) fn channel<T>() -> (Answer<T>, Receiver<T>) {
+    let (sender, receiver) = futures_channel::oneshot::channel();
+    (
+        Answer(std::sync::Arc::new(Mutex::new(Some(sender)))),
+        receiver,
+    )
+}
 
 #[cfg(target_os = "linux")]
 mod linux;

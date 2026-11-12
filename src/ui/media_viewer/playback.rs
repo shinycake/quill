@@ -517,50 +517,50 @@ impl QuillApp {
         if self.viewer.clip.has_tick() {
             return;
         }
+        self.arm_viewer_session_tick(cx);
+    }
+
+    /// One tick after 250 ms; a tick that finds the clip still playing arms
+    /// the next. The clip stage holds the one task, so each tick replaces the
+    /// task that ran it and leaving the stage ends the chain.
+    fn arm_viewer_session_tick(&mut self, cx: &mut Context<Self>) {
         let tick = self.spawn_scoped(cx, async move |this, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(250))
-                    .await;
-                let cont = this
-                    .update(cx, |this, cx| {
-                        if this.viewer.clip.player().is_none() {
-                            if this.active_playback_id().is_none() {
-                                quill::media_session::publish(None);
-                            }
-                            return false;
-                        }
-                        this.drive_viewer_media_session(cx);
-                        let failed = this
-                            .viewer
-                            .clip
-                            .player()
-                            .and_then(|player| player.take_error());
-                        let line = failed.and_then(|error| {
-                            let item = this.viewer.state.current()?;
-                            Some(video::viewer_error_message(item, &error))
-                        });
-                        if let Some(line) = line {
-                            this.viewer.clip.player_failed(line);
-                            cx.notify();
-                        }
-                        this.viewer.clip.player().is_some()
-                    })
-                    .unwrap_or_else(|_| {
-                        // The clip's window closed: the OS widget must not
-                        // keep showing it, unless something else plays.
-                        let _ = this.main().update(cx, |this, _| {
-                            if this.viewer.clip.player().is_none()
-                                && this.active_playback_id().is_none()
-                            {
-                                quill::media_session::publish(None);
-                            }
-                        });
-                        false
-                    });
-                if !cont {
-                    break;
+            cx.background_executor()
+                .timer(Duration::from_millis(250))
+                .await;
+            let updated = this.update(cx, |this, cx| {
+                if this.viewer.clip.player().is_none() {
+                    if this.active_playback_id().is_none() {
+                        quill::media_session::publish(None);
+                    }
+                    return;
                 }
+                this.drive_viewer_media_session(cx);
+                let failed = this
+                    .viewer
+                    .clip
+                    .player()
+                    .and_then(|player| player.take_error());
+                let line = failed.and_then(|error| {
+                    let item = this.viewer.state.current()?;
+                    Some(video::viewer_error_message(item, &error))
+                });
+                if let Some(line) = line {
+                    this.viewer.clip.player_failed(line);
+                    cx.notify();
+                }
+                if this.viewer.clip.player().is_some() {
+                    this.arm_viewer_session_tick(cx);
+                }
+            });
+            if updated.is_err() {
+                // The clip's window closed: the OS widget must not
+                // keep showing it, unless something else plays.
+                let _ = this.main().update(cx, |this, _| {
+                    if this.viewer.clip.player().is_none() && this.active_playback_id().is_none() {
+                        quill::media_session::publish(None);
+                    }
+                });
             }
         });
         self.viewer.clip.set_tick(tick);

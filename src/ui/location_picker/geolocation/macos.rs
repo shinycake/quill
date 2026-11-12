@@ -8,6 +8,7 @@
 //! asking; Quill.app has the key (`scripts/macos-package-smoke.sh`).
 
 use super::join_address;
+use super::{Answer, Receiver, channel};
 use block2::RcBlock;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
@@ -25,10 +26,9 @@ use quill::location_picker::{GeoOutcome, GeoPoint};
 use std::cell::RefCell;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, Sender, channel};
 
 struct Ivars {
-    answer: RefCell<Option<Sender<GeoOutcome>>>,
+    answer: RefCell<Option<Answer<GeoOutcome>>>,
     /// Set while the system's "Allow location" prompt is open.
     prompt_open: Arc<AtomicBool>,
 }
@@ -111,7 +111,7 @@ define_class!(
 impl Delegate {
     fn new(
         mtm: MainThreadMarker,
-        answer: Sender<GeoOutcome>,
+        answer: Answer<GeoOutcome>,
         prompt_open: Arc<AtomicBool>,
     ) -> Retained<Self> {
         let this = Self::alloc(mtm).set_ivars(Ivars {

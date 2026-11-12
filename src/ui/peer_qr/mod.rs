@@ -236,7 +236,19 @@ pub(super) struct OpenQr {
     pub(super) gifts_scroll: gpui_kit::base::VirtualListScrollHandle,
     /// The countdown clock, ticking while a countdown shows. Dropped with
     /// the box, or by the clock itself when nothing counts down.
-    clock: Option<Task<()>>,
+    clock: QrClock,
+}
+
+/// The countdown clock of an open box: stopped, or the task that ticks it.
+pub(super) enum QrClock {
+    Stopped,
+    Running { _task: Task<()> },
+}
+
+impl QrClock {
+    pub(super) fn is_running(&self) -> bool {
+        matches!(self, Self::Running { .. })
+    }
 }
 
 /// The card image behind Copy and Share. The render's task is kept here,
@@ -337,7 +349,7 @@ impl QuillApp {
             share: QrShare::Idle,
             export: Export::Idle,
             gifts_scroll: gpui_kit::base::VirtualListScrollHandle::new(),
-            clock: None,
+            clock: QrClock::Stopped,
         }));
         self.open_box(crate::ui::shell::DialogKind::PeerQr);
         if own && let Some(data) = self.qr_data_mut() {
@@ -598,26 +610,35 @@ impl QuillApp {
         if self.lock_waits() || !self.qr_counts_down() {
             return;
         }
-        let Some(open) = self.peer_qr.open.as_mut() else {
+        let Some(open) = self.peer_qr.open.as_ref() else {
             return;
         };
-        if open.clock.is_some() {
+        if open.clock.is_running() {
             return;
         }
         let id = open.state.id;
+        self.arm_qr_clock(id, cx);
+    }
+
+    /// One tick of box `id`'s clock after [`CLOCK`]; a tick that finds a
+    /// countdown still showing arms the next. The box holds the one task, so
+    /// each tick replaces the task that ran it.
+    fn arm_qr_clock(&mut self, id: u64, cx: &mut Context<Self>) {
         let clock = self.spawn_screen(cx, async move |this, cx| {
-            loop {
-                cx.background_executor().timer(CLOCK).await;
-                let Ok(going) = this.update(cx, |this, cx| this.qr_clock(id, cx)) else {
-                    return;
-                };
-                if !going {
-                    return;
+            cx.background_executor().timer(CLOCK).await;
+            let _ = this.update(cx, |this, cx| {
+                if this.qr_clock(id, cx) {
+                    this.arm_qr_clock(id, cx);
                 }
-            }
+            });
         });
-        if let Some(open) = self.peer_qr.open.as_mut() {
-            open.clock = Some(clock);
+        if let Some(open) = self
+            .peer_qr
+            .open
+            .as_mut()
+            .filter(|open| open.state.id == id)
+        {
+            open.clock = QrClock::Running { _task: clock };
         }
     }
 
@@ -631,7 +652,7 @@ impl QuillApp {
         // for it; the first poll after the unlock starts the clock again.
         if self.lock_waits() {
             if let Some(open) = self.peer_qr.open.as_mut() {
-                open.clock = None;
+                open.clock = QrClock::Stopped;
             }
             return false;
         }
@@ -640,7 +661,7 @@ impl QuillApp {
         cx.notify();
         let going = self.qr_counts_down();
         if !going && let Some(open) = self.peer_qr.open.as_mut() {
-            open.clock = None;
+            open.clock = QrClock::Stopped;
         }
         going
     }

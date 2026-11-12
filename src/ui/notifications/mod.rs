@@ -617,6 +617,7 @@ mod linux_dbus;
 pub(in crate::ui) use linux_dbus::linux_service_capabilities;
 mod native_extras;
 mod photo_preview;
+pub(in crate::ui) use photo_preview::PreviewWait;
 mod poll_drains;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]

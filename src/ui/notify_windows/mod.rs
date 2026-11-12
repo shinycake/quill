@@ -778,19 +778,22 @@ impl QuillApp {
         if matches!(self.delivery.windows.clock, Clock::Running { .. }) {
             return;
         }
+        self.arm_notify_clock(Duration::ZERO, cx);
+    }
+
+    /// Run one clock step after `delay`; the step arms the next one. The
+    /// stage holds the one task, so each step replaces the task that ran it
+    /// and a step that finds nothing left to do stops the clock.
+    fn arm_notify_clock(&mut self, delay: Duration, cx: &mut Context<Self>) {
         // screen-scope: the notification windows are the app's; the tick
         // shows whichever account's notices are queued.
         let task = cx.spawn(async move |this, cx| {
-            loop {
-                let next = this
-                    .update(cx, |app, cx| app.notify_windows_tick(cx))
-                    .ok()
-                    .flatten();
-                let Some(delay) = next else {
-                    break;
-                };
-                cx.background_executor().timer(delay).await;
-            }
+            cx.background_executor().timer(delay).await;
+            let _ = this.update(cx, |app, cx| {
+                if let Some(next) = app.notify_windows_tick(cx) {
+                    app.arm_notify_clock(next, cx);
+                }
+            });
         });
         self.delivery.windows.clock = Clock::Running { _task: task };
     }

@@ -405,22 +405,25 @@ impl QuillApp {
         if self.recording.tick.is_some() {
             return;
         }
+        self.arm_voice_tick(cx);
+    }
+
+    /// One tick after 100 ms; a tick that finds the recording still going
+    /// arms the next, so the stage holds the one task and each tick replaces
+    /// the task that ran it.
+    fn arm_voice_tick(&mut self, cx: &mut Context<Self>) {
         // The tick is the app's; each step runs as the recording's window.
         // window-scope: `recording_tick_in_window` enters the recording's window itself.
         let task = self.spawn_screen(cx, async move |this, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(100))
-                    .await;
-                let cont = this
-                    .update(cx, |this, cx| this.recording_tick_in_window(cx))
-                    .unwrap_or(false);
-                if !cont {
-                    break;
+            cx.background_executor()
+                .timer(Duration::from_millis(100))
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.recording_tick_in_window(cx) {
+                    this.arm_voice_tick(cx);
+                } else {
+                    this.recording.tick = None;
                 }
-            }
-            let _ = this.update(cx, |this, _| {
-                this.recording.tick = None;
             });
         });
         self.recording.tick = Some(task);

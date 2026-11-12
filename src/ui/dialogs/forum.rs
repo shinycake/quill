@@ -18,6 +18,10 @@ pub(crate) struct TopicEditor {
     /// The last Create/Save: the editor closes on its answer, stays on
     /// its error.
     pub(crate) submit: quill::state::Submit,
+    /// The `getForumTopicDefaultIcons` this editor sent, if it sent one: the
+    /// picker waits on it only while the session still holds it, so a refused
+    /// or lost request ends the wait.
+    pub(crate) icons_request: Option<quill::ids::RequestId>,
 }
 
 /// Slice G2: forum-topic management dialog (info panel → "Manage

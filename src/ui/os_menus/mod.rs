@@ -409,7 +409,7 @@ fn spawn_menu_sync(window: &mut Window, cx: &mut Context<QuillApp>) {
     .detach();
     // screen-scope: the menu sync follows whichever account is on screen; each pass
     // reads the current state and rebuilds the Dock and Window menus from it.
-    cx.spawn(async move |this, cx| {
+    let task = cx.spawn(async move |this, cx| {
         let mut sync = sync::MenuSync::default();
         loop {
             // Taken before the work: a poke during it runs the loop again.
@@ -464,16 +464,26 @@ fn spawn_menu_sync(window: &mut Window, cx: &mut Context<QuillApp>) {
             // notification toggles and player changes poke `CHROME`. The
             // timeout covers what nothing announces (the account registry
             // on disk).
-            super::wake_wait::sleep_or_wake(
+            // A burst of pokes rebuilds the menus at most once a second.
+            super::wake_wait::sleep_or_wake_paced(
                 cx.background_executor(),
                 &quill::wake::CHROME,
                 seen,
                 Duration::from_secs(10),
+                Duration::from_secs(1),
             )
             .await;
-            // A burst of pokes rebuilds the menus at most once a second.
-            cx.background_executor().timer(Duration::from_secs(1)).await;
         }
-    })
-    .detach();
+    });
+    // The app holds the task: it ends with the app, not detached.
+    cx.set_global(MenuSyncTask { _task: task });
 }
+
+/// The macOS menu sync's task, held by the app for its whole life.
+#[cfg(target_os = "macos")]
+struct MenuSyncTask {
+    _task: Task<()>,
+}
+
+#[cfg(target_os = "macos")]
+impl Global for MenuSyncTask {}

@@ -11,19 +11,20 @@ mod dialog;
 mod geolocation;
 mod map;
 pub(super) mod state;
-mod wait_budget;
 
 use super::app::QuillApp;
 use crate::ui::shell::DialogKind;
 use crate::ui::status_note::StatusNote;
+use geolocation::Receiver;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
 use quill::location_picker::{GeoOutcome, GeoPoint, LocationSharing, MapView, Venue, country};
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, TryRecvError};
+use std::task::Poll;
 use std::time::Duration;
-use wait_budget::WaitBudget;
 
 /// tdesktop's map `move_end` fires this long after the map stops.
 const SETTLE_DELAY: Duration = Duration::from_millis(500);
@@ -31,48 +32,70 @@ const SETTLE_DELAY: Duration = Duration::from_millis(500);
 const RESOLVE_ADDRESS_DELAY: Duration = Duration::from_secs(3);
 /// tdesktop `kSearchDebounceDelay`.
 const SEARCH_DEBOUNCE: Duration = Duration::from_millis(900);
-const POLL: Duration = Duration::from_millis(100);
 const LOCATE_TIMEOUT: Duration = Duration::from_secs(30);
 const GEOCODE_TIMEOUT: Duration = Duration::from_secs(15);
 
-async fn poll_answer<T>(receiver: Receiver<T>, timeout: Duration, cx: &mut AsyncApp) -> Option<T> {
-    poll_answer_unless(&receiver, timeout, None, cx).await
+async fn poll_answer<T>(
+    mut receiver: Receiver<T>,
+    timeout: Duration,
+    cx: &mut AsyncApp,
+) -> Option<T> {
+    match race_answer(&mut receiver, timeout, cx).await {
+        Raced::Answered(answer) => answer,
+        Raced::TimedOut => None,
+    }
+}
+
+/// The wait for a lookup's answer: the answer, or the end of `timeout`.
+enum Raced<T> {
+    Answered(Option<T>),
+    TimedOut,
+}
+
+/// Wait for the answer, which wakes this task when it comes, against one
+/// timer of `timeout`.
+async fn race_answer<T>(
+    receiver: &mut Receiver<T>,
+    timeout: Duration,
+    cx: &mut AsyncApp,
+) -> Raced<T> {
+    let mut timer = cx.background_executor().timer(timeout);
+    std::future::poll_fn(|task| {
+        if let Poll::Ready(answer) = Pin::new(&mut *receiver).poll(task) {
+            return Poll::Ready(Raced::Answered(answer.ok()));
+        }
+        if Pin::new(&mut timer).poll(task).is_ready() {
+            return Poll::Ready(Raced::TimedOut);
+        }
+        Poll::Pending
+    })
+    .await
 }
 
 /// [`poll_answer`] whose time limit does not run while `paused` is set
-/// (the system's permission prompt is open).
+/// (the system's permission prompt is open): a limit that ends while the
+/// prompt is open starts again, so the user's turn is not counted.
 async fn poll_answer_unless<T>(
-    receiver: &Receiver<T>,
+    receiver: &mut Receiver<T>,
     timeout: Duration,
     paused: Option<&AtomicBool>,
     cx: &mut AsyncApp,
 ) -> Option<T> {
-    let mut budget = WaitBudget::default();
     loop {
-        match receiver.try_recv() {
-            Ok(answer) => return Some(answer),
-            Err(TryRecvError::Disconnected) => return None,
-            Err(TryRecvError::Empty) => {
-                let paused = paused.is_some_and(|flag| flag.load(Ordering::SeqCst));
-                cx.background_executor().timer(POLL).await;
-                if budget.spent(POLL, paused, timeout) {
-                    return None;
-                }
-            }
+        match race_answer(receiver, timeout, cx).await {
+            Raced::Answered(answer) => return answer,
+            Raced::TimedOut if paused.is_some_and(|flag| flag.load(Ordering::SeqCst)) => {}
+            Raced::TimedOut => return None,
         }
     }
 }
 
 /// Wait for a "where am I" answer; `Unavailable` when it never comes.
-async fn locate_outcome(locating: geolocation::Locating, cx: &mut AsyncApp) -> GeoOutcome {
-    poll_answer_unless(
-        &locating.answer,
-        LOCATE_TIMEOUT,
-        Some(&locating.permission_prompt),
-        cx,
-    )
-    .await
-    .unwrap_or(GeoOutcome::Unavailable)
+async fn locate_outcome(mut locating: geolocation::Locating, cx: &mut AsyncApp) -> GeoOutcome {
+    let paused = locating.permission_prompt.clone();
+    poll_answer_unless(&mut locating.answer, LOCATE_TIMEOUT, Some(&paused), cx)
+        .await
+        .unwrap_or(GeoOutcome::Unavailable)
 }
 
 impl QuillApp {

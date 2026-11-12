@@ -14,7 +14,7 @@ use zeroize::Zeroize;
 impl QuillApp {
     /// A sign-in submit is out: Enter in a field must not send a second one
     /// (the buttons are disabled by the same answer).
-    fn auth_submit_busy(&self) -> bool {
+    pub(super) fn auth_submit_busy(&self) -> bool {
         self.live
             .as_ref()
             .is_some_and(|live| live.driver.session.requests.has_auth_submit())

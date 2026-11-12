@@ -6,9 +6,9 @@
 //! address here either).
 
 use super::locale_region;
+use super::{Receiver, channel};
 use futures_lite::StreamExt;
 use quill::location_picker::{GeoOutcome, GeoPoint};
-use std::sync::mpsc::{Receiver, channel};
 use std::time::Duration;
 use zbus::zvariant::OwnedObjectPath;
 

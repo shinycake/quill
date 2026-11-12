@@ -4,11 +4,11 @@
 //! services as unavailable. Windows has no keyless geocoder Quill can use
 //! (tdesktop returns no address here either).
 
+use super::{Receiver, channel};
 use quill::location_picker::{GeoOutcome, GeoPoint};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::mpsc::{Receiver, channel};
 use std::task::{Context, Poll, Wake, Waker};
 use windows::Devices::Geolocation::{
     GeolocationAccessStatus, Geolocator, Geoposition, PositionAccuracy, PositionStatus,

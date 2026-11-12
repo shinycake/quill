@@ -20,7 +20,7 @@ use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
-use quill::state::{RequestPurpose, Submit, SubmitView};
+use quill::state::{Submit, SubmitView};
 use quill::telegram::envelope::ForumTopic;
 use quill::telegram::requests::TOPIC_ICON_COLORS;
 
@@ -118,12 +118,13 @@ impl QuillApp {
                 0,
             ),
         };
-        if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.load_forum_topic_icons();
+        let icons_request = self.live.as_mut().and_then(|live| {
+            let sent = live.driver.load_forum_topic_icons().ok().flatten();
             // The list may be cached already: its thumbnails come now
             // (a list still loading downloads them when it lands).
             live.driver.download_forum_topic_icons();
-        }
+            sent
+        });
         if let Some(dialog) = self.admin.forum_manage_dialog.as_mut() {
             dialog.name_input.update(cx, |input, cx| {
                 input.set_value(name, window, cx);
@@ -133,6 +134,7 @@ impl QuillApp {
                 color,
                 icon_emoji: emoji,
                 submit: Submit::default(),
+                icons_request,
             });
         }
         cx.notify();
@@ -543,8 +545,9 @@ impl QuillApp {
         }
         let loading = session.is_some_and(|s| {
             s.threads.forum_topic_icons.is_empty()
-                && s.requests
-                    .has_purpose(RequestPurpose::GetForumTopicDefaultIcons)
+                && editor
+                    .icons_request
+                    .is_some_and(|request| s.requests.get(request).is_some())
         });
         let creating = editor.target.is_none();
         let sending = editor

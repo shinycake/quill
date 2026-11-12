@@ -295,9 +295,9 @@ pub(super) fn hide_main_window(window: &mut gpui_kit::Window, cx: &mut gpui_kit:
     });
     if cx.has_global::<MainWindow>() {
         cx.global_mut::<MainWindow>().state = MainWindowState::LeavingFullScreen { _poll: poll };
-    } else {
-        poll.detach();
     }
+    // Without the global there is no stage to own the poll, and no main
+    // window state to finish: dropping it ends the wait.
 }
 
 fn hide_or_minimize(window: &mut gpui_kit::Window) {

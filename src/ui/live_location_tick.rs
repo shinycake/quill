@@ -38,52 +38,45 @@ impl QuillApp {
         {
             return;
         }
-        if self
+        let Some(refresh_in) = self
             .session()
             .and_then(|session| session.open_chat_live_location_refresh(now))
-            .is_none()
-        {
+        else {
             return;
-        }
+        };
+        self.arm_live_location_wake(chat_id, wait_for(refresh_in), cx);
+    }
+
+    /// Wake once after `wait`: redraw, and arm the next wake while a share
+    /// still runs. The stage holds the one task, so closing the chat or the
+    /// window ends it, and each wake replaces the task that ran it.
+    fn arm_live_location_wake(&mut self, chat_id: ChatId, wait: Duration, cx: &mut Context<Self>) {
         let task = self.spawn_scoped(cx, async move |this, cx| {
-            loop {
-                let wait = this
-                    .update(cx, |this, _| this.live_location_wait(chat_id))
-                    .ok()
-                    .flatten();
-                let Some(wait) = wait else {
-                    break;
-                };
-                cx.background_executor().timer(wait).await;
-                let keep = this
-                    .update(cx, |this, cx| {
-                        if this.live_location_wait(chat_id).is_none() {
-                            return false;
-                        }
+            cx.background_executor().timer(wait).await;
+            let _ = this.update(cx, |this, cx| {
+                match this.live_location_wait(chat_id) {
+                    Some(next) => {
                         // A window behind another app catches up when it
                         // is activated again.
                         if this.frame.window_active.get() {
                             cx.notify();
                         }
-                        true
-                    })
-                    .unwrap_or(false);
-                if !keep {
-                    break;
+                        this.arm_live_location_wake(chat_id, next, cx);
+                    }
+                    None => {
+                        if this
+                            .history
+                            .live_location_tick
+                            .as_ref()
+                            .map(|(chat, _)| *chat)
+                            == Some(chat_id)
+                        {
+                            this.history.live_location_tick = None;
+                        }
+                        // The last share ended: draw its "ended" state.
+                        cx.notify();
+                    }
                 }
-            }
-            let _ = this.update(cx, |this, cx| {
-                if this
-                    .history
-                    .live_location_tick
-                    .as_ref()
-                    .map(|(chat, _)| *chat)
-                    == Some(chat_id)
-                {
-                    this.history.live_location_tick = None;
-                }
-                // The last share ended: draw its "ended" state.
-                cx.notify();
             });
         });
         self.history.live_location_tick = Some((chat_id, task));
