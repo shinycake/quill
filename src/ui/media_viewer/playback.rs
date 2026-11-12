@@ -286,7 +286,6 @@ impl QuillApp {
         self.players.speed = next;
         self.viewer.controls.end_speed_drag();
         // A chosen speed ends a Space hold (the rate is set below).
-        self.viewer.controls.boost_timer = None;
         let _ = self.viewer.controls.boost.cancel();
         let mut restarted = false;
         if self.playback.track_duration().is_some() {

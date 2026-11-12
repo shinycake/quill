@@ -34,13 +34,13 @@ mod tests;
 #[cfg(feature = "demo-capture")]
 pub(crate) use fade::cursor_hides;
 pub(crate) use fade::{ControlsFade, hide_cursor};
-pub(crate) use gesture::{Drag, SpaceHold, WaitingCheck, WaitingGate};
+pub(crate) use gesture::{SpaceHold, WaitingCheck, WaitingGate};
 pub(crate) use live::{
     BADGE_GAP, BAR_HEIGHT, CONTROLS_BG, LiveActions, LiveFacts, LiveKeyAction, VolumeHoverHandler,
     VolumePart, bar_disc, live_badge, live_key_action, live_label, live_pill, live_pill_text_size,
     live_pill_width,
 };
-pub(crate) use live_overlay::{LiveOverlayClock, LiveSource};
+pub(crate) use live_overlay::{LiveInput, LiveOverlayClock};
 pub(crate) use overlay::{LiveOverlayParts, PictureOverlay, PictureState, stream_label_box};
 pub(crate) use scrubber::{HoverHandler, VideoScrubber, elapsed_label, remaining_label};
 pub(crate) use speed::{SpeedMenu, speed_trigger};

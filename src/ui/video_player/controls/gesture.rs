@@ -1,44 +1,10 @@
-//! The controller's pointer and key gestures, each one value: which slider
-//! is held, the Space hold with its timer, and the stall delay with its
+//! The controller's key gestures, each one value: the Space hold with its timer, and the stall delay with its
 //! timer. A timer lives inside the stage that needs it, so a stage that
 //! ends takes its timer with it and nothing clears the timer by hand.
 
 use gpui_kit::Task;
 use quill::media_viewer::{BoostPress, BoostRelease, BoostState, waiting_wait};
 use std::time::{Duration, Instant};
-
-/// The slider being dragged: one pointer holds one thumb at a time.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub(crate) enum Drag {
-    #[default]
-    None,
-    /// The seek thumb is held, at this position (seconds).
-    Seek(f64),
-    /// The volume thumb is held.
-    Volume,
-    /// The speed slider is held, at this speed.
-    Speed(f64),
-}
-
-impl Drag {
-    pub(crate) fn seek(self) -> Option<f64> {
-        match self {
-            Self::Seek(position) => Some(position),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn speed(self) -> Option<f64> {
-        match self {
-            Self::Speed(speed) => Some(speed),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn volume(self) -> bool {
-        matches!(self, Self::Volume)
-    }
-}
 
 /// Space held to play at 2×: the press state and the check that fires
 /// [`SPEED_BOOST_HOLD_MS`](quill::media_viewer::SPEED_BOOST_HOLD_MS) after
@@ -171,7 +137,7 @@ impl WaitingGate {
 
 #[cfg(test)]
 mod tests {
-    use super::{Drag, SpaceHold, WaitingCheck, WaitingGate};
+    use super::{SpaceHold, WaitingCheck, WaitingGate};
     use gpui_kit::Task;
     use std::time::{Duration, Instant};
 
@@ -228,13 +194,5 @@ mod tests {
             WaitingCheck::Settled { shown: true }
         );
         assert!(matches!(gate, WaitingGate::Shown));
-    }
-
-    #[test]
-    fn one_slider_is_held_at_a_time() {
-        assert_eq!(Drag::Seek(2.0).seek(), Some(2.0));
-        assert_eq!(Drag::Seek(2.0).speed(), None);
-        assert!(Drag::Volume.volume());
-        assert!(!Drag::None.volume());
     }
 }

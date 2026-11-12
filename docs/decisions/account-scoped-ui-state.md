@@ -8048,29 +8048,30 @@ whose variants carry the data, with a way out of every stage.
 
 Files: `translate_ui/mod.rs`, the video player's transport, backends, pacing,
 controls and Picture-in-Picture, and the mini-app launch, invoice and emoji
-status flows.
+status flows. Rebased onto the r2 follow-up: where both sides fixed an entry
+the integration's shape stays and this branch's second version is gone.
 
 | id | fix |
 | --- | --- |
-| 14-008, 14-017, 14-026 | `Awaited` carries the `RequestId` of the send; `LaunchFlow::take_search_for/attach_bot_for/add_for` take an answer only when its request is the one waited on. `WebApps::found`, `attachment_menu_bot` and `attachment_menu_toggled` are lists of answers that name their request (`WebAnswer`), so two answers in one poll are both kept. |
-| 14-027 | A newer launch replaces the older wait or box on purpose (one launch at a time); the replaced request is forgotten with it, so its answer finds no wait. Tested in `launch_flow`. |
-| 14-018 | `WebApps::emoji_access` is a list of `WebAnswer<bool>`; the grant takes only the answer whose request is its `AccessStage::Granting` request, not the permissions panel's. |
-| 14-015, 14-016 | `PaymentsState::outcomes` records the verdict of each invoice's last payment when its answer is applied (`PaymentVerdict`, cleared by a new payment or checkout). `InvoiceWatch` reads `PayStage` (untouched, sending as a request, settled with a verdict) and no longer diffs 30 ms looks; a refusal between two polls still reports `failed`. `CheckoutView::sending` is off the baseline. |
-| 14-033, 13-065, 14-011, 14-012 | Dialog bodies and the PiP slot are `Cell` hand-overs, the offer cache uses `try_borrow`; five baseline borrows pruned. |
-| 13-060 | `TranslateToast` owns its timer `Task`; replacing or clearing the toast cancels it, `toast_seq` is gone. |
-| 13-061 | `TranslateDialog` holds one `TranslateStage` (`Box`, `Choosing { under }`, `SkipList { note }`); the pages' fields live in the stage that uses them. |
+| 14-008, 14-017, 14-026, 14-027 | Integration's shape: `Awaited` holds the send's `RequestId`; `LaunchFlow::take_*_for` take only their own answer; a newer launch replaces the older wait. |
+| 14-018 | `WebApps::emoji_access` is a list of `(RequestId, bool)`; the grant takes only the answer whose request is its `AccessStage::Granting` request, not the permissions panel's. |
+| 14-015, 14-016 | Integration's `CheckoutForm` owns the checkout; `InvoiceWatch::Attempt` stays on the stage-enum baseline as it was on the integration branch. |
+| 14-033, 13-065, 14-011, 14-012 | The PiP slot is a `Cell` hand-over and the offer cache uses `try_borrow`; the web-app confirm body uses the integration's one-shot content. Baseline borrows pruned. |
+| 13-060 | Integration's `ToastStage` owns the toast timer. |
+| 13-061 | `TranslateDialog` holds one `TranslateStage` (`Box`, `Choosing { under }`, `SkipList { note }`). |
 | 13-062 | `new_translate_dialog` drops the open box's selection job before replacing the dialog. |
-| 14-080, 14-044 | `BackendStatus::health` is one `EngineHealth` (`NotOpen`, `Failed`, `Open(Flow)`); backends read their engine through `EngineHealth::read`, which fixes the precedence in one place. `BackendStatus::failed` is off the baseline. |
-| 14-045 | The user's intent lives in `Stage` (`At/Landing(state, Intent)`), so a move sets state and intent in one assignment; `wants_play` is read from the stage. |
+| 14-080, 14-044 | `BackendStatus::health` is one `EngineHealth` (`NotOpen`, `Failed`, `Open(Flow)`). |
+| 14-045 | The user's intent lives in `Stage` (`At/Landing(state, Intent)`); `wants_play` is read from it. |
 | 14-046 | `LiveStatus::end` is `FeedEnd { Live, Ended, Failed }`. |
-| 14-081, 14-083 | `LiveSource` replaces `LiveInput` (`NoPlayer`, `Player`, `Idle`, `HostFailed`), built by `LiveSource::read`; `LiveOverlayClock::armed` holds the due time and its timer together. `LiveInput::failed` is off the baseline. |
-| 14-053 | `VideoControlsState::drag` is one `Drag` (seek, volume or speed); releasing one slider leaves another held. |
-| 14-054, 14-055 | `SpaceHold` and `WaitingGate` keep their timer inside the stage that needs it and drop it on every move out of it. |
-| 14-028 | The PiP's last-drag answer is read once by the click that ends the press (`take_dragged`), and a key activation ignores it. |
-| 14-074 | Each PiP line is one value (`SeekLine`, `VolumeLine`: following with its synced number, or dragging). |
-| 14-041 | `request_lead` computes "on the grid" from the grid, sharing and cadence it is asked about; the cached flag is gone. |
-| 14-050 | The decoder load is one global stage (`DecoderLoad`: idle, loading with its task, settled); the result stays the loader's own. |
-| 14-071 | `Surfaces::pool` is one `PoolState` (unmade, ready for a size, failed for a size since a time) (macOS only; not built on Linux). |
+| 14-081 | Integration's `LiveInput`. |
+| 14-083 | `LiveOverlayClock::armed` holds the due time and its timer together. |
+| 14-053 | Integration's `SliderDrag`. |
+| 14-054, 14-055 | `SpaceHold` and `WaitingGate` keep their timer inside the stage that needs it. |
+| 14-028 | The PiP's last-drag answer is read once by the click that ends the press. |
+| 14-074 | Each PiP line is one value (`SeekLine`, `VolumeLine`). |
+| 14-041 | `request_lead` computes "on the grid" from what it is asked about. |
+| 14-050 | The decoder load is one global stage (`DecoderLoad`). |
+| 14-071 | `Surfaces::pool` is one `PoolState` (macOS only; not built on Linux). |
 
 `MiniAppWindow::closing_confirmation` is allowed in
 `implicit-state-allow.txt` (the app's own setting), so its duplicate baseline

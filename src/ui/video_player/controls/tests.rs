@@ -76,20 +76,6 @@ fn a_stopped_clip_drops_its_gestures() {
     assert!(!state.boost.is_active());
 }
 
-#[test]
-fn releasing_one_slider_leaves_another_held() {
-    let mut state = VideoControlsState::default();
-    state.hold_volume();
-    state.release_seek();
-    state.release_speed();
-    assert!(
-        state.volume_dragging(),
-        "a late seek release is not the volume's"
-    );
-    state.release_volume();
-    assert!(!state.dragging());
-}
-
 /// WCAG relative luminance of an sRGB channel triple.
 fn luminance(rgb: [f32; 3]) -> f32 {
     let channel = |c: f32| {

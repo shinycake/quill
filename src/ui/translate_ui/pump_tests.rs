@@ -196,7 +196,11 @@ fn a_toast_leaves_with_its_own_timer(cx: &mut TestAppContext) {
     });
     vcx.executor().advance_clock(super::TOAST_DURATION);
     vcx.run_until_parked();
-    app.update(&mut vcx, |app, _| assert!(app.translate.toast.toast().is_none()));
+    app.update(&mut vcx, |app, _| {
+        assert!(app.translate.toast.toast().is_none())
+    });
+}
+
 /// A translation that failed is asked for again when the chat is shown
 /// again, not on every pass and not never.
 #[gpui_kit::test]

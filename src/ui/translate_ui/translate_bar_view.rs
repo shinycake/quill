@@ -153,9 +153,8 @@ impl QuillApp {
             .translate
             .toast
             .toast()
-            .filter(|toast| toast.chat_id == chat_id)?
-            .clone();
-        let action = toast.action;
+            .filter(|toast| toast.chat_id == chat_id)?;
+        let (text, label, action) = (toast.text.clone(), toast.label, toast.action);
         Some(
             div()
                 .id("translate-toast")

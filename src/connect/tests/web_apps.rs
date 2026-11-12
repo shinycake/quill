@@ -309,10 +309,7 @@ fn emoji_status_access_follows_the_switch_and_comes_back_on_failure() {
         extra.as_extra()
     ));
     assert_eq!(emoji_access(&h), Some(false));
-    assert_eq!(
-        h.driver.session.bots.web_apps.emoji_access,
-        [(extra, true)]
-    );
+    assert_eq!(h.driver.session.bots.web_apps.emoji_access, [(extra, true)]);
 }
 
 #[test]
