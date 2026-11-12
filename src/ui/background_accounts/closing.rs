@@ -224,7 +224,9 @@ impl QuillApp {
     pub(in crate::ui) fn open_wait(&self, key: &AccountKey) -> CloseWait {
         if self.background.closing.unconfirmed(key) {
             CloseWait::Never
-        } else if self.background.closing.contains(key) || self.background.deleting.contains(key) {
+        } else if self.background.closing.contains(key)
+            || self.background.deleting.contains_key(key)
+        {
             CloseWait::Wait
         } else {
             CloseWait::Go

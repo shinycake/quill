@@ -17,7 +17,6 @@ use quill::platform::SecretStore;
 use quill::settings::{
     begin_remove_account, delete_account_folder, finish_pending_delete, mark_for_deletion,
 };
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -27,59 +26,6 @@ pub(in crate::ui) type SecretsFactory = Arc<dyn Fn() -> Box<dyn SecretStore> + S
 
 pub(in crate::ui) fn live_secrets() -> SecretsFactory {
     Arc::new(quill::platform::live_secret_store)
-}
-
-/// The accounts whose folders are being deleted: nothing opens them. Each
-/// stands as `Waiting` for its clients to close, then `Running` under the
-/// continuation that finishes the deletion, which the stage holds, so a
-/// deletion cannot outlive its entry or be left unowned.
-#[derive(Default)]
-pub(super) struct Deleting {
-    accounts: HashMap<AccountKey, DeleteStage>,
-}
-
-enum DeleteStage {
-    /// Waiting for the clients that may have the folder open to close.
-    Waiting,
-    /// The worker runs, and `_task` finishes the deletion when it ends
-    /// (shared by the accounts of one deletion).
-    Running { _task: Rc<Task<()>> },
-}
-
-impl Deleting {
-    pub(super) fn contains(&self, key: &AccountKey) -> bool {
-        self.accounts.contains_key(key)
-    }
-
-    pub(super) fn keys(&self) -> impl Iterator<Item = &AccountKey> {
-        self.accounts.keys()
-    }
-
-    pub(super) fn is_empty(&self) -> bool {
-        self.accounts.is_empty()
-    }
-
-    fn wait(&mut self, keys: impl IntoIterator<Item = AccountKey>) {
-        for key in keys {
-            self.accounts.entry(key).or_insert(DeleteStage::Waiting);
-        }
-    }
-
-    fn run(&mut self, keys: &[AccountKey], task: Task<()>) {
-        let task = Rc::new(task);
-        for key in keys {
-            self.accounts.insert(
-                key.clone(),
-                DeleteStage::Running {
-                    _task: task.clone(),
-                },
-            );
-        }
-    }
-
-    fn finish(&mut self, key: &AccountKey) {
-        self.accounts.remove(key);
-    }
 }
 
 /// How a deletion ended.
@@ -220,7 +166,7 @@ impl QuillApp {
             .dialog
             .ask(crate::ui::accounts::AccountRowEdit::None);
         // A second click on Remove while the first is still closing.
-        if self.background.deleting.contains(key)
+        if self.background.deleting.contains_key(key)
             || self
                 .live
                 .as_ref()
@@ -342,6 +288,12 @@ impl QuillApp {
 
     /// Delete `keys`' folders (already recorded in `accounts.json`) once
     /// no client may have them open, on a worker; then `done`.
+    /// The folders of `keys` are held in `BackgroundAccounts::deleting`, by
+    /// account, under the task that owns their deletion from here (it
+    /// waits for the clients to close, deletes on a worker, then
+    /// finishes), so a deletion cannot outlive its entry or be left
+    /// unowned. An entry leaves when its deletion ends; one that could not
+    /// be confirmed stays (nothing opens it in this run).
     pub(in crate::ui) fn delete_after_close(
         &mut self,
         root: PathBuf,
@@ -349,55 +301,68 @@ impl QuillApp {
         done: impl FnOnce(&mut QuillApp, Deletion, &mut Context<QuillApp>) + 'static,
         cx: &mut Context<Self>,
     ) {
-        self.background.deleting.wait(keys.iter().cloned());
         for key in &keys {
             self.forget_account_sends(key);
         }
         super::super::notifications::forget_cached_icons();
+        // The task owns the deletion from here: it waits for the go of
+        // `after_closing` (a waiter dropped without one is a no-go), deletes
+        // on a worker, and finishes.
+        let (go_tx, go_rx) = futures_channel::oneshot::channel::<bool>();
+        let owned = keys.clone();
+        // screen-scope: a deletion belongs to the app's account list, not to the account on screen; the stage holds the task, and the entry leaves with its end.
+        let task = Self::spawn_app(cx, async move |this, cx| {
+            let go = go_rx.await.unwrap_or(false);
+            if !go {
+                // Stays in `deleting`: nothing opens it in this run.
+                let _ = this.update(cx, |this, cx| {
+                    done(this, Deletion::Deferred, cx);
+                    cx.notify();
+                });
+                return;
+            }
+            let Ok(secrets) = this.update(cx, |this, _| this.secrets()) else {
+                return;
+            };
+            let worker_keys = owned.clone();
+            let deletion = cx.background_executor().spawn(async move {
+                let store = secrets();
+                let mut deleted = Vec::new();
+                let mut error = None;
+                for key in worker_keys {
+                    match delete_account_data(&root, &key, store.as_ref()) {
+                        Ok(()) => deleted.push(key),
+                        Err(e) => error = Some(e.to_string()),
+                    }
+                }
+                (root, deleted, error)
+            });
+            let (root, deleted, error) = deletion.await;
+            let _ = this.update(cx, |this, cx| {
+                // A folder that failed stays recorded: the next start tries
+                // again, and nothing opens it before.
+                for key in &deleted {
+                    let _ = finish_pending_delete(&root, key);
+                }
+                for key in &owned {
+                    this.background.deleting.remove(key);
+                }
+                // Work waiting to open these folders may go now.
+                this.settle_close_waiters(cx);
+                done(this, Deletion::Done { error }, cx);
+                cx.notify();
+            });
+        });
+        let task = Rc::new(task);
+        for key in &keys {
+            self.background.deleting.insert(key.clone(), task.clone());
+        }
         let waiting = keys.clone();
         self.after_closing(
             cx,
             move |this| this.deletion_wait(&waiting),
-            move |this, go, cx| {
-                if !go {
-                    // Stays in `deleting`: nothing opens it in this run.
-                    done(this, Deletion::Deferred, cx);
-                    cx.notify();
-                    return;
-                }
-                let secrets = this.secrets();
-                let worker_keys = keys.clone();
-                let deletion = cx.background_executor().spawn(async move {
-                    let store = secrets();
-                    let mut deleted = Vec::new();
-                    let mut error = None;
-                    for key in worker_keys {
-                        match delete_account_data(&root, &key, store.as_ref()) {
-                            Ok(()) => deleted.push(key),
-                            Err(e) => error = Some(e.to_string()),
-                        }
-                    }
-                    (root, deleted, error)
-                });
-                let finish_keys = keys.clone();
-                let task = cx.spawn(async move |this, cx| {
-                    let (root, deleted, error) = deletion.await;
-                    let _ = this.update(cx, |this, cx| {
-                        // A folder that failed stays recorded: the next
-                        // start tries again, and nothing opens it before.
-                        for key in &deleted {
-                            let _ = finish_pending_delete(&root, key);
-                        }
-                        for key in &finish_keys {
-                            this.background.deleting.finish(key);
-                        }
-                        // Work waiting to open these folders may go now.
-                        this.settle_close_waiters(cx);
-                        done(this, Deletion::Done { error }, cx);
-                        cx.notify();
-                    });
-                });
-                this.background.deleting.run(&keys, task);
+            move |_, go, _| {
+                let _ = go_tx.send(go);
             },
         );
     }

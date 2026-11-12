@@ -249,7 +249,7 @@ pub(crate) struct BackgroundAccounts {
     quit_close: Option<Subscription>,
     /// Accounts whose folder is being deleted (`deleting`): nothing opens
     /// them.
-    pub(super) deleting: deleting::Deleting,
+    pub(super) deleting: std::collections::HashMap<AccountKey, std::rc::Rc<Task<()>>>,
     pub(super) local: LocalData,
     /// The keychain the account database keys live in.
     pub(super) secrets: deleting::SecretsFactory,
@@ -463,7 +463,7 @@ impl QuillApp {
                 || (self.background.client(&key).is_some() && !retry)
                 || self.background.prepare.wanted(&key)
                 || self.background.closing.may_be_open(&key)
-                || self.background.deleting.contains(&key)
+                || self.background.deleting.contains_key(&key)
                 || pending.contains(&key)
             {
                 continue;
@@ -546,7 +546,7 @@ impl QuillApp {
         if !wanted
             || self.background.wiping()
             || self.disk.is_full()
-            || self.background.deleting.contains(&key)
+            || self.background.deleting.contains_key(&key)
             || active_account(&root) == key
             || self.background.client(&key).is_some()
             || self.background.closing.may_be_open(&key)

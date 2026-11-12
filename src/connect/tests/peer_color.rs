@@ -69,8 +69,7 @@ fn appearance_files_follow_the_files_not_the_list_length() {
     let recorder = Arc::new(RecordingSender::new());
     let seq = AtomicU64::new(0);
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
-    let mut ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>,
-                      payload: serde_json::Value| {
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, payload: serde_json::Value| {
         driver
             .ingest(copy_and_parse(&payload.to_string(), &seq, &sink).unwrap())
             .unwrap();
