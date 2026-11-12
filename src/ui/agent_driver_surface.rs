@@ -226,6 +226,8 @@ pub(super) const GRANTED_DIALOGS: &[&str] = &[
     "ComposerLink",
     "ComposerDate",
     "ComposerCodeLanguage",
+    // The picked files, their caption and Send: the composer's own tray.
+    "SendBox",
 ];
 
 /// The user-facing name of a layer, for the blocked note.
@@ -379,10 +381,12 @@ mod tests {
         assert!(missing.is_empty(), "no close: {missing:?}");
     }
 
-    /// A close runs when a chat window that owns the box closes. These two
-    /// have no dismissal that sends nothing: Esc on an agent's request
-    /// answers it "no", Esc on the call swap declines the incoming call.
-    const WITHOUT_CLOSE: &[&str] = &["AgentRequest", "CallSwap"];
+    /// A close runs when a chat window that owns the box closes. Two have
+    /// no dismissal that sends nothing: Esc on an agent's request answers it
+    /// "no", Esc on the call swap declines the incoming call. The send box
+    /// is its chat's tray, which outlives the window: closing it would drop
+    /// the files.
+    const WITHOUT_CLOSE: &[&str] = &["AgentRequest", "CallSwap", "SendBox"];
 
     #[test]
     fn every_dialog_spec_has_a_close() {

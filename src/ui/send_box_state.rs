@@ -105,6 +105,11 @@ pub(crate) struct TrayReads {
     /// (`send_box_media_check.rs`), with the job that reads each.
     pub(super) media: Reads<super::send_box_media_check::MediaCheck>,
     pub(super) media_check_jobs: u64,
+    /// The first frame and length of tray videos (`send_card/video_preview.rs`).
+    pub(super) previews: Reads<super::send_card::VideoPreview>,
+    pub(super) preview_jobs: u64,
+    /// Bytes of tray files, read once per file for the file rows.
+    pub(super) file_sizes: RefCell<HashMap<PathBuf, Option<u64>>>,
 }
 
 impl Default for TrayReads {
@@ -117,6 +122,9 @@ impl Default for TrayReads {
             thumbnail_jobs: 0,
             media: Reads::default(),
             media_check_jobs: 0,
+            previews: Reads::default(),
+            preview_jobs: 0,
+            file_sizes: RefCell::new(HashMap::new()),
         }
     }
 }
@@ -127,11 +135,17 @@ impl TrayReads {
     /// holds any more (`QuillApp::forget_tray_checks`).
     pub(super) fn forget<'a>(&mut self, paths: impl Iterator<Item = &'a Path>) {
         let mut sizes = self.photo_sizes.borrow_mut();
+        let bytes = self.file_sizes.get_mut();
         for path in paths {
             sizes.remove(path);
+            bytes.remove(path);
             self.sound.forget(path);
             self.thumbnails.forget(path);
             self.media.forget(path);
+            if let Some(preview) = self.previews.done(path) {
+                super::send_card::discard_preview(preview);
+            }
+            self.previews.forget(path);
         }
     }
 }

@@ -10,16 +10,25 @@ use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, Focusable, TestAppContext, VisualTestContext, px, size};
 use quill::composer::{AttachmentKind, ComposerAttachment};
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 use quill::telegram::envelope::{ChannelMemberStatus, SupergroupFullAdmin};
 use std::path::PathBuf;
 
 fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
+    new_app_sized(cx, 1100.)
+}
+
+/// The demo app in a window `width` points wide, with a chat open.
+pub(in crate::ui) fn new_app_sized(
+    cx: &mut TestAppContext,
+    width: f32,
+) -> (Entity<QuillApp>, VisualTestContext) {
     cx.update(gpui_kit::init);
     cx.update(bind_keys);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
     let slot_in = slot.clone();
     let demo = ScreenshotDemo::named("ready-chats");
-    let handle = cx.open_window(size(px(1100.), px(700.)), move |window, cx| {
+    let handle = cx.open_window(size(px(width), px(700.)), move |window, cx| {
         let view = cx.new(|cx| QuillApp::new_with_demo(window, cx, None, Some(demo)));
         *slot_in.borrow_mut() = Some(view.clone());
         let shell = cx.new(|_| QuillShell::new(view));
@@ -30,7 +39,7 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     (app, vcx)
 }
 
-fn fixture(name: &str) -> PathBuf {
+pub(in crate::ui) fn fixture(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("docs/screenshots/fixtures")
         .join(name)
@@ -38,7 +47,7 @@ fn fixture(name: &str) -> PathBuf {
 
 /// Chat 13 is the demo channel; make it one the account owns that allows
 /// paid media.
-fn own_paid_channel(app: &mut QuillApp, allowed: bool) {
+pub(in crate::ui) fn own_paid_channel(app: &mut QuillApp, allowed: bool) {
     let session = app.demo_session.as_mut().expect("demo session");
     session.open_chat(ChatId(13));
     let supergroup = session.chat_supergroup(ChatId(13)).expect("channel");
@@ -59,7 +68,7 @@ fn own_paid_channel(app: &mut QuillApp, allowed: bool) {
         .assume_member_status(Some(ChannelMemberStatus::Creator));
 }
 
-fn tray(app: &mut QuillApp, files: &[(&str, AttachmentKind)]) {
+pub(in crate::ui) fn tray(app: &mut QuillApp, files: &[(&str, AttachmentKind)]) {
     let files: Vec<_> = files
         .iter()
         .map(|(name, kind)| ComposerAttachment::pick(&fixture(name), *kind).unwrap())
@@ -222,20 +231,20 @@ fn the_same_picture_added_again_still_goes_as_its_jpeg(cx: &mut TestAppContext) 
 fn a_slot_whose_files_are_being_read_says_so_and_other_chats_are_free(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
-    app.update_in(vcx, |app, _, cx| {
+    app.update_in(vcx, |app, _, _| {
         tray(app, &[("demo-thumb.png", AttachmentKind::Photo)]);
         let open = app.open_chat_id().expect("a chat is open");
         assert!(!app.tray_preparing());
-        assert!(app.send_box_option_controls(cx).is_empty());
+        assert_eq!(app.send_card_status(), None);
 
         let slot = app.send_slot().expect("an open slot");
         let job = app.composer_sends.prep.begin(slot);
         assert!(job.is_some());
         assert!(app.tray_preparing());
         assert_eq!(
-            app.send_box_option_controls(cx).len(),
-            1,
-            "the tray says the files are being prepared"
+            app.send_card_status(),
+            Some(tr(keys::Q_OPS_PREPARING_THE_FILES)),
+            "the card says the files are being prepared"
         );
 
         // Another chat's composer is not held by it.
@@ -252,7 +261,7 @@ fn a_slot_whose_files_are_being_read_says_so_and_other_chats_are_free(cx: &mut T
         // The job ends: the label goes with it, nothing else stored.
         app.composer_sends.prep.finish(job.unwrap());
         assert!(!app.tray_preparing());
-        assert!(app.send_box_option_controls(cx).is_empty());
+        assert_eq!(app.send_card_status(), None);
     });
 }
 

@@ -743,15 +743,6 @@ impl QuillApp {
         }
         cx.notify();
     }
-
-    /// Phase B3: label for the picker button (`⏱` cycle affordance).
-    pub(in crate::ui) fn self_destruct_button_label(&self) -> String {
-        match self.pending_send().self_destruct {
-            None => tr(keys::Q_CHAT_OFF).to_string(),
-            Some(SelfDestructSend::Timer(secs)) => format!("{secs}s"),
-            Some(SelfDestructSend::Immediately) => tr(keys::Q_CHAT_VIEW_ONCE).to_string(),
-        }
-    }
 }
 
 /// A send-option chip of the composer's option row.

@@ -131,17 +131,7 @@ pub(super) trait WindowActions: InteractiveElement + Sized {
             }
             true
         });
-        // The kit Textarea's paste is text-only, and GPUI stops an action
-        // at the first handler, so this one captures (runs before the
-        // focused textarea): clipboard images and copied files become
-        // attachments; anything else falls through to the text paste.
-        let el = capture::<_, PasteAction>(el, o, scope, |app, _, window, cx| {
-            if app.paste_image_from_clipboard(window, cx) {
-                return true;
-            }
-            app.offer_rich_paste(window, cx);
-            false
-        });
+        let el = paste_action(el, o, scope);
         let el = on::<_, FocusComposer>(el, o, scope, |app, _, window, cx| {
             app.composer.update(cx, |input, cx| input.focus(window, cx));
             true
@@ -204,6 +194,21 @@ pub(super) trait WindowActions: InteractiveElement + Sized {
             true
         });
         let el = viewer_actions(el, o, scope);
+        composer_actions(el, o, scope)
+    }
+
+    /// What the send box binds around its caption: the message field shows
+    /// there while picked files wait (`send_card`), in the kit's dialog
+    /// layer, which no window root is above. Paste (more files join the
+    /// box), the attach key and the field's own actions.
+    fn caption_actions(self, owner: WeakEntity<QuillApp>, scope: Option<ChatId>) -> Self {
+        let o = &owner;
+        let el = paste_action(self, o, scope);
+        // The box is a dialog, which blocks the window's own attach key.
+        let el = on::<_, AttachFile>(el, o, scope, |app, _, _, cx| {
+            app.pick_attachments(false, cx);
+            true
+        });
         composer_actions(el, o, scope)
     }
 
@@ -273,6 +278,24 @@ pub(super) trait WindowActions: InteractiveElement + Sized {
 }
 
 impl<E: InteractiveElement + Sized> WindowActions for E {}
+
+/// The kit Textarea's paste is text-only, and GPUI stops an action at the
+/// first handler, so this one captures (runs before the focused textarea):
+/// clipboard images and copied files become attachments; anything else
+/// falls through to the text paste.
+fn paste_action<E: InteractiveElement>(
+    el: E,
+    o: &WeakEntity<QuillApp>,
+    scope: Option<ChatId>,
+) -> E {
+    capture::<_, PasteAction>(el, o, scope, |app, _, window, cx| {
+        if app.paste_image_from_clipboard(window, cx) {
+            return true;
+        }
+        app.offer_rich_paste(window, cx);
+        false
+    })
+}
 
 /// Left and Right step the media viewer (the story viewer first, which
 /// only the main window draws); `0` resets the zoom. Only while a viewer

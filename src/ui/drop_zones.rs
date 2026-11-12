@@ -105,7 +105,10 @@ impl QuillApp {
             self.composer_ui.file_drag = FileDrag::Idle;
         }
         match self.composer_ui.file_drag {
-            FileDrag::Probed { state, .. } => state.filter(|_| self.file_drop_enabled()),
+            // The send box covers the chat and takes the drop itself.
+            FileDrag::Probed { state, .. } => {
+                state.filter(|_| self.file_drop_enabled() && !self.send_box_shown())
+            }
             FileDrag::Idle | FileDrag::Probing(_) | FileDrag::Preview(_) => None,
         }
     }

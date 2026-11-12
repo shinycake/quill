@@ -17,18 +17,13 @@ use quill::settings::ThemeChoice;
 use std::sync::atomic::Ordering;
 
 register_demos![
-    // Received photo album plus an own-sent album and a multi-attach composer.
+    // Received photo album plus an own-sent album. Files waiting to be sent
+    // are `ready-send-card`'s: their box would cover the history here.
     DemoSpec::chats(
         "ready-albums",
         "screenshot demo — received album and own-sent album"
     )
-    .setup(QuillApp::demo_ready_albums)
-    .attachments(|| {
-        attachments(&[
-            ("demo-thumb.png", AttachmentKind::Photo),
-            ("demo-clip.mp4", AttachmentKind::Video),
-        ])
-    }),
+    .setup(QuillApp::demo_ready_albums),
     // Restored private-chat composer draft (`draftMessage`).
     DemoSpec::chats(
         "ready-drafts",

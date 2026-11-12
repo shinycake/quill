@@ -153,11 +153,14 @@ impl QuillApp {
                 // composer shows Send instead of the mic.
                 // A rich draft shown in place of the field sends too.
                 let rich_preview = self.rich_draft_preview(cx);
+                // Picked files wait in the send box, which takes the field
+                // as its caption and everything that hangs off it
+                // (`send_card`): the bar under the box rests.
+                let boxed = self.send_box_shown();
                 let sendable = !show_attach
                     || self.forward_bar_here()
                     || rich_preview.is_some()
-                    || !self.pending_attachments().is_empty()
-                    || !self.composer.read(cx).value().trim().is_empty();
+                    || (!boxed && !self.composer.read(cx).value().trim().is_empty());
                 this.child(
                     div()
                         .id("composer-file-drop")
@@ -200,10 +203,6 @@ impl QuillApp {
                         .when(self.recording_here(), |this| {
                             this.child(self.record_bar(cx))
                         })
-                        .when(
-                            show_attach && !self.pending_attachments().is_empty(),
-                            |this| this.child(self.composer_attachment_tray(cx)),
-                        )
                         .when_some(self.share.forward_result.clone(), |this, result| {
                             this.child(self.forward_success_banner(&result, cx))
                         })
@@ -243,27 +242,35 @@ impl QuillApp {
                         // above the composer.
                         .when_some(self.force_reply_panel(cx), |this, panel| this.child(panel))
                         // Phase 3.3: `/` command menu above the composer.
-                        .when_some(self.mention_menu_dropdown(cx), |this, panel| {
-                            this.child(panel)
-                        })
-                        .when_some(self.suggest_menu_dropdown(cx), |this, panel| {
-                            this.child(panel)
-                        })
-                        .when_some(self.command_menu_dropdown(cx), |this, panel| {
-                            this.child(panel)
-                        })
+                        .when_some(
+                            (!boxed).then(|| self.mention_menu_dropdown(cx)).flatten(),
+                            |this, panel| this.child(panel),
+                        )
+                        .when_some(
+                            (!boxed).then(|| self.suggest_menu_dropdown(cx)).flatten(),
+                            |this, panel| this.child(panel),
+                        )
+                        .when_some(
+                            (!boxed).then(|| self.command_menu_dropdown(cx)).flatten(),
+                            |this, panel| this.child(panel),
+                        )
                         // Bots slice: `@bot` inline-results dropdown above
                         // the composer (mutually exclusive with the `/`
                         // menu — see `sync_command_menu`).
-                        .when_some(self.inline_results_dropdown(cx), |this, panel| {
-                            this.child(panel)
-                        })
-                        .when_some(self.sticker_suggestions_row(cx), |this, row| {
-                            this.child(row)
-                        })
-                        .when_some(self.animated_emoji_suggestion(cx), |this, row| {
-                            this.child(row)
-                        })
+                        .when_some(
+                            (!boxed).then(|| self.inline_results_dropdown(cx)).flatten(),
+                            |this, panel| this.child(panel),
+                        )
+                        .when_some(
+                            (!boxed).then(|| self.sticker_suggestions_row(cx)).flatten(),
+                            |this, row| this.child(row),
+                        )
+                        .when_some(
+                            (!boxed)
+                                .then(|| self.animated_emoji_suggestion(cx))
+                                .flatten(),
+                            |this, row| this.child(row),
+                        )
                         // Phase A1: slow-mode countdown. The composer stays
                         // usable (typing is fine) but sends are blocked
                         // until the wait expires; the send button shows the
@@ -274,20 +281,26 @@ impl QuillApp {
                         // Pickers open directly above the input, next to the
                         // buttons that summon them.
                         // The share box's schedule step shows inside its dialog.
-                        .when(self.chat_ui.schedule_popup_shown(), |this| {
+                        .when(!boxed && self.chat_ui.schedule_popup_shown(), |this| {
                             this.child(self.schedule_popup(cx))
                         })
                         .when_some(self.paid_messages_notice(cx), |this, row| this.child(row))
-                        .when_some(self.composer_options_row(cx), |this, row| this.child(row))
+                        .when_some(
+                            (!boxed).then(|| self.composer_options_row(cx)).flatten(),
+                            |this, row| this.child(row),
+                        )
                         // MED4: detected-URL chip (send-time preview
-                        // control) and caption bar ("Add a caption…",
-                        // above/below toggle, n / max counter).
+                        // control) and caption bar (above/below toggle
+                        // while editing a caption, n / max counter).
                         .when_some(self.preview_chip(cx), |this, chip| this.child(chip))
                         .when_some(self.edit_replacement_chip(cx), |this, chip| {
                             this.child(chip)
                         })
                         .when_some(self.caption_bar(cx), |this, bar| this.child(bar))
-                        .when_some(self.text_limit_bar(cx), |this, bar| this.child(bar))
+                        .when_some(
+                            (!boxed).then(|| self.text_limit_bar(cx)).flatten(),
+                            |this, bar| this.child(bar),
+                        )
                         // kit Phase 5: the composer input row — attach and
                         // emoji/sticker pickers, the borderless growing
                         // kit Textarea (auto_grow(2, 6) on the state sizes
@@ -335,59 +348,13 @@ impl QuillApp {
                                 })
                                 .when(!show_attach, |row| row.children(self.ai_compose_button(cx)))
                                 .when_some(rich_preview, |row, preview| row.child(preview))
-                                .child(
-                                    div()
-                                        .id("composer-field")
-                                        .relative()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .map(|field| self.emoji_words_hover(field, cx))
-                                        // tdesktop hides the field behind a
-                                        // rich draft's preview.
-                                        .when(self.shown_rich_draft().is_some(), |field| {
-                                            field.hidden()
-                                        })
-                                        // Scopes Cmd/Ctrl+K to "edit link" here
-                                        // (see `composer_bindings`).
-                                        .key_context(super::keybindings::COMPOSER_CONTEXT)
-                                        .child(
-                                            Textarea::new(&self.composer)
-                                                .appearance(false)
-                                                .bordered(false)
-                                                .aria_label(tr(keys::SR_CHAT_COLUMN_MESSAGE))
-                                                // Custom emoji drawn inline
-                                                // (codex:composer-input).
-                                                .token(self.composer_token_renderer(cx))
-                                                // codex:spellcheck-native:
-                                                // suggestions / Add to
-                                                // Dictionary / Ignore on a
-                                                // misspelled word.
-                                                .context_menu({
-                                                    let owner = cx.entity().downgrade();
-                                                    move |_, window, cx| {
-                                                        QuillApp::composer_context_menu(
-                                                            owner.clone(),
-                                                            window,
-                                                            cx,
-                                                        )
-                                                    }
-                                                }),
-                                        )
-                                        // The inline bot's hint after `@bot `.
-                                        .when_some(
-                                            self.inline_bot_hint_overlay(cx),
-                                            |wrap, hint| wrap.child(hint),
-                                        )
-                                        // Red wavy underlines over the
-                                        // misspelled words.
-                                        .when_some(self.spellcheck_underlines(cx), |wrap, lines| {
-                                            wrap.child(lines)
-                                        })
-                                        // Words that have an emoji.
-                                        .when_some(self.emoji_word_highlights(cx), |wrap, wash| {
-                                            wrap.child(wash)
-                                        }),
-                                )
+                                // The field, or its empty seat while the
+                                // send box holds it.
+                                .child(if boxed {
+                                    div().flex_1().min_w_0().into_any_element()
+                                } else {
+                                    self.composer_field(cx).into_any_element()
+                                })
                                 // Scheduled-messages button while the chat has
                                 // any (`updateChatHasScheduledMessages`).
                                 .when_some(self.scheduled_messages_button(cx), |row, button| {
@@ -411,7 +378,10 @@ impl QuillApp {
                                 .child(self.composer_send_button(show_attach, sendable, cx))
                                 // Emoji for `:word` or a pointed-at word,
                                 // as wide as the row.
-                                .when_some(self.emoji_bar_overlay(cx), |row, bar| row.child(bar)),
+                                .when_some(
+                                    (!boxed).then(|| self.emoji_bar_overlay(cx)).flatten(),
+                                    |row, bar| row.child(bar),
+                                ),
                         )
                         // M2: rich editor block bar + live block preview
                         // under the textarea while the editor is open.

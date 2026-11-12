@@ -819,6 +819,8 @@ mod tests {
             DialogKind::CreateChat,
             DialogKind::GroupEditBox,
             DialogKind::EditProfile,
+            // The send box: its tiles open the video editor.
+            DialogKind::SendBox,
         ] {
             for editor in editors {
                 assert!(
