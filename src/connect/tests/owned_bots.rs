@@ -57,7 +57,13 @@ fn opening_the_editor_asks_for_the_name_and_the_about_text() {
     let about = sent_request(&recorder, "getBotInfoShortDescription");
     // The dialog fills its fields only from the load it started.
     assert_eq!(
-        driver.session.bots.owned.edit.as_ref().map(|edit| edit.asked),
+        driver
+            .session
+            .bots
+            .owned
+            .edit
+            .as_ref()
+            .map(|edit| edit.asked),
         Some(asked)
     );
     assert_eq!(name["bot_user_id"], 21);

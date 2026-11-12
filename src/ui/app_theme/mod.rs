@@ -221,9 +221,8 @@ impl AppThemeUi {
     /// Forget a failed read of `name`, so the next appearance pass reads it
     /// again.
     fn forget_failed(&mut self, name: &str) {
-        self.custom_cache.retain(|(cached, state)| {
-            cached != name || !matches!(state, CachedPalette::Failed)
-        });
+        self.custom_cache
+            .retain(|(cached, state)| cached != name || !matches!(state, CachedPalette::Failed));
     }
 }
 

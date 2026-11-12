@@ -321,9 +321,10 @@ impl ComposerEdit {
     /// is the replacement's own choice, read from what was staged, so
     /// dropping the replacement drops the choice with it.
     pub fn replacement_as_file(&self) -> bool {
-        self.media_edit.replacement.as_ref().is_some_and(|rep| {
-            self.can_toggle_as_file(rep) && rep.kind == EditMediaKind::Document
-        })
+        self.media_edit
+            .replacement
+            .as_ref()
+            .is_some_and(|rep| self.can_toggle_as_file(rep) && rep.kind == EditMediaKind::Document)
     }
 
     /// Whether the (possibly replaced) media carries the caption-position flag.

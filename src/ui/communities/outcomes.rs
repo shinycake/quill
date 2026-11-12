@@ -43,7 +43,11 @@ impl QuillApp {
         )
     }
 
-    pub(super) fn apply_community_outcome(&mut self, outcome: CommunityOutcome, cx: &mut Context<Self>) {
+    pub(super) fn apply_community_outcome(
+        &mut self,
+        outcome: CommunityOutcome,
+        cx: &mut Context<Self>,
+    ) {
         let note = match outcome {
             CommunityOutcome::ChatAdded {
                 community_id,

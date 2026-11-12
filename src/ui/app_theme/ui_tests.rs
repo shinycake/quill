@@ -333,7 +333,10 @@ fn a_failed_theme_read_is_read_again_by_the_next_pass() {
         "the pass that read it sees the failure"
     );
     themes.forget_failed("Mine");
-    assert!(themes.cached_palette("Mine").is_none(), "the next pass reads it");
+    assert!(
+        themes.cached_palette("Mine").is_none(),
+        "the next pass reads it"
+    );
     // A read that worked stays cached.
     themes.cache_palette("Mine".into(), Some(palette));
     themes.forget_failed("Mine");

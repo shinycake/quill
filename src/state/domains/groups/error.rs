@@ -109,12 +109,12 @@ impl Session {
             Some(RequestPurpose::CreateCommunity) => {
                 self.communities.new_community_photo = None;
                 if let Some(pending) = pending {
-                    self.communities
-                        .outcomes
-                        .push_back(crate::state::CommunityOutcome::CreateFailed {
+                    self.communities.outcomes.push_back(
+                        crate::state::CommunityOutcome::CreateFailed {
                             request: pending.id,
                             reason: error_reason(err),
-                        });
+                        },
+                    );
                 }
             }
             // TDLib 1.8.68 community management: surface refusals

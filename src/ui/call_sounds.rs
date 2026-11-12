@@ -275,7 +275,9 @@ impl super::app::QuillApp {
             // account keeps the loop, so a lost session never leaves its
             // ring (and the output hold) behind.
             let ring = self.background_ring_audible();
-            self.calls.sounds.keep_looping(ring.then_some(CallSound::Incoming));
+            self.calls
+                .sounds
+                .keep_looping(ring.then_some(CallSound::Incoming));
             return;
         };
         let (call, summary) = (

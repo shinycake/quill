@@ -20,9 +20,9 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 #[cfg(test)]
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{self, TryRecvError};
 #[cfg(test)]
 use std::sync::mpsc::Receiver;
+use std::sync::mpsc::{self, TryRecvError};
 use std::time::{Duration, Instant};
 
 use quill::playback::PlaybackClock;
@@ -146,7 +146,10 @@ impl Sound {
 enum Playback {
     Settled(Sound),
     /// A start or seek is being built; `sound` plays on meanwhile.
-    Building { build: Building, sound: Sound },
+    Building {
+        build: Building,
+        sound: Sound,
+    },
     Simulated(SimRun),
 }
 

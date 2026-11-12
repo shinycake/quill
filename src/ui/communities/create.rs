@@ -202,8 +202,7 @@ impl QuillApp {
             });
         app.update(cx, |this, cx| {
             let dialog = dialog.overlay(true).w(px(420.));
-            let Some(CommunityBox::Create { chat_id, draft, .. }) =
-                &this.admin.community.flow.open
+            let Some(CommunityBox::Create { chat_id, draft, .. }) = &this.admin.community.flow.open
             else {
                 return dialog.on_close(on_close);
             };

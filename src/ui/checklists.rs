@@ -7,6 +7,7 @@
 use super::ai_compose::marked_link;
 use super::app::QuillApp;
 use super::dialogs::OptionMediaSlot;
+use super::dialogs::checklist::DialogSend;
 use super::polls::AttachTarget;
 use super::*;
 use crate::ui::status_note::StatusNote;
@@ -19,11 +20,10 @@ use quill::checklist::{
     CHECKLIST_TASKS_MAX, can_create_checklist, tasks_left, toggle_task_request,
     validate_added_tasks,
 };
-use super::dialogs::checklist::DialogSend;
 use quill::ids::{ChatId, MessageId, RequestId};
-use quill::state::Answer;
 use quill::lang::{keys, tr, tr_with};
 use quill::poll::validate_new_option;
+use quill::state::Answer;
 use quill::telegram::envelope::{MessageContent, MessageSender};
 
 impl QuillApp {

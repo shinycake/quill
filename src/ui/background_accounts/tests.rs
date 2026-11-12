@@ -107,7 +107,11 @@ fn a_ring_ends_when_the_screen_loses_its_session(cx: &mut TestAppContext) {
         app.demo_session = None;
         app.live = None;
         app.sync_call_sounds();
-        assert_eq!(app.calls.sounds.looping(), None, "the ring and its hold end");
+        assert_eq!(
+            app.calls.sounds.looping(),
+            None,
+            "the ring and its hold end"
+        );
     });
 }
 
