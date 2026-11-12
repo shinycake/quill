@@ -124,9 +124,12 @@ impl GiftView {
         };
     }
 
-    /// The open form sent `request` for `purpose`: its answer closes it.
-    pub fn form_sent(&mut self, purpose: PaymentsPurpose, request: RequestId) {
-        if let Self::Form { form, .. } = self
+    /// The form open for gift `gift` sent `request` for `purpose`: its
+    /// answer closes it. A request for another gift, or of another kind,
+    /// is not this form's.
+    pub fn form_sent(&mut self, gift: &str, purpose: PaymentsPurpose, request: RequestId) {
+        if let Self::Form { id, form } = self
+            && id == gift
             && form.sends(purpose)
         {
             *form.ask_mut() = FlowAsk::Sent(request);
@@ -227,14 +230,16 @@ mod tests {
             id: "a".into(),
             form: GiftForm::resale(),
         };
-        view.form_sent(PaymentsPurpose::UpgradeGift, RequestId(1));
+        view.form_sent("a", PaymentsPurpose::UpgradeGift, RequestId(1));
         assert_eq!(view.form(), Some(&GiftForm::resale()), "not its request");
-        view.form_sent(PaymentsPurpose::SetGiftResalePrice, RequestId(2));
+        view.form_sent("b", PaymentsPurpose::SetGiftResalePrice, RequestId(9));
+        assert_eq!(view.form(), Some(&GiftForm::resale()), "another gift's request");
+        view.form_sent("a", PaymentsPurpose::SetGiftResalePrice, RequestId(2));
         view.close_form_answered_by(Some(RequestId(1)));
         assert!(view.form().is_some());
         view.form_refused(Some(RequestId(2)));
         assert_eq!(view.form(), Some(&GiftForm::resale()));
-        view.form_sent(PaymentsPurpose::SetGiftResalePrice, RequestId(3));
+        view.form_sent("a", PaymentsPurpose::SetGiftResalePrice, RequestId(3));
         view.close_form_answered_by(Some(RequestId(3)));
         assert_eq!(view, GiftView::Detail("a".into()));
     }
