@@ -410,12 +410,22 @@ impl QuillApp {
         let at_front = backspace && cursor == 0 && anchor == 0;
         let snapshot = EditSnapshot::new(value, cursor, anchor);
         // The input handles the key after this capture handler and emits
-        // its Change in this same dispatch. The expiry task runs after the
-        // dispatch, so a press that changed nothing (at the start or end of
-        // the text) leaves no snapshot for later typing. It is part of the
-        // snapshot: a Change that takes the snapshot, or a newer press that
-        // replaces it, cancels the task.
+        // its Change in this same effect cycle. A defer queued from a defer
+        // runs after that Change, so a press that changed nothing (at the
+        // start or end of the text) leaves no snapshot for later typing,
+        // even for a key already queued. The task waiting for that second
+        // defer is part of the snapshot: a Change that takes the snapshot,
+        // or a newer press that replaces it, cancels the wait.
+        let (settled, after_change) = futures_channel::oneshot::channel::<()>();
+        self.defer_screen_in(window, cx, move |this, window, cx| {
+            this.defer_screen_in(window, cx, move |_, _, _| {
+                let _ = settled.send(());
+            });
+        });
         let expires = self.spawn_screen_in(window, cx, async move |this, cx| {
+            if after_change.await.is_err() {
+                return;
+            }
             let _ = this.update_in(cx, |this, _, _| {
                 if let Some(input) = this.card_form_mut().and_then(|form| form.input_mut(field)) {
                     input.delete = DeleteEdit::None;

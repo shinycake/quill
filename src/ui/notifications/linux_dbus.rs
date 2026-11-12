@@ -201,7 +201,7 @@ enum Probe {
     /// The probe thread is out; `last` is the earlier answer, still what
     /// is reported until the new one lands.
     Asking {
-        _thread: std::thread::JoinHandle<Option<()>>,
+        thread: std::thread::JoinHandle<Option<()>>,
         last: quill::notify::custom::NativeService,
     },
     Answered {
@@ -225,7 +225,9 @@ impl Probe {
         use quill::notify::custom::NativeService;
         match self {
             Self::Idle => true,
-            Self::Asking { .. } => false,
+            // A probe thread that ended without writing its answer (it
+            // panicked) is asked again, not waited on for good.
+            Self::Asking { thread, .. } => thread.is_finished(),
             Self::Answered { service, at } => {
                 *service == NativeService::Missing && now.saturating_duration_since(*at) >= REPROBE
             }
@@ -269,7 +271,7 @@ pub(in crate::ui) fn linux_service_capabilities() -> quill::notify::custom::Nati
         });
         *probe = match spawned {
             Ok(thread) => Probe::Asking {
-                _thread: thread,
+                thread,
                 last,
             },
             Err(_) => Probe::Answered {

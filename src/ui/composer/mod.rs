@@ -72,10 +72,11 @@ impl QuillApp {
         self.remember_sent_hashtags(text);
     }
 
-    pub(super) fn submit_composer(
+    pub(super) fn submit_composer_agreed(
         &mut self,
         text: String,
         once: crate::ui::composer_sends::SendOnce,
+        agreed: Option<(i64, i64)>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -171,7 +172,7 @@ impl QuillApp {
                         cx.notify();
                         return;
                     }
-                    if self.paid_send_waits(chat_id, &text, once, cx) {
+                    if self.paid_send_waits(chat_id, &text, once, agreed, cx) {
                         return;
                     }
                     // A video's sound track is still being read: wait, so a

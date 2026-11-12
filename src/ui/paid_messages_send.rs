@@ -37,6 +37,19 @@ impl QuillApp {
         }
     }
 
+    /// The composer's send, with no price agreed beforehand.
+    /// `submit_composer_agreed` takes the (chat, Stars) the user just paid,
+    /// good for that one send only.
+    pub(super) fn submit_composer(
+        &mut self,
+        text: String,
+        once: SendOnce,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.submit_composer_agreed(text, once, None, window, cx);
+    }
+
     /// Before a send in `chat_id`: opens the confirmation when it costs
     /// Stars the user has not agreed to yet. True when the send waits.
     pub(super) fn paid_send_waits(
@@ -44,6 +57,7 @@ impl QuillApp {
         chat_id: ChatId,
         text: &str,
         once: SendOnce,
+        agreed: Option<(i64, i64)>,
         cx: &mut Context<Self>,
     ) -> bool {
         let Some(session) = self.session() else {
@@ -52,13 +66,7 @@ impl QuillApp {
         let stars = session.send_gate(chat_id).stars();
         // Pay on this very send: it goes out at the price the user agreed
         // to, once.
-        if let PaidConfirmStage::Agreed {
-            chat_id: agreed_chat,
-            per_message,
-        } = self.paid_messages.confirm
-            && (agreed_chat, per_message) == (chat_id.0, stars)
-        {
-            self.paid_messages.confirm = PaidConfirmStage::None;
+        if agreed == Some((chat_id.0, stars)) {
             return false;
         }
         let Some(session) = self.session() else {
@@ -133,7 +141,7 @@ impl QuillApp {
             PaidConfirmStage::Held { trusted } => self
                 .paid_confirm_view()
                 .is_some_and(|(confirm, _)| (confirm.chat_id, confirm.per_message) == *trusted),
-            PaidConfirmStage::None | PaidConfirmStage::Agreed { .. } => false,
+            PaidConfirmStage::None => false,
         }
     }
 
@@ -141,9 +149,7 @@ impl QuillApp {
     pub(super) fn set_paid_confirm_trust(&mut self, on: bool, price: (i64, i64)) {
         match &mut self.paid_messages.confirm {
             PaidConfirmStage::Composer { trust, .. } => *trust = on,
-            held @ (PaidConfirmStage::None
-            | PaidConfirmStage::Held { .. }
-            | PaidConfirmStage::Agreed { .. }) => {
+            held @ (PaidConfirmStage::None | PaidConfirmStage::Held { .. }) => {
                 *held = if on {
                     PaidConfirmStage::Held { trusted: price }
                 } else {
@@ -219,19 +225,9 @@ impl QuillApp {
             }
         }
         let total = confirm.total();
-        // box-host: the box is already closed; this carries the agreed price
-        // into the one resubmit, nothing opens.
-        self.paid_messages.confirm = PaidConfirmStage::Agreed {
-            chat_id: confirm.chat_id,
-            per_message: confirm.per_message,
-        };
-        self.submit_composer(confirm.text, once, window, cx);
-        // A resubmit that stopped before the check (files still being read)
-        // must not leave the agreement for a later send.
-        if matches!(self.paid_messages.confirm, PaidConfirmStage::Agreed { .. }) {
-            // box-host: clears the agreement, nothing opens.
-            self.paid_messages.confirm = PaidConfirmStage::None;
-        }
+        // The agreed price travels with the one resubmit; nothing outlives it.
+        let agreed = Some((confirm.chat_id, confirm.per_message));
+        self.submit_composer_agreed(confirm.text, once, agreed, window, cx);
         // Not trusted: what the send left held is released up to the total
         // the user just agreed to, never more.
         let mut budget = total;
