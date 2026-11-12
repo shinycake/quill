@@ -234,19 +234,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             },
         )?;
         if let Some(request) = sent {
-            // No page is in flight here, so what was handled so far is
-            // behind this page's answer.
             self.session
                 .communities
-                .handled_add_requests
-                .remove(&community_id);
-            let fetch = self
-                .session
-                .communities
-                .add_chat_requests
-                .entry(community_id)
-                .or_default();
-            fetch.begin_with(request);
+                .begin_add_requests_page(community_id, request);
         }
         Ok(sent)
     }

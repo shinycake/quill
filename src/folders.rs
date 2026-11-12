@@ -307,7 +307,7 @@ pub fn matches_folder_filters(
     if spec.exclude_read && chat.unread_count == 0 {
         return false;
     }
-    if spec.exclude_archived && chat.in_archive {
+    if spec.exclude_archived && chat.in_archive() {
         return false;
     }
     true
@@ -368,12 +368,8 @@ mod tests {
             unread_count: 0,
             last_read_inbox_message_id: MessageId(0),
             last_read_outbox_message_id: MessageId(0),
-            order: 0,
-            is_pinned: false,
-            in_main_list: true,
-            in_archive: false,
-            archive_order: 0,
-            archive_is_pinned: false,
+            main: Some(crate::state::ListPosition::default()),
+            archive: None,
             folder_positions: BTreeMap::new(),
             notification_settings: ChatNotificationSettings::default(),
             last: None,

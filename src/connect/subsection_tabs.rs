@@ -90,7 +90,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // bots with topics, whose topics also fill their row.
         let listed = self.session.chats.get(&chat_id.0).is_some_and(|chat| {
             (chat.is_forum_chat() || self.session.bot_topics(chat_id).is_some())
-                && (chat.in_main_list || chat.in_archive || !chat.folder_positions.is_empty())
+                && (chat.in_main_list() || chat.in_archive() || !chat.folder_positions.is_empty())
         });
         if !listed || !self.chats_path_active() || self.session.threads.forum_row_asked(chat_id.0) {
             return;

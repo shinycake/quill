@@ -32,20 +32,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self
-            .session
-            .requests
-            .pending
-            .values()
-            .any(|p| p.purpose == RequestPurpose::GetRecommendedChatFolders)
-        {
+        if self.session.chat_list.recommended_folders.is_loading() {
             return Ok(None);
         }
         let extra = self
             .session
             .request(RequestPurpose::GetRecommendedChatFolders, None);
-        self.send_folder_request(extra, get_recommended_chat_folders(extra))
-            .map(Some)
+        let sent = self.send_folder_request(extra, get_recommended_chat_folders(extra))?;
+        self.session.chat_list.recommended_folders.begin_with(sent);
+        Ok(Some(sent))
     }
 
     /// `getChatFolderInviteLinks` + `getChatsForChatFolderInviteLink`: what

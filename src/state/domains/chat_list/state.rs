@@ -57,7 +57,7 @@ pub struct ChatListState {
     /// chats a link may include, each with its own load stage.
     pub folder_shares: HashMap<i32, FolderShare>,
     /// `getRecommendedChatFolders` result; `None` until fetched.
-    pub recommended_folders: Option<Vec<RecommendedChatFolder>>,
+    pub recommended_folders: crate::state::fetch::Fetch<Vec<RecommendedChatFolder>>,
     /// What the requests a folder or contact box waits on ended in, by
     /// request id ([`DialogAnswers`]).
     pub dialog_answers: DialogAnswers,
@@ -275,7 +275,7 @@ impl ChatListState {
             delete_after_leave: Vec::new(),
             folder_chats_to_leave: HashMap::new(),
             folder_shares: HashMap::new(),
-            recommended_folders: None,
+            recommended_folders: crate::state::fetch::Fetch::Idle,
             dialog_answers: DialogAnswers::default(),
             folder_new_chats: HashMap::new(),
             folder_new_chats_asked: HashMap::new(),

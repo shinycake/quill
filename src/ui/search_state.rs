@@ -83,5 +83,11 @@ impl super::on_screen::Farewell for SearchUi {
         if let Some(session) = app.session_mut() {
             session.clear_date_jump_ui(None);
         }
+        // The in-chat bar closes with the screen, and its typed query
+        // waiting out the quiet window goes with it: back on this account
+        // the bar must not read "Searching…" for a commit that never comes.
+        if let Some(live) = app.live.as_mut() {
+            live.driver.close_chat_search();
+        }
     }
 }

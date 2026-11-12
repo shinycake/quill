@@ -63,14 +63,9 @@ impl QuillApp {
         // Slice G1: a fresh dialog open clears the last action error —
         // stale failures from a previous open must not linger.
         if let Some(live) = self.live.as_mut() {
-            let newest = live.driver.session.newest_request();
-            live.driver
-                .session
-                .groups
-                .open_member_actions(chat_id.0, newest);
+            live.driver.session.groups.open_member_actions(chat_id.0);
         } else if let Some(session) = self.demo_session.as_mut() {
-            let newest = session.newest_request();
-            session.groups.open_member_actions(chat_id.0, newest);
+            session.groups.open_member_actions(chat_id.0);
         }
         cx.notify();
         self.refresh_member_dialog(cx);

@@ -16,6 +16,11 @@ pub struct AddChatRequestList {
     pub total_count: i32,
     /// The offset of the next page; `None` once the list is complete.
     pub next_offset: Option<String>,
+    /// Chats approved or declined while a page of this list was out: that
+    /// page may still list them and must not bring them back. It rides
+    /// with the list the page was asked for and goes when the page is
+    /// asked (`begin_add_requests_page`) or answers.
+    pub handled: HashSet<i64>,
 }
 
 /// Why a community request failed, as the screens tell it apart.
@@ -112,10 +117,6 @@ pub struct CommunitiesState {
     pub new_community_photo: Option<(RequestId, String)>,
     /// `getCommunityAddChatRequests`, by community id.
     pub add_chat_requests: HashMap<i64, Fetch<AddChatRequestList>>,
-    /// Add-chat requests approved or declined, by community, since the last
-    /// first page was asked: a page that was in flight meanwhile may still
-    /// list them, and must not bring them back.
-    pub handled_add_requests: HashMap<i64, HashSet<i64>>,
     /// `getCommunityMemberChats`, by community and member.
     pub member_chats: HashMap<(i64, CommunityMember), Fetch<CommunityMemberChats>>,
     /// The settings each in-flight `setCommunityNotificationSettings`
@@ -140,7 +141,6 @@ impl CommunitiesState {
             owned_bots: Fetch::Idle,
             new_community_photo: None,
             add_chat_requests: HashMap::new(),
-            handled_add_requests: HashMap::new(),
             member_chats: HashMap::new(),
             notification_sends: HashMap::new(),
             outcomes: VecDeque::new(),
@@ -169,6 +169,27 @@ impl CommunitiesState {
     /// The next finished request for the UI to report.
     pub fn take_outcome(&mut self) -> Option<CommunityOutcome> {
         self.outcomes.pop_front()
+    }
+
+    /// A page of the add-chat requests goes out as `request`: what was
+    /// handled so far is behind it.
+    pub fn begin_add_requests_page(&mut self, community_id: i64, request: RequestId) {
+        let fetch = self.add_chat_requests.entry(community_id).or_default();
+        if let Some(list) = fetch.data_mut() {
+            list.handled.clear();
+        }
+        fetch.begin_with(request);
+    }
+
+    /// A request of the community was approved or declined: a page in
+    /// flight must not bring it back.
+    pub fn mark_add_request_handled(&mut self, community_id: i64, chat_id: i64) {
+        if let Some(fetch) = self.add_chat_requests.get_mut(&community_id)
+            && fetch.is_loading()
+            && let Some(list) = fetch.data_mut()
+        {
+            list.handled.insert(chat_id);
+        }
     }
 
     pub fn add_chat_requests(&self, community_id: i64) -> &Fetch<AddChatRequestList> {

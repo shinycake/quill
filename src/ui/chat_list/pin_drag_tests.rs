@@ -45,7 +45,7 @@ fn open(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext, Vec<i6
         let mut ids: Vec<i64> = session
             .chats
             .values()
-            .filter(|chat| chat.in_main_list)
+            .filter(|chat| chat.in_main_list())
             .map(|chat| chat.id.0)
             .collect();
         ids.sort_unstable();
@@ -214,7 +214,7 @@ fn a_bulk_pin_over_the_limit_opens_the_limit_box_and_pins_nothing(cx: &mut TestA
         let ids: Vec<i64> = session
             .chats
             .values()
-            .filter(|chat| chat.in_main_list)
+            .filter(|chat| chat.in_main_list())
             .map(|chat| chat.id.0)
             .collect();
         assert!(ids.len() >= 2, "two chats to pin");

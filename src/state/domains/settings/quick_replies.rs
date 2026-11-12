@@ -213,9 +213,13 @@ impl Session {
         request: Option<RequestId>,
     ) -> bool {
         let state = &mut self.settings.quick_replies;
-        match purpose {
+        // Only a fetch that waits for this request takes its failure (an
+        // older load's error is nothing the page awaits).
+        let took = match purpose {
             Some(RequestPurpose::Settings(SettingsPurpose::LoadQuickReplyShortcuts)) => {
-                state.shortcuts_load.fail(error_reason(err));
+                state
+                    .shortcuts_load
+                    .failed(request, error_reason(err), false)
             }
             Some(RequestPurpose::Settings(SettingsPurpose::LoadQuickReplyMessages {
                 shortcut_id,
@@ -223,12 +227,16 @@ impl Session {
                 // Marked failed, not un-requested: a poll waiting for the
                 // messages stops instead of asking again on every tick.
                 // Only the load that is waited for fails.
-                if let Some(fetch) = state.messages.get_mut(&shortcut_id) {
-                    fetch.failed(request, error_reason(err), false);
-                }
+                state
+                    .messages
+                    .get_mut(&shortcut_id)
+                    .is_some_and(|fetch| fetch.failed(request, error_reason(err), false))
             }
-            Some(RequestPurpose::Settings(SettingsPurpose::MutateQuickReplies)) => {}
+            Some(RequestPurpose::Settings(SettingsPurpose::MutateQuickReplies)) => true,
             _ => return false,
+        };
+        if !took {
+            return true;
         }
         state.error = Some(format!("Quick replies: {}", error_reason(err)));
         true

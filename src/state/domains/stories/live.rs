@@ -337,7 +337,11 @@ impl Session {
             .as_ref()
             .and_then(|live| live.pending_reaction)
             .map_or(0, |p| p.stars);
-        Some(balance - self.payments.paid.total_pending() - reaction)
+        Some(
+            balance
+                .saturating_sub(self.payments.paid.total_pending())
+                .saturating_sub(reaction),
+        )
     }
 
     /// Whether `stars` more would go past what you can spend (tdesktop

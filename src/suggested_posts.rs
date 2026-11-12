@@ -772,10 +772,13 @@ pub struct SuggestedPostsState {
     /// record of them, so the answer, the error or the loss of the request
     /// frees the post.
     pub deciding: Vec<PostDecision>,
+    /// The `addOffer` messages out, each with its request: a second submit
+    /// of the offer box waits for the first one's answer, error or loss.
+    pub offering: Vec<PostDecision>,
 }
 
-/// An approve or decline of the suggested post `(chat_id, message_id)`, out
-/// as `request`.
+/// An approve, decline or offer of the suggested post `(chat_id, message_id)`,
+/// out as `request`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PostDecision {
     pub chat_id: i64,

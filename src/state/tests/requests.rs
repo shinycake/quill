@@ -476,14 +476,14 @@ fn chat_title_and_unread_updates() {
     assert_eq!(chat.title, "new title");
     assert_eq!(chat.unread_count, 7);
     assert_eq!(chat.last_read_inbox_message_id.0, 1);
-    assert!(chat.in_main_list);
+    assert!(chat.in_main_list());
     apply_json(
         &mut session,
         &seq,
         &sink,
         r#"{"@type":"updateChatPosition","chat_id":4,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"0","is_pinned":false}}"#,
     );
-    assert!(!session.chats.get(&4).unwrap().in_main_list);
+    assert!(!session.chats.get(&4).unwrap().in_main_list());
 }
 
 #[test]

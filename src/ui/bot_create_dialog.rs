@@ -130,8 +130,9 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         // An earlier createBot may still be in flight (its box was closed
-        // while "Creating..."). Resetting would bump the generation and its
-        // answer would no longer match, so it is never reported; a new box
+        // while "Creating..."). Resetting would drop the request the stage
+        // waits for and its answer would no longer match, so it is never
+        // reported; a new box
         // would adopt that submission and its own share would never be
         // answered. So a second press waits: `drain_bot_create` reports the
         // first answer, and the press says so.

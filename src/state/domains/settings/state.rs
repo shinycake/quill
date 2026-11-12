@@ -337,6 +337,9 @@ pub struct SettingsState {
     /// Slice A7: a `deleteAccount` round trip is in flight — the account
     /// surfaces stay disabled meanwhile — or its honest one-line failure.
     pub account_delete: Fetch<()>,
+    /// The account write (`setAccountTtl` or `deleteAccount`) in flight:
+    /// one at a time.
+    pub account_write: super::AccountWrite,
     /// Slice A4: cached `getConnectedWebsites` answer (TGX
     /// `SettingsWebsitesController` style); drives the Connected Websites
     /// overlay.
@@ -565,6 +568,7 @@ impl SettingsState {
             pending_alerts: Vec::new(),
             disable_contact_registered_notifications: false,
             notified: ShownNotifications::default(),
+            account_write: Default::default(),
             default_auto_delete: Fetch::Idle,
             saved_sounds: Fetch::Idle,
             tone_upload: crate::tone_upload::ToneUpload::Idle,

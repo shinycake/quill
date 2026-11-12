@@ -54,7 +54,7 @@ pub(super) fn row_glyph(name: IconName, color: Hsla) -> impl IntoElement {
 /// Whether the chat is pinned in the list this row belongs to.
 pub(super) fn pinned_here(chat: &ChatSummary, archived: bool) -> bool {
     if archived {
-        chat.archive_is_pinned
+        chat.archive_is_pinned()
     } else {
         chat.is_pinned
     }

@@ -365,14 +365,15 @@ impl Session {
                 });
                 // An unpin leaves the pinned list at once; a pin is added
                 // by the refetch the driver sends for the open chat.
-                if !is_pinned
-                    && let Some(list) = self
-                        .messages
-                        .pinned_messages
-                        .get_mut(&chat_id.0)
-                        .and_then(|fetch| fetch.data_mut())
+                // A fetch in flight asked before the unpin: its answer would
+                // bring the message back, so it is outdated and asked again.
+                if !is_pinned && let Some(fetch) = self.messages.pinned_messages.get_mut(&chat_id.0)
                 {
-                    list.retain(|message| message.id != message_id);
+                    if fetch.is_loading() {
+                        fetch.outdate();
+                    } else if let Some(list) = fetch.data_mut() {
+                        list.retain(|message| message.id != message_id);
+                    }
                 }
             }
             MessagesPayload::UpdateMessageContentOpened {

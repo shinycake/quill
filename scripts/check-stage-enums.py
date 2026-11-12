@@ -73,7 +73,7 @@ IN_FLIGHT = set(
     "Busy InFlight Applying Verifying Refreshing Syncing Creating Deleting Looking Searching "
     "Importing Exporting Queued InProgress Mutating Processing Retrying Reading Writing "
     "Installing Paying Buying Transferring Upgrading Lingering Decoding Clearing Merging "
-    "Building Cutting Encoding Activating Rendering Listing Jumping Capturing".split()
+    "Building Cutting Encoding Activating Rendering Listing Jumping Capturing Reconnecting".split()
 )
 CARRIER = re.compile(
     r"\b(?:RequestId|Task|TaskHold|RenderJob|JoinHandle|Subscription|Receiver|Sender|Instant|SystemTime)\b"

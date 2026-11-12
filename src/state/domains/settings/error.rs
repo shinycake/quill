@@ -242,6 +242,7 @@ impl Session {
                 );
             }
             Some(RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { .. })) => {
+                self.settings.account_write.settle(extra);
                 self.settings.account_ttl.failed(
                     extra,
                     sessions_error_line("update the account", err),
@@ -249,6 +250,7 @@ impl Session {
                 );
             }
             Some(RequestPurpose::DeleteAccount) => {
+                self.settings.account_write.settle(extra);
                 self.settings.account_delete.failed(
                     extra,
                     sessions_error_line("update the account", err),

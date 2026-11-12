@@ -797,8 +797,9 @@ fn a_chat_that_asks_again_after_being_handled_is_listed() {
         rig.driver
             .session
             .communities
-            .handled_add_requests
-            .is_empty()
+            .add_chat_requests(OWNED)
+            .data()
+            .is_none_or(|list| list.handled.is_empty())
     );
     let again = rig
         .driver

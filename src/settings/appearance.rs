@@ -1,14 +1,6 @@
 //! Appearance preferences: theme, night mode, font size and interface scale.
 use super::*;
 
-/// Settings → Appearance slice: client-side look-and-feel, persisted as
-/// JSON next to the account root (`appearance_prefs.json`). Entirely
-/// client-side — no TDLib setting exists for the app theme, accent,
-/// font size, or chat-list style (TDLib's `accentColor` is per-peer
-/// name/profile tinting, not app chrome; chat backgrounds exist
-/// server-side as `setChatBackground`, schema 1.8.67 :13473, but this
-/// slice paints local solid colors only — see DECISIONS.md).
-///
 /// What the system battery saver does to the animation switches (tdesktop
 /// `ignoreBatterySaving`). Stored in the settings file as the bool it was.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -39,6 +31,14 @@ impl BatterySaver {
     }
 }
 
+/// Settings → Appearance slice: client-side look-and-feel, persisted as
+/// JSON next to the account root (`appearance_prefs.json`). Entirely
+/// client-side — no TDLib setting exists for the app theme, accent,
+/// font size, or chat-list style (TDLib's `accentColor` is per-peer
+/// name/profile tinting, not app chrome; chat backgrounds exist
+/// server-side as `setChatBackground`, schema 1.8.67 :13473, but this
+/// slice paints local solid colors only — see DECISIONS.md).
+///
 /// TGX reference (`Settings.java`, `SettingsThemeController.java`):
 /// night modes None/Auto(lux)/Scheduled/System, per-theme accent color
 /// ids, solid wallpapers via the backgrounds API, a text-size slider,

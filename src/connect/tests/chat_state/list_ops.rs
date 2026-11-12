@@ -110,9 +110,9 @@ fn cl2_set_pinned_chat_order_sends_full_list_and_rolls_back() {
             .unwrap();
     for (id, order) in [(7i64, 300i64), (9, 200)] {
         let chat = driver.session.chats.get_mut(&id).expect("chat");
-        chat.in_main_list = true;
-        chat.is_pinned = true;
-        chat.order = order;
+        chat.main.get_or_insert_with(Default::default);
+        chat.main.get_or_insert_with(Default::default).is_pinned = true;
+        chat.main.get_or_insert_with(Default::default).order = order;
     }
 
     let sent = driver
@@ -128,8 +128,8 @@ fn cl2_set_pinned_chat_order_sends_full_list_and_rolls_back() {
     assert_eq!(set_pinned_value["chat_list"]["@type"], "chatListMain");
     assert_eq!(set_pinned_value["chat_ids"], serde_json::json!([9, 7]));
     // Optimistic: the model order flipped before the answer.
-    assert_eq!(driver.session.chats.get(&9).expect("chat").order, 300);
-    assert_eq!(driver.session.chats.get(&7).expect("chat").order, 200);
+    assert_eq!(driver.session.chats.get(&9).expect("chat").order(), 300);
+    assert_eq!(driver.session.chats.get(&7).expect("chat").order(), 200);
 
     driver
         .ingest(
@@ -144,8 +144,8 @@ fn cl2_set_pinned_chat_order_sends_full_list_and_rolls_back() {
             .unwrap(),
         )
         .unwrap();
-    assert_eq!(driver.session.chats.get(&7).expect("chat").order, 300);
-    assert_eq!(driver.session.chats.get(&9).expect("chat").order, 200);
+    assert_eq!(driver.session.chats.get(&7).expect("chat").order(), 300);
+    assert_eq!(driver.session.chats.get(&9).expect("chat").order(), 200);
     assert_eq!(
         driver.session.chats_state.chat_action_error.last(),
         Some("could not reorder pinned chats (error 400)")
@@ -168,8 +168,8 @@ fn cl2_set_pinned_chat_order_id_mismatch_is_noop() {
     let seq = AtomicU64::new(0);
     ready_private_chat(&mut driver, &seq, &dyn_sink);
     let chat = driver.session.chats.get_mut(&7).expect("chat");
-    chat.in_main_list = true;
-    chat.is_pinned = true;
+    chat.main.get_or_insert_with(Default::default);
+    chat.main.get_or_insert_with(Default::default).is_pinned = true;
 
     assert_eq!(
         driver
@@ -200,7 +200,7 @@ fn cl2_mark_all_chats_as_read_sends_read_chat_list() {
     let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
     let seq = AtomicU64::new(0);
     ready_private_chat(&mut driver, &seq, &dyn_sink);
-    driver.session.chats.get_mut(&7).expect("chat").in_main_list = true;
+    driver.session.chats.get_mut(&7).expect("chat").main.get_or_insert_with(Default::default);
 
     let sent = driver.mark_all_chats_as_read(false).expect("send");
     assert!(sent.is_some(), "chat 7 is unread");
@@ -237,7 +237,7 @@ fn cl2_mark_all_chats_as_read_noop_when_all_read() {
     let seq = AtomicU64::new(0);
     ready_private_chat(&mut driver, &seq, &dyn_sink);
     let chat = driver.session.chats.get_mut(&7).expect("chat");
-    chat.in_main_list = true;
+    chat.main.get_or_insert_with(Default::default);
     chat.unread_count = 0;
 
     assert_eq!(driver.mark_all_chats_as_read(false).expect("send"), None);
@@ -805,9 +805,15 @@ fn a_pin_counts_for_the_next_chats_limit_check_as_soon_as_it_is_sent() {
             .session
             .chats
             .values()
-            .filter(|chat| chat.is_pinned)
+            .filter(|chat| chat.is_pinned())
             .count()
     };
+    // Both chats are in the main list, where a pin has a place.
+    for id in [7, 8] {
+        if let Some(chat) = driver.session.chats.get_mut(&id) {
+            chat.main.get_or_insert_with(Default::default);
+        }
+    }
     driver.toggle_chat_pin(ChatId(7), true).unwrap();
     assert_eq!(pinned(&driver), 1);
     driver.toggle_chat_pin(ChatId(8), true).unwrap();

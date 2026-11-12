@@ -501,7 +501,7 @@ impl QuillApp {
                 let archived = self
                     .session()
                     .and_then(|s| s.chats.get(&id.0))
-                    .is_some_and(|chat| chat.in_archive);
+                    .is_some_and(|chat| chat.in_archive());
                 (id, archived)
             })
             .collect();
@@ -525,8 +525,8 @@ impl QuillApp {
                     .session()
                     .and_then(|s| s.chats.get(&id.0))
                     .is_some_and(|chat| {
-                        if chat.in_archive {
-                            chat.archive_is_pinned
+                        if chat.in_archive() {
+                            chat.archive_is_pinned()
                         } else {
                             chat.is_pinned
                         }
@@ -728,9 +728,9 @@ impl QuillApp {
             // result (no server sends updates in a screenshot demo).
             session.mark_chats_read_locally(|chat| {
                 if archived {
-                    chat.in_archive
+                    chat.in_archive()
                 } else {
-                    chat.in_main_list
+                    chat.in_main_list()
                 }
             });
             session.touch_unread();
@@ -786,7 +786,7 @@ impl QuillApp {
         let archived = self
             .session()
             .and_then(|session| session.chats.get(&chat_id.0))
-            .is_some_and(|chat| chat.in_archive);
+            .is_some_and(|chat| chat.in_archive());
         if let Some(live) = self.live.as_mut() {
             let result = if archived {
                 live.driver.unarchive_chat(chat_id)

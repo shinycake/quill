@@ -72,6 +72,7 @@ mod conference_invite;
 pub(crate) mod debounce;
 mod domains;
 pub mod fetch;
+pub mod held;
 mod folder_order_cache;
 mod forwards;
 mod group_call_stage;

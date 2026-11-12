@@ -191,7 +191,9 @@ impl Session {
                 );
             }
             ChatListPayload::RecommendedChatFolders(folders) => {
-                self.chat_list.recommended_folders = Some(folders);
+                self.chat_list
+                    .recommended_folders
+                    .answered(pending.map(|p| p.id), folders);
             }
             // The answer to the "Add folder" box's check goes to the box
             // (`DialogAnswers`), keyed by its request.

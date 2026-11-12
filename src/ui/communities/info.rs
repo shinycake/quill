@@ -39,7 +39,7 @@ impl QuillApp {
     fn community_chat_joined(&self, chat_id: i64) -> bool {
         self.session()
             .and_then(|s| s.chats.get(&chat_id))
-            .is_some_and(|chat| chat.in_main_list || chat.in_archive)
+            .is_some_and(|chat| chat.in_main_list() || chat.in_archive())
     }
 
     /// A row of a section: open what can be opened, else the join

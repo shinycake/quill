@@ -88,6 +88,11 @@ impl Session {
                 self.chats_state.chat_action_error.push(error_reason(err));
             }
             Some((RequestPurpose::GetRecommendedChatFolders, _)) => {
+                self.chat_list.recommended_folders.failed(
+                    pending.map(|p| p.id),
+                    error_reason(err),
+                    false,
+                );
                 self.chats_state.chat_action_error.push(error_reason(err));
             }
             _ => {}
@@ -100,7 +105,7 @@ impl Session {
                 .chat_lists_for_add
                 .entry(chat_id.0)
                 .or_default()
-                .fail(error_reason(err));
+                .failed(pending.map(|p| p.id), error_reason(err), false);
         }
         match pending.map(|p| p.purpose) {
             // Slice CL1: refused chat-list actions surface in the

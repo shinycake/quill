@@ -463,7 +463,7 @@ impl QuillApp {
                     chat.id,
                     chat.is_muted(),
                     chat.notification_settings.is_muted_forever(),
-                    chat.in_archive,
+                    chat.in_archive(),
                 ))
             })
         });

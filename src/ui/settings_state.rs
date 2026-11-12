@@ -164,8 +164,9 @@ impl super::on_screen::Farewell for SettingsUi {
         }
         // The proxy-link box (its draft and check) is the session's.
         app.close_proxy_link(cx);
-        // These boxes keep their open flags in the session, which goes to
-        // the background with the account.
+        // The masks and emoji boxes keep their open flags in the session,
+        // which goes to the background with the account (the archive box
+        // is this screen's own, closed with it).
         let (masks, emoji) = app.session().map_or((false, false), |session| {
             (
                 session.stickers.masks.dialog_open(),

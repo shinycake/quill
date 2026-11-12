@@ -18,7 +18,7 @@ impl QuillApp {
         }
         let Some(spec) = self
             .session()
-            .and_then(|s| s.chat_list.recommended_folders.as_ref())
+            .and_then(|s| s.chat_list.recommended_folders.data())
             .and_then(|list| list.iter().find(|r| r.spec.name == name))
             .map(|r| r.spec.clone())
         else {

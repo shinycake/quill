@@ -393,10 +393,25 @@ fn each_create_waits_for_its_own_request_and_a_reset_never_adopts_an_older_one()
     t.driver.reset_create_bot();
     assert_eq!(asked(&t), None);
     assert!(!t.driver.session.bots.owned.create.creating());
+    let older_answer = |extra: crate::ids::RequestId| {
+        json!({"@type":"user","@extra":extra.as_extra(),"id":901,"first_name":"A",
+            "type":{"@type":"userTypeBot","can_be_edited":true}})
+    };
+    // The older create's answer arrives after the reset: nothing adopts it.
+    t.feed(older_answer(first));
+    assert_eq!(asked(&t), None);
+    assert!(t.driver.take_created_bot().is_none());
     let second = t
         .driver
         .create_managed_bot(900, "B", "b_bot", false, None)
         .unwrap();
     assert_ne!(second, first);
     assert_eq!(asked(&t), Some(second));
+    // ... nor does the newer create, which still waits for its own.
+    t.feed(older_answer(first));
+    assert_eq!(asked(&t), Some(second));
+    assert!(t.driver.take_created_bot().is_none());
+    t.feed(older_answer(second));
+    assert_eq!(asked(&t), None);
+    assert_eq!(t.driver.take_created_bot().map(|(_, id)| id), Some(901));
 }

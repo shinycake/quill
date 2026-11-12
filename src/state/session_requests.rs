@@ -25,6 +25,17 @@ impl Session {
         ) {
             self.stamp_window_epoch(id, chat_id);
         }
+        if let Some(chat_id) = chat_id
+            && matches!(
+                purpose,
+                RequestPurpose::Groups(
+                    GroupsPurpose::SetChatMemberStatus { .. } | GroupsPurpose::SetChatMemberTag { .. }
+                ) | RequestPurpose::AddChatMembers
+                    | RequestPurpose::AddChatMember
+            )
+        {
+            self.groups.member_action_sent(chat_id.0, id);
+        }
         id
     }
 

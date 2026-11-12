@@ -296,13 +296,14 @@ pub struct GroupsState {
 }
 
 /// What the member actions of one chat came to since the member dialog
-/// opened. An answer or error of a request asked before `since` (an action
+/// opened. An answer or error of a request that is not in `sent` (an action
 /// of an earlier open of the dialog) lands nowhere, so a late line never
 /// shows up on a newer dialog.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MemberActions {
-    /// The newest request when the dialog opened.
-    since: RequestId,
+    /// The member actions asked since the dialog opened, each leaving with
+    /// its own answer or error.
+    sent: Vec<RequestId>,
     /// Last member-action failure (`setChatMemberTag` /
     /// `setChatMemberStatus`). The dialog reads the member-list fetch
     /// states, not `admin_lists`, so action failures need their own slot to
@@ -315,25 +316,48 @@ pub struct MemberActions {
     add_failed: i32,
 }
 
+impl MemberActions {
+    /// `request` is one asked since the dialog opened: it leaves the list,
+    /// and its answer counts (`false` for an earlier open's request).
+    fn take_sent(&mut self, request: RequestId) -> bool {
+        let before = self.sent.len();
+        self.sent.retain(|sent| *sent != request);
+        self.sent.len() < before
+    }
+}
+
 impl GroupsState {
     /// The member dialog of `chat_id` opens: the last open's failures go,
     /// and so does the answer of any request asked before now.
-    pub fn open_member_actions(&mut self, chat_id: i64, newest: RequestId) {
+    pub fn open_member_actions(&mut self, chat_id: i64) {
         self.member_actions.insert(
             chat_id,
             MemberActions {
-                since: newest,
+                sent: Vec::new(),
                 error: None,
                 add_failed: 0,
             },
         );
     }
 
+    /// `request` was confirmed (`ok`): a member action of it is over.
+    pub(crate) fn member_action_confirmed(&mut self, request: RequestId) {
+        for actions in self.member_actions.values_mut() {
+            actions.take_sent(request);
+        }
+    }
+
+    /// A member action of `chat_id` (a status or tag change, an add) went
+    /// out as `request`: its answer or error counts.
+    pub(crate) fn member_action_sent(&mut self, chat_id: i64, request: RequestId) {
+        self.member_actions_for(chat_id).sent.push(request);
+    }
+
     fn member_actions_for(&mut self, chat_id: i64) -> &mut MemberActions {
         self.member_actions
             .entry(chat_id)
             .or_insert_with(|| MemberActions {
-                since: RequestId(0),
+                sent: Vec::new(),
                 error: None,
                 add_failed: 0,
             })
@@ -353,7 +377,7 @@ impl GroupsState {
     /// `request` (a member action of `chat_id`) was refused.
     pub(crate) fn member_action_failed(&mut self, chat_id: i64, request: RequestId, line: String) {
         let actions = self.member_actions_for(chat_id);
-        if request.0 > actions.since.0 {
+        if actions.take_sent(request) {
             actions.error = Some(line);
         }
     }
@@ -388,7 +412,7 @@ impl GroupsState {
         replace: bool,
     ) {
         let actions = self.member_actions_for(chat_id);
-        if request.0 <= actions.since.0 {
+        if !actions.take_sent(request) {
             return;
         }
         actions.add_failed = if replace {

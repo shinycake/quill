@@ -72,7 +72,7 @@ impl QuillApp {
                 // (Pinned flag first: looking for a second pinned chat walks
                 // the chats, so only pinned rows pay for it.)
                 let pinned = if archived {
-                    chat.archive_is_pinned
+                    chat.archive_is_pinned()
                 } else {
                     chat.is_pinned
                 };

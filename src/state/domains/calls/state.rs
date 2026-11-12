@@ -172,6 +172,12 @@ impl CallsState {
         }
     }
 
+    /// Whether the fetch of `group_call_id` failed and the mark still
+    /// stands (nothing took it).
+    pub fn group_call_fetch_failed(&self, group_call_id: i32) -> bool {
+        self.group_call_fetch_failures.contains(&group_call_id)
+    }
+
     /// Whether the fetch of `group_call_id` failed since it was last taken
     /// or asked again; taking it clears the mark.
     pub fn take_group_call_fetch_failure(&mut self, group_call_id: i32) -> bool {

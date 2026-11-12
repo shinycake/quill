@@ -13,10 +13,10 @@ impl Session {
             return;
         }
         place(&mut self.main_order, &self.chats, &moved, |chat| {
-            chat.in_main_list.then_some(chat.order)
+            chat.main.map(|position| position.order)
         });
         place(&mut self.archive_order, &self.chats, &moved, |chat| {
-            chat.in_archive.then_some(chat.archive_order)
+            chat.archive.map(|position| position.order)
         });
     }
 }

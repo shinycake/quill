@@ -170,9 +170,10 @@ impl QuillApp {
     fn start_dictionary_download(&mut self, code: &str, cx: &mut Context<Self>) {
         if matches!(
             self.spell.dict_manager.download,
-            DictDownload::Running { .. }
+            DictDownload::Running { .. } | DictDownload::Cancelling { .. }
         ) {
-            // One download at a time: the switch snaps back, so say why.
+            // One download at a time (a cancelled one still has its worker
+            // on the dictionary files): the switch snaps back, so say why.
             self.set_note(StatusNote::info(tr(
                 keys::Q_MISC_WAIT_FOR_THE_DICTIONARY_DOWNLOAD,
             )));

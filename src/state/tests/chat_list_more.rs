@@ -66,9 +66,9 @@ fn cl2_reorder_pinned_chats_swaps_orders() {
     let (mut session, _sink) = session();
     for (id, order) in [(11i64, 300i64), (12, 200), (13, 100), (14, 50)] {
         let mut chat = placeholder_chat(ChatId(id));
-        chat.in_main_list = true;
-        chat.order = order;
-        chat.is_pinned = id != 14;
+        chat.main.get_or_insert_with(Default::default);
+        chat.main.get_or_insert_with(Default::default).order = order;
+        chat.main.get_or_insert_with(Default::default).is_pinned = id != 14;
         session.chats.insert(id, chat);
     }
     session.rebuild_main_order();
@@ -91,9 +91,9 @@ fn cl2_pin_order_error_rolls_back_and_surfaces() {
     let seq = AtomicU64::new(0);
     for (id, order) in [(11i64, 300i64), (12, 200)] {
         let mut chat = placeholder_chat(ChatId(id));
-        chat.in_main_list = true;
-        chat.order = order;
-        chat.is_pinned = true;
+        chat.main.get_or_insert_with(Default::default);
+        chat.main.get_or_insert_with(Default::default).order = order;
+        chat.main.get_or_insert_with(Default::default).is_pinned = true;
         session.chats.insert(id, chat);
     }
     let extra = session.request(RequestPurpose::SetPinnedChats, None);
@@ -116,8 +116,8 @@ fn cl2_pin_order_error_rolls_back_and_surfaces() {
             extra.0
         ),
     );
-    assert_eq!(session.chats.get(&11).expect("chat").order, 300);
-    assert_eq!(session.chats.get(&12).expect("chat").order, 200);
+    assert_eq!(session.chats.get(&11).expect("chat").order(), 300);
+    assert_eq!(session.chats.get(&12).expect("chat").order(), 200);
     assert_eq!(
         session.chats_state.chat_action_error.last(),
         Some("could not reorder pinned chats (error 400)")
@@ -317,7 +317,7 @@ fn new_chat_positions_place_the_chat_in_its_lists() {
     );
     let main: Vec<i64> = session.ordered_chats().iter().map(|c| c.id.0).collect();
     assert_eq!(main, vec![11]);
-    assert!(session.chats.get(&11).unwrap().is_pinned);
+    assert!(session.chats.get(&11).unwrap().is_pinned());
     let archive: Vec<i64> = session
         .ordered_archived_chats()
         .iter()
@@ -517,7 +517,20 @@ fn folder_invite_links_list_create_edit_and_errors() {
 fn recommended_folders_and_addlist_check_are_cached() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
+    let stale = session.request(RequestPurpose::GetRecommendedChatFolders, None);
     let extra = session.request(RequestPurpose::GetRecommendedChatFolders, None);
+    session.chat_list.recommended_folders.begin_with(extra);
+    // An older request's answer lands nowhere.
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"recommendedChatFolders","@extra":"{}","chat_folders":[]}}"#,
+            stale.0
+        ),
+    );
+    assert!(session.chat_list.recommended_folders.is_loading());
     apply_json(
         &mut session,
         &seq,
@@ -530,7 +543,7 @@ fn recommended_folders_and_addlist_check_are_cached() {
     let recommended = session
         .chat_list
         .recommended_folders
-        .as_ref()
+        .data()
         .expect("cached");
     assert_eq!(recommended[0].spec.name, "Unread");
     assert_eq!(recommended[0].spec.icon_name.as_deref(), Some("Unread"));

@@ -1212,8 +1212,7 @@ fn a_late_member_action_error_never_lands_on_a_newer_dialog() {
     let seq = AtomicU64::new(0);
     let tag = RequestPurpose::Groups(GroupsPurpose::SetChatMemberTag { user_id: 42 });
     let old = session.request(tag, Some(ChatId(13)));
-    let newest = session.newest_request();
-    session.groups.open_member_actions(13, newest);
+    session.groups.open_member_actions(13);
     let new = session.request(tag, Some(ChatId(13)));
     let refused = |extra: RequestId| {
         format!(

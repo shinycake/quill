@@ -32,7 +32,6 @@ purpose:ConnectDriver::login_request 1
 purpose:ConnectDriver::manage_sticker_set 2
 purpose:ConnectDriver::mark_all_chats_as_read 1
 purpose:ConnectDriver::mark_folder_as_read 1
-purpose:ConnectDriver::mask_request 1
 purpose:ConnectDriver::maybe_fetch_active_sessions 1
 purpose:ConnectDriver::maybe_fetch_connected_websites 1
 purpose:ConnectDriver::maybe_fetch_storage_statistics 1

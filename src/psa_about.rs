@@ -516,7 +516,7 @@ mod tests {
     fn pinned_chats_and_bots_with_messages_get_no_box() {
         let mut s = session_with_promoted(5);
         if let Some(chat) = s.chats.get_mut(&5) {
-            chat.is_pinned = true;
+            chat.main.get_or_insert_with(Default::default).is_pinned = true;
         }
         s.open_chat(ChatId(5));
         assert!(!visible(&s), "a pinned chat");

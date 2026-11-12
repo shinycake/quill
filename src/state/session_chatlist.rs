@@ -60,7 +60,7 @@ impl Session {
             .values()
             .filter(|c| Self::is_pinned_in(c, archived))
             .map(|c| {
-                let order = if archived { c.archive_order } else { c.order };
+                let order = if archived { c.archive_order() } else { c.order() };
                 (c.id.0, order)
             })
             .collect();
@@ -72,9 +72,9 @@ impl Session {
 
     fn is_pinned_in(chat: &ChatSummary, archived: bool) -> bool {
         if archived {
-            chat.in_archive && chat.archive_is_pinned
+            chat.in_archive() && chat.archive_is_pinned()
         } else {
-            chat.in_main_list && chat.is_pinned
+            chat.in_main_list() && chat.is_pinned()
         }
     }
 
@@ -96,7 +96,7 @@ impl Session {
                 let order = self
                     .chats
                     .get(&id)
-                    .map(|c| if archived { c.archive_order } else { c.order });
+                    .map(|c| if archived { c.archive_order() } else { c.order() });
                 (id, order.unwrap_or(0))
             })
             .collect();
@@ -110,10 +110,8 @@ impl Session {
         let orders: Vec<i64> = current.iter().map(|(_, order)| *order).collect();
         for (id, order) in new_ids.iter().zip(orders.iter()) {
             if let Some(chat) = self.chats.get_mut(id) {
-                if archived {
-                    chat.archive_order = *order;
-                } else {
-                    chat.order = *order;
+                if let Some(position) = chat.position_mut(archived) {
+                    position.order = *order;
                 }
             }
         }
@@ -171,16 +169,16 @@ impl Session {
         let mut rows: Vec<(i64, ChatId)> = self
             .chats
             .values()
-            .filter(|c| c.in_main_list)
-            .map(|c| (c.order, c.id))
+            .filter(|c| c.in_main_list())
+            .map(|c| (c.order(), c.id))
             .collect();
         rows.sort_unstable_by(|a, b| b.0.cmp(&a.0).then(b.1.0.cmp(&a.1.0)));
         self.main_order = rows.into_iter().map(|(_, id)| id).collect();
         let mut archived: Vec<(i64, ChatId)> = self
             .chats
             .values()
-            .filter(|c| c.in_archive)
-            .map(|c| (c.archive_order, c.id))
+            .filter(|c| c.in_archive())
+            .map(|c| (c.archive_order(), c.id))
             .collect();
         archived.sort_unstable_by(|a, b| b.0.cmp(&a.0).then(b.1.0.cmp(&a.1.0)));
         self.archive_order = archived.into_iter().map(|(_, id)| id).collect();
@@ -400,7 +398,7 @@ impl Session {
         self.main_order
             .iter()
             .filter_map(|id| self.chats.get(&id.0))
-            .filter(|chat| chat.in_main_list)
+            .filter(|chat| chat.in_main_list())
             .collect()
     }
 
@@ -410,7 +408,7 @@ impl Session {
         self.archive_order
             .iter()
             .filter_map(|id| self.chats.get(&id.0))
-            .any(|chat| chat.in_archive)
+            .any(|chat| chat.in_archive())
     }
 
     /// Chats in `chatListArchive`, highest TDLib order first (same as main).
@@ -418,7 +416,7 @@ impl Session {
         self.archive_order
             .iter()
             .filter_map(|id| self.chats.get(&id.0))
-            .filter(|chat| chat.in_archive)
+            .filter(|chat| chat.in_archive())
             .collect()
     }
 

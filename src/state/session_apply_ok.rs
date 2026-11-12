@@ -36,6 +36,7 @@ impl Session {
         }
         if let Some(pending) = pending {
             self.decision_settled(pending.id);
+            self.groups.member_action_confirmed(pending.id);
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::RemoveSavedNotificationSound) {
             self.mark_saved_sounds_stale();
@@ -207,6 +208,9 @@ impl Session {
         // `updateAuthorizationState` → `Closed` (`set_auth`
         // invalidates the account there). Both clear the
         // in-flight flag and any stale error.
+        self.settings
+            .account_write
+            .settle(pending.map(|p| p.id));
         if let Some(RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { days })) =
             pending.map(|p| p.purpose)
         {

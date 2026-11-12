@@ -20,7 +20,7 @@ impl QuillApp {
         let session = self.session();
         let chat = session.and_then(|s| s.open_chat_id().and_then(|id| s.chats.get(&id.0)));
         let muted = chat.is_some_and(|c| c.is_muted());
-        let archived = chat.is_some_and(|c| c.in_archive);
+        let archived = chat.is_some_and(|c| c.in_archive());
         let live = self.live.is_some();
         let owner = cx.entity().downgrade();
         let chat_id = chat.map(|c| c.id);

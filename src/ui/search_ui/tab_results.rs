@@ -32,7 +32,7 @@ impl QuillApp {
         let mut joined: Vec<_> = session
             .chats
             .values()
-            .filter(|chat| chat.is_channel() && chat.in_main_list)
+            .filter(|chat| chat.is_channel() && chat.in_main_list())
             .collect();
         joined.sort_by_key(|chat| std::cmp::Reverse(chat.order));
         let total = joined.len();

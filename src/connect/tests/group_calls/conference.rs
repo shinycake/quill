@@ -280,6 +280,45 @@ fn add_people_takes_the_call_into_a_new_conference_and_ends_it_with_the_link() {
 }
 
 #[test]
+fn a_handover_whose_group_call_cannot_be_fetched_ends_the_call_and_fails_the_invites() {
+    let mut harness = conference_driver();
+    feed(
+        &mut harness,
+        &one_to_one(r#"{"@type":"callStatePending","is_created":true,"is_received":true}"#),
+    );
+    feed(&mut harness, &one_to_one(READY_SUPPORTING_CONFERENCE));
+    let request = harness
+        .1
+        .upgrade_call_to_conference(vec![41, 42], false)
+        .expect("create sends");
+    let extra = serde_json::to_string(&request.as_extra()).unwrap();
+    let extra: Value = serde_json::from_str(&extra).unwrap();
+    feed(&mut harness, &answer(&extra, 600));
+    assert!(
+        harness
+            .1
+            .session
+            .calls
+            .active_group_call
+            .as_ref()
+            .and_then(|call| call.conference.as_ref())
+            .is_some_and(|conference| conference.upgrade().is_some())
+    );
+    // The group call's fetch is refused: no link will come.
+    harness.1.session.calls.note_group_call_fetch_failed(600);
+    feed(&mut harness, &conference_update(600, "", false));
+    let discard = sent_request(&harness.2, "discardCall");
+    assert_eq!(discard["call_id"], 5);
+    assert_eq!(discard["invite_link"], "");
+    assert_eq!(sent_count(&harness.2, "inviteGroupCallParticipant"), 0);
+    let call = harness.1.session.calls.active_group_call.as_ref().unwrap();
+    assert!(call.conference.as_ref().unwrap().upgrade().is_none());
+    let results = harness.1.session.calls.invite_results.as_ref().unwrap();
+    assert_eq!(results.failed, vec![42], "the other side of the call is not invited");
+    let _ = std::fs::remove_dir_all(&harness.0);
+}
+
+#[test]
 fn the_other_side_of_an_upgraded_call_joins_by_its_link() {
     let mut harness = conference_driver();
     feed(

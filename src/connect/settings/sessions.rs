@@ -1,6 +1,6 @@
 //! Connect driver: device login, active sessions, account TTL, auto-delete and connected websites.
 use super::*;
-use crate::state::DeviceLogin;
+use crate::state::{AccountWrite, DeviceLogin};
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Authorize only a validated scan after explicit user confirmation.
@@ -164,12 +164,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         reason: &str,
         password: &str,
     ) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || self.session.account_ttl_write_pending() {
+        if !self.chats_path_active() || self.session.settings.account_write.is_out() {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.settings.account_ttl.clear_error();
         let extra = self.session.request(RequestPurpose::DeleteAccount, None);
         self.session.settings.account_delete.begin_with(extra);
+        self.session.settings.account_write = AccountWrite::Delete { request: extra };
         match self
             .sender
             .send_json(&delete_account(extra, reason, password))
@@ -178,6 +179,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Err(err) => {
                 self.session.requests.take(extra);
                 self.session.settings.account_delete.cancel();
+                self.session.settings.account_write.settle(Some(extra));
                 Err(err)
             }
         }
@@ -263,7 +265,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// mutation at a time; the confirmed days land from the
     /// authoritative `ok` (never an optimistic write).
     pub fn set_account_ttl(&mut self, days: i32) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || self.session.account_ttl_write_pending() {
+        if !self.chats_path_active() || self.session.settings.account_write.is_out() {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.settings.account_delete.clear_error();
@@ -272,11 +274,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             None,
         );
         self.session.settings.account_ttl.begin_with(extra);
+        self.session.settings.account_write = AccountWrite::SetTtl { request: extra };
         match self.sender.send_json(&set_account_ttl(extra, days)) {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
                 self.session.settings.account_ttl.cancel();
+                self.session.settings.account_write.settle(Some(extra));
                 Err(err)
             }
         }

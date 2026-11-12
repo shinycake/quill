@@ -329,9 +329,11 @@ enum Folder {
     NotConfigured,
     /// The folder is claimed, until the host stops.
     Claimed(data_folder::Generation),
-    /// No folder: the last claim failed (or the host stopped), and none is
-    /// tried before this time.
+    /// No folder: the last claim failed, and none is tried before this time.
     RetryAfter(Instant),
+    /// The host stopped and gave its folder up: no carrier opens, and no
+    /// folder is claimed again.
+    Stopped,
 }
 
 pub struct HelperCarrierHost {
@@ -420,7 +422,9 @@ impl HelperCarrierHost {
                 .to_str()
                 .map(|dir| Some(dir.to_string()))
                 .ok_or(CarrierError::Terminated),
-            Folder::NotConfigured | Folder::RetryAfter(_) => Err(CarrierError::Terminated),
+            Folder::NotConfigured | Folder::RetryAfter(_) | Folder::Stopped => {
+                Err(CarrierError::Terminated)
+            }
         }
     }
 }
@@ -611,7 +615,7 @@ impl HelperCarrierHost {
             }
         }
         if let Folder::Claimed(generation) =
-            std::mem::replace(&mut self.folder, Folder::RetryAfter(Instant::now()))
+            std::mem::replace(&mut self.folder, Folder::Stopped)
         {
             if wait {
                 generation.tear_down(data_folder::RETRY_FOR);
@@ -633,7 +637,7 @@ impl HelperCarrierHost {
     fn data_folder(&self) -> Option<&Path> {
         match &self.folder {
             Folder::Claimed(generation) => Some(generation.dir()),
-            Folder::NotConfigured | Folder::RetryAfter(_) => None,
+            Folder::NotConfigured | Folder::RetryAfter(_) | Folder::Stopped => None,
         }
     }
 }

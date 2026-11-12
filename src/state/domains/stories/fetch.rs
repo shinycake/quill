@@ -77,11 +77,12 @@ impl StoryFetches {
 
     /// `getStory` failed with an error that may pass: `request` is the one
     /// that failed, or `None` when it never left. An older ask's failure,
-    /// while a newer one is out, changes nothing.
+    /// or a send that never left, while an ask is out, changes nothing: the
+    /// ask that is out ends with its own answer or error.
     pub fn failed(&mut self, story: (i64, i32), request: Option<RequestId>, now: Instant) {
         let previous = match self.0.get(&story) {
             Some(StoryFetch::Asked { request: out, .. })
-                if request.is_some_and(|failed| failed != *out) =>
+                if request.is_none_or(|failed| failed != *out) =>
             {
                 return;
             }
@@ -187,6 +188,11 @@ mod tests {
             fetches.retry(story).map(|(_, wait)| wait),
             Some(STORIES_RETRY_FIRST * 2)
         );
+        // A send that never left does not end the ask that is out.
+        fetches.asked(story, RequestId(5));
+        fetches.failed(story, None, now);
+        assert!(fetches.is_asked(story));
+        fetches.failed(story, Some(RequestId(5)), now);
         // A story known gone is not asked again by a late ask.
         fetches.gone(story);
         fetches.asked(story, RequestId(2));

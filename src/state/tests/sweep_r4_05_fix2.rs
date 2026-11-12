@@ -103,8 +103,12 @@ fn a_refused_terminate_leaves_a_session_refetch_in_flight() {
     assert!(session.settings.sessions.error().is_none());
 
     // With no refetch out, the refusal is the list's error line.
-    session.settings.sessions_op.begin(terminate);
-    apply_json(&mut session, &seq, &sink, &error_json(terminate));
+    let again = session.request(
+        RequestPurpose::Settings(SettingsPurpose::TerminateSession { session_id: 4 }),
+        None,
+    );
+    session.settings.sessions_op.begin(again);
+    apply_json(&mut session, &seq, &sink, &error_json(again));
     assert!(session.settings.sessions.error().is_some());
 }
 
@@ -174,4 +178,88 @@ fn a_refused_mask_change_leaves_a_list_fetch_in_flight_and_ends_the_change() {
     apply_json(&mut session, &seq, &sink, &error_json(change));
     assert!(session.stickers.masks.installed.waits_for(list));
     assert!(!session.stickers.masks.change_pending());
+}
+
+#[test]
+fn the_account_write_ends_with_its_own_answer_or_error() {
+    use crate::state::AccountWrite;
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let set = |session: &mut Session, days| {
+        let id = session.request(
+            RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { days }),
+            None,
+        );
+        session.settings.account_ttl.begin_with(id);
+        session.settings.account_write = AccountWrite::SetTtl { request: id };
+        id
+    };
+    let older = session.request(RequestPurpose::DeleteAccount, None);
+    let first = set(&mut session, 90);
+    // An unrelated request's answer leaves the write out.
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, older.0),
+    );
+    assert!(session.settings.account_write.is_out());
+    apply_json(&mut session, &seq, &sink, &error_json(first));
+    assert!(!session.settings.account_write.is_out());
+    let second = set(&mut session, 180);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, second.0),
+    );
+    assert!(!session.settings.account_write.is_out());
+}
+
+#[test]
+fn member_action_answers_leave_the_open_dialogs_list_and_an_old_open_is_dropped() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let tag = RequestPurpose::Groups(GroupsPurpose::SetChatMemberTag { user_id: 42 });
+    let old = session.request(tag, Some(ChatId(13)));
+    session.groups.open_member_actions(13);
+    let confirmed = session.request(tag, Some(ChatId(13)));
+    let refused = session.request(tag, Some(ChatId(13)));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, confirmed.0),
+    );
+    // The old open's refusal lands nowhere; the new one shows once.
+    apply_json(&mut session, &seq, &sink, &error_json(old));
+    assert_eq!(session.groups.member_action_error(13), None);
+    apply_json(&mut session, &seq, &sink, &error_json(refused));
+    assert!(session.groups.member_action_error(13).is_some());
+    session.groups.dismiss_member_action_error(13);
+    // A refusal of an answered request is not a new line.
+    apply_json(&mut session, &seq, &sink, &error_json(refused));
+    assert_eq!(session.groups.member_action_error(13), None);
+}
+
+#[test]
+fn an_unpin_outdates_a_pinned_list_fetch_in_flight() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let ask = session.request(RequestPurpose::GetPinnedMessages, Some(ChatId(11)));
+    session
+        .messages
+        .pinned_messages
+        .entry(11)
+        .or_default()
+        .begin_with(ask);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateMessageIsPinned","chat_id":11,"message_id":101,"is_pinned":false}"#,
+    );
+    let fetch = &session.messages.pinned_messages[&11];
+    assert!(fetch.is_outdated(), "asked again, not answered with the old");
+    assert!(!fetch.waits_for(ask));
 }

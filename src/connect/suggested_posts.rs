@@ -152,6 +152,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         );
         if busy {
             self.session.decision_sent(post_chat, post_message, extra);
+        } else if matches!(purpose, SuggestedPostPurpose::AddOffer { .. }) {
+            self.session.offer_sent(post_chat, post_message, extra);
         }
         match self.sender.send_json(&json(extra)) {
             Ok(()) => Ok(extra),

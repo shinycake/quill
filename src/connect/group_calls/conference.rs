@@ -402,6 +402,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Err(_) => self.session.conference_follow_failed(upgrade.ended),
             }
         }
+        if let Some(result) = self.leave_failed_handover() {
+            return result;
+        }
         let ready = self
             .session
             .calls
@@ -453,6 +456,50 @@ impl<S: JsonSender> ConnectDriver<S> {
             result = Err(err);
         }
         result
+    }
+}
+
+impl<S: JsonSender> ConnectDriver<S> {
+    /// A conference made from a 1:1 call whose group call could not be
+    /// fetched never gets its link: it leaves the handover (the invites
+    /// count as failed), and the 1:1 call ends instead of staying up for a
+    /// link that will not come. `None` when no handover failed.
+    fn leave_failed_handover(&mut self) -> Option<Result<(), ConnectSendError>> {
+        let (group_call_id, upgrade) = self
+            .session
+            .calls
+            .active_group_call
+            .as_ref()
+            .filter(|call| call.invite_link.is_empty())
+            .and_then(|call| Some((call.id, call.conference.as_ref()?.upgrade()?.clone())))
+            .filter(|(id, _)| self.session.calls.group_call_fetch_failed(*id))?;
+        if let Some(conference) = self
+            .session
+            .calls
+            .active_group_call
+            .as_mut()
+            .and_then(|call| call.conference.as_mut())
+        {
+            conference.stage = crate::state::ConferenceStage::Upgraded {
+                from: upgrade.call_id,
+            };
+        }
+        if !upgrade.invite.is_empty() {
+            self.session.calls.invite_results = Some(ConferenceInviteResults::all_failed(
+                group_call_id,
+                upgrade.invite.clone(),
+            ));
+        }
+        let still_in_call = self
+            .session
+            .calls
+            .active_call
+            .as_ref()
+            .is_some_and(|call| call.id == upgrade.call_id);
+        if still_in_call {
+            return Some(self.discard_call_with_link("").map(|_| ()));
+        }
+        Some(Ok(()))
     }
 }
 

@@ -730,7 +730,7 @@ impl QuillApp {
             .get(&chat_id.0)
             .map(|chat| {
                 if archived {
-                    chat.archive_order
+                    chat.archive_order()
                 } else {
                     chat.order
                 }

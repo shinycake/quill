@@ -33,8 +33,9 @@ pub enum DownloadOrigin {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Phase {
-    /// The file is wanted and the request went out; TDLib's file state
-    /// tells how far it is. The intent, not a request to match.
+    /// The file is wanted (the request goes out with the want, or waits
+    /// for TDLib); TDLib's file state tells how far it is. The intent, not
+    /// a request to match.
     Wanted,
     /// The request is out and the user paused it (a listed user download).
     Paused,

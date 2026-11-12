@@ -496,7 +496,11 @@ pub fn install(dir: &Path, code: &str, aff: &[u8], dic: &[u8]) -> Result<(), Ins
     let put_back = |had_old: bool| {
         if had_old {
             let _ = std::fs::remove_file(target("aff"));
-            let _ = std::fs::rename(&backup, target("aff"));
+            let _ = crate::fs_retry::rename_retrying(
+                &backup,
+                &target("aff"),
+                crate::fs_retry::LONG,
+            );
         }
     };
     if let Err(err) = rename(&part("aff"), &target("aff")) {
@@ -521,9 +525,15 @@ pub fn remove(dir: &Path, code: &str) -> io::Result<bool> {
         return Ok(false);
     }
     let mut removed = false;
-    for ext in ["dic", "aff"] {
-        match std::fs::remove_file(dir.join(format!("{code}.{ext}"))) {
-            Ok(()) => removed = true,
+    for (name, counts) in [
+        (format!("{code}.dic"), true),
+        (format!("{code}.aff"), true),
+        // An install that died between its renames leaves the old `.aff`
+        // aside; it goes with the dictionary.
+        (format!(".{code}.aff.old"), false),
+    ] {
+        match std::fs::remove_file(dir.join(name)) {
+            Ok(()) => removed |= counts,
             Err(err) if err.kind() == io::ErrorKind::NotFound => {}
             Err(err) => return Err(err),
         }
@@ -785,6 +795,10 @@ mod tests {
 
     /// Sweep 07-006: a `.dic` that cannot be replaced puts the old `.aff`
     /// back, so the pair on disk is still the old, matching one.
+    // A directory in the way fails the rename with a permission error on
+    // Windows, which the retrying rename waits out: the budget would be a
+    // real wait.
+    #[cfg(unix)]
     #[test]
     fn a_failed_dic_rename_restores_the_old_aff() {
         let tmp = TempDir::new();
@@ -809,6 +823,17 @@ mod tests {
                 .all(|n| !n.ends_with(".part") && !n.ends_with(".old")),
             "{names:?}"
         );
+    }
+
+    #[test]
+    fn remove_also_deletes_a_leftover_aside_aff() {
+        let tmp = TempDir::new();
+        let dir = tmp.0.join("dictionaries");
+        install(&dir, "de", &fixture("de_DE.aff"), &fixture("de_DE.dic")).unwrap();
+        std::fs::write(dir.join(".de.aff.old"), b"old").unwrap();
+        assert!(remove(&dir, "de").unwrap());
+        assert!(!dir.join(".de.aff.old").exists());
+        assert!(!remove(&dir, "de").unwrap());
     }
 
     #[test]
