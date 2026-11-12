@@ -108,7 +108,6 @@ bare:WriteAccess::Asking 1
 optional:Fetch::Loading 1
 optional:LiveJoin::Joining 1
 optional:SetStage::Resolving 1
-optional:SupergroupMembersFetch::Loading 1
 optional:TrendingSets::Loading 1
 rawid:BotUsernameCheck::Checking 1
 rawid:EditorStage::Encoding 1
@@ -121,7 +120,6 @@ unkeyed:Beats::Running 1
 unkeyed:BotUsernameCheck::Checking 1
 unkeyed:CallLinkStage::Leaving 1
 unkeyed:Cancellation::InFlight 1
-unkeyed:CardState::Loading 1
 unkeyed:ChatSearchPaging::Loading 1
 unkeyed:ConferenceStage::Upgrading 1
 unkeyed:CreateStage::Creating 1

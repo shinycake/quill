@@ -498,11 +498,19 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         // Optimistic: the toggle is one-way, so a sent request means the
-        // group becomes a broadcast group barring a TDLib error.
-        self.session
+        // group becomes a broadcast group barring a TDLib error, which
+        // puts back what was known before.
+        let previous = self
+            .session
             .groups
             .supergroup_is_broadcast
             .insert(supergroup_id, true);
+        if let Some(pending) = self.session.requests.pending_mut(extra) {
+            pending.rollback = Some(crate::state::RequestRollback::BroadcastGroup {
+                supergroup_id,
+                previous,
+            });
+        }
         Ok(Some(extra))
     }
 

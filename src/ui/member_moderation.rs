@@ -217,7 +217,7 @@ impl QuillApp {
             None => StatusNote::info(tr(keys::Q_PEOPLE_MEMBER_ACTIONS_NEED_A_LIVE)),
         };
         // The member page is fetched again when the request answers
-        // (`member_list_stale`), not before the change applies.
+        // (the lists go `Stale`), not before the change applies.
         self.set_note(note);
         cx.notify();
     }
@@ -232,7 +232,7 @@ impl QuillApp {
             None => StatusNote::info(tr(keys::Q_PEOPLE_MEMBER_ACTIONS_NEED_A_LIVE)),
         };
         // The member page is fetched again when the request answers
-        // (`member_list_stale`), not before the change applies.
+        // (the lists go `Stale`), not before the change applies.
         self.set_note(note);
         cx.notify();
     }

@@ -10,6 +10,7 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
+use quill::state::EnableSharing;
 use quill::telegram::envelope::MessageSender;
 
 impl QuillApp {
@@ -38,7 +39,7 @@ impl QuillApp {
             Some(live) => live.driver.close_sharing_request_box(),
             None => {
                 if let Some(session) = self.demo_session.as_mut() {
-                    session.groups.private_sharing.enable = None;
+                    session.groups.private_sharing.enable = EnableSharing::Idle;
                 }
             }
         }

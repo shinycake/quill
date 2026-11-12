@@ -261,6 +261,7 @@ impl QuillApp {
                 .chats_state
                 .installed_backgrounds
                 .clear_errors();
+            live.driver.session.chats_state.background_error = None;
         }
     }
 
@@ -268,6 +269,9 @@ impl QuillApp {
     /// confirm for one of its wallpapers goes.
     pub(in crate::ui) fn leave_wallpaper_gallery(&mut self) {
         self.dialogs.wallpaper_remove = None;
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.chats_state.background_error = None;
+        }
     }
 
     /// Ask for the installed wallpapers: once when Appearance (or the look

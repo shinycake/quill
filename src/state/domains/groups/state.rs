@@ -47,24 +47,6 @@ impl GroupsState {
         self.event_logs.entry(chat).or_default().fetch = fetch;
     }
 
-    /// `chat`'s member and admin caches were dropped: the UI refetches
-    /// what it shows of them (`member_list_stale`, drained by the poll).
-    pub(crate) fn mark_member_list_stale(&mut self, chat: i64) {
-        if !self.member_list_stale.contains(&chat) {
-            self.member_list_stale.push(chat);
-        }
-    }
-
-    /// The next page `pending` of `chat`'s list came back.
-    pub(crate) fn more_answered(
-        &mut self,
-        chat: i64,
-        filter: MemberListFilter,
-        pending: &PendingRequest,
-    ) -> bool {
-        self.settle_member_more((chat, filter), pending, true)
-    }
-
     /// The answer to the revoked-links fetch `request` fills the list only
     /// while the list still waits for it (a list closed meanwhile stays
     /// closed).
@@ -80,176 +62,6 @@ impl GroupsState {
         {
             *slot = InviteLinkFetch::Loaded(InviteLinkList { total_count, links });
         }
-    }
-
-    /// `chat` gained members: its cached member pages go stale (the last
-    /// page stays drawn in its `Loading`) and the lists on screen ask again.
-    pub fn members_added(&mut self, chat: i64) {
-        // A loaded page (or one already stale) stays drawn while its
-        // refetch is out; anything else goes.
-        fn stale(fetch: &mut SupergroupMembersFetch) -> bool {
-            let previous = std::mem::replace(fetch, SupergroupMembersFetch::Failed(String::new()));
-            let last = match previous {
-                SupergroupMembersFetch::Loaded {
-                    members,
-                    total_count,
-                } => MembersPage {
-                    members,
-                    total_count,
-                },
-                SupergroupMembersFetch::Loading {
-                    last: Some(last), ..
-                } => last,
-                _ => return false,
-            };
-            *fetch = SupergroupMembersFetch::Loading {
-                request: None,
-                last: Some(last),
-            };
-            true
-        }
-        self.supergroup_members
-            .retain(|(id, _), fetch| *id != chat || stale(fetch));
-        if self
-            .basic_group_members
-            .get_mut(&chat)
-            .is_some_and(|fetch| !stale(fetch))
-        {
-            self.basic_group_members.remove(&chat);
-        }
-        self.mark_member_list_stale(chat);
-    }
-
-    /// The query the member list `key` was asked with ("" for one asked
-    /// before queries were kept, or filled elsewhere).
-    pub fn member_query(&self, key: (i64, MemberListFilter)) -> &str {
-        self.member_asks
-            .get(&key)
-            .map_or("", |ask| ask.query.as_str())
-    }
-
-    /// A first page for `key` was sent as `request` with `query`: it
-    /// replaces how the list was asked, and drops a next page of the old one.
-    pub(crate) fn note_member_first(
-        &mut self,
-        key: (i64, MemberListFilter),
-        request: RequestId,
-        query: &str,
-    ) {
-        self.member_asks.insert(
-            key,
-            MemberAsk {
-                first: Some(request),
-                query: query.to_string(),
-                more: MoreMembers::Idle,
-            },
-        );
-    }
-
-    /// A first page for `key` with `query` could not be sent: the list is
-    /// `Failed` under that query, with no request to wait for.
-    pub(crate) fn note_member_refused(&mut self, key: (i64, MemberListFilter), query: &str) {
-        self.member_asks.insert(
-            key,
-            MemberAsk {
-                first: None,
-                query: query.to_string(),
-                more: MoreMembers::Idle,
-            },
-        );
-    }
-
-    /// The next page the list `key` shows is not asked again at this
-    /// offset (out, answered or failed).
-    pub fn member_more_blocked(&self, key: (i64, MemberListFilter)) -> Option<i32> {
-        self.member_asks
-            .get(&key)
-            .and_then(|ask| ask.more.blocked())
-    }
-
-    /// The members panel of `chat` was scrolled: a failed next page goes
-    /// back to idle, so this scroll asks for it again.
-    pub fn rearm_failed_member_more(&mut self, chat: i64) {
-        for (_, ask) in self.member_asks.iter_mut().filter(|(key, _)| key.0 == chat) {
-            if matches!(ask.more, MoreMembers::Failed { .. }) {
-                ask.more = MoreMembers::Idle;
-            }
-        }
-    }
-
-    /// The members panel of `chat` starts over (opened, or its list went
-    /// stale): answered and failed next pages are forgotten, one still out
-    /// keeps its request so its answer is matched.
-    pub fn forget_member_more(&mut self, chat: i64) {
-        for (_, ask) in self.member_asks.iter_mut().filter(|(key, _)| key.0 == chat) {
-            if !matches!(ask.more, MoreMembers::Asking { .. }) {
-                ask.more = MoreMembers::Idle;
-            }
-        }
-    }
-
-    /// `chat`'s failed member lists are forgotten, so a reopened panel
-    /// asks for them again.
-    pub fn forget_failed_member_lists(&mut self, chat: i64) {
-        self.supergroup_members.retain(|(id, _), fetch| {
-            *id != chat || !matches!(fetch, SupergroupMembersFetch::Failed(_))
-        });
-    }
-
-    /// Sending the next page at `offset` for `key` failed (nothing is out).
-    pub fn member_more_send_failed(&mut self, key: (i64, MemberListFilter), offset: i32) {
-        self.member_asks.entry(key).or_default().more = MoreMembers::Failed { offset };
-    }
-
-    /// Whether `pending` is the latest first-page request for `key`, the
-    /// one whose answer may fill it.
-    pub(crate) fn is_latest_member_request(
-        &self,
-        key: (i64, MemberListFilter),
-        pending: &PendingRequest,
-    ) -> bool {
-        self.member_asks
-            .get(&key)
-            .and_then(|ask| ask.first)
-            .is_none_or(|id| id == pending.id)
-    }
-
-    /// A next-page request for `key` at `offset` was sent: it extends the
-    /// list the latest first page filled.
-    pub(crate) fn note_member_more(
-        &mut self,
-        key: (i64, MemberListFilter),
-        request: RequestId,
-        offset: i32,
-    ) {
-        self.member_asks.entry(key).or_default().more = MoreMembers::Asking { request, offset };
-    }
-
-    /// Settle the next page `pending` with its outcome: whether it is the
-    /// page the list `key` waits for. A page asked for an older query
-    /// (another first page came since) is dropped, or it would join the
-    /// new search's results.
-    pub(crate) fn settle_member_more(
-        &mut self,
-        key: (i64, MemberListFilter),
-        pending: &PendingRequest,
-        answered: bool,
-    ) -> bool {
-        let Some(ask) = self.member_asks.get_mut(&key) else {
-            return false;
-        };
-        let MoreMembers::Asking { request, offset } = ask.more else {
-            return false;
-        };
-        if request != pending.id {
-            return false;
-        }
-        ask.more = if answered {
-            MoreMembers::Settled { offset }
-        } else {
-            MoreMembers::Failed { offset }
-        };
-        true
     }
 }
 
@@ -432,12 +244,10 @@ pub struct GroupsState {
     /// Phase D3b / slice G1: `getSupergroupMembers` fetch state for the
     /// promote member picker and the member-management dialog, keyed by
     /// (chat id, filter). One page per filter.
-    pub supergroup_members: HashMap<(i64, MemberListFilter), SupergroupMembersFetch>,
-    /// How each entry of `supergroup_members` was asked: its first-page
-    /// request, its query and its next page. A search for another query
-    /// replaces the entry; only the latest first page's answer or error
-    /// fills the list, and a next page of an older query finds itself gone.
-    pub member_asks: HashMap<(i64, MemberListFilter), MemberAsk>,
+    /// Each list holds the query it was asked with, its first-page stage
+    /// (and the request it waits for) and its next page; a search for
+    /// another query replaces the value whole.
+    pub supergroup_members: HashMap<(i64, MemberListFilter), MemberList>,
     /// Slice G1: `getBasicGroupFullInfo` fetch state (the member list for
     /// basic groups), keyed by chat id. Reuses `SupergroupMembersFetch`
     /// (Loading / Loaded / Failed).
@@ -488,11 +298,6 @@ pub struct GroupsState {
     /// for basic groups — keyed by chat id.
     /// Reset when a new add starts; cleared when the dialog closes.
     pub add_members_failed: HashMap<i64, i32>,
-    /// Slice G1 fix-up: chat ids whose member-list or admin caches were
-    /// dropped (an `updateChatMember`, or our own moderation's `ok`) while
-    /// a member dialog or the Administrators page may be open. One-shot;
-    /// the UI drains it and refetches what it shows.
-    pub member_list_stale: Vec<i64>,
     /// Slice G1: last member-action failure for the member-management
     /// dialog (`setChatMemberTag` / `setChatMemberStatus`), keyed by
     /// chat id. The dialog reads the member-list fetch states, not
@@ -584,7 +389,6 @@ impl GroupsState {
             supergroup_invite_right: HashMap::new(),
             admin_lists: HashMap::new(),
             supergroup_members: HashMap::new(),
-            member_asks: HashMap::new(),
             basic_group_members: HashMap::new(),
             basic_group_descriptions: HashMap::new(),
             info_edit_errors: HashMap::new(),
@@ -601,7 +405,6 @@ impl GroupsState {
             admin_followups: Vec::new(),
             supergroup_is_broadcast: HashMap::new(),
             add_members_failed: HashMap::new(),
-            member_list_stale: Vec::new(),
             member_action_error: HashMap::new(),
             admin_rights: HashMap::new(),
             supergroup_promote_right: HashMap::new(),

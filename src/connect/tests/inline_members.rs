@@ -98,8 +98,7 @@ fn next_page_goes_out_at_the_loaded_offset_and_appends() {
     }) = driver
         .session
         .groups
-        .supergroup_members
-        .get(&(13, MemberListFilter::Recent))
+        .member_fetch((13, MemberListFilter::Recent))
     else {
         panic!("page dropped");
     };
@@ -143,16 +142,16 @@ fn a_new_search_query_supersedes_the_one_in_flight() {
         .expect("another query is sent while the first is in flight");
     feed(&mut driver, &members_json(1..4, 3, &ann.as_extra()));
     assert_eq!(
-        driver.session.groups.supergroup_members.get(&key),
+        driver.session.groups.member_fetch(key),
         Some(&SupergroupMembersFetch::Loading {
-            request: Some(bob),
+            request: bob,
             last: None
         }),
         "the first query's answer does not show under the second"
     );
     feed(&mut driver, &members_json(7..8, 1, &bob.as_extra()));
     let Some(SupergroupMembersFetch::Loaded { members, .. }) =
-        driver.session.groups.supergroup_members.get(&key)
+        driver.session.groups.member_fetch(key)
     else {
         panic!("the second query's answer fills the list");
     };
@@ -188,7 +187,7 @@ fn a_refused_member_send_fails_the_list_or_keeps_its_page() {
             .is_err()
     );
     assert!(matches!(
-        driver.session.groups.supergroup_members.get(&key),
+        driver.session.groups.member_fetch(key),
         Some(SupergroupMembersFetch::NotSent(_))
     ));
     // The retry goes out and fills the list.
@@ -212,7 +211,7 @@ fn a_refused_member_send_fails_the_list_or_keeps_its_page() {
                 .is_err()
         );
         assert!(matches!(
-            driver.session.groups.supergroup_members.get(&search),
+            driver.session.groups.member_fetch(search),
             Some(SupergroupMembersFetch::NotSent(_))
         ));
         assert_eq!(driver.session.groups.member_query(search), "bob");
@@ -225,7 +224,7 @@ fn a_refused_member_send_fails_the_list_or_keeps_its_page() {
             .is_err()
     );
     assert!(matches!(
-        driver.session.groups.supergroup_members.get(&key),
+        driver.session.groups.member_fetch(key),
         Some(SupergroupMembersFetch::Loaded { members, .. }) if members.len() == 3
     ));
     drop(dir);

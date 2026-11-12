@@ -16,9 +16,9 @@ the re-sweep of 2026-11-11), and this check counts both:
 - `unmatched`: a call to `Fetch::succeed`, which sets the answer whatever
   request it came from. An older request's late answer overwrites a newer
   one.
-- `counter`: a `generation`, `epoch` or `token` number (`uN` or
-  `Option<uN>`) in a variant of a `*Purpose` enum, listed by enum and
-  variant. A counter in the purpose stands in for the `RequestId`: the
+- `counter`: a `generation`, `epoch`, `token`, `ticket` or `seq` number
+  (`uN` or `Option<uN>`) in a variant of any `*Purpose` enum (in any file,
+  not only one named `purpose`), listed by enum and variant. A counter in the purpose stands in for the `RequestId`: the
   stage has to bump it by hand to tell its own answer from an older one,
   a stage that forgets answers the wrong request, and a duplicate request
   for the same stamp cannot be told apart (r3 sweep: shared-media tabs,
@@ -77,7 +77,7 @@ AFTER = 400
 PURPOSE_ENUM = re.compile(r"\benum\s+(\w*Purpose)\b[^{;]*\{")
 VARIANT = re.compile(r"\b([A-Z]\w*)\s*[{(]")
 COUNTER = re.compile(
-    r"\b(?:generation|epoch|token)\s*:\s*(?:Option\s*<\s*)?u(?:8|16|32|64)\b"
+    r"\b(?:generation|epoch|token|ticket|seq)\s*:\s*(?:Option\s*<\s*)?u(?:8|16|32|64)\b"
 )
 
 
@@ -140,6 +140,10 @@ def self_test():
     assert found("    Labels { epoch: Option<u32> },\n    Link { token: u8 },\n") == [
         ("Labels", 2),
         ("Link", 3),
+    ]
+    assert found("    Lookup { ticket: u64 },\n    Page { seq: u64 },\n") == [
+        ("Lookup", 2),
+        ("Page", 3),
     ]
     assert not found("    Plain { request: u64 },\n    Id(u64),\n    Unit,\n")
     assert not list(counter_hits("pub enum Stage { Jump { generation: u64 } }\n"))

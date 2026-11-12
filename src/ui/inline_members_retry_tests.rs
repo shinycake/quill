@@ -5,7 +5,7 @@ use crate::ui::app::QuillApp;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use gpui_kit::component::Root;
 use gpui_kit::{AppContext, Entity, TestAppContext, px, size};
-use quill::state::{InfoPanelTarget, MemberListFilter, MoreMembers};
+use quill::state::{InfoPanelTarget, MemberList, MemberListFilter, MoreMembers};
 use quill::telegram::envelope::ChatKind;
 
 fn demo(cx: &mut TestAppContext) -> Entity<QuillApp> {
@@ -54,7 +54,20 @@ fn a_failed_page_is_asked_for_again_at_the_next_scroll(cx: &mut TestAppContext) 
     let set = |app: &Entity<QuillApp>, cx: &mut TestAppContext, more: MoreMembers| {
         app.update(cx, |app, _| {
             if let Some(session) = app.session_mut() {
-                session.groups.member_asks.entry(key).or_default().more = more;
+                session
+                    .groups
+                    .supergroup_members
+                    .entry(key)
+                    .or_insert_with(|| {
+                        MemberList::of(
+                            "",
+                            quill::state::SupergroupMembersFetch::Loaded {
+                                members: Vec::new(),
+                                total_count: 0,
+                            },
+                        )
+                    })
+                    .more = more;
             }
         })
     };
@@ -79,7 +92,7 @@ fn a_failed_page_is_asked_for_again_at_the_next_scroll(cx: &mut TestAppContext) 
 
 /// Recent members failed, so the block falls back to the administrators.
 /// That fallback is asked while the cache has no entry for it, so a list
-/// that fails too does not loop; Retry (the list going stale) drops the
+/// that fails too does not loop; Retry drops the
 /// failed entry and asks again.
 #[gpui_kit::test]
 fn the_administrators_fallback_is_asked_once_until_retry(cx: &mut TestAppContext) {
@@ -94,7 +107,7 @@ fn the_administrators_fallback_is_asked_once_until_retry(cx: &mut TestAppContext
     };
     app.update(cx, |app, cx| {
         if let Some(session) = app.session_mut() {
-            session.groups.supergroup_members.insert(
+            session.groups.set_member_fetch(
                 (chat, MemberListFilter::Recent),
                 quill::state::SupergroupMembersFetch::Failed("CHANNEL_PRIVATE".into()),
             );
@@ -105,7 +118,7 @@ fn the_administrators_fallback_is_asked_once_until_retry(cx: &mut TestAppContext
     assert!(!held(&app, cx), "nothing was sent, so nothing is held");
     app.update(cx, |app, cx| {
         if let Some(session) = app.session_mut() {
-            session.groups.supergroup_members.insert(
+            session.groups.set_member_fetch(
                 admins,
                 quill::state::SupergroupMembersFetch::Failed("CHANNEL_PRIVATE".into()),
             );
@@ -116,12 +129,15 @@ fn the_administrators_fallback_is_asked_once_until_retry(cx: &mut TestAppContext
         held(&app, cx),
         "a failed list is not asked again by a frame"
     );
+    // A membership change leaves a failed list as it is (it draws Retry).
     app.update(cx, |app, cx| {
         if let Some(session) = app.session_mut() {
-            session.groups.members_added(chat);
+            session.groups.members_changed(chat);
         }
-        app.inline_members_stale(&[chat], cx);
+        app.inline_members_refresh_stale(cx);
     });
+    assert!(held(&app, cx), "a failed list keeps its Retry");
+    app.update(cx, |app, cx| app.inline_members_retry(cx));
     assert!(!held(&app, cx), "Retry drops the failed list to ask again");
 }
 
@@ -152,9 +168,21 @@ fn the_block_starts_over_each_time_the_panel_opens(cx: &mut TestAppContext) {
     let stale = |app: &Entity<QuillApp>, cx: &mut TestAppContext| {
         app.update(cx, |app, _| {
             if let Some(session) = app.session_mut() {
-                session.groups.member_asks.entry(key).or_default().more =
-                    MoreMembers::Failed { offset: 40 };
-                session.groups.supergroup_members.insert(
+                session
+                    .groups
+                    .supergroup_members
+                    .entry(key)
+                    .or_insert_with(|| {
+                        MemberList::of(
+                            "",
+                            quill::state::SupergroupMembersFetch::Loaded {
+                                members: Vec::new(),
+                                total_count: 0,
+                            },
+                        )
+                    })
+                    .more = MoreMembers::Failed { offset: 40 };
+                session.groups.set_member_fetch(
                     (chat, MemberListFilter::Administrators),
                     quill::state::SupergroupMembersFetch::Failed("gone".into()),
                 );
@@ -208,8 +236,7 @@ fn a_locally_refused_send_keeps_the_recent_list(cx: &mut TestAppContext) {
             if let Some(session) = app.session_mut() {
                 session
                     .groups
-                    .supergroup_members
-                    .insert((chat, MemberListFilter::Recent), fetch);
+                    .set_member_fetch((chat, MemberListFilter::Recent), fetch);
             }
             app.inline_members_filter(shape)
         })
@@ -230,4 +257,34 @@ fn a_locally_refused_send_keeps_the_recent_list(cx: &mut TestAppContext) {
         ),
         MemberListFilter::Administrators
     );
+}
+
+/// The poll asks again for the list that went stale, not for the text
+/// typed in the search box since: nothing was searched for.
+#[gpui_kit::test]
+fn the_poll_refreshes_the_shown_list_not_the_typed_text(cx: &mut TestAppContext) {
+    let (app, window) = demo_window(cx);
+    let chat = open_group_panel(&app, cx);
+    window
+        .update(cx, |_, window, cx| {
+            app.update(cx, |app, cx| {
+                app.open_member_dialog_on(
+                    quill::ids::ChatId(chat),
+                    crate::ui::dialogs::member::MemberTab::All,
+                    window,
+                    cx,
+                );
+                if let Some(dialog) = app.admin.member_dialog.as_ref() {
+                    dialog
+                        .search_input
+                        .update(cx, |input, cx| input.set_value("abc", window, cx));
+                }
+                app.refresh_shown_member_dialog(cx);
+            })
+        })
+        .expect("the window is open");
+    app.read_with(cx, |app, _| {
+        let dialog = app.admin.member_dialog.as_ref().expect("the dialog");
+        assert_eq!(dialog.searched, "", "the poll did not search for the text");
+    });
 }

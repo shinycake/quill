@@ -20,9 +20,9 @@ impl AiComposePurpose {
     pub(crate) fn kind(&self) -> RequestKind {
         match self {
             Self::SearchStyle | Self::GetExample => RequestKind::Lookup,
-            Self::BoxCompose { .. }
-            | Self::BoxFix { .. }
-            | Self::ApplyInPlace { .. }
+            Self::BoxCompose
+            | Self::BoxFix
+            | Self::ApplyInPlace
             | Self::CreateStyle
             | Self::EditStyle
             | Self::DeleteStyle

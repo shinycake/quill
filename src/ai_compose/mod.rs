@@ -22,14 +22,3 @@ pub use diff::*;
 pub use limit::*;
 pub use preview::*;
 pub use style::*;
-
-use std::sync::atomic::{AtomicU64, Ordering};
-
-static NEXT_TOKEN: AtomicU64 = AtomicU64::new(1);
-
-/// A token no other AI compose request of this process carries, so an
-/// answer for a closed box (or an older request of the same box) is never
-/// taken for the current one.
-pub fn fresh_token() -> u64 {
-    NEXT_TOKEN.fetch_add(1, Ordering::Relaxed)
-}

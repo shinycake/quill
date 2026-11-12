@@ -24,7 +24,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let purpose = RequestPurpose::Messages(MessagesPurpose::GetSharingProtection { chat_id });
-        if self.session.requests.has_purpose(purpose) {
+        if self.session.groups.private_sharing.asking(chat_id) {
             return Ok(None);
         }
         let recent = self
@@ -43,16 +43,25 @@ impl<S: JsonSender> ConnectDriver<S> {
             return self.set_chat_protected_content(chat_id, false);
         };
         let extra = self.session.request(purpose, Some(chat_id));
-        self.send_json_request(extra, &get_message_properties(extra, chat_id, message_id))
-            .map(Some)
+        let sent = self
+            .send_json_request(extra, &get_message_properties(extra, chat_id, message_id))
+            .map(Some);
+        // Asked once the request is out; the lookup's answer or error (or
+        // the box closing) leaves the stage.
+        if sent.is_ok() {
+            self.session.groups.private_sharing.enable = EnableSharing::Asking {
+                chat: chat_id,
+                request: extra,
+            };
+        }
+        sent
     }
 
     pub(crate) fn apply_resolved_enable_sharing(&mut self) -> Result<(), ConnectSendError> {
-        let Some(EnableSharing::TurnOff(chat_id)) = self.session.groups.private_sharing.enable
-        else {
+        let EnableSharing::TurnOff(chat_id) = self.session.groups.private_sharing.enable else {
             return Ok(());
         };
-        self.session.groups.private_sharing.enable = None;
+        self.session.groups.private_sharing.enable = EnableSharing::Idle;
         self.set_chat_protected_content(chat_id, false).map(|_| ())
     }
 
@@ -65,13 +74,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         // refused leaves it open to try again.
         let sent = self.set_chat_protected_content(chat_id, false);
         if matches!(sent, Ok(Some(_))) {
-            self.session.groups.private_sharing.enable = None;
+            self.session.groups.private_sharing.enable = EnableSharing::Idle;
         }
         sent
     }
 
     pub fn close_sharing_request_box(&mut self) {
-        self.session.groups.private_sharing.enable = None;
+        self.session.groups.private_sharing.enable = EnableSharing::Idle;
     }
 
     /// Accept or Reject under an incoming request; a second press while

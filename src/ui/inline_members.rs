@@ -87,12 +87,17 @@ impl QuillApp {
             session.groups.forget_member_more(shape.chat.0);
             session.groups.forget_failed_member_lists(shape.chat.0);
         }
-        self.inline_members_fetch(shape, cx);
+        self.inline_members_fetch(shape, MemberListFilter::Recent, cx);
         cx.notify();
     }
 
     /// Ask for the page the block shows (deduped by the driver).
-    fn inline_members_fetch(&mut self, shape: GroupShape, cx: &mut Context<Self>) {
+    fn inline_members_fetch(
+        &mut self,
+        shape: GroupShape,
+        filter: MemberListFilter,
+        cx: &mut Context<Self>,
+    ) {
         let Some(live) = self.live.as_mut() else {
             return;
         };
@@ -102,7 +107,7 @@ impl QuillApp {
                 .map(|_| ())
         } else {
             live.driver
-                .fetch_supergroup_members(shape.chat, MemberListFilter::Recent, "")
+                .fetch_supergroup_members(shape.chat, filter, "")
                 .map(|_| ())
         };
         if result.is_err() {
@@ -111,17 +116,35 @@ impl QuillApp {
         }
     }
 
-    /// Membership changed (`updateChatMember` dropped the cached pages):
-    /// fetch again if the panel is showing that group.
-    pub(super) fn inline_members_stale(&mut self, stale: &[i64], cx: &mut Context<Self>) {
+    /// Retry on a failed first page: ask for it again.
+    pub(super) fn inline_members_retry(&mut self, cx: &mut Context<Self>) {
         let Some(shape) = self.inline_members_current() else {
             return;
         };
-        if stale.contains(&shape.chat.0) {
-            if let Some(session) = self.session_mut() {
-                session.groups.forget_member_more(shape.chat.0);
+        if let Some(session) = self.session_mut() {
+            session.groups.forget_member_more(shape.chat.0);
+            session.groups.forget_failed_member_lists(shape.chat.0);
+        }
+        self.inline_members_fetch(shape, MemberListFilter::Recent, cx);
+        cx.notify();
+    }
+
+    /// Membership changed (`updateChatMember` made the cached pages
+    /// `Stale`): fetch again if the panel shows a stale list of that group.
+    pub(super) fn inline_members_refresh_stale(&mut self, cx: &mut Context<Self>) {
+        let Some(shape) = self.inline_members_current() else {
+            return;
+        };
+        let filter = self.inline_members_filter(shape);
+        let stale = self.session().is_some_and(|session| {
+            if shape.is_basic {
+                session.groups.basic_members_are_stale(shape.chat.0)
+            } else {
+                session.groups.member_list_is_stale((shape.chat.0, filter))
             }
-            self.inline_members_fetch(shape, cx);
+        });
+        if stale {
+            self.inline_members_fetch(shape, filter, cx);
             cx.notify();
         }
     }
@@ -195,7 +218,7 @@ impl QuillApp {
             if let Some(Err(_)) = sent
                 && let Some(session) = self.session_mut()
             {
-                session.groups.supergroup_members.insert(
+                session.groups.set_member_fetch(
                     (shape.chat.0, MemberListFilter::Administrators),
                     SupergroupMembersFetch::Failed(
                         tr(keys::Q_MEDIA_COULD_NOT_LOAD_MEMBERS).to_string(),
@@ -256,10 +279,7 @@ impl QuillApp {
         let fetch = if shape.is_basic {
             session.groups.basic_group_members.get(&shape.chat.0)
         } else {
-            session
-                .groups
-                .supergroup_members
-                .get(&(shape.chat.0, filter))
+            session.groups.member_fetch((shape.chat.0, filter))
         };
         match fetch {
             Some(SupergroupMembersFetch::Loaded {
@@ -278,8 +298,7 @@ impl QuillApp {
             matches!(
                 session
                     .groups
-                    .supergroup_members
-                    .get(&(shape.chat.0, MemberListFilter::Recent)),
+                    .member_fetch((shape.chat.0, MemberListFilter::Recent)),
                 Some(SupergroupMembersFetch::Failed(_))
             )
         });

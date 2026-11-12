@@ -496,6 +496,10 @@ pub enum AdminListFetch {
     Loading(RequestId),
     Loaded(Vec<ChatAdministratorEntry>),
     Failed(String),
+    /// A membership change made the list out of date and nobody asked
+    /// again yet; no request is out. Whoever shows the list (or the poll,
+    /// for the one on screen) asks, which moves it to `Loading`.
+    Stale,
 }
 
 /// B4: one `getPollVoters` page (schema 1.8.67, line 12941) backing the
@@ -909,6 +913,7 @@ pub enum DeepLinkState {
     },
     /// Follow-up request (`searchPublicChat` / `createPrivateChat` /
     /// `checkChatInviteLink` / confirmed `joinChatByInviteLink` / `getChat`) in flight.
+    /// Only the answer or error of `request` leaves this stage.
     ResolvingChat {
         action: DeepLinkAction,
         request: RequestId,

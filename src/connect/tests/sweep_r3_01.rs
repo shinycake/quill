@@ -163,7 +163,7 @@ fn star_packs_and_wearable_gifts_wait_for_their_own_request() {
 #[test]
 fn a_style_lookup_is_settled_by_its_own_request_and_a_lost_one_fails_it() {
     let mut t = Flaky::new();
-    t.driver.search_text_composition_style("pirate", 5).unwrap();
+    t.driver.search_text_composition_style("pirate").unwrap();
     let request = t.sender.last("searchTextCompositionStyle").unwrap()["@extra"].clone();
     let lookup = t
         .driver
@@ -207,7 +207,10 @@ fn a_style_lookup_is_settled_by_its_own_request_and_a_lost_one_fails_it() {
             .style_lookup
             .as_ref()
             .map(|l| &l.outcome),
-        Some(StyleReply::Answered(Err(StyleError::Other(_))))
+        Some(StyleReply::Answered {
+            outcome: Err(StyleError::Other(_)),
+            ..
+        })
     ));
 }
 

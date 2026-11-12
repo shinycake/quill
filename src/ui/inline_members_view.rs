@@ -148,7 +148,7 @@ impl QuillApp {
                 "inline-members-retry",
                 tr(keys::Q_MEDIA_RETRY),
                 cx.listener(move |this, _, _, cx| {
-                    this.inline_members_stale(&[chat_id.0], cx);
+                    this.inline_members_retry(cx);
                 }),
             ));
         } else if view.rows.is_empty() {
@@ -191,10 +191,7 @@ impl QuillApp {
         let fetch = if shape.is_basic {
             session.groups.basic_group_members.get(&shape.chat.0)
         } else {
-            session
-                .groups
-                .supergroup_members
-                .get(&(shape.chat.0, filter))
+            session.groups.member_fetch((shape.chat.0, filter))
         };
         let (members, total, stage) = match fetch {
             Some(SupergroupMembersFetch::Loaded {
@@ -213,7 +210,14 @@ impl QuillApp {
                 last.total_count,
                 MembersFetchView::Fetching,
             ),
-            Some(SupergroupMembersFetch::Loading { .. }) => {
+            // A stale list keeps its last page up; whoever shows it (the
+            // poll, for the one on screen) asks again.
+            Some(SupergroupMembersFetch::Stale { last: Some(last) }) if !admins_only => (
+                last.members.clone(),
+                last.total_count,
+                MembersFetchView::Fetching,
+            ),
+            Some(SupergroupMembersFetch::Loading { .. } | SupergroupMembersFetch::Stale { .. }) => {
                 (Vec::new(), 0, MembersFetchView::Fetching)
             }
             None => (Vec::new(), 0, MembersFetchView::Fetching),

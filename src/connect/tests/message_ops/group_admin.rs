@@ -812,8 +812,7 @@ fn a_refused_member_fetch_is_a_failed_list() {
         driver
             .session
             .groups
-            .supergroup_members
-            .get(&(13, crate::state::MemberListFilter::Recent)),
+            .member_fetch((13, crate::state::MemberListFilter::Recent)),
         Some(crate::state::SupergroupMembersFetch::NotSent(_))
     ));
     let _ = std::fs::remove_dir_all(&dir);

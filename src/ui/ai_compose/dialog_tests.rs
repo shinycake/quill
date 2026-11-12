@@ -287,16 +287,18 @@ fn a_chat_windows_style_preview_takes_its_answer_in_its_own_frame(cx: &mut TestA
     })
     .expect("the chat window is open");
     app.update(cx, |app, cx| {
-        let token = app
+        let request = app
             .ai_compose
             .preview
             .as_ref()
-            .and_then(|p| p.lookup_token());
-        if let (Some(token), Some(session)) = (token, app.demo_session.as_mut()) {
+            .and_then(|p| p.lookup_request());
+        if let (Some(request), Some(session)) = (request, app.demo_session.as_mut()) {
             session.messages.ai_compose.style_lookup = Some(quill::state::StyleLookup {
-                token,
                 name: "formal".into(),
-                outcome: quill::state::StyleReply::Answered(Err(quill::state::StyleError::Invalid)),
+                outcome: quill::state::StyleReply::Answered {
+                    request,
+                    outcome: Err(quill::state::StyleError::Invalid),
+                },
             });
         }
         cx.notify();
@@ -349,14 +351,13 @@ fn the_box_closes_when_the_view_moves_to_another_topic(cx: &mut TestAppContext) 
 #[gpui_kit::test]
 fn the_shortcuts_answer_skips_another_topic(cx: &mut TestAppContext) {
     use crate::ui::ai_compose_state::ApplyInPlace;
-    use quill::state::ApplyInPlaceAnswer;
     let (app, mut main) = open_main(cx);
     close_box(&app, &mut main);
     set_draft(&app, &mut main, "the topic's own draft");
     app.update(&mut main, |app, _| {
         let conversation = app.open_conversation().expect("a chat is open");
         app.ai_compose.apply_in_place = Some(ApplyInPlace {
-            token: 41,
+            request: quill::ids::RequestId(41),
             account: quill::ids::AccountKey::primary(),
             field: "the topic's own draft".into(),
             conversation,
@@ -370,10 +371,10 @@ fn the_shortcuts_answer_skips_another_topic(cx: &mut TestAppContext) {
     set_draft(&app, &mut main, "the next topic's draft");
     app.update(&mut main, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.messages.ai_compose.apply_in_place = Some(ApplyInPlaceAnswer {
-                token: 41,
-                outcome: Ok(("Rewritten for the first topic".into(), Vec::new())),
-            });
+            session.messages.ai_compose.apply_answers.push(
+                quill::ids::RequestId(41),
+                Ok(("Rewritten for the first topic".into(), Vec::new())),
+            );
         }
         cx.notify();
     });
@@ -388,14 +389,13 @@ fn the_shortcuts_answer_skips_another_topic(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn the_shortcuts_answer_skips_a_draft_typed_on_meanwhile(cx: &mut TestAppContext) {
     use crate::ui::ai_compose_state::ApplyInPlace;
-    use quill::state::ApplyInPlaceAnswer;
     let (app, mut main) = open_main(cx);
     close_box(&app, &mut main);
     set_draft(&app, &mut main, "Hello there");
     app.update(&mut main, |app, _| {
         let conversation = app.open_conversation().expect("a chat is open");
         app.ai_compose.apply_in_place = Some(ApplyInPlace {
-            token: 42,
+            request: quill::ids::RequestId(42),
             account: quill::ids::AccountKey::primary(),
             field: "Hello there".into(),
             conversation,
@@ -407,10 +407,10 @@ fn the_shortcuts_answer_skips_a_draft_typed_on_meanwhile(cx: &mut TestAppContext
     set_draft(&app, &mut main, "Typed on after pressing");
     app.update(&mut main, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.messages.ai_compose.apply_in_place = Some(ApplyInPlaceAnswer {
-                token: 42,
-                outcome: Ok(("Rewritten".into(), Vec::new())),
-            });
+            session.messages.ai_compose.apply_answers.push(
+                quill::ids::RequestId(42),
+                Ok(("Rewritten".into(), Vec::new())),
+            );
         }
         cx.notify();
     });

@@ -106,12 +106,8 @@ impl QuillApp {
         };
         let groups = &session.groups;
         let lists = [
-            groups
-                .supergroup_members
-                .get(&(chat_id.0, MemberListFilter::Administrators)),
-            groups
-                .supergroup_members
-                .get(&(chat_id.0, MemberListFilter::Recent)),
+            groups.member_fetch((chat_id.0, MemberListFilter::Administrators)),
+            groups.member_fetch((chat_id.0, MemberListFilter::Recent)),
             groups.basic_group_members.get(&chat_id.0),
         ];
         let has_people = lists.iter().any(|list| {
@@ -120,10 +116,12 @@ impl QuillApp {
         if has_people {
             return PoolView::Ready;
         }
-        if lists
-            .iter()
-            .any(|list| matches!(list, Some(SupergroupMembersFetch::Loading { .. })))
-        {
+        if lists.iter().any(|list| {
+            matches!(
+                list,
+                Some(SupergroupMembersFetch::Loading { .. } | SupergroupMembersFetch::Stale { .. })
+            )
+        }) {
             return PoolView::Loading;
         }
         lists
@@ -145,7 +143,7 @@ impl QuillApp {
         let mut pool: Vec<ParsedChatMember> = Vec::new();
         for filter in [MemberListFilter::Administrators, MemberListFilter::Recent] {
             if let Some(SupergroupMembersFetch::Loaded { members, .. }) =
-                session.groups.supergroup_members.get(&(chat_id.0, filter))
+                session.groups.member_fetch((chat_id.0, filter))
             {
                 pool.extend(members.iter().cloned());
             }

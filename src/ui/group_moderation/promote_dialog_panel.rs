@@ -37,13 +37,7 @@ impl QuillApp {
             // Only the page asked with this query: an older search's
             // rows never show under the new text.
             (session.groups.member_query((chat_id.0, filter)) == searched)
-                .then(|| {
-                    session
-                        .groups
-                        .supergroup_members
-                        .get(&(chat_id.0, filter))
-                        .cloned()
-                })
+                .then(|| session.groups.member_fetch((chat_id.0, filter)).cloned())
                 .flatten()
         });
         let mut panel = div()
@@ -73,7 +67,9 @@ impl QuillApp {
                     ),
             );
         match members {
-            None | Some(SupergroupMembersFetch::Loading { .. }) => {
+            None
+            | Some(SupergroupMembersFetch::Loading { .. } | SupergroupMembersFetch::Stale { .. }) =>
+            {
                 panel = panel.child(
                     div()
                         .text_sm()

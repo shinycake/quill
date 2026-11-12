@@ -55,12 +55,11 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// The compose box's request: `composeTextWithAi` for Translate and
     /// Style, `fixTextWithAi` for Fix. The answer lands in
-    /// `AiComposeState::box_answer` with `token`.
+    /// `AiComposeState::box_answers` under the returned request.
     pub fn ai_box_request(
         &mut self,
         chat_id: ChatId,
         request: &AiRequest,
-        token: u64,
     ) -> Result<RequestId, ConnectSendError> {
         let text = match request {
             AiRequest::Compose { text, .. } | AiRequest::Fix { text } => text,
@@ -75,13 +74,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                 translate_to,
                 style_name,
                 add_emojis,
-            } => self.send_ai_compose(
-                AiComposePurpose::BoxCompose { token },
-                Some(chat_id),
-                |extra| compose_text_with_ai(extra, text, translate_to, style_name, *add_emojis),
-            ),
+            } => self.send_ai_compose(AiComposePurpose::BoxCompose, Some(chat_id), |extra| {
+                compose_text_with_ai(extra, text, translate_to, style_name, *add_emojis)
+            }),
             AiRequest::Fix { text } => {
-                self.send_ai_compose(AiComposePurpose::BoxFix { token }, Some(chat_id), |extra| {
+                self.send_ai_compose(AiComposePurpose::BoxFix, Some(chat_id), |extra| {
                     fix_text_with_ai(extra, text)
                 })
             }
@@ -90,23 +87,21 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// The apply-in-place shortcut (tdesktop `TriggerAiApplyInPlace`):
     /// `composeTextWithAi(text, "", style_name, false)` on the selection or
-    /// the whole field. The answer lands in `AiComposeState::apply_in_place`.
+    /// the whole field. The answer lands in `AiComposeState::apply_answers`
+    /// under the returned request.
     pub fn ai_apply_in_place(
         &mut self,
         chat_id: ChatId,
         text: &str,
         style_name: &str,
-        token: u64,
     ) -> Result<RequestId, ConnectSendError> {
         if text.trim().is_empty() || style_name.is_empty() {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.ai_compose_guard(chat_id)?;
-        self.send_ai_compose(
-            AiComposePurpose::ApplyInPlace { token },
-            Some(chat_id),
-            |extra| compose_text_with_ai(extra, text, "", style_name, false),
-        )
+        self.send_ai_compose(AiComposePurpose::ApplyInPlace, Some(chat_id), |extra| {
+            compose_text_with_ai(extra, text, "", style_name, false)
+        })
     }
 
     fn style_fields_fit(&self, title: &str, prompt: &str) -> bool {
@@ -115,7 +110,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// `createTextCompositionStyle`; the new style lands in
-    /// `AiComposeState::style_edit` (under the returned request) and the
+    /// `AiComposeState::style_edits` (under the returned request) and the
     /// front of the style list.
     pub fn create_text_composition_style(
         &mut self,
@@ -180,7 +175,6 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn search_text_composition_style(
         &mut self,
         name: &str,
-        token: u64,
     ) -> Result<RequestId, ConnectSendError> {
         if name.is_empty() || !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
@@ -189,7 +183,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             text_composition_style_by_name(extra, StyleByName::Search, name)
         })?;
         self.session.messages.ai_compose.style_lookup = Some(StyleLookup {
-            token,
             name: name.to_string(),
             outcome: StyleReply::Running { request: extra },
         });
@@ -203,7 +196,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         name: &str,
         example_number: i32,
-        token: u64,
     ) -> Result<RequestId, ConnectSendError> {
         let count = self.session.messages.ai_compose.limits.example_count;
         let in_range = usize::try_from(example_number)
@@ -215,7 +207,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             get_text_composition_style_example(extra, name, example_number)
         })?;
         self.session.messages.ai_compose.example = Some(ExampleAnswer {
-            token,
             style_name: name.to_string(),
             outcome: StyleReply::Running { request: extra },
         });

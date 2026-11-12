@@ -157,8 +157,7 @@ fn a_refused_request_leaves_the_box_open() {
     f.1.send_sharing_request().unwrap().unwrap();
     // The same toggle is still out: a second Send is refused, and the box
     // that asked stays for another try.
-    f.1.session.groups.private_sharing.enable =
-        Some(crate::state::EnableSharing::AskToRequest(CHAT));
+    f.1.session.groups.private_sharing.enable = crate::state::EnableSharing::AskToRequest(CHAT);
     assert_eq!(f.1.send_sharing_request().unwrap(), None);
     assert_eq!(
         f.1.session.groups.private_sharing.request_box_chat(),

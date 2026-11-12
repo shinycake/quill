@@ -10,9 +10,11 @@ impl Session {
         match pending.purpose {
             RequestPurpose::Chats(ChatsPurpose::DeleteDefaultBackground { for_dark_theme }) => {
                 self.chats_state.default_backgrounds.remove(&for_dark_theme);
+                self.chats_state.background_error = None;
             }
             RequestPurpose::Chats(ChatsPurpose::RemoveInstalledBackground { background_id }) => {
                 self.chats_state.installed_backgrounds.forget(background_id);
+                self.chats_state.background_error = None;
             }
             RequestPurpose::DeleteChatBackground => {
                 if let Some(chat_id) = pending.chat_id {
@@ -644,7 +646,7 @@ impl Session {
             }
             // `parity:platform-deep-links`: `getDeepLinkInfo` answer. The
             // actionable destination is parsed from the `textEntityTypeTextUrl`
-            // entities; the generation guard drops stale answers. The UI
+            // entities; the stage waits for its request only. The UI
             // consumes `Info` once (follow-up request, or a dialog with
             // `text` when there is no action / an update is required).
             ChatsPayload::DeepLinkInfo {

@@ -328,23 +328,24 @@ fn set_chat_member_status_ok_invalidates_admin_list() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(!session.groups.admin_lists.contains_key(&13));
-    // `updateChatMember` reaches bots only: the `ok` itself marks the chat
-    // for the UI's refetch, so the list never waits on nothing.
-    assert_eq!(session.groups.member_list_stale, vec![13]);
+    // `updateChatMember` reaches bots only: the `ok` itself makes the list
+    // `Stale`, so it is asked again instead of waiting on nothing.
+    assert!(session.groups.admin_list_is_stale(13));
+    assert_eq!(session.groups.stale_admin_chats(), vec![13]);
 }
 
-/// The add's answer is the only word a user client gets: it marks the
-/// member lists stale so the dialog and the info panel ask again.
+/// The add's answer is the only word a user client gets: it makes the
+/// member lists `Stale` (a loaded page stays drawn) so the dialog and the
+/// info panel ask again.
 #[test]
 fn adding_members_marks_the_member_list_stale() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     session.groups.basic_group_members.insert(
         13,
-        crate::state::SupergroupMembersFetch::Loading {
-            request: None,
-            last: None,
+        crate::state::SupergroupMembersFetch::Loaded {
+            members: Vec::new(),
+            total_count: 0,
         },
     );
     let extra = session.request(RequestPurpose::AddChatMember, Some(ChatId(13)));
@@ -357,19 +358,22 @@ fn adding_members_marks_the_member_list_stale() {
             extra.0
         ),
     );
-    assert!(!session.groups.basic_group_members.contains_key(&13));
-    assert_eq!(session.groups.member_list_stale, vec![13]);
+    assert!(session.groups.basic_members_are_stale(13));
 }
 
-/// A finished ownership transfer drops the member caches and marks the
-/// chat stale, so the lists on screen refetch instead of loading forever.
+/// A finished ownership transfer makes the member caches `Stale`, so the
+/// lists on screen refetch instead of loading forever.
 #[test]
 fn an_ownership_transfer_marks_the_member_list_stale() {
     let (mut session, _sink) = session();
+    session
+        .groups
+        .admin_lists
+        .insert(13, AdminListFetch::Loaded(Vec::new()));
     let request = session.request(RequestPurpose::Other, None);
     session.begin_ownership_transfer(request, 13, 888, false);
     session.finish_ownership_transfer(Some(request), 888, Some(13));
-    assert_eq!(session.groups.member_list_stale, vec![13]);
+    assert!(session.groups.admin_list_is_stale(13));
 }
 
 #[test]
@@ -402,7 +406,7 @@ fn update_chat_member_invalidates_admin_list_and_own_rights() {
         &sink,
         r#"{"@type":"updateChatMember","chat_id":13,"actor_user_id":777,"date":1,"invite_link":null,"via_join_request":false,"via_chat_folder_invite_link":false,"old_chat_member":{"@type":"chatMember","member_id":{"@type":"messageSenderUser","user_id":888},"status":{"@type":"chatMemberStatusAdministrator","can_be_edited":true}},"new_chat_member":{"@type":"chatMember","member_id":{"@type":"messageSenderUser","user_id":888},"status":{"@type":"chatMemberStatusMember","member_until_date":0}}}"#,
     );
-    assert!(!session.groups.admin_lists.contains_key(&13));
+    assert!(session.groups.admin_list_is_stale(13));
 
     // Own promotion to administrator with the promote right.
     apply_json(
@@ -455,7 +459,47 @@ fn an_admin_list_asked_before_a_membership_change_is_dropped() {
             asked.0
         ),
     );
-    assert!(!session.groups.admin_lists.contains_key(&13));
+    assert!(
+        session.groups.admin_list_is_stale(13),
+        "the old answer fills nothing: the list waits to be asked again"
+    );
+}
+
+/// 08-005: an answer lands only on a list that is `Loading` as that very
+/// request: a missing entry (dropped by a closed box or a change) takes
+/// nothing, and neither does a list of another request.
+#[test]
+fn an_administrators_answer_needs_its_own_loading_list() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let answer = |extra: RequestId| {
+        format!(
+            r#"{{"@type":"chatAdministrators","@extra":"{}","administrators":[{{"@type":"chatAdministrator","user_id":888,"custom_title":"","is_owner":false,"can_be_edited":true}}]}}"#,
+            extra.0
+        )
+    };
+    let early = session.request(RequestPurpose::GetChatAdministrators, Some(ChatId(13)));
+    apply_json(&mut session, &seq, &sink, &answer(early));
+    assert!(
+        !session.groups.admin_lists.contains_key(&13),
+        "no list asked: nothing to fill"
+    );
+    let current = session.request(RequestPurpose::GetChatAdministrators, Some(ChatId(13)));
+    session
+        .groups
+        .admin_lists
+        .insert(13, AdminListFetch::Loading(current));
+    let other = session.request(RequestPurpose::GetChatAdministrators, Some(ChatId(13)));
+    apply_json(&mut session, &seq, &sink, &answer(other));
+    assert_eq!(
+        session.groups.admin_lists.get(&13),
+        Some(&AdminListFetch::Loading(current))
+    );
+    apply_json(&mut session, &seq, &sink, &answer(current));
+    assert!(matches!(
+        session.groups.admin_lists.get(&13),
+        Some(AdminListFetch::Loaded(_))
+    ));
 }
 
 #[test]
@@ -518,8 +562,7 @@ fn supergroup_members_fetch_caches() {
         total_count,
     } = session
         .groups
-        .supergroup_members
-        .get(&(13, MemberListFilter::Recent))
+        .member_fetch((13, MemberListFilter::Recent))
         .unwrap()
     else {
         panic!("members were not loaded");
@@ -540,7 +583,7 @@ fn basic_group_full_info_caches_members() {
     session.groups.basic_group_members.insert(
         13,
         SupergroupMembersFetch::Loading {
-            request: Some(extra),
+            request: extra,
             last: None,
         },
     );

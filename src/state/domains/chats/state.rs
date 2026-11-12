@@ -117,7 +117,9 @@ pub struct ChatsState {
     /// (`setDefaultBackground`, `getBackgroundUrl`), each under the
     /// request that asked. The preview takes its own and drops the rest.
     pub background_answers: Answers<BackgroundOutcome>,
-    /// One-shot: a wallpaper request failed; shown in Appearance.
+    /// The last wallpaper request that failed, drawn on the Appearance
+    /// page until a wallpaper change succeeds, the list is asked again, a
+    /// preview opens or the gallery is left (`clear_background_error`).
     pub background_error: Option<String>,
     /// `updateChatOnlineMemberCount`, keyed by chat id.
     pub chat_online_counts: HashMap<i64, i32>,

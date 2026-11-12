@@ -189,6 +189,31 @@ fn a_join_failure_is_shown_when_the_flow_sits_at_the_preview() {
     ));
 }
 
+/// 05-066 (r3-03): a failure of the request the flow waits for is shown, and an
+/// older request's (a Join the flow no longer waits for) is dropped.
+#[test]
+fn a_join_failure_of_an_older_request_is_dropped() {
+    let (mut session, sink) = session();
+    let old = session.request(RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin), None);
+    let current = session.request(RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin), None);
+    session
+        .chats_state
+        .enter_deep_link_stage(DeepLinkState::ResolvingChat {
+            action: DeepLinkAction::JoinInvite { hash: "h".into() },
+            request: current,
+        });
+    fail_request(&mut session, &sink, old, "INVITE_HASH_EXPIRED");
+    assert!(matches!(
+        session.chats_state.deep_link_stage().cloned(),
+        Some(DeepLinkState::ResolvingChat { .. })
+    ));
+    fail_request(&mut session, &sink, current, "INVITE_HASH_EXPIRED");
+    assert!(matches!(
+        session.chats_state.deep_link_stage().cloned(),
+        Some(DeepLinkState::ShowText(_))
+    ));
+}
+
 #[test]
 fn a_saved_messages_pin_over_the_limit_opens_its_own_box() {
     let (mut session, sink) = session();

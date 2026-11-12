@@ -1,5 +1,6 @@
 use super::*;
 use crate::ai_compose::TextCompositionStyle;
+use crate::ids::RequestId;
 
 fn result(text: &str) -> AiResult {
     AiResult {
@@ -29,17 +30,38 @@ fn styles(names: &[(&str, i64)]) -> StyleList {
     list
 }
 
-fn opened() -> (AiComposeBox, AiSend) {
+/// A request the box asked for and the driver sent as `id`.
+struct Sent {
+    id: RequestId,
+    request: AiRequest,
+}
+
+/// Run a box transition and, when it asks for a request, send it as a
+/// fresh request id, as the app's dispatch does.
+fn go(
+    ai: &mut AiComposeBox,
+    step: impl FnOnce(&mut AiComposeBox) -> Option<AiSend>,
+) -> Option<Sent> {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let send = step(ai)?;
+    let id = RequestId(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+    ai.sent(id);
+    Some(Sent {
+        id,
+        request: send.request,
+    })
+}
+
+fn opened() -> (AiComposeBox, Sent) {
     let mut ai = AiComposeBox::new("Hello there".into(), Some("en"), "de");
     assert_eq!(ai.start(), None);
-    let send = ai
-        .set_mode(AiComposeMode::Translate)
+    let send = go(&mut ai, |ai| ai.set_mode(AiComposeMode::Translate))
         .expect("the Translate tab asks at once");
     (ai, send)
 }
 
-fn token(send: &Option<AiSend>) -> u64 {
-    send.as_ref().map(|send| send.token).expect("a request")
+fn id(sent: &Option<Sent>) -> RequestId {
+    sent.as_ref().map(|sent| sent.id).expect("a request")
 }
 
 #[test]
@@ -56,7 +78,7 @@ fn opening_waits_on_the_style_tab() {
 fn translate_tab_targets_the_app_language() {
     let (ai, send) = opened();
     assert_eq!(ai.mode(), AiComposeMode::Translate);
-    assert_eq!(ai.card(), &CardState::Loading { token: send.token });
+    assert_eq!(ai.card(), &CardState::Loading { request: send.id });
     assert_eq!(
         send.request,
         AiRequest::Compose {
@@ -95,13 +117,13 @@ fn default_translate_target_follows_tdesktop() {
 #[test]
 fn answers_only_count_for_the_current_token() {
     let (mut ai, first) = opened();
-    let second = ai.set_translate_to("fr");
-    assert_ne!(token(&second), first.token);
-    assert_eq!(ai.accept(first.token, result("Hallo")), None);
+    let second = go(&mut ai, |ai| ai.set_translate_to("fr"));
+    assert_ne!(id(&second), first.id);
+    assert_eq!(ai.accept(first.id, result("Hallo")), None);
     assert!(ai.loading(), "stale answer ignored");
-    assert_eq!(ai.fail(first.token, AiBoxError::TooLong), None);
+    assert_eq!(ai.fail(first.id, AiBoxError::TooLong), None);
     assert!(ai.loading(), "stale error ignored");
-    assert_eq!(ai.accept(token(&second), result("Bonjour")), None);
+    assert_eq!(ai.accept(id(&second), result("Bonjour")), None);
     assert_eq!(ai.result().map(|r| r.text.as_str()), Some("Bonjour"));
     assert_eq!(ai.result_title(), ResultTitle::ToLanguage("fr".into()));
 }
@@ -110,7 +132,7 @@ fn answers_only_count_for_the_current_token() {
 fn empty_answer_fails_with_the_generic_error() {
     let (mut ai, send) = opened();
     assert_eq!(
-        ai.accept(send.token, result("")),
+        ai.accept(send.id, result("")),
         Some(AiBoxError::Other(String::new()))
     );
     assert_eq!(
@@ -124,14 +146,14 @@ fn empty_answer_fails_with_the_generic_error() {
 fn flood_premium_turns_the_footer_into_increase_limit() {
     let (mut ai, send) = opened();
     assert_eq!(
-        ai.fail(send.token, AiBoxError::FloodPremium),
+        ai.fail(send.id, AiBoxError::FloodPremium),
         Some(AiBoxError::FloodPremium)
     );
     assert!(ai.premium_flooded());
     assert_eq!(ai.footer(), FooterAction::IncreaseLimit);
-    let again = ai.set_mode(AiComposeMode::Fix);
+    let again = go(&mut ai, |ai| ai.set_mode(AiComposeMode::Fix));
     assert!(!ai.premium_flooded(), "the next request leaves the flood");
-    ai.accept(token(&again), result("fixed"));
+    ai.accept(id(&again), result("fixed"));
     assert_eq!(
         ai.footer(),
         FooterAction::Apply {
@@ -145,9 +167,9 @@ fn flood_premium_turns_the_footer_into_increase_limit() {
 #[test]
 fn clicking_the_active_tab_asks_again_after_a_failure() {
     let (mut ai, send) = opened();
-    ai.fail(send.token, AiBoxError::TooLong);
-    let again = ai.set_mode(AiComposeMode::Translate).map(|send| send.token);
-    assert!(again.is_some_and(|t| t != send.token));
+    ai.fail(send.id, AiBoxError::TooLong);
+    let again = go(&mut ai, |ai| ai.set_mode(AiComposeMode::Translate)).map(|sent| sent.id);
+    assert!(again.is_some_and(|t| t != send.id));
     assert!(ai.loading());
     assert_eq!(ai.set_mode(AiComposeMode::Translate), None);
 }
@@ -156,7 +178,7 @@ fn clicking_the_active_tab_asks_again_after_a_failure() {
 fn other_errors_fail_the_card_and_come_back_for_the_toast() {
     let (mut ai, send) = opened();
     assert_eq!(
-        ai.fail(send.token, AiBoxError::Other("SOME_ERROR".into())),
+        ai.fail(send.id, AiBoxError::Other("SOME_ERROR".into())),
         Some(AiBoxError::Other("SOME_ERROR".into()))
     );
     assert_eq!(
@@ -174,7 +196,7 @@ fn style_tab_waits_for_a_style() {
     assert_eq!(ai.footer(), FooterAction::SelectStyle);
     assert!(ai.emojify_visible(), "emojify alone can start a request");
     assert_eq!(ai.result_title(), ResultTitle::Original);
-    let send = ai.select_style("pirate");
+    let send = go(&mut ai, |ai| ai.select_style("pirate"));
     assert_eq!(
         send.as_ref().map(|send| &send.request),
         Some(&AiRequest::Compose {
@@ -191,7 +213,7 @@ fn style_tab_waits_for_a_style() {
             enabled: false
         }
     );
-    ai.accept(token(&send), result("Ahoy there"));
+    ai.accept(id(&send), result("Ahoy there"));
     assert_eq!(
         ai.footer(),
         FooterAction::Apply {
@@ -206,16 +228,16 @@ fn style_tab_waits_for_a_style() {
 fn reselecting_the_active_style_asks_again() {
     let (mut ai, _) = opened();
     ai.set_mode(AiComposeMode::Style);
-    let first = ai.select_style("pirate");
-    let second = ai.select_style("pirate");
-    assert_ne!(token(&first), token(&second));
+    let first = go(&mut ai, |ai| ai.select_style("pirate"));
+    let second = go(&mut ai, |ai| ai.select_style("pirate"));
+    assert_ne!(id(&first), id(&second));
 }
 
 #[test]
 fn emojify_alone_composes_in_the_style_tab() {
     let (mut ai, _) = opened();
     ai.set_mode(AiComposeMode::Style);
-    let send = ai.set_add_emojis(true);
+    let send = go(&mut ai, |ai| ai.set_add_emojis(true));
     assert_eq!(
         send.map(|send| send.request),
         Some(AiRequest::Compose {
@@ -233,7 +255,7 @@ fn emojify_alone_composes_in_the_style_tab() {
 #[test]
 fn fix_ignores_emojify_and_hides_it() {
     let (mut ai, _) = opened();
-    let send = ai.set_mode(AiComposeMode::Fix);
+    let send = go(&mut ai, |ai| ai.set_mode(AiComposeMode::Fix));
     assert_eq!(
         send.as_ref().map(|send| &send.request),
         Some(&AiRequest::Fix {
@@ -243,7 +265,7 @@ fn fix_ignores_emojify_and_hides_it() {
     assert_eq!(ai.set_add_emojis(true), None);
     assert!(ai.add_emojis());
     assert!(!ai.emojify_visible());
-    ai.accept(token(&send), result("Hello, there"));
+    ai.accept(id(&send), result("Hello, there"));
     assert!(!ai.emojify_visible());
     assert_eq!(
         ai.footer(),
@@ -257,7 +279,7 @@ fn fix_ignores_emojify_and_hides_it() {
 #[test]
 fn emojify_requests_with_emoji_in_translate() {
     let (mut ai, _) = opened();
-    let send = ai.set_add_emojis(true);
+    let send = go(&mut ai, |ai| ai.set_add_emojis(true));
     assert_eq!(
         send.map(|send| send.request),
         Some(AiRequest::Compose {
@@ -284,7 +306,9 @@ fn leaving_the_style_tab_drops_the_style() {
 #[test]
 fn translate_style_names_the_title_and_the_request() {
     let (mut ai, _) = opened();
-    let send = ai.select_translate_style(StyleChoice::Style("formal".into()));
+    let send = go(&mut ai, |ai| {
+        ai.select_translate_style(StyleChoice::Style("formal".into()))
+    });
     assert_eq!(
         send.as_ref().map(|send| &send.request),
         Some(&AiRequest::Compose {
@@ -306,7 +330,7 @@ fn translate_choices_outside_translate_wait_for_the_tab() {
     ai.set_mode(AiComposeMode::Fix);
     assert_eq!(ai.set_translate_to("it"), None);
     assert_eq!(ai.translate_to(), "it");
-    let send = ai.set_mode(AiComposeMode::Translate);
+    let send = go(&mut ai, |ai| ai.set_mode(AiComposeMode::Translate));
     assert!(matches!(
         send.map(|send| send.request),
         Some(AiRequest::Compose { translate_to, .. }) if translate_to == "it"
@@ -316,17 +340,17 @@ fn translate_choices_outside_translate_wait_for_the_tab() {
 #[test]
 fn footer_table_matches_rebuild_buttons() {
     let (mut flooded, send) = opened();
-    flooded.fail(send.token, AiBoxError::FloodPremium);
+    flooded.fail(send.id, AiBoxError::FloodPremium);
     let (loading_translate, _) = opened();
     let (mut ready_translate, send) = opened();
-    ready_translate.accept(send.token, result("Hallo"));
+    ready_translate.accept(send.id, result("Hallo"));
     let (mut failed_translate, send) = opened();
-    failed_translate.fail(send.token, AiBoxError::TooLong);
+    failed_translate.fail(send.id, AiBoxError::TooLong);
     let (mut waiting_style, _) = opened();
     waiting_style.set_mode(AiComposeMode::Style);
     let (mut loading_style, _) = opened();
     loading_style.set_mode(AiComposeMode::Style);
-    loading_style.select_style("pirate");
+    go(&mut loading_style, |ai| ai.select_style("pirate"));
     let cases = [
         (flooded, FooterAction::IncreaseLimit),
         (
@@ -368,15 +392,15 @@ fn footer_table_matches_rebuild_buttons() {
 fn author_shows_only_under_a_style_result_with_a_creator() {
     let list = styles(&[("pirate", 42), ("poet", 0)]);
     let (mut ai, send) = opened();
-    ai.accept(send.token, result("Hallo"));
+    ai.accept(send.id, result("Hallo"));
     assert_eq!(ai.author_user_id(&list), None, "translate result");
     ai.set_mode(AiComposeMode::Style);
-    let send = ai.select_style("pirate");
+    let send = go(&mut ai, |ai| ai.select_style("pirate"));
     assert_eq!(ai.author_user_id(&list), None, "still loading");
-    ai.accept(token(&send), result("Ahoy"));
+    ai.accept(id(&send), result("Ahoy"));
     assert_eq!(ai.author_user_id(&list), Some(42));
-    let send = ai.select_style("poet");
-    ai.accept(token(&send), result("Hark"));
+    let send = go(&mut ai, |ai| ai.select_style("poet"));
+    ai.accept(id(&send), result("Hark"));
     assert_eq!(ai.author_user_id(&list), None, "no creator");
 }
 
@@ -401,14 +425,16 @@ fn a_style_the_server_dropped_is_unpicked() {
 #[test]
 fn a_translate_style_the_server_dropped_asks_again() {
     let (mut ai, send) = opened();
-    let styled = ai.select_translate_style(StyleChoice::Style("formal".into()));
-    ai.accept(token(&styled), result("Förmlich"));
+    let styled = go(&mut ai, |ai| {
+        ai.select_translate_style(StyleChoice::Style("formal".into()))
+    });
+    ai.accept(id(&styled), result("Förmlich"));
     assert!(matches!(ai.card(), CardState::Ready(_)));
     let dropped = styles(&[("poet", 0)]);
-    let again = ai.refresh_styles(&dropped).expect("a fresh request");
+    let again = go(&mut ai, |ai| ai.refresh_styles(&dropped)).expect("a fresh request");
     assert_eq!(ai.translate_style(), &StyleChoice::None);
-    assert_ne!(again.token, send.token);
-    assert!(matches!(ai.card(), CardState::Loading { token } if *token == again.token));
+    assert_ne!(again.id, send.id);
+    assert!(matches!(ai.card(), CardState::Loading { request } if *request == again.id));
 }
 
 #[test]

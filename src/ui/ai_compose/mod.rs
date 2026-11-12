@@ -182,22 +182,23 @@ impl QuillApp {
         };
         let chat_id: ChatId = open.conversation.chat_id;
         let sent = match self.live.as_mut() {
-            Some(live) => live
-                .driver
-                .ai_box_request(chat_id, &send.request, send.token)
-                .is_ok(),
-            // A screenshot demo answers through its session.
-            None if self.demo_session.is_some() => return,
-            None => false,
+            Some(live) => live.driver.ai_box_request(chat_id, &send.request).ok(),
+            // A screenshot demo answers through its session, to a request of
+            // its own.
+            None => self
+                .demo_session
+                .as_mut()
+                .map(|session| session.request(quill::state::RequestPurpose::Other, Some(chat_id))),
         };
-        if sent {
-            return;
-        }
-        let error = self
-            .ai_compose
-            .open
-            .as_mut()
-            .and_then(|open| open.ai.fail(send.token, AiBoxError::Other(String::new())));
+        // The card waits for the request that went out; one that could not
+        // leave fails it, so it never loads for good.
+        let error = self.ai_compose.open.as_mut().and_then(|open| match sent {
+            Some(request) => {
+                open.ai.sent(request);
+                None
+            }
+            None => Some(open.ai.send_failed(AiBoxError::Other(String::new()))),
+        });
         if let Some(error) = error {
             self.ai_compose_error_toast(&error, window, cx);
         }

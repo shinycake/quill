@@ -3,9 +3,15 @@ use crate::telegram::envelope::{MessageContent, ServiceAction};
 
 const RECENTLY_DISABLED_SECS: i64 = 86_400;
 
-/// Enable Sharing, once TDLib said who protects the chat.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Enable Sharing: nothing asked, the lookup of who protects the chat out,
+/// or what TDLib's answer (or its error) moved the flow to.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum EnableSharing {
+    #[default]
+    Idle,
+    /// `getMessageProperties` for `chat` is out as `request`: only its
+    /// answer or error leaves the stage (the box closing does too).
+    Asking { chat: ChatId, request: RequestId },
     /// Nobody else protects it: the driver turns protection off next.
     TurnOff(ChatId),
     /// The other person protects it, so TDLib will send them a request:
@@ -15,7 +21,7 @@ pub enum EnableSharing {
 
 #[derive(Debug, Default)]
 pub struct PrivateSharingState {
-    pub enable: Option<EnableSharing>,
+    pub enable: EnableSharing,
     disabled_at_unix: HashMap<i64, i64>,
 }
 
@@ -48,8 +54,43 @@ impl PrivateSharingState {
 
     pub fn request_box_chat(&self) -> Option<ChatId> {
         match self.enable {
-            Some(EnableSharing::AskToRequest(chat_id)) => Some(chat_id),
+            EnableSharing::AskToRequest(chat_id) => Some(chat_id),
             _ => None,
+        }
+    }
+
+    /// Whether the lookup for `chat` is out.
+    pub fn asking(&self, chat: ChatId) -> bool {
+        matches!(self.enable, EnableSharing::Asking { chat: asked, .. } if asked == chat)
+    }
+
+    /// The answer of `request` says who protects the chat: it moves the
+    /// flow only while the flow waits for exactly that request.
+    pub(crate) fn answered(&mut self, request: RequestId, other_user_protects: bool) {
+        if let EnableSharing::Asking {
+            chat,
+            request: asked,
+        } = self.enable
+            && asked == request
+        {
+            self.enable = if other_user_protects {
+                EnableSharing::AskToRequest(chat)
+            } else {
+                EnableSharing::TurnOff(chat)
+            };
+        }
+    }
+
+    /// The lookup `request` failed: who protects the chat is unknown, so
+    /// the "Send Request?" box asks first (only for the request waited for).
+    pub(crate) fn lookup_failed(&mut self, request: RequestId) {
+        if let EnableSharing::Asking {
+            chat,
+            request: asked,
+        } = self.enable
+            && asked == request
+        {
+            self.enable = EnableSharing::AskToRequest(chat);
         }
     }
 }

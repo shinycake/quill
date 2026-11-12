@@ -105,15 +105,33 @@ impl QuillApp {
     /// The box's answers, in its own window's frame (or any, with no box
     /// open: the answer is dropped).
     fn ai_compose_box_upkeep(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let answer = session_mut(self).and_then(|s| s.messages.ai_compose.box_answer.take());
+        // The card takes the answer of the request it waits for; with no box
+        // open nothing waits for the answers, and they are dropped.
+        let waiting = self
+            .ai_compose
+            .open
+            .as_ref()
+            .and_then(|open| match open.ai.card() {
+                quill::ai_compose::CardState::Loading { request } => Some(*request),
+                _ => None,
+            });
+        if self.ai_compose.open.is_none()
+            && let Some(session) = session_mut(self)
+        {
+            session.messages.ai_compose.forget_stage_answers();
+        }
+        let answer = waiting.and_then(|request| {
+            session_mut(self).and_then(|s| s.messages.ai_compose.box_answers.take(request))
+        });
         if let Some(answer) = answer {
             let error = self
                 .ai_compose
                 .open
                 .as_mut()
-                .and_then(|open| match answer.outcome {
-                    Ok(result) => open.ai.accept(answer.token, result),
-                    Err(error) => open.ai.fail(answer.token, error),
+                .and_then(|open| match (waiting, answer) {
+                    (Some(request), Ok(result)) => open.ai.accept(request, result),
+                    (Some(request), Err(error)) => open.ai.fail(request, error),
+                    (None, _) => None,
                 });
             if let Some(error) = error {
                 self.ai_compose_error_toast(&error, window, cx);

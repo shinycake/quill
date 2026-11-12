@@ -76,6 +76,15 @@ fn apply_group(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64, c
     let recent = page(session, MemberListFilter::Recent);
     let restricted = page(session, MemberListFilter::Restricted);
     let banned = page(session, MemberListFilter::Banned);
+    for (filter, request) in [
+        (MemberListFilter::Recent, recent),
+        (MemberListFilter::Restricted, restricted),
+        (MemberListFilter::Banned, banned),
+    ] {
+        session
+            .groups
+            .note_member_first((chat_id, filter), request, "");
+    }
     let my_status = if forum {
         rights(false, false, false)
     } else {

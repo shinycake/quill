@@ -422,7 +422,7 @@ fn basic_group_manage_counts_its_admins() {
     session.groups.basic_group_members.insert(
         30,
         SupergroupMembersFetch::Loading {
-            request: Some(extra),
+            request: extra,
             last: None,
         },
     );

@@ -288,7 +288,7 @@ impl QuillApp {
                     joined_chat_date: 0,
                 })
                 .collect();
-            session.groups.supergroup_members.insert(
+            session.groups.set_member_fetch(
                 (chat.0, MemberListFilter::Recent),
                 SupergroupMembersFetch::Loaded {
                     members,

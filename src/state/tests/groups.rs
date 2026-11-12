@@ -227,6 +227,12 @@ fn invite_link_replace_failure_surfaces_and_broadcast_rolls_back() {
     session.chats.insert(14, chat);
     session.groups.supergroup_is_broadcast.insert(14, true);
     let extra = session.request(RequestPurpose::ToggleBroadcastGroup, Some(ChatId(14)));
+    if let Some(pending) = session.requests.pending_mut(extra) {
+        pending.rollback = Some(crate::state::RequestRollback::BroadcastGroup {
+            supergroup_id: 14,
+            previous: None,
+        });
+    }
     apply_json(
         &mut session,
         &seq,
@@ -237,6 +243,29 @@ fn invite_link_replace_failure_surfaces_and_broadcast_rolls_back() {
         ),
     );
     assert!(!session.groups.supergroup_is_broadcast.contains_key(&14));
+
+    // 08-006: a flag that was known (`false`) comes back as it was.
+    session.groups.supergroup_is_broadcast.insert(14, true);
+    let extra = session.request(RequestPurpose::ToggleBroadcastGroup, Some(ChatId(14)));
+    if let Some(pending) = session.requests.pending_mut(extra) {
+        pending.rollback = Some(crate::state::RequestRollback::BroadcastGroup {
+            supergroup_id: 14,
+            previous: Some(false),
+        });
+    }
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHAT_NOT_MODIFIED"}}"#,
+            extra.0
+        ),
+    );
+    assert_eq!(
+        session.groups.supergroup_is_broadcast.get(&14),
+        Some(&false)
+    );
 }
 
 #[test]

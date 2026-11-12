@@ -1,8 +1,5 @@
 # Answers not matched by RequestId (scripts/check-request-match.py).
 # <rule>:<Type::function> <count>. Only remove lines or lower counts.
-counter:AiComposePurpose::ApplyInPlace 1
-counter:AiComposePurpose::BoxCompose 1
-counter:AiComposePurpose::BoxFix 1
 counter:BotsPurpose::CheckBotUsername 1
 counter:BotsPurpose::CreateBot 1
 counter:BotsPurpose::GetWidgetQueryAnswer 1
@@ -23,7 +20,6 @@ purpose:ConnectDriver::custom_emoji_lookup_idle 1
 purpose:ConnectDriver::delete_saved_topic_history 1
 purpose:ConnectDriver::earn_in_flight 1
 purpose:ConnectDriver::emoji_set_request 1
-purpose:ConnectDriver::enable_private_sharing 1
 purpose:ConnectDriver::fetch_archived_stickers 1
 purpose:ConnectDriver::fetch_marketplace_gift 2
 purpose:ConnectDriver::fetch_new_chat_privacy 1

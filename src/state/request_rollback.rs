@@ -21,6 +21,12 @@ pub enum RequestRollback {
         previous: Option<bool>,
         shown: bool,
     },
+    /// `toggleSupergroupIsBroadcastGroup` (one way, shown as `true`): the
+    /// previous flag (`None` = unknown), put back while `true` still shows.
+    BroadcastGroup {
+        supergroup_id: i64,
+        previous: Option<bool>,
+    },
     /// `setSupergroupUsername`: the previous username (`None` = none set).
     SupergroupUsername {
         supergroup_id: i64,
@@ -288,6 +294,15 @@ impl Session {
             } => {
                 let flags = &mut self.groups.supergroup_join_by_request;
                 if flags.get(&supergroup_id) == Some(&shown) {
+                    restore_flag(flags, supergroup_id, previous);
+                }
+            }
+            RequestRollback::BroadcastGroup {
+                supergroup_id,
+                previous,
+            } => {
+                let flags = &mut self.groups.supergroup_is_broadcast;
+                if flags.get(&supergroup_id) == Some(&true) {
                     restore_flag(flags, supergroup_id, previous);
                 }
             }

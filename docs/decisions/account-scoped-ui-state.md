@@ -10079,3 +10079,49 @@ variant. r3-04's 08-017 already gated every sticker list on
 `answered(Some(pending.id))`, so 03-003's `installed_wanted` is that same
 `current` check and was folded into it; the wearable gifts and Star pack
 options fixes (08-015 and 03-005/03-006) were the same change.
+
+### Sweep fixes (r3-03)
+
+| Id | Fix |
+| --- | --- |
+| 08-001, 08-003 | One `MemberList { query, fetch, more }` per (chat, filter) replaces `supergroup_members` + `member_asks.first/more`. The first-page request lives in `SupergroupMembersFetch::Loading { request }` (not an `Option`), the next page in `MoreMembers::Asking { request }`, and a new first page replaces the whole value. A first page answers or fails only a list that is `Loading` as that very request (`answer_member_first` / `fail_member_first`), so a search refused at send (`NotSent` under the new query, no request) is never filled by an older search's answer. A send that is refused puts back the list as it was (`restore_member_list`), except a stale one, which becomes `NotSent`. |
+| 08-002 | `members_added` and the one-shot `member_list_stale` queue are gone. `GroupsState::members_changed(chat)` makes every member list `SupergroupMembersFetch::Stale { last: Option<MembersPage> }` (a page stays drawn; a first load still out has no page yet; no request is out, so no answer can land on it; `Failed`/`NotSent` keep their Retry; nothing is deleted, so the poll and the readers always have a list to ask again). The poll refreshes exactly the key the dialog shows (`MemberListFilter::shown_for`: without the restrict right, Restricted and Banned show Recent) with the query it was asked with (`refresh_shown_member_dialog` uses `dialog.searched`; only the Search button and tab switches read the text box, so unsent text never makes the poll search) and an asked administrators list `AdminListFetch::Stale`. Whoever shows the list asks: the fetch functions no longer treat an older request of the same purpose as the list being asked, the poll refetches only the dialog's and the panel's stale list and the stale administrators, and a stale list that cannot be asked goes (`drop_stale_*`) or becomes `NotSent` so the poll does not repeat it. |
+| 08-004 | `DeepLinkState::ResolvingChat { action, request }` and `ResolvingInfo { request, original }` hold the request they wait for; `DeepLinkState::waits_for` / `resolving_action` compare it with `pending.id` (join, check, resolve, lookups, the sticker/user/chat answers and the error arm). The purposes lost their `generation`. The invite box is identified by a generation minted when the preview appears, and the Premium `/start` is tied to the follow-up's request (`PremiumAutoStart::request`). |
+| 08-005 | A missing `admin_lists` / `invite_links` entry no longer counts as waiting: an answer or error lands only on a list that is `Loading` as that request (every sender writes `Loading` first). |
+| 08-006 | `ToggleBroadcastGroup` rolls back through `RequestRollback::BroadcastGroup { previous }`, restoring the known flag instead of removing the entry. |
+| 08-007, 08-009 | `AiComposeState::style_edits` is a `Replies<_>` filed by request (a few kept); the editor takes the answer of its own request, so two answers in one drain overwrite nothing. Style notices are a bounded queue (`take_style_notices`), and the op failures a bounded list. |
+| 08-008 | The AI box, the apply-in-place shortcut, the style lookup and the example hold the `RequestId`: `CardState::Loading { request }` (set by `sent` once the driver returned the id, failed by `send_failed`), `ApplyInPlace::request`, `PreviewStage::LookingUp { request }`, `ExampleFetch::Asked { request }`, `StyleReply::Running { request }`. Answers are filed in `Replies` under the request (`box_answers`, `apply_answers`); a box that is gone drops them. The `u64` tokens and `fresh_token` are gone. |
+| 08-010 | `PrivateSharingState::enable` is one `EnableSharing { Idle, Asking { chat, request }, TurnOff, AskToRequest }`: set when the lookup went out, moved only by the answer or error of that request (`answered`, `lookup_failed`), left by the box closing; a second tap while it is out does nothing (no purpose check). |
+| 08-030 | The chat-wide list and a link's list are different scopes (search and paging vs. one link's page); both are edited only by `forget_join_request`, which now calls one `drop_request` helper for the row and the total. |
+| 07-005 | `ChatsState::background_error` is cleared by a wallpaper change that succeeds, a retry of the list, a preview opening and the gallery being left. |
+
+Guard: `check-request-match.py` has a third rule, `ticket`: a purpose
+variant carrying a `u64` `token`/`generation`/`seq` stands in for the
+`RequestId` (the existing ones are baselined). It scans the body of every
+`enum *Purpose` under `src/`, not only files named `purpose` (the location
+picker's `SearchVenues { generation }` is now baselined).
+
+Tests: `state/tests/sweep_r3_03.rs`, `connect/tests/sweep_r3_03.rs`
+(stale lists asked again while an older request is out, the poll not searching for unsent text, a refused search
+not filled by an older answer, the sharing lookup, the wallpaper line),
+`connect/tests/ai_compose.rs` (answers per request, older lookup ignored,
+notices kept together and bounded), `state/tests/premium_limit.rs`
+(join errors of an older request dropped), `state/tests/groups.rs` (the
+broadcast flag comes back as it was).
+
+At the round 3 merge, 08-004 and r3-06's 10-001 were the same deep-link
+fix. r3-06's shape stays: every stage that answers holds its request
+(`InvitePreview { request }` and `Info { request }` too, read by
+`DeepLinkState::request`), so the invite box is tied to the check that
+answered instead of a minted generation, and `PremiumAutoStart::request` is
+a plain `RequestId` (0, never allocated, in demos). r3-03's `waits_for`,
+`resolving_action`, `next_deep_link_generation` and `deep_link_request`
+are not kept; its test of an older Join's failure sits beside r3-06's in
+`state/tests/premium_limit.rs`. For 08-008, r3-03's `StyleReply::{Running,
+Answered}` (both carrying the request, settled by `settle`) replaces
+r3-01's, and r3-01's `is_style_preview_lookup` still makes a lost lookup or
+example sweepable, which settles it through the same error arm. The
+inline members match draws a `Stale` list like a refetch: its last page
+stays up, an empty one reads Loading, and the poll asks again. The `ticket`
+rule is folded into `counter` (its `ticket` and `seq` names joined
+`counter`'s; every `ticket:` hit was already a `counter:` key or gone).
