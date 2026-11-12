@@ -122,3 +122,64 @@ fn a_menu_opened_in_one_window_closes_the_others(cx: &mut TestAppContext) {
     let main_open = h.app.update(cx, |app, _| app.message_ui.menu.is_open());
     assert!(!main_open, "the main window's menu closed");
 }
+
+fn book_state(
+    h: &Harness,
+    cx: &mut TestAppContext,
+    message_id: quill::ids::MessageId,
+) -> Option<quill::state::MessageReactionsState> {
+    h.app.update(cx, |app, _| {
+        app.demo_session.as_ref().and_then(|session| {
+            session
+                .stickers
+                .message_reaction_options
+                .state(OTHER, message_id)
+                .cloned()
+        })
+    })
+}
+
+fn menu_with_options(app: &mut QuillApp, message_id: quill::ids::MessageId) {
+    app.message_ui.menu.open_at(MessageMenuState {
+        chat_id: OTHER,
+        message_id,
+        position: point(px(100.), px(100.)),
+    });
+    if let Some(session) = app.demo_session.as_mut() {
+        session.stickers.message_reaction_options.set(
+            OTHER,
+            message_id,
+            quill::state::MessageReactionsState::Unavailable,
+        );
+    }
+}
+
+#[gpui_kit::test]
+fn a_menu_closed_by_another_window_or_by_its_window_forgets_its_options(cx: &mut TestAppContext) {
+    use quill::ids::MessageId;
+    let h = new_app(cx);
+    let _chat_window = h.open_in_new_window(OTHER, cx);
+    h.settle(cx);
+    let main_message = OTHER_LAST;
+    let window_message = MessageId(OTHER_LAST.0 + 1);
+    h.app
+        .update(cx, |app, _| menu_with_options(app, main_message));
+    scoped(&h, cx, |app, cx| {
+        menu_with_options(app, window_message);
+        app.close_message_menus_of_other_windows(cx);
+    });
+    assert_eq!(
+        book_state(&h, cx, main_message),
+        None,
+        "the menu another window closed forgot its options"
+    );
+    assert!(book_state(&h, cx, window_message).is_some());
+    h.app.update(cx, |app, cx| {
+        app.chat_window_closed(OTHER, None, cx);
+    });
+    assert_eq!(
+        book_state(&h, cx, window_message),
+        None,
+        "a window closed with its menu open forgot its options"
+    );
+}

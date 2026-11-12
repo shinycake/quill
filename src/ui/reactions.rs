@@ -53,7 +53,7 @@ impl QuillApp {
         let here = self.windows.scope;
         self.in_every_window(cx, |app, _| {
             if app.windows.scope != here {
-                app.message_ui.menu.close_message();
+                app.close_message_menu();
             }
         });
     }

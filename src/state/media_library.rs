@@ -177,19 +177,9 @@ pub struct MessageReactionBook {
     by_message: HashMap<(ChatId, MessageId), MessageReactionsState>,
 }
 
-/// Entries kept before settled ones of other messages are dropped (a window
-/// closed with its menu open never forgets its entry).
-const MAX_REACTION_ENTRIES: usize = 16;
-
 impl MessageReactionBook {
     /// `request` was sent for this message: it waits for that request.
     pub fn begin(&mut self, chat_id: ChatId, message_id: MessageId, request: RequestId) {
-        if self.by_message.len() >= MAX_REACTION_ENTRIES {
-            self.by_message.retain(|key, state| {
-                matches!(state, MessageReactionsState::Loading { .. })
-                    || *key == (chat_id, message_id)
-            });
-        }
         self.by_message.insert(
             (chat_id, message_id),
             MessageReactionsState::Loading { request },
