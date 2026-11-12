@@ -59,18 +59,16 @@ fn a_close_friends_list_arriving_under_the_open_panel_shows_without_other_input(
             session.stories.close_friends = CloseFriendsList::Ready(vec![4]);
         }
     });
-    let redraws = std::rc::Rc::new(std::cell::Cell::new(0_u32));
-    let counted = redraws.clone();
-    let _watch = vcx.update(|_, cx| cx.observe(&app, move |_, _| counted.set(counted.get() + 1)));
+    let _ = crate::ui::frame_clock::take_slice_renders();
     wake(vcx);
-    let stage = app.read_with(vcx, |app, _| {
-        app.stories.viewer_ui().close_friends().clone()
-    });
+    vcx.update(|window, cx| window.draw(cx).clear(cx));
+    let drawn = crate::ui::frame_clock::take_slice_renders();
+    let stage = app.read_with(vcx, |app, _| app.stories.viewer_ui().close_friends().clone());
     assert!(
         stage.edit().is_some_and(|edit| edit.contains(4)),
         "the next wake moved the stage"
     );
-    assert!(redraws.get() > 0, "and redrew the panel");
+    assert!(drawn.contains_key("story"), "and redrew the panel: {drawn:?}");
     wake(vcx);
     assert!(
         !running(&app, vcx),

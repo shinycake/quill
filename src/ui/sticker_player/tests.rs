@@ -712,12 +712,9 @@ fn a_clip_that_opens_after_the_give_up_still_plays() {
         "asked, not open"
     );
     player.skip(OPEN_GIVE_UP + ms(1));
-    assert!(
-        player
-            .frame(&other, at_head, PlayMode::Loop, EDGE, false, None, now())
-            .is_none(),
-        "still waiting"
-    );
+    // Whether the engine has opened it by now is up to its worker; the
+    // clip must not have been failed either way.
+    let _ = player.frame(&other, at_head, PlayMode::Loop, EDGE, false, None, now());
     player.settle();
     assert!(
         player

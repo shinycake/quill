@@ -88,7 +88,9 @@ impl QuillApp {
         };
         let (file_id, host) = (pending.file_id, pending.window);
         // The box closed, or the window it was chosen in: nobody wants it.
-        if !self.sticker_set_open() || host.is_some_and(|chat| !self.windows.has(chat)) {
+        if self.sticker_box.host != super::state::SetBoxHost::In(host)
+            || host.is_some_and(|chat| !self.windows.has(chat))
+        {
             self.sticker_box.editing.end_wait();
             return true;
         }

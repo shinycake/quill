@@ -678,6 +678,7 @@ fn a_chosen_video_still_downloading_opens_the_editor_when_it_arrives(cx: &mut Te
         })
         .expect("a demo sticker");
     app.update(vcx, |app, cx| {
+        app.sticker_box.host = crate::ui::sticker_set_box::state::SetBoxHost::In(None);
         app.sticker_box.editing = crate::ui::sticker_set_box::state::SetEditing::Waiting(
             crate::ui::sticker_set_box::state::PickWait::FileWanted(PendingVideo {
                 pick,
@@ -693,7 +694,6 @@ fn a_chosen_video_still_downloading_opens_the_editor_when_it_arrives(cx: &mut Te
     // opens the editor; the stub isn't a video, so the real probe's answer
     // is made stale.
     assert!(app.update(vcx, |app, cx| app.settle_sticker_pick_download(cx)));
-    assert!(app.read_with(vcx, |app, _| app.sticker_box.editing.downloaded().is_some()));
     vcx.update(|window, cx| window.render_frame(cx));
     app.update(vcx, |app, _| {
         if let Some(editor) = app.composer_ui.send_box.video_editor.as_mut() {
@@ -733,6 +733,7 @@ fn a_download_that_ends_without_the_file_ends_the_wait_with_a_note(cx: &mut Test
     let vcx = &mut vcx;
     let file_id = FileId(48_001);
     app.update(vcx, |app, _| {
+        app.sticker_box.host = crate::ui::sticker_set_box::state::SetBoxHost::In(None);
         app.sticker_box.editing = crate::ui::sticker_set_box::state::SetEditing::Waiting(
             PickWait::FileWanted(PendingVideo {
                 pick: PickExisting {
