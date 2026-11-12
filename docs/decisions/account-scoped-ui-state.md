@@ -9836,6 +9836,9 @@ retry; no wall clock), `state/tests/history_prune.rs` (translations pruned).
 | 09-006 | `SetChangeStage::Working { change, request }`; `finish_set_change(request, set_id, success)` settles only that request, so the first answer no longer ends the second change of the same kind. |
 | 09-007 | `accept_replied_message` and `reject_replied_message` take the request and act only on `ReplyTarget::Loading { request }` of that id: a late error of an older ask neither bumps the attempts nor makes the row Missing, a late answer neither fills it, and a row pruned meanwhile is not brought back. |
 
+Shared file touched: `src/state/session_apply_error.rs` reads `file_id()` where it read the
+field (08-025); nothing else of it changed.
+
 Guards: `check-request-match.py` gains `generation` (a call to
 `matches_generation`: an answer taken because it carries the query's counter,
 not the `RequestId` its stage holds; the in-chat search's four calls are
