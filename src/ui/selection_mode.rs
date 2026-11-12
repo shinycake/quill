@@ -298,8 +298,7 @@ impl QuillApp {
     /// Loaded, sent messages the chat's view draws (the open thread's,
     /// topic's or Saved view's own rows), in history order.
     pub(super) fn loaded_selectable_ids(&self, chat_id: ChatId) -> Vec<MessageId> {
-        self.session()
-            .and_then(|_| self.shown_history(chat_id))
+        self.shown_history(chat_id)
             .map(|messages| {
                 messages
                     .values()

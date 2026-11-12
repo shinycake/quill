@@ -183,8 +183,10 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Frame upkeep: the poll changed, which made the list `Stale`; ask for
-    /// it again. The ask turns the stage into `Loading` (or `Failed` when it
-    /// cannot go), so a stale list is asked once. Whether it asked.
+    /// it again. A request that goes out turns the stage into `Loading`, and
+    /// one that cannot go turns it into `Failed`, so a stale list is asked
+    /// once. A `getPollVoters` for it still out sends nothing and leaves it
+    /// `Stale` for a later frame. Whether a request went out.
     pub fn refresh_stale_poll_voters(
         &mut self,
         chat_id: ChatId,
@@ -195,9 +197,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         matches!(
             self.session.messages.poll_voters.get(&key),
             Some(PollVotersFetch::Stale)
-        ) && self
-            .fetch_poll_voters(chat_id, message_id, option_index)
-            .is_ok()
+        ) && matches!(
+            self.fetch_poll_voters(chat_id, message_id, option_index),
+            Ok(Some(_))
+        )
     }
 
     /// B4: the next `getPollVoters` page — `offset` is the already-loaded

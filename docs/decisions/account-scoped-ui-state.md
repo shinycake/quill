@@ -10525,7 +10525,6 @@ Fix round 5 (review `r4-08-r4`): the focus test for the alert closing under anot
 | g-452 | `LinkStatus` is `LinkLine`: what the line under the group link says, worked out from the text and the verdict each time. |
 | g-463, 05-003 | `AddressStage` is `First(Lookup)`, `Later(Lookup)` or `Shown`: whether an address was ever shown is the variant, not `Address::ever_shown`. `Lookup::Resolving { point, _job: TaskHold }` holds the geocode task (the UI's separate `Geocode` stage is gone), so a new place drops the old lookup. `address_job` reads, `address_started` records. |
 | g-459, 05-002 | `VenueList` is `VenueView`, worked out from the ask's stage and the search field (`Loading` is no second copy of `AskStage`). Typing with no search location settles at once instead of sitting on Loading with nothing to send. |
-| g-476, g-477 | The screenshot demo's driver task is held by the `DemoDriver` global; its autoscroll task by the driver. No detach. |
 | g-466 | `GiftPurchaseStage::Sent` is `Completed`. |
 | g-474 | `SendStage::Sent` is `Done`. |
 | 05-001 | `media_session::worker::Worker` holds the thread of the MPRIS and SMTC backends; a send into a worker that died starts a new one. |
@@ -10534,7 +10533,7 @@ Fix round 5 (review `r4-08-r4`): the focus test for the alert closing under anot
 | g-453 | `MediaFile` is `MediaFileView`: read from the downloads table and the disk when the menu is built. |
 | 06-005, g-469..g-471 | `Lifecycle::Due { streak }` (was `Waiting { streak, since }`): the widget is due to start on the next present and holds no work; the `Instant` ordered nothing (every shown due widget starts in the same pass, the capacity grows with the shown ones), so it is gone. The guard counts a field typed by one of the enum's own generic parameters as the owned handle (`Loading { runtime: R }`, `Running(R)`). |
 | 06-010, g-472 | `Neighbour::Asking { gateway, since }`: a gateway that never answers is asked again after `RESOLVE_AGAIN_AFTER`. |
-| 06-011, g-447 | `BackgroundStatus::Connecting { since }`: a start that stays there past `CONNECT_GIVE_UP` is `Failed` and started again. |
+| 06-011, g-447 | `BackgroundStatus::Connecting { since }`: a start that stays there past `CONNECT_GIVE_UP` is `Failed` and started again. With r4-07's `ClientStage`, `ClientStage::Connecting(live)` reports `since` as `LiveConnect::started`. |
 | g-460, 06-008 | `new_chat::ViewState` is `StepView` (a view worked out on each draw; `TypeSaveStage::Saving(requests)` and `NewChatStage::Creating` own the requests). `GiftsLayout` is `GiftsLayoutView`, `OwnLinkState` is `OwnLinkView` (both are worked out on each draw). |
 | 06-006, g-465 | `Dnd::Refreshing { last, _worker }` holds the worker. |
 | 06-013 | `TrustFile::SaveFailed { reason, retry_at_ms }`: a failed write of the trusted Star prices is tried again by `paid_trust_tick` after `TRUST_RETRY_MS`. |
@@ -10546,7 +10545,7 @@ Fix round 5 (review `r4-08-r4`): the focus test for the alert closing under anot
 | 06-002, g-467 | `GiftValueStage::Loading(RequestId)`. |
 | g-462 | `LimitNotice::Box { over }` (how far over the limit; it was `extra`, which the guard reads as an `@extra`). |
 | g-461 | The mirrored `WithdrawalState::Pending` of Fragment is `Unsettled`. |
-| 06-003 | `GramsHub::view` is `GramsView::{Closed, List, Receipt(key), Withdraw(stage)}`; `open`, `selected` and `withdraw` are readers of it. Closing is one assignment. |
+| 06-003 | `GramsHub::view` is `GramsView::{Closed, List, Receipt(key), Withdraw(stage)}`; `open`, `selected` and `withdraw` are readers of it. Closing is one assignment. `open_list` opens a closed screen on its list; an open one keeps its receipt or Collect's box (r4-10's "opening again keeps the view"). |
 | g-457, g-458 | `profile_photo_camera` has no `StreamStage`: the stream holds its reader's `JoinHandle` (`finished()` is `is_finished()`) and a cancel flag the reader checks. |
 | 06-004, g-473 | `Rotation::Probing { id, request, .. }`: the rotation leaves `Disconnected` when the ping's send went out (`probe_sent`), and the probe is out only while the slot is `Checking` under that request. |
 | g-464 | `BadgeStage::Pending { count, since }`: a push the platform never answers is pushed again after `PENDING_GIVES_UP_AFTER`. |
@@ -10566,7 +10565,6 @@ Tests: `location_picker::picker_tests` (typing before a place, a new place stops
 | `media_session::worker` | The test builds the dead worker directly and counts starts through a per-test spawn closure (`send_with`); no static, no spin. |
 | `location_picker` | `VenueView::Failed` derives from `AskStage::Failed` (`ListData::Failed` gone); the ask holds the query as typed (`initial_query` gone); the nearby place to return to lives in `SearchInput::{Typing, Settled} { back }` (`no_search_location` gone). A query typed before the first fix is sent around the fix (05-002). |
 | `gift_manage` | `GiftListFetch<T>::Answered(Vec<T>)` holds the list (`gifts()` and `premium_options()` read it); `SendStage::Open { recipient, step: SendStep }` holds the recipient. |
-| `main.rs` | The wake subscription, the first window open, the macOS menu install and the tray/chrome loop are held in globals (`WakeWatch`, `OpeningMainWindow`, `InstallingMenus`, `ChromeLoop`), like `DemoDriver`. |
 | `Lifecycle::Due` | Documented above: due to start, no work in flight; not an in-flight name. |
 | `collapsed_keyboards` | Keyed by `ChatMessage`, like `dismissed_keyboards`. |
 | `paid_messages` | `SaveFailed { retry_at_ms, tries }`: the wait doubles per failure up to `TRUST_RETRY_MAX_MS`. |
@@ -10620,8 +10618,9 @@ Tests: `location_picker::picker_tests` (typing before a place, a new place stops
 | Review item | Change |
 |---|---|
 | Wall clock in `a_trusted_price_whose_write_failed_is_written_again_after_the_wait` | The test drives fixed times (`now`, `now + TRUST_RETRY_MS - 1`, `now + TRUST_RETRY_MS`) and holds no `unix_ms_now`. |
-| `src/main.rs` (hotspot) | Restored to base. The g-476/g-477 and `main.rs` rows above live on `claude/sweep-r4-04-main` pending the owner's hotspot decision (it needs the `hotspot-ok` label). The base line `detached:run_screenshot_demo 2` is back in `scripts/owned-timers-baseline.txt`. |
+| `src/main.rs` (hotspot) | Restored to base on this branch. The `main.rs` changes (g-476, g-477 and the held tasks) are on `claude/sweep-r4-04-main`, which needs the owner's `hotspot-ok` label; see the "`main.rs` part" section below. |
 | `src/ui/app_demo.rs` (hotspot) | Restored to base. `link_handler::demo_pin` takes `impl Into<DemoPin>`, with `From<Option<LinkHandlerState>> for DemoPin`. |
+
 ### Sweep fixes (r4-04, `main.rs` part)
 
 `src/main.rs` is a no-edit hotspot, so this part is a branch of its own.
@@ -10630,6 +10629,7 @@ Tests: `location_picker::picker_tests` (typing before a place, a new place stops
 |---|---|
 | g-476, g-477 | The screenshot demo's driver task is held by the `DemoDriver` global; its autoscroll task by the driver. No detach. The base line `detached:run_screenshot_demo 2` leaves `scripts/owned-timers-baseline.txt`. |
 | `main.rs` | The wake subscription, the first window open, the macOS menu install and the tray/chrome loop are held in globals (`WakeWatch`, `OpeningMainWindow`, `InstallingMenus`, `ChromeLoop`), like `DemoDriver`. |
+
 ### Sweep fixes (r4-07)
 
 | Ids | What changed |
@@ -10713,4 +10713,4 @@ gone.
 
 ### Sweep fixes (r4-07, round 6)
 
-- The Ungroup test asserts the toggle is in flight with the asked state showing, that another request's `ok` leaves it in flight, and that its own `ok` ends the wait so a third press sends a second toggle. It fails if the in-flight wait is removed.
+- The Ungroup test asserts the toggle is in flight with the asked state showing, that an `ok` that names no request leaves it in flight, and that its own `ok` ends the wait so a third press sends a second toggle. It fails if the in-flight wait is removed.

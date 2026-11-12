@@ -209,7 +209,7 @@ fn ungroup_sends_one_toggle_and_a_second_press_sends_nothing() {
     );
     assert!(
         driver.session.community_collapse_in_flight(ID),
-        "another request's answer does not end the wait"
+        "an ok that names no request does not end the wait"
     );
     ingest(&mut driver, &community(false));
     ingest(

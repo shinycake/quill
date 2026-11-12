@@ -510,7 +510,9 @@ fn install_main_window_tray(
             .await;
         }
     });
-    // The loop ends with its view; a reopened main window replaces it.
+    // The loop ends with its view. A main window reopened after a GPU loss
+    // (`startup_failure::device_loss::reopen_main_window`) keeps the same
+    // view and installs no second loop, so this one goes on serving it.
     cx.set_global(ChromeLoop(chrome));
     // A shown window gets its tray from the chrome loop's first pass, once
     // it has drawn.
