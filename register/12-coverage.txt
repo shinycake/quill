@@ -96,3 +96,8 @@ src/ui/archive_hint.rs 134 read
 src/ui/archive_mute_suggestion.rs 140 read
 src/ui/archive_row.rs 353 read
 src/ui/attach_bots.rs 204 read
+src/ui/audio/mod.rs 746 read
+src/ui/audio/engine.rs 1627 read
+src/ui/audio/output.rs 1490 read
+src/ui/audio/tempo.rs 406 read
+src/ui/audio/opus.rs 296 read
