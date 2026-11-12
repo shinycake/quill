@@ -15,6 +15,16 @@ impl Session {
             return;
         }
         match pending.map(|p| p.purpose) {
+            // The lookup of a group bot failed: the next time the group's
+            // commands arrive it is asked again.
+            Some(RequestPurpose::Bots(BotsPurpose::GroupBotUser)) => {
+                if let Some(pending) = pending
+                    && let Some(bot) = pending.user_id
+                    && let Some(fetch) = self.bots.bot_users.get_mut(&bot)
+                {
+                    fetch.failed(Some(pending.id), "could not load the bot", true);
+                }
+            }
             // Slice B2: refused `sendBotStartMessage` / `getBotSimilarBots` —
             // a refusal is never shown as success.
             Some(RequestPurpose::SendBotStartMessage) => {

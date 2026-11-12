@@ -796,6 +796,9 @@ fn pinned_list_fills_newest_first_and_drops_unpins() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetPinnedMessages, Some(ChatId(16)));
+    let fetch = session.messages.pinned_messages.entry(16).or_default();
+    fetch.begin();
+    fetch.sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -1324,4 +1327,43 @@ fn a_date_jump_waiting_for_its_window_lives_in_the_jump_stage() {
             then: JumpLanding::Message
         }
     );
+}
+
+#[test]
+fn r2_an_older_pinned_fetch_neither_lands_nor_fails_over_the_newer_one() {
+    // Sweep r2-19 (05-038): both orders of two requests in flight.
+    for newest_first in [false, true] {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let older = session.request(RequestPurpose::GetPinnedMessages, Some(ChatId(16)));
+        let newer = session.request(RequestPurpose::GetPinnedMessages, Some(ChatId(16)));
+        let fetch = session.messages.pinned_messages.entry(16).or_default();
+        fetch.begin();
+        fetch.sent(newer);
+        let error = |extra: RequestId| {
+            format!(
+                r#"{{"@type":"error","@extra":"{}","code":500,"message":"X"}}"#,
+                extra.0
+            )
+        };
+        let page = |extra: RequestId| {
+            format!(
+                r#"{{"@type":"foundChatMessages","@extra":"{}","total_count":1,"next_from_message_id":0,"messages":[{{"id":40,"chat_id":16,"is_outgoing":false,"is_pinned":true,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"x","entities":[]}}}}}}]}}"#,
+                extra.0
+            )
+        };
+        if newest_first {
+            apply_json(&mut session, &seq, &sink, &page(newer));
+        }
+        apply_json(&mut session, &seq, &sink, &error(older));
+        assert_eq!(
+            session.messages.pinned_messages[&16].is_loading(),
+            !newest_first,
+            "an older error leaves the newer fetch alone"
+        );
+        if !newest_first {
+            apply_json(&mut session, &seq, &sink, &page(newer));
+        }
+        assert_eq!(session.pinned_list(ChatId(16)).len(), 1);
+    }
 }

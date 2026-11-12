@@ -590,3 +590,42 @@ fn fast_buttons_target_the_last_message_when_it_has_an_inline_keyboard() {
     // Other chats never qualify.
     assert_eq!(session.fast_button_target(ChatId(99)), None);
 }
+
+#[test]
+fn r2_similar_bots_older_request_neither_answers_nor_fails_the_newer() {
+    // Sweep r2-19 (05-015): a reopen asks again while the first request is
+    // out; only the request the section waits for lands or fails it.
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let first = session.request_for_user(RequestPurpose::GetBotSimilarBots, 21);
+    let second = session.request_for_user(RequestPurpose::GetBotSimilarBots, 21);
+    let fetch = session.bots.similar_bots.entry(21).or_default();
+    fetch.begin();
+    fetch.sent(second);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"BOT_INVALID"}}"#,
+            first.0
+        ),
+    );
+    assert!(matches!(
+        session.bots.similar_bots.get(&21),
+        Some(Fetch::Loading { request: Some(id), .. }) if *id == second
+    ));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"users","@extra":"{}","total_count":1,"user_ids":[31]}}"#,
+            second.0
+        ),
+    );
+    assert!(matches!(
+        session.bots.similar_bots.get(&21),
+        Some(Fetch::Ready(ids)) if ids == &[31]
+    ));
+}

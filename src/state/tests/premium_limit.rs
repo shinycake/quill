@@ -311,11 +311,12 @@ fn the_public_links_box_lists_the_chats_afresh_each_time() {
         session.groups.group_type.public_chats,
         PublicChatsFetch::None
     );
-    session.groups.group_type.public_chats = PublicChatsFetch::Loading;
+    let asked = session.request(RequestPurpose::SetChatTitle, None);
+    session.groups.group_type.public_chats = PublicChatsFetch::Loading(asked);
     session.open_premium_limit(PremiumLimitKind::PublicLinks, 0);
     assert_eq!(
         session.groups.group_type.public_chats,
-        PublicChatsFetch::Loading,
+        PublicChatsFetch::Loading(asked),
         "a request on its way is kept"
     );
 }

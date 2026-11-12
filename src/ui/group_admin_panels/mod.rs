@@ -41,7 +41,7 @@ impl QuillApp {
         }
         let status = self
             .session()
-            .and_then(|session| session.groups.boost_level_count(chat_id.0));
+            .and_then(|session| session.groups.boost_level_and_count(chat_id.0));
         let loading = self.session().is_some_and(|session| {
             session
                 .groups

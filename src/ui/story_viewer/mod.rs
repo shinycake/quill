@@ -596,7 +596,7 @@ impl QuillApp {
             session.clear_story_viewers();
             // A failed edit's line was about the story it edited, and a
             // finished page op's about the story or page it acted on.
-            session.stories.manage.error = None;
+            session.stories.manage.clear_error();
             session.settle_story_page_op();
         }
     }

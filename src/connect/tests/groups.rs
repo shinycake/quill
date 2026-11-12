@@ -289,8 +289,7 @@ fn driver_mutation_confirmed_refetches_dropped_cache() {
     driver
         .session
         .groups
-        .chat_boost_status
-        .insert(13, crate::state::fetch::Fetch::Ready((0, 0)));
+        .set_boost_status(13, crate::telegram::envelope::ParsedBoostStatus::default());
     let sent_types = || {
         recorder
             .snapshot()
@@ -395,10 +394,14 @@ fn driver_mutation_confirmed_refetches_dropped_cache() {
             boost_extra.0
         ),
     );
-    assert_eq!(
-        driver.session.groups.boost_level_count(13),
-        None,
-        "the old level is dropped"
+    assert!(
+        driver
+            .session
+            .groups
+            .chat_boost_status
+            .get(&13)
+            .is_some_and(|fetch| fetch.is_loading()),
+        "the status is asked for again"
     );
     assert!(
         sent_types().iter().any(|t| t == "getChatBoostStatus"),

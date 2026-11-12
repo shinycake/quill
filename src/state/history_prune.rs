@@ -117,8 +117,6 @@ pub struct HistoryPruning {
     /// The UI's claim on chats, replaced whole at every update: an input,
     /// not a stage of a history.
     holds: BTreeSet<ChatId>,
-    /// Topic pages still in flight when their entry was dropped.
-    pub(super) gone_topic_pages: BTreeSet<u64>,
     dropped: DroppedMemos,
     /// The histories are the only copy of the rows ([`Session::keep_all_histories`]).
     keep_all: bool,

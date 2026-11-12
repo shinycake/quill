@@ -202,11 +202,13 @@ impl Session {
             }
             // Slice G2: `getChatBoostStatus` answer (schema 1.8.67, line 13917).
             GroupsPayload::ChatBoostStatus(status) => {
+                // Only the request the status waits for lands: one asked
+                // before a boost or a level change is dropped.
                 if let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
+                    && let Some(fetch) = self.groups.chat_boost_status.get_mut(&chat_id.0)
                 {
-                    self.groups
-                        .answer_boost_status(chat_id.0, pending.id, status);
+                    fetch.answered(Some(pending.id), status);
                 }
             }
             GroupsPayload::ApplicationConfig {
@@ -287,8 +289,7 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::BoostChat)
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
                 {
-                    self.groups.chat_boost_status.remove(&chat_id.0);
-                    self.groups.chat_boost_details.remove(&chat_id.0);
+                    self.groups.outdate_boost_status(chat_id.0);
                     // The boost box goes back to its counters, with a line
                     // about boosts that moved here (`lng_boost_reassign_done`).
                     // Only the answer of the `boostChat` the box works on
@@ -320,18 +321,22 @@ impl Session {
                     && let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
                 {
-                    // The theme is the one the request in flight asked for.
-                    let is_dark = match self.groups.chat_statistics.get(&chat_id.0) {
-                        Some(ChatStatisticsFetch::Loading { is_dark }) => *is_dark,
-                        _ => false,
-                    };
-                    self.groups.chat_statistics.insert(
-                        chat_id.0,
-                        ChatStatisticsFetch::Loaded {
-                            stats: std::sync::Arc::new(statistics),
-                            is_dark,
-                        },
-                    );
+                    // Only the request the panel waits for lands, with the
+                    // theme it asked for: an older one, answered after a
+                    // theme change asked again, is dropped.
+                    if let Some(ChatStatisticsFetch::Loading { request, is_dark }) =
+                        self.groups.chat_statistics.get(&chat_id.0)
+                        && *request == pending.id
+                    {
+                        let is_dark = *is_dark;
+                        self.groups.chat_statistics.insert(
+                            chat_id.0,
+                            ChatStatisticsFetch::Loaded {
+                                stats: std::sync::Arc::new(statistics),
+                                is_dark,
+                            },
+                        );
+                    }
                 }
             }
             GroupsPayload::MessageStatistics { statistics } => {
@@ -617,13 +622,17 @@ impl Session {
                         );
                     }
                     let total_count = members.len() as i32;
-                    self.groups.basic_group_members.insert(
-                        chat_id.0,
-                        SupergroupMembersFetch::Loaded {
-                            members,
-                            total_count,
-                        },
-                    );
+                    if let Some(pending) = pending
+                        && self.groups.basic_members_wait_for(chat_id.0, pending.id)
+                    {
+                        self.groups.basic_group_members.insert(
+                            chat_id.0,
+                            SupergroupMembersFetch::Loaded {
+                                members,
+                                total_count,
+                            },
+                        );
+                    }
                 }
             }
             GroupsPayload::UpdateBasicGroupFullInfo {
@@ -881,11 +890,10 @@ impl Session {
                     pending.map(|p| p.purpose)
                     && let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
-                    && let Some(rights) = member.admin_rights()
                 {
+                    let key = (chat_id.0, user_id);
                     self.groups
-                        .admin_rights
-                        .insert((chat_id.0, user_id), AdminRightsFetch::Loaded(rights));
+                        .answer_admin_rights(key, pending.id, member.admin_rights());
                 }
             }
             GroupsPayload::UpdateChatMember { chat_id, member } => {
@@ -902,8 +910,14 @@ impl Session {
                 // Phase D3b: per-admin rights for the changed member are
                 // stale too (e.g. after an edit-rights save) — drop them
                 // so the editor refetches instead of showing old rights.
+                // A lookup in flight stays: its answer is the fresh one.
                 if let MessageSender::User { user_id } = member.member_id {
-                    self.groups.admin_rights.remove(&(chat_id.0, user_id));
+                    if !matches!(
+                        self.groups.admin_rights.get(&(chat_id.0, user_id)),
+                        Some(AdminRightsFetch::Loading(_))
+                    ) {
+                        self.groups.admin_rights.remove(&(chat_id.0, user_id));
+                    }
                     if self.direct_member_banned(chat_id, user_id).is_some() {
                         let banned = member.status() == ChannelMemberStatus::Banned;
                         self.set_direct_member_banned(chat_id, user_id, banned);

@@ -29,6 +29,10 @@ fn replay_admin_list_load_and_gate() {
     assert!(!session.chat_can_manage_admins(chat_id));
 
     let list_extra = session.request(RequestPurpose::GetChatAdministrators, Some(chat_id));
+    session
+        .groups
+        .admin_lists
+        .insert(13, quill::state::AdminListFetch::Loading(list_extra));
     apply_all_seq(
         &mut session,
         &sink,
@@ -106,6 +110,10 @@ fn replay_admin_update_member_invalidates_and_own_gate() {
 
     // Seed a loaded list via a direct insert shaped like the reducer's.
     let list_extra = session.request(RequestPurpose::GetChatAdministrators, Some(chat_id));
+    session
+        .groups
+        .admin_lists
+        .insert(13, quill::state::AdminListFetch::Loading(list_extra));
     apply_all_seq(
         &mut session,
         &sink,
@@ -179,6 +187,10 @@ fn replay_admin_rights_lookup_and_demote() {
     let rights_extra = session.request(
         RequestPurpose::Groups(GroupsPurpose::GetAdminRights { user_id: 2 }),
         Some(chat_id),
+    );
+    session.groups.admin_rights.insert(
+        (13, 2),
+        quill::state::AdminRightsFetch::Loading(rights_extra),
     );
     apply_all_seq(
         &mut session,

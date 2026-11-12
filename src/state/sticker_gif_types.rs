@@ -314,9 +314,6 @@ pub struct StickerPanel {
     pub trending_offset: usize,
     pub trending_next_offset: usize,
     pub trending_is_premium: bool,
-    /// `updateRecentStickers` / `updateFavoriteStickers` /
-    /// `updateTrendingStickerSets` arrived (another device changed them):
-    /// refetch the loaded list.
     /// `getGreetingStickers`: hello stickers for empty private chats.
     /// Asked once per session from `Idle`; a failure stays `Failed`, so a
     /// redraw never asks again.
@@ -349,18 +346,19 @@ pub struct GifPanel {
     pub open: bool,
     pub animations: Vec<AnimationItem>,
     /// The saved list (`getSavedAnimations`): `Idle` until asked, `Loading`
-    /// (with `Some` when a refresh runs over an answer), `Ready`, or
-    /// `Failed` (also after a failed save or remove, which leaves the list
-    /// in place). The list itself is `animations`.
+    /// (with `Some` when a refresh runs over an answer), `Ready`, `Outdated`
+    /// (`updateSavedAnimations` arrived: refreshed even if the panel is
+    /// closed) or `Failed` (also after a failed save or remove, which
+    /// leaves the list in place). The list itself is `animations`.
     pub saved: Fetch<()>,
     /// Which list the panel holds: the saved GIFs, or a search and how it
     /// stands. Leaving the search leaves its stage with it.
     pub list: GifList,
+    pub search_bot_username: String,
+    pub search_bot_user_id: Option<i64>,
     /// The chat of the window that asked (the inline query's chat); paging
     /// keeps it.
     pub search_chat: Option<crate::ids::ChatId>,
-    pub search_bot_username: String,
-    pub search_bot_user_id: Option<i64>,
     // The search's results and paging live in its stage ([`GifSearch`]):
     // a new search replaces them whole.
     /// Slice S9: `updateAnimationSearchParameters` (schema 1.8.67, line
@@ -420,13 +418,12 @@ pub enum GifList {
     Search(GifSearch),
 }
 
-/// A GIF search: its query, where it stands, and the page request it waits
-/// for (none before the first one goes out).
+/// A GIF search: its query, where it stands (the page request it waits for
+/// is in `fetch`), and what it found.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GifSearch {
     pub query: String,
     pub fetch: Fetch<()>,
-    pub request: Option<crate::ids::RequestId>,
     /// Slice S9: GIF search via the animation search bot
     /// (`getInlineQueryResults`; schema 1.8.67, lines 6483, 13019). First
     /// page replaces; later pages append, deduped by file id.
@@ -487,9 +484,10 @@ impl GifPanel {
         self.saved.begin();
     }
 
-    /// `getSavedAnimations` answered.
-    /// A `stale` mark made while the request was out stays: the answer may
-    /// predate the change, so the list is asked for again.
+    /// `getSavedAnimations` answered. An `updateSavedAnimations` that came
+    /// while the request was out marks the list out of date: the answer may
+    /// predate the change, so it is shown (the list does not blank) and the
+    /// mark stays, so the list is asked for again.
     pub fn saved_answered(&mut self, animations: Vec<AnimationItem>) {
         self.animations = animations;
         // Kept `Outdated` (now with a list held) when
@@ -511,8 +509,12 @@ impl GifPanel {
     }
 
     /// `getSavedAnimations` failed, or could not be sent: counted as loaded,
-    /// so nothing asks again until the panel is opened.
+    /// so nothing asks again until the panel is opened. A list marked out
+    /// of date stays marked.
     pub fn saved_failed(&mut self) {
+        if self.saved.is_outdated() {
+            return;
+        }
         self.saved = Fetch::Failed {
             error: GIF_FAILED.to_string(),
             stale: Some(()),
@@ -564,7 +566,6 @@ impl GifPanel {
                 stale: None,
                 request: None,
             },
-            request: None,
             results: Vec::new(),
             next_offset: String::new(),
             asked_offset: String::new(),
@@ -647,28 +648,26 @@ impl GifPanel {
     pub fn search_asked(&mut self) {
         if let GifList::Search(search) = &mut self.list {
             search.fetch.begin();
-            search.request = None;
         }
     }
 
     /// The page request `request` went out for the search.
     pub fn search_sent(&mut self, request: crate::ids::RequestId) {
         if let GifList::Search(search) = &mut self.list {
-            search.request = Some(request);
+            search.fetch.sent(request);
         }
     }
 
     /// Whether `request` is the page the search waits for.
     pub fn search_waits_for(&self, request: Option<crate::ids::RequestId>) -> bool {
         matches!(&self.list, GifList::Search(search)
-            if request.is_some() && search.request == request)
+            if request.is_some_and(|request| search.fetch.waits_for(request)))
     }
 
     /// A search page answered (the caller checked [`Self::search_waits_for`]).
     pub fn search_answered(&mut self) {
         if let GifList::Search(search) = &mut self.list {
             search.fetch.succeed(());
-            search.request = None;
         }
     }
 
@@ -676,7 +675,6 @@ impl GifPanel {
     pub fn search_failed_now(&mut self) {
         if let GifList::Search(search) = &mut self.list {
             search.fetch.fail(GIF_FAILED);
-            search.request = None;
         }
     }
 
@@ -710,6 +708,56 @@ impl GifPanel {
     }
 }
 
+/// The "Attached Stickers" lookup of a photo or video
+/// (`getAttachedStickerSets`): asked as one request, then answered with the
+/// first set (`None`: the media has none) until the box takes it. An answer
+/// or error of an earlier request is dropped.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum AttachedStickers {
+    #[default]
+    Idle,
+    Asking(RequestId),
+    Answered(Option<i64>),
+}
+
+impl AttachedStickers {
+    /// The lookup goes out as `request`.
+    pub fn asked(&mut self, request: RequestId) {
+        *self = Self::Asking(request);
+    }
+
+    /// `request` answered with `first`: taken only while it is the lookup
+    /// waited for.
+    pub fn answered(&mut self, request: Option<RequestId>, first: Option<i64>) -> bool {
+        if request.is_some_and(|request| *self == Self::Asking(request)) {
+            *self = Self::Answered(first);
+            return true;
+        }
+        false
+    }
+
+    /// `request` failed (or never went out): only the lookup waited for
+    /// ends. `true` when it was.
+    pub fn failed(&mut self, request: Option<RequestId>) -> bool {
+        if request.is_some_and(|request| *self == Self::Asking(request)) {
+            *self = Self::Idle;
+            return true;
+        }
+        false
+    }
+
+    /// The answer, once.
+    pub fn take_answer(&mut self) -> Option<Option<i64>> {
+        match *self {
+            Self::Answered(first) => {
+                *self = Self::Idle;
+                Some(first)
+            }
+            _ => None,
+        }
+    }
+}
+
 /// The emoji the composer sticker suggestions are for, and whether they
 /// wait for the installed sets (`InstalledOnly` filters by them).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -718,8 +766,10 @@ pub enum SuggestFor {
     Nothing,
     /// `getInstalledStickerSets` is out; the emoji is asked when it lands.
     WaitingForSets(String),
-    /// `searchStickers` for this emoji went out or answered.
-    Asked(String),
+    /// `searchStickers` for this emoji went out (or answered): only the
+    /// answer of `request` lands, and its error returns the stage to
+    /// `Nothing`, so the next keystroke asks again.
+    Asked { emoji: String, request: RequestId },
 }
 
 impl SuggestFor {
@@ -727,8 +777,13 @@ impl SuggestFor {
     pub fn emoji(&self) -> Option<&str> {
         match self {
             Self::Nothing => None,
-            Self::WaitingForSets(emoji) | Self::Asked(emoji) => Some(emoji),
+            Self::WaitingForSets(emoji) | Self::Asked { emoji, .. } => Some(emoji),
         }
+    }
+
+    /// Whether `request` is the `searchStickers` the suggestions wait for.
+    pub fn waits_for(&self, request: Option<RequestId>) -> bool {
+        matches!(self, Self::Asked { request: asked, .. } if Some(*asked) == request)
     }
 
     pub fn is_nothing(&self) -> bool {

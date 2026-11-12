@@ -1,6 +1,6 @@
 //! Connect driver: call debug logs, call history, call privacy and busy-call handling.
 use super::*;
-use crate::state::{CallUpload, PrivacyAsk, RecentCalls};
+use crate::state::{CallUpload, PrivacyAsk};
 
 impl<S: JsonSender> ConnectDriver<S> {
     pub(crate) fn call_debug_information(&self) -> Result<String, ConnectSendError> {
@@ -160,9 +160,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.calls.recent_calls_clearing() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.calls.recent_calls.clear();
-        self.session.calls.recent_calls_offset.clear();
-        self.session.calls.recent_calls_stage = RecentCalls::Idle;
+        self.session.calls.recent_calls.reset();
         self.fetch_call_history_page()
     }
 
@@ -177,8 +175,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         if !crate::chatlist_calls::can_clear(
-            self.session.calls.recent_calls.len(),
-            self.session.calls.recent_calls_stage,
+            self.session.calls.recent_calls.rows().len(),
+            self.session.calls.recent_calls_clearing(),
         ) {
             return Ok(None);
         }
@@ -192,7 +190,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.calls.recent_calls_stage = RecentCalls::Clearing { request: extra };
+        self.session.calls.recent_calls.clear_sent(extra);
         Ok(Some(extra))
     }
 
@@ -213,17 +211,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::SearchCallMessages, None);
-        let offset = self.session.calls.recent_calls_offset.clone();
+        let offset = self.session.calls.recent_calls.next_offset().to_string();
         if let Err(err) = self
             .sender
             .send_json(&search_call_messages(extra, &offset, 40))
         {
             self.session.requests.take(extra);
-            self.session.calls.recent_calls_stage = RecentCalls::Failed;
+            self.session.calls.recent_calls.page_not_sent();
             return Err(err);
         }
         // A retry of a failed page shows as loading again.
-        self.session.calls.recent_calls_stage = RecentCalls::Loading { request: extra };
+        self.session.calls.recent_calls.page_sent(extra);
         Ok(extra)
     }
 

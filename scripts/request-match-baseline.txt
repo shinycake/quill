@@ -121,7 +121,6 @@ unmatched:Session::accept_profile_photo_emoji_icons 1
 unmatched:Session::apply_auth_payload 1
 unmatched:Session::apply_chat_list_payload 2
 unmatched:Session::apply_chats 3
-unmatched:Session::apply_found_chat_messages 1
 unmatched:Session::apply_grams 1
 unmatched:Session::apply_language_payload 1
 unmatched:Session::apply_live_story_payload 1

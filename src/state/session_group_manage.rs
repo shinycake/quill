@@ -122,10 +122,7 @@ impl Session {
                     recent_actions: self.chat_can_view_event_log(chat_id),
                     auto_translate: channel_settings.then(|| AutoTranslate {
                         on: self.chat_auto_translate(chat_id),
-                        level: self
-                            .groups
-                            .boost_level_count(chat_id.0)
-                            .map(|(level, _)| level),
+                        level: self.groups.boost_level(chat_id.0),
                         required: auto_translate_level(
                             self.groups.chat_boost_features.get(&chat_id.0),
                         ),

@@ -48,7 +48,7 @@ fn open_box(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> i64 {
     app.update_in(vcx, |app, _, cx| {
         let session = app.demo_session.as_mut().expect("demo session");
         let chat_id = *session.chats.keys().min().expect("a chat");
-        session.groups.chat_boost_details.insert(
+        session.groups.set_boost_status(
             chat_id,
             ParsedBoostStatus {
                 level: 1,

@@ -327,7 +327,7 @@ impl QuillApp {
                 .map(|(link, _)| link.clone())
                 .unwrap_or_default();
             let mut body = div().flex().flex_col().gap_3();
-            if let Some(status) = session.groups.chat_boost_details.get(&chat_id) {
+            if let Some(status) = session.groups.boost_status(chat_id) {
                 let counters = BoostCounters::from(status);
                 body = body.child(Self::boost_progress(&counters, cx));
             }

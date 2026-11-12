@@ -215,7 +215,7 @@ fn invite_link_replace_failure_surfaces_and_broadcast_rolls_back() {
         session
             .groups
             .invite_link_error
-            .as_ref()
+            .last()
             .is_some_and(|m| m.contains("Could not replace primary invite link"))
     );
 
@@ -620,6 +620,10 @@ fn invite_link_fetch_flow_loads_and_caches() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetChatInviteLinks, Some(ChatId(13)));
+    session
+        .groups
+        .invite_links
+        .insert(13, InviteLinkFetch::Loading(extra));
 
     let link1 = r#"{"@type":"chatInviteLink","invite_link":"https://t.me/+mods","name":"Mods","creator_user_id":777,"date":1788000000,"edit_date":0,"expiration_date":0,"subscription_pricing":null,"member_limit":25,"member_count":8,"expired_member_count":0,"pending_join_request_count":0,"creates_join_request":false,"is_primary":false,"is_revoked":false}"#;
     let link2 = r#"{"@type":"chatInviteLink","invite_link":"https://t.me/+mods2","name":"Mods 2","creator_user_id":777,"date":1788000000,"edit_date":0,"expiration_date":0,"subscription_pricing":null,"member_limit":25,"member_count":4,"expired_member_count":0,"pending_join_request_count":0,"creates_join_request":false,"is_primary":false,"is_revoked":false}"#;
@@ -664,6 +668,10 @@ fn invite_link_create_upsert_bumps_total() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let fetch_extra = session.request(RequestPurpose::GetChatInviteLinks, Some(ChatId(13)));
+    session
+        .groups
+        .invite_links
+        .insert(13, InviteLinkFetch::Loading(fetch_extra));
 
     let link1 = r#"{"@type":"chatInviteLink","invite_link":"https://t.me/+mods","name":"Mods","creator_user_id":777,"date":1788000000,"edit_date":0,"expiration_date":0,"subscription_pricing":null,"member_limit":25,"member_count":8,"expired_member_count":0,"pending_join_request_count":0,"creates_join_request":false,"is_primary":false,"is_revoked":false}"#;
     let link2 = r#"{"@type":"chatInviteLink","invite_link":"https://t.me/+mods2","name":"Mods 2","creator_user_id":777,"date":1788000000,"edit_date":0,"expiration_date":0,"subscription_pricing":null,"member_limit":25,"member_count":4,"expired_member_count":0,"pending_join_request_count":0,"creates_join_request":false,"is_primary":false,"is_revoked":false}"#;
@@ -703,6 +711,10 @@ fn invite_link_edit_replaces_in_place() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let fetch_extra = session.request(RequestPurpose::GetChatInviteLinks, Some(ChatId(13)));
+    session
+        .groups
+        .invite_links
+        .insert(13, InviteLinkFetch::Loading(fetch_extra));
 
     let link1 = r#"{"@type":"chatInviteLink","invite_link":"https://t.me/+mods","name":"Mods","creator_user_id":777,"date":1788000000,"edit_date":0,"expiration_date":0,"subscription_pricing":null,"member_limit":25,"member_count":8,"expired_member_count":0,"pending_join_request_count":0,"creates_join_request":false,"is_primary":false,"is_revoked":false}"#;
     let link2 = r#"{"@type":"chatInviteLink","invite_link":"https://t.me/+mods2","name":"Mods 2","creator_user_id":777,"date":1788000000,"edit_date":0,"expiration_date":0,"subscription_pricing":null,"member_limit":25,"member_count":4,"expired_member_count":0,"pending_join_request_count":0,"creates_join_request":false,"is_primary":false,"is_revoked":false}"#;
@@ -744,6 +756,10 @@ fn invite_link_revoke_removes_the_revoked_link() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let fetch_extra = session.request(RequestPurpose::GetChatInviteLinks, Some(ChatId(13)));
+    session
+        .groups
+        .invite_links
+        .insert(13, InviteLinkFetch::Loading(fetch_extra));
 
     let link1 = r#"{"@type":"chatInviteLink","invite_link":"https://t.me/+mods","name":"Mods","creator_user_id":777,"date":1788000000,"edit_date":0,"expiration_date":0,"subscription_pricing":null,"member_limit":25,"member_count":8,"expired_member_count":0,"pending_join_request_count":0,"creates_join_request":false,"is_primary":false,"is_revoked":false}"#;
     let link2 = r#"{"@type":"chatInviteLink","invite_link":"https://t.me/+mods2","name":"Mods 2","creator_user_id":777,"date":1788000000,"edit_date":0,"expiration_date":0,"subscription_pricing":null,"member_limit":25,"member_count":4,"expired_member_count":0,"pending_join_request_count":0,"creates_join_request":false,"is_primary":false,"is_revoked":false}"#;

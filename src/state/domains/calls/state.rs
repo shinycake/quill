@@ -3,24 +3,6 @@
 //! with `new`.
 use crate::state::*;
 
-/// The stage of the recent-calls list (`searchCallMessages` pages and
-/// `deleteAllCallMessages`). Only the answer or error of the request in the
-/// stage lands: a reopen asks for the first page again at once, and
-/// "Clear all" forgets the page in flight, so an older page never fills
-/// the list.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum RecentCalls {
-    #[default]
-    Idle,
-    /// A page waits for its answer; its error is `Failed`.
-    Loading { request: RequestId },
-    /// The last page failed; asking again shows it as loading.
-    Failed,
-    /// "Clear all" waits for TDLib; the list empties on `ok`, and its
-    /// error is `Idle` again.
-    Clearing { request: RequestId },
-}
-
 pub struct CallsState {
     /// Phase C1: the tracked live call, if any. **Signaling only** —
     /// TDLib transports no audio/video (official clients use
@@ -86,13 +68,7 @@ pub struct CallsState {
     /// Phase C2i: recent calls from `searchCallMessages` (server-side
     /// history, schema 1.8.67 :11903) for the Recent-calls tab, newest
     /// first.
-    pub recent_calls: Vec<ParsedMessage>,
-    /// `next_offset` from the last `foundMessages` page; empty starts
-    /// (or restarts) the list.
-    pub recent_calls_offset: String,
-    /// Where the recent-calls list stands: its page or its "Clear all" in
-    /// flight, or the last page's failure.
-    pub recent_calls_stage: RecentCalls,
+    pub recent_calls: RecentCalls,
     /// Phase C3a: the tracked group call / voice chat, if any.
     /// **Signaling only** — TDLib transports no audio/video; the
     /// `joinVideoChat` response payload is stored (`join_payload`) and
@@ -123,11 +99,9 @@ pub struct CallsState {
     /// group call; the driver issues `join_video_chat` once the
     /// `getGroupCall` answer has created the unjoined tracker.
     pub pending_live_story_join: Option<LiveStoryJoinIntent>,
-    /// A voice chat, video chat or live stream link offered this call;
-    /// its invite hash goes out with the join (`crate::call_link`).
-    pub call_link: Option<crate::call_link::PendingCallLink>,
-    /// A call link that arrived while a call is on: the question to leave
-    /// it, the wait for it to end, then what the offer found.
+    /// A voice chat, video chat or live stream link: the question to leave
+    /// a running call, the wait for it to end, what the offer found, then
+    /// the invite hash that goes out with the join (`crate::call_link`).
     pub call_link_stage: crate::call_link::CallLinkStage,
     /// A conference call being joined or created, until its answer names
     /// the call (`crate::state::conference`).
@@ -164,27 +138,17 @@ impl CallsState {
 
     /// A recent-calls page is in flight.
     pub fn recent_calls_loading(&self) -> bool {
-        matches!(self.recent_calls_stage, RecentCalls::Loading { .. })
+        self.recent_calls.loading()
     }
 
     /// The last `searchCallMessages` request failed.
     pub fn recent_calls_error(&self) -> bool {
-        self.recent_calls_stage == RecentCalls::Failed
+        self.recent_calls.failed()
     }
 
     /// A `deleteAllCallMessages` request is in flight.
     pub fn recent_calls_clearing(&self) -> bool {
-        matches!(self.recent_calls_stage, RecentCalls::Clearing { .. })
-    }
-
-    /// Whether `request` is the recent-calls page the list waits for; if
-    /// so the list stops waiting for it.
-    pub(crate) fn take_recent_calls_request(&mut self, request: RequestId) -> bool {
-        if self.recent_calls_stage != (RecentCalls::Loading { request }) {
-            return false;
-        }
-        self.recent_calls_stage = RecentCalls::Idle;
-        true
+        self.recent_calls.clearing()
     }
 
     /// The tracked group call `id`: the current one or the story stream.
@@ -258,9 +222,7 @@ impl CallsState {
             privacy_p2p: None,
             privacy_asks: CallPrivacyAsks::default(),
             prefs: CallPrefs::default(),
-            recent_calls: Vec::new(),
-            recent_calls_offset: String::new(),
-            recent_calls_stage: RecentCalls::Idle,
+            recent_calls: RecentCalls::default(),
             active_group_call: None,
             story_stream: None,
             rtmp_start: None,
@@ -269,7 +231,6 @@ impl CallsState {
             answered_creates: Vec::new(),
             group_call_fetch_queue: Vec::new(),
             pending_live_story_join: None,
-            call_link: None,
             call_link_stage: crate::call_link::CallLinkStage::Idle,
             pending_conference: None,
             call_upgrade: None,

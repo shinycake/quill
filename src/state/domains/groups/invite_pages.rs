@@ -152,6 +152,35 @@ impl crate::state::GroupsState {
         }
     }
 
+    /// The `getChatMember` answer of `request` for one administrator's
+    /// rights, taken only while the editor waits for it. A member who is
+    /// not an administrator has no rights to edit: the editor says so
+    /// instead of loading for good.
+    pub(crate) fn answer_admin_rights(
+        &mut self,
+        key: (i64, i64),
+        request: crate::ids::RequestId,
+        rights: Option<crate::telegram::envelope::ChatAdminRights>,
+    ) {
+        if let Some(slot) = self.admin_rights.get_mut(&key)
+            && *slot == crate::state::AdminRightsFetch::Loading(request)
+        {
+            *slot = match rights {
+                Some(rights) => crate::state::AdminRightsFetch::Loaded(rights),
+                None => crate::state::AdminRightsFetch::Failed("not an administrator".to_string()),
+            };
+        }
+    }
+
+    /// The basic group's member list of `chat` is out as `request`.
+    pub(crate) fn basic_members_wait_for(&self, chat: i64, request: crate::ids::RequestId) -> bool {
+        matches!(
+            self.basic_group_members.get(&chat),
+            Some(crate::state::SupergroupMembersFetch::Loading { request: Some(asked), .. })
+                if *asked == request
+        )
+    }
+
     /// The `getChatAdministrators` error of `request`: an older request's
     /// error leaves a newer one waiting, and a loaded list stays.
     pub(crate) fn fail_administrators(

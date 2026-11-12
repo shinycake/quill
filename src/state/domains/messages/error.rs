@@ -28,15 +28,13 @@ impl Session {
         if let Some(p) = pending
             && p.purpose == RequestPurpose::GetPinnedMessages
             && let Some(chat_id) = p.chat_id
+            && let Some(fetch) = self.messages.pinned_messages.get_mut(&chat_id.0)
         {
-            self.messages
-                .pinned_messages
-                .entry(chat_id.0)
-                .or_default()
-                .fail(format!(
-                    "could not load the pinned messages (error {})",
-                    err.code
-                ));
+            fetch.failed(
+                Some(p.id),
+                format!("could not load the pinned messages (error {})", err.code),
+                false,
+            );
         }
         if let Some(RequestPurpose::GetRepliedMessage {
             chat_id,
@@ -199,13 +197,16 @@ impl Session {
                 chat_id,
                 message_id,
             })) => {
-                self.messages.poll_stats.insert(
-                    (chat_id.0, message_id.0),
-                    PollStatsFetch::Failed(call_request_error_line(
+                // Only the request the dialog waits for fails it.
+                if let Some(pending) = pending
+                    && let Some(slot) = self.messages.poll_stats.get_mut(&(chat_id.0, message_id.0))
+                    && *slot == PollStatsFetch::Loading(pending.id)
+                {
+                    *slot = PollStatsFetch::Failed(call_request_error_line(
                         err,
                         "Could not load poll stats",
-                    )),
-                );
+                    ));
+                }
             }
             // B15: poll option / checklist mutations surface their
             // failure in the status note (tdesktop shows a toast:

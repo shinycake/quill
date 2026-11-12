@@ -102,10 +102,7 @@ impl QuillApp {
 
     /// The chat's boost level, once `getChatBoostStatus` answered.
     fn chat_appearance_level(&self, chat_id: ChatId) -> Option<i32> {
-        self.session()?
-            .groups
-            .boost_level_count(chat_id.0)
-            .map(|(level, _)| level)
+        self.session()?.groups.boost_level(chat_id.0)
     }
 
     /// The level line: the level, "checking" while the status request is

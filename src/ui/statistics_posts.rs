@@ -519,7 +519,7 @@ impl QuillApp {
                         page = page.child(divider(cx)).child(section);
                     }
                 }
-                Some(PollStatsFetch::Loading) => {}
+                Some(PollStatsFetch::Loading(_)) => {}
                 Some(PollStatsFetch::Failed(message)) => {
                     page = page
                         .child(divider(cx))

@@ -149,10 +149,7 @@ impl Session {
         let Some(thread) = self.threads.thread.as_mut() else {
             return;
         };
-        if Some(thread.origin_chat_id) != origin_chat
-            || thread.origin_message_id.0 != message_id
-            || thread.history.stale_pages.remove(&pending.id.0)
-        {
+        if Some(thread.origin_chat_id) != origin_chat || thread.origin_message_id.0 != message_id {
             return;
         }
         let empty = messages.is_empty();
@@ -225,10 +222,7 @@ impl Session {
         let Some(thread) = self.threads.thread.as_mut() else {
             return;
         };
-        if Some(thread.origin_chat_id) != origin_chat
-            || thread.origin_message_id.0 != message_id
-            || thread.history.stale_pages.remove(&pending.id.0)
-        {
+        if Some(thread.origin_chat_id) != origin_chat || thread.origin_message_id.0 != message_id {
             return;
         }
         if newer {
@@ -241,8 +235,8 @@ impl Session {
     }
 
     /// Replace the open thread's window (jump to the latest replies): the
-    /// pages still in flight are marked stale. Returns whether a thread
-    /// was open.
+    /// pages still in flight are forgotten, so their answers are ignored.
+    /// Returns whether a thread was open.
     pub(crate) fn reset_thread_window(&mut self) -> bool {
         let Some(thread) = self.threads.thread.as_ref() else {
             return false;
@@ -253,13 +247,12 @@ impl Session {
             RequestPurpose::Threads(ThreadsPurpose::GetMessageThreadHistoryNewer { message_id }),
         ];
         let stale = self.requests.ids_for_chat(&purposes, thread.origin_chat_id);
+        for id in stale {
+            drop(self.requests.take(id));
+        }
         let Some(thread) = self.threads.thread.as_mut() else {
             return false;
         };
-        thread
-            .history
-            .stale_pages
-            .extend(stale.into_iter().map(|id| id.0));
         thread.reset_window();
         true
     }
@@ -361,11 +354,8 @@ impl Session {
             })
             .collect();
         let stale = self.requests.ids_for_chat(&purposes, thread.origin_chat_id);
-        if let Some(thread) = self.threads.thread.as_mut() {
-            thread
-                .history
-                .stale_pages
-                .extend(stale.into_iter().map(|id| id.0));
+        for id in stale {
+            drop(self.requests.take(id));
         }
     }
 

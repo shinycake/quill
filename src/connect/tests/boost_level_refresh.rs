@@ -32,11 +32,14 @@ fn a_moved_boost_level_refetches_the_status() {
         r#"{"@type":"updateNewChat","chat":{"id":13,"title":"News","type":{"@type":"chatTypeSupergroup","supergroup_id":113,"is_channel":true},"unread_count":0}}"#,
     );
     ingest(&mut driver, &supergroup_update(1));
-    driver
-        .session
-        .groups
-        .chat_boost_status
-        .insert(ChatId(13).0, crate::state::fetch::Fetch::Ready((1, 4)));
+    driver.session.groups.set_boost_status(
+        ChatId(13).0,
+        crate::telegram::envelope::ParsedBoostStatus {
+            level: 1,
+            boost_count: 4,
+            ..Default::default()
+        },
+    );
     let asked = |recorder: &RecordingSender| {
         recorder
             .snapshot()
@@ -50,12 +53,8 @@ fn a_moved_boost_level_refetches_the_status() {
 
     ingest(&mut driver, &supergroup_update(2));
     assert_eq!(asked(&recorder), 1);
-    // The old level stays for display while the new one is asked for.
-    let groups = &driver.session.groups;
-    assert_eq!(groups.boost_level_count(13), Some((1, 4)));
-    assert!(
-        groups
-            .boost_status_fetch(13)
-            .is_some_and(|fetch| fetch.is_loading())
-    );
+    // The held status stays visible while the new one is on its way.
+    let held = driver.session.groups.chat_boost_status.get(&13);
+    assert!(held.is_some_and(|fetch| fetch.is_loading()));
+    assert_eq!(driver.session.groups.boost_level(13), Some(1));
 }

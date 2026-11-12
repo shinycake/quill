@@ -12,7 +12,10 @@ impl Session {
         _extra: Option<RequestId>,
         _seq: u64,
     ) {
-        // An answer ends its list's fetch; an update carries no request.
+        // An answer ends its list's fetch; an update carries no request. A
+        // list an update marked out of date meanwhile keeps its mark: this
+        // answer predates the change and is shown until the refetch asks
+        // again.
         if let Some(pending) = pending
             && let Some(list) = self.stickers.stickers.lists.for_purpose(pending.purpose)
         {
@@ -158,8 +161,16 @@ impl Session {
                     self.accept_found_stickers(stickers);
                 } else if purpose == Some(RequestPurpose::SuggestStickers) {
                     // Slice S12: composer suggestions land in their own
-                    // slot — never the search UI's `found_stickers`.
-                    self.accept_sticker_suggestions(stickers);
+                    // slot — never the search UI's `found_stickers`. Only the
+                    // request the composer waits for lands.
+                    if self
+                        .stickers
+                        .stickers
+                        .suggest_for
+                        .waits_for(pending.map(|p| p.id))
+                    {
+                        self.accept_sticker_suggestions(stickers);
+                    }
                 } else if purpose == Some(RequestPurpose::GetFavoriteStickers) {
                     self.accept_favorite_stickers(stickers);
                 } else if purpose == Some(RequestPurpose::GetRecentStickers) {

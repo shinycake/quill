@@ -10,7 +10,6 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
-use quill::state::RequestPurpose;
 use quill::telegram::envelope::ChatKind;
 
 impl QuillApp {
@@ -44,15 +43,17 @@ impl QuillApp {
         } else {
             ("group", "members")
         };
-        let details = session.groups.chat_boost_details.get(&chat_id.0);
-        let prepaid = details
+        let status = session.groups.boost_status(chat_id.0);
+        let prepaid = status
             .map(|status| status.prepaid_giveaways.clone())
             .unwrap_or_default();
         // The prepaid list is not "none" while the status is missing: its
-        // request is out (the table says so), or it failed and Retry asks.
+        // request is out, or it failed and Retry asks.
+        let status_missing = status.is_none();
         let status_in_flight = session
-            .requests
-            .has_purpose_for_chat(RequestPurpose::GetChatBoostStatus, chat_id);
+            .groups
+            .boost_status_fetch(chat_id.0)
+            .is_some_and(|fetch| fetch.shows_loading());
         let multiplier = quill::giveaway::BOOSTS_PER_PREMIUM;
         let mut section = div().flex().flex_col().gap_1().pt_2().child(
             Button::new("boosts-get-via-gifts")
@@ -66,7 +67,7 @@ impl QuillApp {
             keys::Q_MONEY_GET_MORE_BOOSTS_FOR_YOUR,
             &[("0", place.0), ("1", place.1)],
         )));
-        if details.is_none() {
+        if status_missing {
             section = if status_in_flight {
                 section.child(
                     div()

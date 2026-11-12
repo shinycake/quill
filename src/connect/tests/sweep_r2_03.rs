@@ -21,7 +21,10 @@ fn message(chat: i64, id: i64) -> Value {
 #[test]
 fn an_installed_sets_answer_keeps_the_emoji_that_was_already_asked() {
     let mut t = Flaky::new();
-    t.driver.session.stickers.stickers.suggest_for = SuggestFor::Asked("😀".into());
+    t.driver.session.stickers.stickers.suggest_for = SuggestFor::Asked {
+        emoji: "😀".into(),
+        request: crate::ids::RequestId(1),
+    };
     t.driver.open_media_panel().unwrap();
     t.answer(
         "getInstalledStickerSets",
@@ -29,7 +32,10 @@ fn an_installed_sets_answer_keeps_the_emoji_that_was_already_asked() {
     );
     assert_eq!(
         t.driver.session.stickers.stickers.suggest_for,
-        SuggestFor::Asked("😀".into())
+        SuggestFor::Asked {
+            emoji: "😀".into(),
+            request: crate::ids::RequestId(1),
+        }
     );
 }
 

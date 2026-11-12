@@ -160,10 +160,11 @@ impl QuillApp {
         }
         // TDLib 1.8.68 community management (rename / photo /
         // permissions / delete) refused.
-        if let Some(err) = self
+        for err in self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.groups.community_error.take())
+            .map(|live| live.driver.session.groups.community_error.take_all())
+            .unwrap_or_default()
         {
             self.set_note(StatusNote::error(err));
             progressed = true;
@@ -171,10 +172,11 @@ impl QuillApp {
         // Slice G1 fix-up: an invite-link mutation (create/edit/revoke/
         // replace-primary) failed — the loaded list is kept, so the
         // error surfaces here instead of wiping the panel.
-        if let Some(err) = self
+        for err in self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.groups.invite_link_error.take())
+            .map(|live| live.driver.session.groups.invite_link_error.take_all())
+            .unwrap_or_default()
         {
             self.set_note(StatusNote::error(err));
             progressed = true;
@@ -350,7 +352,7 @@ impl QuillApp {
         if let Some(err) = self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.auth_state.logout_refused.take())
+            .and_then(|live| live.driver.session.take_logout_refusal())
         {
             self.set_note(StatusNote::error(crate::ui::user_error::user_error_for(
                 quill::lang::keys::Q_NOTES_FAILED_LOG_OUT,

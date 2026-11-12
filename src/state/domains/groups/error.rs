@@ -56,6 +56,24 @@ impl Session {
         ) {
             self.note_premium_limit(err, pending);
         }
+        // A create whose dialog was closed and whose request was lost has no
+        // answer to wait for: its row goes (an answered one was settled
+        // when the answer came).
+        if let Some(pending) = pending
+            && matches!(
+                pending.purpose,
+                RequestPurpose::CreateBasicGroup
+                    | RequestPurpose::Groups(GroupsPurpose::CreateSupergroupChannel { .. })
+            )
+            && self
+                .groups
+                .new_chats
+                .creations
+                .get(&pending.id)
+                .is_some_and(|creation| matches!(creation.stage, CreationStage::OutClosed { .. }))
+        {
+            self.groups.new_chats.creations.remove(&pending.id);
+        }
         self.record_group_info_edit_error(err, pending);
         self.note_community_full_info_failed(err, pending);
         self.apply_group_type_error(err, pending);
@@ -109,7 +127,9 @@ impl Session {
                     }
                     _ => "Could not delete the community",
                 };
-                self.groups.community_error = Some(format!("{action}: {}", error_reason(err)));
+                self.groups
+                    .community_error
+                    .push(format!("{action}: {}", error_reason(err)));
             }
             // Switching ads off needs a boost level; say so for the usual
             // refusal (TDLib's message text is not kept, see `TdError`).
@@ -180,14 +200,16 @@ impl Session {
             // fetch state so the statistics panel shows an honest
             // error instead of spinning forever.
             Some(RequestPurpose::GetChatStatistics) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.groups.chat_statistics.insert(
-                        chat_id.0,
-                        ChatStatisticsFetch::Failed(call_request_error_line(
-                            err,
-                            "Could not load statistics",
-                        )),
-                    );
+                // Only the request the panel waits for fails it.
+                if let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                    && let Some(slot) = self.groups.chat_statistics.get_mut(&chat_id.0)
+                    && matches!(slot, ChatStatisticsFetch::Loading { request, .. } if *request == pending.id)
+                {
+                    *slot = ChatStatisticsFetch::Failed(call_request_error_line(
+                        err,
+                        "Could not load statistics",
+                    ));
                 }
             }
             Some(RequestPurpose::GetStatisticalGraph) => {
@@ -280,21 +302,24 @@ impl Session {
                 // Slice G1 fix-up: a failed mutation must not wipe
                 // the previously loaded list — surface the error in
                 // the status note and keep the last good data.
-                self.groups.invite_link_error =
-                    Some(call_request_error_line(err, "Could not create invite link"));
+                self.groups
+                    .invite_link_error
+                    .push(call_request_error_line(err, "Could not create invite link"));
             }
             Some(RequestPurpose::EditChatInviteLink) => {
-                self.groups.invite_link_error =
-                    Some(call_request_error_line(err, "Could not edit invite link"));
+                self.groups
+                    .invite_link_error
+                    .push(call_request_error_line(err, "Could not edit invite link"));
             }
             Some(RequestPurpose::RevokeChatInviteLink) => {
-                self.groups.invite_link_error =
-                    Some(call_request_error_line(err, "Could not revoke invite link"));
+                self.groups
+                    .invite_link_error
+                    .push(call_request_error_line(err, "Could not revoke invite link"));
             }
             // Slice G1: failed primary-link replacement — keep the
             // last good list, surface the error in the note.
             Some(RequestPurpose::ReplacePrimaryChatInviteLink) => {
-                self.groups.invite_link_error = Some(call_request_error_line(
+                self.groups.invite_link_error.push(call_request_error_line(
                     err,
                     "Could not replace primary invite link",
                 ));
@@ -349,7 +374,7 @@ impl Session {
                     {
                         fetch.forget_page_in_flight();
                     }
-                    self.groups.invite_link_error = Some(call_request_error_line(
+                    self.groups.invite_link_error.push(call_request_error_line(
                         err,
                         crate::lang::tr(
                             crate::lang::keys::Q_INVITE_LINK_COULD_NOT_LOAD_MORE_JOIN_REQUESTS,
@@ -358,7 +383,7 @@ impl Session {
                 }
             }
             Some(RequestPurpose::Groups(GroupsPurpose::ProcessAllChatJoinRequests { .. })) => {
-                self.groups.invite_link_error = Some(call_request_error_line(
+                self.groups.invite_link_error.push(call_request_error_line(
                     err,
                     "Could not process join requests",
                 ));
@@ -433,7 +458,7 @@ impl Session {
                 }
             }
             Some(RequestPurpose::Groups(GroupsPurpose::ProcessLinkJoinRequests { .. })) => {
-                self.groups.invite_link_error = Some(call_request_error_line(
+                self.groups.invite_link_error.push(call_request_error_line(
                     err,
                     "Could not process join requests",
                 ));
@@ -468,11 +493,12 @@ impl Session {
                 if let Some(pending) = pending {
                     self.groups.revoked_link_deletions.remove(&pending.id);
                 }
-                self.groups.invite_link_error =
-                    Some(call_request_error_line(err, "Could not delete invite link"));
+                self.groups
+                    .invite_link_error
+                    .push(call_request_error_line(err, "Could not delete invite link"));
             }
             Some(RequestPurpose::DeleteAllRevokedChatInviteLinks) => {
-                self.groups.invite_link_error = Some(call_request_error_line(
+                self.groups.invite_link_error.push(call_request_error_line(
                     err,
                     "Could not delete revoked links",
                 ));
@@ -517,7 +543,10 @@ impl Session {
                 }
             }
             Some(RequestPurpose::GetBasicGroupFullInfo) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                if let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                    && self.groups.basic_members_wait_for(chat_id.0, pending.id)
+                {
                     self.groups.basic_group_members.insert(
                         chat_id.0,
                         SupergroupMembersFetch::Failed(call_request_error_line(
@@ -613,14 +642,15 @@ impl Session {
                 }
             }
             Some(RequestPurpose::Groups(GroupsPurpose::GetAdminRights { user_id })) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.groups.admin_rights.insert(
-                        (chat_id.0, user_id),
-                        AdminRightsFetch::Failed(call_request_error_line(
-                            err,
-                            "Could not load admin rights",
-                        )),
-                    );
+                if let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                    && let Some(slot) = self.groups.admin_rights.get_mut(&(chat_id.0, user_id))
+                    && *slot == AdminRightsFetch::Loading(pending.id)
+                {
+                    *slot = AdminRightsFetch::Failed(call_request_error_line(
+                        err,
+                        "Could not load admin rights",
+                    ));
                 }
             }
             _ => {}

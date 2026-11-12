@@ -394,7 +394,7 @@ fn a_refused_poll_votes_request_fails_and_retries() {
         .expect("sent again");
     assert!(matches!(
         rig.driver.session.messages.poll_stats.get(&key),
-        Some(crate::state::PollStatsFetch::Loading)
+        Some(crate::state::PollStatsFetch::Loading(_))
     ));
 }
 
@@ -630,11 +630,14 @@ fn statistics_asked_before_the_full_info_wait_and_go_out_when_it_lands() {
             &rig.sink,
         ).unwrap())
         .unwrap();
-    assert_eq!(
-        rig.driver.session.groups.chat_statistics.get(&-100),
-        Some(&ChatStatisticsFetch::Loading { is_dark: true })
-    );
     let request = rig.last("getChatStatistics");
+    let asked = request["@extra"]
+        .as_str()
+        .and_then(|text| text.parse().ok());
+    assert!(matches!(
+        rig.driver.session.groups.chat_statistics.get(&-100),
+        Some(&ChatStatisticsFetch::Loading { request, is_dark: true }) if Some(request.0) == asked
+    ));
     assert_eq!(request["chat_id"], -100);
     assert_eq!(request["is_dark"], true);
 }

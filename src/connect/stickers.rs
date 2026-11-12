@@ -198,8 +198,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self.session.request(purpose, None);
         if let Err(err) = self.sender.send_json(&build(extra)) {
             self.session.requests.take(extra);
+            // A list marked out of date stays marked: its refetch is owed.
             if let Some(list) = self.session.stickers.stickers.lists.for_purpose(purpose) {
-                list.fail(crate::lang::tr(
+                list.answer_failed(crate::lang::tr(
                     crate::lang::keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN,
                 ));
             }
@@ -654,9 +655,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .requests
                 .take_purpose(RequestPurpose::SuggestStickers),
         );
-        self.session.stickers.stickers.suggest_for =
-            crate::state::SuggestFor::Asked(emoji.to_string());
         let extra = self.session.request(RequestPurpose::SuggestStickers, None);
+        self.session.stickers.stickers.suggest_for = crate::state::SuggestFor::Asked {
+            emoji: emoji.to_string(),
+            request: extra,
+        };
         match self
             .sender
             .send_json(&search_stickers(extra, emoji, "", 0, SUGGEST_LIMIT))

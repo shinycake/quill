@@ -88,17 +88,22 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// was taken into the next step). An answered create is forgotten; one
     /// still out comes anyway (TDLib cannot cancel it) but nothing opens it
     /// on top of whatever the person is doing now, and its entry goes when
-    /// its answer is applied.
+    /// its answer is applied. One whose request is gone (lost) has no
+    /// answer to wait for: its entry goes now.
     pub fn abandon_new_chat(&mut self, request: RequestId) {
+        let still_out = self.session.requests.get(request).is_some();
         let creations = &mut self.session.groups.new_chats.creations;
         let Some(creation) = creations.get_mut(&request) else {
             return;
         };
         match &mut creation.stage {
-            CreationStage::Out { photo } => {
+            CreationStage::Out { photo } if still_out => {
                 creation.stage = CreationStage::OutClosed {
                     photo: photo.take(),
                 };
+            }
+            CreationStage::Out { .. } => {
+                creations.remove(&request);
             }
             CreationStage::Made { chat, photo } => {
                 creation.stage = CreationStage::MadeClosed {

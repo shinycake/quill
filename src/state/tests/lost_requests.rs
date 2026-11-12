@@ -24,7 +24,7 @@ fn sweeping_a_shared_media_page_allows_the_next_page_request() {
     let mut session = ready_session();
     let chat = ChatId(5);
     let media = &mut session.media.shared_media;
-    media.chat_id = Some(chat);
+    media.open_for(chat);
     let tab = SharedMediaTab::default();
     let state = media.tab_state(tab);
     state.status = SharedMediaTabStatus::ready();

@@ -53,7 +53,7 @@ fn open_playlist(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
         session.my_user_id = Some(ME);
         let playlist = session.media.playlists.entry(ME).or_default();
         playlist.set_ready(vec![track(1), track(2), track(3)]);
-        session.media.shared_media.playlist_user = Some(ME);
+        session.media.shared_media.open_playlist(ME);
         cx.notify();
     });
     vcx.run_until_parked();
@@ -197,13 +197,14 @@ fn closing_the_playlist_goes_back_to_the_gallery_under_it(cx: &mut TestAppContex
             .expect("demo session")
             .media
             .shared_media;
-        shared.chat_id = Some(quill::ids::ChatId(5));
+        shared.open_for(quill::ids::ChatId(5));
+        shared.open_playlist(ME);
         app.close_playlist_ui(cx);
     });
     app.read_with(vcx, |app, _| {
         let shared = &app.session().expect("session").media.shared_media;
-        assert_eq!(shared.playlist_user, None);
+        assert_eq!(shared.playlist_user(), None);
         assert!(shared.open(), "the gallery stays");
-        assert_eq!(shared.chat_id, Some(quill::ids::ChatId(5)));
+        assert_eq!(shared.chat_id(), Some(quill::ids::ChatId(5)));
     });
 }

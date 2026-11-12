@@ -252,7 +252,7 @@ impl QuillApp {
         let chat_id = ChatId(state.chat_id);
         let name = chat_title(session, state.chat_id);
         let mut body = div().flex().flex_col().gap_3();
-        match session.groups.chat_boost_details.get(&state.chat_id) {
+        match session.groups.boost_status(state.chat_id) {
             Some(status) => {
                 let counters = BoostCounters::from(status);
                 let mut title = counters.title(&name, state.group);
@@ -419,8 +419,7 @@ impl QuillApp {
                 BoostPhase::Main { .. } | BoostPhase::Working(_) => {
                     let counters = session
                         .groups
-                        .chat_boost_details
-                        .get(&state.chat_id)
+                        .boost_status(state.chat_id)
                         .map(BoostCounters::from);
                     let working = matches!(state.phase, BoostPhase::Working(_));
                     footer = footer.child(close_button(tr(keys::CLOSE)));

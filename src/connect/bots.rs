@@ -103,22 +103,30 @@ impl<S: JsonSender> ConnectDriver<S> {
         let mut sent = false;
         for user_id in wanted {
             if self.session.users.contains_key(&user_id)
-                || !self.session.bots.asked_bot_users.insert(user_id)
+                || !self
+                    .session
+                    .bots
+                    .bot_users
+                    .get(&user_id)
+                    .is_none_or(crate::state::fetch::Fetch::can_ask)
             {
                 continue;
             }
             let extra = self
                 .session
-                .request(RequestPurpose::Bots(BotsPurpose::GroupBotUser), None);
+                .request_for_user(RequestPurpose::Bots(BotsPurpose::GroupBotUser), user_id);
             if self
                 .sender
                 .send_json(&crate::premium_hub::ton::get_user(extra, user_id))
                 .is_err()
             {
                 self.session.requests.take(extra);
-                self.session.bots.asked_bot_users.remove(&user_id);
                 continue;
             }
+            let mut fetch = crate::state::fetch::Fetch::default();
+            fetch.begin();
+            fetch.sent(extra);
+            self.session.bots.bot_users.insert(user_id, fetch);
             sent = true;
         }
         sent

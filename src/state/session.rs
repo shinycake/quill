@@ -1,7 +1,10 @@
 //! The Session reducer: central client state and constructor.
 use super::*;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// How the session is ending, one value. `logOut` is a stage of it: sent
+/// under its request, answered by the auth states that follow, or refused
+/// (back to running, the refusal waiting for the UI to say so once).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShutdownPhase {
     Running,
     /// The account is closing but `close` waits behind a call's hang-up
@@ -9,9 +12,20 @@ pub enum ShutdownPhase {
     HoldingClose {
         until: std::time::Instant,
     },
+    /// `logOut` went out as this request.
+    LogoutRequested(RequestId),
+    /// `logOut` was refused; the session is still signed in.
+    LogoutRefused(TdError),
     CloseRequested,
     WaitingClosed,
     Closed,
+}
+
+impl ShutdownPhase {
+    /// The session is not ending (a refused `logOut` leaves it signed in).
+    pub fn is_running(&self) -> bool {
+        matches!(self, Self::Running | Self::LogoutRefused(_))
+    }
 }
 
 #[derive(Debug, Clone)]

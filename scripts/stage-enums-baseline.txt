@@ -2,7 +2,6 @@
 # <rule>:<Enum>::<Variant> <count>. Only remove lines.
 bare:AccessStage::Asking 1
 bare:AccountStage::Starting 1
-bare:AdminRightsFetch::Loading 1
 bare:Answer::Waiting 1
 bare:ApplyStage::Sent 1
 bare:AskStage::InFlight 1
@@ -85,8 +84,6 @@ bare:PinTarget::Loading 1
 bare:PlayHead::Waiting 1
 bare:PlayState::Opening 1
 bare:Playback::Waiting 1
-bare:PollStatsFetch::Loading 1
-bare:PublicChatsFetch::Loading 1
 bare:Refire::Running 1
 bare:ReplyState::Loading 1
 bare:Restore::Pending 1
@@ -149,7 +146,6 @@ unkeyed:CameraStage::Saving 1
 unkeyed:Cancellation::InFlight 1
 unkeyed:CardState::Loading 1
 unkeyed:ChatSearchPaging::Loading 1
-unkeyed:ChatStatisticsFetch::Loading 1
 unkeyed:ComposerReplyFetch::Loading 1
 unkeyed:ConferenceStage::Upgrading 1
 unkeyed:CreateStage::Creating 1
@@ -194,7 +190,6 @@ unkeyed:SetState::Loading 1
 unkeyed:SizedState::Loading 1
 unkeyed:Stage::Running 1
 unkeyed:StoryFetch::Asked 1
-unkeyed:SuggestFor::Asked 1
 unkeyed:TileState::Requested 1
 unkeyed:TitleCheck::Sent 1
 unkeyed:TonConnectRequestState::Pending 1

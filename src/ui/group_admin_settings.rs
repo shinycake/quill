@@ -505,15 +505,12 @@ impl QuillApp {
         if is_channel
             && let Some(custom) = custom_reactions_over_level(
                 current.as_ref(),
-                session
-                    .groups
-                    .boost_level_count(chat_id.0)
-                    .and_then(|(level, _)| {
-                        custom_reactions_allowed(
-                            session.groups.chat_boost_features.get(&chat_id.0),
-                            level,
-                        )
-                    }),
+                session.groups.boost_level(chat_id.0).and_then(|level| {
+                    custom_reactions_allowed(
+                        session.groups.chat_boost_features.get(&chat_id.0),
+                        level,
+                    )
+                }),
             )
         {
             let count = custom.to_string();

@@ -228,7 +228,6 @@ fn a_newer_page_asked_for_before_the_newest_end_went_is_dropped() {
     assert!(newest < 100_000);
     answer(&mut session, &seq, &sink, newer, &[100_002, 100_001], 0);
     assert_eq!(ids(&session).1, newest, "no row across the gap");
-    assert!(topic(&session).stale_pages.is_empty());
 }
 
 #[test]

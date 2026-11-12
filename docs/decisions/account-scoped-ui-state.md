@@ -8301,6 +8301,45 @@ Review fix round (r2-34, after merging `r2-followup` and `r2-28`):
 | nit | 12-C009/C010: the debounce token is the driver's check that a fired timer is the newest, the `Task` is the timer; the two are not stages of one thing, so they stay apart. |
 | guards | `check-request-match` flagged the two `refresh_*` purpose lookups (fixed above); `check-stage-enums` flagged `PreviewStage::Waiting` (renamed `Shown`, it waits on no request); baseline lines for gone entries pruned. |
 
+### Sweep fixes (r2-19)
+
+Round-2 entries for the auth, bots, calls, communities, groups and messages
+domains and the shared-media, sponsored, sticker/GIF, story, topic-history and
+view-book state files. Every one of those files was read again from the top
+after its entries were done.
+
+| id | file | what changed |
+| --- | --- | --- |
+| 06-026 | `sponsored_state.rs` | The unused `SponsoredReport` machine is deleted; `SponsoredReportFlow` is the only one. |
+| 05-015 | `bots/error.rs` | Already `Fetch<Vec<i64>>` on the integration branch (r2-18, 08-021): `Loading` holds the request. This branch keeps its test (an older request's error and answer leave the newer one alone) and drops its own `SimilarBotsFetch`. |
+| 05-016 | `bots/commands.rs` | `bot_users: HashMap<i64, Fetch<()>>` replaces `asked_bot_users`; a refused `getUser` is `Failed` and is asked again when the group's commands arrive again, never from upkeep. |
+| 05-017 | `auth/state.rs` | `ShutdownPhase::{LogoutRequested(RequestId), LogoutRefused(TdError)}` replace `logout_request` and `logout_refused`; a quit replaces the stage, a refusal outside Ready becomes a close. |
+| 05-018 | `calls/state.rs` | `CallLinkStage::{Offered{offered, link}, Joinable(link)}` hold the invite hash; `calls.call_link` is gone. |
+| 05-019 | `calls/state.rs` | `RecentCalls::{List(Paged<CallPage>), Clearing{request, list}}`: rows, offset and stage are one value. |
+| 05-021 | `communities/apply.rs` | The add-chat request list is `Loading` with its request; a page of another request is dropped. |
+| 05-022, 05-023, 05-026, 05-028, 05-038 | `groups/apply.rs`, `groups/error.rs`, `groups/group_type.rs`, `messages/error.rs` | `ChatStatisticsFetch`, `AdminListFetch`, `AdminRightsFetch`, `PollStatsFetch`, `PollVotersFetch`, `PublicChatsFetch` carry the request in `Loading`; `SupergroupMembersFetch::Loading` stays the integration branch's unit variant, its request is `MemberAsk::first` in `member_asks` (the basic group's one list is the `Recent` key: `GroupsState::basic_members_wait_for`); the invite-link lists, pinned messages and boost status are matched by request too. Answers and errors of older requests change nothing. A member who is no administrator ends the rights lookup (`Failed`). |
+| 05-024 | `groups/apply.rs` | `chat_boost_status` is `Fetch<ParsedBoostStatus>`; `chat_boost_details` and `boost_level_moved` are gone. A level change or a boost marks it `Outdated`, it stays on screen, and a failed refetch is `Failed` with the held answer kept (no re-ask from render). |
+| 04-014, 05-025 | `groups/new_chat.rs` | The integration branch's `CreationStage::{Out, OutClosed, Made, MadeClosed, Settled}` already replaces `CreationAsker` and the copied bools (r2-18); this branch's own stages are dropped. Kept from it: a create whose dialog was closed and whose request is lost removes its row (the lost-request error hook, and `abandon_new_chat` when the request is already gone), with its test. |
+| 05-027 | `groups/private_sharing.rs` | Skipped: tdesktop's `actionTaken` is "the next item is a toggle" (docs/decisions/noforwards-requests.md); Quill matches it. |
+| 05-029 | `groups/state.rs` | `invite_link_error` and `community_error` are `Notes` queues (the integration branch kept `Option<String>`; the entry is two failures between two polls, which needs more than one message at a time). `member_action_error` is a per-chat banner the user dismisses (not a drained slot), `member_list_stale` a queue of chats, `add_members_failed` a counter: they are not stages. |
+| 06-022 | `shared_media_types.rs` | A replaced list drops ticked rows that are no longer listed. |
+| 06-024 | `shared_media_types.rs` | `SharedMediaView::{Closed, Gallery, Playlist{user_id, under}}`. |
+| 06-027 | `sticker_gif_types.rs` | The integration branch's `StickerBatch::{Idle, Running, Finished}` (`begin(total, sent)`, `finish_item(request, ok)`); this branch's second type is dropped. |
+| 06-028 | `sticker_gif_types.rs` | The stale bools are `Fetch::Outdated` on the lists and on the saved GIFs; a refused refetch send keeps the mark. |
+| 06-030 | `sticker_gif_types.rs` | `AttachedStickers::{Idle, Asking(RequestId), Answered}`. The box's own `loading(0)` view is the box's stage. |
+| 06-031, 06-032 | `sticker_gif_types.rs` | The integration branch's `GifSearch` holds results and `asked_offset` (the panel keeps `search_chat`); the duplicate `GifSearch::request` is gone: the page request is the one in `fetch` (`Fetch::sent`, `waits_for`). |
+| 06-033 | `sticker_gif_types.rs` | `SuggestFor::Asked{emoji, request}`: matched by request, and an error returns to `Nothing` so the next keystroke asks again. |
+| 06-034 | `story_types.rs` | `StoryManageState` is a `ManageLine` and one list of `ManageCall::{InFlight, Saved, Failed}(RequestId, ..)`; going away ends a "Saving" line. |
+| 06-016 | `topic_history.rs` | The blacklists (`stale_pages`, `gone_topic_pages`) are gone: a window move forgets the page requests, so their answers find none. Threads do the same. |
+| 06-041 | `view_book.rs` | `Phase::{Newest, Reported{on_screen}}`. |
+
+Merge with r2-18 (`claude/sweep-r2-followup`): every overlap kept the integration branch's shape (sticker batch, poll voters, new chat creation, GIF search, supergroup members, community lists, `ShutdownPhase::HoldingClose`, the `contacts_notice` clear). The four shape guards pass with no new hits; their baseline lines for code that is gone were pruned.
+
+Fresh review of each touched file found nothing more beyond what the table lists: `ManageCallState::InFlight` (the stage guard's one new hit) became `ManageCall`, which carries its request in every variant, and the stranded comment in `bots/error.rs` sits above its arm again.
+
+Files outside the bundle changed only to follow these types: `info_types.rs`
+(request ids in the `Loading` variants), the connect drivers that send the
+requests, and the UI readers.
 ### Sweep fixes (r2-05)
 
 | id | what changed |

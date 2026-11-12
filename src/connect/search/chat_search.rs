@@ -28,7 +28,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Reopening the gallery for the same chat keeps the already-fetched
         // tabs (`SharedMediaState::open_for`); only a fresh open fetches the
         // active tab.
-        let reopening = self.session.media.shared_media.chat_id == Some(chat_id);
+        let reopening = self.session.media.shared_media.chat_id() == Some(chat_id);
         let initial = self.session.main_profile_gallery_tab(chat_id);
         let tab = self
             .session
@@ -69,7 +69,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(filter) = tab.filter_constructor() else {
             return self.fetch_profile_tab(tab, false);
         };
-        let Some(chat_id) = self.session.media.shared_media.chat_id else {
+        let Some(chat_id) = self.session.media.shared_media.chat_id() else {
             return Err(ConnectSendError::InvalidRequest);
         };
         let query = self.shared_media_query(tab);
@@ -114,7 +114,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(filter) = tab.filter_constructor() else {
             return self.fetch_profile_tab(tab, true);
         };
-        let Some(chat_id) = self.session.media.shared_media.chat_id else {
+        let Some(chat_id) = self.session.media.shared_media.chat_id() else {
             return Err(ConnectSendError::InvalidRequest);
         };
         let Some((generation, from_message_id)) =

@@ -5,7 +5,7 @@ use crate::credentials::TelegramCredentials;
 use crate::ids::{ChatId, ChatMessage, MessageId, RequestId};
 use crate::state::{AiAnswer, AiResult};
 use crate::state::{
-    ComposerLinkPreview, InstantViewPage, LinkPreviewFetch, RequestPurpose, Session, ShutdownPhase,
+    ComposerLinkPreview, InstantViewPage, LinkPreviewFetch, RequestPurpose, Session,
 };
 use crate::state::{GroupsPurpose, MessagesPurpose, StickersPurpose, ThreadsPurpose};
 use crate::telegram::client::OwnedEnvelope;
@@ -680,8 +680,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 {
                     let _ = self.load_chat_welcome_messages(chat_id);
                 }
-                RequestPurpose::BoostChat => {
-                    // Asks only when the status is not held (or is due).
+                RequestPurpose::BoostChat if self.session.groups.boost_status_wanted(chat_id.0) => {
                     let _ = self.fetch_chat_boost_status(chat_id);
                 }
                 _ => {}

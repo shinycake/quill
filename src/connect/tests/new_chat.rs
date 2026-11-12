@@ -429,3 +429,25 @@ fn a_lost_type_save_request_lands_in_refused() {
         NewChatStage::Subscribers { chat }
     );
 }
+
+/// Sweep r2-19 (04-014, 05-025): a create whose dialog was closed and whose
+/// request is lost has no answer to wait for, so its row goes, and a
+/// dialog that lets go of a create already lost drops the row at once.
+#[test]
+fn a_lost_detached_create_does_not_keep_its_row() {
+    let mut rig = Rig::new();
+    let creations = |rig: &Rig| rig.driver.session.groups.new_chats.creations.len();
+    let detached = rig.create(NewChatKind::Group, &[5], None);
+    rig.driver.abandon_new_chat(detached);
+    assert_eq!(creations(&rig), 1, "still out, the answer will come");
+    let lost = rig.driver.session.requests.take(detached).expect("pending");
+    rig.driver.session.settle_lost_request(lost);
+    assert_eq!(creations(&rig), 0);
+
+    let owned = rig.create(NewChatKind::Group, &[5], None);
+    let lost = rig.driver.session.requests.take(owned).expect("pending");
+    rig.driver.session.settle_lost_request(lost);
+    assert_eq!(creations(&rig), 1, "the open dialog reads the loss");
+    rig.driver.abandon_new_chat(owned);
+    assert_eq!(creations(&rig), 0);
+}

@@ -103,18 +103,13 @@ impl Session {
             // surface on the Recent-calls tab (the UI reads the
             // flags), not the call overlay.
             Some(RequestPurpose::SearchCallMessages) => {
-                if pending.is_some_and(|p| self.calls.take_recent_calls_request(p.id)) {
-                    self.calls.recent_calls_stage = RecentCalls::Failed;
+                if let Some(pending) = pending {
+                    self.calls.recent_calls.page_failed(pending.id);
                 }
             }
             Some(RequestPurpose::DeleteAllCallMessages) => {
-                if let Some(pending) = pending
-                    && self.calls.recent_calls_stage
-                        == (RecentCalls::Clearing {
-                            request: pending.id,
-                        })
-                {
-                    self.calls.recent_calls_stage = RecentCalls::Idle;
+                if let Some(pending) = pending {
+                    self.calls.recent_calls.clear_failed(pending.id);
                 }
                 self.chats_state
                     .chat_action_error
@@ -328,14 +323,7 @@ impl Session {
             // The call a link offered could not be fetched: its hash goes
             // with it, or a later join of that call would send it.
             Some(RequestPurpose::Calls(CallsPurpose::GetGroupCall { group_call_id })) => {
-                if self
-                    .calls
-                    .call_link
-                    .as_ref()
-                    .is_some_and(|link| link.group_call_id == group_call_id)
-                {
-                    self.calls.call_link = None;
-                }
+                self.calls.call_link_stage.forget_hash(Some(group_call_id));
                 self.calls.note_group_call_fetch_failed(group_call_id);
                 self.calls.group_call_error =
                     Some(call_request_error_line(err, "Voice chat request failed"));

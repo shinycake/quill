@@ -71,9 +71,14 @@ impl Session {
                     message_id,
                 })) = pending.map(|p| p.purpose)
                 {
-                    self.messages
-                        .poll_stats
-                        .insert((chat_id.0, message_id.0), PollStatsFetch::Loaded(graph));
+                    // Only the request the dialog waits for lands.
+                    if let Some(pending) = pending
+                        && let Some(slot) =
+                            self.messages.poll_stats.get_mut(&(chat_id.0, message_id.0))
+                        && *slot == PollStatsFetch::Loading(pending.id)
+                    {
+                        *slot = PollStatsFetch::Loaded(graph);
+                    }
                 }
             }
             MessagesPayload::UpdateMessageUnreadReactions {

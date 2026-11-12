@@ -166,7 +166,12 @@ fn the_status_answer_gives_the_viewers_own_boosts() {
         r#"{{"@type":"chatBoostStatus","@extra":"{}","level":1,"boost_count":3,"current_level_boost_count":2,"next_level_boost_count":5,"applied_slot_ids":[7]}}"#,
         extra.0
     ));
-    let details = &rig.driver.session.groups.chat_boost_details[&13];
+    let details = rig
+        .driver
+        .session
+        .groups
+        .boost_status(13)
+        .expect("answered");
     assert_eq!(details.my_boost_count, 1);
 }
 

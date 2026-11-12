@@ -105,6 +105,17 @@ impl Session {
                 ) {
                     // Settings → My Grams asked for a user its history
                     // names; store it unless an update already did.
+                    if let Some(pending) = pending
+                        && pending.purpose == RequestPurpose::Bots(BotsPurpose::GroupBotUser)
+                        && let Some(bot) = pending.user_id
+                        && self
+                            .bots
+                            .bot_users
+                            .get(&bot)
+                            .is_some_and(|fetch| fetch.waits_for(pending.id))
+                    {
+                        self.bots.bot_users.remove(&bot);
+                    }
                     if let Some(user) = user
                         && !self.users.contains_key(&user_id)
                     {

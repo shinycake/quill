@@ -137,8 +137,10 @@ pub struct BotsState {
     /// Bots named in a group's `bot_commands` whose user is not cached;
     /// the driver asks for them (`getUser`) and clears the list.
     pub bot_users_wanted: Vec<i64>,
-    /// Bot users already asked for, so each is requested once.
-    pub asked_bot_users: HashSet<i64>,
+    /// The `getUser` of each bot named in a group's commands: in flight
+    /// under its request, or failed (asked again the next time the group's
+    /// commands arrive). An answer removes the entry, the user is cached.
+    pub bot_users: HashMap<i64, crate::state::fetch::Fetch<()>>,
     /// Slice B2: `getBotSimilarBots` results (schema 1.8.67, line 11640)
     /// for the similar-bots section of the bot profile, keyed by bot
     /// user id. The `users` ids resolve to names via `Session::users`.
@@ -238,7 +240,7 @@ impl BotsState {
             bot_commands: HashMap::new(),
             group_bot_commands: HashMap::new(),
             bot_users_wanted: Vec::new(),
-            asked_bot_users: HashSet::new(),
+            bot_users: HashMap::new(),
             similar_bots: HashMap::new(),
             game_scores: HashMap::new(),
             callback_answers: Default::default(),

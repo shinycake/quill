@@ -360,7 +360,7 @@ impl QuillApp {
             .cloned();
         let mut section = div().flex().flex_col().gap_1().pb_2();
         section = match fetch {
-            None | Some(PollStatsFetch::Loading) => section.child(
+            None | Some(PollStatsFetch::Loading(_)) => section.child(
                 div()
                     .flex()
                     .items_center()

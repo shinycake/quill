@@ -215,7 +215,7 @@ impl super::on_screen::Farewell for CallBoxes {
         // A confirmed link waiting for its call to end is abandoned too: it
         // must not open a join screen after switching back.
         if let Some(live) = app.live.as_mut() {
-            live.driver.session.calls.call_link_stage = Default::default();
+            live.driver.session.calls.call_link_stage.abandon();
         }
     }
 }

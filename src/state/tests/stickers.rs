@@ -123,6 +123,7 @@ fn s9_gif_backend_purpose_gated_dispatch() {
         RequestPurpose::Stickers(StickersPurpose::GetGifSearchResults { first_page: false }),
         None,
     );
+    with_purpose.stickers.gifs.search_page_asked("50".into());
     with_purpose.stickers.gifs.search_sent(extra);
     apply_json(
         &mut with_purpose,
@@ -436,7 +437,12 @@ fn an_update_during_the_request_survives_its_answer_and_asks_again() {
         "the list is asked for again"
     );
     assert_eq!(gifs.animations.len(), 1, "the list does not blank");
-    // A failure keeps the list and counts as loaded until the next opening.
+    // The failure of the ask that predates the change keeps the mark.
+    gifs.saved_failed();
+    assert!(gifs.loaded() && gifs.saved_is_outdated());
+    // A failure of the new ask keeps the list and counts as loaded until
+    // the next opening.
+    gifs.saved_asked();
     gifs.saved_failed();
     assert!(gifs.failed() && gifs.loaded());
     assert_eq!(gifs.animations.len(), 1);

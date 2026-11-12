@@ -11,10 +11,13 @@ fn chat_statistics_fetch_flow_loads_and_caches() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetChatStatistics, Some(ChatId(13)));
-    session
-        .groups
-        .chat_statistics
-        .insert(13, ChatStatisticsFetch::Loading { is_dark: true });
+    session.groups.chat_statistics.insert(
+        13,
+        ChatStatisticsFetch::Loading {
+            request: extra,
+            is_dark: true,
+        },
+    );
     let graph = r#"{"@type":"statisticalGraphData","json_data":"{}","zoom_token":""}"#;
     let value = r#"{"@type":"statisticalValue","value":1.0,"previous_value":1.0,"growth_rate_percentage":0.0}"#;
     apply_json(
@@ -58,6 +61,13 @@ fn chat_statistics_fetch_flow_error_marks_failed() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetChatStatistics, Some(ChatId(13)));
+    session.groups.chat_statistics.insert(
+        13,
+        ChatStatisticsFetch::Loading {
+            request: extra,
+            is_dark: false,
+        },
+    );
     apply_json(
         &mut session,
         &seq,

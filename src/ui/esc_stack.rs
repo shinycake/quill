@@ -267,13 +267,14 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     layer!(
         "shared-media",
         |app| app.session().is_some_and(|session| {
-            session.media.shared_media.open() || session.media.shared_media.playlist_user.is_some()
+            session.media.shared_media.open()
+                || session.media.shared_media.playlist_user().is_some()
         }),
         |app, _, cx| {
             // Esc leaves the Playlist page first, back to the gallery.
             if app
                 .session()
-                .is_some_and(|session| session.media.shared_media.playlist_user.is_some())
+                .is_some_and(|session| session.media.shared_media.playlist_user().is_some())
             {
                 app.close_playlist_ui(cx);
             } else {

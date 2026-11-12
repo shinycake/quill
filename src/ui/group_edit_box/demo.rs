@@ -14,6 +14,7 @@ use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::ChatId;
 use quill::state::{InviteLinkFetch, InviteLinkList, Session};
 use quill::telegram::client::copy_and_parse;
+use quill::telegram::envelope::ParsedBoostStatus;
 use quill::telegram::envelope::{ParsedBoostFeatures, ParsedBoostLevelFeatures};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -111,9 +112,14 @@ fn seed_counts(session: &mut Session) {
         );
     }
     groups.pending_join_request_counts.insert(GROUP, 1);
-    groups
-        .chat_boost_status
-        .insert(CHANNEL, quill::state::fetch::Fetch::Ready((2, 14)));
+    groups.set_boost_status(
+        CHANNEL,
+        ParsedBoostStatus {
+            level: 2,
+            boost_count: 14,
+            ..ParsedBoostStatus::default()
+        },
+    );
     groups.chat_boost_features.insert(
         CHANNEL,
         ParsedBoostFeatures {

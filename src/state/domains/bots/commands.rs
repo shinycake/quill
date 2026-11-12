@@ -47,7 +47,11 @@ impl Session {
         for entry in &bot_commands {
             let id = entry.bot_user_id;
             if !self.users.contains_key(&id)
-                && !self.bots.asked_bot_users.contains(&id)
+                && self
+                    .bots
+                    .bot_users
+                    .get(&id)
+                    .is_none_or(crate::state::fetch::Fetch::can_ask)
                 && !self.bots.bot_users_wanted.contains(&id)
             {
                 self.bots.bot_users_wanted.push(id);

@@ -238,7 +238,7 @@ fn process_all_failure_keeps_the_list_and_reports() {
         rig.driver.session.groups.join_requests.get(&13),
         Some(JoinRequestFetch::Loaded(_))
     ));
-    assert!(rig.driver.session.groups.invite_link_error.is_some());
+    assert!(rig.driver.session.groups.invite_link_error.last().is_some());
 }
 
 #[test]

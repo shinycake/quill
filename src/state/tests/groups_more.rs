@@ -264,6 +264,10 @@ fn admin_list_fetch_caches() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetChatAdministrators, Some(ChatId(13)));
+    session
+        .groups
+        .admin_lists
+        .insert(13, AdminListFetch::Loading(extra));
 
     apply_json(
         &mut session,
@@ -463,6 +467,10 @@ fn get_admin_rights_response_caches_rights() {
         RequestPurpose::Groups(GroupsPurpose::GetAdminRights { user_id: 888 }),
         Some(ChatId(13)),
     );
+    session
+        .groups
+        .admin_rights
+        .insert((13, 888), AdminRightsFetch::Loading(extra));
     apply_json(
         &mut session,
         &seq,
@@ -525,6 +533,13 @@ fn basic_group_full_info_caches_members() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetBasicGroupFullInfo, Some(ChatId(13)));
+    session.groups.basic_group_members.insert(
+        13,
+        SupergroupMembersFetch::Loading {
+            request: Some(extra),
+            last: None,
+        },
+    );
     apply_json(
         &mut session,
         &seq,
@@ -744,18 +759,9 @@ fn g2_chat_boost_status_cached() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetChatBoostStatus, Some(ChatId(13)));
-    session
-        .groups
-        .chat_boost_status
-        .entry(13)
-        .or_default()
-        .begin();
-    session
-        .groups
-        .chat_boost_status
-        .entry(13)
-        .or_default()
-        .sent(extra);
+    let fetch = session.groups.chat_boost_status.entry(13).or_default();
+    fetch.begin();
+    fetch.sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -765,7 +771,7 @@ fn g2_chat_boost_status_cached() {
             extra.0
         ),
     );
-    assert_eq!(session.groups.boost_level_count(13), Some((3, 42)));
+    assert_eq!(session.groups.boost_level_and_count(13), Some((3, 42)));
 }
 
 #[test]

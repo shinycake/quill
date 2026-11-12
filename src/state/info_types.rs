@@ -337,6 +337,7 @@ pub enum ChatStatisticsFetch {
     },
     /// Asked for graphs in this theme.
     Loading {
+        request: RequestId,
         is_dark: bool,
     },
     /// The graphs' colors are the theme they were asked for
@@ -354,7 +355,8 @@ pub enum ChatStatisticsFetch {
 /// is the in-flight guard.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PollStatsFetch {
-    Loading,
+    /// Asked as this request: only its answer or error acts on the slot.
+    Loading(RequestId),
     Loaded(crate::telegram::envelope::StatisticalGraph),
     Failed(String),
 }
@@ -477,7 +479,8 @@ pub const INVITE_ADMIN_PAGE_SIZE: i32 = 50;
 /// Drives the edit-rights dialog's loading / error states.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AdminRightsFetch {
-    Loading,
+    /// Asked as this request: only its answer or error acts on the slot.
+    Loading(RequestId),
     Loaded(ChatAdminRights),
     Failed(String),
 }
