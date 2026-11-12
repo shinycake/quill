@@ -366,8 +366,13 @@ impl StoriesState {
 
     /// `getStory` for `story` failed with an error that may pass. A card or
     /// reply header showing it asks again once the wait is over.
-    pub fn story_fetch_failed(&mut self, story: (i64, i32), now: Instant) {
-        self.story_fetch.failed(story, now);
+    pub fn story_fetch_failed(
+        &mut self,
+        story: (i64, i32),
+        request: Option<RequestId>,
+        now: Instant,
+    ) {
+        self.story_fetch.failed(story, request, now);
     }
 
     /// `story` arrived (an answer or `updateStory`): whatever said it was

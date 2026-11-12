@@ -188,7 +188,10 @@ impl Session {
         if let Some(RequestPurpose::Settings(SettingsPurpose::LoadQuickReplyShortcuts)) =
             pending.map(|p| p.purpose)
         {
-            self.settings.quick_replies.shortcuts_load.succeed(());
+            self.settings
+                .quick_replies
+                .shortcuts_load
+                .answered(pending.map(|p| p.id), ());
         }
         // TDLib reports the messages as an update before this answer: a load
         // still waiting here had nothing to report.

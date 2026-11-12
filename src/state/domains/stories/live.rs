@@ -205,7 +205,7 @@ impl LiveStoryState {
     pub(crate) fn set_donors(&mut self, donors: LiveStoryDonors, asked: Option<RequestId>) {
         match asked {
             None => {
-                self.donors.succeed(donors);
+                self.donors.pushed(donors);
                 self.committed.clear();
             }
             Some(asked) => {

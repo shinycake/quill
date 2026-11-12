@@ -306,6 +306,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             .entry(chat_id.0)
             .or_default()
             .begin();
+        self.session
+            .chat_list
+            .chat_lists_for_add
+            .entry(chat_id.0)
+            .or_default()
+            .sent(extra);
         if let Err(err) = self
             .sender
             .send_json(&get_chat_lists_to_add_chat(extra, chat_id))

@@ -35,12 +35,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // so only a story actually asked for counts as attempted.
         let now = std::time::Instant::now();
         for (chat_id, story_id) in self.session.reply_story_candidates(now) {
-            if self.get_story(chat_id, story_id)?.is_some() {
-                self.session
-                    .stories
-                    .story_fetch
-                    .asked((chat_id.0, story_id));
-            }
+            self.get_story(chat_id, story_id)?;
         }
         Ok(())
     }

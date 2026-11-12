@@ -95,10 +95,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(());
         }
-        self.send_earn(EarnPurpose::StarStats { peer }, |extra| {
+        let extra = self.send_earn(EarnPurpose::StarStats { peer }, |extra| {
             get_star_revenue_statistics(extra, peer, false)
         })?;
-        self.session.payments.earn.self_stats.begin();
+        let stats = &mut self.session.payments.earn.self_stats;
+        stats.begin();
+        stats.sent(extra);
         Ok(())
     }
 

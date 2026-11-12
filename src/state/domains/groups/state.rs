@@ -317,7 +317,7 @@ impl GroupsState {
         self.welcome_messages
             .entry(chat_id)
             .or_default()
-            .succeed(messages);
+            .pushed(messages);
     }
 
     pub(crate) fn new() -> Self {

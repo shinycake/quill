@@ -121,6 +121,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     fn ask_countries(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
         let extra = self.session.request(RequestPurpose::GetCountries, None);
         self.session.auth_state.countries.begin();
+        self.session.auth_state.countries.sent(extra);
         if let Err(err) = self.sender.send_json(&get_countries(extra)) {
             self.session.requests.take(extra);
             self.session.auth_state.countries.fail("not sent");

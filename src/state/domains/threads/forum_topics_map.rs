@@ -127,10 +127,11 @@ impl ForumTopicsMap {
         self.lists.entry(chat_id).or_default().fail(error);
     }
 
-    /// The answer: the first page of `chat_id`'s topics.
+    /// `chat_id`'s first page of topics, held as they are (a fixture).
+    #[cfg(test)]
     pub fn insert(&mut self, chat_id: i64, topics: Vec<ForumTopic>) {
         self.unread.insert(chat_id, counted_unread(&topics));
-        self.lists.entry(chat_id).or_default().succeed(topics);
+        self.lists.entry(chat_id).or_default().pushed(topics);
     }
 
     /// Forget `chat_id`'s list, asked or not: the chat list asks again.

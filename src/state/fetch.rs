@@ -298,6 +298,14 @@ impl<T> Fetch<T> {
         *self = Self::Ready(value);
     }
 
+    /// The server pushed the value (an update, or the truth after a change
+    /// that needs no fetch): it is not the answer to any request, so it
+    /// replaces whatever stage the fetch was in. A request still in flight
+    /// finds `Ready` and is dropped by [`Fetch::answered`].
+    pub fn pushed(&mut self, value: T) {
+        *self = Self::Ready(value);
+    }
+
     /// A failure that names no request (see [`Fetch::succeed`]); a sender
     /// prefers [`Fetch::failed`]. The last answer stays visible.
     pub fn fail(&mut self, error: impl Into<String>) {

@@ -131,7 +131,6 @@ unkeyed:SendToMenu::Applying 1
 unkeyed:SetState::Loading 1
 unkeyed:SizedState::Loading 1
 unkeyed:Stage::Running 1
-unkeyed:StoryFetch::Asked 1
 unkeyed:TitleCheck::Sent 1
 unkeyed:TonConnectRequestState::Pending 1
 unkeyed:UpdateControl::Downloading 1

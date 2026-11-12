@@ -101,8 +101,11 @@ impl Session {
                     if matches!(err.code, 400 | 404) {
                         self.stories.story_fetch.gone(story);
                     } else {
-                        self.stories
-                            .story_fetch_failed(story, std::time::Instant::now());
+                        self.stories.story_fetch_failed(
+                            story,
+                            pending.map(|p| p.id),
+                            std::time::Instant::now(),
+                        );
                     }
                 }
             }

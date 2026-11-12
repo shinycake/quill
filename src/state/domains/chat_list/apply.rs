@@ -205,7 +205,7 @@ impl Session {
                         .chat_lists_for_add
                         .entry(chat_id.0)
                         .or_default()
-                        .succeed(lists);
+                        .answered(pending.map(|p| p.id), lists);
                 }
             }
             ChatListPayload::Chats {

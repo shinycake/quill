@@ -23,7 +23,7 @@ impl Session {
             TonWalletPayload::State(state) => {
                 if wallet.can_use {
                     wallet.own = Some(state);
-                    wallet.state_fetch.succeed(());
+                    wallet.state_fetch.pushed(());
                 }
             }
             TonWalletPayload::ExchangeRates(rates) => {

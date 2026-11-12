@@ -200,10 +200,11 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<Option<RequestId>, ConnectSendError> {
         let sent = self.send_get_story(chat_id, story_id);
         if sent.is_err() {
-            self.session
-                .stories
-                .story_fetch
-                .failed((chat_id.0, story_id), std::time::Instant::now());
+            self.session.stories.story_fetch.failed(
+                (chat_id.0, story_id),
+                None,
+                std::time::Instant::now(),
+            );
         }
         sent
     }
@@ -231,7 +232,15 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request_for_story(RequestPurpose::GetStory, chat_id, story_id);
         match self.sender.send_json(&get_story(extra, chat_id, story_id)) {
-            Ok(()) => Ok(Some(extra)),
+            Ok(()) => {
+                // Asked now: a refresh does not send it again, and only
+                // this request's failure acts on the entry.
+                self.session
+                    .stories
+                    .story_fetch
+                    .asked((chat_id.0, story_id), extra);
+                Ok(Some(extra))
+            }
             Err(err) => {
                 self.session.requests.take(extra);
                 Err(err)
