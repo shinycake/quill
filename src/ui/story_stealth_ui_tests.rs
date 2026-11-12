@@ -382,6 +382,54 @@ fn a_lost_activation_request_leaves_activating(cx: &mut TestAppContext) {
     );
 }
 
+/// The countdown is drawn on the frame clock: it ticks while the box shows
+/// one, and a box whose button has no countdown asks for no frames.
+#[gpui_kit::test]
+fn the_frame_clock_runs_only_while_the_box_shows_a_countdown(cx: &mut TestAppContext) {
+    fn settle(vcx: &mut VisualTestContext) {
+        for _ in 0..4 {
+            vcx.executor()
+                .advance_clock(std::time::Duration::from_millis(1100));
+            frames(vcx);
+        }
+    }
+    fn clock(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
+        app.read_with(vcx, |app, _| app.frame.clock_running())
+    }
+    let (app, _shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    // Frames come only while the window is active.
+    vcx.update(|window, _| window.activate_window());
+    frames(vcx);
+    seed(&app, vcx, true, StoryStealthMode::default());
+    open_box(&app, vcx, None);
+    settle(vcx);
+    assert!(
+        !clock(&app, vcx),
+        "an Enable button has no countdown: no frames are asked for"
+    );
+    app.update(vcx, |app, cx| {
+        app.close_stealth_box();
+        cx.notify();
+    });
+    frames(vcx);
+    seed(
+        &app,
+        vcx,
+        true,
+        StoryStealthMode {
+            active_until_date: now() - 60,
+            cooldown_until_date: now() + 3600,
+        },
+    );
+    open_box(&app, vcx, None);
+    settle(vcx);
+    assert!(
+        clock(&app, vcx),
+        "a cooldown counts down: the clock keeps redrawing it"
+    );
+}
+
 /// Sweep 13-046: the box and its once-a-second redraw tick end with the lock.
 #[gpui_kit::test]
 fn the_passcode_lock_closes_the_stealth_box(cx: &mut TestAppContext) {

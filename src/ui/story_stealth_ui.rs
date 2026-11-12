@@ -31,12 +31,11 @@ const LOGO: f32 = 88.;
 const LOGO_GLYPH: f32 = 45.;
 const TOAST_MAX_WIDTH: f32 = 340.;
 
-/// The stealth-mode box, with the once-a-second tick that redraws its
-/// countdown: the tick ends with the box.
+/// The stealth-mode box. Its cooldown countdown redraws on the frame clock
+/// (once a second), asked for by the box's own draw while a countdown shows.
 pub(super) struct StealthBox {
     pub(super) open_after: Option<ChatId>,
     pub(super) stage: StealthStage,
-    _tick: Task<()>,
 }
 
 /// The box's button press. `Activating` leaves with the answer to its own
@@ -105,11 +104,9 @@ impl QuillApp {
             }
             self.show_stealth_toast(StealthToast::already(left), cx);
         } else {
-            let tick = self.stealth_box_tick(cx);
             self.stories.stealth_box = Some(StealthBox {
                 open_after,
                 stage: StealthStage::Idle,
-                _tick: tick,
             });
             self.open_box(DialogKind::StoryStealth);
         }
@@ -237,31 +234,6 @@ impl QuillApp {
         }
     }
 
-    /// The redraw at the next whole second (the box counts seconds). It is
-    /// one wait: it redraws and hands the box the task for the next second,
-    /// so the box owns exactly one wait and closing it drops that wait.
-    fn stealth_box_tick(&mut self, cx: &mut Context<Self>) -> Task<()> {
-        self.spawn_screen(cx, async move |this, cx| {
-            let into_second = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.subsec_millis())
-                .unwrap_or(0);
-            let wait = 1000u64.saturating_sub(u64::from(into_second)).max(50);
-            cx.background_executor()
-                .timer(Duration::from_millis(wait))
-                .await;
-            let _ = this.update(cx, |this, cx| {
-                if this.stories.stealth_box.is_some() {
-                    let next = this.stealth_box_tick(cx);
-                    if let Some(stealth_box) = this.stories.stealth_box.as_mut() {
-                        stealth_box._tick = next;
-                    }
-                }
-                cx.notify();
-            });
-        })
-    }
-
     pub(in crate::ui) fn story_stealth_toast(&self) -> Option<AnyElement> {
         let shown = self
             .stories
@@ -336,6 +308,11 @@ impl QuillApp {
                 .as_ref()
                 .is_some_and(|stealth_box| stealth_box.open_after.is_some());
             let button = StealthButton::of(facts.mode, now_unix_secs(), facts.premium, open_after);
+            // The countdown moves once a second: the frame clock redraws the
+            // box while it shows one, and stops when the button has none.
+            if matches!(button, StealthButton::Cooldown { .. }) {
+                this.request_animation_tick(1, cx);
+            }
             let body = stealth_box_body(&facts, cx);
             let footer = stealth_box_button(button, cx);
             let body = Rc::new(Cell::new(Some(body)));
