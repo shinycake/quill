@@ -549,36 +549,30 @@ impl Session {
         }
     }
 
-    /// The poll option the menu opens on; its properties are asked next.
+    /// The poll option the menu opens on, with its properties asked as
+    /// `request` (`None`: the request could not be sent, so the menu stops
+    /// waiting for rows that will not come).
     pub fn begin_poll_option_menu(
         &mut self,
         chat_id: ChatId,
         message_id: MessageId,
         option_id: &str,
+        request: Option<RequestId>,
     ) {
         let mut properties = crate::state::fetch::Fetch::default();
-        properties.begin();
+        match request {
+            Some(request) => {
+                properties.begin();
+                properties.sent(request);
+            }
+            None => properties.fail("the request was not sent"),
+        }
         self.messages.poll_option_menu = Some(PollOptionMenu {
             chat_id,
             message_id,
             option_id: option_id.to_string(),
             properties,
         });
-    }
-
-    /// The option menu's properties request went out as `request`.
-    pub fn poll_option_menu_sent(&mut self, request: RequestId) {
-        if let Some(menu) = self.messages.poll_option_menu.as_mut() {
-            menu.properties.sent(request);
-        }
-    }
-
-    /// The option menu's properties request could not be sent: the menu
-    /// stops waiting for rows that will not come.
-    pub fn poll_option_menu_refused(&mut self) {
-        if let Some(menu) = self.messages.poll_option_menu.as_mut() {
-            menu.properties.fail("the request was not sent");
-        }
     }
 
     pub fn audience_reactions_loading(

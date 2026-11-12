@@ -320,8 +320,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || option_id.is_empty() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session
-            .begin_poll_option_menu(chat_id, message_id, option_id);
         let extra = self.session.request(
             RequestPurpose::Messages(MessagesPurpose::GetPollOptionProperties {
                 chat_id,
@@ -330,15 +328,18 @@ impl<S: JsonSender> ConnectDriver<S> {
             }),
             Some(chat_id),
         );
-        if let Err(err) = self.send_audience(
+        let sent = self.send_audience(
             extra,
             &get_poll_option_properties(extra, chat_id, message_id, option_id),
-        ) {
-            self.session.poll_option_menu_refused();
-            return Err(err);
-        }
-        self.session.poll_option_menu_sent(extra);
-        Ok(extra)
+        );
+        // The menu waits for the request only when it went out.
+        self.session.begin_poll_option_menu(
+            chat_id,
+            message_id,
+            option_id,
+            sent.is_ok().then_some(extra),
+        );
+        sent.map(|()| extra)
     }
 
     /// "Copy Option Link": `getMessageLink` for the option the menu is over,
