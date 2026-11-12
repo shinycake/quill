@@ -206,7 +206,7 @@ impl QuillApp {
         if let Some(open) = self.ai_compose.open.as_mut()
             && open.view.editor().and_then(|e| e.editing.as_deref()) == Some(name)
         {
-            open.view = AiComposeView::Card;
+            open.view = AiComposeView::card();
         }
         cx.notify();
     }

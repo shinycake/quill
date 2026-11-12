@@ -22,17 +22,14 @@ impl Session {
             // every change, so it applies whenever the wallet is on.
             TonWalletPayload::State(state) => {
                 if wallet.can_use {
-                    wallet.own = Some(state);
-                    wallet.state_fetch.succeed(());
+                    wallet.own.pushed(state);
                 }
             }
             TonWalletPayload::ExchangeRates(rates) => {
                 // Only the answer the fetch waits for: one that outlived a
                 // wallet switched off and on lands nowhere.
-                if purpose == Some(TonWalletPurpose::ExchangeRates)
-                    && wallet.rates_fetch.answered(pending.map(|p| p.id), ())
-                {
-                    wallet.rates = rates;
+                if purpose == Some(TonWalletPurpose::ExchangeRates) {
+                    wallet.rates.answered(pending.map(|p| p.id), rates);
                 }
             }
             TonWalletPayload::Transactions(page) => {
@@ -50,7 +47,7 @@ impl Session {
                 {
                     return;
                 }
-                if let Some(own) = wallet.own.as_mut() {
+                if let Some(own) = wallet.own.data_mut() {
                     own.gram_amount = page.gram_amount;
                 }
                 self.want_wallet_thumbs();
@@ -175,10 +172,10 @@ impl Session {
         let wallet = &mut self.ton_wallet;
         match purpose {
             TonWalletPurpose::LoadState => {
-                wallet.state_fetch.failed(request, reason, false);
+                wallet.own.failed(request, reason, false);
             }
             TonWalletPurpose::ExchangeRates => {
-                wallet.rates_fetch.failed(request, reason, false);
+                wallet.rates.failed(request, reason, false);
             }
             TonWalletPurpose::Transactions => {
                 if let Some(money) = wallet.money.as_mut() {
@@ -225,9 +222,15 @@ impl Session {
             TonWalletPurpose::LoadState,
         ))) = pending.map(|p| p.purpose)
         {
-            self.ton_wallet
-                .state_fetch
-                .answered(pending.map(|p| p.id), ());
+            // The state itself arrives as an update; an `ok` that came with
+            // none leaves the fetch to be asked again.
+            let wallet = &mut self.ton_wallet;
+            let request = pending.map(|p| p.id);
+            if request.is_some_and(|request| wallet.own.waits_for(request)) {
+                wallet
+                    .own
+                    .failed(request, "the wallet state did not arrive", false);
+            }
         }
     }
 }

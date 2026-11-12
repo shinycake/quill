@@ -105,10 +105,10 @@ fn opening_money_loads_state_rates_and_history_once() {
                "transactions": [transfer("a", 3_000_000_000)], "next_offset": "p2"}),
     );
     let wallet = &rig.driver.session.ton_wallet;
-    let own = wallet.own.as_ref().expect("own");
+    let own = wallet.own().expect("own");
     assert_eq!(own.gram_amount, 3_000_000_000, "the page's balance wins");
     assert!(own.is_backup_enabled);
-    assert_eq!(wallet.rates, vec![("EUR".to_string(), 0.5)]);
+    assert_eq!(wallet.rates(), [("EUR".to_string(), 0.5)]);
     assert_eq!(wallet.money_page().history.items().len(), 1);
     assert!(wallet.money_page().history.has_more());
 
@@ -399,11 +399,11 @@ fn an_older_state_request_failing_late_leaves_the_newer_one_loading() {
     assert_eq!(rig.sent("loadTonWalletState"), 2);
     // The older request fails after the newer one went out.
     rig.fail_request(older);
-    assert!(rig.driver.session.ton_wallet.state_fetch.is_loading());
+    assert!(rig.driver.session.ton_wallet.own.is_loading());
     // The newer one failing is its own error.
     let newer = rig.extra_of("loadTonWalletState");
     rig.fail_request(newer);
-    assert!(rig.driver.session.ton_wallet.state_fetch.error().is_some());
+    assert!(rig.driver.session.ton_wallet.own.error().is_some());
 }
 
 #[test]
@@ -415,5 +415,5 @@ fn the_wallet_turning_off_closes_its_notice_with_the_money_page() {
     rig.wallet_on(false);
     let wallet = &rig.driver.session.ton_wallet;
     assert!(wallet.notice.is_none() && !wallet.money_open());
-    assert!(wallet.rates_fetch.is_idle() && wallet.rates.is_empty());
+    assert!(wallet.rates.is_idle());
 }

@@ -68,15 +68,46 @@ pub(super) struct EventLogPage {
     pub(super) chat: ChatId,
     /// The page's search box, built once the window it shows in is known.
     pub(super) search: Option<EventLogSearch>,
-    /// The list length an automatic "load earlier" was last asked for in
-    /// this page (cleared when the list starts over).
-    pub(super) autoload: std::cell::Cell<Option<usize>>,
+    /// Whether an automatic "load earlier" was asked for the list as long
+    /// as it is now (cleared when the list starts over).
+    pub(super) autoload: std::cell::Cell<EventLogAutoload>,
     /// The search debounce: each edit replaces it, so only the last one
     /// searches.
-    pub(super) typed: Option<gpui_kit::Task<()>>,
+    pub(super) typed: EventLogTyped,
     /// The poll timer, which ends by itself when the page closes or the app
     /// goes inactive (`resume_event_log_poll` starts it again).
-    pub(super) poll: Option<gpui_kit::Task<()>>,
+    pub(super) poll: EventLogPoll,
+}
+
+/// Whether the page's automatic "load earlier" ran for the list length the
+/// page shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum EventLogAutoload {
+    /// Not asked for the current list.
+    Unasked,
+    /// Asked while the list held this many events.
+    AskedAt { len: usize },
+}
+
+/// The search debounce of the page.
+pub(super) enum EventLogTyped {
+    Idle,
+    /// The pause after the last edit runs as this timer; it ends the stage
+    /// when it fires, and the next edit replaces it.
+    Waiting { _timer: gpui_kit::Task<()> },
+}
+
+/// The poll of the page.
+pub(super) enum EventLogPoll {
+    Stopped,
+    /// The poll timer runs, owned here.
+    Running { _timer: gpui_kit::Task<()> },
+}
+
+impl EventLogPoll {
+    pub(super) fn is_running(&self) -> bool {
+        matches!(self, Self::Running { .. })
+    }
 }
 
 impl EventLogPage {
@@ -84,9 +115,9 @@ impl EventLogPage {
         Self {
             chat,
             search: None,
-            autoload: std::cell::Cell::new(None),
-            typed: None,
-            poll: None,
+            autoload: std::cell::Cell::new(EventLogAutoload::Unasked),
+            typed: EventLogTyped::Idle,
+            poll: EventLogPoll::Stopped,
         }
     }
 }

@@ -149,6 +149,24 @@ impl WebApps {
             .retain(|reply| reply.launch_id != launch_id);
     }
 
+    /// The account leaves the screen: every launch still waiting and every
+    /// answer nobody took goes in one place, so no slot outlives the account
+    /// (the windows that waited for them go with it). An `Opened` answer
+    /// not yet shown is queued for `closeWebApp`.
+    pub fn forget_answers(&mut self) {
+        self.opening = None;
+        self.found.clear();
+        self.attachment_menu_bot.clear();
+        self.attachment_menu_toggled.clear();
+        self.write_access.clear();
+        self.emoji_access.clear();
+        self.data_sent.clear();
+        self.phone_share.clear();
+        self.custom_requests.clear();
+        self.custom_replies.clear();
+        self.replace_open_result(None);
+    }
+
     /// Replace the unconsumed open answer. An `Opened` answer it pushes out
     /// was never shown, but TDLib started that app: its launch is queued
     /// for `closeWebApp`, so the bot keeps no live session.
@@ -219,4 +237,33 @@ pub struct WebApps {
     /// One-shot: contact cards sent for `web_app_request_phone` that TDLib
     /// took or refused, oldest first, each with the request it answers.
     pub phone_share: Vec<PhoneShare>,
+}
+
+#[cfg(test)]
+mod forget_tests {
+    use super::*;
+    use crate::ids::RequestId;
+
+    /// 10-004: leaving the account empties every answer slot, not only
+    /// some of them.
+    #[test]
+    fn forgetting_the_launches_empties_every_answer_slot() {
+        let mut apps = WebApps::default();
+        apps.data_sent.push(DataSent {
+            request: RequestId(1),
+            result: Ok(()),
+        });
+        apps.custom_requests.insert(2, (7, "req".into()));
+        apps.custom_replies.push(CustomRequestReply {
+            launch_id: 7,
+            req_id: "req".into(),
+            result: Ok("{}".into()),
+        });
+        apps.found
+            .push((RequestId(3), Err("no such app".to_string())));
+        apps.attachment_menu_bot
+            .push((RequestId(4), Err("no".to_string())));
+        apps.forget_answers();
+        assert_eq!(apps, WebApps::default());
+    }
 }

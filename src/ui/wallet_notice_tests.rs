@@ -91,7 +91,7 @@ fn seed_wallet(app: &mut QuillApp, with_wallet: bool) {
     let session = app.demo_session.as_mut().expect("demo session");
     let wallet = &mut session.ton_wallet;
     wallet.set_can_use(true);
-    wallet.own = Some(OwnWallet {
+    wallet.own = quill::state::fetch::Fetch::Ready(OwnWallet {
         address: if with_wallet {
             ADDRESS.into()
         } else {

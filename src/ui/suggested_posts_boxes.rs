@@ -105,8 +105,7 @@ impl QuillApp {
         let grams = session.payments.suggested_posts.gram_balance.or_else(|| {
             session
                 .ton_wallet
-                .own
-                .as_ref()
+                .own()
                 .map(|wallet| wallet.gram_amount)
         });
         shortfall(price, stars, grams)
@@ -459,8 +458,7 @@ impl QuillApp {
             let nanos = session.payments.suggested_posts.gram_balance.or_else(|| {
                 session
                     .ton_wallet
-                    .own
-                    .as_ref()
+                    .own()
                     .map(|wallet| wallet.gram_amount)
             })?;
             SuggestedPrice::TonCents(nanos.checked_div(10_000_000).unwrap_or(0))

@@ -338,26 +338,22 @@ impl MoneyPage {
 /// history are public on the blockchain.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct TonWalletState {
-    /// `ton_blockchain_explorer_url` from `getApplicationConfig`, once
-    /// known; [`address::DEFAULT_EXPLORER_URL`] is used until then.
-    pub explorer_url: Option<String>,
-    /// The `getApplicationConfig` for the explorer address: asked once per
-    /// session, again after it failed.
-    pub explorer: Fetch<()>,
+    /// `ton_blockchain_explorer_url` from `getApplicationConfig` (`None`
+    /// when the config names none): asked once per session, again after it
+    /// failed. [`address::DEFAULT_EXPLORER_URL`] is used until it is known.
+    pub explorer: Fetch<Option<String>>,
     /// The `can_use_ton_wallet` option: when false nothing wallet-related
     /// is shown and no wallet getter is sent.
     pub can_use: bool,
     /// `ton_usd_rate` from the app config: the Gram's price in USD.
     pub ton_usd_rate: Option<f64>,
-    /// The own wallet, from `updateTonWalletState`.
-    pub own: Option<OwnWallet>,
-    /// `loadTonWalletState`: sent once per session, again after it failed.
-    pub state_fetch: Fetch<()>,
-    /// `currencyExchangeRates`: `(code, units per USD)`.
-    pub rates: Vec<(String, f64)>,
-    /// `getCurrencyExchangeRates`: asked once per session, again after it
-    /// failed.
-    pub rates_fetch: Fetch<()>,
+    /// The own wallet, from `updateTonWalletState` (`loadTonWalletState`
+    /// is sent once per session, again after it failed; its updates also
+    /// land whenever TDLib sends them).
+    pub own: Fetch<OwnWallet>,
+    /// `currencyExchangeRates`: `(code, units per USD)`, asked once per
+    /// session, again after it failed.
+    pub rates: Fetch<Vec<(String, f64)>>,
     /// The fiat currency the user picked; `None` until the account's prefs
     /// are read ([`fiat::DEFAULT_CURRENCY`] is used meanwhile).
     pub currency: Option<String>,
@@ -370,9 +366,36 @@ pub struct TonWalletState {
 }
 
 impl TonWalletState {
-    /// The app config asked for the explorer came back as `request`.
-    pub fn explorer_answered(&mut self, request: Option<crate::ids::RequestId>) {
-        self.explorer.answered(request, ());
+    /// The app config asked for the explorer came back as `request`, with
+    /// the explorer it carries. Any app-config answer carries the current
+    /// one, so one that names none leaves a known explorer in place.
+    pub fn explorer_answered(
+        &mut self,
+        request: Option<crate::ids::RequestId>,
+        url: Option<String>,
+    ) {
+        let url = url.or_else(|| self.explorer.data().cloned().flatten());
+        if !self.explorer.answered(request, url.clone()) && url.is_some() && !self.explorer.is_loading()
+        {
+            // An app-config answer asked for something else carries the
+            // current explorer too.
+            self.explorer.pushed(url);
+        }
+    }
+
+    /// The own wallet, once known.
+    pub fn own(&self) -> Option<&OwnWallet> {
+        self.own.data()
+    }
+
+    /// The exchange rates, once known.
+    pub fn rates(&self) -> &[(String, f64)] {
+        self.rates.data().map_or(&[], Vec::as_slice)
+    }
+
+    /// The explorer address, once the config named one.
+    pub fn explorer_url(&self) -> Option<&str> {
+        self.explorer.data().and_then(|url| url.as_deref())
     }
 
     /// Whether the Money page is open.
@@ -389,7 +412,7 @@ impl TonWalletState {
 
     /// Where "View in Explorer" opens `address`.
     pub fn explorer_url_for(&self, address: &str) -> String {
-        explorer_url(self.explorer_url.as_deref(), address)
+        explorer_url(self.explorer_url(), address)
     }
 
     /// The fiat currency in use.
@@ -400,7 +423,7 @@ impl TonWalletState {
     /// Units of the chosen currency one Gram is worth, once both rates are
     /// known.
     pub fn units_per_gram(&self) -> Option<f64> {
-        fiat::units_per_gram(self.ton_usd_rate, &self.rates, self.currency())
+        fiat::units_per_gram(self.ton_usd_rate, self.rates(), self.currency())
     }
 
     /// The fiat value of `nanos` in the chosen currency ("—" until known).
@@ -431,7 +454,6 @@ impl TonWalletState {
             return;
         }
         *self = Self {
-            explorer_url: self.explorer_url.take(),
             explorer: std::mem::take(&mut self.explorer),
             ton_usd_rate: self.ton_usd_rate,
             currency: self.currency.take(),

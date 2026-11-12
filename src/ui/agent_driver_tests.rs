@@ -102,10 +102,18 @@ pub(super) fn grant(chat_id: i64, scope: Scope) {
 }
 
 pub(super) fn read_tree(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> UiTree {
-    match drive(app, vcx, UiCommand::ReadTree) {
+    let tree = match drive(app, vcx, UiCommand::ReadTree) {
         Ok(UiReply::Tree(tree)) => tree,
         other => panic!("expected a tree, got {other:?}"),
-    }
+    };
+    // The read's task leaves the bridge once it has answered.
+    vcx.run_until_parked();
+    assert_eq!(
+        app.read_with(vcx, |app, _| app.agent_bridge.reads.len()),
+        0,
+        "an answered read holds no task"
+    );
+    tree
 }
 
 pub(super) fn click(target: Target) -> UiCommand {

@@ -4,7 +4,9 @@
 //! Earlier events load when the list is scrolled to its top.
 #![deny(clippy::indexing_slicing)]
 
-use super::admin_state::{EventLogPage, EventLogSearch};
+use super::admin_state::{
+    EventLogAutoload, EventLogPage, EventLogPoll, EventLogSearch, EventLogTyped,
+};
 use super::app::QuillApp;
 use super::dialogs::group_admin_settings::GroupSettingsView;
 use super::event_log_rows::{LogEntry, render_entry};
@@ -112,6 +114,15 @@ impl QuillApp {
         let typed = self.spawn_scoped(cx, async move |this, cx| {
             cx.background_executor().timer(SEARCH_DELAY).await;
             this.update(cx, |this, cx| {
+                // The pause is over: the stage ends with the timer.
+                if let Some(page) = this
+                    .admin
+                    .event_log_page
+                    .as_mut()
+                    .filter(|page| page.chat == chat_id)
+                {
+                    page.typed = EventLogTyped::Idle;
+                }
                 if this.event_log_open_chat() == Some(chat_id) {
                     this.apply_event_log_search(chat_id, cx);
                 }
@@ -119,7 +130,7 @@ impl QuillApp {
             .ok();
         });
         // Replacing the page's timer stops the one of the earlier edit.
-        self.event_log_page_for(chat_id).typed = Some(typed);
+        self.event_log_page_for(chat_id).typed = EventLogTyped::Waiting { _timer: typed };
     }
 
     /// The page of `chat_id`; the page of another chat is replaced (its
@@ -203,7 +214,9 @@ impl QuillApp {
     /// events are fetched and join the bottom of the list (the list keeps a
     /// reader who has scrolled up where they are).
     pub(super) fn start_event_log_poll(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
-        self.event_log_page_for(chat_id).autoload.set(None);
+        self.event_log_page_for(chat_id)
+            .autoload
+            .set(EventLogAutoload::Unasked);
         self.spawn_event_log_poll(chat_id, cx);
     }
 
@@ -217,7 +230,7 @@ impl QuillApp {
             .admin
             .event_log_page
             .as_ref()
-            .is_some_and(|page| page.chat == chat_id && page.poll.is_none());
+            .is_some_and(|page| page.chat == chat_id && !page.poll.is_running());
         if !stopped || !self.frame.window_active.get() {
             return;
         }
@@ -248,7 +261,7 @@ impl QuillApp {
             }
         });
         // The page owns the timer; a poll already running for it is replaced.
-        self.event_log_page_for(chat_id).poll = Some(poll);
+        self.event_log_page_for(chat_id).poll = EventLogPoll::Running { _timer: poll };
     }
 
     /// One poll step; `false` once the page is closed or the app is inactive.
@@ -259,7 +272,7 @@ impl QuillApp {
         if !self.frame.window_active.get() {
             // Nothing to keep fresh for nobody: the timer stops here and
             // `resume_event_log_poll` starts it when a window wakes.
-            self.event_log_page_for(chat_id).poll = None;
+            self.event_log_page_for(chat_id).poll = EventLogPoll::Stopped;
             return false;
         }
         if !self.refused_while_locked()
@@ -479,7 +492,7 @@ impl QuillApp {
     /// Forget the rows the list was built for.
     pub(super) fn event_log_reset_list(&self) {
         if let Some(page) = self.admin.event_log_page.as_ref() {
-            page.autoload.set(None);
+            page.autoload.set(EventLogAutoload::Unasked);
         }
         let was_shown = !self.admin.event_log_ids.take().is_empty();
         if was_shown {
@@ -524,7 +537,9 @@ impl QuillApp {
         // Only once the list has been laid out: before that every offset is 0.
         let laid_out = state.viewport_bounds().size.height > px(0.);
         let at_top = laid_out && state.scroll_px_offset_for_scrollbar().y > px(-TOP_SLACK);
-        let asked = Some(page.events.len());
+        let asked = EventLogAutoload::AskedAt {
+            len: page.events.len(),
+        };
         let mark = self
             .admin
             .event_log_page

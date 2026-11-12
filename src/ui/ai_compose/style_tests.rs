@@ -123,7 +123,7 @@ fn a_saved_style_closes_the_editor_and_is_selected(cx: &mut gpui_kit::TestAppCon
         cx.notify();
     });
     frames(&mut main);
-    assert_eq!(view(&app, &mut main), Some(AiComposeView::Card));
+    assert_eq!(view(&app, &mut main), Some(AiComposeView::card()));
     let picked = app.read_with(&main, |app, _| {
         app.ai_compose
             .open

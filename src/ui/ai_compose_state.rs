@@ -17,7 +17,10 @@ use std::ops::Range;
 /// Quill's dialogs never stack, so they are views inside the one dialog.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum AiComposeView {
-    Card,
+    /// The box's card. A style just created or edited is selected once the
+    /// box's style list has it (tdesktop `selectToneById`): the name waits
+    /// here, and leaving the card or closing the box drops it.
+    Card { select_on_arrival: Option<String> },
     Languages,
     About,
     /// The New Style / Edit Style view with its editor. Leaving the view
@@ -32,14 +35,21 @@ impl AiComposeView {
     pub(super) fn editor(&self) -> Option<&StyleEditor> {
         match self {
             Self::StyleEditor(editor) | Self::StyleIcon(editor) => Some(editor),
-            Self::Card | Self::Languages | Self::About => None,
+            Self::Card { .. } | Self::Languages | Self::About => None,
         }
     }
 
     pub(super) fn editor_mut(&mut self) -> Option<&mut StyleEditor> {
         match self {
             Self::StyleEditor(editor) | Self::StyleIcon(editor) => Some(editor),
-            Self::Card | Self::Languages | Self::About => None,
+            Self::Card { .. } | Self::Languages | Self::About => None,
+        }
+    }
+
+    /// The plain card, with no style waiting to be selected.
+    pub(super) fn card() -> Self {
+        Self::Card {
+            select_on_arrival: None,
         }
     }
 
@@ -246,9 +256,6 @@ pub(crate) struct AiComposeOpen {
     pub(super) view: AiComposeView,
     /// The style names the box last refreshed against.
     pub(super) style_names: Vec<String>,
-    /// A style just created or edited, selected once the box's style list
-    /// has it (tdesktop `selectToneById`).
-    pub(super) select_saved: Option<String>,
 }
 
 pub(crate) struct AiComposeUi {

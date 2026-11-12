@@ -231,11 +231,7 @@ impl Session {
                 }
                 let asked = pending.map(|p| p.id);
                 self.groups.boosts_per_gift.answered(asked, boosts_per_gift);
-                self.ton_wallet.explorer.answered(asked, ());
-                // Any app-config answer carries the current explorer.
-                if ton_explorer_url.is_some() {
-                    self.ton_wallet.explorer_url = ton_explorer_url;
-                }
+                self.ton_wallet.explorer_answered(asked, ton_explorer_url);
                 if ton_usd_rate.is_some() {
                     self.ton_wallet.ton_usd_rate = ton_usd_rate;
                 }

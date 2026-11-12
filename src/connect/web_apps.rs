@@ -188,11 +188,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// nothing opens later behind an unrelated action.
     pub fn forget_web_app_launches(&mut self) {
         let apps = &mut self.session.bots.web_apps;
-        apps.opening = None;
-        apps.found.clear();
-        apps.attachment_menu_bot.clear();
-        apps.attachment_menu_toggled.clear();
-        apps.replace_open_result(None);
+        apps.forget_answers();
         self.close_dropped_web_apps();
     }
 
