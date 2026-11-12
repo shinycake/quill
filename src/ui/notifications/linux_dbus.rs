@@ -270,10 +270,7 @@ pub(in crate::ui) fn linux_service_capabilities() -> quill::notify::custom::Nati
             quill::wake::UPDATES.poke();
         });
         *probe = match spawned {
-            Ok(thread) => Probe::Asking {
-                thread,
-                last,
-            },
+            Ok(thread) => Probe::Asking { thread, last },
             Err(_) => Probe::Answered {
                 service: NativeService::Missing,
                 at: now,
