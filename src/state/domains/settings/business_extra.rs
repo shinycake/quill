@@ -66,15 +66,6 @@ impl BotLookup {
     }
 }
 
-/// Where the newest `setBusinessConnectedBot` / delete stands.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum ConnectedBotSave {
-    #[default]
-    Idle,
-    /// Out as this request; it answered or was refused when this leaves.
-    Saving(RequestId),
-}
-
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BusinessExtraState {
     /// `getBusinessChatLinks`, newest first. A failed load keeps the row
@@ -82,12 +73,11 @@ pub struct BusinessExtraState {
     pub chat_links: Fetch<Vec<ChatLink>>,
     pub chat_link_answer: ChatLinkAnswer,
     /// `getBusinessConnectedBot`: ready with `None` when no bot is
-    /// connected.
+    /// connected. A bot save shows its bot at once, loading under the
+    /// save's request (`Fetch::written_ahead`): only that save's answer
+    /// forgets it, so the next visit asks TDLib (an older save's answer, or
+    /// a fetch started since, leaves the shown bot alone).
     pub connected_bot: Fetch<Option<ConnectedBot>>,
-    /// The newest bot save and the request it waits for: only its answer
-    /// forgets the bot it wrote ahead (an older save's answer finds
-    /// another request here and leaves the shown bot alone).
-    pub bot_save: ConnectedBotSave,
     pub lookup: BotLookup,
     /// TDLib options; tdesktop's defaults until reported.
     pub title_max: Option<usize>,
@@ -183,11 +173,7 @@ impl Session {
         let Some(request) = request else {
             return;
         };
-        if extra.bot_save != ConnectedBotSave::Saving(request) {
-            return;
-        }
-        extra.bot_save = ConnectedBotSave::Idle;
-        if matches!(extra.connected_bot, Fetch::Ready(_)) {
+        if extra.connected_bot.waits_for(request) {
             extra.connected_bot = Fetch::Idle;
         }
     }

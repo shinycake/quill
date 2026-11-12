@@ -292,20 +292,24 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if self
             .session
-            .requests
-            .has_purpose_for_chat(RequestPurpose::GetChatListsToAddChat, chat_id)
+            .chat_list
+            .chat_lists_for_add
+            .get(&chat_id.0)
+            .is_some_and(|lists| lists.is_loading())
         {
             return Ok(None);
         }
         let extra = self
             .session
             .request(RequestPurpose::GetChatListsToAddChat, Some(chat_id));
-        self.session
+        let lists = self
+            .session
             .chat_list
             .chat_lists_for_add
             .entry(chat_id.0)
-            .or_default()
-            .begin();
+            .or_default();
+        lists.begin();
+        lists.sent(extra);
         if let Err(err) = self
             .sender
             .send_json(&get_chat_lists_to_add_chat(extra, chat_id))
@@ -317,7 +321,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .chat_lists_for_add
                 .entry(chat_id.0)
                 .or_default()
-                .fail(err.stage_line());
+                .failed(Some(extra), err.stage_line(), false);
             return Err(err);
         }
         Ok(Some(extra))

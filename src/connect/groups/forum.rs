@@ -298,15 +298,19 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         if self
-            .session
-            .requests
-            .has_purpose(RequestPurpose::CreateForumTopic)
+            .asked
+            .is_out(&self.session.requests, RequestPurpose::CreateForumTopic)
         {
             return Ok(None);
         }
         let extra = self
             .session
             .request(RequestPurpose::CreateForumTopic, Some(chat_id));
+        self.asked.sent(
+            &self.session.requests,
+            RequestPurpose::CreateForumTopic,
+            extra,
+        );
         if let Err(err) = self
             .sender
             .send_json(&create_forum_topic(extra, chat_id, name.trim()))

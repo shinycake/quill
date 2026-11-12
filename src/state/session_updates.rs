@@ -5,6 +5,7 @@ impl Session {
     pub(crate) fn set_auth(&mut self, state: AuthorizationState) {
         if self.auth != state {
             self.requests.invalidate_auth();
+            self.auth_state.submit = AuthSubmit::Idle;
             // Download requests were dropped and files may be cleared
             // below: every avatar gets one fresh look.
             self.media.avatar_due = AvatarDue::Everything;

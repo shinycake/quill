@@ -223,13 +223,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                 })?,
             (None, None) => return Ok(()),
         };
-        self.session.settings.business_extra.bot_save =
-            crate::state::ConnectedBotSave::Saving(sent);
         self.session
             .settings
             .business_extra
             .connected_bot
-            .succeed(bot.cloned());
+            .written_ahead(bot.cloned(), sent);
         Ok(())
     }
 

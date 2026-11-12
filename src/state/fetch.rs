@@ -225,10 +225,28 @@ impl<T> Fetch<T> {
         };
     }
 
+    /// A change goes out as `request` and is shown at once, ahead of its
+    /// answer (the answer carries no data): the fetch waits for that
+    /// request, and only its answer or error settles it.
+    pub fn written_ahead(&mut self, value: T, request: crate::ids::RequestId) {
+        *self = Self::Loading {
+            stale: Some(value),
+            request: Some(request),
+        };
+    }
+
     /// The request that was begun went out as `request`.
     pub fn sent(&mut self, request: crate::ids::RequestId) {
         if let Self::Loading { request: slot, .. } = self {
             *slot = Some(request);
+        }
+    }
+
+    /// The request the fetch waits for, while it is loading and sent.
+    pub fn request(&self) -> Option<crate::ids::RequestId> {
+        match self {
+            Self::Loading { request, .. } => *request,
+            _ => None,
         }
     }
 

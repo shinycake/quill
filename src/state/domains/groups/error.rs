@@ -107,7 +107,7 @@ impl Session {
             // tdesktop toasts a refused create; the box stays, and the
             // photo waiting for the community goes.
             Some(RequestPurpose::CreateCommunity) => {
-                self.communities.new_community_photo = None;
+                self.communities.create.failed(pending.map(|p| p.id));
                 if let Some(pending) = pending {
                     self.communities.outcomes.push_back(
                         crate::state::CommunityOutcome::CreateFailed {

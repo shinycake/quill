@@ -158,9 +158,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         }
         let Some(my_id) = self.session.my_user_id else {
-            if !self.session.users_state.my_id_probe.is_idle()
-                || self.session.requests.has_purpose(RequestPurpose::GetMe)
-            {
+            if !self.session.users_state.my_id_probe.is_idle() {
                 return Ok(());
             }
             let extra = self.session.request(RequestPurpose::GetMe, None);

@@ -77,7 +77,19 @@ impl<S: JsonSender> ConnectDriver<S> {
             .folder_shares
             .get(&folder_id)
             .is_some_and(|share| share.links.is_loading());
-        if !links_loading {
+        if !links_loading && self.folder_link_delete_out(folder_id) {
+            // A delete still in flight: queries are not ordered, so the list
+            // could be read before the delete lands and bring the link back.
+            // It waits as out of date and is fetched once the delete answered
+            // (`refetch_outdated_folder_links`).
+            self.session
+                .chat_list
+                .folder_shares
+                .entry(folder_id)
+                .or_default()
+                .links
+                .outdate();
+        } else if !links_loading {
             let extra = self
                 .session
                 .request_for_folder(RequestPurpose::GetChatFolderInviteLinks, folder_id);
@@ -201,17 +213,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(sent)
     }
 
+    /// A `deleteChatFolderInviteLink` for the folder waits for its answer.
+    fn folder_link_delete_out(&self, folder_id: i32) -> bool {
+        self.session
+            .requests
+            .has_purpose_for_folder(RequestPurpose::DeleteChatFolderInviteLink, folder_id)
+    }
+
     /// A link edit landed on a list whose fetch was still out: that fetch
     /// asked before the edit, so it is fetched again. A refusal ends in the
     /// error line the box draws with its Retry. A delete still in flight
     /// holds the refetch back: queries are not ordered, so the list could
     /// be read before the delete lands.
     pub fn refetch_outdated_folder_links(&mut self, folder_id: i32) {
-        if self
-            .session
-            .requests
-            .has_purpose_for_folder(RequestPurpose::DeleteChatFolderInviteLink, folder_id)
-        {
+        if self.folder_link_delete_out(folder_id) {
             return;
         }
         let due = self
@@ -368,7 +383,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let purpose = RequestPurpose::ReadChatList;
-        if self.session.requests.has_purpose(purpose) {
+        if self.asked.is_out(&self.session.requests, purpose) {
             return Ok(None);
         }
         let any_unread = self
@@ -380,6 +395,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let extra = self.session.request(purpose, None);
+        self.asked.sent(&self.session.requests, purpose, extra);
         self.send_folder_request(extra, read_chat_folder(extra, folder_id))
             .map(Some)
     }

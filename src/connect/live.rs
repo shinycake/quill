@@ -1,5 +1,5 @@
 //! Connect gate: live TDLib connection bootstrap and shutdown.
-use super::closing::{Closable, CloseProgress, QUIT_CLOSE_DEADLINE};
+use super::closing::{Closable, CloseOutcome, QUIT_CLOSE_DEADLINE};
 use super::*;
 use crate::credentials::TelegramCredentials;
 use crate::data_settings::load_data_storage_prefs;
@@ -101,7 +101,7 @@ impl Closable for LiveConnect {
         super::closing::begin_close_bridged(&mut self.driver, &self.bridge);
     }
 
-    fn drain(&mut self, budget: Duration) -> CloseProgress {
+    fn drain(&mut self, budget: Duration) -> CloseOutcome {
         super::closing::drain_bridged(&mut self.driver, &self.bridge, budget)
     }
 

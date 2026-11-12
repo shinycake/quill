@@ -34,6 +34,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        self.asked.sent(&self.session.requests, purpose, extra);
         Ok(Some(extra))
     }
 
@@ -63,10 +64,10 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// `Session::forum_topic_icons`.
     pub fn load_forum_topic_icons(&mut self) -> Sent {
         if !self.session.threads.forum_topic_icons.is_empty()
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetForumTopicDefaultIcons)
+            || self.asked.is_out(
+                &self.session.requests,
+                RequestPurpose::GetForumTopicDefaultIcons,
+            )
         {
             return Ok(None);
         }
@@ -182,9 +183,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         if self
-            .session
-            .requests
-            .has_purpose(RequestPurpose::CreateForumTopic)
+            .asked
+            .is_out(&self.session.requests, RequestPurpose::CreateForumTopic)
         {
             return Ok(None);
         }
@@ -269,7 +269,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// it fresh) or for one sublist.
     pub fn load_saved_tags(&mut self, topic_id: i64) -> Sent {
         let purpose = RequestPurpose::GetSavedMessagesTags { topic_id };
-        if self.session.requests.has_purpose(purpose) {
+        if self.asked.is_out(&self.session.requests, purpose) {
             return Ok(None);
         }
         if topic_id != 0 {
@@ -350,7 +350,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn toggle_saved_topic_pinned(&mut self, topic_id: i64, pinned: bool) -> Sent {
         let purpose =
             RequestPurpose::Threads(ThreadsPurpose::ToggleSavedMessagesTopicPinned { topic_id });
-        if self.session.requests.has_purpose(purpose) {
+        if self.asked.is_out(&self.session.requests, purpose) {
             return Ok(None);
         }
         self.send_purpose(purpose, None, |extra| {
@@ -363,7 +363,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn delete_saved_topic_history(&mut self, topic_id: i64) -> Sent {
         let purpose =
             RequestPurpose::Threads(ThreadsPurpose::DeleteSavedMessagesTopicHistory { topic_id });
-        if self.session.requests.has_purpose(purpose) {
+        if self.asked.is_out(&self.session.requests, purpose) {
             return Ok(None);
         }
         self.send_purpose(purpose, None, |extra| {

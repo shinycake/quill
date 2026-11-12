@@ -2,7 +2,7 @@
 use super::*;
 use crate::ids::RequestId;
 use crate::state::AuthPurpose;
-use crate::state::{PasswordOp, PasswordRecovery, RequestPurpose};
+use crate::state::{AuthSubmit, PasswordOp, PasswordRecovery, RequestPurpose};
 use crate::telegram::envelope::{AuthorizationState, EmailResetState};
 use crate::telegram::requests::{
     cancel_password_reset, cancel_recovery_email_address_verification, check_authentication_code,
@@ -121,9 +121,13 @@ impl<S: JsonSender> ConnectDriver<S> {
     fn ask_countries(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
         let extra = self.session.request(RequestPurpose::GetCountries, None);
         self.session.auth_state.countries.begin();
+        self.session.auth_state.countries.sent(extra);
         if let Err(err) = self.sender.send_json(&get_countries(extra)) {
             self.session.requests.take(extra);
-            self.session.auth_state.countries.fail("not sent");
+            self.session
+                .auth_state
+                .countries
+                .failed(Some(extra), "not sent", false);
             return Err(err);
         }
         Ok(Some(extra))
@@ -173,7 +177,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !matches!(
             self.session.auth,
             AuthorizationState::WaitPhoneNumber | AuthorizationState::WaitCode { .. }
-        ) || self.session.requests.has_auth_submit()
+        ) || self.session.auth_state.submit.is_busy()
         {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -190,6 +194,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        self.session.auth_state.submit = AuthSubmit::InFlight(extra);
         Ok(extra)
     }
 
@@ -278,7 +283,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         purpose: RequestPurpose,
         build: impl FnOnce(RequestId) -> String,
     ) -> Result<RequestId, ConnectSendError> {
-        if self.session.requests.has_purpose(purpose) {
+        if self.session.auth_state.submit.is_busy() {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.auth_state.last_auth_error = None;
@@ -287,13 +292,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        self.session.auth_state.submit = AuthSubmit::InFlight(extra);
         Ok(extra)
     }
 
     /// Switch to QR login only in supported states with no authentication query in flight.
     pub fn request_qr_login(&mut self) -> Result<RequestId, ConnectSendError> {
         if !crate::auth::can_request_qr_login(&self.session.auth)
-            || self.session.requests.has_auth_submit()
+            || self.session.auth_state.submit.is_busy()
         {
             return Err(ConnectSendError::InvalidRequest);
         }

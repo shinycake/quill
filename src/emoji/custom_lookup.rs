@@ -153,6 +153,11 @@ impl EmojiPanel {
         }
     }
 
+    /// A `getCustomEmojiStickers` is out and waiting for its answer.
+    pub fn custom_emoji_lookup_in_flight(&self) -> bool {
+        !self.custom_lookups.by_request.is_empty()
+    }
+
     /// The status picker opened: every id not being asked for now may be
     /// asked for again, with no failures counted.
     pub fn reset_custom_emoji_lookups(&mut self) {

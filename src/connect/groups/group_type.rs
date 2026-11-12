@@ -74,10 +74,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let purpose = purpose(GroupTypePurpose::CheckPublicChatsLimit);
-        if self.session.requests.has_purpose(purpose) {
+        if self.asked.is_out(&self.session.requests, purpose) {
             return Ok(None);
         }
         let extra = self.session.request(purpose, None);
+        self.asked.sent(&self.session.requests, purpose, extra);
         self.send_json_request(extra, &check_created_public_chats_limit(extra))
             .map(Some)
     }

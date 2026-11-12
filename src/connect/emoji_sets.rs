@@ -72,12 +72,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             .ok_or(ConnectSendError::InvalidRequest)
     }
 
-    fn status_change_busy(&self) -> bool {
-        let requests = &self.session.requests;
-        requests.has_purpose(RequestPurpose::SetEmojiStatus)
-            || requests.has_purpose(RequestPurpose::ClearRecentEmojiStatuses)
-    }
-
     /// Set a collectible (upgraded gift) status for `duration_secs`
     /// (`0` keeps it). `custom_emoji_id` is the gift model's emoji, the
     /// cell the selector showed. `Ok(None)`: another change is in flight.
@@ -96,13 +90,27 @@ impl<S: JsonSender> ConnectDriver<S> {
             .find(|gift| gift.model_custom_emoji_id == custom_emoji_id)
             .ok_or(ConnectSendError::InvalidRequest)?;
         let expiration = self.status_change_expiration(Some(custom_emoji_id), duration_secs)?;
-        if self.status_change_busy() {
-            return Ok(None);
-        }
-        self.session.stickers.emoji.status_change = StatusChange::Idle;
-        self.emoji_set_request(RequestPurpose::SetEmojiStatus, |extra| {
+        self.send_status_change(None, |extra| {
             crate::telegram::requests_emoji::set_collectible_emoji_status(extra, &gift, expiration)
         })
+    }
+
+    /// The one way a status change goes out: refused while another change
+    /// is in flight, and the stage holds the request until its answer or
+    /// refusal. `emoji` is what a success adds to the recents.
+    fn send_status_change(
+        &mut self,
+        emoji: Option<i64>,
+        build: impl FnOnce(RequestId) -> String,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if self.session.stickers.emoji.status_change.is_busy() {
+            return Ok(None);
+        }
+        let request = self.emoji_set_request(RequestPurpose::SetEmojiStatus, build)?;
+        if let Some(request) = request {
+            self.session.stickers.emoji.status_change = StatusChange::Setting { request, emoji };
+        }
+        Ok(request)
     }
 
     /// `custom_emoji_id: None` removes the status.
@@ -112,33 +120,23 @@ impl<S: JsonSender> ConnectDriver<S> {
         duration_secs: i32,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         let expiration = self.status_change_expiration(custom_emoji_id, duration_secs)?;
-        if self.status_change_busy() {
-            return Ok(None);
-        }
-        let request = self.emoji_set_request(RequestPurpose::SetEmojiStatus, |extra| {
+        self.send_status_change(custom_emoji_id, |extra| {
             crate::telegram::requests_emoji::set_emoji_status(extra, custom_emoji_id, expiration)
-        })?;
-        if let Some(request) = request {
-            self.session.stickers.emoji.status_change = StatusChange::Setting {
-                request,
-                emoji: custom_emoji_id,
-            };
-        }
-        Ok(request)
+        })
     }
 
     pub fn clear_recent_emoji_statuses(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        if self
-            .session
-            .requests
-            .has_purpose(RequestPurpose::SetEmojiStatus)
-        {
+        if self.session.stickers.emoji.status_change.is_busy() {
             return Ok(None);
         }
-        self.emoji_set_request(
+        let request = self.emoji_set_request(
             RequestPurpose::ClearRecentEmojiStatuses,
             crate::telegram::requests_emoji::clear_recent_emoji_statuses,
-        )
+        )?;
+        if let Some(request) = request {
+            self.session.stickers.emoji.status_change = StatusChange::Clearing { request };
+        }
+        Ok(request)
     }
 
     /// `getCustomEmojiStickers` for one custom emoji a mini app suggests as the
@@ -164,7 +162,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .emoji
             .sweep_custom_emoji_lookups(|request| requests.get(request).is_some());
         self.custom_emoji_hold.is_none()
-            && !requests.has_purpose(RequestPurpose::GetCustomEmojiStickers)
+            && !self.session.stickers.emoji.custom_emoji_lookup_in_flight()
     }
 
     /// The one way a `getCustomEmojiStickers` goes out: `ids` are marked
@@ -301,12 +299,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if purpose != RequestPurpose::ViewTrendingEmojiSets
-            && self.session.requests.has_purpose(purpose)
-        {
+        // A list is busy while its own fetch waits; any other request while
+        // the one this driver sent for it is out.
+        let busy = match self.session.stickers.emoji.lists.for_purpose(purpose) {
+            Some(list) => list.is_loading(),
+            None => self.asked.is_out(&self.session.requests, purpose),
+        };
+        if purpose != RequestPurpose::ViewTrendingEmojiSets && busy {
             return Ok(None);
         }
         let extra = self.session.request(purpose, None);
+        self.asked.sent(&self.session.requests, purpose, extra);
         if let Err(err) = self.sender.send_json(&build(extra)) {
             self.session.requests.take(extra);
             if let Some(list) = self.session.stickers.emoji.lists.for_purpose(purpose) {
@@ -406,11 +409,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                 get_installed_emoji_sets,
             ),
             EmojiSetTab::Trending => {
-                drop(
-                    self.session
-                        .requests
-                        .take_purpose(RequestPurpose::GetTrendingEmojiSets),
-                );
+                let asked = self.session.stickers.emoji.lists.trending.request();
+                self.drop_request(asked);
                 self.session.stickers.emoji.lists.trending.cancel();
                 self.ask_trending_emoji_sets(0)
             }
@@ -454,11 +454,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        drop(
-            self.session
-                .requests
-                .take_purpose(RequestPurpose::GetKeywordEmojis),
-        );
+        let asked = self.session.stickers.emoji.keyword_emojis.request();
+        self.drop_request(asked);
         let query = query.trim();
         self.session.stickers.emoji.keyword_emojis = crate::emoji::KeywordEmojis::Idle {
             query: query.to_string(),
@@ -576,11 +573,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.select_emoji_set_tab(EmojiSetTab::Search)?;
-        drop(
-            self.session
-                .requests
-                .take_purpose(RequestPurpose::SearchEmojiSets),
-        );
+        let asked = self.session.stickers.emoji.lists.search.request();
+        self.drop_request(asked);
         self.session.stickers.emoji.lists.search.cancel();
         self.session.stickers.emoji.search_query = query.trim().to_string();
         self.session.stickers.emoji.found_sets.clear();
@@ -628,25 +622,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         // TDLib sends this update while it loads the list a request asked
         // for, so a dropped in-flight request is sent again; a cached list
         // (the composer panel's) is refreshed too.
-        let was_asking = self
-            .session
-            .requests
-            .take_purpose(RequestPurpose::GetInstalledEmojiSets)
-            .is_some();
+        let asked = self.session.stickers.emoji.lists.installed.request();
+        let was_asking = asked.is_some();
+        self.drop_request(asked);
         self.session.stickers.emoji.lists.installed.cancel();
         let installed_wanted = was_asking
             || !self.session.stickers.emoji.installed_sets.is_empty()
             || self.session.stickers.emoji.open;
-        for purpose in [
-            RequestPurpose::SearchEmojiSets,
-            RequestPurpose::GetTrendingEmojiSets,
-        ] {
-            drop(self.session.requests.take_purpose(purpose));
-            if let Some(list) = self.session.stickers.emoji.lists.for_purpose(purpose) {
-                list.cancel();
-            }
+        let lists = &mut self.session.stickers.emoji.lists;
+        let asked = [lists.search.request(), lists.trending.request()];
+        lists.search.cancel();
+        lists.trending.cancel();
+        for request in asked {
+            self.drop_request(request);
         }
-        self.session.stickers.emoji.lists.trending.cancel();
         if !self.chats_path_active() {
             return Ok(());
         }
@@ -687,22 +676,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let Some(emoji) = suggest_emoji_for(text) else {
-            drop(
-                self.session
-                    .requests
-                    .take_purpose(RequestPurpose::GetAnimatedEmoji),
-            );
+            let asked = self.session.stickers.emoji.animated.request();
+            self.drop_request(asked);
             self.session.stickers.emoji.animated = crate::emoji::AnimatedSuggestion::Idle;
             return Ok(None);
         };
         if self.session.stickers.emoji.animated.emoji_for() == Some(emoji) {
             return Ok(None);
         }
-        drop(
-            self.session
-                .requests
-                .take_purpose(RequestPurpose::GetAnimatedEmoji),
-        );
+        let asked = self.session.stickers.emoji.animated.request();
+        self.drop_request(asked);
         let extra = self.session.request(RequestPurpose::GetAnimatedEmoji, None);
         match self.sender.send_json(&get_animated_emoji(extra, emoji)) {
             Ok(()) => {

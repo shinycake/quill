@@ -379,6 +379,8 @@ pub struct ConnectDriver<S: JsonSender> {
     /// A `getCustomEmojiStickers` rate limit that was not retried: no
     /// lookup goes out before this time (`flood_retry::absorb_flood`).
     pub(crate) custom_emoji_hold: Option<std::time::Instant>,
+    /// The requests this driver has out, for senders with no stage of their own.
+    pub(crate) asked: super::asked::Asked,
     /// R5: when the stale-request sweep last scanned the registry.
     pub(crate) last_request_sweep: Option<std::time::Instant>,
     /// Whether this client follows the OS proxy (`system_proxy`).

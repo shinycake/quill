@@ -157,15 +157,10 @@ impl Session {
             self.stickers.stickers.suggest_for = SuggestFor::Nothing;
         }
         let emoji_purpose = pending.map(|p| p.purpose);
-        if emoji_purpose == Some(RequestPurpose::SetEmojiStatus)
-            && matches!(
-                self.stickers.emoji.status_change,
-                crate::emoji::StatusChange::Setting { request, .. }
-                    if Some(request) == pending.map(|p| p.id)
-            )
-        {
-            self.stickers.emoji.status_change = crate::emoji::StatusChange::Idle;
-        }
+        self.stickers
+            .emoji
+            .status_change
+            .failed(pending.map(|p| p.id));
         if emoji_purpose == Some(RequestPurpose::GetTrendingEmojiSets) {
             self.stickers.emoji.lists.trending.failed_request(
                 pending.map(|p| p.id),

@@ -100,7 +100,7 @@ impl Session {
                 .chat_lists_for_add
                 .entry(chat_id.0)
                 .or_default()
-                .fail(error_reason(err));
+                .failed(pending.map(|p| p.id), error_reason(err), false);
         }
         match pending.map(|p| p.purpose) {
             // Slice CL1: refused chat-list actions surface in the

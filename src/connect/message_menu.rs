@@ -693,12 +693,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if !self.session.stickers.stickers.installed_loaded()
-            && !self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetInstalledStickerSets)
-        {
+        if !self.session.stickers.stickers.installed_loaded() {
             self.sticker_request(
                 RequestPurpose::GetInstalledStickerSets,
                 get_installed_sticker_sets,
@@ -706,12 +701,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         // "Add to Emoji Set" lists the owned emoji sets, which only the
         // media panel loaded so far.
-        if self.session.stickers.emoji.installed_sets.is_empty()
-            && !self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetInstalledEmojiSets)
-        {
+        if self.session.stickers.emoji.installed_sets.is_empty() {
             self.emoji_set_request(
                 RequestPurpose::GetInstalledEmojiSets,
                 crate::telegram::requests_emoji::get_installed_emoji_sets,

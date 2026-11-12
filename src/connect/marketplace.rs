@@ -14,12 +14,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             || !valid_gift_name(name)
             || self
                 .session
-                .requests
-                .has_purpose(RequestPurpose::GetMarketplaceGift)
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::SendMarketplaceGift)
+                .payments
+                .marketplace_gift
+                .as_ref()
+                .is_some_and(|gift| gift.is_busy())
         {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -62,16 +60,15 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// `getOption gift_text_length_max` unless it is known or on its way.
-    fn ask_gift_text_limit(&mut self) {
+    pub(super) fn ask_gift_text_limit(&mut self) {
+        let purpose = RequestPurpose::GetGiftTextLimit;
         if self.session.payments.gift_text_length_max.is_some()
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetGiftTextLimit)
+            || self.asked.is_out(&self.session.requests, purpose)
         {
             return;
         }
-        let extra = self.session.request(RequestPurpose::GetGiftTextLimit, None);
+        let extra = self.session.request(purpose, None);
+        self.asked.sent(&self.session.requests, purpose, extra);
         let _ = self.send_json_request(extra, &serde_json::json!({"@type":"getOption","@extra":extra.as_extra(),"name":"gift_text_length_max"}).to_string());
     }
 
@@ -82,13 +79,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         comment: &str,
         private: bool,
     ) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active()
-            || !price.valid()
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::SendMarketplaceGift)
-        {
+        if !self.chats_path_active() || !price.valid() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let max = self.session.payments.gift_text_length_max;

@@ -101,15 +101,47 @@ pub enum CommunityOutcome {
     },
 }
 
+/// The `createCommunity` in flight and the picture its identity box chose
+/// for the community it makes (uploaded once the community exists). One
+/// create goes at a time, so a newer one replaces the stage; the answer,
+/// the refusal of that request, or the account going away ends it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum CommunityCreate {
+    #[default]
+    Idle,
+    Creating {
+        request: RequestId,
+        photo: Option<String>,
+    },
+}
+
+impl CommunityCreate {
+    /// The create answered: its picture, once, for the request that asked.
+    pub fn answered(&mut self, answer: RequestId) -> Option<String> {
+        match std::mem::take(self) {
+            Self::Creating { request, photo } if request == answer => photo,
+            other => {
+                *self = other;
+                None
+            }
+        }
+    }
+
+    /// The create was refused or lost: the picture waiting for it goes.
+    pub fn failed(&mut self, request: Option<RequestId>) {
+        if matches!(self, Self::Creating { request: asked, .. } if Some(*asked) == request) {
+            *self = Self::Idle;
+        }
+    }
+}
+
 pub struct CommunitiesState {
     /// `getJoinedCommunities`.
     pub joined: Fetch<Vec<i64>>,
     /// `getOwnedBots`: the user ids of the bots the person owns.
     pub owned_bots: Fetch<Vec<i64>>,
-    /// The picture for the community our `createCommunity` (the request
-    /// id) is making; one create goes at a time, so a newer one replaces
-    /// it.
-    pub new_community_photo: Option<(RequestId, String)>,
+    /// See [`CommunityCreate`].
+    pub create: CommunityCreate,
     /// `getCommunityAddChatRequests`, by community id.
     pub add_chat_requests: HashMap<i64, Fetch<AddChatRequestList>>,
     /// Add-chat requests approved or declined, by community, since the last
@@ -138,7 +170,7 @@ impl CommunitiesState {
         Self {
             joined: Fetch::Idle,
             owned_bots: Fetch::Idle,
-            new_community_photo: None,
+            create: CommunityCreate::Idle,
             add_chat_requests: HashMap::new(),
             handled_add_requests: HashMap::new(),
             member_chats: HashMap::new(),

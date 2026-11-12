@@ -125,6 +125,7 @@ impl Session {
         if let Some(pending) = pending
             && is_auth_submit(pending.purpose)
         {
+            self.auth_state.submit.settle(extra);
             self.auth_state.last_auth_error = Some(AuthRequestError {
                 purpose: pending.purpose,
                 class: err.class,

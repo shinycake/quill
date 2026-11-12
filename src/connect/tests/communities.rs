@@ -654,7 +654,10 @@ fn a_created_community_gets_the_photo_its_box_chose() {
     assert_eq!(photo["community_id"], 44);
     assert_eq!(photo["photo"]["photo"]["path"], "/photos/notes.jpg");
     assert!(sent.iter().any(|v| v["@type"] == "getCommunityFullInfo"));
-    assert!(rig.driver.session.communities.new_community_photo.is_none());
+    assert_eq!(
+        rig.driver.session.communities.create,
+        crate::state::CommunityCreate::Idle
+    );
     assert_eq!(
         rig.outcome(),
         Some(CommunityOutcome::Created {
@@ -686,7 +689,10 @@ fn a_refused_create_reports_and_sets_no_photo() {
         rig.outcome(),
         Some(CommunityOutcome::CreateFailed { .. })
     ));
-    assert!(rig.driver.session.communities.new_community_photo.is_none());
+    assert_eq!(
+        rig.driver.session.communities.create,
+        crate::state::CommunityCreate::Idle
+    );
     assert!(
         !rig.recorder
             .snapshot()
@@ -771,4 +777,18 @@ fn a_page_in_flight_does_not_bring_back_a_request_handled_meanwhile() {
         .map(|r| r.chat_id)
         .collect();
     assert_eq!(ids, vec![9]);
+}
+
+#[test]
+fn an_older_creates_answer_finds_no_picture_waiting() {
+    let mut create = crate::state::CommunityCreate::Creating {
+        request: crate::ids::RequestId(2),
+        photo: Some("/photos/new.jpg".into()),
+    };
+    assert_eq!(create.answered(crate::ids::RequestId(1)), None);
+    assert_eq!(
+        create.answered(crate::ids::RequestId(2)).as_deref(),
+        Some("/photos/new.jpg")
+    );
+    assert_eq!(create, crate::state::CommunityCreate::Idle);
 }

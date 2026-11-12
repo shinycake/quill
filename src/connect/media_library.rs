@@ -27,34 +27,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         // asked for again when the panel opens next, not left blank until
         // restart.
         self.session.media.media_library.forget_failures();
-        if !self.session.stickers.stickers.installed_loaded()
-            && !self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetInstalledStickerSets)
-        {
+        if !self.session.stickers.stickers.installed_loaded() {
             self.sticker_request(
                 RequestPurpose::GetInstalledStickerSets,
                 get_installed_sticker_sets,
             )?;
         }
-        if self.session.stickers.emoji.installed_sets.is_empty()
-            && !self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetInstalledEmojiSets)
-        {
+        if self.session.stickers.emoji.installed_sets.is_empty() {
             self.emoji_set_request(
                 RequestPurpose::GetInstalledEmojiSets,
                 crate::telegram::requests_emoji::get_installed_emoji_sets,
             )?;
         }
-        if self.session.stickers.stickers.recent.is_empty()
-            && !self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetRecentStickers)
-        {
+        if self.session.stickers.stickers.recent.is_empty() {
             self.sticker_request(RequestPurpose::GetRecentStickers, |id| {
                 get_recent_stickers(id, false)
             })?;

@@ -27,6 +27,7 @@ mod chat_window;
 mod chat_window_jumps;
 mod chat_window_views;
 mod closing;
+mod closing_refused;
 mod communities;
 mod composer_suggestions_idle;
 mod connect_flow;

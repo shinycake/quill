@@ -608,15 +608,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if with_premium {
             self.ask_premium_gift_options();
         }
-        if self.session.payments.gift_text_length_max.is_none()
-            && !self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetGiftTextLimit)
-        {
-            let extra = self.session.request(RequestPurpose::GetGiftTextLimit, None);
-            let _ = self.send_json_request(extra, &rq::get_option(extra, "gift_text_length_max"));
-        }
+        self.ask_gift_text_limit();
         // The balance arrives with the first Stars history page.
         let _ = self.maybe_fetch_star_transactions();
         Ok(())

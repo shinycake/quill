@@ -857,6 +857,7 @@ impl Session {
             info.blocked = block;
         }
         if pending.is_some_and(|p| is_auth_submit(p.purpose)) {
+            self.auth_state.submit.settle(extra);
             self.auth_state.last_auth_error = None;
         }
         if pending

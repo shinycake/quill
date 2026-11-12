@@ -6,7 +6,7 @@ use super::closing::{CloseWait, closed};
 use super::tests::new_app;
 use crate::ui::app::QuillApp;
 use gpui_kit::TestAppContext;
-use quill::connect::{CLOSE_GRACE, Closable, CloseProgress, QUIT_CLOSE_DEADLINE};
+use quill::connect::{CLOSE_GRACE, Closable, CloseOutcome, QUIT_CLOSE_DEADLINE};
 use quill::ids::AccountKey;
 use std::cell::Cell;
 use std::rc::Rc;
@@ -32,15 +32,15 @@ impl Closable for Fake {
         self.close_sent.fetch_add(1, Ordering::SeqCst);
     }
 
-    fn drain(&mut self, budget: Duration) -> CloseProgress {
+    fn drain(&mut self, budget: Duration) -> CloseOutcome {
         self.drains.fetch_add(1, Ordering::SeqCst);
         let micros = u64::try_from(budget.as_micros()).unwrap_or(u64::MAX);
         self.longest_drain_micros
             .fetch_max(micros, Ordering::SeqCst);
         match self.progress.load(Ordering::SeqCst) {
-            CLOSED => CloseProgress::Closed,
-            LOST => CloseProgress::Lost,
-            _ => CloseProgress::Pending,
+            CLOSED => CloseOutcome::Closed,
+            LOST => CloseOutcome::Lost,
+            _ => CloseOutcome::Pending,
         }
     }
 

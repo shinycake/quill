@@ -124,17 +124,47 @@ pub enum StatusPicker {
     ChatAppearance,
 }
 
-/// The `setEmojiStatus` call in flight, and the emoji a success adds to the
-/// recents.
+/// The emoji-status call in flight (one at a time), and the emoji a success
+/// adds to the recents. The answer or the refusal of that request ends it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum StatusChange {
     #[default]
     Idle,
+    /// `setEmojiStatus` is out.
     Setting {
         request: crate::ids::RequestId,
         /// `None` removes the status, or sets a gift's.
         emoji: Option<i64>,
     },
+    /// `clearRecentEmojiStatuses` is out.
+    Clearing { request: crate::ids::RequestId },
+}
+
+impl StatusChange {
+    pub fn is_busy(self) -> bool {
+        self != Self::Idle
+    }
+
+    /// `request` answered: the change it was ends, and the emoji it set
+    /// (`Some(None)`: nothing to remember) comes back. `None`: it was not
+    /// the change in flight.
+    pub fn answered(&mut self, request: Option<crate::ids::RequestId>) -> Option<Option<i64>> {
+        let emoji = match *self {
+            Self::Setting {
+                request: waiting,
+                emoji,
+            } if Some(waiting) == request => emoji,
+            Self::Clearing { request: waiting } if Some(waiting) == request => None,
+            _ => return None,
+        };
+        *self = Self::Idle;
+        Some(emoji)
+    }
+
+    /// `request` was refused or lost: the change it was ends.
+    pub fn failed(&mut self, request: Option<crate::ids::RequestId>) {
+        let _ = self.answered(request);
+    }
 }
 
 /// Slice S10: custom-emoji backend (packs + statuses + picker search).
@@ -723,17 +753,8 @@ impl Session {
             purpose,
             Some(RequestPurpose::SetEmojiStatus | RequestPurpose::ClearRecentEmojiStatuses)
         ) {
-            if purpose == Some(RequestPurpose::SetEmojiStatus)
-                && let StatusChange::Setting {
-                    request: waiting,
-                    emoji,
-                } = self.stickers.emoji.status_change
-                && Some(waiting) == request
-            {
-                self.stickers.emoji.status_change = StatusChange::Idle;
-                if let Some(id) = emoji {
-                    self.remember_emoji_pack_usage(&[id]);
-                }
+            if let Some(Some(id)) = self.stickers.emoji.status_change.answered(request) {
+                self.remember_emoji_pack_usage(&[id]);
             }
             self.stickers.emoji.recent_statuses.clear();
             drop(
