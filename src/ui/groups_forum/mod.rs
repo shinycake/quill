@@ -20,7 +20,7 @@ use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
-use quill::state::{RequestPurpose, Submit, SubmitView};
+use quill::state::{Submit, SubmitView};
 use quill::telegram::envelope::ForumTopic;
 use quill::telegram::requests::TOPIC_ICON_COLORS;
 
