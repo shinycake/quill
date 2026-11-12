@@ -221,6 +221,85 @@ fn create_community_asks_a_name_then_the_visibility_and_comes_back(cx: &mut Test
 }
 
 #[gpui_kit::test]
+fn the_create_box_waits_for_its_own_request_only(cx: &mut TestAppContext) {
+    use super::CreateStep;
+    use quill::ids::RequestId;
+    use quill::state::CommunityOutcome;
+    let (app, mut vcx) = new_app(cx);
+    frames(&mut vcx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.open_new_community(OWN_CHANNEL, window, cx)
+    });
+    frames(&mut vcx);
+    let step = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| match &app.admin.community.flow.open {
+            Some(
+                CommunityBox::Create { create, .. } | CommunityBox::CreateVisibility { create, .. },
+            ) => Some(*create),
+            _ => None,
+        })
+    };
+    app.update(&mut vcx, |app, _| {
+        if let Some(CommunityBox::Create { create, .. }) = app.admin.community.flow.open.as_mut() {
+            *create = CreateStep::Creating {
+                request: RequestId(7),
+            };
+        }
+    });
+    // Another request's refusal and answer leave this box waiting.
+    app.update(&mut vcx, |app, cx| {
+        app.apply_community_outcome(
+            CommunityOutcome::CreateFailed {
+                request: RequestId(9),
+                reason: "other".into(),
+            },
+            cx,
+        );
+        app.apply_community_outcome(
+            CommunityOutcome::Created {
+                request: RequestId(9),
+                community_id: 1,
+                chat_id: Some(OWN_CHANNEL),
+            },
+            cx,
+        );
+    });
+    assert_eq!(
+        step(&app, &mut vcx),
+        Some(CreateStep::Creating {
+            request: RequestId(7)
+        })
+    );
+    // Its own refusal returns it to choosing, and its own answer closes it.
+    app.update(&mut vcx, |app, cx| {
+        app.apply_community_outcome(
+            CommunityOutcome::CreateFailed {
+                request: RequestId(7),
+                reason: "refused".into(),
+            },
+            cx,
+        );
+    });
+    assert_eq!(step(&app, &mut vcx), Some(CreateStep::Choosing));
+    app.update(&mut vcx, |app, cx| {
+        if let Some(CommunityBox::Create { create, .. }) = app.admin.community.flow.open.as_mut() {
+            *create = CreateStep::Creating {
+                request: RequestId(8),
+            };
+        }
+        app.apply_community_outcome(
+            CommunityOutcome::Created {
+                request: RequestId(8),
+                community_id: 2,
+                chat_id: Some(OWN_CHANNEL),
+            },
+            cx,
+        );
+    });
+    assert_eq!(step(&app, &mut vcx), None);
+}
+
+#[gpui_kit::test]
 fn the_row_menu_mute_submenu_opens_and_leads_to_mute_for(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     frames(&mut vcx);
@@ -391,27 +470,25 @@ fn ban_waiting_for_a_warning(app: &Entity<QuillApp>, vcx: &mut VisualTestContext
 }
 
 #[gpui_kit::test]
-fn a_ban_warning_waits_while_another_box_is_open_then_opens(cx: &mut TestAppContext) {
+fn a_ban_warning_is_dropped_when_another_box_is_open_at_its_answer(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     frames(&mut vcx);
     ban_waiting_for_a_warning(&app, &mut vcx);
     app.update(&mut vcx, |app, cx| {
         app.show_community_box(CommunityBox::Pick { chat_id: 65 }, cx);
-        // The confirmed ban is kept, not dropped, and nothing opens over Pick.
-        assert!(!app.drain_pending_ban(cx));
+        // Nothing opens over Pick, and the forgotten press ends.
+        assert!(app.drain_pending_ban(cx));
     });
-    assert!(app.read_with(&vcx, |app, _| {
-        !app.admin.community.flow.ban_waits.is_empty()
-    }));
+    assert!(app.read_with(&vcx, |app, _| app.admin.community.flow.ban_waits.is_empty()));
     assert_eq!(open_box(&app, &mut vcx), "pick");
     app.update(&mut vcx, |app, cx| {
         app.admin.community.flow.open = None;
         cx.notify();
     });
     frames(&mut vcx);
-    app.update(&mut vcx, |app, cx| assert!(app.drain_pending_ban(cx)));
-    assert!(app.read_with(&vcx, |app, _| app.admin.community.flow.ban_waits.is_empty()));
-    assert_eq!(open_box(&app, &mut vcx), "ban-warning");
+    // Closing Pick later pops nothing.
+    app.update(&mut vcx, |app, cx| assert!(!app.drain_pending_ban(cx)));
+    assert_eq!(open_box(&app, &mut vcx), "none");
 }
 
 #[gpui_kit::test]

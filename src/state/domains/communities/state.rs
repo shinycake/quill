@@ -89,10 +89,14 @@ pub enum CommunityOutcome {
     /// `createCommunity` answered with the new community, made around
     /// `chat_id`.
     Created {
+        /// The `createCommunity` request this answers.
+        request: RequestId,
         community_id: i64,
         chat_id: Option<i64>,
     },
     CreateFailed {
+        /// The `createCommunity` request that was refused.
+        request: RequestId,
         reason: String,
     },
 }

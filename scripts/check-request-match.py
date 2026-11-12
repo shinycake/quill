@@ -52,6 +52,11 @@ ADVICE = (
 )
 OWNER = "src/state/requests.rs"
 PURPOSE = re.compile(r"\.\s*(?:has_purpose|take_purpose|has_auth_submit)\s*\(")
+# In UI code the per-chat variant is the same shortcut: a box reading "a
+# request of this purpose for my chat is out" is true for another window's.
+# The driver's own double-send refusal (`has_purpose_for_chat` in src/connect)
+# is not an answer match.
+PURPOSE_FOR_CHAT = re.compile(r"\.\s*(?:has_purpose|take_purpose)_for_chat\s*\(")
 SUCCEED = re.compile(r"\.\s*succeed\s*\(")
 
 
@@ -65,9 +70,13 @@ def hits(root):
             continue
         scopes = shape_guard.Scopes(path, text)
         if purpose:
-            for match in PURPOSE.finditer(text):
-                line = shape_guard.line_of(text, match.start())
-                yield f"purpose:{scopes.at(match.start())}", path, line
+            patterns = [PURPOSE]
+            if path.startswith("src/ui/"):
+                patterns.append(PURPOSE_FOR_CHAT)
+            for pattern in patterns:
+                for match in pattern.finditer(text):
+                    line = shape_guard.line_of(text, match.start())
+                    yield f"purpose:{scopes.at(match.start())}", path, line
         if succeed:
             for match in SUCCEED.finditer(text):
                 line = shape_guard.line_of(text, match.start())

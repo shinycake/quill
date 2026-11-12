@@ -96,12 +96,15 @@ impl QuillApp {
             }
             BanStep::Warn(owned_chat_ids) => {
                 // The warning does not open over a box the person moved to
-                // while the ask was out: the ban keeps waiting (the poll
-                // drain comes back) until no box is open or the one Ban was
-                // pressed from is back. A confirmed ban is never dropped.
-                match QuillShell::open_dialog_name(self) {
-                    Some(open) if Some(open) != pending.over => return false,
-                    _ => {}
+                // while the ask was out: the press that asked it belongs to
+                // the box it was made from, which is gone, so the wait ends
+                // here and nothing pops up for a press long forgotten. The
+                // ban is not sent: it needed this warning's confirm.
+                if let Some(open) = QuillShell::open_dialog_name(self)
+                    && Some(open) != pending.over
+                {
+                    self.admin.community.flow.ban_waits.pop_front();
+                    return true;
                 }
                 self.admin.community.flow.ban_waits.pop_front();
                 self.show_community_box(

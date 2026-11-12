@@ -623,6 +623,14 @@ impl QuillApp {
         // A rich send still waiting goes on waiting off the view, so a
         // refusal after the chat changed still gives the text back.
         self.leave_sent_text(std::mem::take(&mut old.sent_text));
+        if let Some(request) = old
+            .checklist_dialog
+            .as_ref()
+            .and_then(|dialog| dialog.send.request())
+            && let Some(live) = self.live.as_mut()
+        {
+            live.driver.session.acks.forget(request);
+        }
         if let Some(request) = old.scheduled_box.loading()
             && let Some(live) = self.live.as_mut()
         {

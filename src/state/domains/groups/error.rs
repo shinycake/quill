@@ -108,11 +108,14 @@ impl Session {
             // photo waiting for the community goes.
             Some(RequestPurpose::CreateCommunity) => {
                 self.communities.new_community_photo = None;
-                self.communities
-                    .outcomes
-                    .push_back(crate::state::CommunityOutcome::CreateFailed {
-                        reason: error_reason(err),
-                    });
+                if let Some(pending) = pending {
+                    self.communities
+                        .outcomes
+                        .push_back(crate::state::CommunityOutcome::CreateFailed {
+                            request: pending.id,
+                            reason: error_reason(err),
+                        });
+                }
             }
             // TDLib 1.8.68 community management: surface refusals
             // ("Have not enough rights", a missing community) in the

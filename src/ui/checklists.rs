@@ -19,7 +19,9 @@ use quill::checklist::{
     CHECKLIST_TASKS_MAX, can_create_checklist, tasks_left, toggle_task_request,
     validate_added_tasks,
 };
-use quill::ids::{ChatId, MessageId};
+use super::dialogs::checklist::DialogSend;
+use quill::ids::{ChatId, MessageId, RequestId};
+use quill::state::Answer;
 use quill::lang::{keys, tr, tr_with};
 use quill::poll::validate_new_option;
 use quill::telegram::envelope::{MessageContent, MessageSender};
@@ -87,7 +89,63 @@ impl QuillApp {
     }
 
     pub(super) fn close_checklist_dialog(&mut self, cx: &mut Context<Self>) {
-        self.chat_ui.checklist_dialog = None;
+        let waiting = self
+            .chat_ui
+            .checklist_dialog
+            .take()
+            .and_then(|dialog| dialog.send.request());
+        self.forget_dialog_request(waiting);
+        cx.notify();
+    }
+
+    /// A dialog that waited for `request` is gone: nothing waits for its
+    /// answer any more.
+    fn forget_dialog_request(&mut self, request: Option<RequestId>) {
+        if let Some(request) = request
+            && let Some(live) = self.live.as_mut()
+        {
+            live.driver.session.acks.forget(request);
+        }
+    }
+
+    /// The checklist dialog's request left with `request`: it waits for
+    /// the answer, with what was typed kept.
+    fn checklist_dialog_sending(&mut self, request: RequestId) {
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.acks.expect(request);
+        }
+        if let Some(dialog) = self.chat_ui.checklist_dialog.as_mut() {
+            dialog.send = DialogSend::Sending { request };
+        }
+    }
+
+    /// Frame upkeep: TDLib answered the checklist dialog's request. The
+    /// answer closes it; a refusal returns it to editing, nothing typed
+    /// lost, with a note.
+    pub(in crate::ui) fn settle_checklist_dialog(&mut self, cx: &mut Context<Self>) {
+        let Some(mut dialog) = self.chat_ui.checklist_dialog.take() else {
+            return;
+        };
+        let adding = dialog.add_to.is_some();
+        let answer = self
+            .live
+            .as_mut()
+            .and_then(|live| dialog.send.settle(&mut live.driver.session.acks));
+        let Some(answer) = answer else {
+            self.chat_ui.checklist_dialog = Some(dialog);
+            return;
+        };
+        match answer {
+            Answer::Done => {}
+            Answer::Failed(_) => {
+                self.chat_ui.checklist_dialog = Some(dialog);
+                self.set_note(StatusNote::error(tr(if adding {
+                    keys::Q_MEDIA_COULD_NOT_ADD_THE_TASKS
+                } else {
+                    keys::Q_MEDIA_COULD_NOT_SEND_THE_CHECKLIST
+                })));
+            }
+        }
         cx.notify();
     }
 
@@ -110,6 +168,10 @@ impl QuillApp {
         let Some(dialog) = self.chat_ui.checklist_dialog.as_ref() else {
             return;
         };
+        // A Create while this dialog's own request is out is that one.
+        if dialog.send.request().is_some() {
+            return;
+        }
         let add_to = dialog.add_to;
         let draft = dialog.draft(cx);
         // Surface validation inline, like tdesktop's field shake + toast.
@@ -132,8 +194,8 @@ impl QuillApp {
                     .driver
                     .add_checklist_tasks(chat_id, message_id, &draft.tasks);
                 match result {
-                    Ok(_) => {
-                        self.chat_ui.checklist_dialog = None;
+                    Ok(request) => {
+                        self.checklist_dialog_sending(request);
                         self.set_note(StatusNote::silent(tr(keys::Q_MEDIA_ADDING_TASKS)));
                     }
                     Err(_) => {
@@ -159,8 +221,8 @@ impl QuillApp {
         let reply_to = self.send_reply_for(chat_id, cx);
         if let Some(live) = self.live.as_mut() {
             match live.driver.send_checklist_draft(chat_id, &draft, reply_to) {
-                Ok(_) => {
-                    self.chat_ui.checklist_dialog = None;
+                Ok(request) => {
+                    self.checklist_dialog_sending(request);
                     self.chat_ui.set_reply(None);
                     self.set_note(StatusNote::silent(tr(keys::Q_MEDIA_SENDING_CHECKLIST)));
                 }
@@ -423,11 +485,9 @@ impl QuillApp {
 
     /// Cancel and Create (or Add), pinned under the checklist box.
     pub(super) fn checklist_box_footer(&self, cx: &mut Context<Self>) -> AnyElement {
-        let adding = self
-            .chat_ui
-            .checklist_dialog
-            .as_ref()
-            .is_some_and(|dialog| dialog.add_to.is_some());
+        let dialog = self.chat_ui.checklist_dialog.as_ref();
+        let adding = dialog.is_some_and(|dialog| dialog.add_to.is_some());
+        let sending = dialog.is_some_and(|dialog| dialog.send.request().is_some());
         div()
             .flex()
             .justify_end()
@@ -448,6 +508,7 @@ impl QuillApp {
                         tr(keys::Q_MEDIA_CREATE)
                     })
                     .primary()
+                    .loading(sending)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.submit_checklist_dialog(cx);
                     })),
@@ -478,7 +539,37 @@ impl QuillApp {
     }
 
     pub(super) fn close_poll_add_option(&mut self, cx: &mut Context<Self>) {
-        self.message_ui.poll_add_option = None;
+        let waiting = self
+            .message_ui
+            .poll_add_option
+            .take()
+            .and_then(|panel| panel.send.request());
+        self.forget_dialog_request(waiting);
+        cx.notify();
+    }
+
+    /// Frame upkeep: TDLib answered the "Add an Option" request. The answer
+    /// closes the box; a refusal returns it to editing with the option
+    /// still typed.
+    pub(in crate::ui) fn settle_poll_add_option(&mut self, cx: &mut Context<Self>) {
+        let Some(mut panel) = self.message_ui.poll_add_option.take() else {
+            return;
+        };
+        let answer = self
+            .live
+            .as_mut()
+            .and_then(|live| panel.send.settle(&mut live.driver.session.acks));
+        let Some(answer) = answer else {
+            self.message_ui.poll_add_option = Some(panel);
+            return;
+        };
+        match answer {
+            Answer::Done => {}
+            Answer::Failed(_) => {
+                self.message_ui.poll_add_option = Some(panel);
+                self.set_note(StatusNote::error(tr(keys::POLLS_ADD_OPTION_ERROR)));
+            }
+        }
         cx.notify();
     }
 
@@ -486,6 +577,10 @@ impl QuillApp {
         let Some(panel) = self.message_ui.poll_add_option.as_ref() else {
             return;
         };
+        // An Add while this box's own request is out is that one.
+        if panel.send.request().is_some() {
+            return;
+        }
         let (chat_id, message_id) = (panel.chat_id, panel.message_id);
         let text = super::composer_field::field_doc(panel.input.read(cx)).to_markup();
         let poll = self
@@ -532,8 +627,11 @@ impl QuillApp {
                 .driver
                 .add_poll_option(chat_id, message_id, &text, media.as_ref())
             {
-                Ok(_) => {
-                    self.message_ui.poll_add_option = None;
+                Ok(request) => {
+                    live.driver.session.acks.expect(request);
+                    if let Some(panel) = self.message_ui.poll_add_option.as_mut() {
+                        panel.send = DialogSend::Sending { request };
+                    }
                     self.set_note(StatusNote::silent(tr(keys::Q_MEDIA_ADDING_OPTION)));
                 }
                 Err(_) => {
@@ -609,6 +707,11 @@ impl QuillApp {
 
     /// Cancel and Save, pinned under the "Add an Option" box.
     pub(super) fn poll_add_option_footer(&self, cx: &mut Context<Self>) -> AnyElement {
+        let sending = self
+            .message_ui
+            .poll_add_option
+            .as_ref()
+            .is_some_and(|panel| panel.send.request().is_some());
         div()
             .flex()
             .justify_end()
@@ -625,6 +728,7 @@ impl QuillApp {
                 Button::new("poll-add-option-save")
                     .label(tr(keys::SETTINGS_SAVE))
                     .primary()
+                    .loading(sending)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.submit_poll_add_option(cx);
                     })),

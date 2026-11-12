@@ -141,6 +141,7 @@ impl Session {
                     self.communities
                         .outcomes
                         .push_back(CommunityOutcome::Created {
+                            request: pending.id,
                             community_id: id,
                             chat_id: pending.chat_id.map(|chat| chat.0),
                         });

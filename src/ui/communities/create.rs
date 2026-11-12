@@ -48,6 +48,7 @@ impl QuillApp {
             CommunityBox::Create {
                 chat_id,
                 draft: NewCommunity { name, photo: None },
+                create: CreateStep::Choosing,
             },
             cx,
         );
@@ -101,10 +102,15 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(CommunityBox::Create { chat_id, draft }) = &self.admin.community.flow.open else {
+        let Some(CommunityBox::Create {
+            chat_id,
+            draft,
+            create,
+        }) = &self.admin.community.flow.open
+        else {
             return;
         };
-        let (chat_id, draft) = (*chat_id, draft.clone());
+        let (chat_id, draft, create) = (*chat_id, draft.clone(), *create);
         if draft.name.read(cx).value().trim().is_empty() {
             draft.name.update(cx, |name, cx| name.focus(window, cx));
             self.set_note(StatusNote::error(tr(keys::Q_PEOPLE_NAME_CANNOT_BE_EMPTY)));
@@ -116,6 +122,7 @@ impl QuillApp {
                 chat_id,
                 draft,
                 hidden: false,
+                create,
             },
             cx,
         );
@@ -127,10 +134,16 @@ impl QuillApp {
             chat_id,
             draft,
             hidden,
+            create,
         }) = &self.admin.community.flow.open
         else {
             return;
         };
+        // A Create (or Enter) while this box's own is out is that one:
+        // nothing more goes and no "no longer available" note is told.
+        if matches!(create, CreateStep::Creating { .. }) {
+            return;
+        }
         let (chat_id, hidden) = (*chat_id, *hidden);
         let name = draft.name.read(cx).value().trim().to_string();
         let photo = draft
@@ -144,8 +157,10 @@ impl QuillApp {
             cx.notify();
             return;
         };
-        // A Create (or Enter) while one is out is that one: nothing more
-        // goes and no "no longer available" note is told.
+        // Another box's create for this chat is out: the driver sends one at
+        // a time, so this press goes nowhere and tells no "unavailable" note.
+        // This box is not busy for it; its own request is the only one it
+        // waits for.
         if live
             .driver
             .community_create_out(quill::ids::ChatId(chat_id))
@@ -161,7 +176,17 @@ impl QuillApp {
             hidden,
             photo,
         );
-        self.community_step_went(None, sent);
+        let request = match &sent {
+            Ok(Some(request)) => Some(*request),
+            _ => None,
+        };
+        if self.community_step_went(None, sent)
+            && let Some(request) = request
+            && let Some(CommunityBox::CreateVisibility { create, .. }) =
+                self.admin.community.flow.open.as_mut()
+        {
+            *create = CreateStep::Creating { request };
+        }
         cx.notify();
     }
 
@@ -177,7 +202,8 @@ impl QuillApp {
             });
         app.update(cx, |this, cx| {
             let dialog = dialog.overlay(true).w(px(420.));
-            let Some(CommunityBox::Create { chat_id, draft }) = &this.admin.community.flow.open
+            let Some(CommunityBox::Create { chat_id, draft, .. }) =
+                &this.admin.community.flow.open
             else {
                 return dialog.on_close(on_close);
             };

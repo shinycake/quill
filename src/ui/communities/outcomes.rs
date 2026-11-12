@@ -43,7 +43,7 @@ impl QuillApp {
         )
     }
 
-    fn apply_community_outcome(&mut self, outcome: CommunityOutcome, cx: &mut Context<Self>) {
+    pub(super) fn apply_community_outcome(&mut self, outcome: CommunityOutcome, cx: &mut Context<Self>) {
         let note = match outcome {
             CommunityOutcome::ChatAdded {
                 community_id,
@@ -102,20 +102,32 @@ impl QuillApp {
             CommunityOutcome::ProcessFailed { error, .. } => {
                 StatusNote::error(self.community_error_text(&error, None))
             }
-            CommunityOutcome::Created { chat_id, .. } => {
+            CommunityOutcome::Created { request, .. } => {
                 // Cancel on the visibility box goes back to the identity box
-                // while the create is out; either one of this chat's ends here.
+                // while the create is out; either one holding this request
+                // ends here.
                 if let Some(
-                    CommunityBox::CreateVisibility { chat_id: asked, .. }
-                    | CommunityBox::Create { chat_id: asked, .. },
+                    CommunityBox::CreateVisibility { create, .. }
+                    | CommunityBox::Create { create, .. },
                 ) = &self.admin.community.flow.open
-                    && Some(*asked) == chat_id
+                    && create.waits_for(request)
                 {
                     self.admin.community.flow.open = None;
                 }
                 StatusNote::info(tr(keys::COMMUNITY_CREATED))
             }
-            CommunityOutcome::CreateFailed { reason } => StatusNote::error(reason),
+            CommunityOutcome::CreateFailed { request, reason } => {
+                // The box stays on a refusal, ready to Create again.
+                if let Some(
+                    CommunityBox::CreateVisibility { create, .. }
+                    | CommunityBox::Create { create, .. },
+                ) = self.admin.community.flow.open.as_mut()
+                    && create.waits_for(request)
+                {
+                    *create = CreateStep::Choosing;
+                }
+                StatusNote::error(reason)
+            }
             CommunityOutcome::MemberBanned { member, .. } => StatusNote::info(tr_with(
                 keys::COMMUNITY_BAN_DONE,
                 &[("user", &self.community_member_name(member))],
