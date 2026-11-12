@@ -373,10 +373,10 @@ impl Session {
         {
             self.fail_history_newer(pending);
         }
-        if pending.map(|p| p.purpose) == Some(RequestPurpose::GetHistoryAround)
-            && let Some(message_id) = pending.and_then(|p| p.around_message_id)
+        if let Some(pending) = pending
+            && pending.purpose == RequestPurpose::GetHistoryAround
         {
-            self.finish_history_around(pending, message_id, true, seq);
+            self.finish_history_around(pending, seq);
         }
         // A failed share box search ends that half with nothing found, as
         // "Add People" does, so the box says "No matching chats" instead of

@@ -549,11 +549,11 @@ fn chat_search_happy_empty_stale_and_jump() {
             message_id: MessageId(101)
         }
     );
-    assert_eq!(
-        session.begin_chat_search_jump(MessageId(90)),
-        ChatSearchJumpNeed::LoadAround
-    );
-    let around = session.request_history_around(ChatId(11), MessageId(90));
+    let ChatSearchJumpNeed::LoadAround { request: around, .. } =
+        session.begin_chat_search_jump(MessageId(90))
+    else {
+        panic!("90 is outside the loaded window");
+    };
     apply_json(
         &mut session,
         &seq,
@@ -707,11 +707,11 @@ fn chat_search_jump_missing_deleted_and_inaccessible() {
             auto_delete: None,
             date: 0,
         });
-    assert_eq!(
-        session.begin_chat_search_jump(MessageId(80)),
-        ChatSearchJumpNeed::LoadAround
-    );
-    let around = session.request_history_around(ChatId(11), MessageId(80));
+    let ChatSearchJumpNeed::LoadAround { request: around, .. } =
+        session.begin_chat_search_jump(MessageId(80))
+    else {
+        panic!("80 is outside the loaded window");
+    };
     apply_json(
         &mut session,
         &seq,
@@ -1345,10 +1345,13 @@ fn a_date_jump_waiting_for_its_window_lives_in_the_jump_stage() {
     let (mut session, _sink) = session();
     session.open_chat(ChatId(5));
     let need = session.begin_date_jump(MessageId(50), DateJumpMode::Next);
-    assert_eq!(need, ChatSearchJumpNeed::LoadAround);
+    let ChatSearchJumpNeed::LoadAround { request, .. } = need else {
+        panic!("50 is outside the loaded window");
+    };
     assert_eq!(
         session.search.chat_search.jump,
         ChatSearchJump::Loading {
+            request,
             message_id: MessageId(50),
             then: JumpLanding::Date {
                 chat_id: ChatId(5),
@@ -1369,6 +1372,7 @@ fn a_date_jump_waiting_for_its_window_lives_in_the_jump_stage() {
     assert_eq!(
         session.search.chat_search.jump,
         ChatSearchJump::Loading {
+            request,
             message_id: MessageId(50),
             then: JumpLanding::Message
         }
@@ -1412,4 +1416,57 @@ fn r2_an_older_pinned_fetch_neither_lands_nor_fails_over_the_newer_one() {
         }
         assert_eq!(session.pinned_list(ChatId(16)).len(), 1);
     }
+}
+
+/// r3-06 09-009: jump to A, jump to B, jump back to A while the first around
+/// page is still out. Only the newest request's answer settles the jump.
+#[test]
+fn an_older_around_page_for_the_same_message_does_not_settle_a_later_jump() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewChat","chat":{"id":11,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":11},"unread_count":0}}"#,
+    );
+    session.open_chat(ChatId(11));
+    let jump = |session: &mut Session, id: i64| match session.begin_chat_search_jump(MessageId(id))
+    {
+        ChatSearchJumpNeed::LoadAround { request, .. } => request,
+        other => panic!("{other:?}"),
+    };
+    let first = jump(&mut session, 50);
+    let _other = jump(&mut session, 60);
+    let again = jump(&mut session, 50);
+    assert_ne!(first, again);
+    assert_eq!(
+        session.search.chat_search.jump,
+        ChatSearchJump::Loading {
+            request: again,
+            message_id: MessageId(50),
+            then: JumpLanding::Message
+        }
+    );
+    let page = |extra: RequestId| {
+        format!(
+            r#"{{"@type":"messages","@extra":"{}","total_count":1,"messages":[{{"id":50,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"fifty","entities":[]}}}}}}]}}"#,
+            extra.0
+        )
+    };
+    apply_json(&mut session, &seq, &sink, &page(first));
+    assert!(
+        matches!(
+            session.search.chat_search.jump,
+            ChatSearchJump::Loading { request, .. } if request == again
+        ),
+        "the first request's page is not the answer to the third jump"
+    );
+    apply_json(&mut session, &seq, &sink, &page(again));
+    assert_eq!(
+        session.search.chat_search.jump,
+        ChatSearchJump::Ready {
+            message_id: MessageId(50)
+        }
+    );
 }

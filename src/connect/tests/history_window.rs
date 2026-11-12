@@ -468,12 +468,16 @@ fn mention_button_jumps_to_the_oldest_unread_mention() {
     ));
     let around = h.last_history_request();
     assert_eq!(around["from_message_id"], 5);
-    assert_eq!(
-        h.driver.session.search.chat_search.jump,
-        crate::state::ChatSearchJump::Loading {
-            message_id: MessageId(5),
-            then: crate::state::JumpLanding::Message,
-        }
+    assert!(
+        matches!(
+            h.driver.session.search.chat_search.jump,
+            crate::state::ChatSearchJump::Loading {
+                message_id: MessageId(5),
+                then: crate::state::JumpLanding::Message,
+                ..
+            }
+        ),
+        "the jump waits on its around page"
     );
 }
 
@@ -508,12 +512,16 @@ fn an_explicit_target_opens_highlighted() {
     h.driver
         .select_chat_open(ChatId(7), crate::state::HistoryOpen::Message(MessageId(45)))
         .unwrap();
-    assert_eq!(
-        h.driver.session.search.chat_search.jump,
-        crate::state::ChatSearchJump::Loading {
-            message_id: MessageId(45),
-            then: crate::state::JumpLanding::Message,
-        }
+    assert!(
+        matches!(
+            h.driver.session.search.chat_search.jump,
+            crate::state::ChatSearchJump::Loading {
+                message_id: MessageId(45),
+                then: crate::state::JumpLanding::Message,
+                ..
+            }
+        ),
+        "the jump waits on its around page"
     );
 }
 
@@ -589,12 +597,16 @@ fn a_jump_whose_page_was_dropped_by_a_window_reset_ends() {
         .unwrap();
     let around = h.last_history_request();
     assert_eq!(around["from_message_id"], 5);
-    assert_eq!(
-        h.driver.session.search.chat_search.jump,
-        crate::state::ChatSearchJump::Loading {
-            message_id: MessageId(5),
-            then: crate::state::JumpLanding::Message,
-        }
+    assert!(
+        matches!(
+            h.driver.session.search.chat_search.jump,
+            crate::state::ChatSearchJump::Loading {
+                message_id: MessageId(5),
+                then: crate::state::JumpLanding::Message,
+                ..
+            }
+        ),
+        "the jump waits on its around page"
     );
     let extra: u64 = around["@extra"].as_str().unwrap().parse().unwrap();
     h.driver.session.reset_history_window(ChatId(7));

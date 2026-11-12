@@ -52,12 +52,14 @@ impl Session {
         // A date jump still loading becomes a plain one: it lands on the
         // message TDLib resolved, without retargeting.
         if let ChatSearchJump::Loading {
+            request,
             message_id,
             then: JumpLanding::Date { chat_id, .. },
         } = self.search.chat_search.jump
             && is_chat(chat_id)
         {
             self.search.chat_search.jump = ChatSearchJump::Loading {
+                request,
                 message_id,
                 then: JumpLanding::Message,
             };

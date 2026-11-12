@@ -330,12 +330,16 @@ fn select_chat_at_requests_history_around_the_message_and_highlights_it() {
     // the message, not the newest page.
     assert_eq!(history.len(), 1, "{history:?}");
     assert!(history[0].contains("\"from_message_id\":40"));
-    assert_eq!(
-        driver.session.search.chat_search.jump,
-        crate::state::ChatSearchJump::Loading {
-            message_id: MessageId(40),
-            then: crate::state::JumpLanding::Message,
-        }
+    assert!(
+        matches!(
+            driver.session.search.chat_search.jump,
+            crate::state::ChatSearchJump::Loading {
+                message_id: MessageId(40),
+                then: crate::state::JumpLanding::Message,
+                ..
+            }
+        ),
+        "the jump waits on its around page"
     );
     driver
         .ingest(

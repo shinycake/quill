@@ -602,19 +602,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         match self.session.begin_date_jump(message_id, mode) {
             ChatSearchJumpNeed::AlreadyReady | ChatSearchJumpNeed::Missing => Ok(None),
-            ChatSearchJumpNeed::LoadAround => {
-                // The target is outside the loaded window: replace the
-                // window instead of dropping a disconnected slice into it.
-                if let Some(chat_id) = self
-                    .session
-                    .search
-                    .chat_search
-                    .chat_id()
-                    .or(self.session.open_chat_id())
-                {
-                    self.session.reset_history_window(chat_id);
-                }
-                self.fetch_history_around(message_id)
+            ChatSearchJumpNeed::LoadAround { request, chat_id } => {
+                self.send_history_around(request, chat_id, message_id)
             }
         }
     }
@@ -664,14 +653,12 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Unigram `GetChatHistory(chatId, maxId, -25, 50)` around the jump target.
-    fn fetch_history_around(
+    fn send_history_around(
         &mut self,
+        extra: RequestId,
+        chat_id: ChatId,
         message_id: MessageId,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        let Some(chat_id) = self.session.open_chat_id() else {
-            return Err(ConnectSendError::InvalidRequest);
-        };
-        let extra = self.session.request_history_around(chat_id, message_id);
         match self.sender.send_json(&self.main_history_request(
             extra,
             chat_id,
