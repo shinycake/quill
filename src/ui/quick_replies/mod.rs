@@ -48,12 +48,14 @@ pub(super) struct ShortcutPane {
 /// waits owns it, so leaving the stage (settled, the screen changed, the box
 /// closed) ends the poll; clones share it.
 #[derive(Clone)]
-pub(super) struct Poll(Rc<Task<()>>);
+pub(super) struct Poll {
+    _task: Rc<Task<()>>,
+}
 
 impl Poll {
     #[cfg(test)]
     pub(super) fn weak(&self) -> std::rc::Weak<Task<()>> {
-        Rc::downgrade(&self.0)
+        Rc::downgrade(&self._task)
     }
 }
 
@@ -363,7 +365,9 @@ impl QuillApp {
                 }
             }
         });
-        Poll(Rc::new(task))
+        Poll {
+            _task: Rc::new(task),
+        }
     }
 
     /// Save of the name field: a new shortcut or a rename.

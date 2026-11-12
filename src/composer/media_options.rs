@@ -146,18 +146,25 @@ pub enum PhotoPrep {
     /// card going or the tray going drops it, which cancels the render).
     /// Until it lands the file must not be sent. If the render fails,
     /// `before` is what the picture was.
-    Rendering {
-        render: u64,
-        hold: crate::task_hold::TaskHold,
-        before: Box<PhotoPrep>,
-    },
+    Rendering(Box<PhotoRender>),
+}
+
+/// A photo edit rendering into a new file (boxed so the picture's prep stays
+/// small in a send's content).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PhotoRender {
+    render: u64,
+    /// Owns the render's work: dropping it cancels the render.
+    _hold: crate::task_hold::TaskHold,
+    /// What the picture was, for a render that fails.
+    before: PhotoPrep,
 }
 
 impl PhotoPrep {
     /// What the picture is apart from a render in flight.
     fn settled(&self) -> &PhotoPrep {
         match self {
-            PhotoPrep::Rendering { before, .. } => before.settled(),
+            PhotoPrep::Rendering(job) => job.before.settled(),
             other => other,
         }
     }
@@ -242,8 +249,8 @@ impl AttachmentExtras {
 
     /// The render of a photo edit in flight for this file.
     pub fn photo_render(&self) -> Option<u64> {
-        match self.photo {
-            PhotoPrep::Rendering { render, .. } => Some(render),
+        match &self.photo {
+            PhotoPrep::Rendering(job) => Some(job.render),
             _ => None,
         }
     }
@@ -252,7 +259,7 @@ impl AttachmentExtras {
     /// flight keeps going and this is what it falls back to.
     pub fn set_photo(&mut self, prep: PhotoPrep) {
         match &mut self.photo {
-            PhotoPrep::Rendering { before, .. } => **before = prep,
+            PhotoPrep::Rendering(job) => job.before = prep,
             slot => *slot = prep,
         }
     }
@@ -260,12 +267,12 @@ impl AttachmentExtras {
     /// A render of an edit starts (the latest Done replaces an earlier one,
     /// whose work is cancelled by dropping its hold).
     pub fn begin_render(&mut self, render: u64, hold: crate::task_hold::TaskHold) {
-        let before = Box::new(self.photo.settled().clone());
-        self.photo = PhotoPrep::Rendering {
+        let before = self.photo.settled().clone();
+        self.photo = PhotoPrep::Rendering(Box::new(PhotoRender {
             render,
-            hold,
+            _hold: hold,
             before,
-        };
+        }));
     }
 
     /// The render ended without a file: the picture is as it was.
