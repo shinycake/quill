@@ -117,6 +117,103 @@ impl InvitePages {
     }
 }
 
+impl crate::state::GroupsState {
+    /// The `getChatInviteLinks` answer of `request`. A refresh asks again
+    /// under a new id, so an older request's answer finds the list waiting
+    /// for another and is dropped.
+    pub(crate) fn answer_invite_links(
+        &mut self,
+        chat: i64,
+        request: crate::ids::RequestId,
+        list: crate::state::InviteLinkList,
+    ) {
+        if waits_for(self.invite_links.get(&chat), request) {
+            self.invite_links
+                .insert(chat, crate::state::InviteLinkFetch::Loaded(list));
+        }
+    }
+
+    /// The `getChatAdministrators` answer of `request`, taken only while
+    /// the list waits for it.
+    pub(crate) fn answer_administrators(
+        &mut self,
+        chat: i64,
+        request: crate::ids::RequestId,
+        administrators: Vec<crate::state::ChatAdministratorEntry>,
+    ) {
+        let waiting = match self.admin_lists.get(&chat) {
+            None => true,
+            Some(crate::state::AdminListFetch::Loading(waiting)) => *waiting == request,
+            Some(_) => false,
+        };
+        if waiting {
+            self.admin_lists
+                .insert(chat, crate::state::AdminListFetch::Loaded(administrators));
+        }
+    }
+
+    /// The `getChatMember` answer of `request` for one administrator's
+    /// rights, taken only while the editor waits for it. A member who is
+    /// not an administrator has no rights to edit: the editor says so
+    /// instead of loading for good.
+    pub(crate) fn answer_admin_rights(
+        &mut self,
+        key: (i64, i64),
+        request: crate::ids::RequestId,
+        rights: Option<crate::telegram::envelope::ChatAdminRights>,
+    ) {
+        if let Some(slot) = self.admin_rights.get_mut(&key)
+            && *slot == crate::state::AdminRightsFetch::Loading(request)
+        {
+            *slot = match rights {
+                Some(rights) => crate::state::AdminRightsFetch::Loaded(rights),
+                None => crate::state::AdminRightsFetch::Failed("not an administrator".to_string()),
+            };
+        }
+    }
+
+    /// The basic group's member list of `chat` is out as `request`.
+    pub(crate) fn basic_members_wait_for(&self, chat: i64, request: crate::ids::RequestId) -> bool {
+        matches!(
+            self.basic_group_members.get(&chat),
+            Some(crate::state::SupergroupMembersFetch::Loading { request: Some(asked), .. })
+                if *asked == request
+        )
+    }
+
+    /// The `getChatAdministrators` error of `request`: an older request's
+    /// error leaves a newer one waiting, and a loaded list stays.
+    pub(crate) fn fail_administrators(
+        &mut self,
+        chat: i64,
+        request: crate::ids::RequestId,
+        line: String,
+    ) {
+        let waiting = match self.admin_lists.get(&chat) {
+            None => true,
+            Some(crate::state::AdminListFetch::Loading(waiting)) => *waiting == request,
+            Some(_) => false,
+        };
+        if waiting {
+            self.admin_lists
+                .insert(chat, crate::state::AdminListFetch::Failed(line));
+        }
+    }
+}
+
+/// Whether a link list waits for `request`'s answer: it was never asked
+/// (nothing to protect) or it is `Loading` as this very request.
+pub(super) fn waits_for(
+    slot: Option<&crate::state::InviteLinkFetch>,
+    request: crate::ids::RequestId,
+) -> bool {
+    match slot {
+        None => true,
+        Some(crate::state::InviteLinkFetch::Loading(waiting)) => *waiting == request,
+        Some(_) => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

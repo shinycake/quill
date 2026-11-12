@@ -19,14 +19,17 @@ use quill::location_picker::GeoOutcome;
 use quill::request_share::{PeerFacts, chat_candidate, confirm_text, empty_text, user_candidate};
 use quill::telegram::envelope::{ChatKind, RequestChatSpec, RequestUsersSpec};
 use quill::telegram::requests::SendReply;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 
 /// The most chats the picker lists.
 const MAX_ROWS: usize = 60;
 
+/// What the bot asked for, with where that request stands: each kind has
+/// only the stages that make sense for it.
 #[derive(Clone)]
 pub(super) enum RequestShareKind {
+    /// The phone number: confirmed at once, nothing to choose or look up.
     Phone {
         bot_user_id: i64,
     },
@@ -35,20 +38,22 @@ pub(super) enum RequestShareKind {
     /// once the location is sent.
     Location {
         one_time: bool,
+        stage: LocateStage,
     },
-    Users(RequestUsersSpec),
-    Chat(RequestChatSpec),
+    Users {
+        spec: RequestUsersSpec,
+        pick: Pick,
+    },
+    Chat {
+        spec: RequestChatSpec,
+        pick: Pick,
+    },
 }
 
-/// Where an open request stands. The lookup task lives in its stage, so
+/// Where the location lookup stands. The lookup task lives in its stage, so
 /// closing the box (which drops the `RequestShare`) cancels it.
 #[derive(Clone)]
-pub(super) enum ShareStage {
-    /// Choosing chats (users and chats requests); also the start of the
-    /// others, before anything is chosen or looked up.
-    Picking { selected: Vec<ChatId> },
-    /// The confirmation page after picking.
-    Confirm { selected: Vec<ChatId> },
+pub(super) enum LocateStage {
     /// The platform is looking up the location. The handle is shared only
     /// so the box's frame snapshot can clone; the last owner dropping it
     /// cancels.
@@ -57,13 +62,67 @@ pub(super) enum ShareStage {
     Located(GeoOutcome),
 }
 
-impl ShareStage {
-    /// The chats picked so far.
+/// Choosing chats (users and chats requests).
+#[derive(Clone)]
+pub(super) enum Pick {
+    Picking {
+        selected: Vec<ChatId>,
+    },
+    /// The confirmation page after picking.
+    Confirm {
+        selected: Vec<ChatId>,
+    },
+}
+
+impl Pick {
+    fn picking() -> Self {
+        Self::Picking {
+            selected: Vec::new(),
+        }
+    }
+
     fn selected(&self) -> &[ChatId] {
         match self {
             Self::Picking { selected } | Self::Confirm { selected } => selected,
-            Self::Locating(_) | Self::Located(_) => &[],
         }
+    }
+}
+
+impl RequestShareKind {
+    pub(super) fn users(spec: RequestUsersSpec) -> Self {
+        Self::Users {
+            spec,
+            pick: Pick::picking(),
+        }
+    }
+
+    pub(super) fn chat(spec: RequestChatSpec) -> Self {
+        Self::Chat {
+            spec,
+            pick: Pick::picking(),
+        }
+    }
+
+    /// The chats picked so far.
+    fn selected(&self) -> &[ChatId] {
+        match self {
+            Self::Users { pick, .. } | Self::Chat { pick, .. } => pick.selected(),
+            Self::Phone { .. } | Self::Location { .. } => &[],
+        }
+    }
+
+    /// The confirmation page of a users or chat request shows.
+    fn confirming(&self) -> bool {
+        matches!(
+            self,
+            Self::Users {
+                pick: Pick::Confirm { .. },
+                ..
+            } | Self::Chat {
+                pick: Pick::Confirm { .. },
+                ..
+            }
+        )
     }
 }
 
@@ -73,7 +132,6 @@ pub(super) struct RequestShare {
     message_id: MessageId,
     bot_name: String,
     pub(super) kind: RequestShareKind,
-    pub(super) stage: ShareStage,
 }
 
 impl QuillApp {
@@ -85,7 +143,6 @@ impl QuillApp {
         kind: RequestShareKind,
         cx: &mut Context<Self>,
     ) {
-        let is_location = matches!(kind, RequestShareKind::Location { .. });
         let bot_name = self
             .session()
             .and_then(|s| s.chats.get(&chat_id.0))
@@ -96,13 +153,7 @@ impl QuillApp {
             message_id,
             bot_name,
             kind,
-            stage: ShareStage::Picking {
-                selected: Vec::new(),
-            },
         });
-        if is_location {
-            self.locate_for_request(cx);
-        }
         cx.notify();
     }
 
@@ -125,33 +176,51 @@ impl QuillApp {
         }
         // The device location is the user's to share: refused before the
         // box opens, or it would wait on a lookup that never starts.
-        if quill::agent::ui_driver::guard::refuse_if_injecting("look up the device location") {
+        let Some(lookup) = self.start_location_lookup(cx) else {
             return;
-        }
+        };
         self.open_request_share(
             chat_id,
             message_id,
-            RequestShareKind::Location { one_time },
+            RequestShareKind::Location {
+                one_time,
+                stage: LocateStage::Locating(Rc::new(lookup)),
+            },
             cx,
         );
     }
 
-    /// (Re)start the location lookup of the open request.
-    fn locate_for_request(&mut self, cx: &mut Context<Self>) {
-        // The device location is the user's to share, never an agent's.
+    /// Ask the platform for the device location. `None` when an agent
+    /// drives the window: the location is the user's to share, never an
+    /// agent's.
+    fn start_location_lookup(&mut self, cx: &mut Context<Self>) -> Option<Task<()>> {
         if quill::agent::ui_driver::guard::refuse_if_injecting("look up the device location") {
-            return;
+            return None;
         }
-        let lookup = self.locate_then(cx, |this, outcome, cx| {
-            if let Some(share) = this.message_ui.request_share.as_mut()
-                && matches!(share.stage, ShareStage::Locating(_))
+        Some(self.locate_then(cx, |this, outcome, cx| {
+            if let Some(RequestShare {
+                kind: RequestShareKind::Location { stage, .. },
+                ..
+            }) = this.message_ui.request_share.as_mut()
+                && matches!(stage, LocateStage::Locating(_))
             {
-                share.stage = ShareStage::Located(outcome);
+                *stage = LocateStage::Located(outcome);
             }
             cx.notify();
-        });
-        if let Some(share) = self.message_ui.request_share.as_mut() {
-            share.stage = ShareStage::Locating(Rc::new(lookup));
+        }))
+    }
+
+    /// Retry the location lookup of the open request.
+    fn locate_for_request(&mut self, cx: &mut Context<Self>) {
+        let Some(lookup) = self.start_location_lookup(cx) else {
+            return;
+        };
+        if let Some(RequestShare {
+            kind: RequestShareKind::Location { stage, .. },
+            ..
+        }) = self.message_ui.request_share.as_mut()
+        {
+            *stage = LocateStage::Locating(Rc::new(lookup));
         }
     }
 
@@ -202,8 +271,8 @@ impl QuillApp {
             .filter_map(|chat| {
                 let facts = self.request_peer_facts(chat.id)?;
                 let ok = match kind {
-                    RequestShareKind::Users(spec) => user_candidate(spec, facts),
-                    RequestShareKind::Chat(spec) => chat_candidate(spec, facts),
+                    RequestShareKind::Users { spec, .. } => user_candidate(spec, facts),
+                    RequestShareKind::Chat { spec, .. } => chat_candidate(spec, facts),
                     RequestShareKind::Phone { .. } | RequestShareKind::Location { .. } => false,
                 };
                 ok.then(|| (chat.id, chat.title.clone()))
@@ -216,11 +285,14 @@ impl QuillApp {
         let Some(share) = self.message_ui.request_share.as_mut() else {
             return;
         };
-        let ShareStage::Picking { selected } = &mut share.stage else {
-            return;
-        };
-        match &share.kind {
-            RequestShareKind::Users(spec) => {
+        match &mut share.kind {
+            RequestShareKind::Users {
+                spec,
+                pick: pick @ Pick::Picking { .. },
+            } => {
+                let Pick::Picking { selected } = pick else {
+                    return;
+                };
                 if let Some(index) = selected.iter().position(|c| *c == id) {
                     selected.remove(index);
                 } else if selected.len() < spec.max_quantity.max(1) as usize {
@@ -228,15 +300,18 @@ impl QuillApp {
                 }
                 // One user: pick and go straight to the confirmation.
                 if spec.max_quantity <= 1 && !selected.is_empty() {
-                    share.stage = ShareStage::Confirm {
+                    *pick = Pick::Confirm {
                         selected: std::mem::take(selected),
                     };
                 }
             }
-            RequestShareKind::Chat(_) => {
-                share.stage = ShareStage::Confirm { selected: vec![id] };
+            RequestShareKind::Chat {
+                pick: pick @ Pick::Picking { .. },
+                ..
+            } => {
+                *pick = Pick::Confirm { selected: vec![id] };
             }
-            RequestShareKind::Phone { .. } | RequestShareKind::Location { .. } => {}
+            _ => {}
         }
         cx.notify();
     }
@@ -256,8 +331,8 @@ impl QuillApp {
                 .driver
                 .share_phone_number(share.chat_id, *bot_user_id)
                 .map(|_| ()),
-            RequestShareKind::Location { one_time } => match share.stage {
-                ShareStage::Located(GeoOutcome::Found(point)) => {
+            RequestShareKind::Location { one_time, stage } => match stage {
+                LocateStage::Located(GeoOutcome::Found(point)) => {
                     let reply_to = Some(SendReply {
                         message_id: share.message_id,
                         quote: None,
@@ -279,9 +354,9 @@ impl QuillApp {
                 }
                 _ => return,
             },
-            RequestShareKind::Users(spec) => {
+            RequestShareKind::Users { spec, .. } => {
                 let ids: Vec<i64> = share
-                    .stage
+                    .kind
                     .selected()
                     .iter()
                     .filter_map(|chat| match live.driver.session.chats.get(&chat.0)?.kind {
@@ -293,7 +368,7 @@ impl QuillApp {
                     .share_users_with_bot(share.chat_id, share.message_id, spec.id, &ids)
                     .map(|_| ())
             }
-            RequestShareKind::Chat(spec) => match share.stage.selected().first() {
+            RequestShareKind::Chat { spec, .. } => match share.kind.selected().first() {
                 Some(picked) => live
                     .driver
                     .share_chat_with_bot(share.chat_id, share.message_id, spec.id, *picked)
@@ -342,7 +417,7 @@ impl QuillApp {
                     })),
             );
             let mut ready = true;
-            let confirming = matches!(share.stage, ShareStage::Confirm { .. });
+            let confirming = share.kind.confirming();
             let (title, confirm_label) = match (&share.kind, confirming) {
                 (RequestShareKind::Phone { .. }, _) => {
                     body = body.child(div().text_sm().child(tr(keys::BOT_SHARE_PHONE)));
@@ -351,24 +426,22 @@ impl QuillApp {
                         Some(tr(keys::BACKGROUND_SHARE)),
                     )
                 }
-                (RequestShareKind::Location { .. }, _) => {
-                    let (text, retry) = match share.stage {
-                        ShareStage::Picking { .. }
-                        | ShareStage::Confirm { .. }
-                        | ShareStage::Locating(_) => {
+                (RequestShareKind::Location { stage, .. }, _) => {
+                    let (text, retry) = match stage {
+                        LocateStage::Locating(_) => {
                             (tr(keys::Q_LOCATION_REQUEST_LOCATING).to_string(), false)
                         }
-                        ShareStage::Located(GeoOutcome::Found(_)) => (
+                        LocateStage::Located(GeoOutcome::Found(_)) => (
                             tr_with(
                                 keys::Q_LOCATION_REQUEST_TEXT,
                                 &[("bot_name", &share.bot_name)],
                             ),
                             false,
                         ),
-                        ShareStage::Located(GeoOutcome::Denied) => {
+                        LocateStage::Located(GeoOutcome::Denied) => {
                             (tr(keys::Q_LOCATION_REQUEST_DENIED).to_string(), true)
                         }
-                        ShareStage::Located(GeoOutcome::Unavailable) => {
+                        LocateStage::Located(GeoOutcome::Unavailable) => {
                             (tr(keys::Q_LOCATION_REQUEST_UNAVAILABLE).to_string(), true)
                         }
                     };
@@ -386,7 +459,7 @@ impl QuillApp {
                             ),
                         );
                     }
-                    ready = matches!(share.stage, ShareStage::Located(GeoOutcome::Found(_)));
+                    ready = matches!(stage, LocateStage::Located(GeoOutcome::Found(_)));
                     (
                         tr(keys::Q_LOCATION_REQUEST_TITLE),
                         Some(tr(keys::BACKGROUND_SHARE)),
@@ -394,7 +467,7 @@ impl QuillApp {
                 }
                 (_, true) => {
                     let names: Vec<String> = share
-                        .stage
+                        .kind
                         .selected()
                         .iter()
                         .filter_map(|id| {
@@ -407,7 +480,7 @@ impl QuillApp {
                     (tr(keys::Q_OPS_SEND_TO_BOT), Some(tr(keys::SHARE_CONFIRM)))
                 }
                 (kind, false) => {
-                    let users = matches!(kind, RequestShareKind::Users(_));
+                    let users = matches!(kind, RequestShareKind::Users { .. });
                     let rows = this.request_candidates(kind);
                     body = body.child(
                         div()
@@ -424,7 +497,7 @@ impl QuillApp {
                         );
                     }
                     for (id, title) in rows {
-                        let picked = share.stage.selected().contains(&id);
+                        let picked = share.kind.selected().contains(&id);
                         let mut row =
                             Button::new(SharedString::from(format!("request-peer-{}", id.0)))
                                 .label(title)
@@ -437,20 +510,23 @@ impl QuillApp {
                         }
                         body = body.child(row);
                     }
-                    if let RequestShareKind::Users(spec) = kind
+                    if let RequestShareKind::Users { spec, .. } = kind
                         && spec.max_quantity > 1
                     {
                         footer = footer.child(
                             Button::new("request-share-next")
                                 .label(tr(keys::CREATE_GROUP_NEXT))
                                 .primary()
-                                .disabled(share.stage.selected().is_empty())
+                                .disabled(share.kind.selected().is_empty())
                                 .on_click(cx.listener(|this, _, _, cx| {
-                                    if let Some(share) = this.message_ui.request_share.as_mut()
-                                        && let ShareStage::Picking { selected } = &mut share.stage
+                                    if let Some(RequestShare {
+                                        kind: RequestShareKind::Users { pick, .. },
+                                        ..
+                                    }) = this.message_ui.request_share.as_mut()
+                                        && let Pick::Picking { selected } = pick
                                         && !selected.is_empty()
                                     {
-                                        share.stage = ShareStage::Confirm {
+                                        *pick = Pick::Confirm {
                                             selected: std::mem::take(selected),
                                         };
                                     }
@@ -478,13 +554,9 @@ impl QuillApp {
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(title))
                 .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body)));
+                    let body = Rc::new(Cell::new(Some(body)));
                     move |content, _, _| {
-                        content.child(
-                            body.borrow_mut()
-                                .take()
-                                .unwrap_or_else(|| div().into_any_element()),
-                        )
+                        content.child(body.take().unwrap_or_else(|| div().into_any_element()))
                     }
                 }))
                 .footer(footer)

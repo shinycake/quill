@@ -8,7 +8,7 @@ use super::super::message_text::rich_block_element;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
 use quill::rich::{MarkupBlocks, PreviewBlocks, RichBlock};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 /// The height the preview stops growing at, so a long draft can't squeeze the
@@ -25,11 +25,13 @@ const OVERDRAW: Pixels = px(200.);
 struct Parsed {
     revision: Option<u64>,
     source: PreviewBlocks,
-    blocks: Rc<Vec<Rc<RichBlock>>>,
 }
 
 pub(in crate::ui) struct RichPreview {
     parsed: RefCell<Parsed>,
+    /// The blocks last parsed, kept outside `parsed` so a frame that finds
+    /// the cell busy draws these rather than nothing.
+    shown: Cell<Rc<Vec<Rc<RichBlock>>>>,
     list: ListState,
 }
 
@@ -37,31 +39,48 @@ impl Default for RichPreview {
     fn default() -> Self {
         Self {
             parsed: RefCell::default(),
+            shown: Cell::default(),
             list: ListState::new(0, ListAlignment::Top, OVERDRAW),
         }
     }
 }
 
+/// The editor's text as blocks, reparsing only what an edit touched. A
+/// `Cell`: `parse` takes the cache out, runs and puts it back, so a second
+/// caller while one runs parses afresh instead of panicking on a borrow.
+#[derive(Default)]
+pub(in crate::ui) struct EditorBlocks(std::cell::Cell<MarkupBlocks>);
+
+impl EditorBlocks {
+    pub(in crate::ui) fn parse(&self, text: &str) -> Vec<std::sync::Arc<RichBlock>> {
+        let mut blocks = self.0.take();
+        let parsed = blocks.parse(text);
+        self.0.set(blocks);
+        parsed
+    }
+}
+
 impl RichPreview {
-    fn blocks(
-        &self,
-        revision: u64,
-        text: &str,
-        editor: &RefCell<MarkupBlocks>,
-    ) -> Rc<Vec<Rc<RichBlock>>> {
-        let changed = {
-            let mut parsed = self.parsed.borrow_mut();
+    fn blocks(&self, revision: u64, text: &str, editor: &EditorBlocks) -> Rc<Vec<Rc<RichBlock>>> {
+        // A busy cell keeps the blocks last shown and parses next frame.
+        let changed = self.parsed.try_borrow_mut().ok().and_then(|mut parsed| {
             (parsed.revision != Some(revision)).then(|| {
-                let change = parsed.source.update(editor.borrow_mut().parse(text));
-                parsed.blocks = Rc::new(parsed.source.shown().to_vec());
+                let change = parsed.source.update(editor.parse(text));
+                self.shown.set(Rc::new(parsed.source.shown().to_vec()));
                 parsed.revision = Some(revision);
                 change
             })
-        };
+        });
         if let Some((replaced, count)) = changed {
             self.list.splice(replaced, count);
         }
-        self.parsed.borrow().blocks.clone()
+        self.last_blocks()
+    }
+
+    fn last_blocks(&self) -> Rc<Vec<Rc<RichBlock>>> {
+        let blocks = self.shown.take();
+        self.shown.set(blocks.clone());
+        blocks
     }
 }
 

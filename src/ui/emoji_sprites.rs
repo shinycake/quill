@@ -14,16 +14,30 @@ use std::ops::Range;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Duration;
 
 use gpui_kit::*;
 use quill::emoji_sets_style::catalog::EmojiSetId;
 use quill::emoji_sets_style::pack::{Cell, SpritePack, sheet_path};
 use smallvec::SmallVec;
 
+/// Reads of an unreadable sheet before it stays on the system glyphs, and
+/// the wait before the first retry (it doubles: 1, 2, 4, 8 and 16 s, so a
+/// disk that stalls for half a minute still gets its sheet).
+const READ_ATTEMPTS: u32 = 6;
+const RETRY_AFTER: Duration = Duration::from_secs(1);
+
+/// One sheet of the atlas. `Loading` holds the decode (and its retries
+/// after a failed read), so dropping the atlas, which a set change does,
+/// cancels it.
 enum Sheet {
     Missing,
-    Loading,
+    Loading {
+        _decode: Task<()>,
+    },
     Ready(Rc<Vec<Option<Arc<RenderImage>>>>),
+    /// Every read failed: this sheet's emoji keep the system glyph until
+    /// the set is installed again.
     Failed,
 }
 
@@ -41,7 +55,7 @@ thread_local! {
 }
 
 fn active() -> Option<Rc<Atlas>> {
-    ACTIVE.with(|a| a.borrow().clone())
+    ACTIVE.with(|a| a.try_borrow().ok().and_then(|a| a.clone()))
 }
 
 /// The set in use (the system font when none is installed).
@@ -62,9 +76,17 @@ pub(super) fn install(set: Option<(EmojiSetId, PathBuf, Arc<SpritePack>)>, cx: &
             app: cx.to_async(),
         })
     });
-    let previous = ACTIVE.with(|a| a.replace(next));
+    let previous = ACTIVE.with(|a| {
+        a.try_borrow_mut()
+            .ok()
+            .and_then(|mut slot| std::mem::replace(&mut *slot, next))
+    });
     if let Some(previous) = previous {
-        let sheets = std::mem::take(&mut *previous.sheets.borrow_mut());
+        let sheets = previous
+            .sheets
+            .try_borrow_mut()
+            .map(|mut sheets| std::mem::take(&mut *sheets))
+            .unwrap_or_default();
         let images: Vec<Arc<RenderImage>> = sheets
             .into_iter()
             .filter_map(|sheet| match sheet {
@@ -79,41 +101,53 @@ pub(super) fn install(set: Option<(EmojiSetId, PathBuf, Arc<SpritePack>)>, cx: &
 
 /// Start decoding `sheet` if nothing has yet.
 fn request(atlas: &Rc<Atlas>, sheet: u16) {
-    {
-        let mut sheets = atlas.sheets.borrow_mut();
-        match sheets.get_mut(usize::from(sheet)) {
-            Some(slot @ Sheet::Missing) => *slot = Sheet::Loading,
-            _ => return,
-        }
+    let missing = atlas
+        .sheets
+        .try_borrow()
+        .is_ok_and(|sheets| matches!(sheets.get(usize::from(sheet)), Some(Sheet::Missing)));
+    if !missing {
+        return;
     }
     let path = sheet_path(&atlas.dir, sheet);
     let pack = atlas.pack.clone();
     let owner = Rc::downgrade(atlas);
-    atlas
-        .app
-        .spawn(async move |cx| {
-            let decoded = cx
+    let decode = atlas.app.spawn(async move |cx| {
+        let mut decoded = None;
+        for attempt in 0..READ_ATTEMPTS {
+            if attempt > 0 {
+                // A read that failed once (disk busy, a partial write) is
+                // tried again after a growing wait.
+                cx.background_executor()
+                    .timer(RETRY_AFTER * 2u32.pow(attempt - 1))
+                    .await;
+            }
+            let (path, pack) = (path.clone(), pack.clone());
+            decoded = cx
                 .background_spawn(async move { decode_sheet(&path, &pack) })
                 .await;
-            let Some(atlas) = owner
-                .upgrade()
-                .filter(|a| active().is_some_and(|now| Rc::ptr_eq(a, &now)))
-            else {
-                // The set changed meanwhile.
-                if let Some(cells) = decoded {
-                    super::image_budget::retire_all(cells.into_iter().flatten());
-                }
-                return;
-            };
-            if let Some(slot) = atlas.sheets.borrow_mut().get_mut(usize::from(sheet)) {
-                *slot = match decoded {
-                    Some(cells) => Sheet::Ready(Rc::new(cells)),
-                    None => Sheet::Failed,
-                };
+            if decoded.is_some() {
+                break;
             }
-            cx.update(|cx| cx.refresh_windows());
-        })
-        .detach();
+        }
+        // The task is dropped with its atlas, so the set is still this one.
+        let Some(atlas) = owner.upgrade() else {
+            return;
+        };
+        if let Ok(mut sheets) = atlas.sheets.try_borrow_mut()
+            && let Some(slot) = sheets.get_mut(usize::from(sheet))
+        {
+            *slot = match decoded {
+                Some(cells) => Sheet::Ready(Rc::new(cells)),
+                None => Sheet::Failed,
+            };
+        }
+        cx.update(|cx| cx.refresh_windows());
+    });
+    if let Ok(mut sheets) = atlas.sheets.try_borrow_mut()
+        && let Some(slot) = sheets.get_mut(usize::from(sheet))
+    {
+        *slot = Sheet::Loading { _decode: decode };
+    }
 }
 
 /// One image per cell of a sheet (empty cells are `None`), BGRA as GPUI
@@ -151,11 +185,13 @@ fn decode_sheet(
 }
 
 fn image_of(atlas: &Rc<Atlas>, cell: Cell) -> Option<Arc<RenderImage>> {
-    let found = match atlas.sheets.borrow().get(usize::from(cell.sheet)) {
+    let sheets = atlas.sheets.try_borrow().ok()?;
+    let found = match sheets.get(usize::from(cell.sheet)) {
         Some(Sheet::Ready(cells)) => return cells.get(usize::from(cell.index)).cloned().flatten(),
         Some(Sheet::Missing) => true,
         _ => false,
     };
+    drop(sheets);
     if found {
         request(atlas, cell.sheet);
     }

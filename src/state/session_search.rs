@@ -92,16 +92,10 @@ impl Session {
         let search = &mut self.search.chat_search;
         if matches!(
             search.jump,
-            ChatSearchJump::Loading { message_id: current } if current == message_id
-        ) && (search.chat_id.is_none() || search.chat_id == chat_id)
+            ChatSearchJump::Loading { message_id: current, .. } if current == message_id
+        ) && (search.chat_id().is_none() || search.chat_id() == chat_id)
         {
             search.jump = ChatSearchJump::None;
-        }
-        if let Some((pending_chat, pending_id, _)) = self.search.date_jump_pending
-            && pending_id == message_id
-            && Some(pending_chat) == chat_id
-        {
-            self.search.date_jump_pending = None;
         }
     }
 
@@ -112,23 +106,25 @@ impl Session {
         _error: bool,
         seq: u64,
     ) {
-        if !matches!(
-            self.search.chat_search.jump,
-            ChatSearchJump::Loading { message_id: current } if current == message_id
-        ) {
-            self.diagnostics.record(Diagnostic {
-                category: "reducer",
-                type_name: Some("messages".into()),
-                extra: pending.map(|p| p.id.0),
-                seq: Some(seq),
-                note: "stale-chat-search-jump",
-            });
+        let ChatSearchJump::Loading {
+            message_id: current,
+            then,
+        } = self.search.chat_search.jump
+        else {
+            self.record_stale_search_jump(pending, seq);
+            return;
+        };
+        if current != message_id {
+            self.record_stale_search_jump(pending, seq);
             return;
         }
         let Some(chat_id) = pending
             .and_then(|p| p.chat_id)
-            .or(self.search.chat_search.chat_id)
+            .or(self.search.chat_search.chat_id())
         else {
+            // Nothing to load into: the jump ends rather than wait on
+            // "Loading message..." for good.
+            self.search.chat_search.jump = ChatSearchJump::Missing { message_id };
             return;
         };
         let history = self.history_entry(chat_id);
@@ -138,6 +134,18 @@ impl Session {
         } else {
             ChatSearchJump::Missing { message_id }
         };
-        self.resolve_date_jump(message_id);
+        if let JumpLanding::Date { chat_id, mode } = then {
+            self.resolve_date_jump(chat_id, message_id, mode);
+        }
+    }
+
+    fn record_stale_search_jump(&mut self, pending: Option<&PendingRequest>, seq: u64) {
+        self.diagnostics.record(Diagnostic {
+            category: "reducer",
+            type_name: Some("messages".into()),
+            extra: pending.map(|p| p.id.0),
+            seq: Some(seq),
+            note: "stale-chat-search-jump",
+        });
     }
 }

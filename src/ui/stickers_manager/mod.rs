@@ -24,8 +24,6 @@ use quill::state::{MasksTab, StickerTab, StickersPurpose};
 use quill::stickers_manager::ManagerEdits;
 use quill::telegram::envelope::StickerSetInfo;
 use rows::RowState;
-use std::cell::RefCell;
-use std::rc::Rc;
 
 #[cfg(feature = "demo-capture")]
 mod demo;
@@ -139,7 +137,7 @@ impl QuillApp {
                     tab,
                     masks.installed.items().to_vec(),
                     Vec::new(),
-                    masks.archived.items().to_vec(),
+                    masks.archived_sets().to_vec(),
                     loading,
                     masks.installed.error().is_some() || masks.archived.error().is_some(),
                 )
@@ -266,7 +264,7 @@ impl QuillApp {
                     StatusNote::error(tr(keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN)),
                 );
                 // Said here: not again from the drain.
-                live.driver.session.stickers.manager.failure = None;
+                live.driver.session.stickers.manager.take_failure();
             }
             live.driver.set_sticker_manager_open(false);
         } else if let Some(session) = self.demo_session.as_mut() {
@@ -389,7 +387,9 @@ impl QuillApp {
             {
                 live.driver.fetch_archived_stickers(true).map(drop)
             }
-            (Kind::Masks, ManagerTab::Archived) if session.stickers.masks.archived_has_more => {
+            (Kind::Masks, ManagerTab::Archived)
+                if session.stickers.masks.archived_next_offset().is_some() =>
+            {
                 live.driver.more_archived_masks().map(drop)
             }
             _ => return,
@@ -462,7 +462,6 @@ impl QuillApp {
                     kind,
                     tab: view.tab,
                     removed: edits.is_removed(set.id),
-                    pending: self.manager_set_pending(kind, set.id),
                 },
                 cx,
             ))
@@ -524,17 +523,11 @@ impl QuillApp {
                 this.close_stickers_manager(cx)
             });
         app.update(cx, |this, cx| {
-            let body = Rc::new(RefCell::new(Some(this.manager_panel(Kind::Stickers, cx))));
+            let body = this.manager_panel(Kind::Stickers, cx);
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(tr(keys::STICKERS_YOU_HAVE)))
-                .content(move |content, _, _| {
-                    content.child(
-                        body.borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element()),
-                    )
-                })
+                .content(crate::ui::shell::one_shot_dialog_content(body))
                 .on_close(close)
         })
     }
@@ -549,17 +542,11 @@ impl QuillApp {
             this.close_mask_sets(cx)
         });
         app.update(cx, |this, cx| {
-            let body = Rc::new(RefCell::new(Some(this.manager_panel(Kind::Masks, cx))));
+            let body = this.manager_panel(Kind::Masks, cx);
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(tr(keys::SWITCH_MASKS)))
-                .content(move |content, _, _| {
-                    content.child(
-                        body.borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element()),
-                    )
-                })
+                .content(crate::ui::shell::one_shot_dialog_content(body))
                 .on_close(close)
         })
     }

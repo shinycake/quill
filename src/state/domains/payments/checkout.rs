@@ -1,6 +1,7 @@
 //! The checkout's lifetime: closing it, and the payments it sent.
 use crate::ids::RequestId;
-use crate::state::{CheckoutForm, OrderInfoStage, PaymentInFlight, Session};
+use crate::payment_invoice::InputInvoice;
+use crate::state::{CheckoutForm, PaymentInFlight, Session};
 
 impl Session {
     /// The checkout closed: its form and answers go. A `sendPaymentForm`
@@ -9,25 +10,24 @@ impl Session {
     /// purchase still unlocks and a checkout opened meanwhile does not take
     /// its answer.
     pub fn close_checkout(&mut self) {
-        let payments = &mut self.payments;
-        payments.note = None;
-        payments.order_info = OrderInfoStage::Unvalidated;
-        payments.shipping_id = None;
-        payments.checkout = CheckoutForm::Closed;
-        payments.request = None;
+        self.payments.checkout = CheckoutForm::Closed;
     }
 
     /// `sendPaymentForm` went out as `request_id` for the checkout on
-    /// screen: remember what it pays, so its answer goes to it.
-    pub(crate) fn payment_sent(&mut self, request_id: RequestId) {
+    /// screen: remember what it pays, so its answer goes to it. The form
+    /// is the one on screen, only while the checkout shows that invoice.
+    pub(crate) fn payment_sent(&mut self, request_id: RequestId, invoice: &InputInvoice) {
         let payments = &mut self.payments;
-        let Some(request) = payments.request.as_ref() else {
-            return;
-        };
+        // A new payment of the invoice starts its verdict over.
+        payments.forget_outcome(invoice);
+        let form = payments
+            .shows(invoice)
+            .then(|| payments.checkout.form().cloned())
+            .flatten();
         payments.paying.push(PaymentInFlight {
             request_id,
-            invoice: request.invoice.clone(),
-            form: payments.checkout.form().cloned(),
+            invoice: invoice.clone(),
+            form,
         });
     }
 }

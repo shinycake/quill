@@ -109,6 +109,7 @@ impl Fixture {
             .session
             .calls
             .recent_calls
+            .rows()
             .iter()
             .map(|message| message.id.0)
             .collect()

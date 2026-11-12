@@ -53,7 +53,7 @@ fn open_playlist(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
         session.my_user_id = Some(ME);
         let playlist = session.media.playlists.entry(ME).or_default();
         playlist.set_ready(vec![track(1), track(2), track(3)]);
-        session.media.shared_media.playlist_user = Some(ME);
+        session.media.shared_media.open_playlist(ME);
         cx.notify();
     });
     vcx.run_until_parked();
@@ -74,15 +74,37 @@ fn dropping_a_track_on_another_row_reorders_the_list(cx: &mut TestAppContext) {
     let (app, _shell, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     open_playlist(&app, vcx);
-    app.update_in(vcx, |app, _, cx| app.reorder_playlist_track(0, 2, cx));
+    app.update_in(vcx, |app, _, cx| {
+        app.reorder_playlist_track(FileId(1), FileId(3), cx)
+    });
     vcx.run_until_parked();
     assert_eq!(order(&app, vcx), [2, 3, 1]);
     // The same row and rows past the end leave the list alone.
     app.update_in(vcx, |app, _, cx| {
-        app.reorder_playlist_track(1, 1, cx);
-        app.reorder_playlist_track(0, 9, cx);
+        app.reorder_playlist_track(FileId(3), FileId(3), cx);
+        app.reorder_playlist_track(FileId(2), FileId(99), cx);
     });
     assert_eq!(order(&app, vcx), [2, 3, 1]);
+}
+
+/// The list changes while a track is held: the drop moves the track that
+/// was dragged, not whichever one sits at its old index (sweep 12-A006).
+#[gpui_kit::test]
+fn a_list_that_changed_under_the_drag_still_moves_the_dragged_track(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_playlist(&app, vcx);
+    app.update_in(vcx, |app, _, _| {
+        let session = app.demo_session.as_mut().expect("demo session");
+        session.local_save_profile_audio(track(7));
+    });
+    assert_eq!(order(&app, vcx), [7, 1, 2, 3]);
+    // Track 1 was dragged at index 0; now it sits at 1.
+    app.update_in(vcx, |app, _, cx| {
+        app.reorder_playlist_track(FileId(1), FileId(3), cx);
+    });
+    vcx.run_until_parked();
+    assert_eq!(order(&app, vcx), [7, 2, 3, 1]);
 }
 
 #[gpui_kit::test]
@@ -197,13 +219,14 @@ fn closing_the_playlist_goes_back_to_the_gallery_under_it(cx: &mut TestAppContex
             .expect("demo session")
             .media
             .shared_media;
-        shared.chat_id = Some(quill::ids::ChatId(5));
+        shared.open_for(quill::ids::ChatId(5));
+        shared.open_playlist(ME);
         app.close_playlist_ui(cx);
     });
     app.read_with(vcx, |app, _| {
         let shared = &app.session().expect("session").media.shared_media;
-        assert_eq!(shared.playlist_user, None);
+        assert_eq!(shared.playlist_user(), None);
         assert!(shared.open(), "the gallery stays");
-        assert_eq!(shared.chat_id, Some(quill::ids::ChatId(5)));
+        assert_eq!(shared.chat_id(), Some(quill::ids::ChatId(5)));
     });
 }

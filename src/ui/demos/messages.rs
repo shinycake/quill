@@ -11,7 +11,7 @@ use crate::ui::search_ui::{apply_ready_search, apply_ready_search_in_chat};
 use crate::ui::status_note::StatusNote;
 use crate::ui::*;
 use gpui_kit::*;
-use quill::composer::{ComposerEdit, ComposerReplyTo, DeleteConfirm, ForwardDraft};
+use quill::composer::{ComposerEdit, ComposerReplyTo, ForwardDraft};
 use quill::ids::{ChatId, MessageId, UserId};
 use quill::state::MessageReactionsState;
 use quill::telegram::envelope::ChatKind;
@@ -120,14 +120,13 @@ impl QuillApp {
                 self.chat_ui.leave_edit();
             }
         }
-        self.chat_ui.pending_delete = DeleteConfirm::own(ChatId(11), MessageId(102), true, false);
     }
 
     fn demo_ready_forward(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_forward(session, &self.demo_ui.sink, &self.demo_ui.seq);
-            self.share.forward_result = session.messages.forwards.latest_result().cloned();
+            self.chat_ui.forward_result = session.messages.forwards.latest_result().cloned();
         }
         if let Some(mut draft) =
             ForwardDraft::from_message(ChatId(11), quill::ids::TopicId::None, MessageId(101), false)
@@ -153,8 +152,7 @@ impl QuillApp {
                 session
                     .settings
                     .scope_notification_settings
-                    .entry(scope)
-                    .or_default();
+                    .insert(scope, Default::default());
             }
         }
         self.open_mute_menu(cx);
@@ -215,7 +213,7 @@ impl QuillApp {
         });
         // `QUILL_DEMO_SECRET_CLOSE=1`: the Close Secret Chat box instead.
         if std::env::var_os("QUILL_DEMO_SECRET_CLOSE").is_some() {
-            self.message_ui.menu.close();
+            self.message_ui.menu.close_menu();
             self.open_close_secret_chat_confirm(ChatId(11), cx);
         }
     }

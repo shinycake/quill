@@ -31,7 +31,7 @@ impl Session {
                         Some(summary) => joined.push(CommunityMemberChat {
                             chat_id: summary.id.0,
                             title: summary.title.clone(),
-                            date: summary.last_message.as_ref().map_or(0, |m| m.date),
+                            date: summary.last_message().map_or(0, |m| m.date),
                             unread: summary.is_unread(),
                             muted: self.effective_muted(summary),
                             mentioned: summary.unread_mention_count > 0,

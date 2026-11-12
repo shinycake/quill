@@ -78,3 +78,22 @@ fn a_call_let_go_of_by_the_slot_still_settles() {
         StoryManageOutcome::Lost
     );
 }
+
+#[test]
+fn r2_the_status_line_and_the_calls_are_one_value_that_leaves_with_the_account() {
+    // Sweep r2-19 (06-034): going away ends a "Saving" line and every
+    // call still out reads as lost.
+    let mut manage = StoryManageState::default();
+    manage.start(RequestId(1), ChatId(5), 3);
+    assert!(manage.pending_for(5, 3));
+    manage.forget_in_flight();
+    assert!(!manage.pending_for(5, 3));
+    assert_eq!(manage.outcome(RequestId(1)), StoryManageOutcome::Lost);
+    // A local refusal takes the line from the call it showed.
+    manage.start(RequestId(2), ChatId(5), 3);
+    manage.fail_locally(5, 3, "no".into());
+    assert!(!manage.is_pending());
+    manage.settle(RequestId(2), None);
+    assert_eq!(manage.error_for(5, 3), Some("no"));
+    assert_eq!(manage.outcome(RequestId(2)), StoryManageOutcome::Saved);
+}

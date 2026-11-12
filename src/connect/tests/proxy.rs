@@ -139,12 +139,12 @@ fn a_list_fetch_that_predates_a_change_does_not_clear_the_stale_mark() {
     rig.feed(stale);
     let proxy = &rig.driver.session.settings.proxy;
     assert!(
-        proxy.fetch.loading(),
+        proxy.ops.loading(),
         "still waiting for the fetch after the change"
     );
     rig.answer("getProxies", proxies_json(&[(1, false), (2, true)]));
     let proxy = &rig.driver.session.settings.proxy;
-    assert_eq!(proxy.fetch, ProxyFetch::Idle);
+    assert_eq!(proxy.ops.fetch(), ProxyFetch::Idle);
     assert_eq!(proxy.enabled().map(|p| p.id), Some(2));
 }
 
@@ -167,7 +167,7 @@ fn ok_acks_refetch_and_errors_surface_without_touching_the_list() {
         json!({"@type": "error", "code": 400, "message": "PROXY_NOT_FOUND"}),
     );
     let proxy = &rig.driver.session.settings.proxy;
-    assert!(!proxy.mutation.in_flight());
+    assert!(!proxy.ops.changing());
     assert!(
         proxy
             .error
@@ -181,10 +181,10 @@ fn ok_acks_refetch_and_errors_surface_without_touching_the_list() {
 fn ping_answers_and_failures_set_the_row_status() {
     let mut rig = Rig::new();
     rig.load_list(&[(1, false), (2, false)]);
-    rig.driver.ping_listed_proxy(1).unwrap();
+    let asked = rig.driver.ping_listed_proxy(1).unwrap();
     assert_eq!(
         rig.driver.session.settings.proxy.pings.get(&1),
-        Some(&PingStatus::Checking)
+        Some(&PingStatus::Checking(asked))
     );
     rig.answer("pingProxy", json!({"@type": "seconds", "seconds": 0.0423}));
     assert_eq!(
@@ -607,17 +607,24 @@ fn an_earlier_links_ping_does_not_fill_the_next_links_box() {
         server: "live.example".into(),
         ..crate::proxy::ProxyDraft::empty(kind)
     };
-    let first = rig.driver.ping_link_proxy(&dead).unwrap();
+    let proxy = &mut rig.driver.session.settings.proxy;
+    proxy.open_link(dead);
+    let first = rig.driver.ping_link_proxy().unwrap();
     // The box closes and the next link's box opens and checks its proxy.
-    rig.driver.session.settings.proxy.link_check = crate::proxy::LinkCheck::Review;
-    let second = rig.driver.ping_link_proxy(&live).unwrap();
+    let proxy = &mut rig.driver.session.settings.proxy;
+    proxy.close_link();
+    proxy.open_link(live.clone());
+    let second = rig.driver.ping_link_proxy().unwrap();
     rig.feed(json!({"@type": "seconds", "seconds": 0.05, "@extra": second.0.to_string()}));
     rig.feed(
         json!({"@type": "error", "code": 400, "message": "Request timeout", "@extra": first.0.to_string()}),
     );
     assert_eq!(
-        rig.driver.session.settings.proxy.link_check,
-        crate::proxy::LinkCheck::Done(PingStatus::Available(50)),
+        rig.driver.session.settings.proxy.link,
+        crate::proxy::LinkBox::Available {
+            draft: live,
+            ms: 50
+        },
         "the working proxy is not shown as unavailable"
     );
 }
@@ -649,7 +656,7 @@ fn a_refused_remove_keeps_the_ping_result() {
     rig.driver.ping_listed_proxy(1).unwrap();
     rig.answer("pingProxy", json!({"@type": "seconds", "seconds": 0.0423}));
     rig.driver.disable_proxy().unwrap();
-    assert!(rig.driver.session.settings.proxy.mutation.in_flight());
+    assert!(rig.driver.session.settings.proxy.ops.changing());
     assert!(rig.driver.remove_proxy(1).is_err());
     assert_eq!(
         rig.driver.session.settings.proxy.pings.get(&1),

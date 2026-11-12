@@ -113,6 +113,30 @@ fn typing_searches_after_a_pause_and_clearing_goes_back(cx: &mut TestAppContext)
     assert!(has(vcx, "emoji-pack-open-1".into()));
 }
 
+/// Sweep 12-A005: clearing the field before the pause ends drops the search
+/// that was waiting; its timer must not run over the list the clear
+/// restored.
+#[gpui_kit::test]
+fn clearing_the_field_before_the_pause_drops_the_waiting_search(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    let input = app.read_with(vcx, |app, _| app.pickers.emoji_set_search_input.clone());
+    for text in ["trav", ""] {
+        vcx.update(|window, cx| {
+            input.update(cx, |input, cx| {
+                input.set_value(text, window, cx);
+                cx.emit(InputEvent::Change);
+            })
+        });
+        frames(vcx);
+    }
+    vcx.executor().advance_clock(Duration::from_millis(400));
+    frames(vcx);
+    assert_eq!(tab(&app, vcx), EmojiSetTab::Installed, "no search ran");
+    assert!(has(vcx, "emoji-pack-open-1".into()));
+    assert!(!has(vcx, "emoji-pack-open-4".into()));
+}
+
 /// Sweep 09-078: a search still waiting on its pause does not go out for a
 /// box that was closed meanwhile.
 #[gpui_kit::test]
@@ -139,7 +163,7 @@ fn remove_asks_before_removing_and_a_row_opens_the_pack(cx: &mut TestAppContext)
     let vcx = &mut vcx;
     vcx.update(|window, cx| window.click("emoji-pack-open-2".to_string(), cx));
     frames(vcx);
-    assert!(app.read_with(vcx, |app, _| app.message_ui.menu_ui.sticker_set_open()));
+    assert!(app.read_with(vcx, |app, _| app.sticker_set_open()));
     vcx.update(|window, cx| window.click("emoji-pack-remove-1".to_string(), cx));
     frames(vcx);
     assert!(app.read_with(vcx, |app, _| app.admin.group_confirm_dialog.is_some()));

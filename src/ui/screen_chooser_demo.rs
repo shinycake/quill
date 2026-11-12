@@ -9,7 +9,7 @@
 
 use super::app::QuillApp;
 use super::calls::demo_feed::{DemoFeed, demo_feed};
-use super::screen_share_state::ScreenFor;
+use super::screen_share_state::{DemoShare, ScreenFor};
 use super::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
 use quill::calls::capture::screen::{
@@ -159,9 +159,7 @@ fn listener(row: usize) -> ParsedGroupCallParticipant {
     ParsedGroupCallParticipant {
         audio_source_id: 5_000 + row as i32,
         is_speaking: false,
-        video_enabled: false,
         video_info: None,
-        screen_sharing_enabled: false,
         screen_sharing_video_info: None,
         ..participant(1_000 + row as i64, false)
     }
@@ -184,14 +182,16 @@ fn participant(user_id: i64, me: bool) -> ParsedGroupCallParticipant {
         can_unmute_self: true,
         volume_level: 10000,
         order: String::new(),
-        video_enabled: !me,
-        screen_sharing_enabled: me,
-        video_info: None,
-        screen_sharing_video_info: me.then(|| GroupCallVideoInfo {
-            endpoint_id: "screen".into(),
-            is_paused: true,
-            source_groups: Vec::new(),
-        }),
+        video_info: (!me).then(|| demo_video_info("camera", false)),
+        screen_sharing_video_info: me.then(|| demo_video_info("screen", true)),
+    }
+}
+
+fn demo_video_info(endpoint: &str, is_paused: bool) -> GroupCallVideoInfo {
+    GroupCallVideoInfo {
+        endpoint_id: endpoint.into(),
+        is_paused,
+        source_groups: Vec::new(),
     }
 }
 
@@ -226,8 +226,7 @@ impl QuillApp {
         participants.extend((0..crowd).map(listener));
         session.calls.active_group_call = Some(ActiveGroupCall {
             is_joined: true,
-            screen_share: quill::state::GroupScreenShare::Sharing,
-            screen_share_paused: true,
+            screen_share: quill::state::GroupScreenShare::Paused,
             participants: participants.into(),
             ..ActiveGroupCall::fresh(7)
         });
@@ -260,9 +259,11 @@ impl QuillApp {
                 ScreenAccess::Granted
             },
         }));
-        self.screen_share.demo_active = Some(SourceId(SHARED.into()));
+        self.screen_share.demo_active = Some(DemoShare {
+            source: SourceId(SHARED.into()),
+            with_audio: audio,
+        });
         self.screen_share.demo_system_audio = audio;
-        self.screen_share.demo_active_audio = audio;
         self.open_screen_chooser(ScreenFor::Group, cx);
         cx.notify();
     }

@@ -155,10 +155,12 @@ fn decline_sends_the_reason_and_an_error_becomes_a_note() {
     f.ingest(&format!(
         r#"{{"@type":"error","@extra":"{extra}","code":400,"message":"SUGGESTED_POST_WRONG"}}"#
     ));
-    let notes = f.driver.session.take_suggested_post_notes();
+    let failures = f.driver.session.take_suggested_post_failures();
     assert_eq!(
-        notes,
-        vec!["Couldn't decline the post: invalid request.".to_string()]
+        failures,
+        vec![crate::suggested_posts::SuggestedPostFailure::Note(
+            "Couldn't decline the post: invalid request.".to_string()
+        )]
     );
     assert!(!f.driver.session.suggested_post_busy(CHAT.0, 6 << 20));
 }
@@ -177,14 +179,15 @@ fn a_low_balance_asks_for_a_top_up_instead_of_a_toast() {
     f.ingest(&format!(
         r#"{{"@type":"error","@extra":"{extra}","code":400,"message":"BALANCE_TOO_LOW"}}"#
     ));
-    assert!(f.driver.session.take_suggested_post_notes().is_empty());
     assert_eq!(
-        f.driver.session.take_suggested_post_balance_low(),
-        vec![crate::suggested_posts::SuggestedPostPurpose::AddOffer {
-            chat_id: CHAT.0,
-            message_id: 3 << 20,
-            price: Some(SuggestedPrice::Stars(900)),
-        }]
+        f.driver.session.take_suggested_post_failures(),
+        vec![crate::suggested_posts::SuggestedPostFailure::BalanceLow(
+            crate::suggested_posts::SuggestedPostPurpose::AddOffer {
+                chat_id: CHAT.0,
+                message_id: 3 << 20,
+                price: Some(SuggestedPrice::Stars(900)),
+            }
+        )]
     );
 }
 
@@ -206,12 +209,28 @@ fn two_low_balance_refusals_between_frames_are_both_kept() {
             r#"{{"@type":"error","@extra":"{extra}","code":400,"message":"BALANCE_TOO_LOW"}}"#
         ));
     }
-    assert_eq!(f.driver.session.take_suggested_post_balance_low().len(), 2);
-    assert!(
-        f.driver
-            .session
-            .take_suggested_post_balance_low()
-            .is_empty()
+    assert_eq!(f.driver.session.take_suggested_post_failures().len(), 2);
+    assert!(f.driver.session.take_suggested_post_failures().is_empty());
+}
+
+/// Failures nobody shows (a locked app) are capped, the oldest dropped.
+#[test]
+fn unshown_failures_are_capped_and_keep_the_newest() {
+    use crate::suggested_posts::{MAX_FAILURES, SuggestedPostFailure};
+    let mut f = Fixture::new();
+    let posts = &mut f.driver.session.payments.suggested_posts;
+    for n in 0..(MAX_FAILURES + 5) {
+        posts.push_failure(SuggestedPostFailure::Note(n.to_string()));
+    }
+    let kept = f.driver.session.take_suggested_post_failures();
+    assert_eq!(kept.len(), MAX_FAILURES);
+    assert_eq!(
+        kept.last(),
+        Some(&SuggestedPostFailure::Note((MAX_FAILURES + 4).to_string()))
+    );
+    assert_eq!(
+        kept.first(),
+        Some(&SuggestedPostFailure::Note("5".to_string()))
     );
 }
 
@@ -228,6 +247,9 @@ fn add_offer_carries_the_complete_terms() {
     assert_eq!(info["price"]["@type"], "suggestedPostPriceStar");
     assert_eq!(info["price"]["star_count"], 50);
     assert_eq!(info["send_date"], 1_900_000_000);
+    // The first offer is answered before the next one goes out.
+    let extra = sent["@extra"].as_str().unwrap_or_default().to_string();
+    f.ingest(&format!(r#"{{"@type":"ok","@extra":"{extra}"}}"#));
     f.driver
         .add_offer(
             CHAT,
@@ -468,4 +490,28 @@ fn an_offer_update_keeps_the_approve_busy_until_it_answers() {
     f.driver
         .approve_suggested_post(CHAT, MessageId(5 << 20), 0)
         .unwrap();
+}
+
+/// A second submit of the offer box before the first answer sends nothing;
+/// the answer frees the message for the next offer.
+#[test]
+fn a_second_offer_waits_for_the_first_answer() {
+    let mut f = Fixture::new();
+    f.open_direct_messages(false);
+    let message = MessageId(3 << 20);
+    f.driver.add_offer(CHAT, message, stars(900, 0)).unwrap();
+    assert!(f.driver.session.suggested_offer_busy(CHAT.0, message.0));
+    assert!(f.driver.add_offer(CHAT, message, stars(950, 0)).is_err());
+    let sent = |f: &Fixture| f.sent("addOffer").len();
+    assert_eq!(sent(&f), 1);
+    let extra = f.last("addOffer")["@extra"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    f.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{extra}","code":400,"message":"BAD"}}"#
+    ));
+    assert!(!f.driver.session.suggested_offer_busy(CHAT.0, message.0));
+    f.driver.add_offer(CHAT, message, stars(950, 0)).unwrap();
+    assert_eq!(sent(&f), 2);
 }

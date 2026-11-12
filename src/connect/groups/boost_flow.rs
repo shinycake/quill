@@ -1,6 +1,6 @@
 //! Connect driver: the boost box (`crate::boost_box`).
 use super::*;
-use crate::boost_box::{BoostBoxState, BoostPhase, BoostWork, ReassignSummary, sources};
+use crate::boost_box::{BoostBoxState, BoostPhase, ReassignSummary, sources};
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// The open boost box, if it is for this chat.
@@ -30,8 +30,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         // The old chat's pending boost and its slots go with its box.
         self.session.groups.boost_box = Some(BoostBoxState::new(chat_id.0, !is_channel));
-        self.session.groups.chat_boost_status.remove(&chat_id.0);
-        self.session.groups.chat_boost_details.remove(&chat_id.0);
+        self.session.groups.outdate_boost_status(chat_id.0);
         self.fetch_chat_boost_status(chat_id)?;
         self.fetch_chat_boost_features(chat_id)?;
         // Only the gift lines need it, so a failure is not an error.
@@ -50,7 +49,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some(state) = self.session.groups.boost_box.as_mut()
             && matches!(state.phase, BoostPhase::Reassign { .. })
         {
-            state.phase = BoostPhase::Main;
+            state.phase = BoostPhase::main();
         }
     }
 
@@ -80,21 +79,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             groups,
             channels,
         };
-        let before = state.phase.clone();
-        if let Some(state) = self.boost_box_for(chat) {
-            state.phase = BoostPhase::Working(BoostWork::Boosting {
-                reassign: Some(summary),
-            });
-            state.note = None;
-        }
-        // A click that never left puts the list back, so the user can pick
-        // again or go back instead of facing a box that is stuck working.
-        if let Err(err) = self.send_boost_chat(chat, &picked) {
-            if let Some(state) = self.boost_box_for(chat) {
-                state.phase = before;
-            }
-            return Err(err);
-        }
+        // A click that never left leaves the list as it is, so the user can
+        // pick again or go back; only a sent request makes the box work.
+        self.send_boost_chat(chat, &picked, Some(summary))?;
         Ok(true)
     }
 }

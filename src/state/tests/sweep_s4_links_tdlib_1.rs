@@ -11,7 +11,7 @@ fn ready_session() -> Session {
 /// Sweep 05-156: a username check that was superseded and then failed says
 /// nothing about the text now being checked.
 #[test]
-fn a_superseded_username_check_failure_shows_no_profile_error() {
+fn a_superseded_username_check_failure_leaves_the_current_check_pending() {
     let mut session = ready_session();
     let first = session.request(RequestPurpose::CheckUsername, None);
     let second = session.request(RequestPurpose::CheckUsername, None);
@@ -19,7 +19,6 @@ fn a_superseded_username_check_failure_shows_no_profile_error() {
 
     let lost = session.requests.take(first).expect("registered");
     session.settle_lost_request(lost);
-    assert_eq!(session.users_state.profile_edit_error, None);
     assert_eq!(
         session.users_state.username_check.pending(),
         Some(second),
@@ -28,12 +27,11 @@ fn a_superseded_username_check_failure_shows_no_profile_error() {
 
     let lost = session.requests.take(second).expect("registered");
     session.settle_lost_request(lost);
-    assert!(session.users_state.profile_edit_error.is_some());
     assert_eq!(session.users_state.username_check.pending(), None);
 }
 
-/// Sweep 02-030: a failed count drops the chat's entry, so the next open
-/// asks for every count again instead of showing a zero for good.
+/// Sweep 02-030 (r2 06-021): a failed count stays unknown, never a zero
+/// for good; every open asks for all of them again (`fetch_chat_media_counts`).
 #[test]
 fn a_failed_media_count_is_asked_again_on_the_next_open() {
     let mut session = ready_session();
@@ -41,12 +39,14 @@ fn a_failed_media_count_is_asked_again_on_the_next_open() {
     session
         .media
         .chat_media_counts
-        .insert(chat.0, Default::default());
+        .insert(chat.0, [(1u8, 4)].into_iter().collect());
     let extra = session.request(
         RequestPurpose::Users(UsersPurpose::GetChatMessageCount { filter: 2 }),
         Some(chat),
     );
     let lost = session.requests.take(extra).expect("registered");
     session.settle_lost_request(lost);
-    assert!(!session.media.chat_media_counts.contains_key(&chat.0));
+    let counts = &session.media.chat_media_counts[&chat.0];
+    assert_eq!(counts.get(&1), Some(&4), "an older count stays shown");
+    assert_eq!(counts.get(&2), None, "the failed one is unknown, not zero");
 }

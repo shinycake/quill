@@ -21,7 +21,7 @@ use quill::inline_grid::{
 };
 use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
-use quill::state::{DeepLinkAction, InlineBotResolve, InlineQueryFetch};
+use quill::state::{DeepLinkAction, InlineBotResolve, InlineMore, InlineQueryFetch};
 use quill::telegram::envelope::{InlineQueryResultSummary, InlineQueryResultsButton};
 use std::path::PathBuf;
 
@@ -31,7 +31,7 @@ fn list_title(result: &InlineQueryResultSummary) -> String {
     if !result.title.is_empty() {
         return result.title.clone();
     }
-    let mut kind = result.kind.replace('_', " ");
+    let mut kind = result.kind.name().replace('_', " ");
     if let Some(first) = kind.get_mut(..1) {
         first.make_ascii_uppercase();
     }
@@ -545,6 +545,7 @@ impl QuillApp {
             results,
             button,
             next_offset,
+            more,
             ..
         } = &slot.fetch
         else {
@@ -553,12 +554,10 @@ impl QuillApp {
         let (bot_user_id, offset) = (slot.bot_user_id, next_offset.clone());
         // A failed page waits for the next query instead of being asked again
         // on every poll batch.
-        if slot.more_failed.as_ref() == Some(&offset) {
+        if matches!(more, InlineMore::Failed { offset: failed } if *failed == offset) {
             return;
         }
-        let loading = session
-            .requests
-            .has_inline_query_in_flight(chat_id, bot_user_id);
+        let loading = slot.fetch.in_flight();
         let mosaic = layout_results(results);
         let has_button = button
             .as_ref()
@@ -576,10 +575,23 @@ impl QuillApp {
             return;
         }
         let query = query.to_string();
-        if let Some(live) = self.live.as_mut() {
-            let _ = live
-                .driver
-                .inline_query(bot_user_id, chat_id, &query, &offset);
+        let refused = self.live.as_mut().is_some_and(|live| {
+            live.driver
+                .inline_query(bot_user_id, chat_id, &query, &offset)
+                .is_err()
+        });
+        // A refused send is a failed page like a failed answer: it is not
+        // asked again on every poll batch.
+        if refused
+            && let Some(quill::state::InlineQuerySlot {
+                fetch: InlineQueryFetch::Loaded { more, .. },
+                ..
+            }) = self
+                .session_mut()
+                .and_then(|session| session.bots.inline_query.as_mut())
+                .filter(|slot| slot.chat_id == chat_id && slot.query == query)
+        {
+            *more = InlineMore::Failed { offset };
         }
     }
 }

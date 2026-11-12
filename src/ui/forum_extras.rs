@@ -25,6 +25,18 @@ pub(super) enum TopicExtra {
     Edit,
 }
 
+/// A topic action sent from the menu, until its answer settles the note.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(super) enum TopicAction {
+    #[default]
+    Idle,
+    /// Its answer shows `done`, or the error note when it failed.
+    Waiting {
+        request: quill::ids::RequestId,
+        done: String,
+    },
+}
+
 /// Which extras apply to a topic right now.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub(super) struct TopicExtras {
@@ -135,11 +147,46 @@ impl QuillApp {
             ),
             TopicExtra::Edit => return,
         };
-        self.set_note(if result.is_ok() {
-            StatusNote::info(done)
-        } else {
-            StatusNote::error(failed)
-        });
+        match result {
+            // The link is copied when its answer lands: this says it is on
+            // its way.
+            Ok(Some(_)) if extra == TopicExtra::CopyLink => {
+                self.set_note(StatusNote::info(done));
+            }
+            // The note says it worked when the answer does.
+            Ok(Some(request)) => {
+                self.chat_ui.topic_action = TopicAction::Waiting {
+                    request,
+                    done: done.to_string(),
+                };
+            }
+            // Nothing needed sending (a pinned topic already at the end).
+            Ok(None) => {}
+            Err(_) => self.set_note(StatusNote::error(failed)),
+        }
+        cx.notify();
+    }
+
+    /// Each window's frame: the topic action it sent was answered. A
+    /// failure already has its own error note (the session's action
+    /// errors), so only a success is shown here.
+    pub(in crate::ui) fn topic_action_upkeep(&mut self, cx: &mut Context<Self>) {
+        let TopicAction::Waiting { request, .. } = &self.chat_ui.topic_action else {
+            return;
+        };
+        let request = *request;
+        let answer = match self.live.as_mut() {
+            Some(live) => live.driver.session.take_topic_action_answer(request),
+            None => Some(false),
+        };
+        let Some(ok) = answer else {
+            return;
+        };
+        if let TopicAction::Waiting { done, .. } = std::mem::take(&mut self.chat_ui.topic_action)
+            && ok
+        {
+            self.set_note(StatusNote::info(done));
+        }
         cx.notify();
     }
 }

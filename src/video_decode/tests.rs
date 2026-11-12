@@ -19,15 +19,36 @@ fn frame(pts: f64) -> VideoFrame {
     VideoFrame::bgra(pts, 1, 1, vec![0; 4])
 }
 
+/// Give the decode thread the processor until `done` holds. No clock: the
+/// bound is a count of turns, far more than any scripted run needs.
 fn wait_until(mut done: impl FnMut() -> bool) -> bool {
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while Instant::now() < deadline {
+    for _ in 0..TURNS {
         if done() {
             return true;
         }
-        std::thread::sleep(Duration::from_millis(2));
+        std::thread::yield_now();
     }
     done()
+}
+
+const TURNS: u32 = 20_000_000;
+
+/// Pull samples until `count` of them were decoded sound (not underrun
+/// silence), handing the processor to the decode thread between misses.
+fn pull_sound(tap: &mut super::AudioTap, count: usize) -> bool {
+    let mut pulled = 0;
+    for _ in 0..TURNS {
+        tap.next_sample();
+        if tap.sounding() {
+            pulled += 1;
+            if pulled == count {
+                return true;
+            }
+        } else {
+            std::thread::yield_now();
+        }
+    }
+    false
 }
 
 #[test]
@@ -86,6 +107,16 @@ fn rotate_90_maps_the_left_column_to_the_top_row() {
     let (out, w, h) = rotate_bgra(&src, 2, 2, 8, 90, &BgraPool::default());
     assert_eq!((w, h), (2, 2));
     assert_eq!(out, [px(3), px(1), px(4), px(2)].concat());
+}
+
+/// A picture with no columns has nothing to turn (it used to split the
+/// output into chunks of zero bytes).
+#[test]
+fn a_zero_width_picture_turns_to_nothing() {
+    for rotation in [0, 90, 180, 270] {
+        let (out, ..) = rotate_bgra(&[], 0, 4, 0, rotation, &BgraPool::default());
+        assert!(out.is_empty(), "rotation {rotation}");
+    }
 }
 
 /// A player's BGRA pictures are turned into the buffers its images hand
@@ -319,32 +350,8 @@ fn scripted_player(frames: Option<usize>, audio: bool, queue: usize) -> (Player,
 }
 
 #[test]
-fn a_paused_player_decodes_only_its_queue() {
-    let (player, calls) = scripted_player(None, false, 3);
-    assert!(wait_until(|| calls.load(Ordering::SeqCst) >= 3));
-    std::thread::sleep(Duration::from_millis(100));
-    // Three pictures queued, then the thread sleeps: no runaway decoding.
-    assert_eq!(calls.load(Ordering::SeqCst), 3);
-    drop(player);
-}
-
-#[test]
-fn an_idle_player_sleeps_long_but_wakes_when_a_picture_is_taken() {
-    use super::IDLE_WAIT;
-    let (mut player, calls) = scripted_player(None, false, 3);
-    assert!(wait_until(|| calls.load(Ordering::SeqCst) >= 3));
-    std::thread::sleep(Duration::from_millis(60));
-    // Taking the first picture frees a slot: the thread refills it at once,
-    // not after its long idle wait.
-    let taken = Instant::now();
-    assert!(player.take_frame().is_some());
-    assert!(wait_until(|| calls.load(Ordering::SeqCst) >= 4));
-    assert!(taken.elapsed() < IDLE_WAIT / 2);
-}
-
-#[test]
 fn the_first_picture_shows_at_once_then_follows_the_clock() {
-    let (mut player, _) = scripted_player(None, false, 3);
+    let (mut player, calls) = scripted_player(None, false, 3);
     assert!(wait_until(|| player.info().is_some()));
     let mut first = None;
     assert!(wait_until(|| {
@@ -352,8 +359,9 @@ fn the_first_picture_shows_at_once_then_follows_the_clock() {
         first.is_some()
     }));
     assert_eq!(first.map(|f| f.pts), Some(0.0));
-    // Paused: the clock doesn't run, no newer picture is due.
-    std::thread::sleep(Duration::from_millis(100));
+    // Paused: the clock doesn't run, no newer picture is due, though the
+    // queue behind the first one is full.
+    assert!(wait_until(|| calls.load(Ordering::SeqCst) >= 3));
     assert!(player.take_frame().is_none());
     player.play();
     let mut shown = None;
@@ -421,16 +429,7 @@ fn sound_is_the_clock() {
     assert!(wait_until(|| player.take_frame().is_some()));
     player.play();
     // Pull exactly half a second of sound (the output would at 1x).
-    let mut pulled = 0;
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while pulled < RATE / 2 && Instant::now() < deadline {
-        tap.next_sample();
-        if tap.sounding() {
-            pulled += 1;
-        } else {
-            std::thread::sleep(Duration::from_millis(1));
-        }
-    }
+    assert!(pull_sound(&mut tap, (RATE / 2) as usize));
     let position = player.position();
     let expected = 0.5 - AUDIO_OUTPUT_LATENCY;
     assert!(
@@ -455,16 +454,7 @@ fn a_seek_restarts_the_sound_at_the_target() {
     player.seek(10.0);
     // Until new sound plays, the clock reads the target.
     assert!((player.position() - 10.0).abs() < 1e-9);
-    let mut pulled = 0;
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while pulled < 100 && Instant::now() < deadline {
-        tap.next_sample();
-        if tap.sounding() {
-            pulled += 1;
-        } else {
-            std::thread::sleep(Duration::from_millis(1));
-        }
-    }
+    assert!(pull_sound(&mut tap, 100));
     let position = player.position();
     assert!(
         (10.0..10.2).contains(&position),
@@ -498,11 +488,12 @@ fn the_sound_buffer_is_bounded() {
         tap = player.take_audio_tap();
         tap.is_some()
     }));
-    // Nobody pulls: the thread stops at the sound cap.
-    std::thread::sleep(Duration::from_millis(300));
+    // Nobody pulls: the sound queue fills up to its cap, and the pictures
+    // between the chunks are bounded with it (`decoding_stops_at_the_queue_bounds`
+    // is why the thread then stops).
+    let shared = tap.as_ref().map(|tap| tap.shared.clone()).expect("tap");
+    assert!(wait_until(|| shared.buffered_secs() >= AUDIO_HIGH_SECS));
     let settled = calls.load(Ordering::SeqCst);
-    std::thread::sleep(Duration::from_millis(100));
-    assert_eq!(calls.load(Ordering::SeqCst), settled);
     // AUDIO_HIGH_SECS of 20 ms chunks plus the pictures between them.
     let chunks = (AUDIO_HIGH_SECS / 0.02) as usize;
     assert!(settled <= chunks * 3, "{settled} decode calls");

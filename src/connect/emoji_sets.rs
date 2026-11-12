@@ -318,7 +318,45 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if let Some(list) = self.session.stickers.emoji.lists.for_purpose(purpose) {
             list.begin();
+            list.sent(extra);
         }
+        Ok(Some(extra))
+    }
+
+    /// `getTrendingEmojiSets` from `from` (0 = the first page, which
+    /// replaces the list; the list stays on screen meanwhile). The ask is
+    /// the list's own stage: its answer lands only while it waits for it.
+    fn ask_trending_emoji_sets(
+        &mut self,
+        from: i32,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        // The list's own stage says whether its page is out.
+        if self.session.stickers.emoji.lists.trending.is_loading() {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::GetTrendingEmojiSets, None);
+        self.session.stickers.emoji.lists.trending.begin(from);
+        if let Err(err) = self
+            .sender
+            .send_json(&get_trending_emoji_sets(extra, from, 100))
+        {
+            self.session.requests.take(extra);
+            self.session
+                .stickers
+                .emoji
+                .lists
+                .trending
+                .fail(crate::lang::tr(
+                    crate::lang::keys::Q_MEDIA_COULD_NOT_UPDATE_EMOJI_PACKS,
+                ));
+            return Err(err);
+        }
+        self.session.stickers.emoji.lists.trending.sent(extra);
         Ok(Some(extra))
     }
 
@@ -329,7 +367,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .stickers
             .emoji
-            .trending_sets
+            .lists
+            .trending
+            .sets()
             .iter()
             .map(|set| set.id)
             .collect();
@@ -372,10 +412,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                         .take_purpose(RequestPurpose::GetTrendingEmojiSets),
                 );
                 self.session.stickers.emoji.lists.trending.cancel();
-                self.session.stickers.emoji.trending_offset = 0;
-                self.emoji_set_request(RequestPurpose::GetTrendingEmojiSets, |id| {
-                    get_trending_emoji_sets(id, 0, 100)
-                })
+                self.ask_trending_emoji_sets(0)
             }
             EmojiSetTab::Search => Ok(None),
         }
@@ -386,7 +423,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let emoji = &mut self.session.stickers.emoji;
         let listed: &[crate::telegram::envelope::StickerSetInfo] = match emoji.tab {
             EmojiSetTab::Installed => &emoji.installed_sets,
-            EmojiSetTab::Trending => &emoji.trending_sets,
+            EmojiSetTab::Trending => emoji.lists.trending.sets(),
             EmojiSetTab::Search => &emoji.found_sets,
         };
         let wanted: Vec<(i64, Vec<crate::ids::FileId>)> = listed
@@ -423,9 +460,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .take_purpose(RequestPurpose::GetKeywordEmojis),
         );
         let query = query.trim();
-        self.session.stickers.emoji.keyword_emojis = crate::emoji::KeywordEmojis {
+        self.session.stickers.emoji.keyword_emojis = crate::emoji::KeywordEmojis::Idle {
             query: query.to_string(),
-            emojis: Vec::new(),
         };
         if query.is_empty() {
             return Ok(());
@@ -440,8 +476,15 @@ impl<S: JsonSender> ConnectDriver<S> {
             ))
         {
             self.session.requests.take(extra);
+            self.session.stickers.emoji.keyword_emojis = crate::emoji::KeywordEmojis::Failed {
+                query: query.to_string(),
+            };
             return Err(err);
         }
+        self.session.stickers.emoji.keyword_emojis = crate::emoji::KeywordEmojis::Asking {
+            query: query.to_string(),
+            request: extra,
+        };
         Ok(())
     }
 
@@ -486,14 +529,27 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// The composer's emoji suggestions offer custom emoji from the
     /// installed emoji sets (tdesktop `SuggestionsWidget::appendCustom`):
-    /// load the installed list when it was never asked for or its last
-    /// request failed, and the sets' contents. Loaded and loading sets are
-    /// skipped, so this is cheap to call whenever the strip is rebuilt.
+    /// load the installed list when it was never asked for, and the sets'
+    /// contents. Loaded and loading sets are skipped, so this is cheap to
+    /// call whenever the strip is rebuilt; a failed list is not asked for
+    /// again from here ([`Self::retry_suggestion_emoji_sets`]).
     pub fn ensure_suggestion_emoji_sets(&mut self) -> Result<(), ConnectSendError> {
+        self.suggestion_emoji_sets(false)
+    }
+
+    /// [`Self::ensure_suggestion_emoji_sets`] for a new list opening (a
+    /// `:` query, a word's bar): a list whose last request failed is
+    /// asked for again.
+    pub fn retry_suggestion_emoji_sets(&mut self) -> Result<(), ConnectSendError> {
+        self.suggestion_emoji_sets(true)
+    }
+
+    fn suggestion_emoji_sets(&mut self, retry_failed: bool) -> Result<(), ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.stickers.emoji.lists.installed.can_ask()
+        let installed = &self.session.stickers.emoji.lists.installed;
+        if (installed.is_idle() || (retry_failed && installed.can_ask()))
             && self.session.stickers.emoji.installed_sets.is_empty()
         {
             self.emoji_set_request(
@@ -538,21 +594,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if !self.session.stickers.emoji.trending_has_more {
+        let trending = &self.session.stickers.emoji.lists.trending;
+        if !trending.has_more() || trending.is_loading() {
             return Ok(None);
         }
-        let offset = self.session.stickers.emoji.trending_next_offset;
-        if self
-            .session
-            .requests
-            .has_purpose(RequestPurpose::GetTrendingEmojiSets)
-        {
-            return Ok(None);
-        }
-        self.session.stickers.emoji.trending_offset = offset;
-        self.emoji_set_request(RequestPurpose::GetTrendingEmojiSets, |id| {
-            get_trending_emoji_sets(id, offset, 100)
-        })
+        let offset = trending.next_offset();
+        self.ask_trending_emoji_sets(offset)
     }
 
     pub fn set_emoji_pack_installed(
@@ -599,6 +646,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 list.cancel();
             }
         }
+        self.session.stickers.emoji.lists.trending.cancel();
         if !self.chats_path_active() {
             return Ok(());
         }
@@ -644,11 +692,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .requests
                     .take_purpose(RequestPurpose::GetAnimatedEmoji),
             );
-            self.session.stickers.emoji.animated_emoji = None;
-            self.session.stickers.emoji.animated_emoji_for = None;
+            self.session.stickers.emoji.animated = crate::emoji::AnimatedSuggestion::Idle;
             return Ok(None);
         };
-        if self.session.stickers.emoji.animated_emoji_for.as_deref() == Some(emoji) {
+        if self.session.stickers.emoji.animated.emoji_for() == Some(emoji) {
             return Ok(None);
         }
         drop(
@@ -656,14 +703,18 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .requests
                 .take_purpose(RequestPurpose::GetAnimatedEmoji),
         );
-        self.session.stickers.emoji.animated_emoji = None;
-        self.session.stickers.emoji.animated_emoji_for = Some(emoji.to_string());
         let extra = self.session.request(RequestPurpose::GetAnimatedEmoji, None);
         match self.sender.send_json(&get_animated_emoji(extra, emoji)) {
-            Ok(()) => Ok(Some(extra)),
+            Ok(()) => {
+                self.session.stickers.emoji.animated = crate::emoji::AnimatedSuggestion::Asking {
+                    emoji: emoji.to_string(),
+                    request: extra,
+                };
+                Ok(Some(extra))
+            }
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.stickers.emoji.animated_emoji_for = None;
+                self.session.stickers.emoji.animated = crate::emoji::AnimatedSuggestion::Idle;
                 Err(err)
             }
         }

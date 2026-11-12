@@ -41,8 +41,9 @@ fn the_bar_title_jumps_in_the_tracks_own_window(cx: &mut TestAppContext) {
     let h = new_app(cx);
     let _chat_window = h.open_in_new_window(OTHER, cx);
     in_window(&h, h.main, None, cx, |app, window, cx| {
-        app.playback.active = crate::ui::playback_state::ActiveTrack::Voice(OTHER_LAST);
-        app.playback.player.chat = Some(OTHER);
+        app.playback.active = crate::ui::playback_state::ActiveTrack::Voice(
+            crate::ui::playback_state::Track::new(OTHER_LAST).in_chat(OTHER),
+        );
         app.jump_to_playing(window, cx);
     });
     assert_eq!(
@@ -88,7 +89,7 @@ fn a_main_window_chat_change_leaves_a_chat_windows_gif(cx: &mut TestAppContext) 
         message: ChatMessage::new(OTHER, MessageId(7)),
     };
     in_window(&h, chat_window, Some(OTHER), cx, |app, _, _| {
-        app.playback.animation = crate::ui::playback_state::GifPlayback::Waiting(gif);
+        app.playback.animation = crate::ui::playback_state::GifPlayback::waiting_in_tests(gif);
         app.playback
             .autoplayed_gifs
             .insert(ChatMessage::new(OTHER, MessageId(7)));
@@ -110,10 +111,11 @@ fn a_main_window_chat_change_leaves_a_chat_windows_gif(cx: &mut TestAppContext) 
     });
     // The main window's own GIF stops with its chat.
     in_window(&h, h.main, None, cx, |app, window, cx| {
-        app.playback.animation = crate::ui::playback_state::GifPlayback::Waiting(PlayingGif {
-            window: None,
-            message: ChatMessage::new(ChatId(13), MessageId(5)),
-        });
+        app.playback.animation =
+            crate::ui::playback_state::GifPlayback::waiting_in_tests(PlayingGif {
+                window: None,
+                message: ChatMessage::new(ChatId(13), MessageId(5)),
+            });
         app.select_listed_chat(OPEN, window, cx);
         assert_eq!(app.playback.animation.playing(), None);
     });
@@ -148,12 +150,12 @@ fn a_chat_windows_gift_box_goes_on_without_the_main_window(cx: &mut TestAppConte
         app.windows.last_press = Some(OTHER);
         app.windows
             .dialog_opened_in(crate::ui::shell::DialogKind::GiftMarket, Some(OTHER));
-        app.gift_market.auction_open = crate::ui::gift_market_state::AuctionOpen::Waiting {
-            from_send_box: false,
-        };
+        app.gift_market.flow.begin_opening(quill::ids::RequestId(7));
         if let Some(session) = app.demo_session.as_mut() {
-            session.payments.gift_market.auction =
-                quill::gift_market::AuctionFetch::Ready { gift_id: 5 };
+            session.payments.gift_market.auction = quill::gift_market::AuctionFetch::Ready {
+                gift_id: 5,
+                request: 7,
+            };
         }
     });
     cx.update_window(chat_window, |_, window, cx| window.render_frame(cx))
@@ -161,7 +163,7 @@ fn a_chat_windows_gift_box_goes_on_without_the_main_window(cx: &mut TestAppConte
     cx.run_until_parked();
     h.app.read_with(cx, |app, _| {
         assert!(
-            app.gift_market.auction_open == crate::ui::gift_market_state::AuctionOpen::Idle,
+            app.gift_market.flow.opening().is_none(),
             "the auction answer was taken"
         );
         let auction = app
@@ -187,7 +189,7 @@ fn viewing_a_set_closes_the_box_in_the_other_window(cx: &mut TestAppContext) {
     let open_in = |chat: Option<ChatId>, cx: &mut TestAppContext| {
         h.app
             .update(cx, |app, cx| {
-                app.in_window_scope(chat, cx, |app, _| app.message_ui.menu_ui.sticker_set_open())
+                app.in_window_scope(chat, cx, |app, _| app.sticker_set_open())
             })
             .unwrap_or(false)
     };
@@ -203,7 +205,7 @@ fn a_closed_boxs_video_pick_opens_no_editor(cx: &mut TestAppContext) {
     use quill::sticker_set_box::SetKind;
     let h = new_app(cx);
     in_window(&h, h.main, None, cx, |app, window, cx| {
-        app.message_ui.menu_ui.end_sticker_set();
+        app.sticker_box.host = crate::ui::sticker_set_box::state::SetBoxHost::Closed;
         app.sticker_box.pending =
             crate::ui::sticker_set_box::state::PickWait::Downloading(PendingVideo {
                 pick: PickExisting {
@@ -292,7 +294,7 @@ fn attached_stickers_close_the_box_in_the_other_window(cx: &mut TestAppContext) 
     let open_in = |chat: Option<ChatId>, cx: &mut TestAppContext| {
         h.app
             .update(cx, |app, cx| {
-                app.in_window_scope(chat, cx, |app, _| app.message_ui.menu_ui.sticker_set_open())
+                app.in_window_scope(chat, cx, |app, _| app.sticker_set_open())
             })
             .unwrap_or(false)
     };
@@ -307,8 +309,9 @@ fn attached_stickers_close_the_box_in_the_other_window(cx: &mut TestAppContext) 
 fn deleting_the_tracks_chat_stops_the_player_and_releases_its_history(cx: &mut TestAppContext) {
     let h = new_app(cx);
     in_window(&h, h.main, None, cx, |app, _, cx| {
-        app.playback.active = crate::ui::playback_state::ActiveTrack::Voice(OTHER_LAST);
-        app.playback.player.chat = Some(OTHER);
+        app.playback.active = crate::ui::playback_state::ActiveTrack::Voice(
+            crate::ui::playback_state::Track::new(OTHER_LAST).in_chat(OTHER),
+        );
         app.sync_history_holds();
         assert!(app.session().is_some_and(|s| s.chat_history_in_use(OTHER)));
         app.check_playing_track(cx);
@@ -320,7 +323,7 @@ fn deleting_the_tracks_chat_stops_the_player_and_releases_its_history(cx: &mut T
         app.demo_session.as_mut().unwrap().chats.remove(&OTHER.0);
         app.check_playing_track(cx);
         assert_eq!(app.playback.active.voice(), None, "the player stopped");
-        assert_eq!(app.playback.player.chat, None, "its claim went");
+        assert_eq!(app.playback.active.chat(), None, "its claim went");
         app.sync_history_holds();
         assert!(!app.session().is_some_and(|s| s.chat_history_in_use(OTHER)));
     });
@@ -333,7 +336,6 @@ fn the_next_song_downloading_keeps_its_chats_history(cx: &mut TestAppContext) {
     use crate::ui::play_intent::{PlayIntent, PlayTarget};
     let h = new_app(cx);
     in_window(&h, h.main, None, cx, |app, _, _| {
-        app.playback.player.chat = None;
         app.playback.intent = Some(PlayIntent {
             file: quill::ids::FileId(9001),
             target: PlayTarget::Audio {
@@ -393,8 +395,11 @@ fn the_checkout_prefills_in_the_window_that_hosts_it(cx: &mut TestAppContext) {
     });
     h.app.update(cx, |app, _| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.payments.checkout = quill::state::CheckoutForm::Ready(
+            session.payments.checkout = quill::state::CheckoutForm::ready(
                 crate::ui::payments::card_form_demo::stripe_checkout(true, false),
+                quill::state::PaymentRequest {
+                    invoice: quill::payment_invoice::InputInvoice::Name("demo".into()),
+                },
             );
         }
     });

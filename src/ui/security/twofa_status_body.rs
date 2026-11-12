@@ -45,11 +45,7 @@ impl QuillApp {
         }
         // B13: the server asked whether the user still remembers the
         // password (`suggestedActionCheckPassword`).
-        if state.has_password
-            && self
-                .session()
-                .is_some_and(|s| s.settings.privacy_data.check_password_suggested)
-        {
+        if state.has_password && self.session().is_some_and(|s| s.check_password_suggested()) {
             let field = self.twofa.status_check_password.clone();
             body = body.child(self.password_check_card(&field, cx));
         }
@@ -70,8 +66,8 @@ impl QuillApp {
                     tr(keys::Q_PREFS_NOT_SET)
                 })),
         );
-        if let Some(pattern) = &state.pending_email_pattern {
-            body = body.child(self.twofa_pending_email_block(cx, pattern, loading));
+        if let Some(pending) = &state.pending_email {
+            body = body.child(self.twofa_pending_email_block(cx, &pending.pattern, loading));
         }
         if let Some(row) = self.twofa_login_email_row(cx, state) {
             body = body.child(row);
@@ -462,9 +458,7 @@ impl QuillApp {
     /// fetch refires; demo re-injects the fixture.
     pub(in crate::ui) fn refresh_websites(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.settings.connected_websites = Fetch::Idle;
-            live.driver.session.settings.websites_op.refetched();
-            let _ = live.driver.maybe_fetch_connected_websites();
+            let _ = live.driver.refresh_connected_websites();
         } else if let Some(session) = self.demo_session.as_mut() {
             session.settings.connected_websites = Fetch::Ready(demo_websites());
         }

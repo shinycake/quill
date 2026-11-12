@@ -22,6 +22,7 @@ use super::app::QuillApp;
 use super::call_panel_devices::DeviceMenuTarget;
 use super::dialogs::rtmp_stream::{RtmpRows, rtmp_info_rows};
 use super::dismiss_layer::DismissLayer;
+use super::group_call_state::CallBox;
 use super::group_call_stream_layout::{StreamFacts, leave_stream_full};
 use super::video_player::controls::bar_disc;
 use crate::ui::status_note::StatusNote;
@@ -64,7 +65,9 @@ impl QuillApp {
         if !leaving && self.refused_while_locked() {
             return;
         }
-        self.group_call.stream.overlay = Some(overlay);
+        if !self.open_call_box(CallBox::Stream(overlay)) {
+            return;
+        }
         if overlay == StreamOverlay::Speakers
             && let Some(live) = self.live.as_mut()
         {
@@ -75,7 +78,7 @@ impl QuillApp {
 
     pub(super) fn close_stream_overlay(&mut self, cx: &mut Context<Self>) {
         // The key shows again only after the warning.
-        self.group_call.stream.overlay = None;
+        self.close_call_box();
         cx.notify();
     }
 
@@ -162,7 +165,7 @@ impl QuillApp {
         facts: &StreamFacts,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let overlay = self.group_call.stream.overlay?;
+        let overlay = self.stream_overlay()?;
         let content = match overlay {
             StreamOverlay::Settings { key_shown } => self.stream_settings_box(facts, key_shown, cx),
             StreamOverlay::Speakers => self.stream_speakers_box(cx),
@@ -300,7 +303,7 @@ impl QuillApp {
                 this.child(
                     row("group-call-stream-share", tr(keys::GROUP_CALL_SHARE).into()).on_click(
                         cx.listener(|this, _, _, cx| {
-                            this.group_call.stream.overlay = None;
+                            this.close_call_box();
                             this.open_group_call_share_links(cx);
                         }),
                     ),
@@ -333,8 +336,8 @@ impl QuillApp {
     /// Server URL and Stream Key for managers, once the URL is known.
     fn stream_rtmp_rows(&self, key_shown: bool, cx: &mut Context<Self>) -> Option<AnyElement> {
         let call = self.session()?.calls.active_group_call.as_ref()?;
-        let url = call.rtmp_url.clone().filter(|url| !url.is_empty())?;
-        let key = call.rtmp_stream_key.clone().unwrap_or_default();
+        let quill::calls::rtmp_start::RtmpInfo { url, key } =
+            call.rtmp.clone().filter(|rtmp| !rtmp.url.is_empty())?;
         Some(rtmp_info_rows(
             RtmpRows {
                 prefix: "group-call-stream",
@@ -478,7 +481,7 @@ impl QuillApp {
                         .label(tr(keys::GROUP_CALL_ALSO_END_CHANNEL))
                         .checked(end)
                         .on_click(cx.listener(|this, &on: &bool, _, cx| {
-                            this.group_call.stream.overlay = Some(StreamOverlay::Leave { end: on });
+                            this.open_call_box(CallBox::Stream(StreamOverlay::Leave { end: on }));
                             cx.notify();
                         })),
                 )
@@ -499,7 +502,7 @@ impl QuillApp {
                             .label(tr(keys::GROUP_CALL_LEAVE))
                             .danger()
                             .on_click(cx.listener(move |this, _, window, cx| {
-                                this.group_call.stream.overlay = None;
+                                this.close_call_box();
                                 leave_stream_full(window);
                                 // tdesktop `discard()`: ending the call
                                 // leaves it too.

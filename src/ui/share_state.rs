@@ -5,25 +5,48 @@ use super::*;
 use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
-use quill::state::ForwardResult;
 
 pub(crate) struct ShareUi {
     /// The forward being built: the selection, the share box over it, the
     /// "Reply in Another Chat" chooser over it, or
     /// the forward bar it became (`ForwardStage`).
     pub(super) forward: super::forward_stage::ForwardStage,
-    /// Destinations ticked in the share box.
-    pub(super) selection: quill::share_box::ShareSelection,
     /// The share box's optional comment, sent before the forwards.
     pub(super) comment_input: Entity<TextareaState>,
     pub(super) search_input: Entity<TextareaState>,
-    /// Last successful (or failed) `forwardMessages` result.
-    pub(super) forward_result: Option<ForwardResult>,
     /// Text of a share link while its chat chooser is open.
     pub(super) link_text: Option<String>,
 }
 
 impl ShareUi {
+    /// Destinations ticked in the open share box: they live in its stage
+    /// (`ForwardStage::Picking`), so every way out of the box drops them.
+    pub(super) fn is_ticked(&self, chat: quill::ids::ChatId) -> bool {
+        self.forward
+            .ticks()
+            .is_some_and(|ticks| ticks.contains(chat))
+    }
+
+    pub(super) fn tick_count(&self) -> usize {
+        self.forward
+            .ticks()
+            .map_or(0, quill::share_box::ShareSelection::len)
+    }
+
+    /// The one ticked destination, when exactly one is.
+    pub(super) fn single_tick(&self) -> Option<quill::ids::ChatId> {
+        self.forward
+            .ticks()
+            .and_then(quill::share_box::ShareSelection::single)
+    }
+
+    /// Tick or untick `chat` in the open box; nothing when no box is open.
+    pub(super) fn toggle_tick(&mut self, chat: quill::ids::ChatId) {
+        if let Some(ticks) = self.forward.ticks_mut() {
+            ticks.toggle(chat);
+        }
+    }
+
     pub(super) fn new(
         window: &mut Window,
         cx: &mut Context<QuillApp>,
@@ -37,11 +60,26 @@ impl ShareUi {
         });
         Self {
             forward: Default::default(),
-            selection: quill::share_box::ShareSelection::default(),
             comment_input: share_comment_input,
             search_input: forward_search_input,
-            forward_result: None,
             link_text: None,
+        }
+    }
+}
+
+impl QuillApp {
+    /// The share box's inputs follow the box: once neither it nor the reply
+    /// chooser (which draws the same box and types in the same search field)
+    /// is open, what was typed in it goes too (per frame, in every window:
+    /// `per_window_upkeep`).
+    pub(super) fn sync_share_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.share.forward.picker_open() || self.reply_chooser_open() {
+            return;
+        }
+        for input in [&self.share.comment_input, &self.share.search_input] {
+            if !input.read(cx).value().is_empty() {
+                input.update(cx, |input, cx| input.set_value("", window, cx));
+            }
         }
     }
 }

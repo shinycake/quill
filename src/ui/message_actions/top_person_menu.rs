@@ -48,7 +48,7 @@ impl QuillApp {
         DismissLayer::new(
             "chat-menu-overlay",
             cx.listener(|this, _, _, cx| {
-                this.chat_list.menu = None;
+                this.message_ui.menu.close_menu();
                 cx.notify();
             }),
         )
@@ -97,7 +97,7 @@ impl QuillApp {
                     this.chat_menu_row_hovered(*hovered, cx);
                 }))
                 .on_click(cx.listener(move |this, _, window, cx| {
-                    this.chat_list.menu = None;
+                    this.message_ui.menu.close_menu();
                     this.open_chat_in_new_window(chat_id, window, cx);
                     // `descriptor.closeCallback`: the search closes.
                     this.close_search_ui(window, cx);
@@ -123,7 +123,7 @@ impl QuillApp {
                 this.chat_menu_row_hovered(*hovered, cx);
             }))
             .on_click(cx.listener(move |this, _, window, cx| {
-                this.chat_list.menu = None;
+                this.message_ui.menu.close_menu();
                 this.select_search_chat(chat_id, window, cx);
                 cx.notify();
             }))
@@ -148,7 +148,7 @@ impl QuillApp {
                 this.chat_menu_row_hovered(*hovered, cx);
             }))
             .on_click(cx.listener(move |this, _, window, cx| {
-                this.chat_list.menu = None;
+                this.message_ui.menu.close_menu();
                 if let Some(target) = this
                     .session()
                     .and_then(|session| session.chat_info_target(chat_id))
@@ -176,7 +176,7 @@ impl QuillApp {
                 this.chat_menu_row_hovered(*hovered, cx);
             }))
             .on_click(cx.listener(move |this, _, _, cx| {
-                this.chat_list.menu = None;
+                this.message_ui.menu.close_menu();
                 this.remove_top_chat(chat_id, cx);
             }))
             .into_any_element(),
@@ -197,7 +197,7 @@ impl QuillApp {
                 this.chat_menu_row_hovered(*hovered, cx);
             }))
             .on_click(cx.listener(|this, _, _, cx| {
-                this.chat_list.menu = None;
+                this.message_ui.menu.close_menu();
                 this.set_search_prompt(Some(SearchConfirm::DisableTopChats), cx);
             }))
             .into_any_element(),

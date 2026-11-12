@@ -36,7 +36,7 @@ fn replay_call_signaling_lifecycle() {
     assert_eq!(call.user_id, 41);
     assert!(!call.is_outgoing);
     assert!(matches!(
-        call.state,
+        call.state(),
         CallState::Pending {
             is_created: true,
             is_received: false
@@ -79,8 +79,8 @@ fn replay_call_signaling_lifecycle() {
         ],
     );
     let call = session.calls.active_call.as_ref().expect("call 77 ready");
-    assert!(matches!(call.state, CallState::Ready));
-    assert!(call.ready.is_some());
+    assert!(matches!(call.state(), CallState::Ready(_)));
+    assert!(call.progress.ready().is_some());
     // Only the tracked call's signaling data is kept (call 78's is
     // dropped — no tracked call with that id).
     assert_eq!(call.signaling_queue.len(), 1);
@@ -244,9 +244,9 @@ fn replay_video_call_signaling() {
         ],
     );
     let call = session.calls.active_call.as_ref().expect("call 90 ready");
-    assert!(matches!(call.state, CallState::Ready));
+    assert!(matches!(call.state(), CallState::Ready(_)));
     assert!(call.is_video);
-    assert!(call.ready.is_some());
+    assert!(call.progress.ready().is_some());
 
     // A second incoming video call while one is active raises the
     // swap prompt, keeping its `is_video`.

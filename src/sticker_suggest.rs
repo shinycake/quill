@@ -193,7 +193,10 @@ mod tests {
         let seq = AtomicU64::new(0);
         // Simulate an in-flight suggestion: purpose registered, slot set.
         let extra = session.request(RequestPurpose::SuggestStickers, None);
-        session.stickers.stickers.suggest_for = crate::state::SuggestFor::Asked("😀".into());
+        session.stickers.stickers.suggest_for = crate::state::SuggestFor::Asked {
+            emoji: "😀".into(),
+            request: extra,
+        };
         apply_json(&mut session, &seq, &sink, &stickers_answer(extra.0));
         assert!(!session.stickers.stickers.suggestions.is_empty());
 
@@ -263,13 +266,21 @@ mod tests {
         // Default mode (InstalledAndRecommended): both stickers stored in
         // the suggestions slot; the search slot is untouched.
         let extra = with_purpose.request(RequestPurpose::SuggestStickers, None);
+        with_purpose.stickers.stickers.suggest_for = crate::state::SuggestFor::Asked {
+            emoji: "😀".into(),
+            request: extra,
+        };
         apply_json(&mut with_purpose, &seq, &sink, &answer(extra.0));
         assert_eq!(with_purpose.stickers.stickers.suggestions.len(), 2);
-        assert!(with_purpose.stickers.stickers.found_stickers.is_empty());
+        assert!(with_purpose.stickers.stickers.search.stickers.is_empty());
 
         // InstalledOnly: the set-99 sticker is filtered out.
         with_purpose.settings.media_prefs.sticker_suggest_mode = StickerSuggestMode::InstalledOnly;
         let extra = with_purpose.request(RequestPurpose::SuggestStickers, None);
+        with_purpose.stickers.stickers.suggest_for = crate::state::SuggestFor::Asked {
+            emoji: "😀".into(),
+            request: extra,
+        };
         apply_json(&mut with_purpose, &seq, &sink, &answer(extra.0));
         assert_eq!(with_purpose.stickers.stickers.suggestions.len(), 1);
         assert_eq!(with_purpose.stickers.stickers.suggestions[0].set_id, 77);
@@ -277,6 +288,10 @@ mod tests {
         // None: the answer is dropped and the slot cleared.
         with_purpose.settings.media_prefs.sticker_suggest_mode = StickerSuggestMode::None;
         let extra = with_purpose.request(RequestPurpose::SuggestStickers, None);
+        with_purpose.stickers.stickers.suggest_for = crate::state::SuggestFor::Asked {
+            emoji: "😀".into(),
+            request: extra,
+        };
         apply_json(&mut with_purpose, &seq, &sink, &answer(extra.0));
         assert!(with_purpose.stickers.stickers.suggestions.is_empty());
 

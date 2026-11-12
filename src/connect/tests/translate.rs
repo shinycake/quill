@@ -74,7 +74,10 @@ fn translate_message_sends_the_request_and_keeps_the_entities() {
         h.driver
             .session
             .message_translation(ChatId(7), MessageId(42), "en"),
-        Some(&Translation::Pending { job: 1 })
+        Some(&Translation::Pending {
+            job: 1,
+            attempts: 0
+        })
     );
 
     // Asking again while it is pending sends nothing new.
@@ -110,7 +113,10 @@ fn translate_message_sends_the_request_and_keeps_the_entities() {
         h.driver
             .session
             .message_translation(ChatId(7), MessageId(42), "de"),
-        Some(&Translation::Pending { job: 2 })
+        Some(&Translation::Pending {
+            job: 2,
+            attempts: 0
+        })
     );
 }
 
@@ -130,7 +136,7 @@ fn a_failed_translation_is_recorded_and_can_be_retried() {
         h.driver
             .session
             .message_translation(ChatId(7), MessageId(5), "fr"),
-        Some(Translation::Failed(_))
+        Some(Translation::Failed { .. })
     ));
     let before = h.sent_count();
     h.driver
@@ -151,7 +157,10 @@ fn translate_selection_round_trips_a_text_job() {
     assert_eq!(v["to_language_code"], "en");
     assert_eq!(
         h.driver.session.text_translation(job),
-        Some(&Translation::Pending { job: 1 })
+        Some(&Translation::Pending {
+            job: 1,
+            attempts: 0
+        })
     );
     let json = format!(
         r#"{{"@type":"formattedText","text":"Hello, world","entities":[],"@extra":"{id}"}}"#,

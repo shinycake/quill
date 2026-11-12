@@ -522,7 +522,7 @@ fn driver_get_story_available_reactions_dedupes_and_caches() {
                 .unwrap(),
             )
             .unwrap();
-    let cached = driver.session.stories.available_reactions.clone().unwrap();
+    let cached = driver.session.stories.available_reactions.items().to_vec();
     assert_eq!(cached.len(), 1);
     assert_eq!(
         cached[0].kind,
@@ -949,5 +949,111 @@ fn driver_b14_close_friends_hide_profile_and_share() {
     assert_eq!(v["@type"], "sendMessage");
     assert_eq!(v["input_message_content"]["@type"], "inputMessageStory");
     assert_eq!(v["input_message_content"]["story_id"], 6);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_refused_tray_refresh_stays_queued_until_it_is_sent() {
+    let mut h = super::live_story::harness();
+    h.driver.session.stories.tray_refresh.insert(7);
+    h.recorder.refuse_sends(true);
+    h.driver.refresh_story_trays();
+    assert_eq!(h.sent("getChatActiveStories"), 0);
+    assert!(h.driver.session.stories.tray_refresh.contains(&7));
+    h.recorder.refuse_sends(false);
+    h.driver.refresh_story_trays();
+    assert_eq!(h.sent("getChatActiveStories"), 1);
+    assert!(h.driver.session.stories.tray_refresh.is_empty());
+}
+
+/// The tray refresh goes out as the update that queued it lands, and a
+/// refused one waits for the next ingest, not for a frame.
+#[test]
+fn a_posted_story_refreshes_its_tray_as_the_update_lands() {
+    let mut h = super::live_story::harness();
+    let update = r#"{"@type":"updateStoryPostSucceeded","story":{"@type":"story","id":7,"poster_chat_id":11,"date":1,"content":{"@type":"storyContentUnsupported"},"caption":{"@type":"formattedText","text":"","entities":[]}},"old_story_id":6}"#;
+    h.recorder.refuse_sends(true);
+    h.ingest(update);
+    assert_eq!(h.sent("getChatActiveStories"), 0);
+    assert!(h.driver.session.stories.tray_refresh.contains(&11));
+    h.recorder.refuse_sends(false);
+    h.ingest(r#"{"@type":"updateOption","name":"x","value":{"@type":"optionValueEmpty"}}"#);
+    assert_eq!(h.sent("getChatActiveStories"), 1);
+    assert!(h.driver.session.stories.tray_refresh.is_empty());
+}
+
+/// r2-05 (13-047): a `getStory` send that is refused is a failed ask, so a
+/// story open waiting for it is dropped instead of waiting for good.
+#[test]
+fn a_refused_get_story_send_starts_the_retry_clock() {
+    let store = MemorySecretStore::new();
+    let (_dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    seed_ready_alice(&mut driver, &seq, &dyn_sink);
+    recorder.refuse_sends(true);
+    assert!(driver.get_story_now(ChatId(7), 9).is_err());
+    assert!(
+        driver.session.stories.story_fetch.retry((7, 9)).is_some(),
+        "the open sees a failed ask"
+    );
+    recorder.refuse_sends(false);
+    assert_eq!(
+        driver.get_story(ChatId(7), 9),
+        Ok(None),
+        "held back while the clock runs"
+    );
+    assert!(driver.get_story_now(ChatId(7), 9).unwrap().is_some());
+}
+
+#[test]
+fn story_reaction_options_come_only_from_the_request_that_asked() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    seed_ready_alice(&mut driver, &seq, &dyn_sink);
+    let payload = |extra: &str| {
+        format!(
+            r#"{{"@type":"availableReactions","@extra":"{extra}","top_reactions":[{{"@type":"availableReaction","type":{{"@type":"reactionTypeEmoji","emoji":"❤"}},"needs_premium":false}}],"recent_reactions":[],"popular_reactions":[],"allow_custom_emoji":false,"are_tags":false,"unavailability_reason":null}}"#
+        )
+    };
+    // An answer nobody asked for is not stored.
+    driver
+        .ingest(copy_and_parse(&payload("999"), &seq, &dyn_sink).unwrap())
+        .unwrap();
+    assert!(
+        driver
+            .session
+            .stories
+            .available_reactions
+            .items()
+            .is_empty()
+    );
+    // A refused ask is failed, and the next open asks again.
+    let extra = driver.get_story_available_reactions().unwrap().unwrap();
+    driver
+        .ingest(
+            copy_and_parse(
+                &format!(
+                    r#"{{"@type":"error","@extra":"{}","code":500,"message":"BOOM"}}"#,
+                    extra.0
+                ),
+                &seq,
+                &dyn_sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(driver.session.stories.available_reactions.error().is_some());
+    assert!(driver.get_story_available_reactions().unwrap().is_some());
     let _ = std::fs::remove_dir_all(&dir);
 }

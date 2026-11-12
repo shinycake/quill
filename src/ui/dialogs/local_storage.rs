@@ -346,7 +346,7 @@ impl QuillApp {
 
     /// Start the two limit sliders on what TDLib reports. They are made
     /// once per visit (`open_data_storage` drops them).
-    pub(super) fn ensure_storage_sliders(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::ui) fn ensure_storage_sliders(&mut self, cx: &mut Context<Self>) {
         let sliders = &self.index_sliders;
         if sliders.contains(StepSlider::StorageSize) && sliders.contains(StepSlider::StorageKeep) {
             return;
@@ -414,7 +414,51 @@ impl QuillApp {
     /// The release of a limit slider: send the limits both sliders are on.
     pub(in crate::ui) fn apply_storage_sliders(&mut self, cx: &mut Context<Self>) {
         let (size, keep) = self.storage_slider_limits(cx);
-        self.apply_storage_limits(size, keep, cx);
+        let account = self.session().map(|s| s.account.clone());
+        match (self.send_storage_limits(size, keep), account) {
+            (Some(requests), Some(account)) => {
+                self.index_sliders.storage = StorageDrag::Sent { account, requests };
+            }
+            // Not sent: the sliders show what was never asked for.
+            _ => self.resync_storage_sliders(cx),
+        }
+        cx.notify();
+    }
+
+    /// Both sliders back on the limits TDLib holds.
+    fn resync_storage_sliders(&mut self, cx: &mut Context<Self>) {
+        self.index_sliders.storage = StorageDrag::Settled;
+        self.forget_storage_sliders();
+        self.ensure_storage_sliders(cx);
+    }
+
+    /// Per render of the page: once every request a release sent has been
+    /// answered the drag is settled; if the save failed (the send, or TDLib
+    /// refused), the sliders return to the limits TDLib holds.
+    pub(in crate::ui) fn settle_storage_sliders(&mut self, cx: &mut Context<Self>) {
+        let StorageDrag::Sent { account, requests } = &self.index_sliders.storage else {
+            return;
+        };
+        let Some(session) = self.session().filter(|s| s.account == *account) else {
+            self.index_sliders.storage = StorageDrag::Settled;
+            return;
+        };
+        if requests
+            .iter()
+            .any(|id| session.requests.get(*id).is_some())
+        {
+            return;
+        }
+        let failed = session
+            .settings
+            .data_storage_save
+            .error_of(quill::state::StorageSaveKind::Limits)
+            .is_some();
+        if failed {
+            self.resync_storage_sliders(cx);
+        } else {
+            self.index_sliders.storage = StorageDrag::Settled;
+        }
     }
 
     /// Leaving the page with a drag that never released: its limits go now.
@@ -431,19 +475,16 @@ impl QuillApp {
         }
     }
 
-    fn apply_storage_limits(
+    /// Send the limits: the requests the release waits for, or `None` when
+    /// they did not go out. A refusal from TDLib comes later
+    /// (`settle_storage_sliders`).
+    fn send_storage_limits(
         &mut self,
         size: Option<i64>,
         keep: Option<i64>,
-        cx: &mut Context<Self>,
-    ) {
-        self.send_storage_limits(size, keep);
-        cx.notify();
-    }
-
-    fn send_storage_limits(&mut self, size: Option<i64>, keep: Option<i64>) {
+    ) -> Option<Vec<quill::ids::RequestId>> {
         if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.set_storage_limits(size, keep);
+            live.driver.set_storage_limits(size, keep).ok()
         } else if let Some(demo) = self.demo_session.as_mut() {
             for (name, value) in options_for(size, keep) {
                 let value = match value {
@@ -456,6 +497,9 @@ impl QuillApp {
                 };
                 demo.settings.storage_limits.apply_option(name, &value);
             }
+            Some(Vec::new())
+        } else {
+            None
         }
     }
 }

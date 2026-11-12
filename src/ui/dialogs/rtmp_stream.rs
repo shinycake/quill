@@ -31,7 +31,7 @@ use quill::calls::rtmp_start::{
 use quill::ids::{ChatId, RequestId};
 use quill::lang::{keys, tr};
 use quill::telegram::envelope::ChatKind;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 
 /// What the box is showing besides the rows.
@@ -399,6 +399,11 @@ impl QuillApp {
         let Some(chat_id) = chat_id else {
             return;
         };
+        if self.video_chat_create_in_flight() {
+            self.group_call_boxes.rtmp_start = RtmpStartUi::default();
+            cx.notify();
+            return;
+        }
         let join_as = rtmp_join_as(
             chat_id.0,
             self.session().is_some_and(|s| s.chat_am_creator(chat_id)),
@@ -570,12 +575,9 @@ impl QuillApp {
                     keys::GROUP_CALL_RTMP_TITLE,
                 )))
                 .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body)));
+                    let body = Rc::new(Cell::new(Some(body)));
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
                 }))

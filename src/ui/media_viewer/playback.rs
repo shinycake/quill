@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::ui::status_note::StatusNote;
+use crate::ui::video_player::controls::SliderDrag;
 use quill::lang::{keys, tr, tr_with};
 use std::time::Instant;
 
@@ -17,11 +18,11 @@ impl QuillApp {
     ) {
         match event {
             SliderEvent::Change(value) => {
-                self.viewer.controls.seek_preview = Some(f64::from(value.end()));
+                self.viewer.controls.drag = SliderDrag::Seek(f64::from(value.end()));
                 self.notify_viewer_panel(cx);
             }
             SliderEvent::Release(value) => {
-                self.viewer.controls.seek_preview = None;
+                self.viewer.controls.drag = SliderDrag::None;
                 self.seek_viewer_to(f64::from(value.end()), cx);
             }
         }
@@ -161,10 +162,9 @@ impl QuillApp {
         }
         let playing = self.viewer_video_playing();
         if !active && playing {
-            self.viewer.extra.loop_pause = LoopPause::HeldByWindow;
+            self.viewer.clip.hold_for_window();
             self.pause_viewer_video(cx);
-        } else if active && self.viewer.extra.loop_pause == LoopPause::HeldByWindow {
-            self.viewer.extra.loop_pause = LoopPause::Free;
+        } else if active && self.viewer.clip.release_window_hold() {
             self.resume_viewer_video(cx);
         }
     }
@@ -197,7 +197,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.viewer.controls.seek_preview.is_some() {
+        if self.viewer.controls.seek_preview().is_some() {
             return;
         }
         let Some(transport) = self.viewer_transport() else {
@@ -232,11 +232,11 @@ impl QuillApp {
     ) {
         match event {
             SliderEvent::Change(_) => {
-                self.viewer.controls.volume_dragging = true;
+                self.viewer.controls.drag = SliderDrag::Volume;
                 self.notify_viewer_panel(cx);
             }
             SliderEvent::Release(value) => {
-                self.viewer.controls.volume_dragging = false;
+                self.viewer.controls.drag = SliderDrag::None;
                 self.set_playback_volume(f64::from(value.end()) as f32 / 100.0, cx);
             }
         }
@@ -249,11 +249,11 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.viewer.controls.volume_dragging {
+        if self.viewer.controls.volume_dragging() {
             return;
         }
         if let Some(slider) = self.viewer.controls.volume.as_ref() {
-            let value = (self.players.volume * 100.0).round();
+            let value = (self.players.volume() * 100.0).round();
             let changed = slider.read(cx).value() != SliderValue::Single(value);
             if changed {
                 slider.update(cx, |state, cx| {
@@ -283,9 +283,8 @@ impl QuillApp {
     pub(in crate::ui) fn set_playback_speed(&mut self, speed: f64, cx: &mut Context<Self>) {
         let next = quill::viewer_extras::clamp_speed(speed);
         self.players.speed = next;
-        self.viewer.controls.speed_preview = None;
+        self.viewer.controls.end_speed_drag();
         // A chosen speed ends a Space hold (the rate is set below).
-        self.viewer.controls.boost_timer = None;
         let _ = self.viewer.controls.boost.cancel();
         let mut restarted = false;
         if self.playback.track_duration().is_some() {
@@ -328,8 +327,8 @@ impl QuillApp {
         cx.subscribe(&slider, move |this, _, event, cx| {
             this.in_window_scope(scope, cx, |this, cx| match event {
                 SliderEvent::Change(value) => {
-                    this.viewer.controls.speed_preview =
-                        Some(quill::viewer_extras::snap_speed(f64::from(value.end())));
+                    this.viewer.controls.drag =
+                        SliderDrag::Speed(quill::viewer_extras::snap_speed(f64::from(value.end())));
                     cx.notify();
                 }
                 SliderEvent::Release(value) => {
@@ -363,9 +362,9 @@ impl QuillApp {
     ) -> AnyElement {
         use crate::ui::video_player::controls::SpeedMenu;
         let slider = self.ensure_speed_slider(cx);
-        let dragging = self.viewer.controls.speed_preview.is_some();
+        let dragging = self.viewer.controls.speed_preview().is_some();
         let current = self.players.speed;
-        let shown = self.viewer.controls.speed_preview.unwrap_or(current);
+        let shown = self.viewer.controls.speed_preview().unwrap_or(current);
         let view = cx.entity().downgrade();
         Popover::new((id, 1usize))
             .anchor(Anchor::BottomRight)
@@ -403,7 +402,7 @@ impl QuillApp {
         let shown = self
             .viewer
             .controls
-            .speed_preview
+            .speed_preview()
             .unwrap_or(self.players.speed);
         Button::new((id, 0usize))
             .label(Self::speed_label(shown))
@@ -421,24 +420,25 @@ impl QuillApp {
     /// MED1: mute toggle — 0 volume remembers the previous level and
     /// restores it on unmute; the sound restarts at the new volume.
     pub(in crate::ui) fn toggle_playback_mute(&mut self, cx: &mut Context<Self>) {
-        if self.players.volume > 0.01 {
-            self.players.unmuted_volume = self.players.volume;
-            self.set_playback_volume(0.0, cx);
-        } else {
-            let restore = self.players.unmuted_volume.max(0.01);
-            self.set_playback_volume(restore, cx);
-        }
+        self.players.volume = self.players.volume.toggled();
+        self.apply_playback_volume(cx);
     }
 
     /// MED1: set playback volume 0.0–1.0 and restart any active player so
     /// the sound picks up the new volume.
     pub(in crate::ui) fn set_playback_volume(&mut self, volume: f32, cx: &mut Context<Self>) {
-        self.players.volume = volume.clamp(0.0, 1.0);
-        self.players.audio.set_volume(self.players.volume);
+        self.players.volume = self.players.volume.set(volume);
+        self.apply_playback_volume(cx);
+    }
+
+    /// Push the volume in `players` to the engine, the stream and every
+    /// window's clip player.
+    fn apply_playback_volume(&mut self, cx: &mut Context<Self>) {
+        self.players.audio.set_volume(self.players.volume());
         if let Some(live) = self.live.as_mut() {
-            live.driver.set_stream_volume(self.players.volume);
+            live.driver.set_stream_volume(self.players.volume());
         }
-        let volume = self.players.volume;
+        let volume = self.players.volume();
         self.in_every_window(cx, |app, _| {
             if let Some(player) = app.viewer.clip.player().filter(|_| !app.viewer_loops()) {
                 player.set_volume(volume);
@@ -485,9 +485,9 @@ impl QuillApp {
         self.set_composer_group_media(Some(next));
         if self
             .session()
-            .is_some_and(|s| s.settings.media_prefs.remember_media_grouping)
+            .is_some_and(|s| s.settings.media_prefs.media_grouping.is_remembered())
         {
-            self.set_media_pref(|prefs| prefs.group_media = next, cx);
+            self.set_media_pref(|prefs| prefs.media_grouping.choose(next), cx);
         } else {
             cx.notify();
         }
@@ -502,19 +502,11 @@ impl QuillApp {
     pub(in crate::ui) fn toggle_remember_media_grouping(&mut self, cx: &mut Context<Self>) {
         let next = !self
             .session()
-            .map(|s| s.settings.media_prefs.remember_media_grouping)
+            .map(|s| s.settings.media_prefs.media_grouping.is_remembered())
             .unwrap_or(false);
         // Turning it on snapshots the current grouping choice.
         let current = self.composer_group_media_effective();
-        self.set_media_pref(
-            |prefs| {
-                prefs.remember_media_grouping = next;
-                if next {
-                    prefs.group_media = current;
-                }
-            },
-            cx,
-        );
+        self.set_media_pref(|prefs| prefs.media_grouping.remember(next, current), cx);
     }
 
     /// While a viewer clip is open: media keys and the OS Now Playing
@@ -625,14 +617,14 @@ impl QuillApp {
             .viewer
             .zoom
             .toggle_natural(self.screen.viewer.frame);
-        self.viewer.drag = None;
+        self.viewer.pointer.end_pan();
         cx.notify();
     }
 
     /// Parity slice 5: reset zoom/pan to fit (double-click, Reset button).
     pub(in crate::ui) fn viewer_reset_zoom(&mut self, cx: &mut Context<Self>) {
         self.viewer.zoom.reset();
-        self.viewer.drag = None;
+        self.viewer.pointer.end_pan();
         cx.notify();
     }
 }

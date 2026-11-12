@@ -127,6 +127,7 @@ fn optimize_storage_answer_drops_stats_and_reports_freed_bytes() {
     let seq = AtomicU64::new(0);
     let stats_extra = session.request(RequestPurpose::GetStorageStatistics, None);
     session.settings.storage_stats.begin();
+    session.settings.storage_stats.sent(stats_extra);
     apply_json(
         &mut session,
         &seq,
@@ -164,6 +165,8 @@ fn optimize_storage_error_keeps_stats() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let stats_extra = session.request(RequestPurpose::GetStorageStatistics, None);
+    session.settings.storage_stats.begin();
+    session.settings.storage_stats.sent(stats_extra);
     apply_json(
         &mut session,
         &seq,

@@ -52,8 +52,22 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// the Share Folder dialog shows. Each is deduped per folder.
     pub fn fetch_folder_share(&mut self, folder_id: i32) -> Result<(), ConnectSendError> {
         if !self.chats_path_active() {
+            // Refused before any request: the box ends in the error with a
+            // Retry, not in "Loading".
+            let line = ConnectSendError::InvalidRequest.stage_line();
+            let share = self
+                .session
+                .chat_list
+                .folder_shares
+                .entry(folder_id)
+                .or_default();
+            share.links.fail(line.clone());
+            share.chats.fail(line);
             return Err(ConnectSendError::InvalidRequest);
         }
+        // The two halves are independent: a refused one fails its own list
+        // (the box draws its error and Retry) and the other is still asked.
+        let mut refused = None;
         if !self
             .session
             .requests
@@ -76,7 +90,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 if let Some(share) = self.session.chat_list.folder_shares.get_mut(&folder_id) {
                     share.links.fail(err.stage_line());
                 }
-                return Err(err);
+                refused = Some(err);
             }
         }
         if !self
@@ -94,6 +108,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .entry(folder_id)
                 .or_default();
             share.chats.begin();
+            share.chats.sent(extra);
             if let Err(err) = self.send_folder_request(
                 extra,
                 get_chats_for_chat_folder_invite_link(extra, folder_id),
@@ -101,10 +116,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                 if let Some(share) = self.session.chat_list.folder_shares.get_mut(&folder_id) {
                     share.chats.fail(err.stage_line());
                 }
-                return Err(err);
+                refused.get_or_insert(err);
             }
         }
-        Ok(())
+        refused.map_or(Ok(()), Err)
     }
 
     /// `createChatFolderInviteLink`; the new link joins the cached list when
@@ -282,7 +297,8 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// `processChatFolderNewChats`: join the chosen new chats, or dismiss the
     /// bar with an empty list. The bar goes away when the answer is `ok`;
-    /// a refusal keeps it (and says so). `Ok(None)`: one is already in flight.
+    /// a refusal keeps it (and says so). One already in flight for the
+    /// folder is returned as it is, for the caller to wait on.
     pub fn process_folder_new_chats(
         &mut self,
         folder_id: i32,
@@ -291,12 +307,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self
+        if let Some(out) = self
             .session
             .requests
-            .has_purpose_for_folder(RequestPurpose::ProcessChatFolderNewChats, folder_id)
+            .pending_extra_for_folder(RequestPurpose::ProcessChatFolderNewChats, folder_id)
         {
-            return Ok(None);
+            return Ok(Some(out));
         }
         let extra = self
             .session

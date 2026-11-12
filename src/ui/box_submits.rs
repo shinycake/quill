@@ -8,13 +8,16 @@ use gpui_kit::*;
 impl QuillApp {
     pub(in crate::ui) fn settle_box_submits(&mut self, cx: &mut Context<Self>) {
         self.settle_moderation_submits(cx);
+        self.settle_member_changes(cx);
         self.settle_permissions_dialog(cx);
         self.settle_username_dialog(cx);
         self.settle_create_community_dialog(cx);
         self.settle_topic_editor(cx);
         self.settle_invite_link_box(cx);
         self.settle_edit_profile_save(cx);
+        self.settle_profile_op(cx);
         self.settle_group_edit_box(cx);
         self.settle_group_upgrade(cx);
+        self.settle_network_reset(cx);
     }
 }

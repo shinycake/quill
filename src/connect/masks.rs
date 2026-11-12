@@ -66,10 +66,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         more: bool,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         let masks = &self.session.stickers.masks;
-        if more && !masks.archived_has_more {
-            return Ok(None);
-        }
-        let offset = if more { masks.archived_next_offset } else { 0 };
+        let offset = if more {
+            let Some(next) = masks.archived_next_offset() else {
+                return Ok(None);
+            };
+            next
+        } else {
+            0
+        };
         let purpose = StickersPurpose::GetArchivedMaskSets { first_page: !more };
         let sent = self.mask_request(purpose.into(), |id| get_archived_mask_sets(id, offset));
         match &sent {

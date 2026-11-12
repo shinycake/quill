@@ -100,8 +100,10 @@ pub(in crate::ui) fn seed_rtmp_stream(
     session.calls.active_group_call = Some(ActiveGroupCall {
         is_rtmp_stream: true,
         is_joined: true,
-        stream_mode: GroupCallMode::Rtmp,
-        stream,
+        media: quill::state::GroupMedia::Stream {
+            mode: GroupCallMode::Rtmp,
+            state: stream,
+        },
         viewer_count: 12_480,
         ..ActiveGroupCall::fresh(CALL)
     });

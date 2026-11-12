@@ -238,12 +238,14 @@ fn effects_are_looked_up_for_the_messages_of_every_shown_chat() {
 }
 
 #[test]
-fn an_attachment_menu_answer_names_its_bot() {
+fn an_attachment_menu_answer_names_its_request() {
     let mut t = Flaky::new();
-    t.driver
+    let first = t
+        .driver
         .toggle_bot_in_attachment_menu(43, true, false)
         .unwrap();
-    t.driver
+    let second = t
+        .driver
         .toggle_bot_in_attachment_menu(44, false, false)
         .unwrap();
     let asked = t.sender.all("toggleBotIsAddedToAttachmentMenu");
@@ -258,9 +260,9 @@ fn an_attachment_menu_answer_names_its_bot() {
         .web_apps
         .attachment_menu_toggled
         .iter()
-        .map(|toggle| (toggle.bot_user_id, toggle.result.is_ok()))
+        .map(|toggle| (toggle.request, toggle.result.is_ok()))
         .collect();
-    assert_eq!(toggles, [(44, false), (43, true)]);
+    assert_eq!(toggles, [(second, false), (first, true)]);
 }
 
 #[test]
@@ -346,10 +348,12 @@ fn the_reply_bar_copy_shows_an_edit_and_the_oldest_copy_is_the_one_dropped() {
     // Past the cap the oldest settled copy goes, whatever its id.
     let session = &mut t.driver.session;
     for id in (1..=40).rev() {
-        session.begin_composer_reply_fetch(ChatId(21), MessageId(id));
+        let request = crate::ids::RequestId(id as u64);
+        session.begin_composer_reply_fetch(ChatId(21), MessageId(id), request);
         session.reject_composer_reply_target(
             ChatId(21),
             MessageId(id),
+            request,
             &crate::telegram::envelope::TdError::from_code(500),
         );
     }
@@ -373,12 +377,19 @@ fn each_create_gets_its_own_generation_and_a_reset_never_reuses_one() {
         .unwrap();
     let first = generation(&t);
     assert_eq!(first, before + 1);
+    // One create at a time: a second waits for the first's answer.
+    assert!(
+        t.driver
+            .create_managed_bot(900, "B", "b_bot", false, None)
+            .is_err()
+    );
+    assert_eq!(generation(&t), first);
+    // The older create's answer finds a newer generation and drops.
+    t.driver.reset_create_bot();
+    assert_eq!(generation(&t), first + 1);
+    assert!(!t.driver.session.bots.owned.create.creating());
     t.driver
         .create_managed_bot(900, "B", "b_bot", false, None)
         .unwrap();
-    assert_eq!(generation(&t), first + 1);
-    // The older create's answer finds a newer submission and drops.
-    t.driver.reset_create_bot();
     assert_eq!(generation(&t), first + 2);
-    assert!(!t.driver.session.bots.owned.create.creating());
 }

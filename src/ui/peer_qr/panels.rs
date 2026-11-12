@@ -137,8 +137,8 @@ impl QuillApp {
             .peer_qr
             .open
             .as_ref()
-            .filter(|open| open.state.gift.is_none())
-            .map(|open| open.state.color);
+            .filter(|open| open.state.gift().is_none())
+            .map(|open| open.state.color());
         let ring = |inset: f64, width: f64, color: Hsla| {
             div()
                 .absolute()
@@ -219,7 +219,7 @@ impl QuillApp {
             .peer_qr
             .open
             .as_ref()
-            .map(|open| super::plain_picks(&open.state.emoji))
+            .map(|open| super::plain_picks(open.state.emoji()))
             .unwrap_or_default();
         let highlight = rgba(view.colors.control);
         v_virtual_list(
@@ -481,7 +481,7 @@ impl QuillApp {
 
     /// The box's toast, over its bottom edge.
     pub(super) fn qr_toast_element(&self) -> Option<Div> {
-        let (toast, _) = self.peer_qr.open.as_ref()?.toast.as_ref()?;
+        let toast = self.peer_qr.open.as_ref()?.toast.toast()?;
         Some(
             div()
                 .absolute()

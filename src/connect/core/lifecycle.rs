@@ -42,7 +42,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             sender,
             batch: Default::default(),
             call_engine: None,
-            close_held_until: None,
             signaling_outbox: Arc::new(Mutex::new(VecDeque::new())),
             transport_outbox: Arc::new(Mutex::new(VecDeque::new())),
             video_state_outbox: Arc::new(Mutex::new(VecDeque::new())),
@@ -69,7 +68,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             call_sound_watch: None,
             credentials,
             paths: prepared.paths,
-            claimed_owner: None,
+            owner_claim: OwnerClaim::Unclaimed,
             database_key: prepared.database_key,
             outgoing_typing: None,
             outgoing_voice: None,
@@ -78,7 +77,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             flood_attempts: HashMap::new(),
             custom_emoji_hold: None,
             last_request_sweep: None,
-            system_proxy_asked: None,
+            system_proxy: Default::default(),
             network_seen: None,
             carrier_host: None,
         }
@@ -123,14 +122,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetAuthorizationState, None);
-        self.sender.send_json(&get_authorization_state(extra))?;
+        if let Err(err) = self.sender.send_json(&get_authorization_state(extra)) {
+            // Nothing went out: no answer will come for a registered request.
+            self.session.requests.take(extra);
+            return Err(err);
+        }
         self.maybe_send_parameters()?;
         Ok(extra)
     }
 
     pub(crate) fn chats_path_active(&self) -> bool {
-        matches!(self.session.auth, AuthorizationState::Ready)
-            && matches!(self.session.shutdown, ShutdownPhase::Running)
+        matches!(self.session.auth, AuthorizationState::Ready) && self.session.shutdown.is_running()
     }
 
     /// First page on Ready; further pages only when a `loadChats` request returns ok.
@@ -167,6 +169,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if self.session.chat_list.archive_paging.retry_due(now) {
             sent |= matches!(self.maybe_load_archive_chats(), Ok(Some(_)));
+        }
+        let due: Vec<i32> = self
+            .session
+            .chat_list
+            .folder_paging
+            .iter()
+            .filter(|(_, paging)| paging.retry_due(now))
+            .map(|(id, _)| *id)
+            .collect();
+        for folder_id in due {
+            sent |= matches!(self.maybe_load_folder_chats(folder_id), Ok(Some(_)));
         }
         sent
     }
@@ -205,15 +218,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         ) {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let before = self.session.shutdown;
-        let logout = self.session.auth_state.logout_request;
+        let before = self.session.shutdown.clone();
         self.session.begin_close();
         let extra = self.session.request(RequestPurpose::Close, None);
         if let Err(err) = self.sender.send_json(&close_request(extra)) {
             // Nothing went out: the session keeps running.
             self.session.requests.take(extra);
             self.session.shutdown = before;
-            self.session.auth_state.logout_request = logout;
             return Err(err);
         }
         Ok(extra)
@@ -227,6 +238,15 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn request_logout(&mut self) -> Result<RequestId, ConnectSendError> {
         if !matches!(self.session.auth, AuthorizationState::Ready) {
             return Err(ConnectSendError::InvalidRequest);
+        }
+        // A `logOut` already out answers a second confirm: another would
+        // settle the account's requests again and replace the request its
+        // answer is matched to. A close or a quit under way takes none.
+        match self.session.shutdown {
+            crate::state::ShutdownPhase::Running
+            | crate::state::ShutdownPhase::LogoutRefused(_) => {}
+            crate::state::ShutdownPhase::LogoutRequested(request) => return Ok(request),
+            _ => return Err(ConnectSendError::InvalidRequest),
         }
         let extra = self.session.request(RequestPurpose::LogOut, None);
         if let Err(err) = self.sender.send_json(&log_out(extra)) {

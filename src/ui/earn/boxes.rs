@@ -11,29 +11,14 @@ use crate::ui::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
-use gpui_kit::component::dialog::{Dialog, DialogContent};
+use gpui_kit::component::dialog::Dialog;
 use quill::boost_box::BoostCounters;
 use quill::lang::{keys, tr, tr_with, trn};
-use std::cell::RefCell;
-use std::rc::Rc;
 
 /// tdesktop `lng_channel_earn_learn_coin_link`.
 const TON_BLOG_URL: &str = "https://telegram.org/blog/monetization-for-channels";
 
-/// The one-shot body the kit dialog content closure takes.
-fn one_shot(
-    body: AnyElement,
-) -> impl Fn(DialogContent, &mut Window, &mut App) -> DialogContent + 'static {
-    let body = Rc::new(RefCell::new(Some(body)));
-    crate::ui::shell::scrollable_dialog_content(move |content, _, _| {
-        let body = body
-            .borrow_mut()
-            .take()
-            .unwrap_or_else(|| div().into_any_element());
-        content.child(body)
-    })
-}
-
+use crate::ui::shell::one_shot_dialog_content as one_shot;
 /// tdesktop's diamonds easter egg on the learn box's TON emoji.
 fn diamonds_toast(count: u32) -> String {
     match count {
@@ -45,7 +30,7 @@ fn diamonds_toast(count: u32) -> String {
 
 impl QuillApp {
     fn close_earn_learn(&mut self, cx: &mut Context<Self>) {
-        self.earn.learn = false;
+        self.earn.learn = None;
         cx.notify();
     }
 
@@ -134,12 +119,14 @@ impl QuillApp {
                                 .debug_selector(|| "earn-learn-diamond".into())
                                 .cursor_pointer()
                                 .on_click(cx.listener(|this, _, _, cx| {
-                                    if this.earn.diamonds < 100 {
-                                        this.earn.diamonds += 1;
+                                    let Some(learn) = this.earn.learn.as_mut() else {
+                                        return;
+                                    };
+                                    if learn.diamonds < 100 {
+                                        learn.diamonds += 1;
                                     }
-                                    this.set_note(StatusNote::info(diamonds_toast(
-                                        this.screen.earn.diamonds,
-                                    )));
+                                    let diamonds = learn.diamonds;
+                                    this.set_note(StatusNote::info(diamonds_toast(diamonds)));
                                     cx.notify();
                                 }))
                                 .child(ton_icon(20., primary)),
@@ -287,6 +274,19 @@ impl QuillApp {
         })
     }
 
+    /// Ask for the boost link the box shows; a refused send says so.
+    pub(super) fn ask_boost_link(&mut self, chat_id: i64, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut()
+            && live
+                .driver
+                .fetch_chat_boost_link(quill::ids::ChatId(chat_id))
+                .is_err()
+        {
+            self.set_note(StatusNote::error(tr(keys::Q_MONEY_COULDNT_LOAD_THE_PAGE)));
+        }
+        cx.notify();
+    }
+
     fn close_earn_ask_boost(&mut self, cx: &mut Context<Self>) {
         self.earn.ask_boost = None;
         cx.notify();
@@ -329,7 +329,7 @@ impl QuillApp {
                 .map(|(link, _)| link.clone())
                 .unwrap_or_default();
             let mut body = div().flex().flex_col().gap_3();
-            if let Some(status) = session.groups.chat_boost_details.get(&chat_id) {
+            if let Some(status) = session.groups.boost_status(chat_id) {
                 let counters = BoostCounters::from(status);
                 body = body.child(Self::boost_progress(&counters, cx));
             }
@@ -364,6 +364,21 @@ impl QuillApp {
                             link.clone()
                         }),
                 );
+            if link.is_empty() {
+                // The link is asked once per chat; a refused or failed ask
+                // leaves it empty, so Retry asks again (a running ask is
+                // not repeated).
+                body = body.child(
+                    div().flex().justify_center().child(
+                        Button::new("earn-boost-link-retry")
+                            .label(tr(keys::Q_CHAT_RETRY))
+                            .ghost()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.ask_boost_link(chat_id, cx);
+                            })),
+                    ),
+                );
+            }
             if let Some(features) = Self::boost_features_for(session, chat_id, false, level) {
                 body = body.child(features);
             }
@@ -390,7 +405,7 @@ impl QuillApp {
 
 crate::ui::shell::register_dialogs! {
     /// The Monetization page's "Learn more" box.
-    EarnLearn => DialogSpec::new(7610, |app| app.earn.learn, QuillApp::build_earn_learn_dialog)
+    EarnLearn => DialogSpec::new(7610, |app| app.earn.learn.is_some(), QuillApp::build_earn_learn_dialog)
     .close(|app, _, cx| app.close_earn_learn(cx)),
     /// A TON transaction's details.
     EarnTonTx => DialogSpec::new(

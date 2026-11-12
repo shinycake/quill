@@ -37,10 +37,22 @@ pub(super) struct FolderTabMenu {
     pub position: Point<Pixels>,
 }
 
+/// Where the join of a shared folder's new chats stands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum JoinStage {
+    /// The user is ticking chats.
+    Choosing,
+    /// `processChatFolderNewChats` is out. Its answer closes the box (the
+    /// offer is gone), or sends it back to `Choosing` with the ticks
+    /// kept (the request failed and the offer stands).
+    Joining { request: quill::ids::RequestId },
+}
+
 /// The join dialog of a shared folder's new chats.
 pub(super) struct FolderNewChatsDialog {
     pub folder_id: i32,
     pub selected: HashSet<i64>,
+    pub stage: JoinStage,
 }
 
 impl FolderNewChatsDialog {
@@ -90,10 +102,7 @@ impl QuillApp {
         position: Point<Pixels>,
         cx: &mut Context<Self>,
     ) {
-        self.close_message_menu();
-        self.chat_list.menu = None;
-        self.chat_list.archive_menu = None;
-        self.folders.tab_menu = Some(FolderTabMenu {
+        self.message_ui.menu.open_folder_tab(FolderTabMenu {
             folder_id,
             position,
         });
@@ -155,7 +164,7 @@ impl QuillApp {
             };
             context_menu_item(id, icon, label, color, true, &self.frame.menu.items, cx)
                 .on_click(cx.listener(move |this, _, window, cx| {
-                    this.folders.tab_menu = None;
+                    this.message_ui.menu.close_menu();
                     on_click(this, window, cx);
                     cx.notify();
                 }))
@@ -236,7 +245,7 @@ impl QuillApp {
         DismissLayer::new(
             "folder-tab-menu-overlay",
             cx.listener(|this, _, _, cx| {
-                this.folders.tab_menu = None;
+                this.message_ui.menu.close_menu();
                 cx.notify();
             }),
         )
@@ -245,7 +254,7 @@ impl QuillApp {
             backdrop.on_mouse_down(
                 MouseButton::Right,
                 cx.listener(|this, _, _, cx| {
-                    this.folders.tab_menu = None;
+                    this.message_ui.menu.close_menu();
                     cx.notify();
                 }),
             )
@@ -261,7 +270,8 @@ impl QuillApp {
     /// Ask for the open shared folder's new chats (the driver keeps to the
     /// update period). Called when a folder opens and from the poll loop.
     pub(super) fn poll_folder_new_chats(&mut self) {
-        let (Some(folder_id), Some(live)) = (self.folders.tab, self.live.as_mut()) else {
+        let (Some(folder_id), Some(live)) = (self.chat_list.view.folder(), self.live.as_mut())
+        else {
             return;
         };
         let _ = live.driver.fetch_folder_new_chats(folder_id);
@@ -269,7 +279,7 @@ impl QuillApp {
 
     /// The bar above the list of a shared folder with new chats.
     pub(super) fn folder_new_chats_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let folder_id = self.folders.tab?;
+        let folder_id = self.chat_list.view.folder()?;
         let new_chats = &self.session()?.chat_list.folder_new_chats;
         if new_chats.get(&folder_id).is_none_or(Vec::is_empty) {
             return None;
@@ -283,7 +293,7 @@ impl QuillApp {
     /// The outer function repeats this body's first check; keep the two in step.
     #[inline(never)]
     fn folder_new_chats_bar_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let folder_id = self.folders.tab?;
+        let folder_id = self.chat_list.view.folder()?;
         let count = self
             .session()?
             .chat_list
@@ -381,6 +391,7 @@ impl QuillApp {
         self.folders.new_chats_dialog = Some(FolderNewChatsDialog {
             folder_id,
             selected: ids.into_iter().collect(),
+            stage: JoinStage::Choosing,
         });
         self.open_box(DialogKind::FolderNewChats);
         cx.notify();
@@ -392,26 +403,40 @@ impl QuillApp {
     }
 
     fn confirm_folder_new_chats(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = self.folders.new_chats_dialog.take() else {
+        let Some(dialog) = self.folders.new_chats_dialog.as_ref() else {
             return;
         };
+        if matches!(dialog.stage, JoinStage::Joining { .. }) {
+            return;
+        }
         let offered: Vec<i64> = self
             .session()
             .and_then(|s| s.chat_list.folder_new_chats.get(&dialog.folder_id).cloned())
             .unwrap_or_default();
         let ids = dialog.still_offered(&offered);
+        let folder_id = dialog.folder_id;
         if ids.is_empty() && !dialog.selected.is_empty() {
             // Everything ticked has left the offer: nothing to join.
-            cx.notify();
+            self.close_folder_new_chats(cx);
             return;
         }
         match self.live.as_mut() {
-            Some(live) => match live.driver.process_folder_new_chats(dialog.folder_id, &ids) {
-                Ok(_) => self.set_note(match ids.len() {
-                    0 => StatusNote::silent(tr(keys::Q_CHATLIST_NEW_CHATS_HIDDEN)),
-                    1 => StatusNote::silent(tr(keys::Q_CHATLIST_JOINING_1_CHAT)),
-                    n => StatusNote::silent(trn(keys::Q_CHATLIST_JOINING_CHATS, n)),
-                }),
+            Some(live) => match live.driver.process_folder_new_chats(folder_id, &ids) {
+                Ok(Some(request)) => {
+                    if let Some(dialog) = self.folders.new_chats_dialog.as_mut() {
+                        dialog.stage = JoinStage::Joining { request };
+                    }
+                    self.set_note(match ids.len() {
+                        0 => StatusNote::silent(tr(keys::Q_CHATLIST_NEW_CHATS_HIDDEN)),
+                        1 => StatusNote::silent(tr(keys::Q_CHATLIST_JOINING_1_CHAT)),
+                        n => StatusNote::silent(trn(keys::Q_CHATLIST_JOINING_CHATS, n)),
+                    });
+                }
+                // Nothing to wait on (no connection path took it).
+                Ok(None) => self.set_note(StatusNote::error(tr(
+                    keys::Q_NOTES_FAILED_PROCESS_NEW_CHATS,
+                ))),
+                // Nothing went out: the box stays for another try.
                 Err(err) => self.set_note(StatusNote::error(user_error_for(
                     keys::Q_NOTES_FAILED_PROCESS_NEW_CHATS,
                     &err,
@@ -419,9 +444,46 @@ impl QuillApp {
             },
             None => {
                 if let Some(session) = self.demo_session.as_mut() {
-                    session.chat_list.folder_new_chats.remove(&dialog.folder_id);
+                    session.chat_list.folder_new_chats.remove(&folder_id);
                 }
+                self.folders.new_chats_dialog = None;
             }
+        }
+        cx.notify();
+    }
+
+    /// Each window's frame, while the box is shown there: the join it sent
+    /// was answered. The offer gone means it went through and the box
+    /// closes; the offer standing means it failed (its note is up), and
+    /// the box is for choosing again, the ticks kept.
+    pub(in crate::ui) fn folder_new_chats_upkeep(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(dialog) = self.folders.new_chats_dialog.as_ref() else {
+            return;
+        };
+        let JoinStage::Joining { request } = dialog.stage else {
+            return;
+        };
+        let Some(session) = self.session() else {
+            return;
+        };
+        if session.requests.get(request).is_some() {
+            return;
+        }
+        let offered = session
+            .chat_list
+            .folder_new_chats
+            .contains_key(&dialog.folder_id);
+        if offered {
+            if let Some(dialog) = self.folders.new_chats_dialog.as_mut() {
+                dialog.stage = JoinStage::Choosing;
+            }
+        } else {
+            self.close_folder_new_chats(cx);
+            self.close_kit_dialog_if_done(DialogKind::FolderNewChats, window, cx);
         }
         cx.notify();
     }
@@ -459,6 +521,7 @@ impl QuillApp {
             let all_selected =
                 !chats.is_empty() && chats.iter().all(|id| state.selected.contains(id));
             let selected = state.still_offered(&chats).len();
+            let joining = matches!(state.stage, JoinStage::Joining { .. });
             let select_ids = chats.clone();
             let mut body = div()
                 .flex()
@@ -548,7 +611,8 @@ impl QuillApp {
                 .child(
                     Button::new("folder-new-chats-join")
                         .label(trn(keys::FILTERS_BY_LINK_AND_JOIN_BUTTON, selected))
-                        .disabled(selected == 0)
+                        .loading(joining)
+                        .disabled(selected == 0 || joining)
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.confirm_folder_new_chats(cx);
                             this.close_kit_dialog_if_done(DialogKind::FolderNewChats, window, cx);
@@ -612,8 +676,8 @@ impl QuillApp {
             InviteStage::Adding { request, .. } => Some(request),
             _ => None,
         });
-        let share = self.folders.share.as_ref().and_then(|d| match d.op {
-            LinkOp::Saving(request) => Some(request),
+        let share = self.folders.share.as_ref().and_then(|d| match d.view.op() {
+            LinkOp::Saving(request) => Some(*request),
             LinkOp::Idle | LinkOp::Failed(_) => None,
         });
         let editor = self.folders.editor.as_ref().and_then(|d| match d.load {

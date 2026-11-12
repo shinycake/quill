@@ -30,7 +30,9 @@ impl Session {
             && let RequestPurpose::Media(MediaPurpose::LocationPicker(purpose)) = pending.purpose
         {
             match purpose {
-                LocationPickerPurpose::ResolveVenueBot => self.location.venue_bot_failed(),
+                LocationPickerPurpose::ResolveVenueBot => {
+                    self.location.venue_bot_failed(pending.id.0)
+                }
                 LocationPickerPurpose::SearchVenues { generation } => {
                     self.location.venues_failed(generation)
                 }
@@ -67,7 +69,7 @@ impl Session {
                 self.fail_profile_tab(
                     chat_id,
                     tab,
-                    Some(generation),
+                    generation,
                     call_request_error_line(err, "Could not load this tab"),
                 );
             }

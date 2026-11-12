@@ -71,31 +71,61 @@ impl Drop for ChosenPhoto {
     }
 }
 
-/// Which source panel the dialog shows.
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
+/// Which source the user asked to open.
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SourceMode {
+    Emoji,
+    Camera,
+}
+
+/// Which source panel the dialog shows, with what the panel owns: the
+/// camera's stage holds its own tasks, so leaving the panel (`close`)
+/// cancels a start or a save still out and nothing late can land.
+#[derive(Default)]
+pub(crate) enum SourceStage {
     /// The dialog's normal body.
     #[default]
     Closed,
     Emoji,
-    Camera,
+    Camera(CameraDraft),
 }
 
 /// State of the source panels. Lives in the edit-profile dialog.
 #[derive(Default)]
 pub(crate) struct PhotoSources {
-    mode: SourceMode,
+    stage: SourceStage,
+    /// The builder's picks stay between visits; only its editor goes with
+    /// the panel.
     emoji: EmojiBuilder,
-    camera: CameraDraft,
     note: Option<String>,
-    /// Bumped per request so a late result for an older one is dropped.
-    serial: u32,
 }
 
 impl PhotoSources {
     /// A camera or emoji panel shows in place of the dialog's body.
     pub(crate) fn is_open(&self) -> bool {
-        self.mode != SourceMode::Closed
+        !matches!(self.stage, SourceStage::Closed)
+    }
+
+    /// Back to the dialog's body: the one way a panel closes (Back, a photo
+    /// taken, the lock for a camera). Its camera, editor and note go with it.
+    fn close(&mut self) {
+        self.stage = SourceStage::Closed;
+        self.emoji.close_editor();
+        self.note = None;
+    }
+
+    fn camera_mut(&mut self) -> Option<&mut CameraDraft> {
+        match &mut self.stage {
+            SourceStage::Camera(draft) => Some(draft),
+            _ => None,
+        }
+    }
+
+    fn camera(&self) -> Option<&CameraDraft> {
+        match &self.stage {
+            SourceStage::Camera(draft) => Some(draft),
+            _ => None,
+        }
     }
 }
 
@@ -220,9 +250,9 @@ impl QuillApp {
     /// Called as the dialog renders: fetch thumbnails the open panel needs
     /// and pull the newest camera frame.
     pub(super) fn photo_sources_prepare_render(&mut self, cx: &mut Context<Self>) {
-        match self.sources().map(|s| s.mode) {
-            Some(SourceMode::Emoji) => self.emoji_prepare_render(),
-            Some(SourceMode::Camera) => self.camera_prepare_render(cx),
+        match self.sources().map(|s| &s.stage) {
+            Some(SourceStage::Emoji) => self.emoji_prepare_render(),
+            Some(SourceStage::Camera(_)) => self.camera_prepare_render(cx),
             _ => {}
         }
     }
@@ -248,7 +278,10 @@ impl QuillApp {
             let _ = live.driver.fetch_editor_stickers();
         }
         if let Some(sources) = self.sources_mut() {
-            sources.mode = mode;
+            sources.stage = match mode {
+                SourceMode::Emoji => SourceStage::Emoji,
+                SourceMode::Camera => SourceStage::Camera(CameraDraft::default()),
+            };
             sources.note = None;
         }
         if mode == SourceMode::Camera {
@@ -259,14 +292,12 @@ impl QuillApp {
 
     /// The passcode lock turns off every camera panel (the profile's, a
     /// group's Edit box, New Group): the stream goes, and with it the
-    /// helper process and the camera light. A start on its way is
-    /// dropped when it lands (`serial`).
+    /// helper process and the camera light. A start on its way goes with
+    /// the camera stage that holds it.
     pub(in crate::ui) fn close_cameras_for_lock(&mut self, cx: &mut Context<Self>) {
         fn close(sources: &mut PhotoSources) {
-            if sources.mode == SourceMode::Camera {
-                sources.mode = SourceMode::Closed;
-                sources.camera = CameraDraft::default();
-                sources.serial = sources.serial.wrapping_add(1);
+            if sources.camera().is_some() {
+                sources.close();
             }
         }
         if let Some(edit) = self.group_edit_box_mut() {
@@ -283,11 +314,7 @@ impl QuillApp {
 
     fn close_photo_source(&mut self, cx: &mut Context<Self>) {
         if let Some(sources) = self.sources_mut() {
-            sources.mode = SourceMode::Closed;
-            sources.camera = CameraDraft::default();
-            sources.emoji.close_editor();
-            sources.note = None;
-            sources.serial += 1;
+            sources.close();
         }
         cx.notify();
     }
@@ -352,7 +379,6 @@ impl QuillApp {
         let Some(live) = self.live.as_mut() else {
             return Err(tr(keys::Q_PEOPLE_PROFILE_EDITS_NEED_A_SIGNED).to_string());
         };
-        live.driver.session.users_state.profile_edit_error = None;
         let sent = match input {
             ChatPhotoInput::Static { path } => live.driver.set_profile_photo(path),
             ChatPhotoInput::Animation {
@@ -365,17 +391,18 @@ impl QuillApp {
                 live.driver.set_profile_photo_sticker(*sticker, colors)
             }
         };
+        let sent = sent.map_err(|err| user_error_for(keys::Q_NOTES_FAILED_SET_PHOTO, &err));
+        self.begin_profile_op(sent.as_ref().ok().copied());
         sent.map(|_| ())
-            .map_err(|err| user_error_for(keys::Q_NOTES_FAILED_SET_PHOTO, &err))
     }
 
     /// The panel for the open source, or `None` for the normal body.
     pub(super) fn photo_sources_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let sources = self.sources()?;
-        let body = match sources.mode {
-            SourceMode::Closed => return None,
-            SourceMode::Emoji => self.emoji_panel(sources, cx),
-            SourceMode::Camera => self.camera_panel(sources, cx),
+        let body = match &sources.stage {
+            SourceStage::Closed => return None,
+            SourceStage::Emoji => self.emoji_panel(sources, cx),
+            SourceStage::Camera(draft) => self.camera_panel(draft, cx),
         };
         let theme = cx.theme();
         let note = sources.note.clone().map(|text| {

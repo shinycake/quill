@@ -84,7 +84,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             // put back, or they would wait on a request that is gone. A
             // conference offer is unwanted because the pending conference
             // is another request's, which must stay.
-            if matches!(send, OfferSend::Rejoin { .. } | OfferSend::Screen) {
+            if matches!(
+                send,
+                OfferSend::Join | OfferSend::Rejoin { .. } | OfferSend::Screen
+            ) {
                 self.undo_offer(key.id(), extra, &send);
             }
             return;
@@ -169,7 +172,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let tracked = calls.group_call(id);
         let is_story = calls.story_stream.as_ref().is_some_and(|c| c.id == id);
         let tracked_muted = tracked.is_some_and(|call| call.is_muted_self);
-        let tracked_video = tracked.is_some_and(|call| call.is_my_video_enabled);
+        let tracked_video = tracked.is_some_and(|call| call.my_video.is_enabled());
         (params.is_muted, params.is_my_video_enabled) = match send {
             OfferSend::Join if is_story => (true, tracked_video),
             OfferSend::Join
@@ -298,7 +301,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             && let Some(call) = self.session.calls.group_call_mut(id)
         {
             // The share failed; the call it was for still works.
-            call.screen_share_error = Some(err.to_string());
+            call.screen_share.fail(err.to_string());
         } else if let Some(call) = self.session.calls.group_call_mut(id) {
             call.transport.fail(err.to_string());
             if matches!(send, OfferSend::Rejoin { .. }) {
@@ -312,7 +315,11 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Puts back what starting the offer changed.
     fn undo_offer(&mut self, id: i32, extra: RequestId, send: &OfferSend) {
         match send {
-            OfferSend::Join => {}
+            OfferSend::Join => {
+                if let Some(call) = self.session.calls.group_call_mut(id) {
+                    call.transport.join_unsent(extra);
+                }
+            }
             OfferSend::Rejoin { .. } => {
                 // Unsent, so not counted (a failed offer already moved on).
                 if let Some(call) = self.session.calls.group_call_mut(id) {
@@ -340,10 +347,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.drop_group_offer(GroupOfferKey::Screen(id));
     }
 
-    /// The engine that was making them is gone.
+    /// The engine that was making them is gone: each offer fails the way a
+    /// failed payload does, so the rejoin, screen share or conference join
+    /// waiting on it is put back instead of waiting for a request that is
+    /// gone.
     pub(crate) fn forget_all_group_offers(&mut self) {
-        for (_, waiting) in std::mem::take(&mut self.group_offers) {
-            self.session.requests.take(waiting.extra);
+        let keys: Vec<GroupOfferKey> = self.group_offers.keys().copied().collect();
+        for key in keys {
+            self.finish_offer(GroupOffer {
+                key,
+                payload: Err(EngineError::Unavailable),
+            });
         }
     }
 }

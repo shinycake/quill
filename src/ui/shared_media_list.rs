@@ -33,7 +33,7 @@ impl QuillApp {
             return div().into_any_element();
         };
         let sections = month_sections(&state.items);
-        let state_chat = session.media.shared_media.chat_id;
+        let state_chat = session.media.shared_media.chat_id();
         let selecting = !session.media.shared_media.selection.is_empty();
         let mut list = div()
             .id(("shared-media-items", tab.index() as u64))
@@ -192,7 +192,7 @@ impl QuillApp {
         };
         let Some(scroll) = self
             .shared_media_grid
-            .list_scroll(tab, PageKey::of(media.chat_id, state))
+            .list_scroll(tab, PageKey::of(media.chat_id(), state))
         else {
             return;
         };

@@ -810,8 +810,12 @@ pub(crate) fn apply_ready_privacy(session: &mut Session, sink: &Arc<MemorySink>,
     ));
     session.settings.privacy_data.can_ignore_sensitive = true;
     session.settings.privacy_data.ignore_sensitive = Some(false);
-    session.settings.privacy_data.check_password_suggested = true;
-    session.settings.privacy_data.inactive_session_ttl_days = Some(180);
+    session
+        .chat_list
+        .suggestions
+        .add_action(quill::chatlist_suggestions::ACTION_PASSWORD);
+    session.settings.privacy_data.inactive_session_ttl =
+        quill::state::saves::Optimistic::Ready(180);
     session.settings.read_date = quill::state::ReadDate::Known(true);
     // box-host: demo
     session.chat_list.edit_archive_settings(Some(
@@ -821,8 +825,6 @@ pub(crate) fn apply_ready_privacy(session: &mut Session, sink: &Arc<MemorySink>,
             keep_chats_from_folders_archived: true,
         },
     ));
-    session.calls.privacy_allow_calls = Some(PrivacyWho::Contacts);
-    session.calls.privacy_p2p = Some(PrivacyWho::Everybody);
     session.settings.blocked_senders = Fetch::Ready(vec![63]);
     session.settings.blocked_total = 1;
     session.users_state.contacts = quill::state::fetch::Fetch::Ready(vec![61, 62, 63]);
@@ -831,51 +833,46 @@ pub(crate) fn apply_ready_privacy(session: &mut Session, sink: &Arc<MemorySink>,
 /// choice, with the always/never exception counts when non-zero (TGX
 /// `SettingsPrivacyKeyController` shows the mode plus exceptions).
 pub(crate) fn privacy_key_value(session: &Session, key: PrivacySettingKey) -> String {
-    match session.settings.privacy.get(&key) {
-        None | Some(PrivacyKeyState::Loading(_)) => tr(keys::Q_PREFS_LOADING).to_string(),
-        Some(PrivacyKeyState::Failed) => tr(keys::Q_PREFS_COULDNT_LOAD).to_string(),
-        Some(
-            PrivacyKeyState::Ready(detail)
-            | PrivacyKeyState::Saving { detail, .. }
-            | PrivacyKeyState::SaveFailed { detail, .. },
-        ) => {
-            let mut value = detail
-                .who
-                .map(|w| w.label().to_string())
-                .unwrap_or_else(|| tr(keys::Q_PREFS_CUSTOM_2).to_string());
-            let (always, never) = detail.exception_counts();
-            if always > 0 || never > 0 {
-                value.push_str(&format!(" (+{always}/−{never})"));
-            }
-            value
-        }
+    let state = session.settings.privacy.get(&key);
+    let Some(detail) = state.and_then(PrivacyKeyState::detail) else {
+        return match state {
+            Some(PrivacyKeyState::Failed { .. }) => tr(keys::Q_PREFS_COULDNT_LOAD).to_string(),
+            _ => tr(keys::Q_PREFS_LOADING).to_string(),
+        };
+    };
+    let mut value = detail
+        .who
+        .map(|w| w.label().to_string())
+        .unwrap_or_else(|| tr(keys::Q_PREFS_CUSTOM_2).to_string());
+    let (always, never) = detail.exception_counts();
+    if always > 0 || never > 0 {
+        value.push_str(&format!(" (+{always}/−{never})"));
     }
+    value
 }
 
 /// B13: the "Who can message me" row value (tdesktop Messages privacy).
 pub(crate) fn new_chat_privacy_value(session: &Session) -> String {
-    match session.settings.privacy_data.new_chat {
-        None | Some(quill::privacy::NewChatPrivacyState::Loading(_)) => {
-            tr(keys::Q_PREFS_LOADING).to_string()
-        }
-        Some(quill::privacy::NewChatPrivacyState::Failed) => {
+    let state = session.settings.privacy_data.new_chat.as_ref();
+    let Some(settings) = state.and_then(quill::privacy::NewChatPrivacyState::value) else {
+        return if matches!(state, Some(quill::privacy::NewChatPrivacyState::Failed)) {
             tr(keys::Q_PREFS_COULDNT_LOAD).to_string()
-        }
-        Some(quill::privacy::NewChatPrivacyState::Ready(settings)) => {
-            if settings.incoming_paid_message_star_count > 0 {
-                tr_with(
-                    keys::Q_PREFS_STARS_PER_MESSAGE,
-                    &[(
-                        "incoming_paid_message_star_count",
-                        &settings.incoming_paid_message_star_count.to_string(),
-                    )],
-                )
-            } else if settings.allow_from_unknown {
-                tr(keys::EDIT_PRIVACY_EVERYONE).to_string()
-            } else {
-                tr(keys::EDIT_PRIVACY_CONTACTS_AND_PREMIUM).to_string()
-            }
-        }
+        } else {
+            tr(keys::Q_PREFS_LOADING).to_string()
+        };
+    };
+    if settings.incoming_paid_message_star_count > 0 {
+        tr_with(
+            keys::Q_PREFS_STARS_PER_MESSAGE,
+            &[(
+                "incoming_paid_message_star_count",
+                &settings.incoming_paid_message_star_count.to_string(),
+            )],
+        )
+    } else if settings.allow_from_unknown {
+        tr(keys::EDIT_PRIVACY_EVERYONE).to_string()
+    } else {
+        tr(keys::EDIT_PRIVACY_CONTACTS_AND_PREMIUM).to_string()
     }
 }
 

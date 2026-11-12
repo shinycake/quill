@@ -14,7 +14,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::RequestId;
 use quill::lang::{Key, keys, tr, tr_with};
-use quill::privacy::{PrivacyKeyState, PrivacyRuleDetail};
+use quill::privacy::PrivacyRuleDetail;
 use quill::state::ReadDate;
 use quill::telegram::requests::PrivacyWho;
 use quill::telegram::requests_privacy::PrivacySettingKey;
@@ -172,28 +172,22 @@ impl QuillApp {
     pub(in crate::ui) fn drain_show_or_premium(&mut self, cx: &mut Context<Self>) -> bool {
         let Some(ShowOrPremiumBox {
             kind,
-            stage: ShowStage::Saving(_),
+            stage: ShowStage::Saving(request),
             ..
         }) = self.profile_cover.show_or_premium
         else {
             return false;
         };
-        let settled = self.session().map(|session| match kind {
-            ShowOrPremium::LastSeen => {
-                match session.settings.privacy.get(&PrivacySettingKey::ShowStatus) {
-                    // Any save still out settles first: this box's own
-                    // answer may be behind it, and an unrelated one says
-                    // nothing about this request.
-                    Some(PrivacyKeyState::Saving { .. }) => None,
-                    Some(PrivacyKeyState::SaveFailed { .. }) => Some(false),
-                    _ => Some(true),
-                }
+        // Settled by this box's own request: an unrelated save of the same
+        // rule (or an older failure) says nothing about it.
+        let settled = self.session().map(|session| {
+            if session.requests.failure(request).is_some() {
+                Some(false)
+            } else if session.requests.get(request).is_some() {
+                None
+            } else {
+                Some(true)
             }
-            ShowOrPremium::ReadTime => match session.settings.read_date {
-                ReadDate::Setting { .. } => None,
-                ReadDate::Failed { .. } => Some(false),
-                _ => Some(true),
-            },
         });
         match settled {
             Some(None) => return false,

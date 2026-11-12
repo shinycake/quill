@@ -19,6 +19,11 @@ pub(crate) struct AuthUi {
     pub(super) registration_last_input: Entity<TextareaState>,
     /// The registration step and the terms the user ticked in it.
     pub(super) registration: RegistrationStep,
+    /// The proxy list as a box over the sign-in screen (tdesktop's
+    /// `ProxiesBox`), which has no Settings window to hold it. It belongs to
+    /// the sign-in screen: the account reaching Ready ends it
+    /// (`follow_auth`), so it does not return if the pane connects again.
+    pub(super) proxy_list_open: bool,
     pub(super) registration_notify_contacts: bool,
     pub(super) email_input: Entity<TextareaState>,
     pub(super) phone_input: Entity<TextareaState>,
@@ -28,9 +33,6 @@ pub(crate) struct AuthUi {
     /// is never stored beyond the input widget — it is zeroized after
     /// submit (the A2 rule).
     pub(super) recovery_code_input: Entity<TextareaState>,
-    /// Batch 4: the attempts the user just terminated from the new-login
-    /// alert ("New Login Prevented" box), until acknowledged.
-    pub(super) login_prevented: Option<Vec<String>>,
     /// Batch 4: terms of service prompt state (decline flow, age check).
     pub(super) terms_prompt: Option<TermsPrompt>,
     /// Slice A1: decoded QR-login bitmap cached by link, rebuilt only when
@@ -104,6 +106,9 @@ impl AuthUi {
     /// The authorization state moved on: the registration step follows it.
     /// A tick holds only while those same terms are asked.
     pub(super) fn follow_auth(&mut self, auth: &AuthorizationState) {
+        if matches!(auth, AuthorizationState::Ready) {
+            self.proxy_list_open = false;
+        }
         let AuthorizationState::WaitRegistration { terms } = auth else {
             self.registration = RegistrationStep::Idle;
             return;
@@ -183,13 +188,13 @@ impl AuthUi {
             registration_first_input,
             registration_last_input,
             registration: RegistrationStep::Idle,
+            proxy_list_open: false,
             registration_notify_contacts: false,
             email_input,
             phone_input,
             code_input,
             password_input,
             recovery_code_input,
-            login_prevented: None,
             terms_prompt: None,
             qr_login_cache: None,
         }

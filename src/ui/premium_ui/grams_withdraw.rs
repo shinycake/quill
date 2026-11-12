@@ -11,7 +11,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
-use crate::ui::fragment_password::{PasswordBox, SecurityCheck, Showing};
+use crate::ui::fragment_password::{PasswordBox, PasswordView, SecurityCheck, ShowingView};
 use crate::ui::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
@@ -31,7 +31,13 @@ crate::ui::shell::register_dialogs! {
         3804,
         |app| {
             app.session().is_some_and(|s| {
-                s.payments.hub.grams.open && s.payments.hub.grams.withdraw.as_ref().is_some()
+                s.payments.hub.grams.open
+                    && s.payments
+                        .hub
+                        .grams
+                        .withdraw
+                        .as_ref()
+                        .is_some_and(GramWithdraw::shows_box)
             })
         },
         QuillApp::build_grams_withdraw_dialog,
@@ -152,21 +158,24 @@ impl QuillApp {
     ) {
         let (outcome, field) = match self.grams_mut() {
             Some(grams) => {
-                let showing =
-                    grams.open && matches!(grams.withdraw, Some(GramWithdraw::Password { .. }));
+                let showing = grams.open
+                    && grams
+                        .withdraw
+                        .as_ref()
+                        .is_some_and(GramWithdraw::shows_password);
                 let idle = grams.open
                     && grams
                         .withdraw
                         .as_ref()
                         .is_some_and(GramWithdraw::can_submit);
                 let field = match (showing, idle) {
-                    (false, _) => Showing::Off,
-                    (true, true) => Showing::Idle,
-                    (true, false) => Showing::Sending,
+                    (false, _) => ShowingView::Off,
+                    (true, true) => ShowingView::Idle,
+                    (true, false) => ShowingView::Sending,
                 };
-                (grams.withdraw_outcome.take(), field)
+                (grams.take_withdraw_outcome(), field)
             }
-            None => (None, Showing::Off),
+            None => (None, ShowingView::Off),
         };
         self.screen
             .payments
@@ -206,15 +215,21 @@ impl QuillApp {
             let (Some(session), Some(withdraw)) = (this.session(), this.grams_withdraw()) else {
                 return dialog.on_close(on_close);
             };
-            let (title, (body, footer)) = match withdraw {
-                GramWithdraw::Password { request, error } => (
+            let (title, (body, footer)) = match withdraw.clone() {
+                GramWithdraw::Finished(_) => return dialog.on_close(on_close),
+                GramWithdraw::Password { .. } | GramWithdraw::Sending(_) => (
                     tr(keys::BOT_EARN_BALANCE_PASSWORD_TITLE),
                     PasswordBox {
                         id: "grams-withdraw",
                         input: &this.payments.grams_withdraw_password,
                         description: tr(keys::BOT_EARN_BALANCE_PASSWORD_DESCRIPTION),
-                        sending: request.is_some(),
-                        error: error.as_ref(),
+                        entry: match &withdraw {
+                            GramWithdraw::Sending(_) => PasswordView::Sending,
+                            GramWithdraw::Password { error: Some(error) } => {
+                                PasswordView::Failed(error)
+                            }
+                            _ => PasswordView::Idle,
+                        },
                         on_submit: QuillApp::submit_grams_withdraw_password,
                         on_cancel: QuillApp::cancel_grams_withdraw,
                         on_forgot: QuillApp::forgot_grams_withdraw_password,

@@ -48,10 +48,11 @@ impl QuillApp {
             let reads = &mut self.composer_sends.reads;
             reads.preview_jobs += 1;
             let job = reads.preview_jobs;
-            reads.previews.start(path.clone(), job);
             let source = path.clone();
             let worker = cx.background_spawn(async move { read_preview(&source) });
-            self.spawn_scoped(cx, async move |this, cx| {
+            let key = path.clone();
+            // The read stage owns the task: the file leaving its tray drops it.
+            let answer = Self::spawn_app(cx, async move |this, cx| {
                 let preview = worker.await;
                 let _ = this.update(cx, |this, cx| {
                     let stale = preview.frame.as_ref().map(|frame| frame.path.clone());
@@ -67,8 +68,11 @@ impl QuillApp {
                         let _ = std::fs::remove_file(stale);
                     }
                 });
-            })
-            .detach();
+            });
+            self.composer_sends
+                .reads
+                .previews
+                .start(key, job, vec![answer]);
         }
     }
 }

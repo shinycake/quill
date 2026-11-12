@@ -80,17 +80,43 @@ pub(in crate::ui) fn video_request(
         ),
     };
     requested.set(Some((target, now.checked_add(lost_after).unwrap_or(now))));
-    VIDEO_ASKS.with(|asks| {
-        let mut asks = asks.borrow_mut();
+    with_asks(|asks| {
         asks.retain(|ask| !ask.asked_by(requested) && ask.live(now));
         asks.push(VideoAsk {
             requested: Rc::downgrade(requested),
             display,
             due: next_due.unwrap_or(now),
             even_spacing,
+            sleep: None,
         });
     });
     Some(request)
+}
+
+/// Run `f` on the clips' asks. Nothing runs if the list is already
+/// borrowed, so a re-entrant call skips its work instead of panicking.
+fn with_asks<R>(f: impl FnOnce(&mut Vec<VideoAsk>) -> R) -> Option<R> {
+    VIDEO_ASKS.with(|asks| asks.try_borrow_mut().ok().map(|mut asks| f(&mut asks)))
+}
+
+/// Run `f` on the answered pictures, like [`with_asks`].
+fn with_answered<R>(f: impl FnOnce(&mut Vec<Answered>) -> R) -> Option<R> {
+    ANSWERED.with(|answered| {
+        answered
+            .try_borrow_mut()
+            .ok()
+            .map(|mut answered| f(&mut answered))
+    })
+}
+
+/// Hand the sleeping timer of `requested`'s ask to the ask, which then owns
+/// it: a replaced, lost or forgotten ask drops (and so cancels) its timer.
+fn keep_sleep(requested: &FrameRequested, sleep: Task<()>) {
+    with_asks(|asks| {
+        if let Some(ask) = asks.iter_mut().find(|ask| ask.asked_by(requested)) {
+            ask.sleep = Some(sleep);
+        }
+    });
 }
 
 thread_local! {
@@ -107,6 +133,9 @@ struct VideoAsk {
     /// Its pictures' spacing, once they come a whole number of grid
     /// vsyncs apart.
     even_spacing: Option<Duration>,
+    /// The wake-up timer of a sleeping request, owned here so it ends with
+    /// the ask.
+    sleep: Option<Task<()>>,
 }
 
 impl VideoAsk {
@@ -163,8 +192,8 @@ thread_local! {
 /// a real `Instant`, which an earlier simulation on this thread ran past.
 #[cfg(test)]
 pub(in crate::ui) fn forget_video_requests() {
-    VIDEO_ASKS.with(|asks| asks.borrow_mut().clear());
-    ANSWERED.with(|answered| answered.borrow_mut().clear());
+    with_asks(Vec::clear);
+    with_answered(Vec::clear);
 }
 
 /// Whether the frame shown on `vsync` draws a picture of a clip that keeps
@@ -179,26 +208,28 @@ pub(in crate::ui) fn clip_frame_keeps_time(
 ) -> bool {
     let shows_now =
         |due: Instant| due <= vsync.at + vsync.period / 4 && vsync.at < due + vsync.period;
-    ANSWERED.with(|answered| {
-        answered.borrow().iter().any(|picture| {
+    with_answered(|answered| {
+        answered.iter().any(|picture| {
             target.is_none_or(|target| target == picture.target)
                 && shows_now(picture.due)
                 && keeps_time(picture.even_spacing, frame)
         })
     })
+    .unwrap_or(false)
 }
 
 /// Whether a clip frame asked for `target` and still in flight at `now`
 /// shows a picture by `by` and keeps time with content at `fps`: its draw
 /// redraws `target` with that content's next frame.
 fn video_redraws(target: EntityId, fps: u32, by: Instant, now: Instant) -> bool {
-    VIDEO_ASKS.with(|asks| {
-        asks.borrow().iter().any(|ask| {
+    with_asks(|asks| {
+        asks.iter().any(|ask| {
             ask.due <= by
                 && keeps_time(ask.even_spacing, content_frame(fps))
                 && ask.in_flight(target, now)
         })
     })
+    .unwrap_or(false)
 }
 
 /// The vsync of the last picture before `tick`, a planned tick of content at
@@ -213,9 +244,8 @@ pub(super) fn clip_beat(
     now: Instant,
 ) -> Option<Instant> {
     let frame = content_frame(fps);
-    VIDEO_ASKS.with(|asks| {
+    with_asks(|asks| {
         let mut beat = None;
-        let asks = asks.borrow();
         let clips = asks
             .iter()
             .filter(|ask| ask.display == Some(display) && ask.live(now))
@@ -229,6 +259,7 @@ pub(super) fn clip_beat(
         }
         beat
     })
+    .flatten()
 }
 
 /// Whether animation layer `painter`, drawn on the main window's latest
@@ -266,19 +297,18 @@ pub(in crate::ui) fn video_request_done(requested: &FrameRequested, target: Enti
         return;
     }
     requested.set(None);
-    let ask = VIDEO_ASKS.with(|asks| {
-        asks.borrow()
-            .iter()
+    let ask = with_asks(|asks| {
+        asks.iter()
             .find(|ask| ask.asked_by(requested))
             .map(|ask| Answered {
                 target,
                 due: ask.due,
                 even_spacing: ask.even_spacing,
             })
-    });
+    })
+    .flatten();
     if let Some(ask) = ask {
-        ANSWERED.with(|answered| {
-            let mut answered = answered.borrow_mut();
+        with_answered(|answered| {
             answered.retain(|old| old.due + VIDEO_REQUEST_LOST > ask.due);
             answered.push(ask);
         });
@@ -345,7 +375,8 @@ pub(crate) fn request_video_frame(
         FrameRequest::SleepUntil(wake) => {
             let sleep = wake.saturating_duration_since(now);
             let handle = window.window_handle();
-            cx.spawn(async move |cx| {
+            let ask = requested.clone();
+            let task = cx.spawn(async move |cx| {
                 cx.background_executor().timer(sleep).await;
                 let asked = handle.update(cx, |_, window, _| {
                     let requested = requested.clone();
@@ -357,8 +388,8 @@ pub(crate) fn request_video_frame(
                 if asked.is_err() {
                     video_request_done(&requested, target);
                 }
-            })
-            .detach();
+            });
+            keep_sleep(&ask, task);
         }
     }
 }

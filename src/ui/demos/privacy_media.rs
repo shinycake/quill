@@ -213,7 +213,7 @@ impl QuillApp {
             "appearance" => {
                 self.appearance.theme = ThemeChoice::Dark;
                 self.appearance.accent_rgb = 0x8b5cf6;
-                self.appearance.wallpaper_rgb = Some(0x1b1230);
+                self.appearance.wallpaper = quill::settings::WallpaperSource::Color(0x1b1230);
                 self.open_settings_on(quill::settings_catalog::Page::Appearance, cx);
             }
             "accent" => {

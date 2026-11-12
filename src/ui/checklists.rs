@@ -388,22 +388,22 @@ impl QuillApp {
             panel = panel
                 .child(
                     Checkbox::new("checklist-others-add")
-                        .checked(dialog.others_can_add_tasks)
+                        .checked(dialog.others.add_tasks)
                         .label(tr(keys::TODO_CREATE_ALLOW_ADD))
                         .on_click(cx.listener(|this, &on, _, cx| {
                             if let Some(dialog) = this.chat_ui.checklist_dialog.as_mut() {
-                                dialog.others_can_add_tasks = on;
+                                dialog.others.add_tasks = on;
                             }
                             cx.notify();
                         })),
                 )
                 .child(
                     Checkbox::new("checklist-others-mark")
-                        .checked(dialog.others_can_mark_tasks_as_done)
+                        .checked(dialog.others.mark_tasks)
                         .label(tr(keys::TODO_CREATE_ALLOW_MARK))
                         .on_click(cx.listener(|this, &on, _, cx| {
                             if let Some(dialog) = this.chat_ui.checklist_dialog.as_mut() {
-                                dialog.others_can_mark_tasks_as_done = on;
+                                dialog.others.mark_tasks = on;
                             }
                             cx.notify();
                         })),
@@ -473,14 +473,7 @@ impl QuillApp {
                 .auto_grow(1, 2)
                 .submit_on_enter(false)
         });
-        self.message_ui.poll_add_option = Some(PollAddOption {
-            chat_id,
-            message_id,
-            input,
-            attach: Default::default(),
-            error: None,
-            focus_on_mount: true,
-        });
+        self.message_ui.poll_add_option = Some(PollAddOption::new(chat_id, message_id, input));
         cx.notify();
     }
 
@@ -513,7 +506,7 @@ impl QuillApp {
             Ok(_) => text.trim().to_string(),
             Err(reason) => {
                 if let Some(panel) = self.message_ui.poll_add_option.as_mut() {
-                    panel.error = Some(reason);
+                    panel.refuse(reason);
                 }
                 cx.notify();
                 return;
@@ -523,7 +516,7 @@ impl QuillApp {
             .message_ui
             .poll_add_option
             .as_ref()
-            .is_some_and(|panel| matches!(panel.attach.media, OptionMediaSlot::Preparing(_)))
+            .is_some_and(|panel| matches!(panel.attach.media, OptionMediaSlot::Preparing { .. }))
         {
             self.set_note(StatusNote::info(tr(keys::Q_MEDIA_WAIT_FOR_THE_VIDEO_TO)));
             cx.notify();
@@ -602,7 +595,7 @@ impl QuillApp {
                     .child(self.poll_option_attach_button(AttachTarget::Added, cx)),
             )
             .children(self.poll_option_attach_area(AttachTarget::Added, cx));
-        if let Some(error) = panel.error {
+        if let Some(error) = panel.error() {
             body = body.child(
                 div()
                     .id("poll-add-option-error")

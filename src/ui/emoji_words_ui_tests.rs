@@ -244,11 +244,11 @@ fn escape_closes_the_colon_strip_before_a_hovered_word(cx: &mut TestAppContext) 
     app.update(vcx, |app, _| app.hover_highlight(0));
     vcx.simulate_input(":heart");
     frame(vcx);
-    let open = app.read_with(vcx, |app, _| app.composer_ui.suggest.active.is_some());
+    let open = app.read_with(vcx, |app, _| app.composer_ui.suggest.is_showing());
     assert!(open, "the `:` strip is showing");
     vcx.simulate_keystrokes("escape");
     frame(vcx);
-    let open = app.read_with(vcx, |app, _| app.composer_ui.suggest.active.is_some());
+    let open = app.read_with(vcx, |app, _| app.composer_ui.suggest.is_showing());
     assert!(!open);
     assert!(lit(&app, vcx).contains(&"pizza".to_string()));
 }
@@ -414,6 +414,48 @@ fn turning_suggestions_off_from_the_menu_says_where_to_turn_them_on(cx: &mut Tes
     assert_eq!(note, tr(keys::Q_CHAT_EMOJI_WORDS_OFF_NOTE));
 }
 
+/// Sweep 09-093: the bar settles by its own lookup. Its request failed and a
+/// later lookup of the same word answered: the bar does not open for that
+/// one; while its own request is out it keeps waiting, and its own answer
+/// opens it.
+#[gpui_kit::test]
+fn suggest_emoji_settles_by_its_own_request(cx: &mut TestAppContext) {
+    use crate::ui::emoji_words_ui::WordBar;
+    use quill::ids::RequestId;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        let Some(session) = app.demo_session.as_mut() else {
+            return;
+        };
+        let lookups = &mut session.stickers.emoji.keyword_lookups;
+        lookups.sent(RequestId(1), "pizza".to_string());
+        app.composer_ui.emoji_words.bar = WordBar::Asking {
+            range: 0..5,
+            word: "pizza".to_string(),
+            request: RequestId(1),
+        };
+        app.answer_asked_word(cx);
+        assert!(matches!(
+            app.composer_ui.emoji_words.bar,
+            WordBar::Asking {
+                request: RequestId(1),
+                ..
+            }
+        ));
+        // Its request fails, and another lookup of the word answers.
+        let Some(session) = app.demo_session.as_mut() else {
+            return;
+        };
+        let lookups = &mut session.stickers.emoji.keyword_lookups;
+        lookups.failed(RequestId(1));
+        lookups.sent(RequestId(2), "pizza".to_string());
+        lookups.answered(RequestId(2), Vec::new());
+        app.answer_asked_word(cx);
+        assert!(matches!(app.composer_ui.emoji_words.bar, WordBar::Closed));
+    });
+}
+
 /// Sweep 09-082: "Suggest Emoji" stops waiting, with a note, when its keyword
 /// lookup has given up.
 #[gpui_kit::test]
@@ -434,6 +476,7 @@ fn suggest_emoji_says_so_when_the_lookup_fails(cx: &mut TestAppContext) {
         app.composer_ui.emoji_words.bar = WordBar::Asking {
             range: 0..4,
             word: "zzzz".to_string(),
+            request: RequestId(2),
         };
         app.answer_asked_word(cx);
         assert!(matches!(app.composer_ui.emoji_words.bar, WordBar::Closed));
@@ -489,4 +532,38 @@ fn sending_closes_a_hovered_words_bar(cx: &mut TestAppContext) {
     frame(vcx);
     assert_eq!(text(&app, vcx), "");
     assert_eq!(hovered_word(&app, vcx), None);
+}
+
+/// A word bar closing lets go of the shared bar only while its own list is
+/// the one showing: suggestions that took the bar over keep their grid.
+#[gpui_kit::test]
+fn a_word_bar_closing_leaves_the_bar_the_suggestions_took_over(cx: &mut TestAppContext) {
+    use crate::ui::emoji_bar::BarOwner;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    vcx.simulate_input("we got pizza and cake for the party later tonight with friends ");
+    frame(vcx);
+    app.update(vcx, |app, _| {
+        app.hover_highlight(0);
+        let ui = &mut app.screen.composer_ui;
+        ui.suggest.bar.restart(BarOwner::Suggest);
+        ui.suggest.bar.expanded = true;
+        ui.emoji_words.unhover(&mut ui.suggest);
+    });
+    app.read_with(vcx, |app, _| {
+        assert!(
+            app.composer_ui.suggest.bar.expanded,
+            "the suggestions' grid stays"
+        );
+    });
+    app.update(vcx, |app, _| {
+        let ui = &mut app.screen.composer_ui;
+        ui.suggest.bar.release(BarOwner::Suggest);
+    });
+    app.read_with(vcx, |app, _| {
+        assert!(
+            !app.composer_ui.suggest.bar.expanded,
+            "released by its owner"
+        );
+    });
 }

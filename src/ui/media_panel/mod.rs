@@ -312,7 +312,7 @@ impl QuillApp {
     ) {
         // Not `close_message_menu`: the selector shows this message's
         // reaction options, which that would drop.
-        self.message_ui.menu.close();
+        self.message_ui.menu.close_menu();
         self.pickers.reaction_search_input.update(cx, |input, cx| {
             input.set_value("", window, cx);
             input.focus(window, cx);
@@ -348,6 +348,8 @@ impl QuillApp {
             return false;
         }
         self.set_media_panel_mode(PanelMode::Closed);
+        // A GIF search waiting on typing is for a panel that is gone.
+        self.pickers.gif_tab.stop_typing();
         self.pickers.media_panel.hovered = None;
         self.sync_gif_downloads();
         cx.notify();
@@ -360,6 +362,7 @@ impl QuillApp {
             self.pickers.media_panel.category = None;
             self.pickers.media_panel.key = None;
             self.pickers.media_panel.active_section = 0;
+            self.pickers.gif_tab.stop_typing();
             // GIFs download and play only while their tab shows.
             self.sync_gif_downloads();
         }
@@ -376,7 +379,7 @@ impl QuillApp {
             StickerSource::Set(id) => session.media.media_library.get(&id)?.get(ix),
             StickerSource::Recent => session.stickers.stickers.recent.get(ix),
             StickerSource::Favorites => session.stickers.stickers.favorites.get(ix),
-            StickerSource::Found => session.stickers.stickers.found_stickers.get(ix),
+            StickerSource::Found => session.stickers.stickers.search.stickers.get(ix),
             StickerSource::CustomEmoji => session.stickers.emoji.custom_emoji_stickers.get(ix),
         }
     }
@@ -482,13 +485,13 @@ impl QuillApp {
         let tab = self.pickers.media_panel.tab;
         // Emoji search adds TDLib's keyword matches (all typed languages).
         let keywords =
-            tab == PanelTab::Emoji && session.stickers.emoji.keyword_emojis.query != query;
+            tab == PanelTab::Emoji && session.stickers.emoji.keyword_emojis.query() != query;
         // Sticker search goes to TDLib (by emoji or keyword, or for a
         // category).
         let stickers = (tab == PanelTab::Stickers)
             .then(|| self.wanted_sticker_search(query))
             .flatten()
-            .filter(|wanted| session.stickers.stickers.searched != *wanted);
+            .filter(|wanted| session.stickers.stickers.search.query != *wanted);
         let Some(live) = self.live.as_mut() else {
             return;
         };
@@ -619,9 +622,9 @@ impl QuillApp {
             // The session's results only while they are for this query or
             // category (another window may have searched since).
             let found = if self.wanted_sticker_search(query).as_ref()
-                == Some(&session.stickers.stickers.searched)
+                == Some(&session.stickers.stickers.search.query)
             {
-                session.stickers.stickers.found_stickers.len()
+                session.stickers.stickers.search.stickers.len()
             } else {
                 0
             };

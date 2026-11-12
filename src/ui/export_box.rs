@@ -45,6 +45,19 @@ pub(super) enum ExportPage {
     },
 }
 
+/// The folder picker of the draft. It lives in the draft, so closing the
+/// box drops the pick, and the next draft never gets a folder chosen for
+/// the last one. (`Rc` only because the box copies the draft to draw it;
+/// the copy never outlives the frame.)
+#[derive(Clone, Default)]
+pub(super) enum FolderPick {
+    #[default]
+    Idle,
+    Choosing {
+        _task: std::rc::Rc<Task<()>>,
+    },
+}
+
 /// The box's choices while it is open.
 #[derive(Clone)]
 pub(super) struct ChatExportDraft {
@@ -52,6 +65,7 @@ pub(super) struct ChatExportDraft {
     size_slider: Entity<SliderState>,
     pub(super) page: ExportPage,
     error: Option<String>,
+    folder: FolderPick,
 }
 
 /// Telegram launched on 2013-08-14; nothing is older.
@@ -79,6 +93,8 @@ impl QuillApp {
             .session()
             .is_some_and(|s| s.settings.chat_export.is_some())
         {
+            // A draft left open by another window gives way to the run.
+            self.dialogs.chat_export.reset();
             self.set_chat_export_view(quill::export::ExportView::Shown);
             self.open_box(DialogKind::ChatExport);
             cx.notify();
@@ -111,6 +127,7 @@ impl QuillApp {
             size_slider: slider,
             page: ExportPage::Options,
             error: None,
+            folder: FolderPick::Idle,
         });
         cx.notify();
     }
@@ -124,6 +141,17 @@ impl QuillApp {
             .and_then(|s| s.settings.chat_export.as_mut())
         {
             export.view = view;
+        }
+    }
+
+    /// The box closed (its close button, Escape, or the dialog going
+    /// away). A running export keeps going and is hidden, but only when the
+    /// box was showing it: closing an options draft leaves it as it was.
+    pub(super) fn close_chat_export_box(&mut self) {
+        let was_draft = self.dialogs.chat_export.is_options();
+        self.dialogs.chat_export.reset();
+        if !was_draft {
+            self.set_chat_export_view(quill::export::ExportView::Hidden);
         }
     }
 
@@ -157,19 +185,26 @@ impl QuillApp {
             multiple: false,
             prompt: Some(tr(keys::Q_OPS_EXPORT_HERE).into()),
         });
-        self.spawn_screen(cx, async move |this, cx| {
+        let task = self.spawn_screen(cx, async move |this, cx| {
             let result = picker.await;
             let _ = this.update(cx, |this, cx| {
-                if let Ok(Ok(Some(paths))) = result
-                    && let Some(folder) = paths.first()
-                    && let Some(draft) = this.dialogs.chat_export.draft_mut()
-                {
-                    draft.settings.dir = folder.clone();
+                if let Some(draft) = this.dialogs.chat_export.draft_mut() {
+                    // The pick is the draft's own: it ends here.
+                    draft.folder = FolderPick::Idle;
+                    if let Ok(Ok(Some(paths))) = result
+                        && let Some(folder) = paths.first()
+                    {
+                        draft.settings.dir = folder.clone();
+                    }
                 }
                 cx.notify();
             });
-        })
-        .detach();
+        });
+        if let Some(draft) = self.dialogs.chat_export.draft_mut() {
+            draft.folder = FolderPick::Choosing {
+                _task: std::rc::Rc::new(task),
+            };
+        }
     }
 
     pub(super) fn build_chat_export_dialog(
@@ -180,9 +215,8 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::ChatExport, |this, _, cx| {
-                this.dialogs.chat_export.reset();
                 // A running export keeps going; its result shows as a note.
-                this.set_chat_export_view(quill::export::ExportView::Hidden);
+                this.close_chat_export_box();
                 cx.notify();
             });
         app.update(cx, |this, cx| {
@@ -612,7 +646,10 @@ crate::ui::shell::register_dialogs! {
         },
         QuillApp::build_chat_export_dialog,
     )
-    .close(|app, _, cx| { app.dialogs.chat_export.reset(); app.set_chat_export_view(quill::export::ExportView::Hidden); cx.notify(); }),
+    .close(|app, _, cx| {
+        app.close_chat_export_box();
+        cx.notify();
+    }),
 }
 
 #[cfg(test)]

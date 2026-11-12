@@ -40,7 +40,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             || self.session.settings.notices.review.busy()
             // The last review's follow-up waits for the UI to take it.
             || self.session.settings.notices.review.outcome().is_some()
-            || self.session.settings.notices.unconfirmed_entries.is_empty()
+            || self.session.settings.notices.unconfirmed_entries().is_empty()
         {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -48,11 +48,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .settings
             .notices
-            .unconfirmed_entries
+            .unconfirmed_entries()
             .iter()
             .map(|entry| entry.id)
             .collect();
-        self.session.begin_login_review(confirmed, ids.len());
+        self.session.begin_login_review(confirmed);
         for (at, id) in ids.iter().copied().enumerate() {
             let extra = self.session.request(
                 RequestPurpose::Settings(SettingsPurpose::ReviewUnconfirmedSession {
@@ -71,10 +71,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                 // This one and the ones not sent yet will not be answered.
                 for id in ids.iter().skip(at).copied() {
                     self.session
-                        .finish_login_review(id, Some("Could not review the new login.".into()));
+                        .login_review_unsent(id, "Could not review the new login.".into());
                 }
                 return Err(err);
             }
+            self.session.login_review_sent(id, extra);
         }
         Ok(())
     }

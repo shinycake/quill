@@ -3,7 +3,6 @@
 //! focus back to the parent row, Up and Down stay inside it. A submenu the
 //! pointer opened takes the keys the same way, from the parent row.
 use super::context_menu_focus_tests::{focus_chat_list, new_app, open_chat_menu};
-use super::is_submenu_key;
 use crate::ui::app::QuillApp;
 use crate::ui::menu_states::ChatMenuSubmenu;
 use gpui_kit::test::TestWindowExt;
@@ -89,7 +88,7 @@ fn mute_label() -> String {
 
 fn submenu(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<ChatMenuSubmenu> {
     app.read_with(vcx, |app, _| {
-        app.chat_list.menu.as_ref().and_then(|menu| menu.submenu)
+        app.message_ui.menu.row().and_then(|menu| menu.submenu)
     })
 }
 
@@ -330,15 +329,11 @@ fn a_drawn_submenu_without_live_rows_keeps_the_focus_on_its_parent(cx: &mut Test
     let vcx = &mut vcx;
     hover_open_with_focus_on_mute(&app, vcx);
     app.update_in(vcx, |app, _, _| {
-        let items = &app.frame.menu.items;
-        let rows = items
-            .keys
-            .borrow()
-            .iter()
-            .filter(|k| is_submenu_key(**k))
-            .count();
-        assert!(rows > 0, "the submenu drew rows before they were dropped");
-        items.keys.borrow_mut().retain(|k| !is_submenu_key(*k));
+        let dropped = app.frame.menu.items.drop_submenu_claims();
+        assert!(
+            dropped > 0,
+            "the submenu drew rows before they were dropped"
+        );
     });
     for key in ["down", "enter"] {
         vcx.simulate_keystrokes(key);
@@ -352,25 +347,28 @@ fn a_drawn_submenu_without_live_rows_keeps_the_focus_on_its_parent(cx: &mut Test
 }
 
 /// A submenu marked open whose parent row is not drawn (here Add to folder,
-/// absent without folders) is closed by the next key, which then acts as if
-/// none were open.
+/// absent without folders) is closed by the frame that does not draw the
+/// parent, before any key arrives.
 fn open_stale_folders_submenu(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
     focus_mute_row(app, vcx);
     app.update_in(vcx, |app, _, cx| {
         app.open_chat_submenu(ChatMenuSubmenu::Folders, cx);
     });
     settle(vcx);
-    assert_eq!(submenu(app, vcx), Some(ChatMenuSubmenu::Folders));
 }
 
 #[gpui_kit::test]
-fn down_with_a_stale_submenu_clears_it_and_walks_the_menu(cx: &mut TestAppContext) {
+fn a_stale_submenu_is_closed_by_the_frame_and_down_walks_the_menu(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     open_stale_folders_submenu(&app, vcx);
+    assert_eq!(
+        submenu(&app, vcx),
+        None,
+        "the frame cleared the stale state"
+    );
     vcx.simulate_keystrokes("down");
     settle(vcx);
-    assert_eq!(submenu(&app, vcx), None, "the stale state is cleared");
     assert!(menu_open(&app, vcx));
     let own = menu_labels(vcx);
     let at = own

@@ -304,7 +304,9 @@ mod platform {
     }
 
     fn connection() -> Option<std::rc::Rc<XConnection>> {
-        if let Some(shared) = CONNECTION.with(|slot| slot.borrow().clone()) {
+        if let Some(shared) =
+            CONNECTION.with(|slot| slot.try_borrow().ok().and_then(|cached| cached.clone()))
+        {
             return Some(shared);
         }
         let (conn, screen) = x11rb::connect(None).ok()?;
@@ -314,7 +316,11 @@ mod platform {
             root,
             wm_state: std::cell::Cell::new(None),
         });
-        CONNECTION.with(|slot| *slot.borrow_mut() = Some(shared.clone()));
+        CONNECTION.with(|slot| {
+            if let Ok(mut cached) = slot.try_borrow_mut() {
+                *cached = Some(shared.clone());
+            }
+        });
         Some(shared)
     }
 

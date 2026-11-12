@@ -54,8 +54,6 @@ pub(super) struct Clip {
     /// What its source holds besides the store (canvas, last frame).
     pub(super) source_bytes: usize,
     pub(super) wanted: VecDeque<u32>,
-    /// A frame of it was handed out.
-    pub(super) delivered: bool,
     pub(super) used: Instant,
     /// Round-robin order among a worker's clips.
     pub(super) served: u64,
@@ -70,31 +68,67 @@ pub(super) struct Clip {
 pub(super) enum Stage {
     /// Not taken yet: a worker takes `Origin` to open it.
     Waiting(Origin),
-    /// A worker is opening (or decoding) it.
+    /// A draw worker is opening it (or decoding it, with no opener
+    /// thread running).
     Opening,
+    /// Opener thread `opener` is decoding it.
+    Decoding {
+        opener: usize,
+    },
     /// Open, and no worker is on it.
-    Ready(ClipInfo),
+    Ready(Open),
     /// Open, and a worker is drawing frame `index`.
     Drawing {
-        info: ClipInfo,
+        open: Open,
         index: u32,
     },
     Failed(String),
+}
+
+/// Whether a drawn frame of an open clip was handed out yet: the first one
+/// wakes the UI, for the still a view waits on.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum FirstFrame {
+    Awaited,
+    Handed,
+}
+
+/// An open clip: what it holds and how far its first frame got.
+#[derive(Clone, Copy)]
+pub(super) struct Open {
+    pub(super) info: ClipInfo,
+    first_frame: FirstFrame,
+}
+
+impl Open {
+    pub(super) fn new(info: ClipInfo) -> Self {
+        Self {
+            info,
+            first_frame: FirstFrame::Awaited,
+        }
+    }
 }
 
 impl Stage {
     /// What the UI sees: a clip not open yet is opening.
     pub(super) fn state(&self) -> ClipState {
         match self {
-            Self::Waiting(_) | Self::Opening => ClipState::Opening,
-            Self::Ready(info) | Self::Drawing { info, .. } => ClipState::Ready(*info),
+            Self::Waiting(_) | Self::Opening | Self::Decoding { .. } => ClipState::Opening,
+            Self::Ready(open) | Self::Drawing { open, .. } => ClipState::Ready(open.info),
             Self::Failed(error) => ClipState::Failed(error.clone()),
         }
     }
 
     /// A worker is on it.
     pub(super) fn busy(&self) -> bool {
-        matches!(self, Self::Opening | Self::Drawing { .. })
+        matches!(
+            self,
+            Self::Opening | Self::Decoding { .. } | Self::Drawing { .. }
+        )
+    }
+
+    fn decoding_on(&self, index: usize) -> bool {
+        matches!(self, Self::Decoding { opener } if *opener == index)
     }
 
     fn drawing(&self) -> Option<u32> {
@@ -106,7 +140,7 @@ impl Stage {
 
     fn info(&self) -> Option<&ClipInfo> {
         match self {
-            Self::Ready(info) | Self::Drawing { info, .. } => Some(info),
+            Self::Ready(open) | Self::Drawing { open, .. } => Some(&open.info),
             _ => None,
         }
     }
@@ -117,9 +151,18 @@ impl Stage {
 
     /// The frame came back: ready again. No effect on any other stage.
     pub(super) fn frame_done(&mut self) {
-        if let Self::Drawing { info, .. } = self {
-            *self = Self::Ready(*info);
+        if let Self::Drawing { open, .. } = self {
+            *self = Self::Ready(*open);
         }
+    }
+
+    /// A drawn frame is handed out: true for the first one of this opening
+    /// (a clip closed and opened again starts over with a new [`Clip`]).
+    pub(super) fn hand_out_frame(&mut self) -> bool {
+        let (Self::Ready(open) | Self::Drawing { open, .. }) = self else {
+            return false;
+        };
+        std::mem::replace(&mut open.first_frame, FirstFrame::Handed) == FirstFrame::Awaited
     }
 }
 
@@ -208,19 +251,18 @@ pub(super) struct State {
     /// system, which the UI thread (closing clips) should not wait for.
     pub(super) freed: Vec<Store>,
     pub(super) stop: bool,
-    /// A worker ended: what it owned will never finish.
-    worker_gone: bool,
     /// Whether each draw worker (by index) still runs. A clip assigned to
     /// one that is gone fails at once, and no new clip goes to it.
     workers: Vec<WorkerLife>,
+    /// Whether each opener thread (by index) still runs. A clip one was
+    /// decoding fails when it ends; with none left the draw workers decode.
+    openers: Vec<WorkerLife>,
     pub(super) budget: usize,
     pub(super) store_bytes: usize,
     pub(super) stats: EngineStats,
     served: u64,
     /// The last clip id handed out.
     opened: u64,
-    /// No opener thread started: workers decode their own clips.
-    workers_decode: bool,
     /// Frames each worker drew in a row while one of its clips waited to
     /// open.
     frames_in_a_row: Vec<u32>,
@@ -254,22 +296,29 @@ pub(super) enum WorkerLife {
     Gone,
 }
 
+/// Which thread a [`WorkerEnd`] stands for.
+#[derive(Clone, Copy)]
+enum Thread {
+    Draw(usize),
+    Opener(usize),
+}
+
 /// Held by a worker's thread: it goes on return, on a panic, and with the
-/// closure of a thread that never started. `draws` is the index of a draw
-/// worker (an opener has none): the clips assigned to it end as failed.
-struct WorkerEnd(Arc<Shared>, Option<usize>);
+/// closure of a thread that never started. The clips the thread held end
+/// as failed.
+struct WorkerEnd(Arc<Shared>, Thread);
 
 impl Drop for WorkerEnd {
     fn drop(&mut self) {
         let failed = {
             let mut state = lock_or_recover(&self.0.state);
-            state.worker_gone = true;
             match self.1 {
-                Some(index) => state.worker_ended(index),
-                None => false,
+                Thread::Draw(index) => state.worker_ended(index),
+                Thread::Opener(index) => state.opener_ended(index),
             }
         };
         self.0.drained.notify_all();
+        self.0.work.notify_all();
         if failed {
             self.0.wake();
         }
@@ -294,6 +343,38 @@ impl State {
             changed = true;
         }
         changed
+    }
+
+    /// Opener `index` ended: the clip it was decoding will never finish. With
+    /// no opener left the draw workers decode what still waits. True when a
+    /// clip changed.
+    fn opener_ended(&mut self, index: usize) -> bool {
+        if let Some(life) = self.openers.get_mut(index) {
+            *life = WorkerLife::Gone;
+        }
+        let mut changed = false;
+        for clip in self.clips.values_mut() {
+            if clip.stage.decoding_on(index) {
+                clip.stage = Stage::Failed("the sticker decoder ended".to_string());
+                clip.wanted.clear();
+                changed = true;
+            }
+        }
+        changed
+    }
+
+    /// No opener thread runs (none started, or all ended): the draw workers
+    /// decode their own clips.
+    fn workers_decode(&self) -> bool {
+        self.openers.iter().all(|life| *life == WorkerLife::Gone)
+    }
+
+    /// A thread of the engine ended: what it owned will never finish.
+    fn any_thread_gone(&self) -> bool {
+        self.workers
+            .iter()
+            .chain(&self.openers)
+            .any(|life| *life == WorkerLife::Gone)
     }
 
     fn worker_runs(&self, index: usize) -> bool {
@@ -328,14 +409,13 @@ impl Engine {
                 closed: vec![Vec::new(); workers],
                 freed: Vec::new(),
                 stop: false,
-                worker_gone: false,
                 workers: vec![WorkerLife::Running; workers],
+                openers: vec![WorkerLife::Running; workers],
                 budget,
                 store_bytes: 0,
                 stats: EngineStats::default(),
                 served: 0,
                 opened: 0,
-                workers_decode: false,
                 frames_in_a_row: vec![0; workers],
             }),
             work: Condvar::new(),
@@ -343,20 +423,19 @@ impl Engine {
             waker: Mutex::new(None),
         });
         let mut live = Vec::new();
-        let mut openers = 0;
         for index in 0..workers {
             let opener = shared.clone();
-            let end = WorkerEnd(shared.clone(), None);
+            let end = WorkerEnd(shared.clone(), Thread::Opener(index));
             let spawned = spawn(
                 format!("quill-sticker-open-{index}"),
                 Box::new(move || {
                     let _end = end;
-                    super::opener::run(&opener)
+                    super::opener::run(index, &opener)
                 }),
             );
-            openers += usize::from(spawned.is_ok());
+            drop(spawned);
             let worker = shared.clone();
-            let end = WorkerEnd(shared.clone(), Some(index));
+            let end = WorkerEnd(shared.clone(), Thread::Draw(index));
             let spawned = spawn(
                 format!("quill-sticker-{index}"),
                 Box::new(move || {
@@ -368,7 +447,6 @@ impl Engine {
                 live.push(index);
             }
         }
-        lock_or_recover(&shared.state).workers_decode = openers == 0;
         Self { shared, live }
     }
 
@@ -430,7 +508,6 @@ impl Engine {
                 source_bytes: 0,
                 // Its first frame, for the still a view waits on.
                 wanted: VecDeque::from([0]),
-                delivered: false,
                 used: Instant::now(),
                 served: 0,
                 cancel: Cancel::default(),
@@ -502,7 +579,7 @@ impl Engine {
     /// frame asked for or being drawn), or one of them ended.
     pub fn wait_idle(&self) {
         let mut state = lock_or_recover(&self.shared.state);
-        while !state.worker_gone && !state.idle() {
+        while !state.any_thread_gone() && !state.idle() {
             state = self
                 .shared
                 .drained
@@ -686,7 +763,7 @@ impl State {
     /// started). A clip waiting to open goes first once
     /// [`FRAMES_BEFORE_OPEN`] frames went before it.
     pub(super) fn next_job(&mut self, me: usize) -> Option<Job> {
-        let workers_decode = self.workers_decode;
+        let workers_decode = self.workers_decode();
         let opening = self.clips.iter().find_map(|(key, clip)| {
             let own = match &clip.stage {
                 Stage::Waiting(Origin::Lottie(_)) => true,
@@ -741,10 +818,10 @@ impl State {
         let served = self.served;
         let clip = self.clips.get_mut(&key)?;
         let index = clip.wanted.pop_front()?;
-        let Stage::Ready(info) = clip.stage else {
+        let Stage::Ready(open) = clip.stage else {
             return None;
         };
-        clip.stage = Stage::Drawing { info, index };
+        clip.stage = Stage::Drawing { open, index };
         clip.served = served;
         let stored = clip.store.get(index);
         Some(Job::Frame {
@@ -757,8 +834,11 @@ impl State {
 
     /// The next clip for an opener to decode, with its id and what stops
     /// it.
-    pub(super) fn next_decode(&mut self) -> Option<(ClipKey, u64, DecodeAll, Cancel)> {
-        if self.workers_decode {
+    pub(super) fn next_decode(
+        &mut self,
+        opener: usize,
+    ) -> Option<(ClipKey, u64, DecodeAll, Cancel)> {
+        if self.workers_decode() {
             return None;
         }
         let (key, clip) = self
@@ -766,7 +846,7 @@ impl State {
             .iter_mut()
             .find(|(_, clip)| matches!(clip.stage, Stage::Waiting(Origin::Decoded(_))))?;
         let Stage::Waiting(Origin::Decoded(decode)) =
-            std::mem::replace(&mut clip.stage, Stage::Opening)
+            std::mem::replace(&mut clip.stage, Stage::Decoding { opener })
         else {
             return None;
         };

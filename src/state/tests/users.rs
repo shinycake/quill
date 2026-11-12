@@ -231,7 +231,7 @@ fn add_contact_ok_invalidates_contacts() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, add_extra.0),
     );
-    assert!(session.users_state.contacts.data().is_none());
+    assert!(session.users_state.contacts.is_outdated());
 }
 
 #[test]
@@ -252,7 +252,7 @@ fn a6_imported_contacts_response_invalidates_and_notices() {
             extra.0
         ),
     );
-    assert!(session.users_state.contacts.data().is_none());
+    assert!(session.users_state.contacts.is_outdated());
     assert_eq!(
         session.users_state.contacts_notice.as_deref(),
         Some("Contacts imported.")
@@ -281,7 +281,7 @@ fn a6_remove_contact_ok_clears_cached_is_contact() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(session.users_state.contacts.data().is_none());
+    assert!(session.users_state.contacts.is_outdated());
     assert!(!session.users.get(&31).expect("user").is_contact);
     assert_eq!(
         session.users_state.contacts_notice.as_deref(),
@@ -381,6 +381,7 @@ fn failed_color_requests_surface_the_error_and_icons_flag() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::SetAccentColor, None);
+    session.acks.expect(extra);
     apply_json(
         &mut session,
         &seq,
@@ -390,13 +391,17 @@ fn failed_color_requests_surface_the_error_and_icons_flag() {
             extra.0
         ),
     );
-    assert!(session.users_state.peer_color_error.is_some());
     assert!(
-        session.users_state.profile_edit_error.is_none(),
-        "a color failure is not a profile-edit failure"
+        matches!(
+            session.acks.take(extra),
+            Some(crate::state::Answer::Failed(_))
+        ),
+        "the box that sent it gets its own refusal"
     );
 
     let extra = session.request(RequestPurpose::GetBackgroundEmojiIcons, None);
+    session.users_state.background_emoji_icons.begin();
+    session.users_state.background_emoji_icons.sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -493,7 +498,7 @@ fn an_older_contacts_answer_does_not_bring_back_a_dropped_list() {
     session.users_state.contacts.begin();
     session.users_state.contacts.sent(old);
     // A contact change dropped the list while the fetch was out.
-    session.users_state.contacts = crate::state::fetch::Fetch::Idle;
+    session.users_state.contacts.outdate();
     apply_json(
         &mut session,
         &seq,
@@ -503,6 +508,6 @@ fn an_older_contacts_answer_does_not_bring_back_a_dropped_list() {
             old.0
         ),
     );
-    assert!(session.users_state.contacts.is_idle());
+    assert!(session.users_state.contacts.is_outdated());
     assert!(session.users_state.contacts.data().is_none());
 }

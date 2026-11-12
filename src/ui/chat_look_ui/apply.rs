@@ -43,10 +43,7 @@ impl QuillApp {
     }
 
     fn apply_chat_look_for(&mut self, both: bool, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(dialog) = self.dialogs.chat_look_dialog.as_mut() {
-            dialog.both = both;
-        }
-        self.apply_chat_look(cx);
+        self.apply_chat_look(both, cx);
         self.close_kit_dialog_if_done(DialogKind::ChatLook, window, cx);
     }
 

@@ -34,39 +34,60 @@ pub(super) enum View {
     },
 }
 
-/// The delete button's two steps (a shortcut with messages asks first).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) enum DeleteStep {
-    #[default]
-    Idle,
-    /// "Delete?" was pressed: the next press deletes.
-    Asked,
-}
-
 /// What the open shortcut's screen holds beside its address (`View`): the
-/// edit in the field, the text being saved, the delete question and the
-/// last refusal. A screen change replaces it whole
-/// ([`QuillApp::quick_replies_go`]), so nothing outlives its screen.
+/// one thing it is doing, and the last refusal. A screen change replaces it
+/// whole ([`QuillApp::quick_replies_go`]), so nothing outlives its screen.
 #[derive(Clone, Default)]
 pub(super) struct ShortcutPane {
-    /// The message whose text is in the field.
-    pub(super) editing: Option<i64>,
-    /// The text sent to the server and not answered yet: the field is
-    /// empty meanwhile, and a refusal puts it back.
-    pub(super) save: TextSave,
-    pub(super) delete: DeleteStep,
+    pub(super) stage: PaneStage,
     pub(super) error: Option<String>,
 }
 
-#[derive(Clone, Default)]
-pub(super) enum TextSave {
-    #[default]
-    Idle,
-    Sending {
+/// What the shortcut's screen is doing. Any other action replaces
+/// `ConfirmDelete`, so the next press of Delete asks again.
+#[derive(Clone)]
+pub(super) enum PaneStage {
+    /// The field edits the text of message `editing` (a new message when
+    /// `None`).
+    Editing { editing: Option<i64> },
+    /// The text of the field is on its way to the server: the field is
+    /// empty meanwhile, and a refusal puts it back. Sent as `request`; only
+    /// that request's answer settles it.
+    Saving {
         request: quill::ids::RequestId,
         text: String,
         editing: Option<i64>,
     },
+    /// The server accepted the text of a shortcut named here whose id TDLib
+    /// has not reported yet: the poll waits for it. Leaves when the id
+    /// resolves, the screen changes or the box closes.
+    Accepted,
+    /// "Delete?" was pressed on a shortcut with messages: the next press
+    /// deletes. `editing` is the edit still in the field.
+    ConfirmDelete { editing: Option<i64> },
+    /// The shortcut's delete went out as `request`; its answer leaves for
+    /// the list, its refusal comes back to the field.
+    Deleting { request: quill::ids::RequestId },
+}
+
+impl Default for PaneStage {
+    fn default() -> Self {
+        Self::Editing { editing: None }
+    }
+}
+
+impl PaneStage {
+    /// The message whose text is in the field.
+    pub(super) fn editing(&self) -> Option<i64> {
+        match self {
+            Self::Editing { editing } | Self::ConfirmDelete { editing } => *editing,
+            Self::Saving { .. } | Self::Accepted | Self::Deleting { .. } => None,
+        }
+    }
+
+    fn sending(&self) -> bool {
+        matches!(self, Self::Saving { .. } | Self::Deleting { .. })
+    }
 }
 
 #[derive(Clone)]
@@ -113,8 +134,19 @@ impl QuillApp {
     }
 
     pub(super) fn close_quick_replies(&mut self, cx: &mut Context<Self>) {
-        if self.dialogs.quick_replies_dialog.take().is_some() {
+        if let Some(dialog) = self.dialogs.quick_replies_dialog.take() {
+            self.forget_quick_reply_stage(dialog.pane.stage);
             cx.notify();
+        }
+    }
+
+    /// The screen that sent a request went away: nobody waits for its
+    /// answer.
+    fn forget_quick_reply_stage(&mut self, stage: PaneStage) {
+        if let PaneStage::Saving { request, .. } | PaneStage::Deleting { request } = stage
+            && let Some(live) = self.live.as_mut()
+        {
+            live.driver.session.acks.forget(request);
         }
     }
 
@@ -143,7 +175,11 @@ impl QuillApp {
             return;
         };
         dialog.view = view;
-        dialog.pane = ShortcutPane::default();
+        let old = std::mem::take(&mut dialog.pane);
+        self.forget_quick_reply_stage(old.stage);
+        let Some(dialog) = self.quick_replies_mut() else {
+            return;
+        };
         let (name_input, text_input) = (dialog.name_input.clone(), dialog.text_input.clone());
         name_input.update(cx, |input, cx| input.set_value(name, window, cx));
         text_input.update(cx, |input, cx| input.set_value("", window, cx));
@@ -187,12 +223,24 @@ impl QuillApp {
                 .map(|s| s.id)
         });
         let Some(shortcut_id) = resolved else {
-            return false;
+            // The id is awaited only for a text the server accepted (its
+            // update is on its way); with nothing sent or the send
+            // refused there is nothing to wait for, and neither is there
+            // behind the lock screen.
+            let waiting = self
+                .dialogs
+                .quick_replies_dialog
+                .as_ref()
+                .is_some_and(|dialog| matches!(dialog.pane.stage, PaneStage::Accepted));
+            return self.refused_while_locked() || (!saving && !waiting);
         };
-        if let Some(dialog) = self.quick_replies_mut()
-            && let View::Shortcut { id, .. } = &mut dialog.view
-        {
-            *id = Some(shortcut_id);
+        if let Some(dialog) = self.quick_replies_mut() {
+            if let View::Shortcut { id, .. } = &mut dialog.view {
+                *id = Some(shortcut_id);
+            }
+            if matches!(dialog.pane.stage, PaneStage::Accepted) {
+                dialog.pane.stage = PaneStage::default();
+            }
         }
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.ensure_quick_reply_messages(shortcut_id);
@@ -206,19 +254,17 @@ impl QuillApp {
         (settled || self.live.is_none()) && !saving
     }
 
-    /// The answer of the text being saved: an accepted change is done, a
-    /// refused one gives the text (and its edit) back to the field.
-    /// Returns whether the request is still out.
+    /// The answer of the request the screen waits for: an accepted text is
+    /// done and a refused one gives the text (and its edit) back to the
+    /// field; an accepted delete leaves for the list and a refused one
+    /// comes back to the field with its line. Returns whether the request
+    /// is still out.
     fn settle_quick_reply_save(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let Some(dialog) = self.dialogs.quick_replies_dialog.as_ref() else {
             return false;
         };
-        let TextSave::Sending {
-            request,
-            text,
-            editing,
-        } = dialog.pane.save.clone()
-        else {
+        let stage = dialog.pane.stage.clone();
+        let (PaneStage::Saving { request, .. } | PaneStage::Deleting { request }) = stage else {
             return false;
         };
         let answered = self
@@ -228,16 +274,39 @@ impl QuillApp {
         if !answered {
             return true;
         }
-        let refused = self
-            .session()
-            .is_some_and(|s| s.settings.quick_replies.error.is_some());
-        if let Some(dialog) = self.quick_replies_mut() {
-            dialog.pane.save = TextSave::Idle;
-            if refused {
-                dialog.pane.editing = editing;
-                let input = dialog.text_input.clone();
-                input.update(cx, |input, cx| input.set_value(text, window, cx));
+        // The answer of this request, not the dialog's last error: a request
+        // that left flight with no answer was not accepted either.
+        let accepted = self.live.as_mut().is_none_or(|live| {
+            live.driver.session.acks.take(request) == Some(quill::state::Answer::Done)
+        });
+        match stage {
+            PaneStage::Deleting { .. } if accepted => {
+                self.quick_replies_go(View::List, window, cx);
+                return false;
             }
+            PaneStage::Deleting { .. } => {
+                if let Some(dialog) = self.quick_replies_mut() {
+                    dialog.pane.stage = PaneStage::default();
+                }
+                self.quick_replies_error(tr(keys::Q_OPS_COULD_NOT_DELETE_THE_SHORTCUT), cx);
+            }
+            PaneStage::Saving { text, editing, .. } => {
+                if let Some(dialog) = self.quick_replies_mut() {
+                    let awaiting_id = matches!(dialog.view, View::Shortcut { id: None, .. });
+                    dialog.pane.stage = if accepted && awaiting_id {
+                        PaneStage::Accepted
+                    } else if accepted {
+                        PaneStage::default()
+                    } else {
+                        PaneStage::Editing { editing }
+                    };
+                    if !accepted {
+                        let input = dialog.text_input.clone();
+                        input.update(cx, |input, cx| input.set_value(text, window, cx));
+                    }
+                }
+            }
+            _ => {}
         }
         cx.notify();
         false
@@ -274,7 +343,7 @@ impl QuillApp {
             let _ = this.update_in(cx, |this, window, cx| {
                 let sending = this.quick_replies_mut().is_some_and(|dialog| {
                     dialog.watch = None;
-                    matches!(dialog.pane.save, TextSave::Sending { .. })
+                    dialog.pane.stage.sending()
                 });
                 // A save sent as this poll ended still needs its answer.
                 if sending {
@@ -341,7 +410,11 @@ impl QuillApp {
         let View::Shortcut { name, id } = dialog.view.clone() else {
             return;
         };
-        let editing = dialog.pane.editing;
+        if dialog.pane.stage.sending() {
+            // The text before it is still on its way.
+            return;
+        }
+        let editing = dialog.pane.stage.editing();
         let text = dialog.text_input.read(cx).value().trim().to_string();
         if text.is_empty() {
             self.quick_replies_error(tr(keys::Q_OPS_WRITE_THE_MESSAGE_FIRST), cx);
@@ -369,13 +442,15 @@ impl QuillApp {
         let Some(request) = request else {
             return;
         };
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.acks.expect(request);
+        }
         if let Some(dialog) = self.quick_replies_mut() {
-            dialog.pane.save = TextSave::Sending {
+            dialog.pane.stage = PaneStage::Saving {
                 request,
                 text,
                 editing,
             };
-            dialog.pane.editing = None;
             dialog.pane.error = None;
             let input = dialog.text_input.clone();
             input.update(cx, |input, cx| input.set_value("", window, cx));
@@ -392,8 +467,12 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(dialog) = self.quick_replies_mut() {
-            dialog.pane.editing = Some(message_id);
+        if let Some(dialog) = self.quick_replies_mut()
+            && !dialog.pane.stage.sending()
+        {
+            dialog.pane.stage = PaneStage::Editing {
+                editing: Some(message_id),
+            };
             dialog.pane.error = None;
             let input = dialog.text_input.clone();
             input.update(cx, |input, cx| input.set_value(text, window, cx));
@@ -402,8 +481,10 @@ impl QuillApp {
     }
 
     pub(super) fn cancel_quick_reply_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(dialog) = self.quick_replies_mut() {
-            dialog.pane.editing = None;
+        if let Some(dialog) = self.quick_replies_mut()
+            && !dialog.pane.stage.sending()
+        {
+            dialog.pane.stage = PaneStage::default();
             let input = dialog.text_input.clone();
             input.update(cx, |input, cx| input.set_value("", window, cx));
         }
@@ -418,6 +499,12 @@ impl QuillApp {
     ) {
         if !self.quick_replies_live(cx) {
             return;
+        }
+        if let Some(dialog) = self.quick_replies_mut()
+            && let PaneStage::ConfirmDelete { editing } = dialog.pane.stage
+        {
+            // Another action: the question is not asked any more.
+            dialog.pane.stage = PaneStage::Editing { editing };
         }
         if let Some(live) = self.live.as_mut()
             && live
@@ -447,13 +534,18 @@ impl QuillApp {
             self.quick_replies_go(View::List, window, cx);
             return;
         };
+        if dialog.pane.stage.sending() {
+            return;
+        }
         let has_messages = self
             .session()
             .is_some_and(|s| !s.settings.quick_replies.messages_of(id).is_empty());
-        let confirmed = dialog.pane.delete == DeleteStep::Asked;
+        let confirmed = matches!(dialog.pane.stage, PaneStage::ConfirmDelete { .. });
         if has_messages && !confirmed {
             if let Some(dialog) = self.quick_replies_mut() {
-                dialog.pane.delete = DeleteStep::Asked;
+                dialog.pane.stage = PaneStage::ConfirmDelete {
+                    editing: dialog.pane.stage.editing(),
+                };
             }
             cx.notify();
             return;
@@ -461,13 +553,29 @@ impl QuillApp {
         if !self.quick_replies_live(cx) {
             return;
         }
-        if let Some(live) = self.live.as_mut()
-            && live.driver.delete_quick_reply_shortcut(id).is_err()
-        {
-            self.quick_replies_error(tr(keys::Q_OPS_COULD_NOT_DELETE_THE_SHORTCUT), cx);
-            return;
+        let sent = self
+            .live
+            .as_mut()
+            .map(|live| live.driver.delete_quick_reply_shortcut(id));
+        match sent {
+            Some(Ok(Some(request))) => {
+                if let Some(live) = self.live.as_mut() {
+                    live.driver.session.acks.expect(request);
+                }
+                if let Some(dialog) = self.quick_replies_mut() {
+                    dialog.pane.stage = PaneStage::Deleting { request };
+                    dialog.pane.error = None;
+                }
+                self.quick_replies_watch(window, cx);
+            }
+            // The same delete is already on its way: it answers for this one.
+            Some(Ok(None)) | None => {}
+            Some(Err(_)) => {
+                self.quick_replies_error(tr(keys::Q_OPS_COULD_NOT_DELETE_THE_SHORTCUT), cx);
+                return;
+            }
         }
-        self.quick_replies_go(View::List, window, cx);
+        cx.notify();
     }
 
     /// The first `/` in a chat asks for the shortcuts (once per session).

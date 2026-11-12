@@ -220,7 +220,11 @@ impl QuillApp {
                 this.close_proxy_link(cx);
             });
         app.update(cx, |this, cx| {
-            let Some(link) = this.settings.proxy.link.as_ref() else {
+            let shown = this
+                .session()
+                .map(|s| s.settings.proxy.link.clone())
+                .unwrap_or_default();
+            let Some(draft) = shown.draft().cloned() else {
                 return dialog
                     .overlay(true)
                     .title(crate::ui::shell::dialog_title(tr(
@@ -228,16 +232,8 @@ impl QuillApp {
                     )))
                     .on_close(on_close);
             };
-            let draft = link.draft.clone();
-            let stage = this
-                .session()
-                .map_or(LinkCheck::Review, |s| s.settings.proxy.link_check);
-            let warn = stage == LinkCheck::Warn;
-            let ping = match stage {
-                LinkCheck::Checking(_) => Some(PingStatus::Checking),
-                LinkCheck::Done(status) => Some(status),
-                LinkCheck::Review | LinkCheck::Warn => None,
-            };
+            let warn = shown.is_warning();
+            let ping = shown.status();
             let mut body = div().flex().flex_col().gap_2().child(Self::link_row(
                 tr(keys::PROXY_BOX_SERVER),
                 draft.display_address(),
@@ -276,7 +272,7 @@ impl QuillApp {
             let status = match ping {
                 Some(status) => {
                     let (text, color) = match status {
-                        PingStatus::Checking => {
+                        PingStatus::Checking(_) => {
                             (tr(keys::PROXY_BOX_TABLE_CHECKING).to_string(), text_muted())
                         }
                         PingStatus::Available(ms) => (

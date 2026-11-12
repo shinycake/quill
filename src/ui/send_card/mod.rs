@@ -10,6 +10,7 @@
 #[cfg(feature = "demo-capture")]
 mod demo;
 mod dialog;
+mod file_size;
 mod layout;
 mod options;
 mod tiles;

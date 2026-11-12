@@ -215,3 +215,63 @@ fn a_failed_stories_tab_ends_its_loading() {
     assert!(!tab.loading_more());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn reopening_the_gallery_asks_for_the_counts_again_and_keeps_the_shown_ones() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    driver
+        .ingest(
+            copy_and_parse(
+                r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Ada","type":{"@type":"chatTypePrivate","user_id":31},"unread_count":0}}"#,
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    driver.session.open = crate::state::OpenView::of(Some(ChatId(7)));
+    assert!(driver.open_shared_media().unwrap());
+    let counts_sent = |recorder: &RecordingSender| {
+        types_sent(recorder)
+            .iter()
+            .filter(|kind| kind.starts_with("getChatMessageCount"))
+            .count()
+    };
+    let first = counts_sent(&recorder);
+    assert!(first > 0);
+    driver
+        .session
+        .media
+        .chat_media_counts
+        .get_mut(&7)
+        .expect("entry")
+        .insert(2, 0);
+    // Open again while the first answers are still out: nothing is asked twice.
+    driver.close_shared_media();
+    assert!(driver.open_shared_media().unwrap());
+    assert_eq!(counts_sent(&recorder), first);
+    // Once they answered, the next open asks again and the entry stays.
+    let ids: Vec<_> = driver.session.requests.ids_for_chat(
+        &(0..16u8)
+            .map(|filter| {
+                crate::state::RequestPurpose::Users(
+                    crate::state::UsersPurpose::GetChatMessageCount { filter },
+                )
+            })
+            .collect::<Vec<_>>(),
+        ChatId(7),
+    );
+    for id in ids {
+        driver.session.requests.take(id);
+    }
+    driver.close_shared_media();
+    assert!(driver.open_shared_media().unwrap());
+    assert_eq!(counts_sent(&recorder), first * 2);
+    assert_eq!(driver.session.media.chat_media_counts[&7].get(&2), Some(&0));
+    drop(driver);
+    let _ = std::fs::remove_dir_all(dir);
+}

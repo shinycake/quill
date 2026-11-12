@@ -5,6 +5,7 @@ use super::super::*;
 use super::*;
 use crate::diagnostics::DiagnosticSink;
 use crate::diagnostics::MemorySink;
+use crate::ids::RequestId;
 use crate::platform::MemorySecretStore;
 use crate::state::AuthPurpose;
 use crate::state::{LoginReview, PasswordOp, RequestPurpose, TwofaNotice};
@@ -115,13 +116,13 @@ fn sessions_answer(extra: u64) -> String {
 /// list, and the user's answer confirms or terminates exactly that session.
 fn unconfirmed_alert(f: &mut Fixture) {
     ingest(&mut f.1, &f.4, &f.3, UNCONFIRMED_UPDATE);
-    assert_eq!(f.1.session.settings.notices.unconfirmed_count, 1);
+    assert_eq!(f.1.session.settings.notices.unconfirmed_count(), 1);
     // The update marked the list stale: the same ingest refetched it.
     let fetch = requests_of(&f.2, "getActiveSessions");
     assert_eq!(fetch.len(), 1);
     let extra: u64 = fetch[0]["@extra"].as_str().unwrap().parse().unwrap();
     ingest(&mut f.1, &f.4, &f.3, &sessions_answer(extra));
-    let entries = &f.1.session.settings.notices.unconfirmed_entries;
+    let entries = f.1.session.settings.notices.unconfirmed_entries();
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].id, 77);
     assert_eq!(entries[0].device, "Pixel 9");
@@ -148,8 +149,14 @@ fn new_login_yes_confirms_the_unconfirmed_session() {
         f.1.session.settings.notices.review.outcome(),
         Some(&LoginReview::Allowed)
     );
-    assert_eq!(f.1.session.settings.notices.unconfirmed_count, 0);
-    assert!(f.1.session.settings.notices.unconfirmed_entries.is_empty());
+    assert_eq!(f.1.session.settings.notices.unconfirmed_count(), 0);
+    assert!(
+        f.1.session
+            .settings
+            .notices
+            .unconfirmed_entries()
+            .is_empty()
+    );
     cleanup(f);
 }
 
@@ -193,7 +200,7 @@ fn new_login_review_error_keeps_the_alert() {
     );
     assert!(f.1.session.settings.notices.review.error().is_some());
     assert!(f.1.session.settings.notices.review.outcome().is_none());
-    assert_eq!(f.1.session.settings.notices.unconfirmed_count, 1);
+    assert_eq!(f.1.session.settings.notices.unconfirmed_count(), 1);
     assert!(!f.1.session.settings.notices.review.busy());
     cleanup(f);
 }
@@ -208,9 +215,15 @@ fn unconfirmed_update_with_none_left_clears_the_alert() {
         &f.3,
         r#"{"@type":"updateUnconfirmedSession","session":null,"unconfirmed_session_count":0}"#,
     );
-    assert_eq!(f.1.session.settings.notices.unconfirmed_count, 0);
+    assert_eq!(f.1.session.settings.notices.unconfirmed_count(), 0);
     assert!(f.1.session.settings.notices.unconfirmed.is_none());
-    assert!(f.1.session.settings.notices.unconfirmed_entries.is_empty());
+    assert!(
+        f.1.session
+            .settings
+            .notices
+            .unconfirmed_entries()
+            .is_empty()
+    );
     cleanup(f);
 }
 
@@ -468,13 +481,13 @@ fn recovery_email_code_confirms_the_pending_address() {
         f.1.session
             .auth_state
             .password_state
-            .as_ref()
+            .get()
             .unwrap()
-            .pending_email_pattern,
+            .pending_email,
         None
     );
     assert_eq!(
-        f.1.session.auth_state.twofa_flow.notice,
+        f.1.session.auth_state.twofa_flow.notice(),
         Some(TwofaNotice::RecoveryEmailConfirmed)
     );
     cleanup(f);
@@ -510,9 +523,9 @@ fn wrong_recovery_email_code_reports_without_changing_state() {
         f.1.session
             .auth_state
             .password_state
-            .as_ref()
+            .get()
             .unwrap()
-            .pending_email_pattern
+            .pending_email
             .is_some()
     );
     cleanup(f);
@@ -537,7 +550,7 @@ fn forgot_password_requests_a_code_then_recovers_with_a_new_password() {
         ),
     );
     assert_eq!(
-        f.1.session.auth_state.twofa_flow.code_wait.recovery(),
+        f.1.session.auth_state.twofa_flow.recovery(),
         Some("i***@example.com")
     );
     assert!(!f.1.session.auth_state.password_state_loading());
@@ -557,16 +570,9 @@ fn forgot_password_requests_a_code_then_recovers_with_a_new_password() {
         &f.3,
         &PASSWORD_STATE_ON.replace("EXTRA", &extra),
     );
-    assert!(
-        f.1.session
-            .auth_state
-            .twofa_flow
-            .code_wait
-            .recovery()
-            .is_none()
-    );
+    assert!(f.1.session.auth_state.twofa_flow.recovery().is_none());
     assert_eq!(
-        f.1.session.auth_state.twofa_flow.notice,
+        f.1.session.auth_state.twofa_flow.notice(),
         Some(TwofaNotice::PasswordRecovered)
     );
     cleanup(f);
@@ -576,19 +582,19 @@ fn forgot_password_requests_a_code_then_recovers_with_a_new_password() {
 fn a_refused_request_keeps_the_code_sent_to_step() {
     let mut f = fixture();
     seed_password_state(&mut f, PASSWORD_STATE_ON);
-    f.1.session.auth_state.twofa_flow.code_wait =
-        crate::state::CodeWait::Recovery("i***@example.com".into());
+    f.1.session.auth_state.twofa_flow =
+        crate::state::TwofaFlow::RecoveryCode("i***@example.com".into());
     // Another 2FA request is out: both starters are refused.
     f.1.refresh_password_state().unwrap();
     assert_invalid(f.1.request_twofa_recovery_code());
     assert_invalid(f.1.set_login_email("me@example.com"));
     let flow = &f.1.session.auth_state.twofa_flow;
-    assert_eq!(flow.code_wait.recovery(), Some("i***@example.com"));
-    f.1.session.auth_state.twofa_flow.code_wait =
-        crate::state::CodeWait::LoginEmail("m***@example.com".into());
+    assert_eq!(flow.recovery(), Some("i***@example.com"));
+    f.1.session.auth_state.twofa_flow =
+        crate::state::TwofaFlow::LoginEmailCode("m***@example.com".into());
     assert_invalid(f.1.set_login_email("me@example.com"));
     let flow = &f.1.session.auth_state.twofa_flow;
-    assert_eq!(flow.code_wait.login_email(), Some("m***@example.com"));
+    assert_eq!(flow.login_email(), Some("m***@example.com"));
     cleanup(f);
 }
 
@@ -603,7 +609,7 @@ fn recovering_with_an_empty_password_reports_removal() {
     );
     ingest(&mut f.1, &f.4, &f.3, &removed);
     assert_eq!(
-        f.1.session.auth_state.twofa_flow.notice,
+        f.1.session.auth_state.twofa_flow.notice(),
         Some(TwofaNotice::PasswordRemoved)
     );
     cleanup(f);
@@ -626,13 +632,60 @@ fn reset_password_pending_refetches_the_state_for_the_date() {
         ),
     );
     assert_eq!(
-        f.1.session.auth_state.twofa_flow.notice,
+        f.1.session.auth_state.twofa_flow.notice(),
         Some(TwofaNotice::ResetPending {
             reset_date: 1_760_604_800
         })
     );
     // The new date lives in the password state: refetched on the same ingest.
     assert_eq!(requests_of(&f.2, "getPasswordState").len(), 2);
+    cleanup(f);
+}
+
+#[test]
+fn a_refused_password_refetch_is_sent_on_a_later_ingest() {
+    let mut f = fixture();
+    seed_password_state(&mut f, PASSWORD_STATE_ON);
+    f.1.reset_twofa_password().unwrap();
+    let extra = last_request(&f.2)["@extra"].as_str().unwrap().to_string();
+    let before = requests_of(&f.2, "getPasswordState").len();
+    f.2.refuse_sends(true);
+    ingest(
+        &mut f.1,
+        &f.4,
+        &f.3,
+        &format!(
+            r#"{{"@type":"resetPasswordResultPending","pending_reset_date":1760604800,"@extra":"{extra}"}}"#
+        ),
+    );
+    assert_eq!(requests_of(&f.2, "getPasswordState").len(), before);
+    assert!(f.1.session.auth_state.password_state.is_outdated());
+    f.2.refuse_sends(false);
+    ingest(
+        &mut f.1,
+        &f.4,
+        &f.3,
+        r#"{"@type":"updateOption","name":"x","value":{"@type":"optionValueEmpty"}}"#,
+    );
+    assert_eq!(requests_of(&f.2, "getPasswordState").len(), before + 1);
+    assert!(!f.1.session.auth_state.password_state.is_outdated());
+    // The refetch is refused: the state shown stays, and nothing asks again
+    // by itself.
+    let refetch = last_request(&f.2)["@extra"].as_str().unwrap().to_string();
+    ingest(
+        &mut f.1,
+        &f.4,
+        &f.3,
+        &format!(r#"{{"@type":"error","code":500,"message":"X","@extra":"{refetch}"}}"#),
+    );
+    ingest(
+        &mut f.1,
+        &f.4,
+        &f.3,
+        r#"{"@type":"updateOption","name":"x","value":{"@type":"optionValueEmpty"}}"#,
+    );
+    assert_eq!(requests_of(&f.2, "getPasswordState").len(), before + 1);
+    assert!(f.1.session.auth_state.password_state.get().is_some());
     cleanup(f);
 }
 
@@ -651,7 +704,7 @@ fn reset_password_declined_reports_the_retry_date() {
         ),
     );
     assert_eq!(
-        f.1.session.auth_state.twofa_flow.notice,
+        f.1.session.auth_state.twofa_flow.notice(),
         Some(TwofaNotice::ResetDeclined {
             retry_date: 1_760_700_000
         })
@@ -681,7 +734,7 @@ fn cancel_password_reset_needs_a_pending_reset() {
         &format!(r#"{{"@type":"ok","@extra":"{extra}"}}"#),
     );
     assert_eq!(
-        f.1.session.auth_state.twofa_flow.notice,
+        f.1.session.auth_state.twofa_flow.notice(),
         Some(TwofaNotice::ResetCancelled)
     );
     assert_eq!(requests_of(&f.2, "getPasswordState").len(), 3);
@@ -708,7 +761,7 @@ fn login_email_change_is_code_confirmed() {
         ),
     );
     assert_eq!(
-        f.1.session.auth_state.twofa_flow.code_wait.login_email(),
+        f.1.session.auth_state.twofa_flow.login_email(),
         Some("m***@example.com")
     );
     f.1.resend_login_email_code().unwrap();
@@ -734,16 +787,9 @@ fn login_email_change_is_code_confirmed() {
         &f.3,
         &format!(r#"{{"@type":"ok","@extra":"{extra}"}}"#),
     );
-    assert!(
-        f.1.session
-            .auth_state
-            .twofa_flow
-            .code_wait
-            .login_email()
-            .is_none()
-    );
+    assert!(f.1.session.auth_state.twofa_flow.login_email().is_none());
     assert_eq!(
-        f.1.session.auth_state.twofa_flow.notice,
+        f.1.session.auth_state.twofa_flow.notice(),
         Some(TwofaNotice::LoginEmailChanged)
     );
     cleanup(f);
@@ -820,12 +866,27 @@ fn limits_tdlib_never_took_are_sent_again_on_the_next_ready() {
     );
     f.2.sent.lock().unwrap().clear();
     f.1.maybe_seed_storage_limits().unwrap();
-    assert!(
-        requests_of(&f.2, "setOption").is_empty(),
-        "once per session"
+    let first = requests_of(&f.2, "setOption");
+    assert_eq!(first.len(), 4);
+    // TDLib refuses an option: nothing keeps the seed "in flight", so the
+    // next Ready sends the limits again.
+    let extra = first.first().expect("an option")["@extra"].clone();
+    ingest(
+        &mut f.1,
+        &f.4,
+        &f.3,
+        &format!(
+            r#"{{"@type":"error","code":400,"message":"Option can't be set","@extra":{extra}}}"#
+        ),
     );
-    // The process died before the echo: a new session starts unseeded.
-    f.1.session.settings.data_storage.storage_limits_seeded = crate::data_settings::Seed::Unseeded;
+    assert!(
+        !f.1.session
+            .settings
+            .data_storage
+            .storage_limits_seeded
+            .is_seeded()
+    );
+    f.2.sent.lock().unwrap().clear();
     f.1.maybe_seed_storage_limits().unwrap();
     assert_eq!(requests_of(&f.2, "setOption").len(), 4);
     cleanup(f);
@@ -874,21 +935,26 @@ fn a_retried_review_skips_the_sessions_already_reviewed() {
         location: format!("City {id}"),
     };
     let notices = &mut f.1.session.settings.notices;
-    notices.unconfirmed_entries = vec![entry(5), entry(6)];
+    if let Some(alert) = notices.unconfirmed.as_mut() {
+        alert.entries = vec![entry(5), entry(6)];
+    }
     f.1.review_unconfirmed_sessions(false).unwrap();
     let sent: Vec<_> = requests_of(&f.2, "terminateSession");
     assert_eq!(sent.len(), 2);
+    let ask = |at: usize| sent[at]["@extra"].as_str().and_then(|x| x.parse().ok());
+    let (first, second) = (ask(0).map(RequestId), ask(1).map(RequestId));
     let session = &mut f.1.session;
-    session.finish_login_review(5, None);
-    session.finish_login_review(6, Some("Could not review the new login.".into()));
+    session.finish_login_review(first, None);
+    session.finish_login_review(second, Some("Could not review the new login.".into()));
     let notices = &f.1.session.settings.notices;
     assert!(matches!(notices.review, ReviewStage::Failed { .. }));
-    assert_eq!(notices.unconfirmed_entries, vec![entry(6)]);
+    assert_eq!(notices.unconfirmed_entries(), vec![entry(6)]);
     f.1.review_unconfirmed_sessions(false).unwrap();
     let sent = requests_of(&f.2, "terminateSession");
     assert_eq!(sent.len(), 3, "only session 6 is sent again");
     assert_eq!(sent[2]["session_id"], 6);
-    f.1.session.finish_login_review(6, None);
+    let third = sent[2]["@extra"].as_str().and_then(|x| x.parse().ok());
+    f.1.session.finish_login_review(third.map(RequestId), None);
     assert_eq!(
         f.1.session.settings.notices.review.outcome(),
         Some(&LoginReview::Prevented {

@@ -45,7 +45,7 @@ fn a_logout_that_cannot_go_out_leaves_the_account_as_it_was() {
         .request(RequestPurpose::SendMessage, Some(ChatId(5)));
     let chats = driver.session.request(RequestPurpose::LoadChats, None);
     let generation = driver.session.account_generation;
-    let shutdown = driver.session.shutdown;
+    let shutdown = driver.session.shutdown.clone();
 
     down.store(true, Ordering::SeqCst);
     assert!(driver.request_logout().is_err());
@@ -83,5 +83,21 @@ fn a_logout_that_went_out_settles_the_rest_and_waits_for_its_answer() {
     assert!(
         kept.account_generation == driver.session.account_generation,
         "its answer is not dropped as stale"
+    );
+}
+
+/// r2-14, 02-039: confirming Log out twice sends one `logOut`; the second
+/// confirm is told the request that is out, and the generation moves once.
+#[test]
+fn a_second_logout_confirm_sends_nothing_more() {
+    let mut driver = ready_driver(Arc::new(AtomicBool::new(false)));
+    let first = driver.request_logout().unwrap();
+    let generation = driver.session.account_generation;
+    let second = driver.request_logout().unwrap();
+    assert_eq!(first, second);
+    assert!(driver.session.account_generation == generation);
+    assert_eq!(
+        driver.session.shutdown,
+        crate::state::ShutdownPhase::LogoutRequested(first)
     );
 }

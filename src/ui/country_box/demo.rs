@@ -78,8 +78,8 @@ impl QuillApp {
         self.sync_chat_ui(cx);
         self.open_poll_dialog(window, cx);
         if let Some(dialog) = self.chat_ui.poll_dialog.as_mut() {
-            dialog.limit_by_country = true;
-            dialog.country_codes = vec!["US".into(), "GB".into()];
+            dialog.set_limit_by_country(true);
+            dialog.set_country_codes(vec!["US".into(), "GB".into()]);
         }
         if open_requested() {
             self.open_country_box(CountryHost::Poll, window, cx);
@@ -88,7 +88,12 @@ impl QuillApp {
 
     fn demo_country_payment(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            session.payments.checkout = quill::state::CheckoutForm::Ready(shipping_form());
+            session.payments.checkout = quill::state::CheckoutForm::ready(
+                shipping_form(),
+                quill::state::PaymentRequest {
+                    invoice: quill::payment_invoice::InputInvoice::Name("demo".into()),
+                },
+            );
         }
         self.open_payment_dialog(window, cx);
         if let Some(dialog) = self.payments.dialog.as_mut() {

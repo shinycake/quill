@@ -199,3 +199,27 @@ fn a_follow_up_page_that_fails_ends_the_groups_in_common_list() {
     assert!(driver.fetch_more_groups_in_common(31).unwrap().is_none());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// A list whose send is refused is failed, not absent: the strip that asks
+/// for it while drawing sees it as asked and does not send again.
+#[test]
+fn a_refused_profile_list_send_leaves_the_list_failed() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    recorder.refuse_sends(true);
+    assert!(driver.fetch_similar_chats(ChatId(5)).is_err());
+    assert!(matches!(
+        driver
+            .session
+            .users_state
+            .profile_chat_lists
+            .get(&(ProfileChatsKind::SimilarChats, 5)),
+        Some(ProfileChatsFetch::Failed(_))
+    ));
+    recorder.refuse_sends(false);
+    assert!(driver.fetch_similar_chats(ChatId(5)).unwrap().is_some());
+    let _ = std::fs::remove_dir_all(dir);
+}

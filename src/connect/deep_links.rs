@@ -271,7 +271,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         ) {
             return Ok(None);
         }
-        self.session.chats_state.deep_link = None;
+        self.session.chats_state.end_deep_link_flow();
         // Like tdesktop's `openLocalUrl`, route the link by its shape
         // locally. `getDeepLinkInfo` only knows server-side deep links
         // (it answers 404 for `resolve?domain=` and `t.me/<user>`).
@@ -315,9 +315,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         internal: bool,
         from_agent: bool,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        self.session.chats_state.deep_link_seq =
-            self.session.chats_state.deep_link_seq.wrapping_add(1);
-        let generation = self.session.chats_state.deep_link_seq;
+        let generation = self.session.chats_state.next_deep_link_generation();
         self.session.chats_state.start_deep_link(
             DeepLinkState::ResolvingInfo {
                 generation,
@@ -428,9 +426,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || matches!(action, DeepLinkAction::ShareDraft { .. }) {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.chats_state.deep_link_seq =
-            self.session.chats_state.deep_link_seq.wrapping_add(1);
-        let generation = self.session.chats_state.deep_link_seq;
+        let generation = self.session.chats_state.next_deep_link_generation();
         let purpose = match &action {
             DeepLinkAction::JoinInvite { .. } => {
                 RequestPurpose::Chats(ChatsPurpose::DeepLinkCheckInvite { generation })

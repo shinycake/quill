@@ -28,48 +28,22 @@ use quill::state::{Audience, MessageReportStage, Session};
 use quill::telegram::envelope::{
     ChannelMemberStatus, MessageActions, MessageContent, MessageSender, ReactionType, ReportOption,
 };
-use std::cell::RefCell;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 
 pub(super) use super::message_menu_state::MessageMenuPage;
 
 /// UI state of the message menu's extras.
 pub(super) struct MessageMenuUi {
-    /// The sticker set dialog (`DialogKind::StickerSet`) of this window.
     /// The report dialog is not kept here: it shows while the session's
-    /// report flow exists, in the window that opened it (`open_box`).
-    pub sticker_box: StickerBox,
+    /// report flow exists, in the window that opened it (`open_box`). The
+    /// sticker set dialog's window is the box's own (`SetBoxHost`).
     /// Details of a report (`reportChatResultTextRequired`).
     pub report_text: Entity<TextareaState>,
-}
-
-/// Whether this window shows the sticker set dialog.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(super) enum StickerBox {
-    #[default]
-    Closed,
-    Shown,
-}
-
-impl MessageMenuUi {
-    pub(super) fn sticker_set_open(&self) -> bool {
-        self.sticker_box == StickerBox::Shown
-    }
-
-    pub(super) fn show_sticker_set(&mut self) {
-        self.sticker_box = StickerBox::Shown;
-    }
-
-    pub(super) fn end_sticker_set(&mut self) {
-        self.sticker_box = StickerBox::Closed;
-    }
 }
 
 impl MessageMenuUi {
     pub(super) fn new(window: &mut Window, cx: &mut App) -> Self {
         Self {
-            sticker_box: StickerBox::Closed,
             report_text: cx.new(|cx| {
                 TextareaState::new(window, cx)
                     .placeholder(tr(keys::Q_CHAT_ADD_COMMENT))
@@ -429,13 +403,17 @@ impl QuillApp {
             });
         let Some(target) = target else { return };
         let Some((_, path)) = self.menu_media_local(chat_id, message_id) else {
-            // Start the download so a second try finds the file.
-            if let Some(live) = self.live.as_mut() {
-                let _ = live.driver.ensure_media_files(&[target.file_id]);
-            }
-            self.set_note(StatusNote::silent(tr(
-                keys::Q_CHAT_DOWNLOADING_CHOOSE_SAVE_AS_AGAIN,
-            )));
+            // Start the download so a second try finds the file; a refused
+            // send says so instead of promising one.
+            let asked = self
+                .live
+                .as_mut()
+                .is_none_or(|live| live.driver.ensure_media_files(&[target.file_id]).is_ok());
+            self.set_note(if asked {
+                StatusNote::silent(tr(keys::Q_CHAT_DOWNLOADING_CHOOSE_SAVE_AS_AGAIN))
+            } else {
+                StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_START_THE_DOWNLOAD))
+            });
             cx.notify();
             return;
         };

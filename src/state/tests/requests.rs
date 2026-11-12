@@ -11,10 +11,13 @@ fn chat_statistics_fetch_flow_loads_and_caches() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetChatStatistics, Some(ChatId(13)));
-    session
-        .groups
-        .chat_statistics
-        .insert(13, ChatStatisticsFetch::Loading { is_dark: true });
+    session.groups.chat_statistics.insert(
+        13,
+        ChatStatisticsFetch::Loading {
+            request: extra,
+            is_dark: true,
+        },
+    );
     let graph = r#"{"@type":"statisticalGraphData","json_data":"{}","zoom_token":""}"#;
     let value = r#"{"@type":"statisticalValue","value":1.0,"previous_value":1.0,"growth_rate_percentage":0.0}"#;
     apply_json(
@@ -58,6 +61,13 @@ fn chat_statistics_fetch_flow_error_marks_failed() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetChatStatistics, Some(ChatId(13)));
+    session.groups.chat_statistics.insert(
+        13,
+        ChatStatisticsFetch::Loading {
+            request: extra,
+            is_dark: false,
+        },
+    );
     apply_json(
         &mut session,
         &seq,
@@ -91,20 +101,21 @@ fn optimistic_mutations_roll_back_on_error() {
     // Permissions: optimistic write, then the error.
     let mut chat = placeholder_chat(ChatId(13));
     chat.permissions = Some(ChatPermissions::all());
-    chat.can_send_basic_messages = true;
     session.chats.insert(13, chat);
+    let muted = ChatPermissions {
+        can_send_basic_messages: false,
+        ..ChatPermissions::all()
+    };
     let extra = session.request(RequestPurpose::SetChatPermissions, Some(ChatId(13)));
     if let Some(pending) = session.requests.pending_mut(extra) {
         pending.rollback = Some(RequestRollback::ChatPermissions {
-            previous: None,
-            previous_can_send: false,
+            previous: Some(muted),
             sent: ChatPermissions::all(),
         });
     }
     // Simulate the optimistic write the driver performs at send.
     if let Some(chat) = session.chats.get_mut(&13) {
         chat.permissions = Some(ChatPermissions::all());
-        chat.can_send_basic_messages = true;
     }
     apply_json(
         &mut session,
@@ -116,8 +127,8 @@ fn optimistic_mutations_roll_back_on_error() {
         ),
     );
     let chat = session.chats.get(&13).unwrap();
-    assert_eq!(chat.permissions, None);
-    assert!(!chat.can_send_basic_messages);
+    assert_eq!(chat.permissions, Some(muted));
+    assert!(!chat.can_send_basic_messages());
 
     // Join-by-request: previous flag restored.
     session.groups.supergroup_join_by_request.insert(21, true);
@@ -304,7 +315,10 @@ fn chat_list_paging_restarts_after_logout_and_login() {
                 ),
             );
         }
-        session.chat_list.folder_chats_exhausted.insert(2);
+        session
+            .chat_list
+            .folder_paging
+            .insert(2, ListPaging::Exhausted);
         assert!(
             session.chat_list.main_paging.is_exhausted()
                 && session.chat_list.archive_paging.is_exhausted()
@@ -315,10 +329,7 @@ fn chat_list_paging_restarts_after_logout_and_login() {
             !session.chat_list.archive_paging.is_exhausted(),
             "{leaving}"
         );
-        assert!(
-            session.chat_list.folder_chats_exhausted.is_empty(),
-            "{leaving}"
-        );
+        assert!(session.chat_list.folder_paging.is_empty(), "{leaving}");
     }
 }
 
@@ -352,11 +363,12 @@ fn an_unanswered_device_login_and_tone_upload_settle_with_their_account() {
     use crate::tone_upload::{ToneTarget, ToneUpload};
     let (mut session, _) = session();
     let login = session.request(RequestPurpose::ConfirmDeviceLogin, None);
-    session.request(RequestPurpose::UploadSavedNotificationSound, None);
+    let upload = session.request(RequestPurpose::UploadSavedNotificationSound, None);
     session.settings.sessions_op.begin(login);
     session.settings.tone_upload = ToneUpload::Uploading {
         name: "Chime".into(),
         target: ToneTarget::Reaction,
+        request: upload,
     };
     session.settle_account_requests();
     assert!(!session.settings.sessions_op.is_mutating());
@@ -373,6 +385,7 @@ fn storage_statistics_answer_cached_by_purpose() {
     let seq = AtomicU64::new(0);
     let extra = with_purpose.request(RequestPurpose::GetStorageStatistics, None);
     with_purpose.settings.storage_stats.begin();
+    with_purpose.settings.storage_stats.sent(extra);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -414,6 +427,7 @@ fn storage_statistics_error_clears_loading() {
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetStorageStatistics, None);
     session.settings.storage_stats.begin();
+    session.settings.storage_stats.sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -575,7 +589,7 @@ fn chat_permissions_gate_topic_composer() {
             permissions = permissions
         ),
     );
-    assert!(!session.chats.get(&16).unwrap().can_send_basic_messages);
+    assert!(!session.chats.get(&16).unwrap().can_send_basic_messages());
     let permissions_on = permissions.replace(
         "\"can_send_basic_messages\":false",
         "\"can_send_basic_messages\":true",
@@ -589,7 +603,7 @@ fn chat_permissions_gate_topic_composer() {
             permissions_on
         ),
     );
-    assert!(session.chats.get(&16).unwrap().can_send_basic_messages);
+    assert!(session.chats.get(&16).unwrap().can_send_basic_messages());
 }
 
 #[test]
@@ -756,6 +770,13 @@ fn cl_chat_preview_cached_for_unopened_chat() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetChatPreview, Some(ChatId(12)));
+    let peek = session
+        .chat_list
+        .chat_preview_fetch
+        .entry(ChatId(12))
+        .or_default();
+    peek.begin();
+    peek.sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -780,6 +801,13 @@ fn cl_chat_preview_cached_for_unopened_chat() {
         "preview must not merge into the chat's history"
     );
     let extra = session.request(RequestPurpose::GetChatPreview, Some(ChatId(12)));
+    let peek = session
+        .chat_list
+        .chat_preview_fetch
+        .entry(ChatId(12))
+        .or_default();
+    peek.begin();
+    peek.sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -803,6 +831,20 @@ fn a_late_preview_answer_for_another_chat_keeps_the_one_on_screen() {
     let seq = AtomicU64::new(0);
     let a = session.request(RequestPurpose::GetChatPreview, Some(ChatId(11)));
     let b = session.request(RequestPurpose::GetChatPreview, Some(ChatId(12)));
+    let peek = session
+        .chat_list
+        .chat_preview_fetch
+        .entry(ChatId(11))
+        .or_default();
+    peek.begin();
+    peek.sent(a);
+    let peek = session
+        .chat_list
+        .chat_preview_fetch
+        .entry(ChatId(12))
+        .or_default();
+    peek.begin();
+    peek.sent(b);
     apply_json(
         &mut session,
         &seq,

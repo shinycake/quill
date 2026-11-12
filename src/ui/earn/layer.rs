@@ -36,18 +36,152 @@ pub(super) fn layer_width(width: f32) -> f32 {
     LAYER_WIDTH.min((width - 2. * LAYER_MARGIN).max(0.))
 }
 
-/// The layer's fade. `closes` counts the closes started so far; the close
-/// on its way out is the latest, so a timer only drops the layer for the
-/// close that started it (a layer opened again meanwhile carries on).
-pub(crate) enum LayerFade {
-    Open { glide: Glide, closes: u64 },
-    Closing { glide: Glide, closes: u64 },
+/// The layer's fade in and out.
+pub(crate) struct LayerFade {
+    glide: Glide,
+    stage: FadeStage,
+}
+
+enum FadeStage {
+    Shown,
+    /// Fading out; the timer that drops the layer is owned by this stage,
+    /// so reopening or dropping the layer cancels it.
+    Closing {
+        _timer: Task<()>,
+    },
 }
 
 impl LayerFade {
+    fn fresh(animate: bool, now: Instant) -> Self {
+        let mut glide = Glide::settled(0., now, ease_out_circ);
+        glide.go(1., OPEN_FADE, animate, now);
+        Self {
+            glide,
+            stage: FadeStage::Shown,
+        }
+    }
+
     fn glide(&self) -> &Glide {
+        &self.glide
+    }
+
+    fn is_closing(&self) -> bool {
+        matches!(self.stage, FadeStage::Closing { .. })
+    }
+
+    /// Fade back in (the layer was reopened while it faded out).
+    fn show(&mut self, animate: bool, now: Instant) {
+        if self.is_closing() {
+            self.glide.go(1., OPEN_FADE, animate, now);
+            self.stage = FadeStage::Shown;
+        }
+    }
+}
+
+/// The earn layer: closed, or open with the pages it stacked, the info
+/// panel it covered, its fade and the page whose first send was refused.
+/// Closing the layer replaces the whole value, so none of these outlives
+/// it.
+pub(crate) enum EarnLayer {
+    Closed,
+    Open {
+        /// The earn pages the open one was opened from (tdesktop's back
+        /// arrow).
+        back: Vec<InfoPanelTarget>,
+        /// The info panel the layer covered; it comes back on close.
+        restore: Option<InfoPanelTarget>,
+        fade: LayerFade,
+        /// The page whose load was refused before it left (the client
+        /// could not send), shown with a Retry. The next open replaces it.
+        refused: Option<EarnPanel>,
+    },
+}
+
+impl EarnLayer {
+    /// A page opens in the layer while the info panel shows `current`.
+    /// Pages opened from another earn page stack for the back arrow; any
+    /// other panel is what the layer covers and gives back.
+    fn enter(
+        &mut self,
+        current: Option<InfoPanelTarget>,
+        panel: EarnPanel,
+        animate: bool,
+        now: Instant,
+    ) {
+        let fresh = |restore| EarnLayer::Open {
+            back: Vec::new(),
+            restore,
+            fade: LayerFade::fresh(animate, now),
+            refused: None,
+        };
+        let previous = std::mem::replace(self, EarnLayer::Closed);
+        *self = match (current, previous) {
+            (Some(InfoPanelTarget::Earn(open)), previous) => {
+                let mut layer = match previous {
+                    EarnLayer::Closed => fresh(None),
+                    open_layer => open_layer,
+                };
+                if let EarnLayer::Open { back, fade, .. } = &mut layer {
+                    if open != panel {
+                        back.push(InfoPanelTarget::Earn(open));
+                    }
+                    fade.show(animate, now);
+                }
+                layer
+            }
+            // A layer replaced without closing starts afresh.
+            (other, _) => fresh(other),
+        };
+        if let EarnLayer::Open { refused, .. } = self {
+            *refused = None;
+        }
+    }
+
+    pub(super) fn back_is_empty(&self) -> bool {
         match self {
-            LayerFade::Open { glide, .. } | LayerFade::Closing { glide, .. } => glide,
+            EarnLayer::Closed => true,
+            EarnLayer::Open { back, .. } => back.is_empty(),
+        }
+    }
+
+    pub(super) fn back_pop(&mut self) -> Option<InfoPanelTarget> {
+        match self {
+            EarnLayer::Closed => None,
+            EarnLayer::Open { back, .. } => back.pop(),
+        }
+    }
+
+    fn fade(&self) -> Option<&LayerFade> {
+        match self {
+            EarnLayer::Closed => None,
+            EarnLayer::Open { fade, .. } => Some(fade),
+        }
+    }
+
+    /// Leave the layer, giving back the info panel it covered.
+    fn leave(&mut self) -> Option<InfoPanelTarget> {
+        match std::mem::replace(self, EarnLayer::Closed) {
+            EarnLayer::Closed => None,
+            EarnLayer::Open { restore, .. } => restore,
+        }
+    }
+
+    /// Whether `panel`'s first send was refused.
+    pub(super) fn refused(&self, panel: EarnPanel) -> bool {
+        matches!(self, EarnLayer::Open { refused: Some(p), .. } if *p == panel)
+    }
+
+    /// `panel`'s first send was refused: its page shows the error.
+    pub(super) fn refuse(&mut self, panel: EarnPanel) {
+        if let EarnLayer::Open { refused, .. } = self {
+            *refused = Some(panel);
+        }
+    }
+
+    /// A retry of the refused page starts over.
+    pub(super) fn retry(&mut self) {
+        if let EarnLayer::Open { refused, .. } = self {
+            *refused = None;
         }
     }
 }
@@ -61,37 +195,22 @@ impl QuillApp {
         )
     }
 
-    /// Fade the layer in, unless it is already up.
-    pub(super) fn show_earn_layer(&mut self) {
-        if !self.earn_layer_open() {
-            // A layer that was replaced without closing starts afresh.
-            self.earn.fade = None;
-        }
-        let now = Instant::now();
+    /// Open `panel` in the layer: fade in unless it is already up.
+    pub(super) fn enter_earn_layer(&mut self, panel: EarnPanel) {
+        let current = self.session().and_then(|s| s.users_state.open_info_panel);
         let animate = self.frame.window_active.get();
-        match self.earn.fade.take() {
-            Some(open @ LayerFade::Open { .. }) => self.earn.fade = Some(open),
-            Some(LayerFade::Closing { mut glide, closes }) => {
-                glide.go(1., OPEN_FADE, animate, now);
-                self.earn.fade = Some(LayerFade::Open { glide, closes });
-            }
-            None => {
-                let mut glide = Glide::settled(0., now, ease_out_circ);
-                glide.go(1., OPEN_FADE, animate, now);
-                self.earn.fade = Some(LayerFade::Open { glide, closes: 0 });
-            }
-        }
+        self.earn
+            .layer
+            .enter(current, panel, animate, Instant::now());
     }
 
     /// Put back what the info panel showed before the layer, or nothing.
     /// Needs no window, so the poll loop can call it.
     pub(in crate::ui) fn drop_earn_layer(&mut self, cx: &mut Context<Self>) {
-        self.earn.fade = None;
-        self.earn.back.clear();
+        let restore = self.earn.layer.leave();
         if let Some(earn) = self.earn_mut() {
             earn.recipients.drop_parked();
         }
-        let restore = self.earn.restore.take();
         if let Some(live) = self.live.as_mut() {
             // A withdrawal still checking has no box to cancel it from.
             live.driver.cancel_withdrawal();
@@ -107,46 +226,32 @@ impl QuillApp {
     pub(in crate::ui) fn close_earn_layer(&mut self, cx: &mut Context<Self>) {
         let animate = self.frame.window_active.get();
         let now = Instant::now();
-        let (mut glide, close_id) = match self.earn.fade.take() {
-            None => {
-                self.drop_earn_layer(cx);
-                return;
-            }
-            Some(closing @ LayerFade::Closing { .. }) => {
-                self.earn.fade = Some(closing);
-                return;
-            }
-            Some(LayerFade::Open { glide, closes }) => (glide, closes.wrapping_add(1)),
+        let EarnLayer::Open { fade, .. } = &mut self.earn.layer else {
+            self.drop_earn_layer(cx);
+            return;
         };
-        glide.go(0., CLOSE_FADE, animate, now);
-        let animating = glide.animating(now);
-        self.earn.fade = Some(LayerFade::Closing {
-            glide,
-            closes: close_id,
-        });
-        if !animating {
+        if fade.is_closing() {
+            return;
+        }
+        fade.glide.go(0., CLOSE_FADE, animate, now);
+        if !fade.glide.animating(now) {
             self.drop_earn_layer(cx);
             return;
         }
-        self.spawn_screen(cx, async move |this, cx| {
+        let timer = self.spawn_screen(cx, async move |this, cx| {
             cx.background_executor().timer(CLOSE_FADE).await;
-            this.update(cx, |this, cx| {
-                if this.earn.fade.as_ref().is_some_and(
-                    |fade| matches!(fade, LayerFade::Closing { closes, .. } if *closes == close_id),
-                ) {
-                    this.drop_earn_layer(cx);
-                }
-            })
-            .ok();
-        })
-        .detach();
+            this.update(cx, |this, cx| this.drop_earn_layer(cx)).ok();
+        });
+        if let EarnLayer::Open { fade, .. } = &mut self.earn.layer {
+            fade.stage = FadeStage::Closing { _timer: timer };
+        }
         cx.notify();
     }
 
     /// Escape: back to the page this one was opened from, or close
     /// (tdesktop `WrapWidget::keyPressEvent`).
     pub(in crate::ui) fn earn_layer_escape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.earn.back.is_empty() {
+        if self.earn.layer.back_is_empty() {
             self.close_earn_layer(cx);
         } else {
             self.earn_back(window, cx);
@@ -181,13 +286,13 @@ impl QuillApp {
         let now = Instant::now();
         let shown = self
             .earn
-            .fade
-            .as_ref()
+            .layer
+            .fade()
             .map_or(1., |fade| fade.glide().value(now).clamp(0., 1.));
         if self
             .earn
-            .fade
-            .as_ref()
+            .layer
+            .fade()
             .is_some_and(|fade| fade.glide().animating(now))
         {
             self.request_animation_tick(60, cx);
@@ -203,7 +308,7 @@ impl QuillApp {
             .gap_1()
             .h(px(TOP_BAR_HEIGHT))
             .px_2();
-        if !self.earn.back.is_empty() {
+        if !self.earn.layer.back_is_empty() {
             bar = bar.child(
                 Button::new("earn-back")
                     .debug_selector(|| "earn-back".into())
@@ -268,7 +373,14 @@ impl QuillApp {
 
 #[cfg(test)]
 mod unit {
-    use super::{layer_top, layer_width};
+    use super::{EarnLayer, layer_top, layer_width};
+    use quill::earn::{EarnPanel, EarnPeer};
+    use quill::state::InfoPanelTarget;
+    use std::time::Instant;
+
+    fn setup(bot: i64) -> EarnPanel {
+        EarnPanel::Setup { bot_user_id: bot }
+    }
 
     #[test]
     fn the_layer_follows_tdesktop_geometry() {
@@ -278,5 +390,51 @@ mod unit {
         assert_eq!(layer_width(1280.), 392.);
         assert_eq!(layer_width(400.), 368.);
         assert_eq!(layer_width(10.), 0.);
+    }
+
+    #[test]
+    fn a_page_opened_from_a_page_stacks_and_a_close_gives_the_panel_back() {
+        let now = Instant::now();
+        let mut layer = EarnLayer::Closed;
+        let covered = Some(InfoPanelTarget::User(7));
+        layer.enter(covered, setup(1), false, now);
+        assert!(layer.back_is_empty());
+        let join = EarnPanel::Join {
+            peer: EarnPeer::User(2),
+        };
+        layer.enter(Some(InfoPanelTarget::Earn(setup(1))), join, false, now);
+        assert_eq!(layer.back_pop(), Some(InfoPanelTarget::Earn(setup(1))));
+        assert!(layer.back_is_empty());
+        assert_eq!(layer.leave(), covered);
+        assert!(layer.back_is_empty(), "nothing is left of a closed layer");
+        assert_eq!(layer.leave(), None);
+    }
+
+    #[test]
+    fn a_layer_replaced_without_closing_starts_afresh() {
+        let now = Instant::now();
+        let mut layer = EarnLayer::Closed;
+        layer.enter(Some(InfoPanelTarget::User(7)), setup(1), false, now);
+        layer.enter(Some(InfoPanelTarget::Earn(setup(1))), setup(2), false, now);
+        assert!(!layer.back_is_empty());
+        // The info panel moved to a chat and an earn page opens again.
+        layer.enter(Some(InfoPanelTarget::User(9)), setup(3), false, now);
+        assert!(layer.back_is_empty(), "the old stack is gone");
+        assert_eq!(layer.leave(), Some(InfoPanelTarget::User(9)));
+    }
+
+    #[test]
+    fn a_refused_page_is_the_pages_own_and_the_next_open_clears_it() {
+        let now = Instant::now();
+        let mut layer = EarnLayer::Closed;
+        layer.enter(None, setup(1), false, now);
+        layer.refuse(setup(1));
+        assert!(layer.refused(setup(1)));
+        assert!(!layer.refused(setup(2)), "another page is not refused");
+        layer.retry();
+        assert!(!layer.refused(setup(1)));
+        layer.refuse(setup(1));
+        layer.enter(Some(InfoPanelTarget::Earn(setup(1))), setup(1), false, now);
+        assert!(!layer.refused(setup(1)), "a fresh open asks again");
     }
 }

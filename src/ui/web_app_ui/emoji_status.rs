@@ -45,6 +45,14 @@ enum AccessStage {
 }
 
 impl EmojiStatusFlow {
+    /// A suggested emoji is being looked up: nothing pokes when the lookup
+    /// lands, so the poll looks again on a short tick.
+    pub(super) fn is_active(&self) -> bool {
+        self.set
+            .as_ref()
+            .is_some_and(|request| matches!(request.stage, SetStage::Resolving { .. }))
+    }
+
     #[cfg(test)]
     #[cfg(all(feature = "demo-capture", unix))]
     fn set_is_idle(&self) -> bool {
@@ -262,18 +270,17 @@ impl QuillApp {
         });
     }
 
-    /// One tick of the emoji status flows: the grant's answer, and the
-    /// suggested emoji while it resolves.
-    pub(super) fn poll_emoji_status(&mut self, cx: &mut Context<Self>) {
-        let access = self
-            .live
-            .as_mut()
-            .and_then(|live| live.driver.session.bots.web_apps.emoji_access.take());
-        if let Some((bot_id, done)) = access {
-            let waiting = self.mini_apps.window.as_ref().is_some_and(|window| {
-                window.launch.bot_user_id == bot_id
-                    && matches!(window.emoji.access, AccessStage::Granting(_))
-            });
+    /// The grant answers drained this tick: the one to the request the
+    /// window waits on answers the app, any other is not its own.
+    pub(super) fn answer_emoji_access(&mut self, answers: Vec<quill::state::EmojiAccessAnswer>) {
+        for answer in answers {
+            let done = answer.result == quill::state::EmojiAccessResult::Granted;
+            // Only the answer to the grant this window sent counts: the bot
+            // permissions switch answers through the same mailbox.
+            let waiting =
+                self.mini_apps.window.as_ref().is_some_and(|window| {
+                    window.emoji.access == AccessStage::Granting(answer.request)
+                });
             if waiting {
                 self.with_window(|window| {
                     window.emoji.access = AccessStage::Idle;
@@ -281,6 +288,17 @@ impl QuillApp {
                 });
             }
         }
+    }
+
+    /// One tick of the emoji status flows: the grant's answer, and the
+    /// suggested emoji while it resolves.
+    pub(super) fn poll_emoji_status(&mut self, cx: &mut Context<Self>) {
+        let answers = self
+            .live
+            .as_mut()
+            .map(|live| std::mem::take(&mut live.driver.session.bots.web_apps.emoji_access))
+            .unwrap_or_default();
+        self.answer_emoji_access(answers);
         // A grant whose request left flight with no answer was dropped:
         // the app hears "no", and later requests are not turned away as busy.
         let dropped = match self.mini_apps.window.as_ref().map(|w| w.emoji.access) {

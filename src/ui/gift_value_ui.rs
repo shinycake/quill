@@ -33,7 +33,7 @@ use quill::premium_hub::upgraded::Collectible;
 use quill::state::Session;
 use quill::telegram::envelope::StickerContent;
 use quill::text::LinkTarget;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -208,7 +208,7 @@ impl QuillApp {
         let pending = hub
             .gift_value
             .as_ref()
-            .is_some_and(|lookup| !lookup.is_open() && lookup.info().is_none());
+            .is_some_and(GiftValueLookup::is_pending);
         if host_shown || !pending {
             return;
         }
@@ -374,17 +374,14 @@ impl QuillApp {
                         .children(links),
                 )
                 .into_any_element();
-            let body = Rc::new(RefCell::new(Some(body)));
+            let body = Rc::new(Cell::new(Some(body)));
             let ok_app = owner.clone();
             dialog
                 .overlay(true)
                 .w(px(BOX_WIDTH))
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     },
                 ))

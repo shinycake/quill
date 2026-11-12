@@ -11,6 +11,7 @@ impl QuillApp {
     pub(in crate::ui) fn conversation(
         &mut self,
         part: ConversationPart,
+        forum_on_screen: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         if part.top() {
@@ -38,7 +39,7 @@ impl QuillApp {
                 cx,
             )
             .into_any_element(),
-            PaneMode::Ready => self.session_history(cx).into_any_element(),
+            PaneMode::Ready => self.session_history(forum_on_screen, cx).into_any_element(),
         };
         let composer = self.composer_available(mode).then_some(true);
         let composer_note: Option<String> = match mode {
@@ -75,7 +76,7 @@ impl QuillApp {
                     let send_allowed = open.is_some_and(|id| {
                         self.session()
                             .and_then(|s| s.chats.get(&id.0))
-                            .is_some_and(|c| c.can_post() && c.can_send_basic_messages)
+                            .is_some_and(|c| c.can_post() && c.can_send_basic_messages())
                     });
                     if topic_closed {
                         Some(tr(keys::Q_CHAT_THIS_TOPIC_IS_CLOSED_NEW).to_string())
@@ -203,7 +204,7 @@ impl QuillApp {
                         .when(self.recording_here(), |this| {
                             this.child(self.record_bar(cx))
                         })
-                        .when_some(self.share.forward_result.clone(), |this, result| {
+                        .when_some(self.chat_ui.forward_result.clone(), |this, result| {
                             this.child(self.forward_success_banner(&result, cx))
                         })
                         .when(
@@ -422,7 +423,11 @@ impl QuillApp {
             .children(dust.map(super::anim_layer::occluder))
     }
 
-    pub(in crate::ui) fn session_history(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(in crate::ui) fn session_history(
+        &mut self,
+        forum_on_screen: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         super::video_player::warm_decoder(cx);
         let session = self.session();
         let open = session.and_then(|s| s.open_chat_id());
@@ -447,7 +452,7 @@ impl QuillApp {
         let sender_name = title.clone();
         let chat_search_open = session.is_some_and(|s| s.search.chat_search.is_open());
         let highlight_id = session.and_then(|s| match s.search.chat_search.jump {
-            ChatSearchJump::Ready { message_id } | ChatSearchJump::Loading { message_id } => {
+            ChatSearchJump::Ready { message_id } | ChatSearchJump::Loading { message_id, .. } => {
                 Some(message_id)
             }
             ChatSearchJump::None | ChatSearchJump::Missing { .. } => None,
@@ -574,6 +579,10 @@ impl QuillApp {
                     let (key, rows) = self.thread_rows_input(thread, highlight_id);
                     let failed = (thread.history.older == quill::state::OlderEnd::Failed)
                         .then_some(super::older_retry::OlderRetryFor::Thread);
+                    let newer = thread
+                        .history
+                        .newer_failed()
+                        .then_some(super::older_retry::NewerRetryFor::Thread);
                     let list = self.history_message_list(
                         "thread-history",
                         rows,
@@ -585,6 +594,7 @@ impl QuillApp {
                     );
                     self.history.rows_key = Some(key);
                     let list = super::older_retry::with_older_retry(list, failed, cx);
+                    let list = super::older_retry::with_newer_retry(list, newer, cx);
                     self.thread_history_pane(list, cx)
                 } else if is_forum
                     && open_topic.is_none()
@@ -594,7 +604,7 @@ impl QuillApp {
                     // Phase 5.1: opening a forum supergroup shows its topics;
                     // with the topic column on screen the pane only asks for
                     // a choice.
-                    if self.history.forum_column.on_screen() {
+                    if forum_on_screen {
                         pane_placeholder(
                             tr(keys::Q_CHAT_CHOOSE_A_TOPIC),
                             tr(keys::Q_CHAT_PICK_A_TOPIC_FROM_THE),
@@ -625,6 +635,9 @@ impl QuillApp {
                         let failed = topic_history
                             .is_some_and(|h| h.older == quill::state::OlderEnd::Failed)
                             .then_some(super::older_retry::OlderRetryFor::Topic);
+                        let newer = topic_history
+                            .is_some_and(|h| h.newer_failed())
+                            .then_some(super::older_retry::NewerRetryFor::Topic);
                         let list = self.history_message_list(
                             "topic-history",
                             rows,
@@ -635,7 +648,8 @@ impl QuillApp {
                             cx,
                         );
                         self.history.rows_key = Some(key);
-                        super::older_retry::with_older_retry(list, failed, cx)
+                        let list = super::older_retry::with_older_retry(list, failed, cx);
+                        super::older_retry::with_newer_retry(list, newer, cx)
                     }
                 } else if main_empty {
                     // Phase S1: an empty secret chat shows TGX's end-to-end
@@ -654,24 +668,9 @@ impl QuillApp {
                     // instead of an endless skeleton or a false "No messages".
                     let history_failed =
                         open.is_some_and(|id| session.is_some_and(|s| s.history_load_failed(id)));
-                    // Nothing to show and no page on the way (an answer for
-                    // a window that was replaced, or none asked yet): ask
-                    // for the first page. The driver sends nothing for a
-                    // chat known to be empty, so this cannot loop.
-                    if open.is_some() && !history_loading && !history_failed {
-                        let weak = cx.weak_entity();
-                        let window_chat = self.windows.scope;
-                        let screen = self.screen_epoch();
-                        cx.defer(move |cx| {
-                            let _ = weak.update(cx, |this, cx| {
-                                this.in_screen_scope(screen, cx, |this, cx| {
-                                    this.in_window_scope(window_chat, cx, |this, cx| {
-                                        this.maybe_auto_load_older(cx)
-                                    })
-                                })
-                            });
-                        });
-                    }
+                    // The first page is asked when the chat opens
+                    // (`select_chat_open`, `open_chat_window`); a send that
+                    // could not go out is the Failed row. Render only draws.
                     if history_failed {
                         history_load_failed(cx)
                     } else if history_loading {
@@ -692,6 +691,12 @@ impl QuillApp {
                 } else {
                     let (key, rows) =
                         self.main_rows_input(open, open_topic, main_history, highlight_id);
+                    let older = main_history
+                        .is_some_and(|h| h.load_failed())
+                        .then_some(super::older_retry::OlderRetryFor::Chat);
+                    let newer = main_history
+                        .is_some_and(|h| h.newer_failed())
+                        .then_some(super::older_retry::NewerRetryFor::Chat);
                     let list = self.history_message_list(
                         "session-history",
                         rows,
@@ -702,7 +707,8 @@ impl QuillApp {
                         cx,
                     );
                     self.history.rows_key = Some(key);
-                    list
+                    let list = super::older_retry::with_older_retry(list, older, cx);
+                    super::older_retry::with_newer_retry(list, newer, cx)
                 },
             ))
     }

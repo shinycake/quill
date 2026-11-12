@@ -75,7 +75,10 @@ register_demos![
     DemoSpec::chat_list("ready-sticker-suggest").setup(|app, window, cx| {
         if let Some(session) = app.demo_session.as_mut() {
             let stickers = &mut session.stickers.stickers;
-            stickers.suggest_for = quill::state::SuggestFor::Asked(PUMPKIN.into());
+            stickers.suggest_for = quill::state::SuggestFor::Asked {
+                emoji: PUMPKIN.into(),
+                request: quill::ids::RequestId(0),
+            };
             stickers.suggestions = (1..=6).map(sticker).collect();
         }
         draft(app, PUMPKIN, window, cx);

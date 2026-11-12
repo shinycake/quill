@@ -14,7 +14,10 @@ fn payment_form_applies_only_to_own_request() {
     apply_json(&mut session, &seq, &sink, &form_json("999"));
     assert!(session.payments.checkout.form().is_none());
     let extra = session.request(RequestPurpose::GetPaymentForm, Some(ChatId(51)));
-    session.payments.checkout = crate::state::CheckoutForm::Loading { request: extra };
+    session.payments.checkout = crate::state::CheckoutForm::Loading {
+        request: extra,
+        invoice: test_invoice(),
+    };
     apply_json(&mut session, &seq, &sink, &form_json(&extra.0.to_string()));
     let form = session.payments.checkout.form().expect("form applies");
     assert_eq!(form.id, 7);
@@ -26,15 +29,19 @@ fn payment_form_applies_only_to_own_request() {
 fn payment_request_survives_form_and_validated_answers() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    // Buy press: `getPaymentForm` sent, request context set.
+    // Buy press: `getPaymentForm` sent, the invoice rides with the stage.
     let extra = session.request(RequestPurpose::GetPaymentForm, Some(ChatId(51)));
-    session.payments.checkout = crate::state::CheckoutForm::Loading { request: extra };
-    session.payments.request = Some(PaymentRequest {
-        invoice: crate::payment_invoice::InputInvoice::Message {
+    session.payments.checkout = crate::state::CheckoutForm::Loading {
+        request: extra,
+        invoice: test_invoice(),
+    };
+    open_checkout(
+        &mut session,
+        crate::payment_invoice::InputInvoice::Message {
             chat_id: ChatId(51),
             message_id: MessageId(7),
         },
-    });
+    );
     apply_json(
         &mut session,
         &seq,
@@ -46,21 +53,12 @@ fn payment_request_survives_form_and_validated_answers() {
     );
     assert!(session.payments.checkout.form().is_some());
     assert!(
-        session.payments.request.is_some(),
+        session.payments.checkout.invoice().is_some(),
         "form answer must not clear the payment request"
     );
     // Continue: `validateOrderInfo` sent, request context refreshed.
     let extra = session.request(RequestPurpose::ValidateOrderInfo, Some(ChatId(51)));
-    session.payments.order_info = OrderInfoStage::Validating {
-        request: extra,
-        order: Default::default(),
-    };
-    session.payments.request = Some(PaymentRequest {
-        invoice: crate::payment_invoice::InputInvoice::Message {
-            chat_id: ChatId(51),
-            message_id: MessageId(7),
-        },
-    });
+    validating(&mut session, extra, Default::default());
     apply_json(
         &mut session,
         &seq,
@@ -70,10 +68,10 @@ fn payment_request_survives_form_and_validated_answers() {
             extra.0
         ),
     );
-    assert!(session.payments.order_info.validated().is_some());
-    assert_eq!(session.payments.shipping_id.as_deref(), Some("ship1"));
+    assert!(session.payments.checkout.validated_order().is_some());
+    assert_eq!(session.payments.checkout.shipping_id(), Some("ship1"));
     assert!(
-        session.payments.request.is_some(),
+        session.payments.checkout.invoice().is_some(),
         "validated answer must not clear the payment request"
     );
 }
@@ -83,7 +81,10 @@ fn payment_form_error_surfaces_note() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetPaymentForm, Some(ChatId(51)));
-    session.payments.checkout = crate::state::CheckoutForm::Loading { request: extra };
+    session.payments.checkout = crate::state::CheckoutForm::Loading {
+        request: extra,
+        invoice: test_invoice(),
+    };
     apply_json(
         &mut session,
         &seq,
@@ -97,8 +98,8 @@ fn payment_form_error_surfaces_note() {
     assert!(
         session
             .payments
-            .note
-            .as_deref()
+            .checkout
+            .note()
             .unwrap_or("")
             .starts_with("Payment failed:")
     );
@@ -108,16 +109,17 @@ fn payment_form_error_surfaces_note() {
 fn payment_result_notes_and_verification_url() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.payments.request = Some(PaymentRequest {
-        invoice: crate::payment_invoice::InputInvoice::Name("shop".into()),
-    });
+    open_checkout(
+        &mut session,
+        crate::payment_invoice::InputInvoice::Name("shop".into()),
+    );
     let result_json = |extra: &str, success: bool, url: &str| {
         format!(
             r#"{{"@type":"paymentResult","@extra":"{extra}","success":{success},"verification_url":"{url}"}}"#
         )
     };
     let extra = session.request(RequestPurpose::SendPaymentForm, Some(ChatId(51)));
-    session.payment_sent(extra);
+    payment_sent_for_shown(&mut session, extra);
     apply_json(
         &mut session,
         &seq,
@@ -125,11 +127,16 @@ fn payment_result_notes_and_verification_url() {
         &result_json(&extra.0.to_string(), true, ""),
     );
     assert_eq!(
-        session.payments.note.as_deref(),
+        session.payments.checkout.note(),
         Some("✅ Payment successful")
     );
+    let shop = crate::payment_invoice::InputInvoice::Name("shop".into());
+    assert_eq!(
+        session.payments.outcome_of(&shop),
+        Some(PaymentVerdict::Paid)
+    );
     let extra = session.request(RequestPurpose::SendPaymentForm, Some(ChatId(51)));
-    session.payment_sent(extra);
+    payment_sent_for_shown(&mut session, extra);
     apply_json(
         &mut session,
         &seq,
@@ -144,15 +151,48 @@ fn payment_result_notes_and_verification_url() {
             .map(|step| step.url.as_str()),
         Some("https://pay.example.com/3ds")
     );
+    assert_eq!(
+        session.payments.outcome_of(&shop),
+        Some(PaymentVerdict::NeedsVerification)
+    );
     let extra = session.request(RequestPurpose::SendPaymentForm, Some(ChatId(51)));
-    session.payment_sent(extra);
+    payment_sent_for_shown(&mut session, extra);
+    assert_eq!(
+        session.payments.outcome_of(&shop),
+        None,
+        "a new payment starts over"
+    );
     apply_json(
         &mut session,
         &seq,
         &sink,
         &result_json(&extra.0.to_string(), false, ""),
     );
-    assert_eq!(session.payments.note.as_deref(), Some("Payment failed"));
+    assert_eq!(session.payments.checkout.note(), Some("Payment failed"));
+    assert_eq!(
+        session.payments.outcome_of(&shop),
+        Some(PaymentVerdict::Refused)
+    );
+}
+
+#[test]
+fn finished_payments_keep_only_the_newest_verdicts_and_none_across_a_switch() {
+    let (mut session, _sink) = session();
+    let invoice = |n: usize| crate::payment_invoice::InputInvoice::Name(format!("shop{n}"));
+    for n in 0..40 {
+        session
+            .payments
+            .record_outcome(&invoice(n), PaymentVerdict::Paid);
+    }
+    assert_eq!(session.payments.outcome_of(&invoice(0)), None);
+    assert_eq!(
+        session.payments.outcome_of(&invoice(39)),
+        Some(PaymentVerdict::Paid)
+    );
+    assert!(session.payments.outcomes.len() <= 16);
+    // The mini app that watched closed with its screen.
+    session.forget_screen_outcomes();
+    assert_eq!(session.payments.outcome_of(&invoice(39)), None);
 }
 
 #[test]
@@ -172,8 +212,16 @@ fn payment_receipt_opens_dialog() {
     );
     let receipt = session.payments.receipt.data().expect("receipt");
     assert_eq!(receipt.product_title, "Time machine");
-    assert_eq!(receipt.total_amount, 1999);
-    assert_eq!(receipt.credentials_title, "Visa •• 4242");
+    let crate::telegram::envelope::PaymentReceiptKind::Regular {
+        total_amount,
+        credentials_title,
+        ..
+    } = &receipt.kind
+    else {
+        panic!("not a card receipt");
+    };
+    assert_eq!(*total_amount, 1999);
+    assert_eq!(credentials_title, "Visa •• 4242");
     assert!(session.payments.receipt.is_open());
 }
 
@@ -382,11 +430,11 @@ fn a_verification_step_closes_only_its_own_checkout() {
     let seq = AtomicU64::new(0);
     let a = InputInvoice::Name("a".into());
     let b = InputInvoice::Name("b".into());
-    session.payments.request = Some(PaymentRequest { invoice: a });
+    open_checkout(&mut session, a);
     let extra = session.request(RequestPurpose::SendPaymentForm, Some(ChatId(51)));
-    session.payment_sent(extra);
+    payment_sent_for_shown(&mut session, extra);
     // Esc, then B's checkout opens while A processes.
-    session.payments.request = Some(PaymentRequest { invoice: b.clone() });
+    open_checkout(&mut session, b.clone());
     apply_json(
         &mut session,
         &seq,
@@ -421,16 +469,13 @@ fn an_earlier_order_id_never_outlives_a_new_continue() {
         name: "addr1".into(),
         ..Default::default()
     };
-    session.payments.order_info = OrderInfoStage::Validating {
-        request: first,
-        order: addr1.clone(),
-    };
+    validating(&mut session, first, addr1.clone());
     apply_json(&mut session, &seq, &sink, &validated_json(first, "oid1"));
     assert_eq!(
         session
             .payments
-            .order_info
-            .validated()
+            .checkout
+            .validated_order()
             .map(|v| v.order_info_id.as_str()),
         Some("oid1")
     );
@@ -440,17 +485,14 @@ fn an_earlier_order_id_never_outlives_a_new_continue() {
         name: "addr2".into(),
         ..addr1.clone()
     };
-    session.payments.order_info = OrderInfoStage::Validating {
-        request: second,
-        order: addr2.clone(),
-    };
-    assert!(session.payments.order_info.validated().is_none());
+    validating(&mut session, second, addr2.clone());
+    assert!(session.payments.checkout.validated_order().is_none());
     // A late answer to the first one does not resurrect it.
     apply_json(&mut session, &seq, &sink, &validated_json(first, "oid1"));
-    assert!(session.payments.order_info.validated().is_none());
+    assert!(session.payments.checkout.validated_order().is_none());
     apply_json(&mut session, &seq, &sink, &validated_json(second, "oid2"));
-    match &session.payments.order_info {
-        OrderInfoStage::Validated { order, info } => {
+    match session.payments.checkout.order_info() {
+        Some(OrderInfoStage::Validated { order, info }) => {
             assert_eq!(order, &addr2);
             assert_eq!(info.order_info_id, "oid2");
         }
@@ -464,10 +506,7 @@ fn a_rejected_continue_leaves_the_order_unvalidated() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::ValidateOrderInfo, Some(ChatId(51)));
-    session.payments.order_info = OrderInfoStage::Validating {
-        request: extra,
-        order: Default::default(),
-    };
+    validating(&mut session, extra, Default::default());
     apply_json(
         &mut session,
         &seq,
@@ -477,8 +516,11 @@ fn a_rejected_continue_leaves_the_order_unvalidated() {
             extra.0
         ),
     );
-    assert_eq!(session.payments.order_info, OrderInfoStage::Unvalidated);
-    assert!(session.payments.note.is_some());
+    assert_eq!(
+        session.payments.checkout.order_info(),
+        Some(&OrderInfoStage::Unvalidated)
+    );
+    assert!(session.payments.checkout.note().is_some());
 }
 
 fn giveaway_invoice(chat: i64) -> crate::payment_invoice::InputInvoice {
@@ -499,11 +541,9 @@ fn giveaway_invoice(chat: i64) -> crate::payment_invoice::InputInvoice {
 fn a_paid_giveaway_finishes_its_form_even_with_the_checkout_closed() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.payments.request = Some(PaymentRequest {
-        invoice: giveaway_invoice(-100),
-    });
+    open_checkout(&mut session, giveaway_invoice(-100));
     let extra = session.request(RequestPurpose::SendPaymentForm, Some(ChatId(51)));
-    session.payment_sent(extra);
+    payment_sent_for_shown(&mut session, extra);
     assert!(session.payments.giveaway_paying(-100));
     assert!(!session.payments.giveaway_paying(-200));
     session.close_checkout();
@@ -518,8 +558,8 @@ fn a_paid_giveaway_finishes_its_form_even_with_the_checkout_closed() {
         ),
     );
     assert!(!session.payments.giveaway_paying(-100));
-    assert!(session.payments.giveaway.launch.is_done_for(-100));
-    assert!(!session.payments.giveaway.launch.is_done_for(-200));
+    assert!(session.payments.giveaway.launches.is_done_for(-100));
+    assert!(!session.payments.giveaway.launches.is_done_for(-200));
 }
 
 /// The 3-D Secure step of a giveaway payment names the chat whose form
@@ -528,11 +568,9 @@ fn a_paid_giveaway_finishes_its_form_even_with_the_checkout_closed() {
 fn a_giveaway_verification_step_names_its_chat() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.payments.request = Some(PaymentRequest {
-        invoice: giveaway_invoice(-100),
-    });
+    open_checkout(&mut session, giveaway_invoice(-100));
     let extra = session.request(RequestPurpose::SendPaymentForm, Some(ChatId(51)));
-    session.payment_sent(extra);
+    payment_sent_for_shown(&mut session, extra);
     apply_json(
         &mut session,
         &seq,
@@ -553,11 +591,9 @@ fn a_giveaway_verification_step_names_its_chat() {
 fn a_giveaway_verification_with_the_checkout_closed_keeps_start_refused() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.payments.request = Some(PaymentRequest {
-        invoice: giveaway_invoice(-100),
-    });
+    open_checkout(&mut session, giveaway_invoice(-100));
     let extra = session.request(RequestPurpose::SendPaymentForm, Some(ChatId(51)));
-    session.payment_sent(extra);
+    payment_sent_for_shown(&mut session, extra);
     session.close_checkout();
     apply_json(
         &mut session,
@@ -570,6 +606,6 @@ fn a_giveaway_verification_with_the_checkout_closed_keeps_start_refused() {
     );
     let step = session.payments.verification_url.clone().expect("step");
     assert!(!step.closes_checkout);
-    assert!(session.payments.giveaway.launch.is_done_for(-100));
-    assert!(!session.payments.giveaway.launch.is_done_for(-200));
+    assert!(session.payments.giveaway.launches.is_done_for(-100));
+    assert!(!session.payments.giveaway.launches.is_done_for(-200));
 }

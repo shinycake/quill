@@ -70,7 +70,7 @@ async fn press_demo_keys(
             other => vec![format!("{other:?}")],
         };
         let settings_open = app
-            .update_in(cx, |app, _, _| app.settings.open)
+            .update_in(cx, |app, _, _| app.settings.open())
             .unwrap_or(false);
         eprintln!(
             "quill screenshot demo: keys answered, settings open {settings_open}, refusals {refusals:?}"
@@ -83,11 +83,14 @@ fn demo_screenshot(app: &mut QuillApp, window: &mut Window, cx: &mut Context<Qui
     // Over the second and third rows of the demo's chat list.
     let anchor = point(px(48.), px(200.));
     if let Some(chat_id) = env_chat("QUILL_DEMO_SHOT_MENU") {
-        app.chat_list.menu = Some(ChatMenuState::at(chat_id, anchor));
+        app.message_ui
+            .menu
+            .open_row(ChatMenuState::at(chat_id, anchor));
     }
     if let Some(chat_id) = env_chat("QUILL_DEMO_SHOT_PEEK") {
-        app.chat_list.peek =
-            crate::ui::chat_list_state::PeekPreview::Open(ChatPreviewState { chat_id, anchor });
+        app.message_ui
+            .menu
+            .open_peek(ChatPreviewState { chat_id, anchor });
     }
     quill::fast_buttons::set_persistence(false);
     access::set_enabled(true);

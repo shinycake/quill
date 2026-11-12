@@ -45,6 +45,54 @@ pub(super) fn apply_ready_reactions(
 }
 
 impl QuillApp {
+    /// One message menu is open at a time, across windows: the session's
+    /// audience and reaction-option slots belong to the open menu, so a
+    /// menu opened in another window closes this window's first, as a
+    /// native context menu does when focus moves.
+    pub(in crate::ui) fn close_message_menus_of_other_windows(&mut self, cx: &mut Context<Self>) {
+        let here = self.windows.scope;
+        self.in_every_window(cx, |app, _| {
+            if app.windows.scope != here {
+                app.message_ui.menu.close_message();
+            }
+        });
+    }
+
+    /// Poll-loop half of a chip's menu: once the message's audience has
+    /// begun, the tab the chip asked for loads its first page. The wanted
+    /// reaction lives in the open menu, so a menu closed before the
+    /// properties arrived never asks for it.
+    pub(in crate::ui) fn drain_wanted_reactor_tab(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(open) = self.screen.message_ui.menu.open() else {
+            return false;
+        };
+        if open.first_tab.is_none() {
+            return false;
+        }
+        let (chat, message) = (open.at.chat_id, open.at.message_id);
+        let begun = self
+            .session()
+            .and_then(|s| s.messages.message_audience.as_ref())
+            .is_some_and(|audience| {
+                audience.chat_id == chat
+                    && audience.message_id == message
+                    && !matches!(audience.reactions, quill::state::Audience::NotAsked)
+            });
+        if !begun {
+            return false;
+        }
+        let Some(reaction) = self.screen.message_ui.menu.take_first_tab() else {
+            return false;
+        };
+        if let Some(live) = self.live.as_mut() {
+            let _ = live
+                .driver
+                .fetch_reactors_tab(chat, message, Some(&reaction), false);
+        }
+        cx.notify();
+        true
+    }
+
     /// Open the message menu and ask which reactions the message may get.
     pub(super) fn open_message_menu(
         &mut self,
@@ -52,13 +100,10 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // A reactor tab asked for by an earlier menu whose properties never
-        // allowed it is not this menu's (a chip's menu sets it after this).
-        if let Some(live) = self.live.as_mut() {
-            live.driver.session.messages.wanted_reactor_tab = None;
-        }
-        let link = self.take_right_clicked_link(menu.position);
-        let item = self.take_right_clicked_item(menu.position);
+        self.close_message_menus_of_other_windows(cx);
+        let (link, item) = self.take_right_press(menu.position);
+        // The whole message when the press was over no task or option.
+        let item = item.unwrap_or_default();
         // Over a poll option the menu shows the option's page.
         let page = if matches!(item, quill::composer::ReplyItem::PollOption(_)) {
             super::message_menu_state::MessageMenuPage::PollOption
@@ -84,7 +129,7 @@ impl QuillApp {
                 self.widget_selection(key).map(str::to_owned)
             });
         self.message_ui.menu =
-            super::message_menu_state::MessageMenu::Open(super::message_menu_state::OpenMenu {
+            super::chat_list_state::ChatOverlay::Message(super::message_menu_state::OpenMenu {
                 at: menu,
                 selection: selected_text
                     .map(|text| super::message_menu_state::MenuSelection { text, nth }),
@@ -92,6 +137,7 @@ impl QuillApp {
                 item,
                 page,
                 reactions_expanded: false,
+                first_tab: None,
             });
         if let Some(live) = self.live.as_mut() {
             let _ = live
@@ -170,13 +216,13 @@ impl QuillApp {
     /// Escape closes an open message or chat context menu first: the
     /// window's own message menu, and in the main window the chat menu.
     pub(super) fn close_context_menus(&mut self, cx: &mut Context<Self>) -> bool {
-        let chat_menu = !self.windows.in_window() && self.chat_list.menu.is_some();
+        let chat_menu = !self.windows.in_window() && self.message_ui.menu.row().is_some();
         if !self.message_ui.menu.is_open() && !chat_menu {
             return false;
         }
         self.close_message_menu();
         if chat_menu {
-            self.chat_list.menu = None;
+            self.message_ui.menu.close_menu();
         }
         cx.notify();
         true
@@ -373,7 +419,7 @@ impl QuillApp {
                 .toggle_reaction_choice(chat_id, message_id, &choice)
                 .is_ok();
             if sent && fly.is_some() {
-                self.history.reaction_fly = fly;
+                self.history.reaction_fly.set(fly);
             }
             self.screen.connection.set_note_for(
                 &self.screen.windows,
@@ -387,7 +433,7 @@ impl QuillApp {
             return sent;
         }
         if fly.is_some() {
-            self.history.reaction_fly = fly;
+            self.history.reaction_fly.set(fly);
         }
         match choice {
             ReactionChoice::Emoji(emoji) => {

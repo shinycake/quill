@@ -93,7 +93,7 @@ impl QuillApp {
         // which stays in `preview` until the menu closes) lets it play.
         let paused = open
             .preview()
-            .is_some_and(|preview| preview.hiding.is_none());
+            .is_some_and(|preview| preview.hiding().is_none());
         let theme = cx.theme();
         let (hover_bg, muted) = (theme.accent, theme.muted_foreground);
         let mut row = div()
@@ -129,7 +129,9 @@ impl QuillApp {
                     ))
                     .child(self.effect_cell_picture(effect, STRIP_IMAGE, motion, cx))
                     .child(tracker(move |bounds| {
-                        cells.cells.borrow_mut().insert(id, bounds);
+                        if let Ok(mut cells) = cells.cells.try_borrow_mut() {
+                            cells.insert(id, bounds);
+                        }
                     }))
                     .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
                         if let Some(open) = this.composer_ui.send_menu.open.as_mut() {

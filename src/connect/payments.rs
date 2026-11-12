@@ -3,7 +3,7 @@ use super::*;
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::payment_invoice::InputInvoice;
 use crate::state::PaymentsPurpose;
-use crate::state::{BankCardLookup, BankCardStage, OrderInfoStage};
+use crate::state::{BankCardLookup, BankCardStage};
 use crate::state::{PaymentRequest, RequestPurpose};
 use crate::telegram::envelope::OrderInfoData;
 use crate::telegram::requests::{
@@ -37,12 +37,24 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         invoice: InputInvoice,
     ) -> Result<RequestId, ConnectSendError> {
+        // A payment that asked for a verification step is not abandoned by
+        // a new form: that checkout stays until its answer arrives.
+        if self.session.payments.checkout.is_verifying() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
         let extra = self.payment_extra(&invoice, RequestPurpose::GetPaymentForm)?;
         let json = get_payment_form(extra, &invoice);
         let sent = self.send_json_request(extra, &json)?;
-        // The checkout waits on the form only once the request is out.
-        self.session.payments.request = Some(PaymentRequest { invoice });
-        self.session.payments.checkout = crate::state::CheckoutForm::Loading { request: extra };
+        // The checkout waits on the form only once the request is out. The
+        // new value replaces the one before it whole (its request, form,
+        // order info, shipping choice and note), here and nowhere in the
+        // UI; a refused send leaves the checkout on screen as it was. A new
+        // checkout of the invoice starts its payment's verdict over.
+        self.session.payments.forget_outcome(&invoice);
+        self.session.payments.checkout = crate::state::CheckoutForm::Loading {
+            request: extra,
+            invoice: PaymentRequest { invoice },
+        };
         Ok(sent)
     }
 
@@ -57,16 +69,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self.payment_extra(invoice, RequestPurpose::ValidateOrderInfo)?;
         let json = validate_order_info_request(extra, invoice, order, allow_save);
         let sent = self.send_json_request(extra, &json)?;
-        self.session.payments.request = Some(PaymentRequest {
-            invoice: invoice.clone(),
-        });
         // Stored only once the send went out; the earlier order id and
         // shipping choice are for other fields.
-        self.session.payments.shipping_id = None;
-        self.session.payments.order_info = OrderInfoStage::Validating {
-            request: extra,
-            order: order.clone(),
-        };
+        if self.session.payments.shows(invoice) {
+            self.session
+                .payments
+                .checkout
+                .begin_validating(extra, order.clone());
+        }
         Ok(sent)
     }
 
@@ -98,10 +108,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             tip_amount,
         );
         let sent = self.send_json_request(extra, &json)?;
-        self.session.payments.request = Some(PaymentRequest {
-            invoice: invoice.clone(),
-        });
-        self.session.payment_sent(extra);
+        self.session.payment_sent(extra, invoice);
         Ok(sent)
     }
 
@@ -118,8 +125,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetPaymentReceipt, Some(chat_id));
-        // A receipt is no checkout: `payments.request` stays the open
-        // checkout's invoice, which `shows` and `checkout_sending` read.
+        // A receipt is no checkout: the open checkout's stage stays as it
+        // is (`shows` and `checkout_sending` read its invoice).
         let json = get_payment_receipt(extra, chat_id, message_id);
         let sent = self.send_json_request(extra, &json)?;
         self.session.payments.receipt = crate::state::ReceiptStage::Loading(extra);
@@ -301,11 +308,11 @@ impl<S: JsonSender> ConnectDriver<S> {
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Look up a tapped collectible username or phone number
-    /// (`getCollectibleItemInfo`). The same item is not asked twice while
-    /// its lookup is running (tdesktop `resolveCollectible`).
+    /// (`getCollectibleItemInfo`). A tap on a lookup still out asks again:
+    /// the newest request is the one answered.
     pub fn request_collectible_info(
         &mut self,
-        mut lookup: crate::collectible_info::CollectibleLookup,
+        spec: crate::collectible_info::LookupSpec,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
@@ -316,16 +323,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             .hub
             .collectible
             .as_ref()
-            .is_some_and(|open| open.is_loading() && open.entity == lookup.entity);
+            .is_some_and(|open| open.is_loading() && open.entity == spec.entity);
         if running {
             return Ok(None);
         }
-        let (kind, entity) = (lookup.kind, lookup.entity.clone());
+        let (kind, entity) = (spec.kind, spec.entity.clone());
         let extra = self
             .session
             .request(RequestPurpose::GetCollectibleInfo, None);
-        lookup.stage = crate::collectible_info::LookupStage::Loading(extra);
-        self.session.payments.hub.collectible = Some(lookup);
+        self.session.payments.hub.collectible =
+            Some(spec.into_lookup(crate::collectible_info::LookupStage::Loading(extra)));
         let json = crate::telegram::requests::get_collectible_item_info(extra, kind, &entity);
         if let Err(err) = self.send_json_request(extra, &json) {
             self.session.payments.hub.collectible = None;

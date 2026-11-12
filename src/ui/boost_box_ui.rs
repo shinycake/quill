@@ -23,7 +23,7 @@ use quill::boost_box::{
 };
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
-use quill::state::{RequestPurpose, Session};
+use quill::state::Session;
 
 fn chat_title(session: &Session, chat_id: i64) -> String {
     session
@@ -91,7 +91,7 @@ impl QuillApp {
     fn boost_box_toggle(&mut self, slot_id: i32, cx: &mut Context<Self>) {
         let now = quill::local_time::now_unix();
         if let Some(session) = self.boost_session_mut() {
-            let receive = session.groups.boosts_per_gift.unwrap_or(0);
+            let receive = session.groups.boosts_per_gift.data().copied().unwrap_or(0);
             if let Some(state) = session.groups.boost_box.as_mut() {
                 state.toggle_slot(slot_id, now, receive);
             }
@@ -107,7 +107,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|session| session.groups.boost_box.as_mut())
         {
-            state.phase = BoostPhase::Main;
+            state.phase = BoostPhase::main();
         }
         cx.notify();
     }
@@ -252,7 +252,7 @@ impl QuillApp {
         let chat_id = ChatId(state.chat_id);
         let name = chat_title(session, state.chat_id);
         let mut body = div().flex().flex_col().gap_3();
-        match session.groups.chat_boost_details.get(&state.chat_id) {
+        match session.groups.boost_status(state.chat_id) {
             Some(status) => {
                 let counters = BoostCounters::from(status);
                 let mut title = counters.title(&name, state.group);
@@ -282,8 +282,9 @@ impl QuillApp {
                 }
             }
             None if session
-                .requests
-                .has_purpose_for_chat(RequestPurpose::GetChatBoostStatus, chat_id) =>
+                .groups
+                .boost_status_fetch(chat_id.0)
+                .is_some_and(|fetch| fetch.shows_loading()) =>
             {
                 body = body.child(
                     div()
@@ -316,7 +317,7 @@ impl QuillApp {
                 );
             }
         }
-        if let Some(note) = state.note.clone() {
+        if let Some(note) = state.note().map(str::to_string) {
             body = body.child(div().id("boost-box-note").text_sm().child(note));
         }
         body.into_any_element()
@@ -348,7 +349,7 @@ impl QuillApp {
                 .text_color(text_muted())
                 .child(reassign_text(
                     &name,
-                    session.groups.boosts_per_gift.unwrap_or(0),
+                    session.groups.boosts_per_gift.data().copied().unwrap_or(0),
                 )),
         );
         for slot in slots {
@@ -377,7 +378,7 @@ impl QuillApp {
                     ),
             );
         }
-        if let Some(note) = state.note.clone() {
+        if let Some(note) = state.note().map(str::to_string) {
             list = list.child(div().id("boost-box-note").text_sm().child(note));
         }
         list.into_any_element()
@@ -415,16 +416,15 @@ impl QuillApp {
             };
             let mut footer = div().flex().justify_end().gap_2();
             let (title, body) = match &state.phase {
-                BoostPhase::Main | BoostPhase::Working(_) => {
+                BoostPhase::Main { .. } | BoostPhase::Working(_) => {
                     let counters = session
                         .groups
-                        .chat_boost_details
-                        .get(&state.chat_id)
+                        .boost_status(state.chat_id)
                         .map(BoostCounters::from);
                     let working = matches!(state.phase, BoostPhase::Working(_));
                     footer = footer.child(close_button(tr(keys::CLOSE)));
                     if let Some(counters) = counters {
-                        let allow_multi = session.groups.boosts_per_gift.unwrap_or(0) > 0;
+                        let allow_multi = session.groups.boosts_per_gift.data().copied().unwrap_or(0) > 0;
                         let button = counters.button(state.group, allow_multi);
                         footer = footer.child(
                             Button::new("boost-box-boost")
@@ -453,7 +453,9 @@ impl QuillApp {
                     };
                     (title, this.boost_main_body(session, &state, cx))
                 }
-                BoostPhase::Reassign { slots, selected } => {
+                BoostPhase::Reassign {
+                    slots, selected, ..
+                } => {
                     let now = quill::local_time::now_unix();
                     let single = matches!(slots.as_slice(), [only] if !quill::boost_box::is_waiting(only, now));
                     let can_move = !state.reassign_selection(now).is_empty();

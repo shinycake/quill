@@ -31,7 +31,6 @@ impl Session {
         notification_settings: ChatNotificationSettings,
         draft: Option<ChatDraft>,
         photo: Option<ParsedFile>,
-        can_send_basic_messages: bool,
         permissions: Option<ChatPermissions>,
         can_be_deleted_for_all_users: bool,
         can_be_deleted_only_for_self: bool,
@@ -56,10 +55,11 @@ impl Session {
             self.remember_files(std::slice::from_ref(file));
         }
         self.apply_business_bot_exact(&kind, pending);
-        if pending.map(|p| p.purpose)
-            == Some(RequestPurpose::Media(MediaPurpose::LocationPicker(
-                crate::location_picker::LocationPickerPurpose::ResolveVenueBot,
-            )))
+        if let Some(pending) = pending
+            && pending.purpose
+                == RequestPurpose::Media(MediaPurpose::LocationPicker(
+                    crate::location_picker::LocationPickerPurpose::ResolveVenueBot,
+                ))
         {
             // tdesktop takes only an inline bot (`isBotInlineGeo`).
             let bot = match &kind {
@@ -70,7 +70,7 @@ impl Session {
                     .map(|_| user_id.0),
                 _ => None,
             };
-            self.location.venue_bot_resolved(bot);
+            self.location.venue_bot_resolved(pending.id.0, bot);
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::ResolveGifSearchBot) {
             self.stickers.gifs.search_bot_user_id = match &kind {
@@ -92,18 +92,14 @@ impl Session {
         // username is not a bot. The user object may already
         // have arrived via `updateUser` — re-scan the cache for
         // the inline capability (`None` = unknown; the query
-        // attempt itself is the capability check). The generation
-        // guard drops stale answers (a newer username is already
-        // resolving).
+        // attempt itself is the capability check). Only the request the
+        // entry waits for answers it.
         if let Some(p) = pending.as_ref()
-            && let RequestPurpose::Bots(BotsPurpose::ResolveInlineBot { generation }) = p.purpose
-            && let Some(InlineBotResolve::Resolving {
-                username,
-                generation: slot_generation,
-            }) = self.bots.inline_bot_resolve.as_ref()
-            && *slot_generation == generation
+            && p.purpose == RequestPurpose::Bots(BotsPurpose::ResolveInlineBot)
+            && let Some(username) = self.bots.inline_bot_asked(p.id).map(str::to_string)
         {
-            match &kind {
+            let username = &username;
+            let resolved = match &kind {
                 ChatKind::Private { user_id } => {
                     // Any public username resolves to a private
                     // chat — confirm it is actually a bot. The
@@ -112,29 +108,23 @@ impl Session {
                     // unknown (the query attempt itself is then
                     // the capability check).
                     match self.users.get(&user_id.0) {
-                        Some(user) if !user.is_bot => {
-                            self.bots.inline_bot_resolve = Some(InlineBotResolve::Failed {
-                                username: username.clone(),
-                                reason: format!("@{username} is not a bot"),
-                            });
-                        }
-                        user => {
-                            let is_inline = user.map(|u| u.is_inline);
-                            self.bots.inline_bot_resolve = Some(InlineBotResolve::Resolved {
-                                username: username.clone(),
-                                user_id: user_id.0,
-                                is_inline,
-                            });
-                        }
+                        Some(user) if !user.is_bot => InlineBotResolve::Failed {
+                            username: username.clone(),
+                            reason: format!("@{username} is not a bot"),
+                        },
+                        user => InlineBotResolve::Resolved {
+                            username: username.clone(),
+                            user_id: user_id.0,
+                            is_inline: user.map(|u| u.is_inline),
+                        },
                     }
                 }
-                _ => {
-                    self.bots.inline_bot_resolve = Some(InlineBotResolve::Failed {
-                        username: username.clone(),
-                        reason: format!("@{username} is not a bot"),
-                    });
-                }
-            }
+                _ => InlineBotResolve::Failed {
+                    username: username.clone(),
+                    reason: format!("@{username} is not a bot"),
+                },
+            };
+            self.bots.set_inline_bot(resolved);
         }
         // `parity:platform-deep-links`: the `searchPublicChat` /
         // `createPrivateChat` answer for a deep-link follow-up. Any chat
@@ -171,7 +161,6 @@ impl Session {
         chat.last_read_outbox_message_id = last_read_outbox_message_id;
         chat.notification_settings = notification_settings;
         let old_photo_file_id = std::mem::replace(&mut chat.photo_file_id, photo_file_id);
-        chat.can_send_basic_messages = can_send_basic_messages;
         // Slice G1: full default permissions block for the editor.
         chat.permissions = permissions;
         chat.can_be_deleted_for_all_users = can_be_deleted_for_all_users;
@@ -663,7 +652,10 @@ impl Session {
                 .folder_chats_to_leave
                 .entry(folder_id)
                 .or_default()
-                .succeed(chat_ids.iter().map(|id| id.0).collect());
+                .answered(
+                    pending.map(|p| p.id),
+                    chat_ids.iter().map(|id| id.0).collect(),
+                );
         }
         // `getChatFolderNewChats` answer: the "N new chats" bar.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatFolderNewChats)
@@ -690,7 +682,10 @@ impl Session {
                 .entry(folder_id)
                 .or_default()
                 .chats
-                .succeed(chat_ids.iter().map(|id| id.0).collect());
+                .answered(
+                    pending.map(|p| p.id),
+                    chat_ids.iter().map(|id| id.0).collect(),
+                );
         }
         // B10: profile panel lists (groups in common, similar channels,
         // personal channel candidates).
@@ -703,9 +698,10 @@ impl Session {
         // composer's "post as" picker options. Runs before the
         // search branch below consumes `chat_ids`.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatsToPostStories) {
-            self.stories
-                .post_as
-                .succeed(chat_ids.iter().map(|id| id.0).collect());
+            self.stories.post_as.answered(
+                pending.map(|p| p.id),
+                chat_ids.iter().map(|id| id.0).collect(),
+            );
         }
         // Parity slice: `getChatNotificationSettingsExceptions`
         // answer — the scope is correlated via `pending.scope`
@@ -713,11 +709,14 @@ impl Session {
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatNotificationSettingsExceptions)
             && let Some(scope) = pending.and_then(|p| p.scope)
         {
-            self.settings
-                .notification_exceptions
-                .entry(scope)
-                .or_default()
-                .succeed(chat_ids.iter().map(|id| id.0).collect());
+            // Only the ask that waits for it takes the list: an answer for a
+            // list dropped as stale meanwhile is not the list now wanted.
+            if let Some(list) = self.settings.notification_exceptions.get_mut(&scope) {
+                list.answered(
+                    pending.map(|p| p.id),
+                    chat_ids.iter().map(|id| id.0).collect(),
+                );
+            }
         }
         if let Some(pending) = pending
             && matches!(

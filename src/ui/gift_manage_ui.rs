@@ -13,6 +13,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::gift_manage::{GiftFlow, GiftManageState};
 use quill::lang::{keys, tr, tr_with};
+use quill::premium_hub::gift_view::GiftForm;
 use quill::premium_hub::group_digits;
 use quill::state::Session;
 
@@ -58,36 +59,48 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (price, name) = {
-            let session = self.session();
-            let manage = session.map(|s| &s.payments.gifts_manage);
-            let price = match (&flow, session) {
-                (Some(GiftFlow::Resale { id }), Some(s)) => s
-                    .payments
-                    .hub
-                    .gifts
-                    .iter()
-                    .find(|g| g.id == *id)
-                    .filter(|g| g.manage.listed && !g.manage.resale_gram_only)
-                    .map(|g| g.manage.resale_star_count.to_string()),
-                _ => None,
-            };
-            let name = match (&flow, manage) {
-                (Some(GiftFlow::RenameCollection(id)), Some(m)) => {
-                    m.collection(*id).map(|c| c.name.clone())
-                }
-                _ => None,
-            };
-            (price.unwrap_or_default(), name.unwrap_or_default())
+        let name = match (&flow, self.session()) {
+            (Some(GiftFlow::RenameCollection(id, _)), Some(s)) => s
+                .payments
+                .gifts_manage
+                .collection(*id)
+                .map(|c| c.name.clone()),
+            _ => None,
         };
-        self.payments
-            .gift_price_input
-            .update(cx, |input, cx| input.set_value(price, window, cx));
-        self.payments
-            .gift_collection_input
-            .update(cx, |input, cx| input.set_value(name, window, cx));
+        self.payments.gift_collection_input.update(cx, |input, cx| {
+            input.set_value(name.unwrap_or_default(), window, cx)
+        });
         if let Some(manage) = self.gift_manage_mut() {
             manage.flow = flow;
+        }
+        cx.notify();
+    }
+
+    /// Show `form` in the open gift's panel (or close the open one) and
+    /// prefill the price input.
+    pub(super) fn set_gift_form(
+        &mut self,
+        form: Option<GiftForm>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let price = match (&form, self.session()) {
+            (Some(GiftForm::Resale { .. }), Some(s)) => {
+                let hub = &s.payments.hub;
+                hub.received
+                    .view
+                    .selected()
+                    .and_then(|id| hub.received.rows.iter().find(|g| g.id == id))
+                    .filter(|g| g.manage.listed && !g.manage.resale_gram_only)
+                    .map(|g| g.manage.resale_star_count.to_string())
+            }
+            _ => None,
+        };
+        self.payments.gift_price_input.update(cx, |input, cx| {
+            input.set_value(price.unwrap_or_default(), window, cx)
+        });
+        if let Some(hub) = self.hub_mut() {
+            hub.received.view.set_form(form);
         }
         cx.notify();
     }
@@ -119,8 +132,8 @@ impl QuillApp {
     }
 
     pub(super) fn toggle_keep_details(&mut self, cx: &mut Context<Self>) {
-        if let Some(GiftFlow::Upgrade { keep_details, .. }) =
-            self.gift_manage_mut().and_then(|m| m.flow.as_mut())
+        if let Some(GiftForm::Upgrade { keep_details, .. }) =
+            self.hub_mut().and_then(|h| h.received.view.form_mut())
         {
             *keep_details = !*keep_details;
         }
@@ -215,7 +228,7 @@ impl QuillApp {
         // to delete, and a stale id is never sent.
         let listed = self
             .session()
-            .is_some_and(|s| s.payments.hub.gifts.iter().any(|g| g.id == id));
+            .is_some_and(|s| s.payments.hub.received.rows.iter().any(|g| g.id == id));
         if !listed {
             return;
         }
@@ -225,8 +238,7 @@ impl QuillApp {
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             // The demo has no connection: answer as the server would.
-            session.payments.gifts_manage.deleting = Some(id.to_string());
-            session.finish_gift_delete(None);
+            session.finish_gift_delete(Some(id.to_string()), None);
         }
         cx.notify();
     }
@@ -252,7 +264,7 @@ pub(super) fn gift_collection_tabs(
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let manage = &session.payments.gifts_manage;
-    let busy = session.payments.hub.gifts_op.is_mutating();
+    let busy = session.payments.hub.received.op.is_mutating();
     if manage.collections.is_empty() && !mine {
         return div().into_any_element();
     }
@@ -284,7 +296,11 @@ pub(super) fn gift_collection_tabs(
                 .ghost()
                 .disabled(busy)
                 .on_click(cx.listener(|this, _, window, cx| {
-                    this.set_gift_flow(Some(GiftFlow::NewCollection), window, cx)
+                    this.set_gift_flow(
+                        Some(GiftFlow::NewCollection(Default::default())),
+                        window,
+                        cx,
+                    )
                 })),
         );
     }
@@ -301,7 +317,11 @@ pub(super) fn gift_collection_tabs(
                         .ghost()
                         .disabled(busy)
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            this.set_gift_flow(Some(GiftFlow::RenameCollection(active)), window, cx)
+                            this.set_gift_flow(
+                                Some(GiftFlow::RenameCollection(active, Default::default())),
+                                window,
+                                cx,
+                            )
                         })),
                 )
                 .child(
@@ -311,19 +331,23 @@ pub(super) fn gift_collection_tabs(
                         .ghost()
                         .disabled(busy)
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            this.set_gift_flow(Some(GiftFlow::DeleteCollection(active)), window, cx)
+                            this.set_gift_flow(
+                                Some(GiftFlow::DeleteCollection(active, Default::default())),
+                                window,
+                                cx,
+                            )
                         })),
                 ),
         );
     }
     match &manage.flow {
-        Some(GiftFlow::NewCollection) => {
+        Some(GiftFlow::NewCollection(_)) => {
             col = col.child(collection_name_form(None, busy, name_input, cx));
         }
-        Some(GiftFlow::RenameCollection(id)) => {
+        Some(GiftFlow::RenameCollection(id, _)) => {
             col = col.child(collection_name_form(Some(*id), busy, name_input, cx));
         }
-        Some(GiftFlow::DeleteCollection(id)) => {
+        Some(GiftFlow::DeleteCollection(id, _)) => {
             let id = *id;
             let name = manage
                 .collection(id)

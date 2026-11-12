@@ -13,6 +13,8 @@ impl Session {
         self.payments.verification_url = None;
         self.payments.receipt_error = None;
         self.payments.unlocked_notice = None;
+        // The mini app that watched an invoice closed with its screen.
+        self.payments.outcomes.clear();
         // The earn toasts, a Fragment URL and a setup page's "go back"
         // belong to the screen that asked.
         let earn = &mut self.payments.earn;
@@ -20,12 +22,21 @@ impl Session {
         earn.open_url = None;
         earn.effects.clear();
         self.bots.callback_answers.clear();
+        // A mini app's one-shot answers that landed while away have no
+        // flow or window left to take them.
+        let apps = &mut self.bots.web_apps;
+        apps.found.clear();
+        apps.attachment_menu_bot.clear();
+        apps.attachment_menu_toggled.clear();
+        apps.write_access = None;
+        apps.emoji_access.clear();
+        apps.data_sent.clear();
+        apps.phone_share = None;
+        apps.custom_replies.clear();
         // The consent box and the raw-URL fallback of a login button
         // answered while away: its request goes with its answer. A request
         // still in flight keeps its context for the answer to come.
-        if self.bots.last_login_url_info.take().is_some() {
-            self.bots.login_url_request = None;
-        }
+        self.bots.login_url.forget_answer();
         let messages = &mut self.messages;
         messages.message_link = None;
         messages.message_link_error.clear();
@@ -36,8 +47,11 @@ impl Session {
         messages.message_action_note.clear();
         messages.send_permission_error.clear();
         messages.flood_notice.clear();
-        self.groups.community_error = None;
-        self.groups.invite_link_error = None;
+        self.groups.community_error.clear();
+        // The contacts line ("Contacts imported.") of a mutation that
+        // answered while the account was away is not news on return.
+        self.users_state.contacts_notice = None;
+        self.groups.invite_link_error.clear();
         self.chats_state.chat_action_error.clear();
         self.chats_state.report_chat_outcome = None;
     }

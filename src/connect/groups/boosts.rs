@@ -1,6 +1,6 @@
 //! Connect driver: chat boosts.
 use super::*;
-use crate::boost_box::{BoostDecision, BoostPhase, BoostWork, classify, decide};
+use crate::boost_box::{BoostDecision, BoostPhase, BoostWork, ReassignSummary, classify, decide};
 use crate::telegram::requests::{get_chat_boost_features, set_supergroup_unrestrict_boost_count};
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -8,7 +8,12 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// the boost status of every chat whose cached status is now stale, so an
     /// open boost box, profile row or look dialog shows the new level.
     pub(crate) fn refresh_moved_boost_statuses(&mut self) {
-        for chat_id in self.session.take_moved_boost_chats() {
+        for chat_id in self.session.outdated_boost_chats() {
+            // A status asked before the move would hold the old level: its
+            // request is dropped, and the one sent now answers.
+            self.session
+                .requests
+                .take_purpose_for_chat(RequestPurpose::GetChatBoostStatus, chat_id);
             let _ = self.fetch_chat_boost_status(chat_id);
         }
     }
@@ -28,11 +33,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         ) {
             return Ok(None);
         }
-        if self
-            .session
-            .groups
-            .chat_boost_status
-            .contains_key(&chat_id.0)
+        if !self.session.groups.boost_status_wanted(chat_id.0)
             || self
                 .session
                 .requests
@@ -43,13 +44,36 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetChatBoostStatus, Some(chat_id));
+        let fetch = self
+            .session
+            .groups
+            .chat_boost_status
+            .entry(chat_id.0)
+            .or_default();
+        fetch.begin();
+        fetch.sent(extra);
         if let Err(err) = self
             .sender
             .send_json(&get_chat_boost_status(extra, chat_id))
         {
             self.session.requests.take(extra);
+            if let Some(fetch) = self.session.groups.chat_boost_status.get_mut(&chat_id.0) {
+                fetch.failed(
+                    Some(extra),
+                    crate::state::send_failed_line("Could not load boost status"),
+                    false,
+                );
+            }
             return Err(err);
         }
+        let fetch = self
+            .session
+            .groups
+            .chat_boost_status
+            .entry(chat_id.0)
+            .or_default();
+        fetch.begin();
+        fetch.sent(extra);
         Ok(Some(extra))
     }
 
@@ -82,15 +106,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
         }
         // A slots read from a press whose box closed is still out: this
-        // press takes it over, and its answer continues this boost.
-        if self
+        // press waits for that request, and its answer continues this boost.
+        if let Some(out) = self
             .session
             .requests
-            .has_purpose_for_chat(RequestPurpose::GetBoostSlotsForBoost, chat_id)
+            .id_for_purpose_for_chat(RequestPurpose::GetBoostSlotsForBoost, chat_id)
         {
             if let Some(state) = self.boost_box_for(chat_id) {
-                state.phase = BoostPhase::Working(BoostWork::Slots);
-                state.note = None;
+                state.reading_slots(out);
             }
             return Ok(None);
         }
@@ -105,8 +128,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         if let Some(state) = self.boost_box_for(chat_id) {
-            state.phase = BoostPhase::Working(BoostWork::Slots);
-            state.note = None;
+            state.reading_slots(extra);
         }
         Ok(Some(extra))
     }
@@ -124,22 +146,21 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         }
         let chat_id = state.chat_id;
-        let BoostPhase::Working(BoostWork::SlotsReady(slots)) = std::mem::replace(
-            &mut state.phase,
-            BoostPhase::Working(BoostWork::Boosting { reassign: None }),
-        ) else {
+        let BoostPhase::Working(BoostWork::SlotsReady(slots)) =
+            std::mem::replace(&mut state.phase, BoostPhase::main())
+        else {
             return Ok(());
         };
         let now = crate::local_time::now_unix();
         let choice = classify(chat_id, &slots, now);
         let session = &self.session;
-        let receive = session.groups.boosts_per_gift.unwrap_or(0);
+        let receive = session.groups.boosts_per_gift.data().copied().unwrap_or(0);
         let decision = decide(&choice, session.my_is_premium(), receive, now, |id| {
             session.chat_is_group(ChatId(id))
         });
         match decision {
             BoostDecision::Boost(slot_id) => {
-                self.send_boost_chat(ChatId(chat_id), &[slot_id])?;
+                self.send_boost_chat(ChatId(chat_id), &[slot_id], None)?;
             }
             other => {
                 if let Some(state) = self.boost_box_for(ChatId(chat_id)) {
@@ -150,20 +171,22 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(())
     }
 
-    /// `boostChat` for these slots; the answer returns the box to its
-    /// counters.
+    /// `boostChat` for these slots. Once it is out the box works on that
+    /// request, and its answer (or error) returns the box to its counters;
+    /// a send that is refused leaves the box as it was.
     pub(super) fn send_boost_chat(
         &mut self,
         chat: ChatId,
         slot_ids: &[i32],
+        reassign: Option<ReassignSummary>,
     ) -> Result<(), ConnectSendError> {
         let extra = self.session.request(RequestPurpose::BoostChat, Some(chat));
         if let Err(err) = self.sender.send_json(&boost_chat(extra, chat, slot_ids)) {
             self.session.requests.take(extra);
-            if let Some(state) = self.boost_box_for(chat) {
-                state.phase = BoostPhase::Main;
-            }
             return Err(err);
+        }
+        if let Some(state) = self.boost_box_for(chat) {
+            state.boosting(extra, reassign);
         }
         Ok(())
     }
@@ -173,20 +196,23 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.groups.boosts_per_gift.is_some()
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetBoostsPerGift)
-        {
+        if !self.session.groups.boosts_per_gift.can_ask() {
             return Ok(());
         }
         let extra = self.session.request(RequestPurpose::GetBoostsPerGift, None);
+        let fetch = &mut self.session.groups.boosts_per_gift;
+        fetch.begin();
+        fetch.sent(extra);
         if let Err(err) = self
             .sender
             .send_json(&crate::telegram::requests::get_application_config(extra))
         {
             self.session.requests.take(extra);
+            self.session.groups.boosts_per_gift.failed(
+                Some(extra),
+                crate::state::send_failed_line("Could not load the boost settings"),
+                false,
+            );
             return Err(err);
         }
         Ok(())

@@ -6,6 +6,7 @@
 use super::app::QuillApp;
 use super::dialogs::GroupConfirmAction;
 use super::{DialogKind, QuillShell};
+use crate::ui::pickers_state::Debounce;
 use crate::ui::scroll_load::scrolled_near_end;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
@@ -18,10 +19,7 @@ use gpui_kit::*;
 use quill::emoji::EmojiSetTab;
 use quill::lang::{keys, tr, trn};
 use quill::local_path::sandboxed_display_path;
-use quill::state::RequestPurpose;
 use quill::telegram::envelope::StickerSetInfo;
-use std::cell::RefCell;
-use std::rc::Rc;
 use std::time::Duration;
 
 /// How long typing pauses before the search goes out.
@@ -33,16 +31,55 @@ const COVER_SIZE: f32 = 28.;
 
 const TABS: [EmojiSetTab; 2] = [EmojiSetTab::Installed, EmojiSetTab::Trending];
 
+/// The emoji packs box's tab bar and its search pause: the tab the bar
+/// highlights (the one an emptied field goes back to, also while search
+/// results replace the list), and the typing pause being waited out. The
+/// pause's timer lives in the value, so opening, closing or choosing a tab
+/// drops a search that has not gone out.
+#[derive(Default)]
+pub(super) struct SetsView {
+    tab: EmojiSetTab,
+    typing: Debounce,
+}
+
+impl SetsView {
+    /// The box showing `tab`, nothing waiting.
+    pub(super) fn on(tab: EmojiSetTab) -> Self {
+        Self {
+            tab,
+            typing: Debounce::Idle,
+        }
+    }
+
+    pub(super) fn tab(&self) -> EmojiSetTab {
+        self.tab
+    }
+
+    /// Typing that was waiting no longer searches.
+    pub(super) fn cancel_typing(&mut self) {
+        self.typing.cancel();
+    }
+
+    /// Wait for `timer`, then search `query` (replacing an earlier wait).
+    pub(super) fn arm(&mut self, query: String, timer: Task<()>) {
+        self.typing.arm(query, timer);
+    }
+
+    /// The timer ended: the query to search, once.
+    pub(super) fn fire(&mut self) -> Option<String> {
+        self.typing.fire()
+    }
+}
+
 impl QuillApp {
     pub(super) fn open_emoji_sets(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // The box opens on Installed with an empty field, as its list does:
         // a search typed in an earlier visit does not stay in the field
         // (and a search still waiting on its pause does not fire).
-        self.pickers.emoji_set_keystroke = self.pickers.emoji_set_keystroke.wrapping_add(1);
+        self.pickers.emoji_sets_view = SetsView::default();
         self.pickers
             .emoji_set_search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.pickers.emoji_set_return_tab = EmojiSetTab::Installed;
         self.open_box(DialogKind::EmojiSets);
         if let Some(live) = self.live.as_mut() {
             if live.driver.open_emoji_sets().is_err() {
@@ -57,7 +94,7 @@ impl QuillApp {
     }
     pub(super) fn close_emoji_sets(&mut self, cx: &mut Context<Self>) {
         // A search still waiting on its pause is for a box that is gone.
-        self.pickers.emoji_set_keystroke = self.pickers.emoji_set_keystroke.wrapping_add(1);
+        self.pickers.emoji_sets_view.cancel_typing();
         if let Some(live) = self.live.as_mut() {
             live.driver.session.stickers.emoji.open = false;
         } else if let Some(session) = self.demo_session.as_mut() {
@@ -71,8 +108,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.pickers.emoji_set_keystroke = self.pickers.emoji_set_keystroke.wrapping_add(1);
-        self.pickers.emoji_set_return_tab = tab;
+        self.pickers.emoji_sets_view = SetsView::on(tab);
         self.pickers
             .emoji_set_search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
@@ -96,8 +132,10 @@ impl QuillApp {
     /// The search field changed: once typing pauses, the packs matching it
     /// replace the list; clearing the field brings the last tab back.
     pub(super) fn emoji_sets_search_typed(&mut self, cx: &mut Context<Self>) {
-        self.pickers.emoji_set_keystroke = self.pickers.emoji_set_keystroke.wrapping_add(1);
-        let keystroke = self.pickers.emoji_set_keystroke;
+        // A search typed earlier is over with this keystroke: even when the
+        // field is now empty, its timer must not fire over the restored list.
+        self.pickers.emoji_sets_view.cancel_typing();
+        let tab = self.pickers.emoji_sets_view.tab();
         let query = self
             .pickers
             .emoji_set_search_input
@@ -106,7 +144,6 @@ impl QuillApp {
             .trim()
             .to_string();
         if query.is_empty() {
-            let tab = self.pickers.emoji_set_return_tab;
             if self
                 .session()
                 .is_some_and(|s| s.stickers.emoji.tab == EmojiSetTab::Search)
@@ -115,16 +152,16 @@ impl QuillApp {
             }
             return;
         }
-        self.spawn_scoped(cx, async move |this, cx| {
+        let timer = self.spawn_scoped(cx, async move |this, cx| {
             cx.background_executor().timer(SEARCH_DELAY).await;
             this.update(cx, |this, cx| {
-                if this.pickers.emoji_set_keystroke == keystroke {
+                if let Some(query) = this.pickers.emoji_sets_view.fire() {
                     this.search_emoji_sets_for(&query, cx);
                 }
             })
             .ok();
-        })
-        .detach();
+        });
+        self.pickers.emoji_sets_view.arm(query, timer);
     }
     fn search_emoji_sets_for(&mut self, query: &str, cx: &mut Context<Self>) {
         self.pickers
@@ -144,7 +181,7 @@ impl QuillApp {
             emoji.found_sets = emoji
                 .installed_sets
                 .iter()
-                .chain(&emoji.trending_sets)
+                .chain(emoji.lists.trending.sets())
                 .filter(|set| set.title.to_lowercase().contains(&needle))
                 .cloned()
                 .collect();
@@ -312,13 +349,11 @@ impl QuillApp {
         let session = self.session();
         let no_panel = quill::emoji::EmojiPanel::default();
         let panel = session.map_or(&no_panel, |s| &s.stickers.emoji);
-        let loading = session.is_some_and(|s| {
-            s.requests.has_purpose(match panel.tab {
-                EmojiSetTab::Installed => RequestPurpose::GetInstalledEmojiSets,
-                EmojiSetTab::Trending => RequestPurpose::GetTrendingEmojiSets,
-                EmojiSetTab::Search => RequestPurpose::SearchEmojiSets,
-            })
-        });
+        let loading = match panel.tab {
+            EmojiSetTab::Installed => panel.lists.installed.is_loading(),
+            EmojiSetTab::Trending => panel.lists.trending.is_loading(),
+            EmojiSetTab::Search => panel.lists.search.is_loading(),
+        };
         let owner = cx.entity().downgrade();
         let tabs = TabBar::new("emoji-sets-tabs")
             .underline()
@@ -330,7 +365,7 @@ impl QuillApp {
             }))
             .selected_index(
                 TABS.iter()
-                    .position(|tab| *tab == self.pickers.emoji_set_return_tab)
+                    .position(|tab| *tab == self.pickers.emoji_sets_view.tab())
                     .unwrap_or(0),
             )
             .on_click(move |ix, window, cx| {
@@ -341,7 +376,7 @@ impl QuillApp {
             });
         let sets: Vec<&StickerSetInfo> = match panel.tab {
             EmojiSetTab::Installed => session.map(|s| s.ordered_emoji_packs()).unwrap_or_default(),
-            EmojiSetTab::Trending => panel.trending_sets.iter().collect(),
+            EmojiSetTab::Trending => panel.lists.trending.sets().iter().collect(),
             EmojiSetTab::Search => panel.found_sets.iter().collect(),
         };
         let rows = sets.iter().fold(v_flex().w_full(), |rows, set| {
@@ -349,7 +384,7 @@ impl QuillApp {
         });
         let status = if loading && sets.is_empty() {
             Some(tr(keys::Q_MEDIA_LOADING_EMOJI_PACKS))
-        } else if panel.lists.of(panel.tab).error().is_some() || panel.mutation.is_failed() {
+        } else if panel.lists.error_of(panel.tab).is_some() || panel.mutation.is_failed() {
             Some(tr(keys::Q_MEDIA_COULD_NOT_UPDATE_EMOJI_PACKS))
         } else if sets.is_empty() && !loading {
             Some(tr(keys::Q_MEDIA_NO_EMOJI_PACKS_FOUND))
@@ -402,19 +437,13 @@ impl QuillApp {
             if let Some(live) = this.live.as_mut() {
                 let _ = live.driver.ensure_emoji_pack_covers();
             }
-            let body = Rc::new(RefCell::new(Some(this.emoji_sets_panel(cx))));
+            let body = this.emoji_sets_panel(cx);
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(tr(
                     keys::Q_MEDIA_EMOJI_PACKS,
                 )))
-                .content(move |content, _, _| {
-                    content.child(
-                        body.borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element()),
-                    )
-                })
+                .content(crate::ui::shell::one_shot_dialog_content(body))
                 .on_close(close)
         })
     }

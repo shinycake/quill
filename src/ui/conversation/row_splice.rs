@@ -184,7 +184,7 @@ impl QuillApp {
         } = spliced;
         if start > end || end > self.history.rows.len() {
             // Not the rows the splice was made for: build them whole.
-            self.history.rows_key = None;
+            self.history.invalidate_rows();
             cx.notify();
             return;
         }

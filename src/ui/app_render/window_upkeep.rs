@@ -12,6 +12,9 @@ use quill::lang::{keys, tr};
 impl QuillApp {
     /// One window's frame upkeep, with that window's state in place.
     pub(in crate::ui) fn per_window_upkeep(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // The history's area is reported again by this frame's paint, if it
+        // shows one (`bubble_theme`).
+        crate::ui::bubble_theme::forget_history_area();
         // Whether a screen reader reads this window, for its history rows.
         self.slices
             .window
@@ -22,6 +25,8 @@ impl QuillApp {
         self.menu_focus_upkeep(window, cx);
         // A resolved comment thread moves the view into its discussion group.
         self.advance_thread(window, cx);
+        // The share box's typed text goes with the box.
+        self.sync_share_inputs(window, cx);
         // A deleted message's reply or edit bar goes.
         self.cancel_gone_composer_targets(window, cx);
         // The reply bar's message, when it is not in memory: each window's
@@ -34,6 +39,11 @@ impl QuillApp {
         // An edit TDLib answered leaves edit mode (or goes on, on an error).
         self.settle_edit_send(window, cx);
         self.settle_sent_text(window, cx);
+        self.settle_left_sends(cx);
+        self.settle_scheduled_load(cx);
+        self.settle_scheduled_deletes(cx);
+        // A bot's Restart sends its /start once the unblock is answered.
+        self.pump_bot_restart(cx);
         // A forced reply for the chat this window shows arms its composer.
         self.arm_force_reply_here(window, cx);
         // The histories every window still reads stay whole.
@@ -83,15 +93,17 @@ impl QuillApp {
         // A Premium preview a reducer asked for, in the window showing
         // the chat it is about.
         self.pump_promo_request(cx);
-        // A Premium limit's toast (a full GIF list, too many pins), in the
-        // window of the last press: the one whose action hit the limit.
-        if self.windows.pressed_here() {
-            self.premium_limit_toast_upkeep(window, cx);
-        }
+        // A Premium limit's toast (a full GIF list, too many pins): claimed
+        // by the window of the last press, shown in that window.
+        self.premium_limit_toast_upkeep(window, cx);
         self.gift_boxes_upkeep(window, cx);
         // A video chosen for an owned set finished downloading: its editor,
         // in the window the pick was made in.
         self.sticker_box_window_upkeep(window, cx);
+        // A topic menu action's answer: its success note.
+        self.topic_action_upkeep(cx);
+        // A photo "Edit Image" waited for: its editor, or a note.
+        self.edit_image_upkeep(cx);
         self.call_boxes_upkeep(window, cx);
         self.box_answers_upkeep(window, cx);
         self.checkout_prefill_upkeep(window, cx);
@@ -127,6 +139,14 @@ impl QuillApp {
             .dialog_may_show_in(crate::ui::shell::DialogKind::BotEdit, self.windows.scope)
         {
             self.fill_bot_edit(window, cx);
+        }
+        // A Verify accounts box that sent its request: the answer returns
+        // it to the list, a refusal shows its reason.
+        if self
+            .windows
+            .dialog_may_show_in(crate::ui::shell::DialogKind::BotVerify, self.windows.scope)
+        {
+            self.pump_bot_verify(cx);
         }
         self.business_closed_error_upkeep();
         if self.windows.dialog_may_show_in(
@@ -183,6 +203,13 @@ impl QuillApp {
         // The welcome messages box clears its field when an Add is answered.
         if self.windows.dialog_may_show_in(DialogKind::Welcome, here) {
             self.settle_welcome_dialog(window, cx);
+        }
+        // The shared folder's join box closes on its request's answer.
+        if self
+            .windows
+            .dialog_may_show_in(DialogKind::FolderNewChats, here)
+        {
+            self.folder_new_chats_upkeep(window, cx);
         }
         // A collectible lookup that failed copies its link, with the toast
         // in the box's window.
@@ -289,58 +316,62 @@ impl QuillApp {
         let ours = |window: Option<ChatId>, session: &quill::state::Session| {
             window == here || window.is_some_and(|chat| !session.window_chats.contains(&chat))
         };
-        let ai_text = match session.messages.ai_composer_text.as_ref() {
-            Some((window, ..)) if ours(*window, session) => {
-                session.messages.ai_composer_text.take()
-            }
-            _ => None,
+        // Answers of this window's asks; those of another window wait for
+        // its frame, those of a window that closed have no taker.
+        let (taken, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut session.messages.ai_answers)
+            .into_iter()
+            .partition(|answer| ours(answer.window, session));
+        session.messages.ai_answers = rest;
+        for answer in taken.into_iter().filter(|answer| answer.window == here) {
+            self.apply_ai_answer(answer, open_chat, window, cx);
         }
-        .filter(|(window, ..)| *window == here);
-        let ai_blocks = match session.messages.ai_composer_blocks.as_ref() {
-            Some((window, ..)) if ours(*window, session) => {
-                session.messages.ai_composer_blocks.take()
-            }
-            _ => None,
-        }
-        .filter(|(window, ..)| *window == here);
-        // The answer is for the draft that was asked about: text typed
-        // since, a message sent meanwhile or an edit begun after the ask
-        // keeps the field as it is.
-        let for_here = ai_text
-            .as_ref()
-            .is_some_and(|(_, c, _)| open_chat == Some(*c))
-            || ai_blocks
-                .as_ref()
-                .is_some_and(|(_, c, _, _)| open_chat == Some(*c));
-        if !for_here {
+    }
+
+    /// One answer, applied only when it is the answer of the request this
+    /// chat's composer is waiting for: a newer ask or a closed chat leaves
+    /// an older answer without a taker. The answer is for the draft that was
+    /// asked about: text typed since, a message sent meanwhile or an edit
+    /// begun after the ask keeps the field as it is.
+    fn apply_ai_answer(
+        &mut self,
+        answer: quill::state::AiAnswer,
+        open_chat: Option<ChatId>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use crate::ui::composer::AiAsk;
+        use quill::state::AiResult;
+        if open_chat != Some(answer.chat) {
             return;
         }
-        let asked = std::mem::take(&mut self.chat_ui.ai_ask);
-        let still_asked = matches!(
-            &asked,
-            crate::ui::composer::AiAsk::Asked { markup }
-                if !self.chat_ui.is_editing() && *markup == self.composer_markup(cx)
-        );
-        if !still_asked {
-            self.set_note(StatusNote::info(tr(
-                keys::Q_CHAT_THE_DRAFT_CHANGED_THE_AI_ANSWER,
-            )));
+        let AiAsk::Asked { request, markup } = &self.chat_ui.ai_ask else {
+            return;
+        };
+        if *request != answer.request {
             return;
         }
-        if let Some((_, chat_id, text)) = ai_text
-            && open_chat == Some(chat_id)
-        {
-            self.set_composer_markup(&text, window, cx);
-            self.set_note(StatusNote::silent(tr(keys::Q_REST_AI_UPDATED_THE_DRAFT)));
-        }
-        if let Some((_, chat_id, rich, note)) = ai_blocks
-            && open_chat == Some(chat_id)
-        {
-            let text = quill::rich::RichDraft::from_message(&rich.blocks)
-                .map(|draft| draft.markup())
-                .unwrap_or_default();
-            self.set_composer_markup(&text, window, cx);
-            self.set_note(StatusNote::info(note));
-        }
+        let still_asked = !self.chat_ui.is_editing() && *markup == self.composer_markup(cx);
+        self.chat_ui.ai_ask = AiAsk::Idle;
+        let (text, note) = match answer.result {
+            AiResult::Failed => return,
+            _ if !still_asked => {
+                self.set_note(StatusNote::info(tr(
+                    keys::Q_CHAT_THE_DRAFT_CHANGED_THE_AI_ANSWER,
+                )));
+                return;
+            }
+            AiResult::Text(text) => (
+                text,
+                StatusNote::silent(tr(keys::Q_REST_AI_UPDATED_THE_DRAFT)),
+            ),
+            AiResult::Blocks(rich, note) => (
+                quill::rich::RichDraft::from_message(&rich.blocks)
+                    .map(|draft| draft.markup())
+                    .unwrap_or_default(),
+                StatusNote::info(note),
+            ),
+        };
+        self.set_composer_markup(&text, window, cx);
+        self.set_note(note);
     }
 }

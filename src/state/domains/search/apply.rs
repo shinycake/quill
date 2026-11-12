@@ -55,10 +55,10 @@ impl Session {
                     for message in &messages {
                         self.remember_files(&message.files);
                     }
-                    if self.calls.take_recent_calls_request(pending.id) {
-                        self.calls.recent_calls.extend(messages);
-                        self.calls.recent_calls_offset = next_offset;
-                    }
+                    self.calls.recent_calls.page_answered(
+                        pending.id,
+                        crate::state::CallPage::new(messages, next_offset),
+                    );
                 }
             }
             // `searchPublicPosts` answer: posts of public channels; an

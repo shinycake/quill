@@ -87,7 +87,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     // Slice CL: the peek preview is the most transient layer.
     layer!(
         "chat-preview",
-        |app| app.chat_list.peek.open().is_some(),
+        |app| app.message_ui.menu.peek().is_some(),
         |app, _, cx| app.close_chat_preview(cx)
     ),
     // Drawn in the call windows, not the main window: Esc there closes
@@ -100,12 +100,12 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     ),
     layer!(
         "group-call-settings",
-        |app| app.group_call_screen.settings_open,
+        |app| app.settings_open(),
         |app, _, cx| app.close_group_call_settings(cx)
     ),
     layer!(
         "group-call-title",
-        |app| app.group_call_screen.title_dialog.is_some(),
+        |app| app.title_dialog().is_some(),
         |app, _, cx| app.close_group_call_title_dialog(cx)
     ),
     // Phase 9.7: the chat story page paints above the story composer.
@@ -117,7 +117,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     // Phase 9.3: the story composer is above the story viewer.
     layer!(
         "story-composer",
-        |app| app.stories.composer.open,
+        |app| app.stories.composer.is_open(),
         |app, _, cx| app.close_story_composer(cx)
     ),
     // The story reply row's voice recording and emoji / sticker / GIF
@@ -228,7 +228,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         "ttl-picker",
         |app| app.notify.ttl_picker.is_some(),
         |app, _, cx| {
-            app.notify.ttl_picker = None;
+            app.close_ttl_picker();
             cx.notify();
         }
     ),
@@ -247,8 +247,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     }),
     layer!(
         "reply-panels",
-        |app| (app.share.forward.reply_chooser_open() && app.chat_ui.has_reply())
-            || app.reply_quote_open(),
+        |app| app.chat_ui.reply_panel() != crate::ui::reply_options_ui::ReplyPanel::None,
         |app, window, cx| app.close_reply_panels(window, cx)
     ),
     layer!(
@@ -267,13 +266,14 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     layer!(
         "shared-media",
         |app| app.session().is_some_and(|session| {
-            session.media.shared_media.open() || session.media.shared_media.playlist_user.is_some()
+            session.media.shared_media.open()
+                || session.media.shared_media.playlist_user().is_some()
         }),
         |app, _, cx| {
             // Esc leaves the Playlist page first, back to the gallery.
             if app
                 .session()
-                .is_some_and(|session| session.media.shared_media.playlist_user.is_some())
+                .is_some_and(|session| session.media.shared_media.playlist_user().is_some())
             {
                 app.close_playlist_ui(cx);
             } else {
@@ -324,9 +324,9 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     ),
     layer!(
         "forward-result",
-        |app| app.share.forward_result.is_some(),
+        |app| app.chat_ui.forward_result.is_some(),
         |app, _, cx| {
-            app.share.forward_result = None;
+            app.chat_ui.forward_result = None;
             app.set_note(StatusNote::silent(tr(
                 keys::Q_MISC_FORWARD_RESULT_DISMISSED,
             )));
@@ -338,7 +338,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         "downloads-panel",
         |app| app.downloads_panel_open(),
         |app, _, cx| {
-            app.chat_list.downloads_panel_open = false;
+            app.close_downloads_panel();
             cx.notify();
         }
     ),
@@ -628,7 +628,7 @@ mod dispatch_tests {
                 });
             }),
             ("context-menus", |app, _, _| {
-                app.chat_list.archive_menu = Some(point(px(10.), px(10.)));
+                app.message_ui.menu.open_archive(point(px(10.), px(10.)));
             }),
             ("downloads-panel", |app, _, _| {
                 app.chat_list.downloads_panel_open = true;
@@ -674,14 +674,16 @@ mod dispatch_tests {
         let (app, mut vcx) = new_app(cx);
         let vcx = &mut vcx;
         app.update_in(vcx, |app, window, cx| {
-            app.group_call_screen.title_dialog = Some(
+            if let Some(session) = app.demo_session.as_mut() {
+                session.calls.active_group_call = Some(quill::state::ActiveGroupCall::fresh(77));
+            }
+            app.open_call_box(crate::ui::group_call_state::CallBox::Rename(
                 crate::ui::dialogs::group_call::GroupCallTitleDialog::new(window, cx, "x"),
-            );
-            app.group_call_screen.settings_open = true;
+            ));
             app.screen_share.chooser = crate::ui::screen_share_state::Chooser::PrivacyBox(
                 crate::ui::screen_share_state::ChooserTarget {
                     for_call: crate::ui::screen_share_state::ScreenFor::Group,
-                    group_call: None,
+                    group_call: Some(77),
                 },
             );
             app.stories.page = Some(crate::ui::story_page::StoryPage::new(ChatId(1), window, cx));
@@ -690,8 +692,7 @@ mod dispatch_tests {
         vcx.simulate_keystrokes("escape");
         assert_eq!(top(&app, vcx), None, "the main window's own layer closed");
         app.read_with(vcx, |app, _| {
-            assert!(app.group_call_screen.title_dialog.is_some());
-            assert!(app.group_call_screen.settings_open);
+            assert!(app.title_dialog().is_some());
             assert!(app.screen_share.chooser.privacy_for().is_some());
         });
     }
@@ -773,8 +774,8 @@ mod dispatch_tests {
             (
                 "passcode settings",
                 // box-host: a test sets the flag directly
-                |a| a.account.passcode.open = true,
-                |a| a.account.passcode.open,
+                |a| a.account.passcode.panel = Some(Default::default()),
+                |a| a.account.passcode.is_open(),
             ),
             (
                 "file open warning",

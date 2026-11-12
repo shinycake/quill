@@ -174,10 +174,7 @@ fn a_made_group_takes_its_dialog_away(cx: &mut TestAppContext) {
         let request = session.request(RequestPurpose::SetChatTitle, None);
         session.groups.new_chats.creations.insert(
             request,
-            NewChatCreation {
-                outcome: Some(CreationOutcome::Created(ChatId(77))),
-                ..NewChatCreation::default()
-            },
+            NewChatCreation::settled(CreationOutcome::Created(ChatId(77))),
         );
         if let Some(dialog) = app.admin.create_chat_dialog.as_mut() {
             dialog.stage = NewChatStage::Creating {

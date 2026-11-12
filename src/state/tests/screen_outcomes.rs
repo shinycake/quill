@@ -1,8 +1,8 @@
 //! What finished for an account while it was in the background is not
 //! reported when it comes back on screen.
 use crate::diagnostics::{DiagnosticSink, MemorySink};
-use crate::ids::{AccountKey, ChatId, MessageId};
-use crate::state::{CallbackAnswer, LoginUrlRequest};
+use crate::ids::{AccountKey, ChatId, MessageId, RequestId};
+use crate::state::{CallbackAnswer, LoginUrlRequest, LoginUrlStage};
 use crate::state::{PaymentVerification, Session};
 use crate::telegram::envelope::{CallbackQueryAnswer, LoginUrlInfo};
 use std::sync::Arc;
@@ -26,7 +26,7 @@ fn outcomes_that_landed_in_the_background_are_not_drained_later() {
     session.messages.message_action_note.push("banned".into());
     session.chats_state.chat_action_error.push("pin".into());
     session.chats_state.report_chat_outcome = Some("chat reported".into());
-    session.groups.invite_link_error = Some("link".into());
+    session.groups.invite_link_error.push("link".into());
     session.payments.earn.notes.push("Failed: x".into());
     session.payments.earn.open_url = Some("https://fragment.example".into());
     session
@@ -50,26 +50,30 @@ fn outcomes_that_landed_in_the_background_are_not_drained_later() {
         },
         chat: None,
     });
-    session.bots.last_login_url_info = Some(LoginUrlInfo::Open {
-        url: "https://site.example".into(),
-    });
-    session.bots.login_url_request = Some(LoginUrlRequest {
-        chat_id: ChatId(1),
-        message_id: MessageId(2),
-        button_id: 3,
-        raw_url: "https://site.example".into(),
-        from_agent: false,
-    });
+    session.bots.login_url = LoginUrlStage::Answered {
+        info: LoginUrlInfo::Open {
+            url: "https://site.example".into(),
+        },
+        context: LoginUrlRequest {
+            chat_id: ChatId(1),
+            message_id: MessageId(2),
+            button_id: 3,
+            raw_url: "https://site.example".into(),
+            from_agent: false,
+        },
+    };
+
+    session.users_state.contacts_notice = Some("Contacts imported.".into());
 
     session.forget_screen_outcomes();
 
+    assert!(session.users_state.contacts_notice.is_none());
     assert!(session.payments.receipt_error.is_none());
     assert!(session.payments.unlocked_notice.is_none());
     assert!(session.messages.send_permission_error.is_empty());
     assert!(session.messages.flood_notice.is_empty());
     assert!(session.bots.callback_answers.is_empty());
-    assert!(session.bots.last_login_url_info.is_none());
-    assert!(session.bots.login_url_request.is_none());
+    assert!(session.bots.login_url.is_idle());
 
     assert!(session.payments.verification_url.is_none());
     assert!(session.messages.message_link.is_none());
@@ -79,7 +83,7 @@ fn outcomes_that_landed_in_the_background_are_not_drained_later() {
     assert!(session.messages.message_action_note.is_empty());
     assert!(session.chats_state.chat_action_error.is_empty());
     assert!(session.chats_state.report_chat_outcome.is_none());
-    assert!(session.groups.invite_link_error.is_none());
+    assert!(session.groups.invite_link_error.is_empty());
     assert!(session.payments.earn.notes.is_empty());
     assert!(session.payments.earn.open_url.is_none());
     assert!(session.payments.earn.effects.is_empty());
@@ -91,15 +95,18 @@ fn outcomes_that_landed_in_the_background_are_not_drained_later() {
 fn a_login_request_in_flight_survives_the_return() {
     let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
     let mut session = Session::new(AccountKey::primary(), sink);
-    session.bots.login_url_request = Some(LoginUrlRequest {
-        chat_id: ChatId(1),
-        message_id: MessageId(2),
-        button_id: 3,
-        raw_url: "https://site.example".into(),
-        from_agent: false,
-    });
+    session.bots.login_url = LoginUrlStage::asking(
+        RequestId(7),
+        LoginUrlRequest {
+            chat_id: ChatId(1),
+            message_id: MessageId(2),
+            button_id: 3,
+            raw_url: "https://site.example".into(),
+            from_agent: false,
+        },
+    );
     session.forget_screen_outcomes();
-    assert!(session.bots.login_url_request.is_some());
+    assert!(!session.bots.login_url.is_idle());
 }
 
 /// Every outcome `poll_drains` takes from the session is one the return
@@ -109,9 +116,7 @@ fn a_login_request_in_flight_survives_the_return() {
 fn every_drained_outcome_is_forgotten_on_return() {
     let drains = include_str!("../../ui/notifications/poll_drains.rs");
     let forgets = include_str!("../session_outcomes.rs");
-    // Not an outcome of the screen: TDLib refused the log-out, which the
-    // account's own sign-in state keeps.
-    let exempt = ["logout_refused"];
+    let exempt: [&str; 0] = [];
     let mut missing = Vec::new();
     for part in drains.split("driver.session.").skip(1) {
         let path: String = part

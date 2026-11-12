@@ -99,6 +99,17 @@ fn a_topic_switch_in_a_forum_window_leaves_the_old_topics_text(cx: &mut TestAppC
     assert_eq!(text, "", "the topic's own (empty) draft is in the field");
 }
 
+const ASK: quill::ids::RequestId = quill::ids::RequestId(77);
+
+fn ai_text(window: Option<ChatId>, text: &str) -> quill::state::AiAnswer {
+    quill::state::AiAnswer {
+        request: ASK,
+        window,
+        chat: OTHER,
+        result: quill::state::AiResult::Text(text.into()),
+    }
+}
+
 #[gpui_kit::test]
 fn an_ai_answer_for_a_chat_window_lands_in_its_composer(cx: &mut TestAppContext) {
     let h = new_app(cx);
@@ -108,12 +119,16 @@ fn an_ai_answer_for_a_chat_window_lands_in_its_composer(cx: &mut TestAppContext)
     in_window(&h, chat_window, Some(OTHER), cx, |app, window, cx| {
         composer.update(cx, |field, cx| field.set_value("fixd text", window, cx));
         app.chat_ui.ai_ask = crate::ui::composer::AiAsk::Asked {
+            request: ASK,
             markup: "fixd text".into(),
         };
     });
     h.app.update(cx, |app, _| {
         if let Some(session) = app.session_mut() {
-            session.messages.ai_composer_text = Some((Some(OTHER), OTHER, "fixed text".into()));
+            session
+                .messages
+                .ai_answers
+                .push(ai_text(Some(OTHER), "fixed text"));
         }
     });
     // The main window's frame leaves another window's answer alone.
@@ -137,6 +152,7 @@ fn an_ai_answer_goes_to_the_window_that_asked(cx: &mut TestAppContext) {
     in_window(&h, chat_window, Some(OTHER), cx, |app, window, cx| {
         composer.update(cx, |field, cx| field.set_value("fixd text", window, cx));
         app.chat_ui.ai_ask = crate::ui::composer::AiAsk::Asked {
+            request: ASK,
             markup: "fixd text".into(),
         };
     });
@@ -144,7 +160,10 @@ fn an_ai_answer_goes_to_the_window_that_asked(cx: &mut TestAppContext) {
     // does not take the answer.
     h.app.update(cx, |app, _| {
         if let Some(session) = app.session_mut() {
-            session.messages.ai_composer_text = Some((None, OTHER, "fixed text".into()));
+            session
+                .messages
+                .ai_answers
+                .push(ai_text(None, "fixed text"));
         }
     });
     draw(chat_window, cx);
@@ -155,7 +174,7 @@ fn an_ai_answer_goes_to_the_window_that_asked(cx: &mut TestAppContext) {
     );
     assert!(h.app.read_with(cx, |app, _| {
         app.session()
-            .is_some_and(|session| session.messages.ai_composer_text.is_some())
+            .is_some_and(|session| !session.messages.ai_answers.is_empty())
     }));
 }
 
@@ -261,11 +280,11 @@ fn a_forward_from_a_chat_window_answers_there(cx: &mut TestAppContext) {
     let main = read(&h, None, cx, |app, _| {
         (
             app.share.forward.draft().is_some(),
-            app.share.forward_result.is_some(),
+            app.chat_ui.forward_result.is_some(),
         )
     });
     let window = read(&h, Some(OTHER), cx, |app, _| {
-        app.share.forward_result.is_some()
+        app.chat_ui.forward_result.is_some()
     });
     assert_eq!(main, (true, false), "the main window's selection stays");
     assert!(window, "the result shows in the window it came from");
@@ -276,13 +295,11 @@ fn a_chat_windows_frame_leaves_the_main_windows_peek(cx: &mut TestAppContext) {
     let h = new_app(cx);
     let chat_window = h.open_in_new_window(OTHER, cx);
     read(&h, None, cx, |app, _| {
-        app.history.forum_column = crate::ui::history_state::ForumColumnUi::Peek
+        app.history.forum_peek = crate::ui::history_state::ForumPeek::Chats { forum: OTHER }
     });
     draw(chat_window, cx);
-    assert!(read(&h, None, cx, |app, _| app
-        .history
-        .forum_column
-        .peeking()));
+    assert!(read(&h, None, cx, |app, _| app.history.forum_peek
+        == crate::ui::history_state::ForumPeek::Chats { forum: OTHER }));
 }
 
 #[gpui_kit::test]

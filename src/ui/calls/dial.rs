@@ -18,6 +18,16 @@ pub(in crate::ui) fn join_error_note(err: ConnectSendError, fallback: Key) -> St
     }
 }
 
+/// What a placed call does to the end summary on screen.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(in crate::ui) enum SummaryAfterDial {
+    /// A call from anywhere else: the summary stays to be answered.
+    Keep,
+    /// A redial from the ended call's own screen: the summary (its rating
+    /// and uploads) goes once the dial is accepted, not before.
+    Dismiss,
+}
+
 impl QuillApp {
     /// With a live connection but no call engine (libquill_calls did not
     /// load), says calls are unavailable and returns true: nothing would
@@ -91,6 +101,18 @@ impl QuillApp {
         is_video: bool,
         cx: &mut Context<Self>,
     ) {
+        self.dial_user_with(user_id, is_video, SummaryAfterDial::Keep, cx);
+    }
+
+    /// `dial_user` for a call placed from an ended call's screen
+    /// (`SummaryAfterDial::Dismiss`).
+    pub(in crate::ui) fn dial_user_with(
+        &mut self,
+        user_id: i64,
+        is_video: bool,
+        after: SummaryAfterDial,
+        cx: &mut Context<Self>,
+    ) {
         // A failure to start, and the rating, show where Call was pressed.
         self.call_boxes.card_window = self.asking_window_or_last_press();
         // tdesktop asks for the microphone (and the camera for video)
@@ -98,15 +120,21 @@ impl QuillApp {
         if self.live.is_some() {
             self.with_capture_access(
                 is_video,
-                move |this, cx| this.send_dial(user_id, is_video, cx),
+                move |this, cx| this.send_dial(user_id, is_video, after, cx),
                 cx,
             );
             return;
         }
-        self.send_dial(user_id, is_video, cx);
+        self.send_dial(user_id, is_video, after, cx);
     }
 
-    fn send_dial(&mut self, user_id: i64, is_video: bool, cx: &mut Context<Self>) {
+    fn send_dial(
+        &mut self,
+        user_id: i64,
+        is_video: bool,
+        after: SummaryAfterDial,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.session.is_offline() {
                 self.set_note(StatusNote::error(tr(
@@ -116,6 +144,9 @@ impl QuillApp {
                 return;
             }
             let result = live.driver.start_call(user_id, is_video);
+            if result.is_ok() && after == SummaryAfterDial::Dismiss {
+                self.drop_call_summary();
+            }
             self.set_note(match result {
                 Ok(_) => {
                     if is_video {
@@ -127,6 +158,9 @@ impl QuillApp {
                 Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_START_THE_CALL)),
             });
         } else if self.demo_session.is_some() {
+            if after == SummaryAfterDial::Dismiss {
+                self.drop_call_summary();
+            }
             self.set_note(StatusNote::silent(tr(keys::Q_OPS_DEMO_CALL_START_NO_LIVE)));
         }
         cx.notify();

@@ -8,4 +8,5 @@
 "lng_context_monoforum_unban" = "Unban user in channel";
 "lng_context_remove_fee" = "Remove Fee";
 "lng_monoforum_choose_to_reply" = "Choose a message to reply.";
+"qll_direct_couldnt_check_the_member_try_again" = "Couldn't check the member. Try again.";
 "lng_profile_delete_conversation" = "Delete chat";

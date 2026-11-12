@@ -146,7 +146,7 @@ fn channel_monetization_loads_ton_stars_and_ads_link() {
     assert_eq!(page.ton.ready().unwrap().amounts.balance, 3_000_000_000);
     assert_eq!(page.stars.ready().unwrap().status.current.stars, 250);
     assert_eq!(
-        page.ad_account_url.as_deref(),
+        page.ad_account_url.ready().map(String::as_str),
         Some("https://ads.example/acc")
     );
     assert_eq!(
@@ -292,9 +292,11 @@ fn a_cancelled_withdrawals_answer_opens_nothing() {
     );
     let earn = &p.0.session.payments.earn;
     assert_eq!(earn.open_url, None, "Fragment does not open after Cancel");
-    assert_eq!(
-        earn.withdraw.as_ref().map(|w| &w.step),
-        Some(&WithdrawStep::Checking),
+    assert!(
+        matches!(
+            earn.withdraw.as_ref().map(|w| &w.step),
+            Some(WithdrawStep::Checking(_))
+        ),
         "the new attempt goes on"
     );
     // Cancel the new attempt from its password box; its wrong-password
@@ -309,10 +311,10 @@ fn a_cancelled_withdrawals_answer_opens_nothing() {
         json!({"@type": "error", "code": 400, "message": "PASSWORD_HASH_INVALID",
             "@extra": cancelled}),
     );
-    assert_eq!(
+    assert!(matches!(
         p.0.session.payments.earn.withdraw.as_ref().map(|w| &w.step),
-        Some(&WithdrawStep::Checking)
-    );
+        Some(WithdrawStep::Checking(_))
+    ));
 }
 
 #[test]
@@ -474,7 +476,13 @@ fn a_reopened_setup_page_stays_open_for_an_earlier_save() {
     p.0.session.payments.earn.setup = None;
     p.0.open_starref_setup(BOT).unwrap();
     p.0.save_starref_program().unwrap();
-    let waiting = p.0.session.payments.earn.setup.as_ref().map(|s| s.saving);
+    let waiting =
+        p.0.session
+            .payments
+            .earn
+            .setup
+            .as_ref()
+            .map(|s| s.saving_request());
     // The end (sent second to last) fails late: the new save still waits.
     let end =
         p.1.snapshot()
@@ -488,7 +496,7 @@ fn a_reopened_setup_page_stays_open_for_an_earlier_save() {
     feed(&mut p, refused);
     let setup = p.0.session.payments.earn.setup.as_ref().unwrap();
     assert!(setup.is_saving());
-    assert_eq!(Some(setup.saving), waiting);
+    assert_eq!(setup.saving_request(), waiting.flatten());
 }
 
 #[test]
@@ -701,4 +709,39 @@ fn a_program_click_answered_after_its_list_closed_opens_nothing() {
         connected(BOT, "https://t.me/bot?start=_tgr_z"),
     );
     assert!(p.0.session.payments.earn.link_box.is_none());
+}
+
+#[test]
+fn a_refused_ads_link_is_drawn_failed_and_asks_again_only_from_its_retry() {
+    let mut p = parts();
+    p.0.open_earn_page(EarnPeer::User(BOT), EarnScreen::Stars, false)
+        .unwrap();
+    assert_eq!(count(&p.1, "getStarAdAccountUrl"), 1);
+    error(&mut p, "getStarAdAccountUrl", "FLOOD");
+    let page = p.0.session.payments.earn.page.as_ref().unwrap();
+    assert!(matches!(page.ad_account_url, Load::Failed(_)));
+    // Nothing re-asks by itself (a poll, another ingest).
+    feed(
+        &mut p,
+        json!({"@type": "updateOption", "name": "x", "value": {"@type": "optionValueBoolean", "value": true}}),
+    );
+    assert_eq!(count(&p.1, "getStarAdAccountUrl"), 1);
+    // The Retry asks again; only that request's answer lands.
+    p.0.retry_earn_ad_account_url(EarnPeer::User(BOT)).unwrap();
+    assert_eq!(count(&p.1, "getStarAdAccountUrl"), 2);
+    let page = p.0.session.payments.earn.page.as_ref().unwrap();
+    assert!(page.ad_account_url.is_loading());
+    answer(
+        &mut p,
+        "getStarAdAccountUrl",
+        json!({"@type": "httpUrl", "url": "https://ads.example/acc"}),
+    );
+    let page = p.0.session.payments.earn.page.as_ref().unwrap();
+    assert_eq!(
+        page.ad_account_url.ready().map(String::as_str),
+        Some("https://ads.example/acc")
+    );
+    // A retry with nothing refused sends nothing.
+    p.0.retry_earn_ad_account_url(EarnPeer::User(BOT)).unwrap();
+    assert_eq!(count(&p.1, "getStarAdAccountUrl"), 2);
 }

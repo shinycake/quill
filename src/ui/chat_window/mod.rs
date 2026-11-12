@@ -42,6 +42,7 @@ mod dialog_host_tests;
 #[cfg(test)]
 mod dialog_host_window_tests;
 mod dialog_hosts;
+pub(in crate::ui) use dialog_hosts::AskWaits;
 #[cfg(test)]
 mod lock_tests;
 #[cfg(test)]
@@ -76,7 +77,6 @@ mod window_state_tests;
 
 use super::app::QuillApp;
 use super::on_screen::ScreenEpoch;
-use super::threads::ThreadAsker;
 use cover::WindowPlace;
 use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
@@ -104,10 +104,6 @@ pub(crate) struct ChatWindows {
     /// Who asks for what the code running now opens (`dialog_hosts`):
     /// the window in place, a window a flow carried, or nobody.
     pub(super) asker: dialog_hosts::Asker,
-    /// The window that asked for the thread the session is opening (the
-    /// session keeps one thread): only its frame takes the resolved
-    /// thread on, not whichever window draws first (`advance_thread`).
-    pub(super) thread_asker: ThreadAsker,
     /// Which window shows each kit dialog (`dialog_hosts`).
     dialogs: dialog_hosts::DialogHosts,
     /// A write of the open windows is scheduled (`saved`).
@@ -144,14 +140,38 @@ pub(crate) struct MainWindow {
     /// `close_kit_dialog_if_done`): the shell forgets the one it showed
     /// (`QuillShell::sync_kit_dialogs_in`) and does not close again, which
     /// would close an unrelated dialog now on top.
-    pub(super) dialogs_closed: std::cell::RefCell<std::collections::HashSet<WindowId>>,
+    pub(super) dialogs_closed: ClosedKitDialogs,
     /// The exit a Quit left waiting behind the "Stop and quit" alert. The
     /// alert is the window's and the Quit is the app's, so an account
     /// switch under the alert does not take the exit with it.
-    pub(super) export_stop: Option<super::export_quit::ExitAfterStop>,
+    pub(super) quit_gate: super::export_quit::QuitGate,
     /// Keys go to the window that received them: the interceptor runs
     /// before any handler and puts that window's state in place.
     _key_scope: Subscription,
+}
+
+/// The mailbox of [`MainWindow::dialogs_closed`]. A closer holds only
+/// `&QuillApp` (often inside a shell's own update), so the marks sit in a
+/// cell; every borrow is `try_borrow_mut` and a busy cell reads as "no
+/// mark" instead of panicking.
+#[derive(Default)]
+pub(super) struct ClosedKitDialogs(std::cell::RefCell<std::collections::HashSet<WindowId>>);
+
+impl ClosedKitDialogs {
+    /// `window`'s kit dialog was closed from outside its shell.
+    pub(super) fn mark(&self, window: WindowId) {
+        if let Ok(mut marks) = self.0.try_borrow_mut() {
+            marks.insert(window);
+        }
+    }
+
+    /// The shell of `window` reads (and clears) the mark: true when its
+    /// dialog was already closed.
+    pub(super) fn take(&self, window: WindowId) -> bool {
+        self.0
+            .try_borrow_mut()
+            .is_ok_and(|mut marks| marks.remove(&window))
+    }
 }
 
 impl MainWindow {
@@ -169,7 +189,7 @@ impl MainWindow {
             place: None,
             cascade: 0,
             dialogs_closed: Default::default(),
-            export_stop: None,
+            quit_gate: Default::default(),
             _key_scope: key_scope,
         }
     }
@@ -208,7 +228,6 @@ impl ChatWindows {
             scope: None,
             last_press: None,
             asker: dialog_hosts::Asker::InPlace,
-            thread_asker: ThreadAsker::Nobody,
             dialogs: dialog_hosts::DialogHosts::default(),
             save: saved::SaveTimer::Idle,
             closed: Vec::new(),
@@ -237,7 +256,7 @@ impl ChatWindows {
     /// window the caller is inside of counts too.
     pub(super) fn open_places(&self) -> impl Iterator<Item = (ChatId, Bounds<Pixels>)> + '_ {
         self.open.iter().filter_map(|open| {
-            let bounds = open.slot.try_borrow().ok()?.bounds?;
+            let bounds = open.slot.try_borrow().ok()?.stand.bounds?;
             Some((open.chat_id, bounds))
         })
     }
@@ -271,9 +290,9 @@ impl ChatWindows {
     ) -> Vec<(Entity<super::image_budget::BoundedImageCache>, bool)> {
         self.open
             .iter()
-            .map(|open| {
-                let slot = open.slot.borrow();
-                (slot.images.clone(), slot.active)
+            .filter_map(|open| {
+                let slot = open.slot.try_borrow().ok()?;
+                Some((slot.images.clone(), slot.stand.active))
             })
             .collect()
     }
@@ -287,7 +306,7 @@ impl ChatWindows {
             .open
             .iter()
             .find(|open| open.handle.window_id() == id)?;
-        Some(open.slot.borrow().images.clone())
+        Some(open.slot.try_borrow().ok()?.images.clone())
     }
 
     /// The image cache of the chat window whose state is in place.
@@ -295,7 +314,7 @@ impl ChatWindows {
         &self,
     ) -> Option<Entity<super::image_budget::BoundedImageCache>> {
         let slot = self.slot_for(self.scope?)?;
-        Some(slot.borrow().images.clone())
+        Some(slot.try_borrow().ok()?.images.clone())
     }
 
     fn slot_for(&self, chat_id: ChatId) -> Option<slot::SharedSlot> {
@@ -357,7 +376,9 @@ impl ChatWindows {
 
     /// A chat window is the active one (the frame clock runs for it).
     pub(super) fn any_active(&self) -> bool {
-        self.open.iter().any(|open| open.slot.borrow().active)
+        self.open
+            .iter()
+            .any(|open| open.slot.try_borrow().is_ok_and(|slot| slot.stand.active))
     }
 
     pub(super) fn any_open(&self) -> bool {
@@ -376,13 +397,19 @@ impl ChatWindows {
         };
         cx.activate(true);
         let composer = if self.scope == Some(chat_id) {
-            in_place.clone()
+            Some(in_place.clone())
         } else {
-            open.slot.borrow().composer.clone()
+            // A slot in use is not read: the window still comes forward.
+            open.slot
+                .try_borrow()
+                .ok()
+                .map(|slot| slot.composer.clone())
         };
         let _ = open.handle.update(cx, |_, window, cx| {
             window.activate_window();
-            composer.update(cx, |input, cx| input.focus(window, cx));
+            if let Some(composer) = composer {
+                composer.update(cx, |input, cx| input.focus(window, cx));
+            }
         });
         true
     }
@@ -540,7 +567,10 @@ impl QuillApp {
             };
             owner.update(cx, |app, cx| {
                 app.in_screen_scope(screen, cx, |app, cx| {
-                    let views = slot.borrow().slices.view_ids().collect();
+                    let views = slot
+                        .try_borrow()
+                        .map(|slot| slot.slices.view_ids().collect())
+                        .unwrap_or_default();
                     app.windows.open.push(OpenChatWindow {
                         chat_id,
                         handle,
@@ -662,9 +692,10 @@ impl QuillApp {
             .open
             .iter()
             .find(|open| open.chat_id == chat_id)
-            && let Ok(mut closed) = self.main_window.dialogs_closed.try_borrow_mut()
         {
-            closed.remove(&open.handle.window_id());
+            self.main_window
+                .dialogs_closed
+                .take(open.handle.window_id());
         }
         self.windows.open.retain(|open| open.chat_id != chat_id);
         // Its media panel goes: the GIF downloads follow the panels left.
@@ -772,7 +803,7 @@ impl QuillApp {
         }
         self.set_composer_markup("", window, cx);
         self.composer_ui.echo.set(SharedString::default());
-        self.history.rows_key = None;
+        self.history.invalidate_rows();
         if self
             .session()
             .is_some_and(|session| session.users_state.open_info_panel.is_some())

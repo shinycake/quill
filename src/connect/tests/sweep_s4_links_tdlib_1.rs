@@ -9,11 +9,13 @@ use crate::telegram::client::copy_and_parse;
 #[test]
 fn a_refused_close_keeps_the_logout_request() {
     let (_dir, mut driver, sender, _sink, _seq) = toggle_driver();
-    driver.session.auth_state.logout_request = Some(RequestId(9));
+    driver.session.shutdown = ShutdownPhase::LogoutRequested(RequestId(9));
     sender.refuse(true);
     assert!(driver.request_close().is_err());
-    assert_eq!(driver.session.auth_state.logout_request, Some(RequestId(9)));
-    assert_eq!(driver.session.shutdown, ShutdownPhase::Running);
+    assert_eq!(
+        driver.session.shutdown,
+        ShutdownPhase::LogoutRequested(RequestId(9))
+    );
 }
 
 /// Sweep 02-039: parameters that could not be sent leave no dead entry.
@@ -76,10 +78,7 @@ fn a_refused_withdrawal_shows_an_error_in_the_box() {
     assert!(driver.submit_gram_withdrawal("pw").is_err());
     assert!(matches!(
         driver.session.payments.hub.grams.withdraw,
-        Some(GramWithdraw::Password {
-            request: None,
-            error: Some(_)
-        })
+        Some(GramWithdraw::Password { error: Some(_) })
     ));
 }
 

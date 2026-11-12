@@ -188,8 +188,12 @@ impl PrivacyRuleDetail {
 /// only while that id is still the key's live request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PrivacyKeyState {
-    /// `getUserPrivacySettingRules` is out.
-    Loading(RequestId),
+    /// `getUserPrivacySettingRules` is out; `stale` is the rule held before
+    /// the refetch (shown meanwhile and kept if the refetch fails).
+    Loading {
+        request: RequestId,
+        stale: Option<PrivacyRuleDetail>,
+    },
     Ready(PrivacyRuleDetail),
     /// `setUserPrivacySettingRules` is out: `detail` shows at once (the
     /// live save, under `request`). `confirmed` is the last rule the
@@ -208,8 +212,10 @@ pub enum PrivacyKeyState {
         detail: PrivacyRuleDetail,
         error: String,
     },
-    /// The rule could not be loaded.
-    Failed,
+    /// The rule could not be loaded; `stale` is the rule held before.
+    Failed {
+        stale: Option<PrivacyRuleDetail>,
+    },
 }
 
 impl PrivacyKeyState {
@@ -220,7 +226,7 @@ impl PrivacyKeyState {
             Self::Ready(detail) | Self::Saving { detail, .. } | Self::SaveFailed { detail, .. } => {
                 Some(detail)
             }
-            Self::Loading(_) | Self::Failed => None,
+            Self::Loading { stale, .. } | Self::Failed { stale } => stale.as_ref(),
         }
     }
 
@@ -235,7 +241,7 @@ impl PrivacyKeyState {
     /// The load or save request that decides this state's next answer.
     fn request(&self) -> Option<RequestId> {
         match self {
-            Self::Loading(request) | Self::Saving { request, .. } => Some(*request),
+            Self::Loading { request, .. } | Self::Saving { request, .. } => Some(*request),
             _ => None,
         }
     }
@@ -250,7 +256,7 @@ impl crate::state::SettingsState {
         request: Option<RequestId>,
         detail: PrivacyRuleDetail,
     ) -> bool {
-        let live = matches!(self.privacy.get(&key), Some(PrivacyKeyState::Loading(id)) if Some(*id) == request);
+        let live = matches!(self.privacy.get(&key), Some(PrivacyKeyState::Loading { request: id, .. }) if Some(*id) == request);
         if live {
             self.privacy.insert(key, PrivacyKeyState::Ready(detail));
         }
@@ -361,8 +367,31 @@ impl crate::state::SettingsState {
         {
             return false;
         }
-        self.privacy.insert(key, PrivacyKeyState::Loading(request));
+        let stale = self
+            .privacy
+            .get(&key)
+            .and_then(PrivacyKeyState::detail)
+            .cloned();
+        self.privacy
+            .insert(key, PrivacyKeyState::Loading { request, stale });
         true
+    }
+
+    /// The load under `request` was refused or never left: only the key's
+    /// live load fails, and the rule held before it stays.
+    pub fn fail_privacy_load(&mut self, key: PrivacySettingKey, request: Option<RequestId>) {
+        let Some(PrivacyKeyState::Loading {
+            request: live,
+            stale,
+        }) = self.privacy.get_mut(&key)
+        else {
+            return;
+        };
+        if Some(*live) != request {
+            return;
+        }
+        let stale = stale.take();
+        self.privacy.insert(key, PrivacyKeyState::Failed { stale });
     }
 }
 
@@ -473,12 +502,78 @@ pub fn session_ttl_label(days: i32) -> String {
 }
 
 /// B13: fetch state of the new-chat privacy row.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NewChatPrivacyState {
     /// The first fetch is out; only its answer (or error) leaves the stage.
     Loading(RequestId),
     Ready(NewChatPrivacy),
+    /// Saves are out over the confirmed value; the row shows the newest.
+    Saving(crate::state::saves::Saves<NewChatPrivacy>),
     Failed,
+}
+
+impl NewChatPrivacyState {
+    /// What the row shows, once a value is known.
+    pub fn value(&self) -> Option<NewChatPrivacy> {
+        match self {
+            Self::Ready(value) => Some(*value),
+            Self::Saving(saves) => Some(saves.value()),
+            Self::Loading(_) | Self::Failed => None,
+        }
+    }
+
+    /// The stage a row draws: saves in flight show as the value they ask for.
+    pub fn shown(&self) -> Self {
+        match self.value() {
+            Some(value) => Self::Ready(value),
+            None => self.clone(),
+        }
+    }
+
+    /// A save goes out under `request` over the value shown.
+    pub fn save(&mut self, request: RequestId, next: NewChatPrivacy) {
+        match self {
+            Self::Ready(confirmed) => {
+                *self = Self::Saving(crate::state::saves::Saves::first(*confirmed, request, next));
+            }
+            Self::Saving(saves) => saves.push(request, next),
+            Self::Loading(_) | Self::Failed => {}
+        }
+    }
+
+    /// `request` was refused: its value goes, the row falls back.
+    pub fn save_failed(&mut self, request: RequestId) {
+        if let Self::Saving(saves) = self
+            && !saves.fail(request)
+        {
+            *self = Self::Ready(saves.confirmed());
+        }
+    }
+
+    /// `request` landed: the server holds its value.
+    pub fn save_landed(&mut self, request: RequestId) {
+        if let Self::Saving(saves) = self
+            && !saves.land(request)
+        {
+            *self = Self::Ready(saves.confirmed());
+        }
+    }
+
+    /// The fetch `fetch` answered `server`: it replaces what is shown
+    /// unless a save asked after it is still out. The first fetch of this
+    /// stage always lands.
+    pub fn fetched(&mut self, fetch: RequestId, server: NewChatPrivacy) {
+        match self {
+            Self::Loading(live) if *live == fetch => *self = Self::Ready(server),
+            Self::Ready(_) => *self = Self::Ready(server),
+            Self::Saving(saves) => {
+                if let Some(value) = saves.fetched(fetch, server) {
+                    *self = Self::Ready(value);
+                }
+            }
+            Self::Loading(_) | Self::Failed => {}
+        }
+    }
 }
 
 #[cfg(test)]
@@ -573,8 +668,7 @@ mod tests {
     }
 
     /// Sweep 04-046, 12-013, 04-045: a refused save puts back what the
-    /// server kept, keeps the rule editable and says why; the mirrored call
-    /// rule goes back too.
+    /// server kept, keeps the rule editable and says why.
     #[test]
     fn privacy_set_failure_restores_the_kept_rule_and_stays_editable() {
         let (mut session, sink) = session();
@@ -584,7 +678,6 @@ mod tests {
             .settings
             .privacy
             .insert(key, PrivacyKeyState::Ready(who(PrivacyWho::Nobody)));
-        session.calls.privacy_allow_calls = Some(PrivacyWho::Nobody);
         let extra = session.request(
             RequestPurpose::Settings(SettingsPurpose::SetPrivacyRules { key }),
             None,
@@ -592,12 +685,10 @@ mod tests {
         session
             .settings
             .begin_privacy_save(key, who(PrivacyWho::Everybody), extra);
-        session.mirror_call_privacy(key, &who(PrivacyWho::Everybody));
         apply_json(&mut session, &seq, &sink, &error_json(extra));
         let state = &session.settings.privacy[&key];
         assert_eq!(state.detail(), Some(&who(PrivacyWho::Nobody)));
         assert!(state.save_error().is_some());
-        assert_eq!(session.calls.privacy_allow_calls, Some(PrivacyWho::Nobody));
     }
 
     /// Two saves in flight: the first one's refusal does not touch the

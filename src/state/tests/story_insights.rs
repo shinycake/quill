@@ -11,6 +11,7 @@ fn statistics_and_forwards_land_for_the_open_story_only() {
     let seq = AtomicU64::new(0);
     session.begin_story_insights(11, 5);
     let stats = session.request_for_story(RequestPurpose::GetStoryStatistics, ChatId(11), 5);
+    session.story_statistics_requested(11, 5, stats);
     apply_json(
         &mut session,
         &seq,
@@ -123,6 +124,7 @@ fn statistics_error_is_kept_for_the_panel() {
     let seq = AtomicU64::new(0);
     session.begin_story_insights(11, 5);
     let stats = session.request_for_story(RequestPurpose::GetStoryStatistics, ChatId(11), 5);
+    session.story_statistics_requested(11, 5, stats);
     apply_json(
         &mut session,
         &seq,
@@ -134,6 +136,38 @@ fn statistics_error_is_kept_for_the_panel() {
     );
     let state = session.stories.insights.as_ref().unwrap();
     assert!(matches!(state.statistics, StoryStatsFetch::Failed(_)));
+}
+
+/// A request that is not the one the fetch waits for (an older one for the
+/// same story, left by a reopen) neither fills nor fails it.
+#[test]
+fn statistics_answers_of_another_request_change_nothing() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.begin_story_insights(11, 5);
+    let old = session.request_for_story(RequestPurpose::GetStoryStatistics, ChatId(11), 5);
+    let current = session.request_for_story(RequestPurpose::GetStoryStatistics, ChatId(11), 5);
+    session.story_statistics_requested(11, 5, current);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"STATS_NOT_AVAILABLE"}}"#,
+            old.0
+        ),
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"storyStatistics","@extra":"{}","story_interaction_graph":{GRAPH_DATA},"story_reaction_graph":{GRAPH_DATA}}}"#,
+            old.0
+        ),
+    );
+    let state = session.stories.insights.as_ref().unwrap();
+    assert_eq!(state.statistics, StoryStatsFetch::Loading(Some(current)));
 }
 
 #[test]
@@ -202,4 +236,17 @@ fn search_error_lands_in_the_panel() {
     );
     let search = session.stories.search.as_ref().unwrap();
     assert!(search.page.error().is_some());
+}
+
+#[test]
+fn a_statistics_send_that_failed_leaves_the_panel_a_failure_to_retry() {
+    let (mut session, _sink) = session();
+    session.begin_story_insights(11, 5);
+    session.story_statistics_not_sent(11, 5, "no connection".into());
+    let state = session.stories.insights.as_ref().expect("insights kept");
+    assert_eq!((state.chat_id, state.story_id), (11, 5));
+    assert_eq!(
+        state.statistics,
+        StoryStatsFetch::Failed("no connection".into())
+    );
 }

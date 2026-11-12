@@ -43,6 +43,17 @@ fn without_a_fix_it_starts_at_the_country_and_waits() {
 }
 
 #[test]
+fn my_location_after_a_refusal_is_locating_until_it_answers() {
+    let mut picker = fresh();
+    picker.geolocated(GeoOutcome::Denied, false);
+    assert_eq!(picker.here(), HereState::Denied);
+    picker.locate_started();
+    assert_eq!(picker.here(), HereState::Locating);
+    picker.geolocated(GeoOutcome::Unavailable, false);
+    assert_eq!(picker.here(), HereState::Unavailable);
+}
+
+#[test]
 fn a_previous_fix_starts_there_with_venues_and_address() {
     let here = point(40.7, -74.);
     let mut picker = LocationPicker::open(ChatId(7), Some(here), point(31., 35.), 0);
@@ -181,12 +192,29 @@ fn stale_venue_answers_are_dropped_and_results_cached() {
     picker.venues_answered(second, vec![venue("New")]);
     assert_eq!(picker.venues(), &VenueList::Found(vec![venue("New")]));
     picker.venues_failed(second);
-    assert_eq!(
-        picker.venues(),
-        &VenueList::NothingFound {
-            query: String::new()
-        }
-    );
+    assert_eq!(picker.venues(), &VenueList::Failed);
+}
+
+/// Sweep r2-06b 03-C011: a failed lookup is drawn as a failure, and
+/// Retry asks for the same place and text again.
+#[test]
+fn a_failed_lookup_is_a_failure_and_retry_asks_again() {
+    let mut picker = fresh();
+    picker.geolocated(GeoOutcome::Found(point(48.85, 2.35)), true);
+    let (first, ..) = picker.venue_query_to_send().expect("nearby");
+    picker.venue_query_sent(first);
+    picker.venues_failed(first);
+    assert_eq!(picker.venues(), &VenueList::Failed);
+    assert_eq!(picker.venue_query_to_send(), None, "not re-asked by itself");
+    picker.retry_venues();
+    assert_eq!(picker.venues(), &VenueList::Loading);
+    let (again, _, query) = picker.venue_query_to_send().expect("asked again");
+    assert_ne!(again, first);
+    assert_eq!(query, "");
+    picker.venues_answered(again, vec![venue("Near")]);
+    assert_eq!(picker.venues(), &VenueList::Found(vec![venue("Near")]));
+    picker.retry_venues();
+    assert_eq!(picker.venue_query_to_send(), None, "nothing to retry");
 }
 
 #[test]
@@ -274,4 +302,77 @@ fn tiles_are_bounded() {
         picker.tile_answered(n, Some(FileId(n as i32)));
     }
     assert!(picker.tiles().len() <= 24);
+}
+
+/// Fails every ask for the current view's tile until the picker stops
+/// asking, and returns the tile's key.
+fn fail_the_tile_until_it_rests(picker: &mut LocationPicker) -> TileKey {
+    let key = picker.tile_to_request().expect("tile");
+    let mut asks = 0u64;
+    while let Some(again) = picker.tile_to_request() {
+        assert_eq!(again, key);
+        asks += 1;
+        assert!(asks <= 3, "a failing tile is not asked for without end");
+        picker.tile_requested(key, asks);
+        assert_eq!(picker.tile_to_request(), None, "one ask at a time");
+        assert!(picker.tile_answered(asks, None));
+    }
+    assert_eq!(asks, 3, "a lost answer is asked again, a few times");
+    key
+}
+
+#[test]
+fn a_failed_tile_is_asked_a_few_times_then_again_once_the_map_rests() {
+    let mut picker = fresh();
+    picker.set_map_size(SIZE);
+    let view = picker.view();
+    let key = fail_the_tile_until_it_rests(&mut picker);
+    // Away and back to the very same view: the same tile, asked again.
+    picker.moved_to(view.panned(100., 0.));
+    picker.moved_to(view);
+    picker.move_ended();
+    assert_eq!(picker.tile_to_request(), Some(key), "asked after a move");
+    picker.tile_requested(key, 9);
+    assert!(picker.tile_answered(9, Some(FileId(5))));
+    assert_eq!(picker.tile_to_request(), None);
+    assert_eq!(picker.tiles(), vec![(key, FileId(5))]);
+}
+
+#[test]
+fn a_failed_tile_is_asked_again_after_a_resize() {
+    let mut picker = fresh();
+    picker.set_map_size(SIZE);
+    fail_the_tile_until_it_rests(&mut picker);
+    picker.set_map_size(SIZE);
+    assert_eq!(
+        picker.tile_to_request(),
+        None,
+        "same size keeps the failure"
+    );
+    picker.set_map_size(MapSize {
+        width: SIZE.width + 10,
+        ..SIZE
+    });
+    assert!(picker.tile_to_request().is_some());
+}
+
+#[test]
+fn a_tile_whose_ask_cannot_be_sent_is_not_asked_on_every_pass() {
+    let mut picker = fresh();
+    picker.set_map_size(SIZE);
+    let key = picker.tile_to_request().expect("tile");
+    for _ in 0..3 {
+        assert_eq!(picker.tile_to_request(), Some(key));
+        picker.tile_unsent(key);
+    }
+    assert_eq!(picker.tile_to_request(), None, "it waits for a move");
+    // A refused send between two failed answers counts with them.
+    let mut picker = fresh();
+    picker.set_map_size(SIZE);
+    picker.tile_requested(key, 1);
+    assert!(picker.tile_answered(1, None));
+    picker.tile_unsent(key);
+    picker.tile_requested(key, 2);
+    assert!(picker.tile_answered(2, None));
+    assert_eq!(picker.tile_to_request(), None);
 }

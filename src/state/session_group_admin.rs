@@ -159,13 +159,13 @@ impl Session {
     /// The emoji reactions a picker can offer: the server's active list
     /// when known, tdesktop's default row otherwise.
     pub fn reaction_picker_emoji(&self) -> Vec<String> {
-        if self.stickers.active_emoji_reactions.is_empty() {
+        if self.stickers.active_reactions.is_empty() {
             crate::telegram::envelope::DEFAULT_EMOJI_REACTIONS
                 .iter()
                 .map(|emoji| (*emoji).to_string())
                 .collect()
         } else {
-            self.stickers.active_emoji_reactions.clone()
+            self.stickers.active_reactions.clone()
         }
     }
 

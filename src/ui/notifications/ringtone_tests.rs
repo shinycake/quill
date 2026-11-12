@@ -45,10 +45,10 @@ fn an_incoming_call_rings_before_any_window_draws(cx: &mut TestAppContext) {
             panic!("the demo has a call");
         };
         call.is_outgoing = false;
-        call.state = CallState::Pending {
+        call.progress = quill::state::CallProgress::Signaling(CallState::Pending {
             is_created: true,
             is_received: true,
-        };
+        });
         // What a poll does after it applied the update, inside one update:
         // no window has drawn since.
         app.deliver_notifications(None, cx);

@@ -3,7 +3,7 @@
 //! `Session::proxy`. Mutations never touch the list optimistically: the
 //! answer marks it stale and the driver refetches `getProxies`.
 use super::*;
-use crate::proxy::{LinkCheck, PingStatus, ProxyFetch, ProxyMutation};
+use crate::proxy::PingStatus;
 
 impl Session {
     /// `getProxies` answer: replaces the list; pings of proxies that no
@@ -19,7 +19,7 @@ impl Session {
         let proxy = &mut self.settings.proxy;
         // An older fetch (sent before a change, or replaced) says nothing
         // about the list as it is now.
-        if !proxy.fetch.answers(pending.id) {
+        if !proxy.ops.fetch_answered(pending.id) {
             return;
         }
         proxy
@@ -32,7 +32,6 @@ impl Session {
             .partition(crate::system_proxy::is_system_entry);
         proxy.system = system;
         proxy.list = Some(list);
-        proxy.fetch = ProxyFetch::Idle;
     }
 
     /// `updateWebProxyCarrierOpened`: host it, or refuse it when this
@@ -85,14 +84,11 @@ impl Session {
     fn proxy_mutation_succeeded(&mut self, pending: Option<&PendingRequest>) {
         let proxy = &mut self.settings.proxy;
         let system = pending.is_some_and(|p| proxy.system_step.answered(p.id, false));
-        // Only the change in flight unlocks the list; an answer of an older
-        // one (dropped meanwhile) leaves the lock to its own.
-        if pending.is_none_or(|p| proxy.mutation.is(p.id)) {
-            proxy.mutation = ProxyMutation::Idle;
-        }
-        // A list fetch still out may predate this change: its answer is not
-        // the one to wait for any more, and the refetch asks again.
-        proxy.fetch = ProxyFetch::Stale;
+        // Only the change in flight unlocks the list (an answer of an older
+        // one leaves the lock to its own), and a list fetch still out may
+        // predate it: its answer is not the one to wait for any more, and
+        // the refetch asks again.
+        proxy.ops.change_succeeded(pending.map(|p| p.id));
         // The box's error line is the user's: the system step's success
         // does not wipe the error of the user's own failed change.
         if !system {
@@ -100,34 +96,24 @@ impl Session {
         }
     }
 
-    /// Whether `pending` is the ping its slot waits for: the latest one
-    /// sent for the slot, which still shows Checking (a slot cleared since,
-    /// for a new link or an edit, waits for nothing). Settles the slot's
-    /// request either way when it is the latest.
+    /// Whether `pending` is the ping its slot waits for: the slot shows
+    /// `Checking` under this very request (a slot cleared since, for an edit
+    /// or a newer ping, waits for nothing).
     fn take_awaited_ping(&mut self, pending: Option<&PendingRequest>) -> Option<i32> {
         let pending = pending?;
         let RequestPurpose::Settings(SettingsPurpose::PingProxy { proxy_id }) = pending.purpose
         else {
             return None;
         };
-        if self.settings.proxy_ping_requests.get(&proxy_id) != Some(&pending.id) {
-            return None;
-        }
-        self.settings.proxy_ping_requests.remove(&proxy_id);
-        matches!(
-            self.settings.proxy.pings.get(&proxy_id),
-            Some(PingStatus::Checking)
-        )
-        .then_some(proxy_id)
+        (self.settings.proxy.pings.get(&proxy_id) == Some(&PingStatus::Checking(pending.id)))
+            .then_some(proxy_id)
     }
 
     /// The link box's check answered: only the request its `Checking`
     /// stage carries settles it.
     fn settle_link_check(&mut self, pending: Option<&PendingRequest>, status: PingStatus) {
         let Some(pending) = pending else { return };
-        if self.settings.proxy.link_check == LinkCheck::Checking(pending.id) {
-            self.settings.proxy.link_check = LinkCheck::Done(status);
-        }
+        self.settings.proxy.settle_link(pending.id, status);
     }
 
     /// `pingProxy` answer, in seconds.
@@ -167,16 +153,13 @@ impl Session {
     ) {
         match purpose {
             RequestPurpose::GetProxies => {
-                if pending.is_some_and(|p| self.settings.proxy.fetch.answers(p.id)) {
-                    self.settings.proxy.fetch = ProxyFetch::Failed;
+                if pending.is_some_and(|p| self.settings.proxy.ops.fetch_failed(p.id)) {
                     self.settings.proxy.error =
                         Some(sessions_error_line("load the proxy list", err));
                 }
             }
             RequestPurpose::MutateProxy => {
-                if pending.is_none_or(|p| self.settings.proxy.mutation.is(p.id)) {
-                    self.settings.proxy.mutation = ProxyMutation::Idle;
-                }
+                self.settings.proxy.ops.change_failed(pending.map(|p| p.id));
                 // TDLib refusing the system step is not the user's error:
                 // the box does not show it, and the tick reads it here.
                 let system =

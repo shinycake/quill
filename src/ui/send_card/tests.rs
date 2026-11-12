@@ -412,6 +412,8 @@ fn pictures_sent_separately_stand_side_by_side(cx: &mut TestAppContext) {
     // A picture as wide as the mosaic's room fits the box too.
     app.update_in(vcx, |app, _, cx| {
         tray(app, &[("demo-gif-still-wide.jpg", AttachmentKind::Photo)]);
+        // Its size is read off the UI thread, as after a pick.
+        app.check_tray_videos(cx);
         cx.notify();
     });
     frames(vcx);
@@ -464,6 +466,8 @@ fn a_short_window_shrinks_the_previews_and_keeps_every_option_in_view(cx: &mut T
         let photo = ComposerAttachment::pick(&tall, AttachmentKind::Photo).expect("picture");
         app.update_pending_attachments(|tray| *tray = vec![photo])
             .expect("an open chat");
+        // The picture's size is read off the UI thread, as after a pick.
+        app.check_tray_videos(cx);
         cx.notify();
     });
     frames(vcx);
@@ -588,6 +592,19 @@ fn quality_is_one_choice_of_three_and_files_keep_the_way_back(cx: &mut TestAppCo
         let photo = ComposerAttachment::pick(&big, AttachmentKind::Photo).expect("a photo");
         app.update_pending_attachments(|tray| tray.push(photo))
             .expect("an open chat");
+        // Its size is read off the UI thread, as after a pick: until the
+        // read lands HD is not on offer.
+        app.check_tray_videos(cx);
+        assert_eq!(
+            app.send_card_quality(),
+            Some((
+                Quality::Compressed,
+                &[Quality::Compressed, Quality::File][..]
+            ))
+        );
+    });
+    vcx.run_until_parked();
+    app.update_in(vcx, |app, _, cx| {
         assert_eq!(
             app.send_card_quality(),
             Some((Quality::Compressed, &all[..]))

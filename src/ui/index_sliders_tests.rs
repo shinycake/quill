@@ -199,7 +199,7 @@ fn storage_limit_sliders_restart_from_the_account_shown(cx: &mut TestAppContext)
         if let Some(session) = app.demo_session.as_mut() {
             session.settings.storage_limits = Default::default();
         }
-        app.settings.page = None;
+        app.settings.nav = crate::ui::settings_window::SettingsNav::List;
         app.open_settings(Some(quill::settings_catalog::Page::DataStorage), cx);
         cx.notify();
     });

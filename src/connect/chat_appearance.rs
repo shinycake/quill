@@ -69,7 +69,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.groups.chat_boost_status.remove(&chat_id.0);
+        self.session.groups.outdate_boost_status(chat_id.0);
         self.fetch_chat_boost_status(chat_id)?;
         self.fetch_chat_boost_features(chat_id)?;
         Ok(())

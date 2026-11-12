@@ -17,7 +17,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let id = self
             .session
             .request(RequestPurpose::ConfirmDeviceLogin, None);
-        self.session.settings.device_login = DeviceLogin::InFlight;
+        self.session.settings.device_login = DeviceLogin::Idle;
         self.session.settings.sessions_op.begin(id);
         self.session.settings.sessions.clear_error();
         let request = zeroize::Zeroizing::new(
@@ -25,11 +25,21 @@ impl<S: JsonSender> ConnectDriver<S> {
         );
         if let Err(error) = self.sender.send_json(&request) {
             self.session.requests.take(id);
-            self.session.settings.device_login = DeviceLogin::Idle;
             self.session.settings.sessions_op.failed(Some(id));
             return Err(error);
         }
         Ok(id)
+    }
+
+    /// An explicit refresh: drop the held list and ask again. A fetch
+    /// already in flight is the refresh, so its stage is left alone.
+    pub fn refresh_active_sessions(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if self.session.settings.sessions.is_loading() {
+            return Ok(None);
+        }
+        self.session.settings.sessions = crate::state::fetch::Fetch::Idle;
+        self.session.settings.sessions_op.refetched();
+        self.maybe_fetch_active_sessions()
     }
 
     /// Slice A3: `getActiveSessions` (schema 1.8.67, line 15102) — once
@@ -57,11 +67,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         let was_stale = self.session.settings.sessions_op.is_stale();
         self.session.settings.sessions_op.refetched();
         self.session.settings.sessions.begin();
+        self.session.settings.sessions.sent(extra);
         match self.sender.send_json(&get_active_sessions(extra)) {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.sessions.cancel();
+                // The list says so with its Refresh; the sections that ask
+                // for it when they show ask nothing while it is failed.
+                self.session
+                    .settings
+                    .sessions
+                    .fail("could not send the request");
                 if was_stale {
                     self.session.settings.sessions_op.mark_stale();
                 }
@@ -182,6 +198,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request(RequestPurpose::GetDefaultAutoDelete, None);
         self.session.settings.default_auto_delete.begin();
+        self.session.settings.default_auto_delete.sent(extra);
         let json = crate::telegram::requests::get_default_message_auto_delete_time(extra);
         match self.sender.send_json(&json) {
             Ok(()) => Ok(Some(extra)),
@@ -208,6 +225,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             None,
         );
         self.session.settings.default_auto_delete.begin();
+        self.session.settings.default_auto_delete.sent(extra);
         let json = crate::telegram::requests::set_default_message_auto_delete_time(extra, seconds);
         match self.sender.send_json(&json) {
             Ok(()) => Ok(extra),
@@ -233,6 +251,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let extra = self.session.request(RequestPurpose::GetAccountTtl, None);
         self.session.settings.account_ttl.begin();
+        self.session.settings.account_ttl.sent(extra);
         match self.sender.send_json(&get_account_ttl(extra)) {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
@@ -256,6 +275,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             None,
         );
         self.session.settings.account_ttl.begin();
+        self.session.settings.account_ttl.sent(extra);
         match self.sender.send_json(&set_account_ttl(extra, days)) {
             Ok(()) => Ok(extra),
             Err(err) => {
@@ -345,6 +365,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
+    /// An explicit refresh: drop the held list and ask again. A fetch
+    /// already in flight is the refresh, so its stage is left alone.
+    pub fn refresh_connected_websites(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if self.session.settings.connected_websites.is_loading() {
+            return Ok(None);
+        }
+        self.session.settings.connected_websites = crate::state::fetch::Fetch::Idle;
+        self.session.settings.websites_op.refetched();
+        self.maybe_fetch_connected_websites()
+    }
+
     /// Slice A4: `getConnectedWebsites` (schema 1.8.67, line 15124) —
     /// guarded-once like `maybe_fetch_active_sessions` (cached state
     /// reused, in-flight fetch deduped).
@@ -371,6 +402,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let was_stale = self.session.settings.websites_op.is_stale();
         self.session.settings.websites_op.refetched();
         self.session.settings.connected_websites.begin();
+        self.session.settings.connected_websites.sent(extra);
         match self.sender.send_json(&get_connected_websites(extra)) {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {

@@ -11,6 +11,32 @@ use std::time::Instant;
 
 pub(crate) type ExitAfterStop = Box<dyn Fn(&mut Window, &mut App)>;
 
+/// Whether a Quit is held behind the "Stop and quit?" alert. The alert's
+/// Stop runs the exit; the alert closing, or the exports ending under it
+/// (`quit_gate_upkeep`), lets the hold go.
+#[derive(Default)]
+pub(crate) enum QuitGate {
+    #[default]
+    Open,
+    Asking {
+        exit: ExitAfterStop,
+    },
+}
+
+impl QuitGate {
+    pub(crate) fn is_asking(&self) -> bool {
+        matches!(self, Self::Asking { .. })
+    }
+
+    /// Leave the hold, giving back the exit it kept.
+    fn take(&mut self) -> Option<ExitAfterStop> {
+        match std::mem::take(self) {
+            Self::Asking { exit } => Some(exit),
+            Self::Open => None,
+        }
+    }
+}
+
 fn exporting(session: &Session) -> bool {
     let settings = &session.settings;
     let chat = settings.chat_export.as_ref();
@@ -64,12 +90,13 @@ impl QuillApp {
             return false;
         }
         raise_main_window(window, cx);
-        if self
-            .main_window
-            .export_stop
-            .replace(Box::new(exit))
-            .is_some()
-        {
+        // A second Quit under the alert keeps the alert and takes over the
+        // exit it will run.
+        let asking = self.main_window.quit_gate.is_asking();
+        self.main_window.quit_gate = QuitGate::Asking {
+            exit: Box::new(exit),
+        };
+        if asking {
             return true;
         }
         window.set_shutdown_block_reason(Some(tr(keys::EXPORT_PROGRESS_TITLE)));
@@ -85,7 +112,7 @@ impl QuillApp {
                 .on_ok(move |_, window, cx| {
                     let exit = stop.update(cx, |this, _| {
                         this.stop_exports();
-                        this.main_window.export_stop.take()
+                        this.main_window.quit_gate.take()
                     });
                     if let Ok(Some(exit)) = exit {
                         exit(window, cx);
@@ -94,10 +121,25 @@ impl QuillApp {
                 })
                 .on_close(move |_, window, cx| {
                     window.set_shutdown_block_reason(None);
-                    let _ = closed.update(cx, |this, _| this.main_window.export_stop = None);
+                    let _ =
+                        closed.update(cx, |this, _| this.main_window.quit_gate = QuitGate::Open);
                 })
         });
         true
+    }
+
+    /// The exports ended while the alert was up: nothing is left to stop,
+    /// so the alert goes and the shutdown is no longer held. The Quit is not
+    /// carried out: the user was asked about stopping, not about quitting
+    /// now.
+    pub(in crate::ui) fn quit_gate_upkeep(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.main_window.quit_gate.is_asking() || self.exporting_anywhere() {
+            return;
+        }
+        self.main_window.quit_gate = QuitGate::Open;
+        window.set_shutdown_block_reason(None);
+        window.close_dialog(cx);
+        cx.notify();
     }
 
     pub(crate) fn exit_after_exports(

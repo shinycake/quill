@@ -8,7 +8,7 @@
 use super::ble::{ScanEvent, Scanner};
 use super::eid::{self, EID_KEY_LEN};
 use super::messages::{self, Reply};
-use super::noise::{Crypter, Initiator};
+use super::noise::{AwaitingResponse, Crypter, Initiator};
 use super::qr::{self, Derived, QrKey};
 use super::tunnel::{Stop, Tunnel, TunnelError};
 use super::{DEFAULT_TIMEOUT, Environment};
@@ -129,8 +129,16 @@ pub(super) fn run(kind: Kind<'_>, env: &mut Environment, link: &Link) -> End {
     }
 }
 
+/// `span` after `from`; one too long to add to the clock reads as a year.
+fn after(from: Instant, span: Duration) -> Instant {
+    from.checked_add(span)
+        .or_else(|| from.checked_add(Duration::from_secs(86_400 * 365)))
+        .unwrap_or(from)
+}
+
 fn run_phone(kind: Kind<'_>, env: &mut Environment, link: &Link) -> Result<End, CeremonyError> {
-    let deadline = Instant::now() + kind.timeout();
+    let started_at = (env.now)();
+    let deadline = after(started_at, kind.timeout());
     let qr = QrKey::generate(env.rng.as_mut()).ok_or(CeremonyError::Phone)?;
     let eid_key = qr::derive::<EID_KEY_LEN>(qr.secret(), &[], Derived::EidKey);
 
@@ -141,7 +149,14 @@ fn run_phone(kind: Kind<'_>, env: &mut Environment, link: &Link) -> Result<End, 
         .is_some_and(|scanner| scanner.start(scan_tx));
     let mut guard = ScanGuard(scanner);
     let mut early = Vec::new();
-    let available = started && probe(&scan_rx, env.bluetooth_probe, link, &mut early)?;
+    let available = started
+        && probe(
+            &scan_rx,
+            env.bluetooth_probe,
+            env.now.as_ref(),
+            link,
+            &mut early,
+        )?;
     if !available {
         log("bluetooth unavailable");
     }
@@ -160,7 +175,7 @@ fn run_phone(kind: Kind<'_>, env: &mut Environment, link: &Link) -> Result<End, 
         if link.cancelled() {
             return Err(CeremonyError::Cancelled);
         }
-        if Instant::now() >= deadline {
+        if (env.now)() >= deadline {
             log("phone ceremony timed out");
             return Err(CeremonyError::Phone);
         }
@@ -227,11 +242,12 @@ fn run_phone(kind: Kind<'_>, env: &mut Environment, link: &Link) -> Result<End, 
         .connect(&domain, &path, &stop)
         .map_err(tunnel_error)?;
     let ephemeral = random_secret(env.rng.as_mut()).ok_or(CeremonyError::Phone)?;
-    let mut initiator = Initiator::new(&psk, &qr.identity);
-    let result = initiator
+    let result = Initiator::new(&psk, &qr.identity)
         .initial_message(ephemeral)
         .ok_or(CeremonyError::Phone)
-        .and_then(|first| converse(kind, initiator, &first, tunnel.as_mut(), &stop, link));
+        .and_then(|(first, awaiting)| {
+            converse(kind, awaiting, &first, tunnel.as_mut(), &stop, link)
+        });
     tunnel.close();
     result.map(End::Event)
 }
@@ -241,15 +257,16 @@ fn run_phone(kind: Kind<'_>, env: &mut Environment, link: &Link) -> Result<End, 
 fn probe(
     events: &Receiver<ScanEvent>,
     limit: Duration,
+    now: &(dyn Fn() -> Instant + Send + Sync),
     link: &Link,
     early: &mut Vec<Vec<u8>>,
 ) -> Result<bool, CeremonyError> {
-    let until = Instant::now() + limit;
+    let until = after(now(), limit);
     loop {
         if link.cancelled() {
             return Err(CeremonyError::Cancelled);
         }
-        let left = until.saturating_duration_since(Instant::now());
+        let left = until.saturating_duration_since(now());
         if left.is_zero() {
             return Ok(false);
         }
@@ -275,7 +292,7 @@ fn tunnel_error(error: TunnelError) -> CeremonyError {
 /// The handshake, the phone's first message, the request and the answer.
 fn converse(
     kind: Kind<'_>,
-    initiator: Initiator<'_>,
+    initiator: AwaitingResponse<'_>,
     first: &[u8],
     tunnel: &mut dyn Tunnel,
     stop: &Stop<'_>,

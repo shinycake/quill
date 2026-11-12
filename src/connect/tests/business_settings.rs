@@ -89,7 +89,14 @@ fn a_greeting_save_is_tracked_until_ok() {
     };
     driver.save_business_greeting(Some(&settings)).unwrap();
     assert_eq!(
-        driver.session.settings.business.saving,
+        driver
+            .session
+            .settings
+            .business
+            .saving
+            .iter()
+            .map(|(_, kind)| *kind)
+            .collect::<Vec<_>>(),
         vec![BusinessSettingKind::Greeting]
     );
     let request = sent_request(&recorder, "setBusinessGreetingMessageSettings");
@@ -124,7 +131,7 @@ fn a_refused_save_says_so() {
     let state = &driver.session.settings.business;
     assert!(state.saving.is_empty());
     assert_eq!(
-        state.error.as_deref(),
+        state.error.as_ref().map(|refusal| refusal.line.as_str()),
         Some("Couldn't save the location: invalid request")
     );
 }

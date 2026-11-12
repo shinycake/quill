@@ -151,7 +151,7 @@ impl QuillApp {
             .content(move |content, window, cx| {
                 let viewport = window.viewport_size().height;
                 let body = body_app.update(cx, |this, cx| {
-                    if this.share.forward.take_first_draw() {
+                    if this.chat_ui.take_chooser_first_draw() {
                         let search = this.share.search_input.clone();
                         window.defer(cx, move |window, cx| {
                             search.update(cx, |input, cx| input.focus(window, cx));
@@ -186,7 +186,7 @@ crate::ui::shell::register_dialogs! {
     /// "Reply in Another Chat" over the window (tdesktop `ShowReplyToChatBox`).
     ReplyElsewhere => DialogSpec::new(
         2931,
-        |app| app.share.forward.reply_chooser_open() && app.chat_ui.has_reply(),
+        |app| app.reply_chooser_open(),
         QuillApp::build_reply_elsewhere_dialog,
     )
     .per_window()

@@ -52,7 +52,7 @@ fn a_main_window_menu_leaves_a_chat_windows_keys_alone(cx: &mut TestAppContext) 
     let _chat_window = h.open_in_new_window(OTHER, cx);
     h.settle(cx);
     h.app.update(cx, |app, _| {
-        app.chat_list.archive_menu = Some(point(px(40.), px(80.)));
+        app.message_ui.menu.open_archive(point(px(40.), px(80.)));
     });
     assert!(scoped(&h, None, cx, |app, _| app.context_menu_open()));
     assert!(
@@ -64,7 +64,7 @@ fn a_main_window_menu_leaves_a_chat_windows_keys_alone(cx: &mut TestAppContext) 
     assert!(!spent);
     let still = h
         .app
-        .read_with(cx, |app, _| app.chat_list.archive_menu.is_some());
+        .read_with(cx, |app, _| app.message_ui.menu.archive().is_some());
     assert!(still, "the main window's menu stays open");
     assert!(scoped(&h, None, cx, |app, cx| app.dismiss_context_menus(cx)));
 }
@@ -167,7 +167,6 @@ fn each_saved_view_has_its_own_history_key(cx: &mut TestAppContext) {
                 session.threads.saved.sublist = Some(SavedSublistView {
                     topic_id,
                     history: TopicHistory::default(),
-                    page: quill::state::SavedPage::Idle,
                 });
             }
             scopes.push(app.saved_view_scope());
@@ -180,7 +179,6 @@ fn each_saved_view_has_its_own_history_key(cx: &mut TestAppContext) {
                         emoji: emoji.to_string(),
                     },
                     history: TopicHistory::default(),
-                    page: quill::state::SavedPage::Idle,
                 });
             }
             scopes.push(app.saved_view_scope());

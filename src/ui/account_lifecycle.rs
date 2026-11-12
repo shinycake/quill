@@ -11,8 +11,6 @@ use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with, trn};
-use std::cell::RefCell;
-use std::rc::Rc;
 use zeroize::Zeroize;
 /// Slice A9: account lifecycle UI — the A7 UI half. One "Account" dialog
 /// with the self-destruct TTL picker and the delete-account danger zone.
@@ -150,8 +148,13 @@ impl QuillApp {
     /// from the authoritative `ok` (never an optimistic write); the
     /// driver gates one mutation at a time and surfaces `account_error`.
     pub(crate) fn submit_account_ttl(&mut self, days: i32, cx: &mut Context<Self>) {
-        if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.set_account_ttl(days);
+        if let Some(live) = self.live.as_mut()
+            && let Err(err) = live.driver.set_account_ttl(days)
+        {
+            self.set_note(StatusNote::error(user_error_for(
+                keys::Q_NOTES_FAILED_SET_ACCOUNT_TTL,
+                &err,
+            )));
         }
         cx.notify();
     }
@@ -161,7 +164,12 @@ impl QuillApp {
     /// authoritative `ok`; the demo session applies it directly.
     pub(crate) fn submit_default_auto_delete(&mut self, seconds: i32, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.set_default_auto_delete(seconds);
+            if let Err(err) = live.driver.set_default_auto_delete(seconds) {
+                self.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_SET_AUTO_DELETE,
+                    &err,
+                )));
+            }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.settings.default_auto_delete.succeed(seconds);
         }
@@ -253,17 +261,30 @@ impl QuillApp {
             .read(cx)
             .value()
             .to_string();
-        for input in [
-            &self.account_boxes.lifecycle.reason,
-            &self.account_boxes.lifecycle.password,
-        ] {
-            input.update(cx, |input, cx| input.set_value("", window, cx));
-        }
-        self.account_boxes.lifecycle.stage = LifecycleStage::Open;
-        if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.delete_account(&reason, &password);
-        }
+        let sent = match self.live.as_mut() {
+            Some(live) => live.driver.delete_account(&reason, &password).map(|_| ()),
+            None => Ok(()),
+        };
         password.zeroize();
+        match sent {
+            Ok(()) => {
+                for input in [
+                    &self.account_boxes.lifecycle.reason,
+                    &self.account_boxes.lifecycle.password,
+                ] {
+                    input.update(cx, |input, cx| input.set_value("", window, cx));
+                }
+                self.account_boxes.lifecycle.stage = LifecycleStage::Open;
+            }
+            Err(err) => {
+                // The send was refused: keep the typed password, reason and
+                // the armed banner so nothing has to be retyped.
+                self.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_DELETE_ACCOUNT,
+                    &err,
+                )));
+            }
+        }
         cx.notify();
     }
 
@@ -345,7 +366,7 @@ impl QuillApp {
                 .and_then(|s| s.settings.account_error().map(str::to_string));
             let has_password = session
                 .as_ref()
-                .and_then(|s| s.auth_state.password_state.as_ref())
+                .and_then(|s| s.auth_state.password_state.get())
                 .is_some_and(|p| p.has_password);
             let pw_loading = session.is_some_and(|s| s.auth_state.password_state_loading());
 
@@ -392,18 +413,9 @@ impl QuillApp {
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(tr(keys::Q_PREFS_ACCOUNT)))
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    // `content` needs an `Fn` closure, but the body is built once
-                    // per dialog render — hand it over through a one-shot cell.
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
+                .content(crate::ui::shell::one_shot_dialog_content(
+                    body.into_any_element(),
+                ))
                 .footer(footer)
                 .on_close(on_close)
         })

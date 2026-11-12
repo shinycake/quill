@@ -570,18 +570,19 @@ pub fn rename_account(
             "an account name cannot be empty",
         ));
     }
-    let mut registry = load_registry(app_root);
-    let Some(record) = registry.record_mut(key) else {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            format!("no such account: {key}"),
-        ));
-    };
-    if record.display_name == name {
-        return Ok(());
-    }
-    record.display_name = name.to_string();
-    save_registry(app_root, &registry)
+    update_registry(app_root, |registry| {
+        let Some(record) = registry.record_mut(key) else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("no such account: {key}"),
+            ));
+        };
+        if record.display_name == name {
+            return Ok(false);
+        }
+        record.display_name = name.to_string();
+        Ok(true)
+    })
 }
 
 /// Refusing to remove the last remaining account, or deleting an account's

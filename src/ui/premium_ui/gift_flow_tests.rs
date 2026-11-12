@@ -6,8 +6,9 @@
 use crate::ui::app::QuillApp;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use gpui_kit::{TestAppContext, WindowHandle};
-use quill::gift_manage::{GiftFlow, GiftRecipient};
+use quill::gift_manage::GiftRecipient;
 use quill::ids::ChatId;
+use quill::premium_hub::gift_view::GiftForm;
 use quill::telegram::envelope::MessageSender;
 
 fn demo(cx: &mut TestAppContext) -> WindowHandle<QuillApp> {
@@ -21,18 +22,22 @@ fn demo(cx: &mut TestAppContext) -> WindowHandle<QuillApp> {
 fn another_gift_drops_the_first_gifts_upgrade_box(cx: &mut TestAppContext) {
     let window = demo(cx);
     window
-        .update(cx, |app, _, cx| {
-            if let Some(manage) = app.gift_manage_mut() {
-                manage.flow = Some(GiftFlow::Upgrade {
-                    id: "first".into(),
-                    keep_details: true,
-                });
+        .update(cx, |app, window, cx| {
+            if let Some(hub) = app.hub_mut() {
+                hub.received.open();
             }
             app.select_gift(Some("first".into()), cx);
-            let flow = |app: &mut QuillApp| app.gift_manage_mut().and_then(|m| m.flow.clone());
-            assert!(flow(app).is_some(), "the same gift keeps its box");
+            app.set_gift_form(Some(GiftForm::upgrade(true)), window, cx);
+            let form =
+                |app: &mut QuillApp| app.hub_mut().and_then(|h| h.received.view.form().cloned());
+            assert!(form(app).is_some(), "the box opens");
+            app.select_gift(Some("first".into()), cx);
+            assert!(form(app).is_some(), "the same gift keeps its box");
             app.select_gift(Some("second".into()), cx);
-            assert_eq!(flow(app), None);
+            assert_eq!(form(app), None);
+            app.set_gift_form(Some(GiftForm::resale()), window, cx);
+            app.select_gift(None, cx);
+            assert_eq!(form(app), None, "closing the panel closes the form");
         })
         .unwrap();
 }
@@ -45,7 +50,7 @@ fn buy_by_name_from_send_gift_buys_for_its_recipient(cx: &mut TestAppContext) {
             if let Some(session) = app.demo_session.as_mut() {
                 session.open_chat(ChatId(11));
                 let send = &mut session.payments.gifts_manage.send;
-                send.open = true;
+                send.stage = quill::gift_manage::SendStage::Idle;
                 send.recipient = Some(GiftRecipient {
                     sender: MessageSender::User { user_id: 501 },
                     name: "Ada".into(),

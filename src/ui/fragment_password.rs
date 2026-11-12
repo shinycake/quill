@@ -32,6 +32,17 @@ fn footer() -> Div {
     div().flex().justify_end().gap_2()
 }
 
+/// What the password box draws, derived each frame from the caller's own
+/// stage (which holds the request and matches its answer): waiting for the
+/// password, its answer pending, or refused. The answer pending hides an
+/// earlier refusal.
+#[derive(Clone, Copy)]
+pub(super) enum PasswordView<'a> {
+    Idle,
+    Sending,
+    Failed(&'a ExportError),
+}
+
 /// tdesktop `PasscodeBox` in check mode: the field, the error or the hint
 /// under it, "Forgot password?" and the description; Cancel and Submit.
 pub(super) struct PasswordBox<'a> {
@@ -39,8 +50,7 @@ pub(super) struct PasswordBox<'a> {
     pub(super) id: &'static str,
     pub(super) input: &'a Entity<InputState>,
     pub(super) description: &'static str,
-    pub(super) sending: bool,
-    pub(super) error: Option<&'a ExportError>,
+    pub(super) entry: PasswordView<'a>,
     pub(super) on_submit: BoxAction,
     pub(super) on_cancel: BoxAction,
     pub(super) on_forgot: BoxAction,
@@ -57,14 +67,18 @@ impl PasswordBox<'_> {
             id,
             input,
             description,
-            sending,
-            error,
+            entry,
             on_submit,
             on_cancel,
             on_forgot,
         } = self;
+        let sending = matches!(entry, PasswordView::Sending);
+        let error = match entry {
+            PasswordView::Failed(error) => Some(error),
+            PasswordView::Idle | PasswordView::Sending => None,
+        };
         let muted = cx.theme().muted_foreground;
-        let state = session.auth_state.password_state.as_ref();
+        let state = session.auth_state.password_state.get();
         let hint = state
             .map(|state| state.password_hint.clone())
             .filter(|hint| !hint.is_empty());
@@ -199,6 +213,7 @@ pub(super) fn export_error_text(error: &ExportError) -> SharedString {
         ExportError::WrongPassword => tr(keys::CLOUD_PASSWORD_WRONG).into(),
         ExportError::Flood => tr(keys::FLOOD_ERROR).into(),
         ExportError::ServerError => tr(keys::Q_MONEY_SERVER_ERROR).into(),
+        ExportError::NotSent => tr(keys::Q_MONEY_COULDNT_OPEN_FRAGMENT).into(),
         ExportError::Other(reason) if reason.is_empty() => {
             tr(keys::Q_MONEY_COULDNT_OPEN_FRAGMENT).into()
         }
@@ -210,10 +225,10 @@ pub(super) fn export_error_text(error: &ExportError) -> SharedString {
     }
 }
 
-/// What a password box shows this frame. The box is shown with its field
+/// What a password box shows this frame (a view of the caller's own stage). The box is shown with its field
 /// ready for a password (`Idle`), or shown while a try is out (`Sending`).
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum Showing {
+pub(super) enum ShowingView {
     Off,
     Sending,
     Idle,
@@ -229,10 +244,9 @@ pub(super) struct PasswordField {
 /// The field's stage. `Typing` is the idle phase after the field took the
 /// keyboard, so it takes it once per phase and not on every frame.
 enum FieldStage {
-    /// The box is off screen; the field is empty.
+    /// The box is off screen or a try is out (the field is disabled until
+    /// its answer): the keyboard is taken again when the box is idle.
     Away,
-    /// A try is out; the field waits for its answer.
-    Waiting,
     /// Idle, and the field has taken the keyboard.
     Typing,
 }
@@ -255,17 +269,16 @@ impl PasswordField {
     /// Per frame: the field takes the keyboard when the idle box opens and
     /// after each answer (tdesktop `PasscodeBox` focuses the field), and is
     /// emptied whenever the box is not on screen.
-    pub(super) fn keep(&mut self, showing: Showing, window: &mut Window, cx: &mut App) {
+    pub(super) fn keep(&mut self, showing: ShowingView, window: &mut Window, cx: &mut App) {
         self.stage = match (showing, &self.stage) {
-            (Showing::Idle, FieldStage::Typing) => FieldStage::Typing,
-            (Showing::Idle, _) => {
+            (ShowingView::Idle, FieldStage::Typing) => FieldStage::Typing,
+            (ShowingView::Idle, _) => {
                 self.input.update(cx, |input, cx| input.focus(window, cx));
                 FieldStage::Typing
             }
-            (Showing::Sending, _) => FieldStage::Waiting,
-            (Showing::Off, _) => FieldStage::Away,
+            (ShowingView::Sending | ShowingView::Off, _) => FieldStage::Away,
         };
-        if showing == Showing::Off && !self.input.read(cx).value().is_empty() {
+        if showing == ShowingView::Off && !self.input.read(cx).value().is_empty() {
             self.input
                 .update(cx, |input, cx| input.set_value("", window, cx));
         }
@@ -280,7 +293,7 @@ impl QuillApp {
     pub(super) fn recover_cloud_password(&mut self, cx: &mut Context<Self>) {
         let has_email = self
             .session()
-            .and_then(|s| s.auth_state.password_state.as_ref())
+            .and_then(|s| s.auth_state.password_state.get())
             .is_some_and(|state| state.has_recovery_email_address);
         self.open_twofa(cx);
         self.goto_twofa_view(crate::ui::dialogs::callback_password::TwofaView::Recover);

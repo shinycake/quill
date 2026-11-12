@@ -41,9 +41,6 @@ pub struct MessagesState {
     pub message_report: Option<MessageReportFlow>,
     /// Viewers, read date and reactors of the message the menu is open on.
     pub message_audience: Option<MessageAudience>,
-    /// A reaction chip was right-clicked: its "who reacted" tab opens as
-    /// soon as the message's audience is loaded.
-    pub wanted_reactor_tab: Option<(ChatId, MessageId, crate::telegram::envelope::ReactionType)>,
     /// One-shot result of an admin moderation call from the delete box
     /// (ban, delete all, report spam); the UI drains it into the status
     /// note.
@@ -57,19 +54,13 @@ pub struct MessagesState {
     /// request errors. The UI drains it into the status note so the
     /// click never silently does nothing.
     pub message_link_error: Notes,
-    /// Slice msg-richtext-ai-tools: one-shot `fixTextWithAi` /
-    /// `composeTextWithAi` answer for the open chat's composer. The UI
-    /// drains it (replacing the draft) on the next frame. The first id is
-    /// the window that asked (`None`: the main window): only that window
-    /// takes the answer, even when another shows the same chat; the chat
-    /// id guards against applying to a chat the window has since left.
-    pub ai_composer_text: Option<(Option<ChatId>, ChatId, String)>,
-    /// Slice msg-richtext-ai-tools: one-shot `composeRichMessageWithAi`
-    /// / `createRichMessageWithAi` / `fixRichMessageWithAi` answer for
-    /// the open chat's composer. Same drain contract as
-    /// `ai_composer_text`. The UI writes the blocks back as editor markup
-    /// (`blocks_to_markup`); the note distinguishes create / fix / rewrite.
-    pub ai_composer_blocks: Option<(Option<ChatId>, ChatId, RichMessageContent, &'static str)>,
+    /// Slice msg-richtext-ai-tools: answers of `fixTextWithAi` /
+    /// `composeTextWithAi` / the rich-message AI methods (and their
+    /// failures) for the composers. Each window's frame takes the answers
+    /// of its own asks and applies one only while it holds that request
+    /// (`AiAsk::Asked`); a queue, so two answers in one frame are both
+    /// kept.
+    pub ai_answers: Vec<AiAnswer>,
     /// Slice msg-richtext-ai-tools: one-shot; set when an AI request
     /// errors. The UI drains it into the status note so the click never
     /// silently does nothing.
@@ -101,9 +92,6 @@ pub struct MessagesState {
     /// MED4b: composer `getLinkPreview` prefetch state, by URL: each
     /// window's chip reads the preview of its own composer's URL.
     pub composer_previews: crate::state::ComposerLinkPreviews,
-    /// MED4b: pending `getLinkPreview` URLs by `RequestId` (same
-    /// `Copy`-purpose pattern as `instant_view_requests`).
-    pub composer_preview_urls: HashMap<RequestId, String>,
     /// MED2 fix-up: one-shot; set when TDLib refuses a `recognizeSpeech`
     /// request. The UI drains it into the status note — previously the
     /// error fell into the `_ => {}` swallower and the user saw
@@ -172,6 +160,9 @@ pub struct MessagesState {
     /// Send succeeded in this (chat, topic); UI clears the server draft
     /// if the composer is still empty.
     pub draft_clears: Vec<(ChatId, DraftTopic)>,
+    /// Send failed in this (chat, topic): a draft clear that waited on its
+    /// ack is dropped, the draft stays.
+    pub failed_sends: Vec<(ChatId, DraftTopic)>,
     /// Captions chosen for media messages that are still being sent; each
     /// goes out as an edit once the message has its real id.
     pub deferred_captions: Vec<crate::composer::DeferredCaption>,
@@ -198,6 +189,17 @@ impl MessagesState {
         self.pinned_messages.get(&chat_id)?.data()
     }
 
+    /// A confirmed unpin-all left the chat with no pinned message. That is
+    /// the new truth whichever fetch was in flight: a late answer of an
+    /// older one finds the list `Ready` and is dropped (`Fetch::answered`
+    /// takes only a waiting fetch).
+    pub(crate) fn pins_cleared(&mut self, chat_id: i64) {
+        self.pinned_messages
+            .entry(chat_id)
+            .or_default()
+            .succeed(Vec::new());
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             mention_search: None,
@@ -207,12 +209,10 @@ impl MessagesState {
             poll_option_menu: None,
             message_report: None,
             message_audience: None,
-            wanted_reactor_tab: None,
             message_action_note: Notes::default(),
             message_link: None,
             message_link_error: Notes::default(),
-            ai_composer_text: None,
-            ai_composer_blocks: None,
+            ai_answers: Vec::new(),
             ai_error: Notes::default(),
             message_caption_length_max: 1024,
             paid_media_star_max: crate::composer::PAID_MEDIA_MAX_STARS,
@@ -221,7 +221,6 @@ impl MessagesState {
             instant_view_fallbacks: Vec::new(),
             instant_view_requests: HashMap::new(),
             composer_previews: Default::default(),
-            composer_preview_urls: HashMap::new(),
             recognize_speech_error: Notes::default(),
             full_rich_loads: HashMap::new(),
             resend_error: Notes::default(),
@@ -242,6 +241,7 @@ impl MessagesState {
             draft_dirty: HashSet::new(),
             remote_draft_revision: 0,
             draft_clears: Vec::new(),
+            failed_sends: Vec::new(),
             deferred_captions: Vec::new(),
             sponsored: HashMap::new(),
             sponsored_hidden: false,
@@ -253,37 +253,36 @@ impl MessagesState {
     }
 }
 
-/// The ad being reported and the `reportChatSponsoredMessage` request the
-/// flow waits on. An answer for any other request (a report the user
-/// dismissed, or an earlier step) is dropped.
+/// The ad being reported.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SponsoredReportTarget {
     pub chat_id: ChatId,
     pub message_id: i64,
-    /// `None` between choosing the target and the request going out.
-    pub request: Option<RequestId>,
 }
 
 /// The `reportChatSponsoredMessage` flow, one stage at a time.
 ///
-/// `Asking` leaves on the answer of its request (`Picking` when TDLib
-/// wants an option, `Done` otherwise), on the request's error (`Idle`), or
-/// on Cancel / a failed send (`Idle`, `dismiss`). `Picking` leaves on the
-/// answer of the option sent from it, on Cancel, or on an error. `Done`
-/// leaves when the UI dismisses the note or a new report starts. An answer
-/// for any other request is dropped.
+/// `Choosing` is the target picked before the request is sent; it leaves
+/// when the send succeeds (`Asking`) or fails (`dismiss`, `Idle`). `Asking`
+/// leaves on the answer of its request (`Picking` when TDLib wants an
+/// option, `Done` otherwise), on the request's error (`Idle`), or on Cancel
+/// (`Idle`). `Picking` holds no request: choosing an option starts a new
+/// flow (`Choosing`), Cancel leaves it. `Done` leaves when the UI dismisses
+/// the note or a new report starts. An answer for any other request is
+/// dropped.
 #[derive(Debug, Clone, Default)]
 pub enum SponsoredReportFlow {
     #[default]
     Idle,
+    /// The ad being reported; the request has not gone out yet.
+    Choosing(SponsoredReportTarget),
     /// The ad being reported and the request its answer is awaited as.
-    Asking(SponsoredReportTarget),
-    /// TDLib wants an option; the option sent from here is the request in
-    /// the target.
-    Picking {
-        flight: SponsoredReportFlight,
+    Asking {
         target: SponsoredReportTarget,
+        request: RequestId,
     },
+    /// TDLib wants an option; nothing is in flight.
+    Picking(SponsoredReportFlight),
     /// The last outcome note (also `AdsHidden` from "Hide ads").
     Done(SponsoredReportOutcome),
 }
@@ -292,7 +291,7 @@ impl SponsoredReportFlow {
     /// The report waiting on an option choice.
     pub fn flight(&self) -> Option<&SponsoredReportFlight> {
         match self {
-            Self::Picking { flight, .. } => Some(flight),
+            Self::Picking(flight) => Some(flight),
             _ => None,
         }
     }
@@ -307,15 +306,20 @@ impl SponsoredReportFlow {
 
     pub fn target(&self) -> Option<SponsoredReportTarget> {
         match self {
-            Self::Asking(target) | Self::Picking { target, .. } => Some(*target),
+            Self::Choosing(target) | Self::Asking { target, .. } => Some(*target),
+            Self::Picking(flight) => Some(SponsoredReportTarget {
+                chat_id: flight.chat_id,
+                message_id: flight.message_id,
+            }),
             Self::Idle | Self::Done(_) => None,
         }
     }
 
-    pub fn target_mut(&mut self) -> Option<&mut SponsoredReportTarget> {
+    /// The request the flow waits on, if one is out.
+    pub fn awaited(&self) -> Option<RequestId> {
         match self {
-            Self::Asking(target) | Self::Picking { target, .. } => Some(target),
-            Self::Idle | Self::Done(_) => None,
+            Self::Asking { request, .. } => Some(*request),
+            _ => None,
         }
     }
 

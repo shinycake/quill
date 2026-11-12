@@ -28,6 +28,22 @@ pub(super) struct SelectionRow {
 }
 
 impl QuillApp {
+    /// The row a Shift+click or Shift+arrow range runs from: the selection's
+    /// own, so it is gone with the selection.
+    pub(super) fn selection_anchor(&self) -> Option<MessageId> {
+        self.share
+            .forward
+            .draft()
+            .and_then(|draft| draft.range_anchor)
+    }
+
+    /// Make `id` the range anchor of the selection on now; nothing without one.
+    pub(super) fn set_selection_anchor(&mut self, id: MessageId) {
+        if let Some(draft) = self.share.forward.draft_mut() {
+            draft.range_anchor = Some(id);
+        }
+    }
+
     /// Whether selection mode is on in `chat_id`, in the conversation the
     /// view shows there (`forward_draft` hides one made in another topic).
     /// A forward bar is no selection mode, in the chat it waits in or the
@@ -48,7 +64,10 @@ impl QuillApp {
         // A drag that is about to select rows shows the mode already.
         let on = self.selection_visible_in(chat_id);
         let count = on.then(|| self.selection_shown_count(chat_id));
-        let mut fx = self.frame.motion.selection.borrow_mut();
+        // A re-entrant frame skips this one's motion instead of panicking.
+        let Ok(mut fx) = self.frame.motion.selection.try_borrow_mut() else {
+            return (if on { 1. } else { 0. }, if on { 1. } else { 0. });
+        };
         if let Some(count) = count {
             fx.last_count = count;
         }
@@ -67,7 +86,6 @@ impl QuillApp {
         &self,
         chat_id: ChatId,
         message_id: MessageId,
-        pending: bool,
         // The wide layout's check position from the history's left edge
         // (`chat_wide::selection_right`); `None` puts it at the right edge.
         wide_right: Option<f32>,
@@ -80,12 +98,17 @@ impl QuillApp {
             return SelectionRow::default();
         }
         let now = std::time::Instant::now();
-        let checked = self.frame.motion.selection.borrow_mut().check(
-            chat_id.0,
-            message_id.0,
-            selected,
-            self.frame.window_active.get(),
-            now,
+        let checked = self.frame.motion.selection.try_borrow_mut().map_or(
+            if selected { 1. } else { 0. },
+            |mut fx| {
+                fx.check(
+                    chat_id.0,
+                    message_id.0,
+                    selected,
+                    self.frame.window_active.get(),
+                    now,
+                )
+            },
         );
         let interactive = self.selecting_in(chat_id);
         let focused = interactive && self.chat_ui.focus.row() == Some(message_id);
@@ -117,9 +140,7 @@ impl QuillApp {
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                                this.selection_press_row(
-                                    chat_id, message_id, pending, event, window, cx,
-                                );
+                                this.selection_press_row(chat_id, message_id, event, window, cx);
                             }),
                         )
                 })
@@ -250,7 +271,7 @@ impl QuillApp {
             quill::selection_pin::room_for(draft.count()),
         );
         self.add_to_selection(chat_id, span);
-        self.chat_ui.selection_anchor = Some(message_id);
+        self.set_selection_anchor(message_id);
         self.chat_ui.focus = A11yFocus::Row(message_id);
         cx.notify();
     }
@@ -357,98 +378,16 @@ impl QuillApp {
         if missing.is_empty() {
             return;
         }
-        if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.ensure_media_files(&missing);
-        }
+        let sent = self
+            .live
+            .as_mut()
+            .is_none_or(|live| live.driver.ensure_media_files(&missing).is_ok());
         self.set_note(match missing.len() {
+            _ if !sent => StatusNote::error(tr(keys::Q_OPS_REQUEST_NOT_SENT)),
             1 => StatusNote::silent(tr(keys::Q_CHAT_DOWNLOADING_1_FILE)),
             n => StatusNote::silent(trn(keys::Q_CHAT_DOWNLOADING_FILES, n)),
         });
         cx.notify();
-    }
-
-    /// "Save Selected": pick a folder and copy the downloaded media of the
-    /// selection into it; media still downloading is requested first.
-    pub(super) fn save_selection(&mut self, cx: &mut Context<Self>) {
-        let Some(chat_id) = self.forward_draft().map(|d| d.from_chat_id) else {
-            return;
-        };
-        if self.refuse_protected_copy(chat_id, cx) {
-            return;
-        }
-        let media = self.selected_media();
-        if media.is_empty() {
-            return;
-        }
-        let mut files = Vec::new();
-        let mut missing = Vec::new();
-        for (id, target) in &media {
-            match self.menu_media_local(chat_id, *id) {
-                Some((_, path)) => {
-                    let local = path
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("file")
-                        .to_string();
-                    files.push((
-                        path,
-                        quill::message_menu::suggested_save_name(target, &local),
-                    ));
-                }
-                None => missing.push(target.file_id),
-            }
-        }
-        if !missing.is_empty() {
-            if let Some(live) = self.live.as_mut() {
-                let _ = live.driver.ensure_media_files(&missing);
-            }
-            self.set_note(StatusNote::silent(tr(
-                keys::Q_CHAT_DOWNLOADING_CHOOSE_SAVE_AGAIN_WHEN,
-            )));
-            cx.notify();
-            return;
-        }
-        let picker = cx.prompt_for_paths(PathPromptOptions {
-            files: false,
-            directories: true,
-            multiple: false,
-            prompt: Some(tr(keys::SETTINGS_SAVE).into()),
-        });
-        // screen-scope: the note reports a local file save to whichever account is on screen.
-        cx.spawn(async move |this, cx| {
-            let Ok(Ok(Some(dirs))) = picker.await else {
-                return;
-            };
-            let Some(dir) = dirs.into_iter().next() else {
-                return;
-            };
-            let saved = cx
-                .background_executor()
-                .spawn(async move {
-                    let mut used = std::collections::HashSet::new();
-                    let mut saved = 0usize;
-                    for (path, name) in files {
-                        let (dest, claimed) = unique_destination(&dir, &name, &mut used);
-                        if std::fs::copy(&path, &dest).is_ok() {
-                            saved += 1;
-                        } else if claimed {
-                            // Drop the empty file `unique_destination` created,
-                            // never a path it did not create.
-                            let _ = std::fs::remove_file(&dest);
-                        }
-                    }
-                    saved
-                })
-                .await;
-            let _ = this.update(cx, |this, cx| {
-                this.set_note(match saved {
-                    1 => StatusNote::silent(tr(keys::Q_CHAT_SAVED_1_FILE)),
-                    n => StatusNote::silent(trn(keys::Q_CHAT_SAVED_FILES, n)),
-                });
-                cx.notify();
-            });
-        })
-        .detach();
     }
 
     /// Whether the selection can be reported: other people's sent
@@ -647,8 +586,10 @@ impl QuillApp {
         revoke: bool,
         cx: &mut Context<Self>,
     ) {
-        self.delete_messages(chat_id, ids, revoke);
-        self.share.forward = super::forward_stage::ForwardStage::None;
+        // A refused send keeps the selection, so the delete can be retried.
+        if self.delete_messages(chat_id, ids, revoke) {
+            self.share.forward = super::forward_stage::ForwardStage::None;
+        }
         cx.notify();
     }
 
@@ -907,9 +848,34 @@ impl QuillApp {
                     let community = community_ban
                         .filter(|_| on_ok_community.get())
                         .zip(offer.clone());
+                    let mut refused = false;
                     let _ = app.update(cx, |this, cx| {
                         // Opened for one account: a switch since cancels it.
                         if this.session().map(|s| &s.account) != account.as_ref() {
+                            return;
+                        }
+                        // Reports and "delete all" name the user's
+                        // messages, so they go out before the delete. A
+                        // send that fails keeps the box open and deletes
+                        // nothing: the admin retries (every step is
+                        // idempotent on the server).
+                        if let (true, Some(offer), Some(live)) =
+                            (picked.any(), offer.clone(), this.live.as_mut())
+                            && live
+                                .driver
+                                .moderate_message(
+                                    offer.chat_id,
+                                    &[confirm.message_id],
+                                    offer.user_id,
+                                    picked,
+                                )
+                                .is_err()
+                        {
+                            refused = true;
+                            this.set_note(StatusNote::error(tr(
+                                keys::Q_CHAT_COULD_NOT_DELETE_MESSAGES,
+                            )));
+                            cx.notify();
                             return;
                         }
                         if let Some(((community_id, _), offer)) = community {
@@ -920,22 +886,9 @@ impl QuillApp {
                                 cx,
                             );
                         }
-                        // Reports and "delete all" name the user's
-                        // messages, so they go out before the delete.
-                        if let (true, Some(offer), Some(live)) =
-                            (picked.any(), offer, this.live.as_mut())
-                        {
-                            let _ = live.driver.moderate_message(
-                                offer.chat_id,
-                                &[confirm.message_id],
-                                offer.user_id,
-                                picked,
-                            );
-                        }
-                        this.chat_ui.pending_delete = Some(confirm);
-                        this.confirm_delete(cx);
+                        this.confirm_delete(confirm, cx);
                     });
-                    true
+                    !refused
                 })
         });
     }
@@ -947,4 +900,6 @@ impl QuillApp {
 mod delete_tests;
 
 mod save_destination;
+mod save_selection;
 use save_destination::unique_destination;
+pub(super) use save_selection::SaveSelection;

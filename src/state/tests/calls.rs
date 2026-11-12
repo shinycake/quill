@@ -91,10 +91,12 @@ fn rtmp_url_answer_caches_on_tracked_call() {
     );
     let call = session.calls.active_group_call.as_ref().unwrap();
     assert_eq!(
-        call.rtmp_url.as_deref(),
-        Some("rtmp://dc1-rtmp.telegram.org:443/live")
+        call.rtmp,
+        Some(crate::calls::rtmp_start::RtmpInfo {
+            url: "rtmp://dc1-rtmp.telegram.org:443/live".into(),
+            key: "secret-key".into(),
+        })
     );
-    assert_eq!(call.rtmp_stream_key.as_deref(), Some("secret-key"));
 }
 
 #[test]
@@ -115,6 +117,10 @@ fn join_as_answer_fills_options_and_preselects_the_saved_default() {
         }),
         None,
     );
+    if let Some(call) = session.calls.active_group_call.as_mut() {
+        call.join_as_options.begin();
+        call.join_as_options.sent(extra);
+    }
     apply_json(
         &mut session,
         &seq,
@@ -129,107 +135,6 @@ fn join_as_answer_fills_options_and_preselects_the_saved_default() {
     assert_eq!(call.join_as, Some(MessageSender::Chat { chat_id: -300 }));
     // The blocked-users list is untouched by a join-as answer.
     assert!(session.settings.blocked_senders.is_idle());
-}
-
-#[test]
-fn call_privacy_get_maps_rules_and_set_failure_clears() {
-    let (mut session, sink) = session();
-    let seq = AtomicU64::new(0);
-    let extra = session.request(
-        RequestPurpose::Calls(CallsPurpose::GetCallPrivacyRules {
-            setting: CallPrivacySetting::AllowCalls,
-        }),
-        None,
-    );
-    session
-        .calls
-        .privacy_asks
-        .set(CallPrivacySetting::AllowCalls, PrivacyAsk::Asking(extra));
-    apply_json(
-        &mut session,
-        &seq,
-        &sink,
-        &format!(
-            r#"{{"@type":"userPrivacySettingRules","@extra":"{}","rules":[{{"@type":"userPrivacySettingRuleAllowContacts"}}]}}"#,
-            extra.0,
-        ),
-    );
-    assert_eq!(
-        session.calls.privacy_allow_calls,
-        Some(PrivacyWho::Contacts)
-    );
-    assert!(!session.calls.privacy_error());
-
-    // Optimistic set, then a TDLib error: the optimistic value is
-    // cleared (the next fetch restores the truth) and the error
-    // flag is set.
-    session.calls.privacy_allow_calls = Some(PrivacyWho::Nobody);
-    let extra = session.request(
-        RequestPurpose::Calls(CallsPurpose::SetCallPrivacyRules {
-            setting: CallPrivacySetting::AllowCalls,
-        }),
-        None,
-    );
-    session
-        .calls
-        .privacy_asks
-        .set(CallPrivacySetting::AllowCalls, PrivacyAsk::Asking(extra));
-    apply_json(
-        &mut session,
-        &seq,
-        &sink,
-        &format!(
-            r#"{{"@type":"error","@extra":"{}","code":400,"message":"PRIVACY_TOO_LONG"}}"#,
-            extra.0,
-        ),
-    );
-    assert_eq!(session.calls.privacy_allow_calls, None);
-    assert!(session.calls.privacy_error());
-}
-
-#[test]
-fn call_privacy_loading_clears_only_after_both_gets_land() {
-    // `fetch_call_privacy` fires two gets (AllowCalls + PeerToPeer):
-    // clearing on the first would briefly render the radios with
-    // nothing selected instead of "Loading…".
-    let (mut session, sink) = session();
-    let seq = AtomicU64::new(0);
-    let settings = [
-        CallPrivacySetting::AllowCalls,
-        CallPrivacySetting::PeerToPeer,
-    ];
-    let asked = settings.map(|setting| {
-        let extra = session.request(
-            RequestPurpose::Calls(CallsPurpose::GetCallPrivacyRules { setting }),
-            None,
-        );
-        session
-            .calls
-            .privacy_asks
-            .set(setting, PrivacyAsk::Asking(extra));
-        extra
-    });
-    for (setting, extra) in settings.into_iter().zip(asked) {
-        apply_json(
-            &mut session,
-            &seq,
-            &sink,
-            &format!(
-                r#"{{"@type":"userPrivacySettingRules","@extra":"{}","rules":[{{"@type":"userPrivacySettingRuleAllowAll"}}]}}"#,
-                extra.0,
-            ),
-        );
-        if setting == CallPrivacySetting::AllowCalls {
-            assert!(session.calls.privacy_loading());
-            assert_eq!(session.calls.privacy_p2p, None);
-        }
-    }
-    assert!(!session.calls.privacy_loading());
-    assert_eq!(
-        session.calls.privacy_allow_calls,
-        Some(PrivacyWho::Everybody)
-    );
-    assert_eq!(session.calls.privacy_p2p, Some(PrivacyWho::Everybody));
 }
 
 fn swap_pending_json(id: i32, user_id: i64, is_video: bool) -> String {
@@ -371,12 +276,9 @@ fn swap_accept_queued_survives_active_call_end() {
 
 fn hanging_up(session: &mut Session, call_id: i32) -> RequestId {
     let request = session.request(RequestPurpose::DiscardCall, None);
-    let call = session.calls.active_call.as_mut().expect("active call");
-    let resume = std::mem::replace(&mut call.state, CallState::HangingUp);
     session
         .calls
-        .progress
-        .hang_up_sent(crate::state::HangUp::new(request, call_id, resume));
+        .hang_up_sent(crate::state::HangUp::new(request, call_id));
     request
 }
 
@@ -401,12 +303,12 @@ fn non_terminal_update_keeps_a_hang_up_in_flight() {
     let request = hanging_up(&mut session, 78);
     // An update queued before the discard lands.
     apply_json(&mut session, &seq, &sink, &swap_active_json(78, 42));
-    let state = |s: &Session| s.calls.active_call.as_ref().map(|c| c.state.clone());
+    let state = |s: &Session| s.calls.active_call.as_ref().map(|c| c.phase());
     assert_eq!(state(&session), Some(CallState::HangingUp));
     // The hang-up fails: the call is back in the phase it moved to.
     apply_json(&mut session, &seq, &sink, &error_json(request));
     assert_eq!(state(&session), Some(CallState::ExchangingKeys));
-    assert!(session.calls.progress.hang_up().is_none());
+    assert!(session.calls.hang_up().is_none());
     assert!(session.calls.error.is_some());
 }
 
@@ -424,10 +326,7 @@ fn failed_hang_up_reverts_and_brings_the_swap_prompt_back() {
     let request = hanging_up(&mut session, 77);
     apply_json(&mut session, &seq, &sink, &error_json(request));
     let call = session.calls.active_call.as_ref().expect("call goes on");
-    assert_eq!(
-        (call.id, call.state.clone()),
-        (77, CallState::ExchangingKeys)
-    );
+    assert_eq!((call.id, call.phase()), (77, CallState::ExchangingKeys));
     assert_eq!(session.calls.second_call.prompt(), Some((78, 42, false)));
 }
 
@@ -441,51 +340,19 @@ fn other_discard_errors_leave_the_hang_up_alone() {
     let other = session.request(RequestPurpose::DiscardCall, None);
     apply_json(&mut session, &seq, &sink, &error_json(other));
     let call = session.calls.active_call.as_ref().expect("active call");
-    assert_eq!(call.state, CallState::HangingUp);
-    assert!(session.calls.progress.hang_up().is_some());
+    assert_eq!(call.phase(), CallState::HangingUp);
+    assert!(session.calls.hang_up().is_some());
     // TDLib's own hanging-up update is kept as the phase to go back to.
     apply_json(&mut session, &seq, &sink, &hanging_up_update_json(77, 41));
     assert_eq!(
-        session.calls.progress.hang_up().map(|h| h.resume.clone()),
+        session
+            .calls
+            .active_call
+            .as_ref()
+            .map(|c| c.state().clone()),
         Some(CallState::HangingUp)
     );
-}
-
-/// Sweep 05-251: a send that failed marks only its own rule, so the answer
-/// of the other get neither hides the failure nor looks like a full load.
-#[test]
-fn a_failed_privacy_send_survives_the_other_rules_answer() {
-    let (mut session, sink) = session();
-    let seq = AtomicU64::new(0);
-    let first = session.request(
-        RequestPurpose::Calls(CallsPurpose::GetCallPrivacyRules {
-            setting: CallPrivacySetting::AllowCalls,
-        }),
-        None,
-    );
-    let calls = &mut session.calls;
-    calls
-        .privacy_asks
-        .set(CallPrivacySetting::AllowCalls, PrivacyAsk::Asking(first));
-    // The second get never left.
-    calls
-        .privacy_asks
-        .set(CallPrivacySetting::PeerToPeer, PrivacyAsk::Failed);
-    apply_json(
-        &mut session,
-        &seq,
-        &sink,
-        &format!(
-            r#"{{"@type":"userPrivacySettingRules","@extra":"{}","rules":[{{"@type":"userPrivacySettingRuleAllowAll"}}]}}"#,
-            first.0,
-        ),
-    );
-    assert_eq!(
-        session.calls.privacy_allow_calls,
-        Some(PrivacyWho::Everybody)
-    );
-    assert!(session.calls.privacy_error(), "the failure line stays");
-    assert!(!session.calls.privacy_loading());
+    assert!(session.calls.hang_up().is_some());
 }
 
 fn rated_summary(session: &mut Session, seq: &AtomicU64, sink: &Arc<MemorySink>) {
@@ -508,17 +375,27 @@ fn a_failed_rating_brings_the_card_back_and_an_ok_says_thanks() {
     let seq = AtomicU64::new(0);
     rated_summary(&mut session, &seq, &sink);
     let request = session.request(RequestPurpose::SendCallRating, None);
-    session.calls.summary.as_mut().expect("summary").rating = CallRating::Sending(request);
+    let mut draft = RatingDraft::new(3);
+    draft.problems[1] = true;
+    session.calls.summary.as_mut().expect("summary").rating = CallRating::Sending {
+        request,
+        draft: draft.clone(),
+    };
     apply_json(&mut session, &seq, &sink, &error_json(request));
     let failed = rating(&session).expect("summary");
-    assert!(matches!(failed, CallRating::Failed(_)));
+    assert!(matches!(failed, CallRating::Failed { .. }));
     assert!(failed.is_open(), "the card is drawn again");
+    assert_eq!(failed.draft(), Some(&draft), "with the draft that was sent");
     // The retry is answered ok.
     let retry = session.request(RequestPurpose::SendCallRating, None);
-    session.calls.summary.as_mut().expect("summary").rating = CallRating::Sending(retry);
+    let sending = CallRating::Sending {
+        request: retry,
+        draft: draft.clone(),
+    };
+    session.calls.summary.as_mut().expect("summary").rating = sending.clone();
     // An answer to the first, stale request changes nothing.
     apply_json(&mut session, &seq, &sink, &error_json(request));
-    assert_eq!(rating(&session), Some(CallRating::Sending(retry)));
+    assert_eq!(rating(&session), Some(sending));
     apply_json(
         &mut session,
         &seq,
@@ -602,6 +479,9 @@ fn join_as_failure_leaves_the_picker_out_and_is_not_asked_again() {
         }),
         None,
     );
+    if let Some(call) = session.calls.active_group_call.as_mut() {
+        call.join_as_options.sent(extra);
+    }
     apply_json(
         &mut session,
         &seq,

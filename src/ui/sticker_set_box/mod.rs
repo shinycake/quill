@@ -26,7 +26,7 @@ use quill::sticker_set_box::{
     ARCHIVED_NOTE, SetKind, can_archive, copied_note, has_add_cell, set_link, share_label,
 };
 use quill::telegram::envelope::StickerItem;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 
 mod creator;
@@ -34,6 +34,7 @@ mod demo;
 mod dialogs;
 mod menu;
 pub(crate) mod state;
+use state::SetBoxHost;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod tests;
@@ -78,11 +79,15 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.in_every_window(cx, |app, cx| {
-            app.message_ui.menu_ui.end_sticker_set();
             app.close_set_editors_not_for(set_id, cx);
         });
         self.sticker_box.reset();
-        self.message_ui.menu_ui.show_sticker_set();
+        self.sticker_box.host = SetBoxHost::In(self.windows.scope);
+    }
+
+    /// The sticker set dialog is open in the window in place.
+    pub(in crate::ui) fn sticker_set_open(&self) -> bool {
+        self.sticker_box.host == SetBoxHost::In(self.windows.scope)
     }
 
     /// This window's photo or video editor closes when it makes a sticker
@@ -108,7 +113,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.view_sticker_set(set_id).is_err()
         {
-            self.message_ui.menu_ui.end_sticker_set();
+            self.sticker_box.host = SetBoxHost::Closed;
             self.set_note(StatusNote::error(tr(
                 keys::Q_MEDIA_COULD_NOT_OPEN_THE_STICKER,
             )));
@@ -202,13 +207,11 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// The session holds one viewed set, so its box closes in every window
-    /// that shows it: a set deleted from a chat window's box (the poll runs
-    /// as the main window) leaves no empty box behind.
+    /// The session holds one viewed set, so its box closes in whichever
+    /// window shows it: a set deleted from a chat window's box (the poll
+    /// runs as the main window) leaves no empty box behind.
     pub(in crate::ui) fn close_sticker_set_dialog(&mut self, cx: &mut Context<Self>) {
-        self.in_every_window(cx, |app, _| {
-            app.message_ui.menu_ui.end_sticker_set();
-        });
+        self.sticker_box.host = SetBoxHost::Closed;
         self.sticker_box.reset();
         if let Some(live) = self.live.as_mut() {
             live.driver.session.stickers.sticker_set_view = None;
@@ -540,12 +543,9 @@ impl QuillApp {
                 dialog
                     .title(shell::dialog_title(title))
                     .content(shell::scrollable_dialog_content({
-                        let body = Rc::new(RefCell::new(Some(body)));
+                        let body = Rc::new(Cell::new(Some(body)));
                         move |content, _, _| {
-                            let body = body
-                                .borrow_mut()
-                                .take()
-                                .unwrap_or_else(|| div().into_any_element());
+                            let body = body.take().unwrap_or_else(|| div().into_any_element());
                             content.child(body)
                         }
                     }));
@@ -563,7 +563,7 @@ impl QuillApp {
 /// Sticker") paints inside the app, under any kit dialog, so the box steps
 /// aside until the editor is done or cancelled.
 pub(super) fn sticker_box_shown(app: &QuillApp) -> bool {
-    app.message_ui.menu_ui.sticker_set_open() && app.viewer.photo_editor.is_none()
+    app.sticker_set_open() && app.viewer.photo_editor.is_none()
 }
 
 crate::ui::shell::register_dialogs! {

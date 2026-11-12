@@ -36,6 +36,28 @@ fn corner_badge(text: String) -> Div {
         .child(text)
 }
 
+/// A failure line with its Retry button.
+fn retry_row(
+    id: &'static str,
+    error: &str,
+    color: Hsla,
+    on_retry: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> Div {
+    div()
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap_2()
+        .child(div().text_sm().text_color(color).child(error.to_string()))
+        .child(
+            Button::new(id)
+                .label(tr(keys::Q_CHAT_RETRY))
+                .ghost()
+                .small()
+                .on_click(on_retry),
+        )
+}
+
 impl QuillApp {
     /// A gift of the user's own: into the first free slot, unless a gate
     /// says it can't go there.
@@ -284,26 +306,12 @@ impl QuillApp {
             && let Some(error) = market.load.error()
         {
             // A failed search is not "none on sale": say why, and retry.
-            body = body.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap_2()
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().danger)
-                            .child(error.to_string()),
-                    )
-                    .child(
-                        Button::new("craft-sale-retry")
-                            .label(tr(keys::Q_CHAT_RETRY))
-                            .ghost()
-                            .small()
-                            .on_click(cx.listener(|this, _, _, cx| this.retry_craft_listings(cx))),
-                    ),
-            );
+            body = body.child(retry_row(
+                "craft-sale-retry",
+                error,
+                cx.theme().danger,
+                cx.listener(|this, _, _, cx| this.retry_craft_listings(cx)),
+            ));
         } else if market.listings.is_empty() {
             body = body.child(
                 div()
@@ -314,7 +322,17 @@ impl QuillApp {
         } else {
             body = body.child(sale);
         }
-        if market.has_more() {
+        if !market.listings.is_empty()
+            && let Some(error) = market.load.error()
+        {
+            // A failed next page: the listings stay, and Retry asks it again.
+            body = body.child(retry_row(
+                "craft-sale-more-retry",
+                error,
+                cx.theme().danger,
+                cx.listener(|this, _, _, cx| this.more_craft_listings(cx)),
+            ));
+        } else if market.has_more() {
             body = body.child(
                 Button::new("craft-sale-more")
                     .label(tr(keys::Q_MONEY_SHOW_MORE))

@@ -8,10 +8,10 @@ impl QuillApp {
     pub(in crate::ui) fn chat_search_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let session = self.session();
         let status = session
-            .map(|s| s.search.chat_search.status)
+            .map(|s| s.search.chat_search.status())
             .unwrap_or(SearchStatus::Closed);
         let query = session
-            .map(|s| s.search.chat_search.query.clone())
+            .map(|s| s.search.chat_search.query().to_owned())
             .unwrap_or_default();
         let position = session
             .map(|s| s.search.chat_search.position_label())
@@ -21,19 +21,19 @@ impl QuillApp {
         let sender_label = session.and_then(|s| {
             s.search
                 .chat_search
-                .sender
+                .sender()
                 .map(|sender| s.sender_label(sender))
         });
         let media = session
-            .map(|s| s.search.chat_search.media)
+            .map(|s| s.search.chat_search.media())
             .unwrap_or_default();
-        let picker = session.and_then(|s| s.search.chat_search.from_picker.clone());
+        let picker = session.and_then(|s| s.search.chat_search.from_picker().cloned());
         let more_failed = session.is_some_and(|s| s.search.chat_search.more_failed());
         let hits: Vec<(MessageId, String, i32, bool)> = session
             .map(|s| {
                 s.search
                     .chat_search
-                    .hits
+                    .hits()
                     .iter()
                     .enumerate()
                     .map(|(i, hit)| {
@@ -41,7 +41,7 @@ impl QuillApp {
                             hit.message_id,
                             hit.preview.clone(),
                             hit.date,
-                            s.search.chat_search.selected == Some(i),
+                            s.search.chat_search.selected() == Some(i),
                         )
                     })
                     .collect()
@@ -146,13 +146,17 @@ impl QuillApp {
                     .gap_1()
                     .child(
                         div().id("chat-search-field").flex_1().child(
-                            Textarea::new(&self.search_ui.chat_input)
-                                .aria_label(if picker_open {
-                                    tr(keys::Q_CHAT_SEARCH_MEMBERS)
-                                } else {
-                                    tr(keys::Q_CHAT_SEARCH_THIS_CONVERSATION)
-                                })
-                                .h(px(36.)),
+                            Textarea::new(if picker_open {
+                                &self.search_ui.member_input
+                            } else {
+                                &self.search_ui.chat_input
+                            })
+                            .aria_label(if picker_open {
+                                tr(keys::Q_CHAT_SEARCH_MEMBERS)
+                            } else {
+                                tr(keys::Q_CHAT_SEARCH_THIS_CONVERSATION)
+                            })
+                            .h(px(36.)),
                         ),
                     )
                     .when(!position.is_empty() && !picker_open, |this| {
@@ -225,7 +229,7 @@ impl QuillApp {
                             |this, window, cx| {
                                 if this
                                     .session()
-                                    .is_some_and(|s| s.search.chat_search.sender.is_some())
+                                    .is_some_and(|s| s.search.chat_search.sender().is_some())
                                 {
                                     this.chat_search_pick_sender(None, window, cx);
                                 } else {
@@ -317,7 +321,7 @@ impl QuillApp {
     }
 
     pub(in crate::ui) fn schedule_search_commit(&mut self, token: u64, cx: &mut Context<Self>) {
-        self.spawn_screen(cx, async move |this, cx| {
+        self.search_ui.debounce.global = self.spawn_screen(cx, async move |this, cx| {
             cx.background_executor().timer(SEARCH_DEBOUNCE).await;
             this.update(cx, |this, cx| {
                 if let Some(live) = this.live.as_mut() {
@@ -334,8 +338,7 @@ impl QuillApp {
                 cx.notify();
             })
             .ok();
-        })
-        .detach();
+        });
     }
 
     /// Enter in the search field: open the selected result, else the
@@ -724,5 +727,99 @@ impl QuillApp {
                     ),
             )
             .into_any_element()
+    }
+}
+
+impl QuillApp {
+    /// The members list that replaces the hits while a "From:" is chosen.
+    pub(super) fn chat_search_picker(
+        &self,
+        picker: &FromPicker,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let session = self.session();
+        let mut list = div()
+            .id("chat-search-from-list")
+            .flex()
+            .flex_col()
+            .gap_0p5();
+        let rows: Vec<(MessageSender, String)> = picker
+            .members()
+            .iter()
+            .map(|m| {
+                (
+                    *m,
+                    session.map_or_else(|| "member".into(), |s| s.sender_label(*m)),
+                )
+            })
+            .collect();
+        if rows.is_empty() {
+            let text = if picker.loading() {
+                tr(keys::Q_CHAT_LOADING_MEMBERS)
+            } else {
+                tr(keys::Q_CHAT_NO_MEMBERS_FOUND)
+            };
+            list = list.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(text),
+            );
+        }
+        for (sender, name) in rows {
+            let photo = match sender {
+                MessageSender::User { user_id } => self.chat_photo_for_row(ChatId(user_id)),
+                MessageSender::Chat { chat_id } => self.chat_photo_for_row(ChatId(chat_id)),
+            };
+            let key = match sender {
+                MessageSender::User { user_id } => user_id as u64,
+                MessageSender::Chat { chat_id } => chat_id as u64 ^ (1 << 62),
+            };
+            list = list.child(
+                div()
+                    .id(("chat-search-from", key))
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .px_2()
+                    .py_1()
+                    .rounded_md()
+                    .role(gpui_kit::Role::Button)
+                    .aria_label(tr_with(
+                        keys::Q_CHAT_SEARCH_MESSAGES_FROM,
+                        &[("name", &name.to_string())],
+                    ))
+                    .tab_index(0)
+                    .cursor_pointer()
+                    .pressable(cx.theme())
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.chat_search_pick_sender(Some(sender), window, cx);
+                    }))
+                    .child(crate::ui::chat_row::chat_avatar(
+                        &name,
+                        photo.as_deref(),
+                        28.,
+                    ))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_sm()
+                            .child(crate::ui::bidi_line::name_line(name)),
+                    ),
+            );
+        }
+        div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(
+                div()
+                    .text_xs()
+                    .font_semibold()
+                    .child(tr(keys::Q_CHAT_SEARCH_MESSAGES_FROM_2)),
+            )
+            .child(list.max_h(px(240.)).overflow_y_scroll())
     }
 }

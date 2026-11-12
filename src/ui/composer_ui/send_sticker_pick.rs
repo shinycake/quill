@@ -71,6 +71,9 @@ impl QuillApp {
         if sent {
             self.consume_sent_reply(chat_id, cx);
             self.arm_send_fly(chat_id, file_id, cx);
+        } else {
+            // The chosen cell is not left for a later send.
+            super::send_fly::forget_source();
         }
         cx.notify();
         sent
@@ -450,7 +453,7 @@ impl QuillApp {
                     Some(tr(keys::Q_CHAT_COULDNT_LOAD_LINK_PREVIEW).to_string())
                 }
                 // Request in flight.
-                quill::state::LinkPreviewFetch::Asked => {
+                quill::state::LinkPreviewFetch::Asked(_) => {
                     Some(tr(keys::Q_CHAT_GETTING_LINK_INFO).to_string())
                 }
             },

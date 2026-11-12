@@ -76,9 +76,9 @@ fn a_reopened_main_window_is_not_raised_after_a_plain_minimize(cx: &mut TestAppC
     close_main_window(vcx);
     vcx.update(super::raise_main_window);
     vcx.run_until_parked();
-    assert_eq!(
-        vcx.cx.update(|cx| cx.global::<MainWindow>().state),
-        MainWindowState::Open
+    assert!(
+        vcx.cx
+            .update(|cx| matches!(cx.global::<MainWindow>().state, MainWindowState::Open))
     );
     vcx.deactivate_window();
     come_forward(&app, vcx);
@@ -96,8 +96,10 @@ fn quill_coming_forward_raises_the_closed_main_window(cx: &mut TestAppContext) {
 
 fn close_in_full_screen(vcx: &mut VisualTestContext) {
     close_main_window(vcx);
-    vcx.cx
-        .update(|cx| cx.global_mut::<MainWindow>().state = MainWindowState::LeavingFullScreen);
+    vcx.cx.update(|cx| {
+        let poll = cx.spawn(async |_| {});
+        cx.global_mut::<MainWindow>().state = MainWindowState::LeavingFullScreen { _poll: poll };
+    });
 }
 
 #[gpui_kit::test]
@@ -112,6 +114,35 @@ fn a_dock_click_during_the_full_screen_wait_undoes_the_close(cx: &mut TestAppCon
         !vcx.cx.update(take_hide_after_full_screen),
         "the wait hides nothing"
     );
+}
+
+/// The full-screen wait is the stage's own task: raising the window leaves
+/// the stage and cancels the poll, so it cannot hide the window later.
+#[gpui_kit::test]
+fn raising_the_window_cancels_the_full_screen_poll(cx: &mut TestAppContext) {
+    struct Guard(std::rc::Rc<std::cell::Cell<bool>>);
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            self.0.set(true);
+        }
+    }
+    let (_app, mut vcx) = new_app(cx, "ready-privacy");
+    let vcx = &mut vcx;
+    close_main_window(vcx);
+    let cancelled = std::rc::Rc::new(std::cell::Cell::new(false));
+    let guard = Guard(cancelled.clone());
+    vcx.cx.update(|cx| {
+        let poll = cx.spawn(async move |_| {
+            let _guard = guard;
+            std::future::pending::<()>().await;
+        });
+        cx.global_mut::<MainWindow>().state = MainWindowState::LeavingFullScreen { _poll: poll };
+    });
+    vcx.run_until_parked();
+    assert!(!cancelled.get(), "the poll waits");
+    vcx.update(super::raise_main_window);
+    vcx.run_until_parked();
+    assert!(cancelled.get(), "leaving the stage dropped the poll");
 }
 
 #[gpui_kit::test]
@@ -228,7 +259,7 @@ fn quit_with_the_main_window_closed_asks_during_an_export(cx: &mut TestAppContex
     vcx.cx.update(|cx| cx.dispatch_action(&QuitApp));
     vcx.run_until_parked();
     assert!(!vcx.cx.windows().is_empty(), "still running");
-    assert!(app.read_with(vcx, |app, _| app.main_window.export_stop.is_some()));
+    assert!(app.read_with(vcx, |app, _| app.main_window.quit_gate.is_asking()));
     assert!(
         vcx.update(|window, _| window.is_window_active()),
         "back with the prompt"

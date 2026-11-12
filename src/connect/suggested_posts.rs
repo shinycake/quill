@@ -139,6 +139,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         if busy && self.session.suggested_post_busy(post_chat, post_message) {
             return Err(ConnectSendError::InvalidRequest);
         }
+        // One offer per message at a time: a double submit of the box would
+        // send two offer messages.
+        if matches!(purpose, SuggestedPostPurpose::AddOffer { .. })
+            && self.session.suggested_offer_busy(post_chat, post_message)
+        {
+            return Err(ConnectSendError::InvalidRequest);
+        }
         let extra = self.session.request(
             RequestPurpose::Payments(PaymentsPurpose::SuggestedPost(purpose)),
             Some(chat_id),

@@ -127,7 +127,9 @@ impl VideoPip {
                 .with_size(px(control.area.w as f32))
                 .icon(Icon::new(icon).with_size(px(control.icon.w as f32)))
                 .accessibility_label(label)
-                .on_click(cx.listener(move |this, _, window, cx| this.button(action, window, cx))),
+                .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                    this.button(action, event.is_keyboard(), window, cx)
+                })),
         )
     }
 

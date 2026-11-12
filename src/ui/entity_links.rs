@@ -30,9 +30,7 @@ use quill::lang::{keys, tr, tr_with};
 use quill::link_policy::{OpenDecision, open_decision};
 use quill::telegram::envelope::{ChatKind, MessageContent, MessageSender};
 use quill::text::LinkTarget;
-use std::cell::RefCell;
 use std::ops::Range;
-use std::rc::Rc;
 
 /// A clicked link waiting for render: the link and the message it is in
 /// (chat id, message id).
@@ -349,7 +347,7 @@ impl QuillApp {
                     .positions
                     .insert(ChatMessage::new(chat_id, target_id), secs);
                 if self.playback.active.voice() == Some(target_id)
-                    && self.playback.player.chat.is_none_or(|c| c == chat_id)
+                    && self.playback.active.chat().is_none_or(|c| c == chat_id)
                 {
                     self.seek_active_to(secs, cx);
                 } else {
@@ -370,7 +368,7 @@ impl QuillApp {
                     .positions
                     .insert(ChatMessage::new(chat_id, target_id), secs);
                 if self.playback.active.audio() == Some(target_id)
-                    && self.playback.player.chat.is_none_or(|c| c == chat_id)
+                    && self.playback.active.chat().is_none_or(|c| c == chat_id)
                 {
                     self.seek_active_to(secs, cx);
                 } else {
@@ -397,9 +395,9 @@ impl QuillApp {
     /// it opens at this very point.
     ///
     /// The note lives for this press only: the menu opens in the same
-    /// event, and whatever is left when it ends is dropped, so a press
-    /// where no menu opened cannot hand its link to a later menu at the
-    /// same point.
+    /// event, and whatever is left when it ends is dropped (the press holds
+    /// the task that ends it), so a press where no menu opened cannot hand
+    /// its link to a later menu at the same point.
     pub(super) fn note_right_clicked_link(
         &mut self,
         position: Point<Pixels>,
@@ -407,23 +405,67 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.chat_ui.link_tooltip = None;
-        self.message_ui.right_clicked_link = Some((position, link));
-        self.spawn_scoped(cx, async move |this, cx| {
-            let _ = this.update(cx, |this, _| this.message_ui.right_clicked_link = None);
-        })
-        .detach();
+        self.note_right_press(position, Some(link), None, cx);
     }
 
-    /// The link under the right-click that opened a menu at `position`.
-    pub(super) fn take_right_clicked_link(
+    /// Note what a right-press is over. Notes of one press (a link inside a
+    /// task) share the slot; a press elsewhere replaces it.
+    pub(super) fn note_right_press(
         &mut self,
         position: Point<Pixels>,
-    ) -> Option<LinkTarget> {
-        self.message_ui
-            .right_clicked_link
-            .take()
-            .filter(|(at, _)| *at == position)
-            .map(|(_, link)| link)
+        link: Option<LinkTarget>,
+        item: Option<quill::composer::ReplyItem>,
+        cx: &mut Context<Self>,
+    ) {
+        let (mut link, mut item) = (link, item);
+        if let super::message_state::RightPress::Pressed {
+            position: at,
+            link: earlier_link,
+            item: earlier_item,
+            ..
+        } = std::mem::take(&mut self.message_ui.right_press)
+            && at == position
+        {
+            link = link.or(earlier_link);
+            item = item.or(earlier_item);
+        }
+        let end = self.spawn_scoped(cx, async move |this, cx| {
+            let _ = this.update(cx, |this, _| {
+                this.message_ui.right_press = Default::default();
+            });
+        });
+        self.message_ui.right_press = super::message_state::RightPress::Pressed {
+            position,
+            link,
+            item,
+            _end: end,
+        };
+    }
+
+    /// What the right-press that opened a menu at `position` was over. The
+    /// press is spent either way.
+    pub(super) fn take_right_press(
+        &mut self,
+        position: Point<Pixels>,
+    ) -> (Option<LinkTarget>, Option<quill::composer::ReplyItem>) {
+        match std::mem::take(&mut self.message_ui.right_press) {
+            super::message_state::RightPress::Pressed {
+                position: at,
+                link,
+                item,
+                ..
+            } if at == position => (link, item),
+            _ => (None, None),
+        }
+    }
+
+    /// The link of the right-press that opened a menu, wherever it was
+    /// pressed (a menu built by a view that has no position of its own).
+    pub(super) fn take_right_press_link(&mut self) -> Option<LinkTarget> {
+        match std::mem::take(&mut self.message_ui.right_press) {
+            super::message_state::RightPress::Pressed { link, .. } => link,
+            super::message_state::RightPress::None => None,
+        }
     }
 
     /// The pointer entered a link that has a tooltip (or left one).
@@ -752,16 +794,7 @@ impl QuillApp {
                 } else {
                     tr(keys::Q_OPS_OPEN_THIS_LINK)
                 }))
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body)));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
+                .content(crate::ui::shell::one_shot_dialog_content(body))
                 .footer(footer)
                 .on_close(on_close)
         })

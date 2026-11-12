@@ -244,7 +244,14 @@ fn a_prepaid_giveaway_launches_only_on_the_explicit_call() {
     let recorder = Arc::new(RecordingSender::new());
     let seq = AtomicU64::new(0);
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
-    driver.session.groups.chat_boost_status.insert(-100, (1, 2));
+    driver.session.groups.set_boost_status(
+        -100,
+        crate::telegram::envelope::ParsedBoostStatus {
+            level: 1,
+            boost_count: 2,
+            ..Default::default()
+        },
+    );
 
     // A new giveaway (not prepaid) never launches.
     let paid = GiveawayDraft::new(-100, None, NOW);
@@ -265,8 +272,8 @@ fn a_prepaid_giveaway_launches_only_on_the_explicit_call() {
     assert_eq!(sent["parameters"]["prize_description"], "A mug");
     assert_eq!(sent["parameters"]["boosted_chat_id"], -100);
     assert!(matches!(
-        driver.session.payments.giveaway.launch,
-        GiveawayLaunch::Launching { chat_id: -100, .. }
+        driver.session.payments.giveaway.launches.stage(-100),
+        GiveawayLaunch::Launching { .. }
     ));
     // A second click while it runs sends nothing.
     assert!(driver.launch_prepaid_giveaway(&draft, NOW).is_err());
@@ -279,11 +286,19 @@ fn a_prepaid_giveaway_launches_only_on_the_explicit_call() {
         json!({"@type":"ok","@extra":extra.as_extra()}),
     );
     assert_eq!(
-        driver.session.payments.giveaway.launch,
-        GiveawayLaunch::Launched { chat_id: -100 }
+        driver.session.payments.giveaway.launches.stage(-100),
+        &GiveawayLaunch::Launched
     );
     // The cached boost numbers are dropped so the page asks again.
-    assert!(!driver.session.groups.chat_boost_status.contains_key(&-100));
+    assert!(
+        driver
+            .session
+            .groups
+            .chat_boost_status
+            .get(&-100)
+            .is_some_and(|fetch| fetch.is_outdated()),
+        "the page asks again"
+    );
     for ty in ["getPaymentForm", "sendPaymentForm"] {
         assert_eq!(count_sent(&recorder, ty), 0);
     }
@@ -301,22 +316,30 @@ fn a_launch_answer_for_one_chat_does_not_land_in_another_chats_form() {
         let recorder = Arc::new(RecordingSender::new());
         let seq = AtomicU64::new(0);
         let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
-        driver.session.groups.chat_boost_status.insert(-100, (1, 2));
-        driver.session.groups.chat_boost_status.insert(-200, (3, 4));
+        for (chat, level, count) in [(-100, 1, 2), (-200, 3, 4)] {
+            driver.session.groups.set_boost_status(
+                chat,
+                crate::telegram::envelope::ParsedBoostStatus {
+                    level,
+                    boost_count: count,
+                    ..Default::default()
+                },
+            );
+        }
         let extra = driver
             .launch_prepaid_giveaway(&prepaid_draft(), NOW)
             .unwrap();
         // The form for chat B opens (what `open_giveaway_form` does).
         let giveaway = &mut driver.session.payments.giveaway;
-        giveaway.launch = std::mem::take(&mut giveaway.launch).for_form();
-        assert!(!giveaway.launch.is_launching_for(-200));
+        giveaway.launches.for_form(-200);
+        assert!(!giveaway.launches.is_launching_for(-200));
         let answer = if fail {
             json!({"@type":"error","@extra":extra.as_extra(),"code":400,"message":"GIVEAWAY_ID_INVALID"})
         } else {
             json!({"@type":"ok","@extra":extra.as_extra()})
         };
         feed(&mut driver, &seq, &sink, answer);
-        let launch = &driver.session.payments.giveaway.launch;
+        let launch = &driver.session.payments.giveaway.launches;
         assert!(
             !launch.is_done_for(-200) && launch.failure_for(-200).is_none(),
             "B's form shows nothing of A's launch"
@@ -324,11 +347,23 @@ fn a_launch_answer_for_one_chat_does_not_land_in_another_chats_form() {
         assert_eq!(launch.is_done_for(-100), !fail);
         assert_eq!(launch.failure_for(-100).is_some(), fail);
         assert_eq!(
-            driver.session.groups.chat_boost_status.contains_key(&-100),
-            fail,
-            "A's boost status is dropped when its launch succeeded"
+            driver
+                .session
+                .groups
+                .chat_boost_status
+                .get(&-100)
+                .is_some_and(|fetch| fetch.is_outdated()),
+            !fail,
+            "A's boost status is out of date when its launch succeeded"
         );
-        assert!(driver.session.groups.chat_boost_status.contains_key(&-200));
+        assert!(
+            driver
+                .session
+                .groups
+                .chat_boost_status
+                .get(&-200)
+                .is_some_and(|fetch| !fetch.is_outdated())
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
@@ -348,11 +383,10 @@ fn going_back_to_a_chat_keeps_its_launch_in_flight() {
         .unwrap();
     // A's form closes, B's opens and closes, A's opens again (what
     // `close_giveaway_form` and `open_giveaway_form` do each time).
-    for _ in 0..4 {
-        let giveaway = &mut driver.session.payments.giveaway;
-        giveaway.launch = std::mem::take(&mut giveaway.launch).for_form();
+    for chat in [-100, -200, -200, -100] {
+        driver.session.payments.giveaway.launches.for_form(chat);
     }
-    let launch = &driver.session.payments.giveaway.launch;
+    let launch = &driver.session.payments.giveaway.launches;
     assert!(launch.is_launching_for(-100), "A's Start stays disabled");
     assert!(!launch.is_launching_for(-200), "B's Start is not");
     assert!(
@@ -367,7 +401,7 @@ fn going_back_to_a_chat_keeps_its_launch_in_flight() {
         &sink,
         json!({"@type":"ok","@extra":extra.as_extra()}),
     );
-    assert!(driver.session.payments.giveaway.launch.is_done_for(-100));
+    assert!(driver.session.payments.giveaway.launches.is_done_for(-100));
     std::fs::remove_dir_all(dir).unwrap();
 }
 
@@ -388,14 +422,59 @@ fn a_failed_launch_reports_the_reason() {
         json!({"@type":"error","@extra":extra.as_extra(),"code":400,"message":"GIVEAWAY_ID_INVALID"}),
     );
     assert!(matches!(
-        driver.session.payments.giveaway.launch,
-        GiveawayLaunch::Failed { chat_id: -100, ref reason } if reason.starts_with("Couldn't start")
+        driver.session.payments.giveaway.launches.stage(-100),
+        GiveawayLaunch::Failed { reason } if reason.starts_with("Couldn't start")
     ));
     // After a failure the user can try again.
     assert!(
         driver
             .launch_prepaid_giveaway(&prepaid_draft(), NOW)
             .is_ok()
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn an_older_stars_options_answer_or_error_does_not_touch_the_newer_fetch() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    driver.request_giveaway_options(-100).unwrap();
+    driver.request_giveaway_options(-100).unwrap();
+    let asked: Vec<serde_json::Value> = recorder
+        .snapshot()
+        .iter()
+        .filter_map(|j| serde_json::from_str::<serde_json::Value>(j).ok())
+        .filter(|v| v["@type"] == "getStarGiveawayPaymentOptions")
+        .collect();
+    let (old, new) = (asked[0]["@extra"].clone(), asked[1]["@extra"].clone());
+    let options = |extra: &serde_json::Value, stars: i64| {
+        json!({"@type":"starGiveawayPaymentOptions","@extra":extra,"options":[{
+            "currency":"USD","amount":100,"star_count":stars,"yearly_boost_count":1,
+            "winner_options":[],"is_default":true,"is_extended":false}]})
+    };
+    feed(&mut driver, &seq, &sink, options(&new, 500));
+    feed(&mut driver, &seq, &sink, options(&old, 1));
+    let held = driver.session.payments.giveaway.options.stars_options();
+    assert_eq!(held.len(), 1);
+    assert_eq!(held[0].star_count, 500);
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        json!({"@type":"error","@extra":old,"code":500,"message":"BOOM"}),
+    );
+    assert_eq!(
+        driver
+            .session
+            .payments
+            .giveaway
+            .options
+            .stars_options()
+            .len(),
+        1
     );
     std::fs::remove_dir_all(dir).unwrap();
 }

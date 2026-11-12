@@ -52,7 +52,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .is_some_and(|state| {
                 matches!(
                     state,
-                    PrivacyKeyState::Loading(_) | PrivacyKeyState::Saving { .. }
+                    PrivacyKeyState::Loading { .. } | PrivacyKeyState::Saving { .. }
                 )
             });
         if busy {
@@ -68,10 +68,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&get_privacy_rules(extra, key.td_type()))
         {
             self.session.requests.take(extra);
-            self.session
-                .settings
-                .privacy
-                .insert(key, PrivacyKeyState::Failed);
+            self.session.settings.fail_privacy_load(key, Some(extra));
             return Err(err);
         }
         Ok(())
@@ -100,7 +97,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.mirror_call_privacy(key, &detail);
         self.session.settings.begin_privacy_save(key, detail, extra);
         Ok(extra)
     }

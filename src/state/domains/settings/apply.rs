@@ -34,41 +34,15 @@ impl Session {
                 // a later read clears them too.
                 self.settings.notified.mark_active(chat_ids);
             }
-            // Phase C2i: `getUserPrivacySettingRules` answer — map the
-            // rule list to the simple Everybody / Contacts / Nobody
-            // choice (`None` when the account has custom rules the UI
-            // cannot represent; the radios then show nothing selected).
-            // Slice S3: the Privacy-screen keys keep the full parsed
-            // detail (exception lists) instead.
+            // `getUserPrivacySettingRules` answer for a Privacy-screen key:
+            // the full parsed detail (exception lists).
             SettingsPayload::UserPrivacySettingRules { rules } => {
-                if let Some(purpose) = pending.map(|p| p.purpose) {
-                    match purpose {
-                        RequestPurpose::Calls(CallsPurpose::GetCallPrivacyRules { setting })
-                            if pending.is_some_and(|p| {
-                                self.calls.privacy_asks.answered(setting, p.id)
-                            }) =>
-                        {
-                            let names: Vec<String> = rules.iter().map(|r| r.name.clone()).collect();
-                            let who = PrivacyWho::from_rule_names(&names);
-                            match setting {
-                                CallPrivacySetting::AllowCalls => {
-                                    self.calls.privacy_allow_calls = who
-                                }
-                                CallPrivacySetting::PeerToPeer => self.calls.privacy_p2p = who,
-                            }
-                        }
-                        RequestPurpose::Settings(SettingsPurpose::GetPrivacyRules { key }) => {
-                            let detail = PrivacyRuleDetail::from_rules(&rules);
-                            if self.settings.finish_privacy_load(
-                                key,
-                                pending.map(|p| p.id),
-                                detail.clone(),
-                            ) {
-                                self.mirror_call_privacy(key, &detail);
-                            }
-                        }
-                        _ => {}
-                    }
+                if let Some(RequestPurpose::Settings(SettingsPurpose::GetPrivacyRules { key })) =
+                    pending.map(|p| p.purpose)
+                {
+                    let detail = PrivacyRuleDetail::from_rules(&rules);
+                    self.settings
+                        .finish_privacy_load(key, pending.map(|p| p.id), detail);
                 }
             }
             // Slice S3: `updateUserPrivacySettingRules` (:10871) — rules
@@ -87,7 +61,6 @@ impl Session {
                         Some(PrivacyKeyState::Saving { .. })
                     );
                     if !saving {
-                        self.mirror_call_privacy(key, &detail);
                         self.settings
                             .privacy
                             .insert(key, PrivacyKeyState::Ready(detail));
@@ -117,15 +90,17 @@ impl Session {
                     CallsPurpose::GetVideoChatAvailableParticipants { group_call_id },
                 )) = pending.map(|p| p.purpose)
                 {
-                    self.set_group_call_join_as_options(group_call_id, senders);
+                    self.set_group_call_join_as_options(
+                        group_call_id,
+                        pending.map(|p| p.id),
+                        senders,
+                    );
                 } else if let Some(RequestPurpose::Calls(CallsPurpose::CreateVideoChatJoinAs {
                     ..
                 })) = pending.map(|p| p.purpose)
                 {
-                    if let Some(join_as) = self.calls.create_join_as.as_mut()
-                        && Some(join_as.request) == extra
-                    {
-                        join_as.answer = Some(Ok(senders));
+                    if let Some(join_as) = self.calls.create_join_as.as_mut() {
+                        join_as.accept(extra, senders);
                     }
                 } else if let Some(RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders {
                     offset,
@@ -142,10 +117,11 @@ impl Session {
                 }
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::UploadSavedNotificationSound)
                 {
-                    self.finish_tone_upload(sounds);
+                    self.finish_tone_upload(pending.map(|p| p.id), sounds);
                 // Parity slice: `getSavedNotificationSounds` answer.
                 } else if pending.map(|p| p.purpose)
                     == Some(RequestPurpose::GetSavedNotificationSounds)
+                    && pending.is_some_and(|p| self.settings.saved_sounds.waits_for(p.id))
                 {
                     let files: Vec<ParsedFile> = sounds.iter().map(|s| s.sound.clone()).collect();
                     self.remember_files(&files);
@@ -157,7 +133,9 @@ impl Session {
                     self.settings
                         .sound_file_ids
                         .retain(|_, sound_id| live_ids.contains(sound_id));
-                    self.settings.saved_sounds.succeed(sounds);
+                    self.settings
+                        .saved_sounds
+                        .answered(pending.map(|p| p.id), sounds);
                 }
             }
             SettingsPayload::UpdateSavedNotificationSounds { .. } => {
@@ -172,11 +150,14 @@ impl Session {
                 // Phase S2: `getStorageStatistics` answer — only our own
                 // in-flight request writes the cache (matched by `@extra`).
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStorageStatistics) {
-                    self.settings.storage_stats.succeed(StorageStats {
-                        total_size,
-                        by_file_type,
-                        by_chat,
-                    });
+                    self.settings.storage_stats.answered(
+                        pending.map(|p| p.id),
+                        StorageStats {
+                            total_size,
+                            by_file_type,
+                            by_chat,
+                        },
+                    );
                 }
                 // Batch 6: `optimizeStorage` answers with the statistics
                 // of the files it deleted. Drop the usage cache so the
@@ -193,15 +174,16 @@ impl Session {
                 // per-network settings (matched by `@extra`), and only
                 // when nothing was loaded from disk. The driver persists
                 // the seed on the next ingest (`data_storage_dirty`).
-                if pending.map(|p| p.purpose)
-                    == Some(RequestPurpose::GetAutoDownloadSettingsPresets)
-                    && !self.settings.data_storage.seeded.is_seeded()
+                if self
+                    .settings
+                    .data_storage
+                    .seeded
+                    .waits_for(pending.map(|p| p.id))
                 {
                     self.settings
                         .data_storage
                         .seed_from_presets(low, medium, high);
                     self.settings.data_storage_dirty = true;
-                    self.settings.auto_download_presets.succeed(());
                 }
             }
             SettingsPayload::UpdateUnconfirmedSession { session, count } => {
@@ -229,7 +211,9 @@ impl Session {
                     Some(RequestPurpose::Auth(AuthPurpose::PasswordStateOp { .. }))
                 ) {
                     let has_password = state.has_password;
-                    self.auth_state.password_state = Some(state);
+                    self.auth_state
+                        .password_state
+                        .answered(pending.map(|p| p.id), state);
                     self.auth_state.settle_password_op(pending.map(|p| p.id));
                     self.route_gift_export_on_password(has_password);
                     self.route_gram_withdrawal_on_password(has_password);
@@ -241,8 +225,13 @@ impl Session {
                 }
             }
             SettingsPayload::DeviceLoginResult { result } => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::ConfirmDeviceLogin) {
-                    self.settings.device_login = DeviceLogin::Done(result);
+                if let Some(asked) =
+                    pending.filter(|p| p.purpose == RequestPurpose::ConfirmDeviceLogin)
+                {
+                    self.settings.device_login = DeviceLogin::Done {
+                        request: asked.id,
+                        result,
+                    };
                     if result != crate::auth::DeviceLoginResult::Failed {
                         self.settings.sessions_op.changed(pending.map(|p| p.id));
                         self.settings.sessions.clear_error();
@@ -288,12 +277,17 @@ impl Session {
                 // The answer is authoritative: it replaces the list and
                 // clears any stale error. No optimistic mutation ever
                 // happens client-side.
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetActiveSessions) {
+                if let Some(asked) = pending
+                    && asked.purpose == RequestPurpose::GetActiveSessions
+                    && self.settings.sessions.waits_for(asked.id)
+                {
                     self.resolve_unconfirmed_entries(&sessions);
-                    self.settings.sessions.succeed(sessions);
-                    if inactive_session_ttl_days.is_some() {
-                        self.settings.privacy_data.inactive_session_ttl_days =
-                            inactive_session_ttl_days;
+                    self.settings.sessions.answered(Some(asked.id), sessions);
+                    if let Some(days) = inactive_session_ttl_days {
+                        self.settings
+                            .privacy_data
+                            .inactive_session_ttl
+                            .read(asked.id, days);
                     }
                 }
             }
@@ -303,7 +297,9 @@ impl Session {
                 // `@extra`). Authoritative: replaces the cached days and
                 // clears any stale error.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetAccountTtl) {
-                    self.settings.account_ttl.succeed(days);
+                    self.settings
+                        .account_ttl
+                        .answered(pending.map(|p| p.id), days);
                 }
             }
             SettingsPayload::ConnectedWebsites { websites } => {
@@ -313,20 +309,23 @@ impl Session {
                 // clears any stale error. No optimistic mutation ever
                 // happens client-side.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetConnectedWebsites) {
-                    self.settings.connected_websites.succeed(websites);
+                    self.settings
+                        .connected_websites
+                        .answered(pending.map(|p| p.id), websites);
                 }
             }
-            SettingsPayload::ScopeNotificationSettings { settings, .. } => {
+            SettingsPayload::ScopeNotificationSettings { settings } => {
                 // Parity slice: `getScopeNotificationSettings` answer; the
                 // scope is correlated via the pending request (the response
                 // carries no scope field).
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetScopeNotificationSettings)
                     && let Some(scope) = pending.and_then(|p| p.scope)
                 {
-                    self.settings
-                        .scope_notification_settings
-                        .insert(scope, settings);
-                    self.settings.scope_settings_loading.remove(&scope);
+                    self.settings.scope_notification_settings.answered(
+                        scope,
+                        pending.map(|p| p.id),
+                        settings,
+                    );
                 }
             }
             SettingsPayload::UpdateScopeNotificationSettings { scope, settings } => {
@@ -339,7 +338,6 @@ impl Session {
                         .scope_notification_settings
                         .insert(scope, settings);
                 }
-                self.settings.scope_settings_loading.remove(&scope);
             }
             SettingsPayload::UpdateReactionNotificationSettings { settings } => {
                 // Parity slice: no getter exists — the update stream is the
@@ -350,10 +348,10 @@ impl Session {
                 }
             }
             SettingsPayload::QuickReplies(update) => self.apply_quick_replies(update),
-            SettingsPayload::TimeZones(zones) => self.apply_time_zones(zones),
-            SettingsPayload::BusinessChatLinks(links) => self.apply_chat_links(links),
+            SettingsPayload::TimeZones(zones) => self.apply_time_zones(zones, extra),
+            SettingsPayload::BusinessChatLinks(links) => self.apply_chat_links(links, extra),
             SettingsPayload::BusinessChatLink(link) => self.apply_chat_link(link, extra),
-            SettingsPayload::BusinessConnectedBot(bot) => self.apply_connected_bot(bot),
+            SettingsPayload::BusinessConnectedBot(bot) => self.apply_connected_bot(bot, pending),
         }
     }
 }

@@ -134,6 +134,24 @@ impl RequestPurpose {
                 | RequestPurpose::Media(MediaPurpose::GetSharedMediaMore { .. })
                 | RequestPurpose::Media(MediaPurpose::SearchDiskPausedDownloads)
                 | RequestPurpose::GetPinnedMessages
+                // The composer's link chip and reply bar wait on these:
+                // a lost one settles as a failure they draw and ask again.
+                | RequestPurpose::GetLinkPreview
+                | RequestPurpose::Messages(MessagesPurpose::GetComposerReplyTarget { .. })
+                // Panels that draw "Loading" for these end in their error
+                // state (with Retry) when the answer is lost.
+                | RequestPurpose::Messages(MessagesPurpose::GetPollVoters { .. })
+                | RequestPurpose::Messages(MessagesPurpose::GetPollVoteStatistics { .. })
+                | RequestPurpose::GetChatStatistics
+                | RequestPurpose::GetChatInviteLinkCounts
+                | RequestPurpose::GetChatAdministrators
+                | RequestPurpose::Groups(GroupsPurpose::GetAdminRights { .. })
+                | RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembers { .. })
+                | RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembersMore { .. })
+                | RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { .. })
+                | RequestPurpose::Groups(GroupsPurpose::PollChatEventLog)
+                | RequestPurpose::GetChatOwnerAfterLeaving
+                | RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults { .. })
                 | RequestPurpose::GetUserFullInfo
                 | RequestPurpose::GetSupergroupFullInfo
                 | RequestPurpose::GetBasicGroupFullInfo
@@ -321,22 +339,6 @@ pub struct ForwardResult {
 pub struct ForceReplyTarget {
     pub chat_id: ChatId,
     pub message_id: MessageId,
-}
-
-/// B1: context of an in-flight login-URL button press. Kept while
-/// `getLoginUrlInfo` (and then `getLoginUrl`, after consent) is in flight,
-/// so an error degrades the button to a plain URL-button press (schema
-/// 1.8.67 doc on `getLoginUrl`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LoginUrlRequest {
-    pub chat_id: ChatId,
-    pub message_id: MessageId,
-    pub button_id: i64,
-    /// The button's raw URL — the plain-URL fallback.
-    pub raw_url: String,
-    /// Pressed by a step the agent UI driver injected: what the answer
-    /// opens runs as part of that step (`guard::with_injecting`).
-    pub from_agent: bool,
 }
 
 /// Slice P1: context of an in-flight payment request (`getPaymentForm`,
@@ -767,6 +769,13 @@ impl RequestRegistry {
         self.pending.len()
     }
 
+    /// The ids in flight now, oldest first.
+    pub fn pending_ids(&self) -> Vec<RequestId> {
+        let mut ids: Vec<RequestId> = self.pending.values().map(|p| p.id).collect();
+        ids.sort_by_key(|id| id.0);
+        ids
+    }
+
     pub fn is_empty(&self) -> bool {
         self.pending.is_empty()
     }
@@ -808,9 +817,20 @@ impl RequestRegistry {
     }
 
     pub fn has_purpose_for_chat(&self, purpose: RequestPurpose, chat_id: ChatId) -> bool {
+        self.id_for_purpose_for_chat(purpose, chat_id).is_some()
+    }
+
+    /// The in-flight request for a purpose and chat, to wait for it
+    /// instead of asking again.
+    pub fn id_for_purpose_for_chat(
+        &self,
+        purpose: RequestPurpose,
+        chat_id: ChatId,
+    ) -> Option<RequestId> {
         self.pending
             .values()
-            .any(|p| p.purpose == purpose && p.chat_id == Some(chat_id))
+            .find(|p| p.purpose == purpose && p.chat_id == Some(chat_id))
+            .map(|p| p.id)
     }
 
     /// An in-flight request for a purpose and message (`request_for_message`).
@@ -820,28 +840,25 @@ impl RequestRegistry {
         chat_id: ChatId,
         message_id: MessageId,
     ) -> bool {
-        self.pending.values().any(|p| {
-            p.purpose == purpose
-                && p.chat_id == Some(chat_id)
-                && p.around_message_id == Some(message_id)
-        })
+        self.find_for_message(purpose, chat_id, message_id)
+            .is_some()
     }
 
-    /// Bots slice: whether a `getInlineQueryResults` request is in flight
-    /// for the (chat, bot) pair, whatever the page. `has_purpose_for_chat`
-    /// compares the full purpose (including `first_page`), so it cannot
-    /// dedup across pages.
-    pub fn has_inline_query_in_flight(&self, chat_id: ChatId, bot_user_id: i64) -> bool {
-        self.pending.values().any(|p| {
-            matches!(
-                p.purpose,
-                RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
-                    chat_id: c,
-                    bot_user_id: b,
-                    ..
-                }) if c == chat_id && b == bot_user_id
-            )
-        })
+    /// The in-flight request for a purpose and message, if any.
+    pub fn find_for_message(
+        &self,
+        purpose: RequestPurpose,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) -> Option<RequestId> {
+        self.pending
+            .values()
+            .find(|p| {
+                p.purpose == purpose
+                    && p.chat_id == Some(chat_id)
+                    && p.around_message_id == Some(message_id)
+            })
+            .map(|p| p.id)
     }
 
     /// Mutable access to a pending request (parity slice: stamping
@@ -901,6 +918,21 @@ impl RequestRegistry {
         })
     }
 
+    /// The in-flight request for a purpose/chat/story triple.
+    pub fn request_for_story_in_flight(
+        &self,
+        purpose: RequestPurpose,
+        chat_id: ChatId,
+        story_id: i32,
+    ) -> Option<RequestId> {
+        self.pending
+            .values()
+            .find(|p| {
+                p.purpose == purpose && p.chat_id == Some(chat_id) && p.story_id == Some(story_id)
+            })
+            .map(|p| p.id)
+    }
+
     /// Phase 9.7: an in-flight request for a purpose/chat/album triple
     /// (`GetStoryAlbumStories` per album).
     pub fn has_purpose_for_story_album(
@@ -942,7 +974,8 @@ impl RequestRegistry {
     }
 
     /// Parity slice: the in-flight request id for a purpose/folder pair
-    /// (test hook; the live path matches responses by `@extra`).
+    /// (a second ask waits on it; the live path matches responses by
+    /// `@extra`).
     pub fn pending_extra_for_folder(
         &self,
         purpose: RequestPurpose,

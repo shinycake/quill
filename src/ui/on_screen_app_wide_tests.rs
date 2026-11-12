@@ -119,13 +119,13 @@ fn call_ids_and_video_chat_boxes_do_not_carry_over(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, "ready-chats");
     frames(&mut vcx);
     app.update_in(&mut vcx, |app, window, cx| {
-        app.call_screen.window_closed_by_user = Some(1);
-        app.call_screen.end = crate::ui::calls_state::CallEnd::Ended {
+        app.call_screen.wanted = crate::ui::calls_state::WindowWanted::ClosedByUser(1);
+        app.call_screen.end = crate::ui::calls_state::CallEnd::Lingering {
             call_id: 1,
-            at: std::time::Instant::now(),
+            _timer: gpui_kit::Task::ready(()),
         };
         app.group_call_screen.window_closed_by_user = Some(1);
-        app.group_call_screen.settings_open = true;
+        app.group_call_screen.view_of(5).open = crate::ui::group_call_state::CallBox::Settings;
         app.group_call_screen.stream_watch = crate::ui::group_call_state::StreamWatch::Joining(
             crate::ui::group_call_state::StreamJoining::new(1, gpui_kit::Task::ready(())),
         );
@@ -136,14 +136,17 @@ fn call_ids_and_video_chat_boxes_do_not_carry_over(cx: &mut TestAppContext) {
     switch(&app, &mut vcx);
     frames(&mut vcx);
     app.read_with(&vcx, |app, cx| {
-        assert_eq!(app.call_screen.window_closed_by_user, None);
         assert_eq!(
+            app.call_screen.wanted,
+            crate::ui::calls_state::WindowWanted::Open
+        );
+        assert!(matches!(
             app.call_screen.end,
             crate::ui::calls_state::CallEnd::Running
-        );
+        ));
         let group = &app.group_call_screen;
         assert_eq!(group.window_closed_by_user, None);
-        assert!(!group.settings_open);
+        assert!(group.view.is_none(), "A's call view and its box are gone");
         assert!(
             group.stream_wish().is_none(),
             "no join waits for B's call 1"

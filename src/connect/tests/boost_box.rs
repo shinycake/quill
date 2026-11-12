@@ -115,7 +115,7 @@ fn opening_the_box_reads_the_level_and_boosts_nothing() {
     assert_eq!(rig.sent_all("getChatBoostFeatures").len(), 1);
     assert!(rig.sent_all("getAvailableChatBoostSlots").is_empty());
     assert!(rig.sent_all("boostChat").is_empty());
-    assert_eq!(rig.phase(), BoostPhase::Main);
+    assert_eq!(rig.phase(), BoostPhase::main());
     let state = rig.driver.session.groups.boost_box.as_ref().unwrap();
     assert!(!state.group, "a channel");
     // A private chat has nothing to boost.
@@ -137,7 +137,7 @@ fn the_app_config_gives_the_gift_boosts_and_changes_the_notice() {
         r#"{{"@type":"jsonValueObject","@extra":"{}","members":[{{"key":"boosts_per_sent_gift","value":{{"@type":"jsonValueNumber","value":3}}}}]}}"#,
         extra.0
     ));
-    assert_eq!(rig.driver.session.groups.boosts_per_gift, Some(3));
+    assert_eq!(rig.driver.session.groups.boosts_per_gift.data(), Some(&3));
     // Asked once.
     rig.driver.open_boost_box(ChatId(13)).unwrap();
     assert_eq!(rig.sent_all("getApplicationConfig").len(), 1);
@@ -166,7 +166,12 @@ fn the_status_answer_gives_the_viewers_own_boosts() {
         r#"{{"@type":"chatBoostStatus","@extra":"{}","level":1,"boost_count":3,"current_level_boost_count":2,"next_level_boost_count":5,"applied_slot_ids":[7]}}"#,
         extra.0
     ));
-    let details = &rig.driver.session.groups.chat_boost_details[&13];
+    let details = rig
+        .driver
+        .session
+        .groups
+        .boost_status(13)
+        .expect("answered");
     assert_eq!(details.my_boost_count, 1);
 }
 
@@ -188,7 +193,7 @@ fn a_free_slot_boosts_with_that_slot() {
         r#"{{"@type":"chatBoostSlots","@extra":"{}","slots":[]}}"#,
         extra.0
     ));
-    assert_eq!(rig.phase(), BoostPhase::Main);
+    assert_eq!(rig.phase(), BoostPhase::main());
 }
 
 #[test]
@@ -203,7 +208,10 @@ fn other_slots_open_the_reassign_list_and_wait_for_a_second_click() {
         slot(6, 20, now() + 3_600)
     ));
     assert!(rig.sent_all("boostChat").is_empty(), "no boost yet");
-    let BoostPhase::Reassign { slots, selected } = rig.phase() else {
+    let BoostPhase::Reassign {
+        slots, selected, ..
+    } = rig.phase()
+    else {
         panic!("reassign list");
     };
     assert_eq!(slots.len(), 3);
@@ -229,10 +237,9 @@ fn other_slots_open_the_reassign_list_and_wait_for_a_second_click() {
         extra.0
     ));
     let state = rig.driver.session.groups.boost_box.as_ref().unwrap();
-    assert_eq!(state.phase, BoostPhase::Main);
     assert_eq!(
-        state.note.as_deref(),
-        Some("2 boosts are reassigned from 2 groups and channels.")
+        state.phase,
+        BoostPhase::main_with("2 boosts are reassigned from 2 groups and channels.")
     );
 }
 
@@ -318,8 +325,10 @@ fn a_refused_boost_returns_to_the_counters_with_the_reason() {
         extra.0
     ));
     let state = rig.driver.session.groups.boost_box.as_ref().unwrap();
-    assert_eq!(state.phase, BoostPhase::Main);
-    assert_eq!(state.note.as_deref(), Some("Could not boost (error 400)"));
+    assert_eq!(
+        state.phase,
+        BoostPhase::main_with("Could not boost (error 400)")
+    );
 }
 
 #[test]
@@ -335,14 +344,16 @@ fn closing_the_box_drops_a_pending_boost_intent() {
 }
 
 #[test]
-fn a_press_after_closing_mid_request_takes_over_the_slots_read() {
+fn a_press_after_closing_mid_request_joins_the_slots_read_still_out() {
     let mut rig = Rig::new(true);
     rig.driver.open_boost_box(ChatId(13)).unwrap();
     rig.driver.request_chat_boost(ChatId(13)).unwrap();
     rig.driver.close_boost_box();
     rig.driver.open_boost_box(ChatId(13)).unwrap();
-    // The first read is still out: this press waits for it.
-    assert_eq!(rig.driver.request_chat_boost(ChatId(13)).unwrap(), None);
+    // The first read is still out: this press waits for that request and
+    // sends no second one.
+    let own = rig.driver.request_chat_boost(ChatId(13)).unwrap();
+    assert!(own.is_none());
     assert!(matches!(rig.phase(), BoostPhase::Working(_)));
     assert_eq!(rig.sent_all("getAvailableChatBoostSlots").len(), 1);
     rig.answer_slots(&format!("[{}]", slot(5, 0, 0)));
@@ -358,9 +369,11 @@ fn a_press_while_the_box_works_sends_nothing_more() {
     assert!(rig.driver.request_chat_boost(ChatId(13)).unwrap().is_some());
     assert_eq!(rig.driver.request_chat_boost(ChatId(13)).unwrap(), None);
     assert_eq!(rig.sent_all("getAvailableChatBoostSlots").len(), 1);
-    // A press with no box makes the box that holds its wait.
+    // A press with no box makes the box that holds its wait: it joins the
+    // read of the closed box instead of sending another.
     rig.driver.close_boost_box();
-    assert!(rig.driver.request_chat_boost(ChatId(13)).unwrap().is_none());
+    assert_eq!(rig.driver.request_chat_boost(ChatId(13)).unwrap(), None);
+    assert_eq!(rig.sent_all("getAvailableChatBoostSlots").len(), 1);
     assert!(
         rig.driver
             .session
@@ -380,7 +393,32 @@ fn slots_answered_after_the_box_closed_are_not_kept_for_the_next_press() {
     rig.answer_slots(&format!("[{}]", slot(5, 0, 0)));
     // The next press reads the slots afresh; the late answer left nothing.
     rig.driver.open_boost_box(ChatId(13)).unwrap();
-    assert_eq!(rig.phase(), BoostPhase::Main);
+    assert_eq!(rig.phase(), BoostPhase::main());
     assert!(rig.driver.request_chat_boost(ChatId(13)).unwrap().is_some());
     assert!(rig.sent_all("boostChat").is_empty());
+}
+
+#[test]
+fn an_error_of_an_earlier_boost_does_not_touch_the_box_working_on_a_newer_press() {
+    let mut rig = Rig::new(true);
+    rig.driver.open_boost_box(ChatId(13)).unwrap();
+    rig.driver.request_chat_boost(ChatId(13)).unwrap();
+    rig.answer_slots(&format!("[{}]", slot(5, 0, 0)));
+    let stale = rig.boost_extra();
+    // The box closes while boostChat is out; the next press reads slots.
+    rig.driver.close_boost_box();
+    rig.driver.open_boost_box(ChatId(13)).unwrap();
+    let fresh = rig.driver.request_chat_boost(ChatId(13)).unwrap().unwrap();
+    assert_ne!(stale, fresh);
+    rig.ingest(&format!(
+        r#"{{"@type":"error","code":400,"message":"BOOST_NOT_MODIFIED","@extra":"{}"}}"#,
+        stale.0
+    ));
+    let state = rig.driver.session.groups.boost_box.as_ref().unwrap();
+    assert!(state.waits_for(fresh), "{:?}", state.phase);
+    rig.ingest(&format!(
+        r#"{{"@type":"chatBoostSlots","@extra":"{}","slots":[]}}"#,
+        fresh.0
+    ));
+    assert_eq!(rig.phase(), BoostPhase::Notice(BoostNotice::GiftedNoBoosts));
 }

@@ -138,7 +138,7 @@ fn poll_vote_statistics_land_in_the_session() {
     assert_eq!(v["is_dark"], true);
     assert!(matches!(
         driver.session.messages.poll_stats.get(&(7, 106)),
-        Some(PollStatsFetch::Loading)
+        Some(PollStatsFetch::Loading(_))
     ));
     // A second call while loading sends nothing.
     assert!(

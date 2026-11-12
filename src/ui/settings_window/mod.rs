@@ -16,6 +16,7 @@ mod agent_tools;
 mod agent_window;
 mod arrival;
 mod log_out;
+mod nav;
 mod notifications;
 mod pages;
 mod privacy;
@@ -25,6 +26,7 @@ mod sidebar;
 
 pub(in crate::ui) use agent_page::AgentPageUi;
 pub(in crate::ui) use arrival::Arrival;
+pub(in crate::ui) use nav::SettingsNav;
 pub(in crate::ui) use search::SettingsSearch;
 
 use super::actions::{CancelSearch, OpenChatSearch, OpenSearch};
@@ -78,10 +80,9 @@ impl QuillApp {
         }) {
             return;
         }
-        self.settings.open = true;
-        self.settings.sub = None;
+        self.settings.nav = self.settings.nav.opened();
         if let Some(page) = page {
-            self.switch_settings_page(page);
+            self.switch_settings_page(page, cx);
         }
         // The next pass sends the grams balance probe, which waits for Settings.
         quill::wake::UPDATES.poke();
@@ -94,32 +95,30 @@ impl QuillApp {
         self.settings.search.close();
         self.settings.page_scroll.set_offset(point(px(0.), px(0.)));
         self.preferences.app_theme.editor_read = None;
-        self.settings.open = false;
-        self.settings.page = None;
-        self.settings.sub = None;
+        self.settings.nav = SettingsNav::Closed;
     }
 
     pub(super) fn show_settings_page(&mut self, page: Page, cx: &mut Context<Self>) {
-        self.settings.sub = None;
-        self.switch_settings_page(page);
+        self.settings.nav = self.settings.nav.without_sub();
+        self.switch_settings_page(page, cx);
         cx.notify();
     }
 
     /// The one way a page changes: the old page lets go of its drafts and
     /// pickers, the new one asks for what it shows.
-    fn switch_settings_page(&mut self, page: Page) {
-        if self.settings.page == Some(page) {
+    fn switch_settings_page(&mut self, page: Page, cx: &mut Context<Self>) {
+        if self.settings.page() == Some(page) {
             return;
         }
         self.leave_settings_page(self.shown_settings_page());
         self.settings.page_scroll.set_offset(point(px(0.), px(0.)));
-        self.settings.page = Some(page);
-        self.arrive_settings_page(page);
+        self.settings.nav = self.settings.nav.on_page(page);
+        self.arrive_settings_page(page, cx);
     }
 
     /// What a page asks for each time it is entered. A search result for the
     /// page already shown runs this too, after the page let go of its drafts.
-    pub(super) fn arrive_settings_page(&mut self, page: Page) {
+    pub(super) fn arrive_settings_page(&mut self, page: Page, cx: &mut Context<Self>) {
         match page {
             Page::Notifications => self.fetch_notification_settings(),
             // tdesktop asks for the passkeys whenever the screen opens.
@@ -136,7 +135,10 @@ impl QuillApp {
             Page::Language => self.leave_language_settings(),
             Page::System => quill::link_handler::read_now(),
             Page::Calls => self.fetch_call_settings(),
-            Page::Appearance => self.retry_failed_wallpapers(),
+            Page::Appearance => {
+                self.retry_failed_wallpapers();
+                self.ask_for_wallpapers(cx);
+            }
             _ => {}
         }
     }
@@ -150,13 +152,15 @@ impl QuillApp {
                 let _ = live.driver.fetch_privacy_rules(key);
             }
             let _ = live.driver.fetch_auto_download_presets();
+            // The "Accept calls on this device" row reads the sessions.
+            let _ = live.driver.maybe_fetch_active_sessions();
         }
     }
 
     /// The page a wide window shows: Account until one is chosen. Leaving
     /// it on a narrow window, which shows the list then, drops nothing.
     fn shown_settings_page(&self) -> Page {
-        self.settings.page.unwrap_or(Page::Account)
+        self.settings.page().unwrap_or(Page::Account)
     }
 
     /// What a page opened over Settings goes when the page does.
@@ -177,17 +181,18 @@ impl QuillApp {
             // The test lives with its section, as in tdesktop. So does an
             // armed "Press a key": left armed, it ate the next key typed
             // anywhere and bound push-to-talk to it.
+            Page::Appearance => self.leave_wallpaper_gallery(),
+            Page::System => self.preferences.link_handler_recheck = Default::default(),
             Page::Calls => {
                 self.call_boxes.mic_test = Default::default();
-                self.group_call.ptt_capture = false;
+                self.preferences.keybinding.end_ptt_capture();
             }
             _ => {}
         }
     }
 
     pub(super) fn show_settings_sub(&mut self, sub: SubPage, cx: &mut Context<Self>) {
-        self.settings.page = Some(sub.parent());
-        self.settings.sub = Some(sub);
+        self.settings.nav = self.settings.nav.on_sub(sub);
         self.preferences.advanced.forget_import_offer();
         self.settings.sub_scroll.set_offset(point(px(0.), px(0.)));
         cx.notify();
@@ -202,13 +207,13 @@ impl QuillApp {
     }
 
     fn settings_back(&mut self, narrow: bool, cx: &mut Context<Self>) {
-        if self.settings.sub.take().is_none() {
-            if narrow && let Some(page) = self.settings.page {
-                self.leave_settings_page(page);
-                self.settings.page = None;
-            } else {
-                self.close_settings();
-            }
+        if self.settings.sub().is_some() {
+            self.settings.nav = self.settings.nav.without_sub();
+        } else if narrow && let Some(page) = self.settings.page() {
+            self.leave_settings_page(page);
+            self.settings.nav = self.settings.nav.to_list();
+        } else {
+            self.close_settings();
         }
         cx.notify();
     }
@@ -217,7 +222,7 @@ impl QuillApp {
     /// Agent access turned off under its page leaves Advanced, where its
     /// switch now is.
     fn settings_page_shown(&self) -> Page {
-        match self.settings.page.unwrap_or(Page::Account) {
+        match self.settings.page().unwrap_or(Page::Account) {
             page if page.shown(quill::agent::access::enabled()) => page,
             _ => Page::Advanced,
         }
@@ -236,19 +241,19 @@ impl QuillApp {
         if !window.has_active_dialog(cx) && window.focused(cx).is_none() {
             window.focus(&self.settings.focus, cx);
         }
-        if self.settings.page == Some(Page::Language) {
+        if self.settings.page() == Some(Page::Language) {
             self.ensure_language_box(window, cx);
         }
-        if self.settings.page == Some(Page::AgentAccess) && quill::agent::access::enabled() {
+        if self.settings.page() == Some(Page::AgentAccess) && quill::agent::access::enabled() {
             self.ensure_agent_page(window, cx);
         }
-        if self.settings.page == Some(Page::DataStorage) {
+        if self.settings.page() == Some(Page::DataStorage) {
             self.ensure_storage_scroll(window, cx);
         }
         let searching = self.settings_searching(window, cx);
         // A narrow window shows the results in the list's place.
-        let list = !narrow || (self.settings.page.is_none() && !searching);
-        let page = (!narrow || self.settings.page.is_some()).then(|| self.settings_page_shown());
+        let list = !narrow || (self.settings.page().is_none() && !searching);
+        let page = (!narrow || self.settings.page().is_some()).then(|| self.settings_page_shown());
         div()
             .id("settings-window")
             .debug_selector(|| "settings-window".into())
@@ -266,7 +271,7 @@ impl QuillApp {
             // Escape and Find are app-wide bindings: answered here first,
             // so they act on Settings rather than on the chats behind it.
             .on_action(cx.listener(|this, _: &CancelSearch, window, cx| {
-                if this.preferences.keybinding.capture.waiting().is_some() {
+                if this.preferences.keybinding.waiting().is_some() {
                     return;
                 }
                 if this.search_field_focused(window, cx) {
@@ -314,7 +319,7 @@ impl QuillApp {
 
     /// The right side: a page title and the page in a readable column.
     fn settings_page_view(&mut self, page: Page, narrow: bool, cx: &mut Context<Self>) -> Div {
-        let sub = self.settings.sub;
+        let sub = self.settings.sub();
         let back = narrow || sub.is_some();
         let title = match sub {
             Some(sub) => pages::sub_title(sub),

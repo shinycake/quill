@@ -146,11 +146,8 @@ fn viewer_caption_custom_emoji_covers_media_captions() {
         has_spoiler: false,
         is_secret: false,
         file_id: crate::ids::FileId(1),
-        thumb_file_id: None,
-        thumb_width: 0,
-        thumb_height: 0,
+        thumb: crate::telegram::envelope::Thumb::of(None, 0, 0, true),
         minithumbnail: None,
-        thumb_still: true,
     });
     assert_eq!(viewer_caption_custom_emoji(&gif), vec![777]);
     assert!(
@@ -278,6 +275,10 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
 
     // getAnimatedEmoji's animatedEmoji lands under GetAnimatedEmoji.
     let extra = with_purpose.request(RequestPurpose::GetAnimatedEmoji, None);
+    with_purpose.stickers.emoji.animated = crate::emoji::AnimatedSuggestion::Asking {
+        emoji: "🔥".into(),
+        request: extra,
+    };
     apply_json(
         &mut with_purpose,
         &seq,
@@ -291,8 +292,8 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
         with_purpose
             .stickers
             .emoji
-            .animated_emoji
-            .as_ref()
+            .animated
+            .sticker()
             .expect("animated")
             .emoji,
         "🔥"
@@ -357,6 +358,8 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
         )
     };
     let extra = with_purpose.request(RequestPurpose::GetInstalledEmojiSets, None);
+    with_purpose.stickers.emoji.lists.installed.begin();
+    with_purpose.stickers.emoji.lists.installed.sent(extra);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -372,6 +375,8 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
     assert!(with_purpose.stickers.stickers.sets.is_empty());
 
     let extra = with_purpose.request(RequestPurpose::SearchEmojiSets, None);
+    with_purpose.stickers.emoji.lists.search.begin();
+    with_purpose.stickers.emoji.lists.search.sent(extra);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -383,7 +388,7 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
         ),
     );
     assert_eq!(with_purpose.stickers.emoji.found_sets.len(), 1);
-    assert!(with_purpose.stickers.stickers.found_sets.is_empty());
+    assert!(with_purpose.stickers.stickers.search.sets.is_empty());
 
     let extra = with_purpose.request(
         RequestPurpose::Stickers(StickersPurpose::GetArchivedEmojiSets { first_page: true }),
@@ -416,6 +421,8 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
     assert_eq!(with_purpose.stickers.emoji.archived_sets.len(), 2);
 
     let extra = with_purpose.request(RequestPurpose::GetTrendingEmojiSets, None);
+    with_purpose.stickers.emoji.lists.trending.begin(0);
+    with_purpose.stickers.emoji.lists.trending.sent(extra);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -426,8 +433,8 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
             extra.0
         ),
     );
-    assert_eq!(with_purpose.stickers.emoji.trending_sets.len(), 1);
-    assert!(with_purpose.stickers.emoji.trending_is_premium);
+    assert_eq!(with_purpose.stickers.emoji.lists.trending.sets().len(), 1);
+    assert!(with_purpose.stickers.emoji.lists.trending.is_premium());
     assert!(with_purpose.stickers.stickers.trending.is_empty());
 
     // A clearRecentEmojiStatuses `ok` drops the recent statuses.
@@ -502,7 +509,10 @@ fn a_chat_windows_custom_emoji_count_as_shown() {
 fn an_empty_installed_list_is_loaded_only_after_its_answer() {
     let (mut session, _) = session();
     assert!(session.stickers.emoji.lists.installed.can_ask());
-    session.accept_installed_emoji_sets(Vec::new());
+    let request = session.request(RequestPurpose::GetInstalledEmojiSets, None);
+    session.stickers.emoji.lists.installed.begin();
+    session.stickers.emoji.lists.installed.sent(request);
+    session.accept_installed_emoji_sets(Some(request), Vec::new());
     assert!(!session.stickers.emoji.lists.installed.can_ask());
     session.invalidate_installed_emoji_sets();
     assert!(session.stickers.emoji.lists.installed.can_ask());

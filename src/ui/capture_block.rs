@@ -26,10 +26,21 @@ pub(super) fn should_block(open_chat_secret: bool, viewer_chat_secret: bool) -> 
 
 /// Keep `window` out of screen capture (`blocked`) or let it be captured.
 /// Every window that can show a secret chat's content goes through here.
-pub(super) fn apply_sharing(window: &Window, blocked: bool) {
+/// Returns whether the platform took the setting: a caller records the
+/// state as applied only then, so a window with no handle yet is retried
+/// on the next render.
+#[must_use]
+pub(super) fn apply_sharing(window: &Window, blocked: bool) -> bool {
     #[cfg(test)]
-    SHARING_APPLIED.with(|applied| applied.borrow_mut().push(blocked));
-    apply_native_sharing(window, blocked);
+    {
+        // A test window has no native handle on macOS or Windows: the
+        // record is the platform here, and it takes every setting.
+        let _ = window;
+        SHARING_APPLIED.with(|applied| applied.borrow_mut().push(blocked));
+        true
+    }
+    #[cfg(not(test))]
+    apply_native_sharing(window, blocked)
 }
 
 #[cfg(test)]
@@ -39,8 +50,8 @@ thread_local! {
         const { std::cell::RefCell::new(Vec::new()) };
 }
 
-#[cfg(target_os = "macos")]
-fn apply_native_sharing(window: &Window, blocked: bool) {
+#[cfg(all(not(test), target_os = "macos"))]
+fn apply_native_sharing(window: &Window, blocked: bool) -> bool {
     use objc2_app_kit::{NSView, NSWindowSharingType};
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     if let Ok(handle) = HasWindowHandle::window_handle(window)
@@ -54,12 +65,14 @@ fn apply_native_sharing(window: &Window, blocked: bool) {
             } else {
                 NSWindowSharingType::ReadOnly
             });
+            return true;
         }
     }
+    false
 }
 
-#[cfg(target_os = "windows")]
-fn apply_native_sharing(window: &Window, blocked: bool) {
+#[cfg(all(not(test), target_os = "windows"))]
+fn apply_native_sharing(window: &Window, blocked: bool) -> bool {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE, WDA_NONE,
@@ -73,12 +86,15 @@ fn apply_native_sharing(window: &Window, blocked: bool) {
             WDA_NONE
         };
         // SAFETY: GPUI owns this HWND; it is valid during the render callback.
-        unsafe { SetWindowDisplayAffinity(handle.hwnd.get() as _, affinity) };
+        return unsafe { SetWindowDisplayAffinity(handle.hwnd.get() as _, affinity) } != 0;
     }
+    false
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn apply_native_sharing(_window: &Window, _blocked: bool) {}
+#[cfg(all(not(test), not(any(target_os = "macos", target_os = "windows"))))]
+fn apply_native_sharing(_window: &Window, _blocked: bool) -> bool {
+    true
+}
 
 /// Whether this platform can keep a window out of screen capture.
 pub(super) const CAPTURE_BLOCK_SUPPORTED: bool =
@@ -106,8 +122,7 @@ impl QuillApp {
     /// desired state changes. `frame.capture_blocked` is the main window's.
     pub(super) fn sync_capture_block(&mut self, window: &Window) {
         let blocked = self.capture_block_wanted();
-        if blocked != self.frame.capture_blocked {
-            apply_sharing(window, blocked);
+        if blocked != self.frame.capture_blocked && apply_sharing(window, blocked) {
             self.frame.capture_blocked = blocked;
         }
     }

@@ -67,7 +67,7 @@ pub fn shutdown_request(kind: ShutdownKind) -> RequestPurpose {
     }
 }
 
-pub fn shutdown_is_complete(phase: ShutdownPhase) -> bool {
+pub fn shutdown_is_complete(phase: &ShutdownPhase) -> bool {
     matches!(phase, ShutdownPhase::Closed)
 }
 
@@ -118,7 +118,7 @@ mod tests {
             shutdown_request(ShutdownKind::LogOut),
             RequestPurpose::LogOut
         );
-        assert!(!shutdown_is_complete(ShutdownPhase::CloseRequested));
-        assert!(shutdown_is_complete(ShutdownPhase::Closed));
+        assert!(!shutdown_is_complete(&ShutdownPhase::CloseRequested));
+        assert!(shutdown_is_complete(&ShutdownPhase::Closed));
     }
 }

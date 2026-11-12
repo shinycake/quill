@@ -216,8 +216,8 @@ impl QuillApp {
                     )),
             );
         }
-        if self.privacy.extra.network_reset == NetworkReset::Confirming {
-            section.child(
+        match &self.privacy.extra.network_reset {
+            NetworkReset::Confirming => section.child(
                 div()
                     .flex()
                     .items_center()
@@ -247,50 +247,81 @@ impl QuillApp {
                                 cx.notify();
                             })),
                     ),
-            )
-        } else {
-            section.child(
-                div().flex().child(
-                    Button::new("network-usage-reset")
-                        .label(tr(keys::Q_OPS_RESET_STATISTICS))
-                        .outline()
-                        .small()
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.privacy.extra.network_reset = NetworkReset::Confirming;
-                            cx.notify();
-                        })),
-                ),
-            )
+            ),
+            stage => {
+                let resetting = matches!(stage, NetworkReset::Resetting(_));
+                section.child(
+                    div().flex().child(
+                        Button::new("network-usage-reset")
+                            .label(tr(keys::Q_OPS_RESET_STATISTICS))
+                            .outline()
+                            .small()
+                            .loading(resetting)
+                            .disabled(resetting)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.privacy.extra.network_reset = NetworkReset::Confirming;
+                                cx.notify();
+                            })),
+                    ),
+                )
+            }
         }
     }
 }
 
-/// "Reset statistics": asking for the confirmation, or not.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// "Reset statistics": from the confirmation to the request's answer.
+/// Every stage has a way out: Cancel, the answer, or leaving the page; a
+/// send that did not go out stays on the confirmation and says so through
+/// `data_storage_save` (`StorageSaveKind::ResetStatistics`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) enum NetworkReset {
     #[default]
     Idle,
     Confirming,
+    /// `resetNetworkStatistics` is out; its answer ends the stage.
+    Resetting(quill::ids::RequestId),
 }
 
 impl QuillApp {
-    /// The confirmed reset. The box stays until the request went out; a
-    /// failed send says so on the page (the `data_storage_save` pattern).
+    /// The confirmed reset: the stage holds the request it waits on, and a
+    /// send that did not go out says so on the page.
     pub(crate) fn reset_network_usage(&mut self) {
+        if self.privacy.extra.network_reset != NetworkReset::Confirming {
+            return;
+        }
         if let Some(live) = self.live.as_mut() {
-            if live.driver.reset_network_statistics().is_err() {
-                live.driver
-                    .session
-                    .settings
-                    .data_storage_save
-                    .fail(tr(keys::Q_OPS_RESET_STATISTICS_FAILED).to_string());
-                return;
+            let save = &mut live.driver.session.settings.data_storage_save;
+            save.begin(quill::state::StorageSaveKind::ResetStatistics);
+            match live.driver.reset_network_statistics() {
+                Ok(request) => self.privacy.extra.network_reset = NetworkReset::Resetting(request),
+                Err(_) => live.driver.session.settings.data_storage_save.fail(
+                    quill::state::StorageSaveKind::ResetStatistics,
+                    tr(keys::Q_OPS_RESET_STATISTICS_FAILED).to_string(),
+                ),
             }
-        } else if let Some(demo) = self.demo_session.as_mut() {
+            return;
+        }
+        if let Some(demo) = self.demo_session.as_mut() {
             demo.settings.privacy_data.network =
                 quill::state::fetch::Fetch::Ready(NetworkUsage::default());
         }
         self.privacy.extra.network_reset = NetworkReset::Idle;
+    }
+
+    /// Poll-loop half: the reset's request answered (or its session went),
+    /// so the page offers Reset again. A refusal from TDLib shows on the
+    /// usage block itself (`privacy_data.network`).
+    pub(in crate::ui) fn settle_network_reset(&mut self, cx: &mut Context<Self>) {
+        let NetworkReset::Resetting(request) = self.privacy.extra.network_reset else {
+            return;
+        };
+        let in_flight = self
+            .session()
+            .is_some_and(|session| session.requests.get(request).is_some());
+        if !in_flight {
+            self.privacy.extra.network_reset = NetworkReset::Idle;
+            cx.notify();
+        }
     }
 }
 

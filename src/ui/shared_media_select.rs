@@ -17,7 +17,7 @@ use quill::composer::ForwardDraft;
 use quill::ids::{FileId, MessageId};
 use quill::lang::{keys, tr};
 use quill::state::{
-    MediaMenuFacts, MediaMenuItem, SelectedMedia, SharedMediaAction, SharedMediaItem,
+    MediaMenuFacts, MediaMenuItem, MenuFile, SelectedMedia, SharedMediaAction, SharedMediaItem,
     SharedMediaState, SharedMediaTab, media_menu_items,
 };
 use quill::telegram::envelope::MessageActions;
@@ -40,7 +40,7 @@ impl QuillApp {
         let session = self.session()?;
         Some(quill::ids::AccountChat::new(
             session.account.clone(),
-            session.media.shared_media.chat_id?,
+            session.media.shared_media.chat_id()?,
         ))
     }
 
@@ -48,7 +48,7 @@ impl QuillApp {
     /// chat's message.
     fn shared_media_actions(&self, message_id: MessageId) -> Option<MessageActions> {
         let session = self.session()?;
-        let chat = session.media.shared_media.chat_id?;
+        let chat = session.media.shared_media.chat_id()?;
         session.messages.menu_actions.get(chat, message_id)
     }
 
@@ -65,7 +65,7 @@ impl QuillApp {
         }
         let Some(chat) = self
             .session()
-            .and_then(|session| session.media.shared_media.chat_id)
+            .and_then(|session| session.media.shared_media.chat_id())
         else {
             return;
         };
@@ -113,7 +113,7 @@ impl QuillApp {
         if known.is_none()
             && let Some(chat) = self
                 .session()
-                .and_then(|session| session.media.shared_media.chat_id)
+                .and_then(|session| session.media.shared_media.chat_id())
             && let Some(live) = self.live.as_mut()
         {
             let _ = live.driver.refresh_message_menu_actions(chat, message_id);
@@ -165,7 +165,7 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return MediaMenuFacts::default();
         };
-        let chat = session.media.shared_media.chat_id;
+        let chat = session.media.shared_media.chat_id();
         let actions = self.shared_media_actions(item.message_id);
         let downloading = item.file.0 != 0
             && (session
@@ -193,8 +193,17 @@ impl QuillApp {
         );
         MediaMenuFacts {
             is_message: item.action == SharedMediaAction::Message,
-            downloading,
-            local: document_tab && on_disk && !protected && actions.is_none_or(|a| a.can_be_saved),
+            file: if downloading {
+                MenuFile::Downloading
+            } else if document_tab
+                && on_disk
+                && !protected
+                && actions.is_none_or(|a| a.can_be_saved)
+            {
+                MenuFile::OnDisk
+            } else {
+                MenuFile::Remote
+            },
             can_forward,
             can_delete,
             selected: session.media.shared_media.is_selected(item.message_id),
@@ -247,7 +256,7 @@ impl QuillApp {
     ) {
         let Some(chat_id) = self
             .session()
-            .and_then(|session| session.media.shared_media.chat_id)
+            .and_then(|session| session.media.shared_media.chat_id())
         else {
             return;
         };
@@ -356,7 +365,7 @@ impl QuillApp {
         let Some(state) = self.session().map(|s| &s.media.shared_media) else {
             return;
         };
-        let (Some(chat_id), true) = (state.chat_id, state.can_forward_selection()) else {
+        let (Some(chat_id), true) = (state.chat_id(), state.can_forward_selection()) else {
             return;
         };
         // The chat's own selection stays: its draft is not replaced.
@@ -374,8 +383,9 @@ impl QuillApp {
             send_copy: false,
             remove_caption: false,
             topic_id: None,
+            range_anchor: None,
         };
-        self.share.forward = crate::ui::forward_stage::ForwardStage::Selecting(draft);
+        self.share.forward.begin_selection(draft);
         self.clear_shared_media_selection(cx);
         self.open_forward_picker(window, cx);
     }
@@ -384,7 +394,7 @@ impl QuillApp {
         let Some(state) = self.session().map(|s| &s.media.shared_media) else {
             return;
         };
-        let (Some(chat_id), true) = (state.chat_id, state.can_delete_selection()) else {
+        let (Some(chat_id), true) = (state.chat_id(), state.can_delete_selection()) else {
             return;
         };
         let (ids, revoke) = (state.selected_ids(), state.can_revoke_selection());

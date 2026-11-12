@@ -61,10 +61,17 @@ pub(super) fn seed_backgrounds(session: &mut Session) {
             angle: 0,
         }),
     };
-    session.chats_state.installed_backgrounds.succeed(vec![
+    let list = vec![
         fill(901, "dawn", 0xF6D365, 0xFDA085),
         fill(902, "sea", 0x84FAB0, 0x8FD3F4),
-    ]);
+    ];
+    for dark in [false, true] {
+        session
+            .chats_state
+            .installed_backgrounds
+            .theme_mut(dark)
+            .succeed(list.clone());
+    }
 }
 
 /// A ready local `file` object.

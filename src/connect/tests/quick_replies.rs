@@ -242,6 +242,25 @@ fn choosing_a_shortcut_sends_it_to_the_chat() {
 }
 
 #[test]
+fn a_send_whose_request_was_lost_does_not_block_the_next_tap() {
+    let (mut driver, recorder, _sink, _seq) = driver_parts();
+    driver.send_quick_reply(ChatId(31), 2).unwrap();
+    // The request was lost (a logout sweep dropped it): nothing mirrors it.
+    let lost = driver
+        .session
+        .requests
+        .take_purpose(crate::state::RequestPurpose::SendMessageAlbum);
+    assert!(lost.is_some());
+    driver.send_quick_reply(ChatId(31), 2).unwrap();
+    let sent = recorder
+        .snapshot()
+        .iter()
+        .filter(|json| json.contains("sendQuickReplyShortcutMessages"))
+        .count();
+    assert_eq!(sent, 2);
+}
+
+#[test]
 fn a_double_click_on_add_creates_the_message_once() {
     let (mut driver, recorder, _sink, _seq) = driver_parts();
     driver.add_quick_reply_text("hours", "Hi").unwrap();
@@ -355,4 +374,59 @@ fn a_successful_request_clears_the_last_refusal() {
         &format!(r#"{{"@type":"ok","@extra":"{extra}"}}"#),
     );
     assert!(driver.session.settings.quick_replies.error.is_none());
+}
+
+/// r2-05 (12-B002): a change is answered by its own request (`acks`), not by
+/// whatever error the dialog shows.
+#[test]
+fn a_change_is_answered_by_its_own_request() {
+    use crate::state::Answer;
+    let (mut driver, recorder, sink, seq) = driver_parts();
+    let add = driver
+        .add_quick_reply_text("hours", "Hi")
+        .unwrap()
+        .expect("sent");
+    driver.session.acks.expect(add);
+    driver.delete_quick_reply_shortcut(9).unwrap();
+    let delete = sent_request(&recorder, "deleteQuickReplyShortcut");
+    let extra = delete["@extra"].as_str().unwrap().to_string();
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{extra}","code":400,"message":"SHORTCUT_INVALID"}}"#
+        ),
+    );
+    assert!(driver.session.settings.quick_replies.error.is_some());
+    assert_eq!(driver.session.acks.take(add), None, "the add is still out");
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"quickReplyMessage","@extra":"{}","id":5,"can_be_edited":true,"content":{{"@type":"messageText","text":{{"text":"Hi","entities":[]}}}}}}"#,
+            add.0
+        ),
+    );
+    // Accepted, though the delete's refusal is still showing.
+    assert!(driver.session.settings.quick_replies.error.is_some());
+    assert_eq!(driver.session.acks.take(add), Some(Answer::Done));
+}
+
+#[test]
+fn a_message_load_answered_without_an_update_stops_waiting() {
+    let (mut driver, recorder, sink, seq) = driver_parts();
+    seed_shortcuts(&mut driver, &seq, &sink);
+    driver.ensure_quick_reply_messages(1).unwrap();
+    assert!(!driver.session.settings.quick_replies.messages_settled(1));
+    let request = sent_request(&recorder, "loadQuickReplyShortcutMessages");
+    let extra = request["@extra"].as_str().unwrap().to_string();
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{extra}"}}"#),
+    );
+    assert!(driver.session.settings.quick_replies.messages_settled(1));
 }

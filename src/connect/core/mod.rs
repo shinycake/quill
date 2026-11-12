@@ -3,10 +3,9 @@ use super::composer::ai_rich_draft_note;
 use super::*;
 use crate::credentials::TelegramCredentials;
 use crate::ids::{ChatId, ChatMessage, MessageId, RequestId};
-use crate::state::{
-    ComposerLinkPreview, InstantViewPage, LinkPreviewFetch, RequestPurpose, Session, ShutdownPhase,
-};
+use crate::state::{AiAnswer, AiResult};
 use crate::state::{GroupsPurpose, MessagesPurpose, StickersPurpose, ThreadsPurpose};
+use crate::state::{InstantViewPage, RequestPurpose, Session};
 use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::StoryListView;
 use crate::telegram::envelope::{
@@ -26,6 +25,7 @@ mod answer_captures;
 pub(crate) mod batch;
 mod lifecycle;
 mod pumps;
+mod stale_fetches;
 
 use std::sync::{Arc, Mutex};
 
@@ -258,10 +258,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         // (`fixTextWithAi` → `fixedText`, `composeTextWithAi` →
         // `formattedText`) before `apply` takes the pending request. The
         // chat id rides `PendingRequest::chat_id` (the purposes are unit
-        // variants); the UI drains `Session::ai_composer_text` into the
+        // variants); the UI drains `MessagesState::ai_answers` into the
         // composer draft.
-        let ai_text_answer: Option<(Option<ChatId>, ChatId, String)> = match &owned.envelope.payload
-        {
+        let ai_text_answer: Option<AiAnswer> = match &owned.envelope.payload {
             EnvelopePayload::Messages(MessagesPayload::AiCompose(
                 AiComposePayload::FixedText { text, .. },
             ))
@@ -276,9 +275,12 @@ impl<S: JsonSender> ConnectDriver<S> {
                     )
                 })
                 .and_then(|pending| {
-                    pending
-                        .chat_id
-                        .map(|chat_id| (pending.asked_in.chat(), chat_id, text.clone()))
+                    pending.chat_id.map(|chat| AiAnswer {
+                        request: pending.id,
+                        window: pending.asked_in.chat(),
+                        chat,
+                        result: AiResult::Text(text.clone()),
+                    })
                 }),
             _ => None,
         };
@@ -288,28 +290,30 @@ impl<S: JsonSender> ConnectDriver<S> {
         // the pending request. Same drain contract as the text answers.
         // The UI serializes the blocks back to editor markup; the note
         // records which method answered.
-        let ai_rich_answer: Option<(Option<ChatId>, ChatId, RichMessageContent, &'static str)> =
-            match &owned.envelope.payload {
-                EnvelopePayload::Messages(MessagesPayload::RichMessage { rich }) => owned
-                    .envelope
-                    .extra
-                    .and_then(|id| self.session.requests.get(id))
-                    .filter(|pending| {
-                        matches!(
-                            pending.purpose,
-                            RequestPurpose::ComposeRichMessageWithAi
-                                | RequestPurpose::CreateRichMessageWithAi
-                                | RequestPurpose::FixRichMessageWithAi
-                        )
+        let ai_rich_answer: Option<AiAnswer> = match &owned.envelope.payload {
+            EnvelopePayload::Messages(MessagesPayload::RichMessage { rich }) => owned
+                .envelope
+                .extra
+                .and_then(|id| self.session.requests.get(id))
+                .filter(|pending| {
+                    matches!(
+                        pending.purpose,
+                        RequestPurpose::ComposeRichMessageWithAi
+                            | RequestPurpose::CreateRichMessageWithAi
+                            | RequestPurpose::FixRichMessageWithAi
+                    )
+                })
+                .and_then(|pending| {
+                    let note = ai_rich_draft_note(pending.purpose);
+                    pending.chat_id.map(|chat| AiAnswer {
+                        request: pending.id,
+                        window: pending.asked_in.chat(),
+                        chat,
+                        result: AiResult::Blocks(rich.clone(), note),
                     })
-                    .and_then(|pending| {
-                        let note = ai_rich_draft_note(pending.purpose);
-                        pending
-                            .chat_id
-                            .map(|chat_id| (pending.asked_in.chat(), chat_id, rich.clone(), note))
-                    }),
-                _ => None,
-            };
+                }),
+            _ => None,
+        };
         // M1 fix-up: capture the `getMessageProperties` answer for the
         // "Share link" gate before `apply` takes the pending request.
         let link_gate: Option<(ChatId, MessageId, bool)> = match &owned.envelope.payload {
@@ -366,31 +370,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         // no Instant View) falls back to the browser like TGX — the URL
         // is stashed for the UI drain, never rendered as a reader.
         let instant_view_fallback = self.take_instant_view_fallback(&owned.envelope);
-        // MED4b: capture the `getLinkPreview` answer before `apply` takes
-        // the pending request; the composer chip reads
-        // `Session::composer_previews`. A late answer for a URL no longer
-        // kept is dropped.
-        let link_preview_answer = self.take_link_preview_answer(&owned.envelope);
-        // MED4b: a 404/400 or an empty answer is "no link info" (TGX
-        // `isNotFound`); any other error is `Failed`, asked again when the URL
-        // is typed again. Every answer ends "Getting link info".
-        let link_preview_failed: Option<(String, LinkPreviewFetch)> = match &owned.envelope.payload
-        {
-            EnvelopePayload::Messages(MessagesPayload::LinkPreview { .. }) => None,
-            payload => owned.envelope.extra.and_then(|id| {
-                let miss = match payload {
-                    EnvelopePayload::Error(err) if err.code == 404 || err.code == 400 => {
-                        LinkPreviewFetch::NotFound
-                    }
-                    EnvelopePayload::Error(_) => LinkPreviewFetch::Failed,
-                    _ => LinkPreviewFetch::NotFound,
-                };
-                (self.session.requests.purpose(id) == Some(RequestPurpose::GetLinkPreview))
-                    .then_some(id)
-                    .and_then(|id| self.session.messages.composer_preview_urls.remove(&id))
-                    .map(|url| (url, miss))
-            }),
-        };
         // Slice CL2: our `createPrivateChat` answer — the bare `chat`
         // parses as `UpdateNewChat`; the `@extra` tells it apart from a
         // genuine `updateNewChat`. Captured before `apply` takes the
@@ -522,7 +501,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let paid_prices_change = Self::changes_paid_prices(&owned.envelope.payload);
         let premium_change = Self::changes_viewer_premium(&owned.envelope.payload);
         let send_outcome = Self::send_outcome(&owned.envelope.payload);
+        let answer_extra = owned.envelope.extra;
         self.session.apply(owned);
+        self.session.stickers.manager.step_answered(answer_extra);
         self.run_deferred_caption(send_outcome);
         // The answers captured above are stashed before any step that can
         // fail: a send error later in this ingest returns early with `?`,
@@ -540,10 +521,18 @@ impl<S: JsonSender> ConnectDriver<S> {
             *existing = rich;
         }
         if let Some((chat_id, message_id)) = full_rich_key {
-            self.session
-                .messages
-                .full_rich_loads
-                .remove(&ChatMessage::new(chat_id, message_id));
+            // Only the ask that waits for this answer ends the load.
+            let key = ChatMessage::new(chat_id, message_id);
+            let waits = answer_extra.is_some_and(|extra| {
+                self.session
+                    .messages
+                    .full_rich_loads
+                    .get(&key)
+                    .is_some_and(|load| load.waits_for(extra))
+            });
+            if waits {
+                self.session.messages.full_rich_loads.remove(&key);
+            }
         }
         // M1: stash the `getMessageLink` answer for the UI clipboard drain.
         if let Some((link, is_public)) = message_link_answer {
@@ -553,12 +542,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Slice msg-richtext-ai-tools: stash AI answers for the composer
         // drain. A late answer for a chat the user has since left is
         // dropped by the UI (chat-id check), never applied blindly.
-        if let Some((window, chat_id, text)) = ai_text_answer {
-            self.session.messages.ai_composer_text = Some((window, chat_id, text));
-        }
-        if let Some((window, chat_id, rich, note)) = ai_rich_answer {
-            self.session.messages.ai_composer_blocks = Some((window, chat_id, rich, note));
-        }
+        self.session
+            .messages
+            .ai_answers
+            .extend(ai_text_answer.into_iter().chain(ai_rich_answer));
         // A5: stash the `checkChatUsername` verdict for the
         // edit-profile dialog.
         if let Some((request, result)) = username_check_answer {
@@ -576,18 +563,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if let Some(fallback) = instant_view_fallback {
             self.session.messages.instant_view_fallbacks.push(fallback);
-        }
-        // MED4b: stash the `getLinkPreview` answer for the composer
-        // chip; a 404 becomes "no link info" (`Some(None)`); answers for
-        // superseded URLs are dropped.
-        if let Some(answer) = link_preview_answer {
-            self.session
-                .messages
-                .composer_previews
-                .answered(&answer.url, answer.fetch);
-        }
-        if let Some((url, miss)) = link_preview_failed {
-            self.session.messages.composer_previews.answered(&url, miss);
         }
         if paid_prices_change {
             self.sync_paid_guard();
@@ -617,35 +592,34 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             self.save_media_prefs();
         }
-        // Slice S4: persist per-network settings seeded from
-        // `getAutoDownloadSettingsPresets` (the reducer cannot touch the
-        // filesystem, so it marks them dirty instead).
-        if self.session.settings.data_storage_dirty {
-            self.session.settings.data_storage_dirty = false;
-            let _ = self.save_data_storage_prefs();
-        }
+        self.persist_data_storage_if_dirty();
         if cleared_download_cache {
             let _ = self.maybe_fetch_storage_statistics();
         }
-        // Batch 6: a finished reset / cancel / login-email step left the
-        // cached password state out of date.
-        if std::mem::take(&mut self.session.auth_state.twofa_flow.refetch) {
-            let _ = self.refresh_password_state();
+        // Batch 6: a reset / cancel / login-email step left the cached
+        // password state out of date; a refused send keeps it so.
+        if self.session.auth_state.password_state.is_outdated()
+            && let Ok(request) = self.refresh_password_state()
+        {
+            self.session.auth_state.password_state.refetching(request);
         }
+        // Phase 9.2: `updateStoryPostSucceeded` queued poster chats whose
+        // active stories should be refreshed (an own story posted from
+        // another client appears in the tray this way). Asked as the update
+        // lands; a refused send stays queued for the next ingest, never
+        // for every frame.
+        self.refresh_story_trays();
         if let Some(chat_id) = unpinned_all {
-            self.session
-                .messages
-                .pinned_messages
-                .entry(chat_id.0)
-                .or_default()
-                .succeed(Vec::new());
+            self.session.messages.pins_cleared(chat_id.0);
         }
         if let Some(chat_id) = pins_changed.filter(|chat| self.session.chat_is_shown(*chat)) {
             let _ = self.fetch_pinned_messages(chat_id);
         }
-        self.run_post_ingest_pumps(active_call_before, bridge_signaling, group_calls_before)?;
-        // Slice G2: chain `boostChat` once the slots answer arrives.
-        self.maybe_continue_boost()?;
+        // A refused send here is returned at the end: the one-shot work below
+        // (the Ready kickoff, the next chat page) has no second chance.
+        let pumped = self
+            .run_post_ingest_pumps(active_call_before, bridge_signaling, group_calls_before)
+            .and(self.maybe_continue_boost());
         // A channel's boost level moved: refresh the status shown for it.
         self.refresh_moved_boost_statuses();
         // Slice G2: refetch caches the state dropped after a confirmed
@@ -675,13 +649,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 {
                     let _ = self.load_chat_welcome_messages(chat_id);
                 }
-                RequestPurpose::BoostChat
-                    if !self
-                        .session
-                        .groups
-                        .chat_boost_status
-                        .contains_key(&chat_id.0) =>
-                {
+                RequestPurpose::BoostChat if self.session.groups.boost_status_wanted(chat_id.0) => {
                     let _ = self.fetch_chat_boost_status(chat_id);
                 }
                 _ => {}
@@ -705,11 +673,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Slice (communities backend core): refetch the full-info pack
         // the state dropped after a confirmed `setCommunityName`.
         if let Some(community_id) = community_mutation_refetch
-            && !self
+            && self
                 .session
                 .groups
                 .community_full_infos
-                .contains_key(&community_id)
+                .wants_fetch(community_id)
         {
             let _ = self.get_community_full_info(community_id);
         }
@@ -826,9 +794,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if gif_bot_changed {
             self.cancel_gif_search_requests();
-            self.session.stickers.gifs.search_results.clear();
-            self.session.stickers.gifs.search_next_offset.clear();
-            self.session.stickers.gifs.search_asked();
+            self.session.stickers.gifs.search_restarted();
         }
         if self.chats_path_active()
             && self.session.stickers.gifs.open
@@ -837,16 +803,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.maybe_search_gifs(false)?;
         }
         if gif_mutation_ok || gif_saved_changed {
-            drop(
-                self.session
-                    .requests
-                    .take_purpose(RequestPurpose::GetSavedAnimations),
-            );
+            self.drop_in_flight(RequestPurpose::GetSavedAnimations);
         }
         if installed_stickers_answer
             && let crate::state::SuggestFor::WaitingForSets(emoji) =
-                std::mem::take(&mut self.session.stickers.stickers.suggest_for)
+                &self.session.stickers.stickers.suggest_for
         {
+            let emoji = emoji.clone();
+            self.session.stickers.stickers.suggest_for = crate::state::SuggestFor::Nothing;
             self.update_sticker_suggestions(&emoji)?;
         }
         if thumbs_after
@@ -891,50 +855,31 @@ impl<S: JsonSender> ConnectDriver<S> {
         // and invites the people picked; the other side follows the link.
         let _ = self.maybe_continue_conference();
         if archive_catalog_changed {
-            drop(
-                self.session
-                    .requests
-                    .take_purpose(RequestPurpose::GetArchivedStickerSets),
-            );
+            self.drop_in_flight(RequestPurpose::GetArchivedStickerSets);
             if self.session.stickers.stickers.open
                 && self.session.stickers.stickers.tab == crate::state::StickerTab::Archived
             {
-                drop(
-                    self.session
-                        .requests
-                        .take_purpose(RequestPurpose::GetStickerSet),
-                );
-                self.session.stickers.stickers.set = crate::state::StickerSetStage::Idle;
+                self.drop_in_flight(RequestPurpose::GetStickerSet);
+                self.session.stickers.stickers.selection.stage =
+                    crate::state::StickerSetStage::Idle;
                 self.fetch_archived_stickers(false)?;
             }
         }
         if sticker_set_changed {
-            drop(
-                self.session
-                    .requests
-                    .take_purpose(RequestPurpose::GetInstalledStickerSets),
-            );
+            self.drop_in_flight(RequestPurpose::GetInstalledStickerSets);
             if self.session.stickers.stickers.open {
                 self.refresh_installed_sticker_sets()?;
             }
         }
         if sticker_mutation_ok {
             // An older fetch can answer after the mutation with stale contents.
-            drop(
-                self.session
-                    .requests
-                    .take_purpose(RequestPurpose::GetFavoriteStickers),
-            );
+            self.drop_in_flight(RequestPurpose::GetFavoriteStickers);
             if self.session.stickers.stickers.open {
                 self.sticker_request_favorites()?;
             }
         }
         if recent_cleared {
-            drop(
-                self.session
-                    .requests
-                    .take_purpose(RequestPurpose::GetRecentStickers),
-            );
+            self.drop_in_flight(RequestPurpose::GetRecentStickers);
         }
         if trending_answer {
             self.mark_trending_stickers_viewed()?;
@@ -947,7 +892,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             // Unigram ChatSearchViewModel: first hit → LoadMessageSliceAsync.
             self.jump_selected_chat_search_hit()?;
         }
-        Ok(())
+        pumped
     }
 
     fn maybe_send_parameters(&mut self) -> Result<(), ConnectSendError> {

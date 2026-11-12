@@ -1,6 +1,7 @@
 //! The payments domain: payments, Premium, Stars and gifts.
 mod apply;
 mod checkout;
+mod checkout_form;
 mod earn;
 mod error;
 mod gift_code;
@@ -17,6 +18,7 @@ mod subscriptions;
 mod suggested_posts;
 mod ton_wallet;
 
+pub use checkout_form::*;
 pub use gift_code::*;
 pub use giveaway::*;
 pub use purpose::*;

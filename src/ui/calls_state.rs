@@ -8,12 +8,21 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-/// The 1s call clock: at most one task, which exits when unwanted.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// The 1s call clock: at most one task, which exits when unwanted. The
+/// stage holds the task, so replacing it ends the clock.
+#[derive(Debug, Default)]
 pub(crate) enum CallTick {
     #[default]
     Idle,
-    Running,
+    Running {
+        _task: Task<()>,
+    },
+}
+
+impl CallTick {
+    pub(crate) fn is_running(&self) -> bool {
+        matches!(self, CallTick::Running { .. })
+    }
 }
 
 /// The call window: not there, being opened (at most one open at a time),
@@ -37,37 +46,51 @@ impl CallWindow {
 }
 
 /// The ended call the window lingers on.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Debug, Default)]
 pub(crate) enum CallEnd {
     #[default]
     Running,
-    /// The call ended at `at`; nobody waits for the linger yet.
-    Ended {
-        call_id: i32,
-        at: std::time::Instant,
-    },
-    /// The same, with the linger timer running, so the syncs from the poll
-    /// and every window's frame start one, not one each.
-    Lingering {
-        call_id: i32,
-        at: std::time::Instant,
-    },
+    /// The call ended; the window lingers on "call ended" until the timer
+    /// fires. The stage holds the timer, so a new call or a switch of
+    /// account drops it.
+    Lingering { call_id: i32, _timer: Task<()> },
+    /// An outgoing call met a busy line: the window stays until Cancel or
+    /// Redial dismisses the summary.
+    Busy { call_id: i32 },
+    /// The linger is over.
+    Over { call_id: i32 },
 }
 
 impl CallEnd {
-    pub(crate) fn call_id(self) -> Option<i32> {
+    pub(crate) fn call_id(&self) -> Option<i32> {
         match self {
             CallEnd::Running => None,
-            CallEnd::Ended { call_id, .. } | CallEnd::Lingering { call_id, .. } => Some(call_id),
+            CallEnd::Lingering { call_id, .. }
+            | CallEnd::Busy { call_id }
+            | CallEnd::Over { call_id } => Some(*call_id),
         }
     }
 
-    pub(crate) fn at(self) -> Option<std::time::Instant> {
-        match self {
-            CallEnd::Running => None,
-            CallEnd::Ended { at, .. } | CallEnd::Lingering { at, .. } => Some(at),
-        }
+    /// The window of the ended call may still show.
+    pub(crate) fn lingers(&self) -> bool {
+        matches!(self, CallEnd::Lingering { .. } | CallEnd::Busy { .. })
     }
+}
+
+/// Whether the call window may open for the call it shows. One value for
+/// the account's call: the next call's window starts from `Open`
+/// (`sync_call_window` resets it when no call shows).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum WindowWanted {
+    #[default]
+    Open,
+    /// The user closed the window of this call: it stays shut (a second
+    /// call ringing, or the call bar, reopens it).
+    ClosedByUser(i32),
+    /// The window of this call could not be opened: not tried again on
+    /// every sync, not even while a second call rings (the call bar or a
+    /// notification's Open tries once more).
+    OpenFailed(i32),
 }
 
 pub(crate) struct CallUi {
@@ -90,10 +113,8 @@ pub(crate) struct CallUi {
     pub(super) panel_view: Rc<Cell<Option<EntityId>>>,
     /// The call window (tdesktop's call panel), and its bookkeeping: a
     /// call whose window you closed stays closed until the call bar
-    /// reopens it or a second call rings; each call that rings in raises
-    /// it once (`raised_for`: the last one that did).
+    /// reopens it or a second call rings.
     pub(super) window: CallWindow,
-    pub(super) raised_for: Option<i32>,
     pub(super) sounds: super::call_sounds::CallSounds,
 }
 
@@ -106,12 +127,11 @@ pub(crate) struct CallUi {
 /// closes a client in a call). A field of `OnScreen`.
 #[derive(Default)]
 pub(crate) struct CallScreen {
-    pub(super) window_closed_by_user: Option<i32>,
-    /// The call whose window could not be opened: not tried again on every
-    /// sync, not even while a second call rings (the call bar or a
-    /// notification's Open tries once more).
-    pub(super) window_open_failed: Option<i32>,
-    /// When the window's call ended, and whether its linger timer runs.
+    pub(super) wanted: WindowWanted,
+    /// Each call that rings in raises the open window once: the last one
+    /// that did. Per account, as call ids are.
+    pub(super) raised_for: Option<i32>,
+    /// The window's ended call and its linger.
     pub(super) end: CallEnd,
     pub(super) sound_marks: super::call_sounds::SoundMarks,
 }
@@ -144,7 +164,6 @@ pub(crate) struct CallBoxes {
     /// Settings > Calls: the microphone test and its level meter
     /// (`ui::call_audio_ui`).
     pub(super) mic_test: super::call_audio_ui::MicTestRun,
-    pub(super) mic_test_starts: u64,
     pub(super) open_mic_test: super::call_audio_ui::OpenMicTest,
     /// "Add People" over the call window (`ui::call_add_people`), `Some`
     /// while the box is open.
@@ -166,7 +185,6 @@ impl CallBoxes {
             history_scroll: ScrollHandle::new(),
             history_asked: Default::default(),
             mic_test: Default::default(),
-            mic_test_starts: 0,
             open_mic_test: super::call_audio_ui::open_default_mic_test(),
             add_people: None,
             conference_link: None,
@@ -192,10 +210,12 @@ impl super::on_screen::Farewell for CallBoxes {
         {
             app.cancel_call_link_leave(cx);
         }
+        // The Add People box and its search go with the account's call.
+        app.end_call_add_people();
         // A confirmed link waiting for its call to end is abandoned too: it
         // must not open a join screen after switching back.
         if let Some(live) = app.live.as_mut() {
-            live.driver.session.calls.call_link_stage = Default::default();
+            live.driver.session.calls.call_link_stage.abandon();
         }
     }
 }
@@ -220,7 +240,6 @@ impl CallUi {
             tick: CallTick::Idle,
             panel_view: Rc::default(),
             window: CallWindow::Closed,
-            raised_for: None,
             sounds: super::call_sounds::CallSounds::new(audio_output),
         }
     }

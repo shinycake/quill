@@ -80,14 +80,17 @@ fn a_start_cancelled_while_the_microphone_opens_leaves_nothing(cx: &mut TestAppC
     app.update(&mut vcx, |app, cx| app.cancel_recording_here(cx));
     vcx.run_until_parked();
     app.read_with(&vcx, |app, _| {
-        assert_eq!(opens.load(Ordering::SeqCst), 1);
-        assert!(!app.recording_active(), "what arrived was dropped");
+        // The stage holds the opening: cancelling drops it, so the device
+        // that had not started is never opened (and one that had is
+        // dropped with its file, `VoiceCapture::drop`).
+        assert_eq!(opens.load(Ordering::SeqCst), 0);
+        assert!(!app.recording_active(), "nothing was held");
         assert!(!app.recording_busy(), "the next recording may start");
     });
 }
 
 #[gpui_kit::test]
-fn record_works_again_while_a_cancelled_microphone_has_not_answered(cx: &mut TestAppContext) {
+fn record_works_again_right_after_a_cancelled_start(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_chat(cx);
     let opens = fake_microphone(&app, &mut vcx);
     start(&app, CaptureFor::Message, &mut vcx);
@@ -98,11 +101,8 @@ fn record_works_again_while_a_cancelled_microphone_has_not_answered(cx: &mut Tes
     start(&app, CaptureFor::Message, &mut vcx);
     vcx.run_until_parked();
     app.read_with(&vcx, |app, _| {
-        assert_eq!(
-            opens.load(Ordering::SeqCst),
-            2,
-            "the second press opened too"
-        );
+        // The cancelled start never ran, so only the second press opened.
+        assert_eq!(opens.load(Ordering::SeqCst), 1, "the second press opened");
         assert!(app.recording_active(), "the second press records");
     });
 }
@@ -246,17 +246,21 @@ fn play_once_and_lock_end_with_the_recording_whoever_takes_it(cx: &mut TestAppCo
 
 #[gpui_kit::test]
 fn a_press_that_needs_no_prompt_leaves_an_earlier_prompt_alone(cx: &mut TestAppContext) {
-    use crate::ui::recording_state::PermissionAsk;
     let (app, mut vcx) = open_chat(cx);
-    let asking = PermissionAsk::Asking { id: 7, call: None };
     app.update(&mut vcx, |app, cx| {
-        app.recording.permission = asking;
-        // Linux reports every device granted: the start runs at once.
-        app.with_capture_access(false, |_, _| {}, cx);
-        assert_eq!(
-            app.recording.permission, asking,
+        let ask = app.recording.next_start_id();
+        app.recording.begin_asking(ask, gpui_kit::Task::ready(()));
+        // Linux reports every device granted, but a prompt is up for the
+        // earlier press: this one starts nothing behind it.
+        let ran = std::rc::Rc::new(std::cell::Cell::new(false));
+        let flag = ran.clone();
+        app.with_capture_access(false, move |_, _| flag.set(true), cx);
+        assert!(!ran.get(), "nothing starts behind the prompt");
+        assert!(
+            app.recording.finish_asking(ask),
             "the other press's ask is still the one waiting"
         );
+        assert!(!app.recording.starting(), "its answer ends the stage");
     });
 }
 

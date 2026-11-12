@@ -129,7 +129,7 @@ impl TwoStepUi {
     }
 
     /// Open the box on `view`, with no confirmation or notice.
-    pub(super) fn open_at(&mut self, view: TwofaView) {
+    fn open_at(&mut self, view: TwofaView) {
         self.stage = TwoFaBox::Open {
             view,
             confirm: None,
@@ -139,13 +139,13 @@ impl TwoStepUi {
 
     /// Switch an open box to `view`, dropping its confirmation and notice.
     /// A closed box stays closed.
-    pub(super) fn goto(&mut self, view: TwofaView) {
+    fn goto(&mut self, view: TwofaView) {
         if self.is_open() {
             self.open_at(view);
         }
     }
 
-    pub(super) fn close(&mut self) {
+    fn close(&mut self) {
         self.stage = TwoFaBox::Closed;
     }
 
@@ -160,5 +160,61 @@ impl TwoStepUi {
         if let TwoFaBox::Open { confirm, .. } = &mut self.stage {
             *confirm = ask;
         }
+    }
+}
+
+/// The box's stage (`TwoStepUi`, per account on screen) and the account's
+/// recovery flow (`TwofaFlow` in the session: the emailed code a step awaits
+/// and the finished step's notice) move together, and only from here: every
+/// open, view change, close and finished step is one of these, so neither
+/// outlives the other's view.
+impl QuillApp {
+    fn twofa_flow_mut(&mut self) -> Option<&mut quill::state::TwofaFlow> {
+        match self.live.as_mut() {
+            Some(live) => Some(&mut live.driver.session.auth_state.twofa_flow),
+            None => self
+                .demo_session
+                .as_mut()
+                .map(|session| &mut session.auth_state.twofa_flow),
+        }
+    }
+
+    /// Forget the one-time notice and any half-finished recovery step.
+    /// Every path that drops the box runs this: `twofa_close`, and
+    /// `replace_screen` for the ones that drop the whole `TwoStepUi` (account
+    /// switch, logout, a connection replacing the client).
+    pub(in crate::ui) fn twofa_forget_flow(&mut self) {
+        if let Some(flow) = self.twofa_flow_mut() {
+            flow.clear();
+        }
+    }
+
+    /// Open the box on the status screen with a clean flow.
+    pub(super) fn twofa_open(&mut self) {
+        self.twofa.open_at(TwofaView::Status);
+        self.twofa_forget_flow();
+    }
+
+    /// Close the box; the flow goes with it.
+    pub(super) fn twofa_close(&mut self) {
+        self.twofa.close();
+        self.twofa_forget_flow();
+    }
+
+    /// Switch the 2FA view; a fresh form starts with no local notice line,
+    /// and the status screen with no half-finished step.
+    pub(super) fn goto_twofa_view(&mut self, view: TwofaView) {
+        self.twofa.goto(view);
+        if view == TwofaView::Status {
+            self.twofa_forget_flow();
+        } else if let Some(flow) = self.twofa_flow_mut() {
+            flow.clear_notice();
+        }
+    }
+
+    /// A recovery / reset / login-email step finished: the box moves to the
+    /// status screen, which reports the step's notice once.
+    pub(super) fn twofa_step_done(&mut self) {
+        self.twofa.goto(TwofaView::Status);
     }
 }

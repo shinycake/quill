@@ -55,9 +55,11 @@ impl QuillApp {
                 .retry_story_statistics(*chat_id, story_id, is_dark)
                 .is_err()
             {
-                self.set_note(StatusNote::error(tr(
-                    keys::Q_MEDIA_COULD_NOT_LOAD_STORY_STATISTICS,
-                )));
+                live.driver.session.story_statistics_not_sent(
+                    chat_id.0,
+                    story_id,
+                    tr(keys::Q_MEDIA_COULD_NOT_LOAD_STORY_STATISTICS).to_string(),
+                );
             }
         } else if self.demo_session.is_some() {
             self.set_note(StatusNote::silent(tr(
@@ -89,7 +91,9 @@ impl QuillApp {
             || (state.forwards_error().is_some() && !scrolled)
             || !load_due(
                 scrolled_near_end(&self.stories.stats_scroll),
-                !state.forwards_next_offset.is_empty(),
+                // A failed first page has no next offset: a scroll asks for
+                // the first page again.
+                !state.forwards_next_offset.is_empty() || state.forwards_error().is_some(),
                 state.forwards_loading(),
             )
             || !self
@@ -134,12 +138,19 @@ impl QuillApp {
         let Some(item) = self.stories.viewer.current().cloned() else {
             return;
         };
-        let offset = self
+        let Some((offset, failed)) = self
             .session()
             .and_then(|s| s.stories.insights.as_ref())
-            .map(|state| state.forwards_next_offset.clone())
-            .unwrap_or_default();
-        if offset.is_empty() {
+            .map(|state| {
+                (
+                    state.forwards_next_offset.clone(),
+                    state.forwards_error().is_some(),
+                )
+            })
+        else {
+            return;
+        };
+        if offset.is_empty() && !failed {
             return;
         }
         if let Some(live) = self.live.as_mut()
@@ -257,7 +268,7 @@ impl QuillApp {
                 );
         }
         match &state.statistics {
-            StoryStatsFetch::Loading => {
+            StoryStatsFetch::Loading(_) => {
                 panel = panel.child(
                     div()
                         .text_sm()

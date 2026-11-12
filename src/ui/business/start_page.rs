@@ -63,11 +63,28 @@ impl QuillApp {
         )
     }
 
-    /// The sticker pick is over (a sticker, Back, another screen, the box
-    /// closing): the account's sticker panel it opened closes too, or the
-    /// main window's first Esc would close a panel nobody sees, and its
+    /// The one way the open screen changes: the sticker panel the start
+    /// page's pick opened closes when that pick is left.
+    pub(super) fn business_show(&mut self, view: View) {
+        let Some(d) = self.business_mut() else {
+            return;
+        };
+        let from = d.view();
+        d.screen.go(view);
+        self.sticker_pick_left(from, Some(view));
+    }
+
+    /// The box was on `from` and goes to `to` (`None`: it closes). Leaving
+    /// the sticker pick closes the account's sticker panel it opened, or
+    /// the main window's first Esc would close a panel nobody sees, and its
     /// downloads would go on.
-    pub(super) fn close_start_page_stickers(&mut self) {
+    pub(super) fn sticker_pick_left(&mut self, from: View, to: Option<View>) {
+        if from == View::StickerPick && to != Some(View::StickerPick) {
+            self.close_start_page_stickers();
+        }
+    }
+
+    fn close_start_page_stickers(&mut self) {
         if let Some(live) = self.live.as_mut() {
             live.driver.close_sticker_panel();
         } else if let Some(session) = self.demo_session.as_mut() {
@@ -104,10 +121,10 @@ impl QuillApp {
         let found = self.session().and_then(|s| {
             let panel = &s.stickers.stickers;
             [
-                &panel.stickers,
+                &panel.selection.stickers,
                 &panel.recent,
                 &panel.favorites,
-                &panel.found_stickers,
+                &panel.search.stickers,
                 &panel.suggestions,
             ]
             .into_iter()
@@ -115,13 +132,12 @@ impl QuillApp {
             .find(|sticker| sticker.file_id == file_id)
             .cloned()
         });
-        if let Some(d) = self.business_mut() {
-            if let (Some(sticker), Some(page)) = (found, d.screen.start_page_mut()) {
-                page.sticker = Some(sticker);
-            }
-            d.screen.go(View::StartPage);
+        if let Some(d) = self.business_mut()
+            && let (Some(sticker), Some(page)) = (found, d.screen.start_page_mut())
+        {
+            page.sticker = Some(sticker);
         }
-        self.close_start_page_stickers();
+        self.business_show(View::StartPage);
         cx.notify();
         true
     }

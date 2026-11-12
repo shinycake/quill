@@ -75,7 +75,7 @@ impl QuillApp {
                 .any(|attachment| attachment.kind != AttachmentKind::Document),
             remember: self
                 .session()
-                .is_some_and(|s| s.settings.media_prefs.remember_media_grouping),
+                .is_some_and(|s| s.settings.media_prefs.media_grouping.is_remembered()),
             quality: self.send_card_quality(),
             caption_above: (!self.open_chat_is_secret()
                 && tray.iter().any(|attachment| {

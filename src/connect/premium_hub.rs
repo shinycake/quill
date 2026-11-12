@@ -36,7 +36,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if !self.session.payments.hub.tx.first_page_due() {
+        if !self.session.payments.hub.stars.page.first_page_due() {
             return Ok(None);
         }
         self.fetch_star_transactions_page(false).map(Some)
@@ -47,8 +47,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.payments.hub.tx_offset.is_empty()
-            || self.session.payments.hub.tx.is_loading()
+        if self.session.payments.hub.stars.offset.is_empty()
+            || self.session.payments.hub.stars.page.is_loading()
         {
             return Ok(None);
         }
@@ -63,15 +63,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.payments.hub.filter == filter && self.session.payments.hub.tx.is_loaded() {
+        if self.session.payments.hub.stars.filter == filter
+            && self.session.payments.hub.stars.page.is_loaded()
+        {
             return Ok(None);
         }
-        let hub = &mut self.session.payments.hub;
-        hub.filter = filter;
-        hub.transactions.clear();
-        hub.tx_offset.clear();
-        hub.tx_selected = None;
-        hub.tx = PageStage::Idle;
+        self.session.payments.hub.stars.switch_filter(filter);
         self.fetch_star_transactions_page(false).map(Some)
     }
 
@@ -84,17 +81,17 @@ impl<S: JsonSender> ConnectDriver<S> {
             .my_user_id
             .ok_or(ConnectSendError::InvalidRequest)?;
         let offset = if append {
-            self.session.payments.hub.tx_offset.to_string()
+            self.session.payments.hub.stars.offset.to_string()
         } else {
             String::new()
         };
-        let filter = self.session.payments.hub.filter;
+        let filter = self.session.payments.hub.stars.filter;
         let extra = self.session.request(
             RequestPurpose::Payments(PaymentsPurpose::GetStarTransactions { append }),
             None,
         );
         let kind = page_kind(append);
-        self.session.payments.hub.tx = PageStage::Loading {
+        self.session.payments.hub.stars.page = PageStage::Loading {
             request: extra,
             kind,
         };
@@ -103,7 +100,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             // A first page that never left ends in the error line, not in an
             // empty list with nothing drawn.
             let hub = &mut self.session.payments.hub;
-            hub.tx = PageStage::Failed {
+            hub.stars.page = PageStage::Failed {
                 error: crate::lang::tr(crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_STARS_HISTORY)
                     .into(),
                 kind,
@@ -122,19 +119,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let hub = &mut self.session.payments.hub;
-        hub.gifts_open = true;
-        hub.gifts_owner = Some(owner);
-        hub.gifts.clear();
-        hub.gifts_total = 0;
-        hub.gifts_offset.clear();
-        hub.gifts_page = PageStage::Idle;
-        hub.gift_notice = None;
-        hub.gift_view.select(None);
-        hub.gift_view.confirm_convert(None);
-        // The `Mutating` view is not reset: a toggle or sale still out keeps its
-        // lock until its own answer (another request would pay twice).
-        hub.gifts_op.refetched();
+        // The list starts over for the owner; a toggle or sale still out
+        // keeps its lock until its own answer (another request would pay
+        // twice).
+        let received = &mut self.session.payments.hub.received;
+        *received = crate::premium_hub::ReceivedGifts::opened_for(owner, received.op);
         self.begin_gift_manage(owner);
         self.fetch_received_gifts_page(false)
     }
@@ -144,8 +133,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.payments.hub.gifts_offset.is_empty()
-            || self.session.payments.hub.gifts_page.is_loading()
+        if self.session.payments.hub.received.offset.is_empty()
+            || self.session.payments.hub.received.page.is_loading()
         {
             return Ok(None);
         }
@@ -160,10 +149,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .payments
             .hub
-            .gifts_owner
+            .received
+            .owner
             .ok_or(ConnectSendError::InvalidRequest)?;
         let offset = if append {
-            self.session.payments.hub.gifts_offset.to_string()
+            self.session.payments.hub.received.offset.to_string()
         } else {
             String::new()
         };
@@ -172,7 +162,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             None,
         );
         let kind = page_kind(append);
-        self.session.payments.hub.gifts_page = PageStage::Loading {
+        self.session.payments.hub.received.page = PageStage::Loading {
             request: extra,
             kind,
         };
@@ -180,7 +170,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let json = get_received_gifts_in(extra, owner, collection, &offset, GIFT_PAGE);
         if let Err(err) = self.send_json_request(extra, &json) {
             let hub = &mut self.session.payments.hub;
-            hub.gifts_page = PageStage::Failed {
+            hub.received.page = PageStage::Failed {
                 error: crate::lang::tr(crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_GIFTS).into(),
                 kind,
             };
@@ -197,13 +187,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         let hub = &self.session.payments.hub;
         // A page already out settles first (its answer is not the refetch);
         // the list stays stale until a first page answers or fails.
-        if !hub.gifts_op.is_stale() || hub.gifts_owner.is_none() || hub.gifts_page.is_loading() {
+        if !hub.received.op.is_stale()
+            || hub.received.owner.is_none()
+            || hub.received.page.is_loading()
+        {
             return Ok(None);
         }
         let sent = self.fetch_received_gifts_page(false);
         if sent.is_err() {
             // Not asked again every frame: the error line says so.
-            self.session.payments.hub.gifts_op.refetched();
+            self.session.payments.hub.received.op.refetched();
         }
         sent.map(Some)
     }
@@ -215,7 +208,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         saved: bool,
     ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active()
-            || self.session.payments.hub.gifts_op.is_mutating()
+            || self.session.payments.hub.received.op.is_mutating()
             || !self
                 .session
                 .payments
@@ -225,7 +218,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .session
                 .payments
                 .hub
-                .gifts
+                .received
+                .rows
                 .iter()
                 .any(|gift| gift.id == received_gift_id)
         {
@@ -235,11 +229,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Payments(PaymentsPurpose::ToggleGiftSaved { saved }),
             None,
         );
-        self.session.payments.hub.gifts_op.begin(extra);
-        self.session.payments.hub.gift_notice = None;
+        self.session.payments.hub.received.op.begin(extra);
+        self.session.payments.hub.received.notice = None;
         let json = toggle_gift_is_saved(extra, received_gift_id, saved);
         if let Err(err) = self.send_json_request(extra, &json) {
-            self.session.payments.hub.gifts_op.failed(Some(extra));
+            self.session.payments.hub.received.op.failed(Some(extra));
             return Err(err);
         }
         Ok(extra)
@@ -255,11 +249,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .payments
             .hub
-            .gifts
+            .received
+            .rows
             .iter()
             .any(|gift| gift.id == received_gift_id && gift.can_convert());
         if !self.chats_path_active()
-            || self.session.payments.hub.gifts_op.is_mutating()
+            || self.session.payments.hub.received.op.is_mutating()
             || !self
                 .session
                 .payments
@@ -272,11 +267,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request_for_subject(RequestPurpose::SellGift, received_gift_id);
-        self.session.payments.hub.gifts_op.begin(extra);
-        self.session.payments.hub.gift_notice = None;
+        self.session.payments.hub.received.op.begin(extra);
+        self.session.payments.hub.received.notice = None;
         let json = sell_gift(extra, received_gift_id);
         if let Err(err) = self.send_json_request(extra, &json) {
-            self.session.payments.hub.gifts_op.failed(Some(extra));
+            self.session.payments.hub.received.op.failed(Some(extra));
             return Err(err);
         }
         Ok(extra)
@@ -290,10 +285,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.session.payments.hub.premium_stickers.can_ask() {
             return Ok(None);
         }
-        self.session.payments.hub.premium_stickers.begin();
         let extra = self
             .session
             .request(RequestPurpose::GetPremiumStickerExamples, None);
+        self.session.payments.hub.premium_stickers.begin();
+        self.session.payments.hub.premium_stickers.sent(extra);
         if let Err(err) = self.send_json_request(extra, &get_premium_sticker_examples(extra)) {
             // The next look at the preview asks again.
             self.session.payments.hub.premium_stickers.cancel();
@@ -337,21 +333,34 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if !self.session.payments.hub.premium.can_ask() {
-            return Ok(None);
+        let hub = &self.session.payments.hub;
+        let features = hub.premium.can_ask();
+        let state = hub.premium_state.can_ask() || hub.premium_state.is_outdated();
+        let mut asked = None;
+        if features {
+            let extra = self
+                .session
+                .request(RequestPurpose::GetPremiumFeatures, None);
+            self.session.payments.hub.premium.begin();
+            if let Err(err) = self.send_json_request(extra, &get_premium_features(extra)) {
+                self.session.payments.hub.premium.cancel();
+                return Err(err);
+            }
+            self.session.payments.hub.premium.sent(extra);
+            asked = Some(extra);
         }
-        let extra = self
-            .session
-            .request(RequestPurpose::GetPremiumFeatures, None);
-        self.session.payments.hub.premium.begin();
-        if let Err(err) = self.send_json_request(extra, &get_premium_features(extra)) {
-            self.session.payments.hub.premium.cancel();
-            return Err(err);
+        if state {
+            let state_extra = self.session.request(RequestPurpose::GetPremiumState, None);
+            let hub = &mut self.session.payments.hub;
+            hub.premium_state.begin();
+            // The state text is optional decoration: a send that fails
+            // leaves the plans out, and the next opening asks again.
+            match self.send_json_request(state_extra, &get_premium_state(state_extra)) {
+                Ok(_) => self.session.payments.hub.premium_state.sent(state_extra),
+                Err(_) => self.session.payments.hub.premium_state.fail("not sent"),
+            }
         }
-        let state_extra = self.session.request(RequestPurpose::GetPremiumState, None);
-        // The state text is optional decoration; a send failure is ignored.
-        let _ = self.send_json_request(state_extra, &get_premium_state(state_extra));
-        Ok(Some(extra))
+        Ok(asked)
     }
 
     /// Fetch the Business feature list (`getBusinessFeatures`) once.
@@ -371,6 +380,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.payments.hub.business_features.cancel();
             return Err(err);
         }
+        self.session.payments.hub.business_features.sent(extra);
         Ok(Some(extra))
     }
 }

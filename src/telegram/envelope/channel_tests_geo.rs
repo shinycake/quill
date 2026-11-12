@@ -127,7 +127,7 @@ fn message_dice_parses_emoji_and_value() {
                 panic!("{:?}", message.content);
             };
             assert_eq!(dice.emoji, "🎲");
-            assert_eq!(dice.value, 4);
+            assert_eq!(dice.value(), Some(4));
             assert_eq!(dice.face(), "🎲");
             assert_eq!(dice.label(), "🎲 4");
             assert_eq!(message.content.preview(), "🎲 4");
@@ -160,7 +160,7 @@ fn message_dice_keeps_the_regular_final_state_sticker() {
     };
     assert_eq!(sticker.file_id.0, 71);
     assert_eq!(sticker.format, StickerFormat::Tgs);
-    let Some(DiceStickers::Regular(roll)) = &dice.initial else {
+    let Some(DiceStickers::Regular(roll)) = dice.stickers().next() else {
         panic!("{dice:?}");
     };
     assert_eq!(roll.file_id.0, 70);
@@ -202,7 +202,7 @@ fn message_dice_slot_machine_has_no_single_final_sticker() {
     let MessageContent::Dice(dice) = &message.content else {
         panic!("{:?}", message.content);
     };
-    assert_eq!(dice.value, 64);
+    assert_eq!(dice.value(), Some(64));
     assert!(dice.animation().is_none());
 }
 
@@ -294,9 +294,15 @@ fn slot_machine_values_decode_to_reel_symbols() {
 fn dice_result_lines_state_the_roll() {
     let dice = |emoji: &str, value| DiceContent {
         emoji: emoji.into(),
-        value,
-        initial: None,
-        landing: None,
+        state: if value > 0 {
+            DiceState::Landed {
+                value,
+                initial: None,
+                landing: None,
+            }
+        } else {
+            DiceState::Rolling { initial: None }
+        },
     };
     assert_eq!(dice("🎲", 4).result_line(), "Rolled 4");
     assert_eq!(dice("🎯", 6).result_line(), "Rolled 6");
@@ -431,4 +437,19 @@ fn add_contact_shape_uses_imported_contact() {
             "importedContact missing {field}: {imported}"
         );
     }
+}
+
+#[test]
+fn a_dice_with_a_value_but_no_stickers_still_reads_as_rolled() {
+    let json = r#"{"@type":"updateNewMessage","message":{"id":130,"chat_id":17,"is_outgoing":false,"content":{"@type":"messageDice","emoji":"🎲","value":3,"initial_state":null,"final_state":null}}}"#;
+    let env = parse_envelope(json).unwrap();
+    let EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) = env.payload else {
+        panic!("not a new message");
+    };
+    let MessageContent::Dice(dice) = &message.content else {
+        panic!("{:?}", message.content);
+    };
+    assert_eq!(dice.value(), Some(3));
+    assert!(dice.animation().is_none());
+    assert_eq!(dice.stickers().count(), 0);
 }

@@ -24,13 +24,13 @@ fn pinned_message_preview_names_the_actor_and_excerpt() {
     ]);
     let chat = &session.chats[&61];
     assert_eq!(
-        chat.last_preview,
+        chat.last_preview(),
         "Dana Cole pinned \"Lunch at noon, b\u{2026}\""
     );
-    assert!(chat.last_preview_style.service);
+    assert!(chat.last_preview_style().service);
     // No "Dana:" prefix on top of the actor already named in the text.
     assert_eq!(session.chat_preview_sender(chat), None);
-    assert_eq!(chat.last_preview_sender, "");
+    assert_eq!(chat.last_preview_sender(), "");
 }
 
 #[test]
@@ -41,7 +41,7 @@ fn member_joined_preview_uses_the_user_name() {
         r#"{"@type":"updateChatLastMessage","chat_id":61,"last_message":{"id":12,"chat_id":61,"is_outgoing":false,"sender_id":{"@type":"messageSenderUser","user_id":1},"date":6,"content":{"@type":"messageChatAddMembers","member_user_ids":[1]}},"positions":[]}"#,
     ]);
     assert_eq!(
-        session.chats[&61].last_preview,
+        session.chats[&61].last_preview(),
         "Dana Cole joined the group"
     );
 }

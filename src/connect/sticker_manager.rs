@@ -27,7 +27,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .chain(&stickers.stickers.trending)
             .chain(&stickers.stickers.archived)
             .chain(stickers.masks.installed.items())
-            .chain(stickers.masks.archived.items())
+            .chain(stickers.masks.archived_sets())
         {
             if stickers.manager.covers_requested.contains(&set.id) || asked.contains(&set.id) {
                 continue;
@@ -109,19 +109,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.advance_manager_commit()
     }
 
-    fn manager_change_pending(&self, masks: bool) -> bool {
-        if masks {
-            return self.session.mask_change_pending();
-        }
-        self.session.requests.pending.values().any(|pending| {
-            matches!(
-                pending.purpose,
-                RequestPurpose::Stickers(StickersPurpose::ManageStickerSet { .. })
-                    | RequestPurpose::ReorderInstalledStickerSets
-            )
-        })
-    }
-
     /// Send the next step of the oldest saved change once the one before it
     /// has been answered, whether it worked or not.
     pub(crate) fn advance_manager_commit(&mut self) -> Result<(), ConnectSendError> {
@@ -130,7 +117,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 return Ok(());
             };
             let masks = front.masks;
-            if self.manager_change_pending(masks) {
+            if self.session.stickers.manager.step_out() {
                 return Ok(());
             }
             let step = self
@@ -159,7 +146,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return match sent {
                 Ok(Some(id)) => {
                     if let Some(front) = self.session.stickers.manager.commits.front_mut() {
-                        front.sent = Some(id);
+                        front.stage = crate::state::CommitStage::Sent(id);
                     }
                     Ok(())
                 }
@@ -180,9 +167,8 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Called after every answer: thumbnails and the saved changes.
     pub(crate) fn pump_sticker_manager(&mut self) {
-        if self.advance_manager_commit().is_err() {
-            self.session.stickers.manager.note_send_failure();
-        }
+        // A send that fails has noted its failure in `advance_manager_commit`.
+        let _ = self.advance_manager_commit();
         if self.session.stickers.manager.open {
             let _ = self.ensure_manager_covers();
         }

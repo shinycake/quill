@@ -42,19 +42,7 @@ pub(crate) struct InviteLinkBox {
 /// number of users.
 pub(crate) enum CustomBox {
     Date(TimePicker),
-    Limit {
-        input: Entity<InputState>,
-        focus: LimitFocus,
-    },
-}
-
-/// Whether the number field still has to take focus: the kit focuses a
-/// dialog as it opens, so the field asks once the dialog is built. It goes
-/// with the box.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum LimitFocus {
-    Requested,
-    Done,
+    Limit { input: Entity<InputState> },
 }
 
 impl QuillApp {
@@ -109,7 +97,7 @@ impl QuillApp {
                 .default_value(name)
         });
         let stars = form
-            .locked_stars
+            .locked_stars()
             .map(|stars| stars.to_string())
             .unwrap_or_default();
         let stars_input = cx.new(|cx| {

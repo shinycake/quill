@@ -35,26 +35,10 @@ impl Session {
             if call.state.is_terminal() {
                 self.end_active_call(call);
             } else {
-                if matches!(call.state, CallState::Ready) {
-                    match active.ready.as_mut() {
-                        Some(ready) => ready.params = call.ready.clone(),
-                        None => {
-                            active.ready = Some(CallReady {
-                                params: call.ready.clone(),
-                                since: Instant::now(),
-                            })
-                        }
-                    }
-                }
                 active.is_video = call.is_video;
-                // A hang-up in flight keeps showing: the update is where
-                // the call goes back to if the discardCall fails.
-                match self.calls.progress.hang_up_mut() {
-                    Some(hang_up) if hang_up.call_id == call.id => {
-                        hang_up.resume = call.state.clone();
-                    }
-                    _ => active.state = call.state.clone(),
-                }
+                // A hang-up in flight keeps showing ([`ActiveCall::phase`]);
+                // the update is where the call stands if it fails.
+                active.progress.update(call.state.clone(), Instant::now());
             }
             return;
         }
@@ -113,7 +97,6 @@ impl Session {
             call.is_outgoing,
             call.is_video,
             call.state.clone(),
-            call.ready.clone(),
         ));
         self.calls.summary = None;
         self.calls.error = None;
@@ -189,7 +172,6 @@ impl Session {
         if !self.note_call_migration(call, &summary) {
             self.calls.summary = Some(summary);
         }
-        self.calls.progress.call_ended(call.id);
         self.calls
             .busy_decline_queue
             .retain(|(id, _, _)| *id != call.id);
@@ -214,7 +196,6 @@ impl Session {
                 is_created: true,
                 is_received: false,
             },
-            None,
         ));
         self.calls.summary = None;
         self.calls.error = None;
@@ -479,6 +460,7 @@ impl Session {
     pub(crate) fn set_group_call_join_as_options(
         &mut self,
         group_call_id: i32,
+        request: Option<RequestId>,
         senders: Vec<MessageSender>,
     ) {
         let default = self.chats.values().find_map(|chat| {
@@ -489,19 +471,25 @@ impl Session {
         });
         if let Some(tracked) = self.calls.active_group_call.as_mut()
             && tracked.id == group_call_id
+            && request.is_some_and(|request| tracked.join_as_options.waits_for(request))
         {
             tracked.join_as = pick_join_as(&senders, tracked.join_as, default);
-            tracked.join_as_options.succeed(senders);
+            tracked.join_as_options.answered(request, senders);
         }
     }
 
     /// `getVideoChatAvailableParticipants` failed: the picker is optional,
     /// so the call keeps no list and the join goes ahead as yourself.
-    pub(crate) fn fail_group_call_join_as_options(&mut self, group_call_id: i32, error: &str) {
+    pub(crate) fn fail_group_call_join_as_options(
+        &mut self,
+        group_call_id: i32,
+        request: Option<RequestId>,
+        error: &str,
+    ) {
         if let Some(tracked) = self.calls.active_group_call.as_mut()
             && tracked.id == group_call_id
         {
-            tracked.join_as_options.fail(error);
+            tracked.join_as_options.failed(request, error, false);
         }
     }
 
@@ -533,7 +521,7 @@ impl Session {
     /// stops the call's native transport.
     pub fn leave_group_call_local(&mut self) {
         self.calls.active_group_call = None;
-        self.calls.call_link = None;
+        self.calls.call_link_stage.forget_hash(None);
         self.calls.invite_results = None;
     }
 
@@ -567,28 +555,38 @@ impl Session {
             if let Some(request) = request {
                 tracked.rejoin.attempt_joined(request);
             }
-            tracked.transport.store_answer(payload);
+            tracked.transport.store_answer(request, payload);
         }
     }
 
     /// Phase C2g: store the `startGroupCallScreenSharing` `Text`
     /// response on the tracked call; the driver pump consumes it to
     /// finish the presentation handshake.
-    pub fn set_group_call_screen_share_answer(&mut self, group_call_id: i32, payload: String) {
+    pub fn set_group_call_screen_share_answer(
+        &mut self,
+        group_call_id: i32,
+        request: Option<RequestId>,
+        payload: String,
+    ) {
         if let Some(tracked) = self.calls.active_group_call.as_mut()
             && tracked.id == group_call_id
         {
-            tracked.screen_share.store_answer(payload);
+            tracked.screen_share.store_answer(request, payload);
         }
     }
 
-    /// Store a `getVideoChatInviteLink` `HttpUrl` answer on the tracked
-    /// call: the speaker link when the request had `can_self_unmute`.
-    pub fn set_group_call_invite_link(&mut self, group_call_id: i32, speaker: bool, link: String) {
+    /// Store the `HttpUrl` answer of the `getVideoChatInviteLink` request
+    /// `request` on the tracked call, in the slot that waits for it.
+    pub fn set_group_call_invite_link(
+        &mut self,
+        group_call_id: i32,
+        request: RequestId,
+        link: String,
+    ) {
         if let Some(tracked) = self.calls.active_group_call.as_mut()
             && tracked.id == group_call_id
         {
-            tracked.share_links.answered(speaker, link);
+            tracked.share_links.answered(request, link);
         }
     }
 }
@@ -608,8 +606,10 @@ fn apply_group_call_fields(tracked: &mut ActiveGroupCall, group_call: &ParsedGro
     tracked.participant_count = group_call.participant_count;
     tracked.viewer_count = u32::try_from(group_call.participant_count).unwrap_or(0);
     tracked.loaded_all_participants = group_call.loaded_all_participants;
-    tracked.is_my_video_enabled = group_call.is_my_video_enabled;
-    tracked.is_my_video_paused = group_call.is_my_video_paused;
+    tracked.my_video = MyVideo::from_server(
+        group_call.is_my_video_enabled,
+        group_call.is_my_video_paused,
+    );
     tracked.can_enable_video = group_call.can_enable_video;
     tracked.mute_new_participants = group_call.mute_new_participants;
     tracked.can_toggle_mute_new_participants = group_call.can_toggle_mute_new_participants;

@@ -209,9 +209,10 @@ fn ctap_requests_match_tdesktop() {
 fn handshake_matches_tdesktop() {
     let qr = fixed_qr();
     let psk: [u8; 32] = hex("psk_domain0").try_into().unwrap();
-    let mut initiator = Initiator::new(&psk, &qr.identity);
     let ephemeral = SecretKey::from_slice(&[0x22; 32]).unwrap();
-    let first = initiator.initial_message(ephemeral).unwrap();
+    let (first, initiator) = Initiator::new(&psk, &qr.identity)
+        .initial_message(ephemeral)
+        .unwrap();
     assert_eq!(first, hex("init_msg"));
     let handshake = initiator.process_response(&hex("response")).unwrap();
     assert_eq!(handshake.hash.to_vec(), hex("handshake_hash"));
@@ -228,19 +229,15 @@ fn handshake_matches_tdesktop() {
 fn handshake_rejects_a_wrong_response() {
     let qr = fixed_qr();
     let psk: [u8; 32] = hex("psk_domain0").try_into().unwrap();
-    let mut initiator = Initiator::new(&psk, &qr.identity);
-    initiator
+    let (_, initiator) = Initiator::new(&psk, &qr.identity)
         .initial_message(SecretKey::from_slice(&[0x22; 32]).unwrap())
         .unwrap();
     let mut response = hex("response");
     response[70] ^= 1;
     assert!(initiator.process_response(&response).is_none());
 
-    let initiator = Initiator::new(&psk, &qr.identity);
-    // No first message yet, and a short response.
-    assert!(initiator.process_response(&hex("response")).is_none());
-    let mut initiator = Initiator::new(&psk, &qr.identity);
-    initiator
+    // A short response (an answer before a first message cannot be built).
+    let (_, initiator) = Initiator::new(&psk, &qr.identity)
         .initial_message(SecretKey::from_slice(&[0x22; 32]).unwrap())
         .unwrap();
     assert!(initiator.process_response(&hex("response")[..80]).is_none());
@@ -250,8 +247,7 @@ fn handshake_rejects_a_wrong_response() {
 fn both_sides_of_the_handshake_agree() {
     let qr = fixed_qr();
     let psk = [7u8; 32];
-    let mut initiator = Initiator::new(&psk, &qr.identity);
-    let first = initiator
+    let (first, initiator) = Initiator::new(&psk, &qr.identity)
         .initial_message(SecretKey::from_slice(&[0x22; 32]).unwrap())
         .unwrap();
     let phone_key = SecretKey::from_slice(&[0x44; 32]).unwrap();
@@ -277,8 +273,7 @@ fn both_sides_of_the_handshake_agree() {
     assert_eq!(phone.decrypt(&a).unwrap(), b"a");
 
     // The phone with another PSK cannot answer.
-    let mut initiator = Initiator::new(&psk, &qr.identity);
-    let first = initiator
+    let (first, _) = Initiator::new(&psk, &qr.identity)
         .initial_message(SecretKey::from_slice(&[0x22; 32]).unwrap())
         .unwrap();
     assert!(respond(&[8; 32], &qr.identity_x962(), &first, &phone_key).is_none());

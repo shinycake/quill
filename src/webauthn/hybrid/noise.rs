@@ -189,11 +189,20 @@ pub struct Handshake {
     pub hash: [u8; 32],
 }
 
-/// Quill's side of the handshake (tdesktop `HandshakeInitiator`).
+/// Quill's side of the handshake (tdesktop `HandshakeInitiator`), before
+/// the first message: sending it ([`Initiator::initial_message`]) consumes
+/// this and gives the [`AwaitingResponse`] that can read the phone's answer,
+/// so neither a response without a first message nor a second first message
+/// can be written.
 pub struct Initiator<'a> {
     psk: Zeroizing<[u8; 32]>,
     identity: &'a SecretKey,
-    ephemeral: Option<SecretKey>,
+}
+
+/// The handshake after the first message went out.
+pub struct AwaitingResponse<'a> {
+    identity: &'a SecretKey,
+    ephemeral: SecretKey,
     noise: Noise,
 }
 
@@ -205,38 +214,43 @@ impl<'a> Initiator<'a> {
         Self {
             psk: Zeroizing::new(*psk),
             identity,
-            ephemeral: None,
-            noise: Noise::new(HandshakeType::KNpsk0),
         }
     }
 
-    /// The first message: the ephemeral point and an empty message's tag.
-    /// `ephemeral` is random in a ceremony, fixed in tests.
-    pub fn initial_message(&mut self, ephemeral: SecretKey) -> Option<Vec<u8>> {
-        self.noise = Noise::new(HandshakeType::KNpsk0);
-        self.noise.mix_hash(&PROLOGUE);
-        self.noise
-            .mix_hash(&x962(&self.identity.public_key(), false));
-        self.noise.mix_key_and_hash(self.psk.as_ref());
+    /// The first message: the ephemeral point and an empty message's tag,
+    /// and the handshake waiting for the answer. `ephemeral` is random in a
+    /// ceremony, fixed in tests.
+    pub fn initial_message(self, ephemeral: SecretKey) -> Option<(Vec<u8>, AwaitingResponse<'a>)> {
+        let mut noise = Noise::new(HandshakeType::KNpsk0);
+        noise.mix_hash(&PROLOGUE);
+        noise.mix_hash(&x962(&self.identity.public_key(), false));
+        noise.mix_key_and_hash(self.psk.as_ref());
         let public = x962(&ephemeral.public_key(), false);
-        self.noise.mix_hash(&public);
-        self.noise.mix_key(&public);
-        let tag = self.noise.encrypt_and_hash(&[])?;
-        self.ephemeral = Some(ephemeral);
+        noise.mix_hash(&public);
+        noise.mix_key(&public);
+        let tag = noise.encrypt_and_hash(&[])?;
         let mut message = public;
         message.extend_from_slice(&tag);
-        Some(message)
+        Some((
+            message,
+            AwaitingResponse {
+                identity: self.identity,
+                ephemeral,
+                noise,
+            },
+        ))
     }
+}
 
+impl AwaitingResponse<'_> {
     /// The phone's answer: its ephemeral point (ee and se) and an empty
     /// message.
     pub fn process_response(mut self, response: &[u8]) -> Option<Handshake> {
         if response.len() != RESPONSE_LEN {
             return None;
         }
-        let ephemeral = self.ephemeral.take()?;
         let (peer, sealed) = response.split_at(X962_LEN);
-        let ee = Zeroizing::new(ecdh_x(&ephemeral, peer)?);
+        let ee = Zeroizing::new(ecdh_x(&self.ephemeral, peer)?);
         self.noise.mix_hash(peer);
         self.noise.mix_key(peer);
         self.noise.mix_key(ee.as_ref());

@@ -63,28 +63,27 @@ fn edge_shade(edge: u32) -> std::sync::Arc<RenderImage> {
     thread_local! {
         static SHADES: RefCell<HashMap<u32, Arc<RenderImage>>> = RefCell::new(HashMap::new());
     }
-    SHADES.with(|shades| {
-        shades
-            .borrow_mut()
-            .entry(edge)
-            .or_insert_with(|| {
-                let radius = edge as f32 / 2.0;
-                let mut image = image::RgbaImage::new(edge, edge);
-                for (x, y, pixel) in image.enumerate_pixels_mut() {
-                    let dx = x as f32 + 0.5 - radius;
-                    let dy = y as f32 + 0.5 - radius;
-                    let distance = (dx * dx + dy * dy).sqrt() / radius;
-                    let ramp = ((distance - SHADOW_INNER) / (1.0 - SHADOW_INNER)).clamp(0.0, 1.0);
-                    // Anti-aliased rim.
-                    let inside = (radius - distance * radius + 0.5).clamp(0.0, 1.0);
-                    let alpha = SHADOW_OPACITY * ramp * inside;
-                    *pixel = image::Rgba([0, 0, 0, (alpha * 255.0).round() as u8]);
-                }
-                Arc::new(RenderImage::new(smallvec::SmallVec::from_buf([
-                    image::Frame::new(image),
-                ])))
-            })
-            .clone()
+    let build = || {
+        let radius = edge as f32 / 2.0;
+        let mut image = image::RgbaImage::new(edge, edge);
+        for (x, y, pixel) in image.enumerate_pixels_mut() {
+            let dx = x as f32 + 0.5 - radius;
+            let dy = y as f32 + 0.5 - radius;
+            let distance = (dx * dx + dy * dy).sqrt() / radius;
+            let ramp = ((distance - SHADOW_INNER) / (1.0 - SHADOW_INNER)).clamp(0.0, 1.0);
+            // Anti-aliased rim.
+            let inside = (radius - distance * radius + 0.5).clamp(0.0, 1.0);
+            let alpha = SHADOW_OPACITY * ramp * inside;
+            *pixel = image::Rgba([0, 0, 0, (alpha * 255.0).round() as u8]);
+        }
+        Arc::new(RenderImage::new(smallvec::SmallVec::from_buf([
+            image::Frame::new(image),
+        ])))
+    };
+    // A paint that lands while the cache is borrowed builds its own copy.
+    SHADES.with(|shades| match shades.try_borrow_mut() {
+        Ok(mut shades) => shades.entry(edge).or_insert_with(build).clone(),
+        Err(_) => build(),
     })
 }
 

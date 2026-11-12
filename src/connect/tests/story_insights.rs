@@ -412,3 +412,36 @@ fn the_first_forwards_page_is_not_asked_twice_on_a_reopen() {
     assert_eq!(rows(&driver.session), 1);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// r2-14, 13-036: a first forwards page that cannot be sent is a failure the
+/// panel shows (a scroll or Retry asks again), not an empty list.
+#[test]
+fn a_first_forwards_page_that_cannot_be_sent_fails_the_stage() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    seed_ready_alice(&mut driver, &seq, &dyn_sink);
+    seed_story(
+        &mut driver,
+        &seq,
+        &dyn_sink,
+        7,
+        6,
+        "storyContentPhoto",
+        r#""can_get_statistics":true,"#,
+    );
+    recorder.refuse(Some("getStoryPublicForwards"));
+    driver
+        .fetch_story_insights(ChatId(7), 6, true)
+        .unwrap()
+        .expect("statistics sends");
+    let insights = driver.session.stories.insights.as_ref().expect("insights");
+    assert!(insights.forwards_error().is_some());
+    assert!(!insights.forwards_loading());
+    drop(dir);
+}

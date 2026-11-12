@@ -26,17 +26,17 @@ pub enum ChatLinkOp {
     Delete,
 }
 
-/// The save of the link box, from the send to TDLib's answer. The box stays
-/// open on its draft until it says `Saved`; a refusal goes back to `Idle`
-/// with the error line, so the draft can be fixed and sent again.
+/// The latest answer to a link create or edit, with the request it answers.
+/// The link box that sent the request waits for exactly that id
+/// (`LinkEditDraft`), so an answer for a box that was closed matches
+/// nothing and needs no reset: the next answer replaces it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum ChatLinkSave {
+pub enum ChatLinkAnswer {
     #[default]
-    Idle,
-    /// A create or edit is out; only its own answer ends it.
-    Saving(RequestId),
-    /// The answer arrived; the box goes back to the list and resets this.
-    Saved,
+    None,
+    Saved(RequestId),
+    /// Refused; the error line is in the Business screens' error.
+    Refused(RequestId),
 }
 
 /// The bot lookup of the chatbots screen for one typed username.
@@ -44,17 +44,35 @@ pub enum ChatLinkSave {
 pub struct BotLookup {
     pub generation: u32,
     pub query: String,
-    /// `None` while the exact lookup runs; `Some(None)` when nothing
-    /// matched.
-    pub exact: Option<Option<i64>>,
-    pub mine: Option<Vec<i64>>,
-    pub global: Option<Vec<i64>>,
+    /// `Ready(None)` when nothing matched; a refused search is `Failed`,
+    /// not an empty result.
+    pub exact: Fetch<Option<i64>>,
+    pub mine: Fetch<Vec<i64>>,
+    pub global: Fetch<Vec<i64>>,
 }
 
 impl BotLookup {
+    /// Every search answered or failed.
     pub fn done(&self) -> bool {
-        self.exact.is_some() && self.mine.is_some() && self.global.is_some()
+        !self.exact.is_loading() && !self.mine.is_loading() && !self.global.is_loading()
     }
+
+    /// The first refusal, when any search failed.
+    pub fn error(&self) -> Option<&str> {
+        self.exact
+            .error()
+            .or_else(|| self.mine.error())
+            .or_else(|| self.global.error())
+    }
+}
+
+/// Where the newest `setBusinessConnectedBot` / delete stands.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ConnectedBotSave {
+    #[default]
+    Idle,
+    /// Out as this request; it answered or was refused when this leaves.
+    Saving(RequestId),
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -62,10 +80,14 @@ pub struct BusinessExtraState {
     /// `getBusinessChatLinks`, newest first. A failed load keeps the row
     /// list it replaced and draws a Retry.
     pub chat_links: Fetch<Vec<ChatLink>>,
-    pub chat_link_save: ChatLinkSave,
+    pub chat_link_answer: ChatLinkAnswer,
     /// `getBusinessConnectedBot`: ready with `None` when no bot is
     /// connected.
     pub connected_bot: Fetch<Option<ConnectedBot>>,
+    /// The newest bot save and the request it waits for: only its answer
+    /// forgets the bot it wrote ahead (an older save's answer finds
+    /// another request here and leaves the shown bot alone).
+    pub bot_save: ConnectedBotSave,
     pub lookup: BotLookup,
     /// TDLib options; tdesktop's defaults until reported.
     pub title_max: Option<usize>,
@@ -103,18 +125,19 @@ impl Session {
         }
     }
 
-    pub(crate) fn apply_chat_links(&mut self, links: Vec<ChatLink>) {
-        self.settings.business_extra.chat_links.succeed(links);
+    pub(crate) fn apply_chat_links(&mut self, links: Vec<ChatLink>, request: Option<RequestId>) {
+        self.settings
+            .business_extra
+            .chat_links
+            .answered(request, links);
     }
 
     /// A created or edited link: an edit replaces its row, a new link goes
     /// first (tdesktop `prependRow`).
     pub(crate) fn apply_chat_link(&mut self, link: ChatLink, extra: Option<RequestId>) {
         let state = &mut self.settings.business_extra;
-        if let Some(id) = extra
-            && state.chat_link_save == ChatLinkSave::Saving(id)
-        {
-            state.chat_link_save = ChatLinkSave::Saved;
+        if let Some(id) = extra {
+            state.chat_link_answer = ChatLinkAnswer::Saved(id);
         }
         state.chat_links.insert_data_if_missing(Vec::new);
         let Some(list) = state.chat_links.data_mut() else {
@@ -126,8 +149,17 @@ impl Session {
         }
     }
 
-    pub(crate) fn apply_connected_bot(&mut self, bot: Option<ConnectedBot>) {
-        self.settings.business_extra.connected_bot.succeed(bot);
+    /// `getBusinessConnectedBot` answered: only the fetch that asked takes
+    /// it (a save since then wrote the bot ahead and dropped that fetch).
+    pub(crate) fn apply_connected_bot(
+        &mut self,
+        bot: Option<ConnectedBot>,
+        pending: Option<&PendingRequest>,
+    ) {
+        self.settings
+            .business_extra
+            .connected_bot
+            .answered(pending.map(|p| p.id), bot);
     }
 
     /// `ok` of a bot save: the bot was written ahead of the answer, which
@@ -138,7 +170,25 @@ impl Session {
         if let Some(RequestPurpose::Settings(SettingsPurpose::SaveConnectedBot)) =
             pending.map(|p| p.purpose)
         {
-            self.settings.business_extra.connected_bot = Fetch::Idle;
+            self.forget_written_bot(pending.map(|p| p.id));
+        }
+    }
+
+    /// A bot save answered (`ok` or refused): the bot it wrote ahead is
+    /// forgotten so the next visit asks TDLib, when it was the newest save
+    /// (a newer one wrote the shown bot) and no fetch started since (its
+    /// answer is the truth).
+    fn forget_written_bot(&mut self, request: Option<RequestId>) {
+        let extra = &mut self.settings.business_extra;
+        let Some(request) = request else {
+            return;
+        };
+        if extra.bot_save != ConnectedBotSave::Saving(request) {
+            return;
+        }
+        extra.bot_save = ConnectedBotSave::Idle;
+        if matches!(extra.connected_bot, Fetch::Ready(_)) {
+            extra.connected_bot = Fetch::Idle;
         }
     }
 
@@ -158,10 +208,11 @@ impl Session {
         };
         let lookup = &mut self.settings.business_extra.lookup;
         if lookup.generation == generation {
-            lookup.exact = Some(match kind {
+            let found = match kind {
                 ChatKind::Private { user_id } => Some(user_id.0),
                 _ => None,
-            });
+            };
+            lookup.exact.answered(pending.map(|p| p.id), found);
         }
         true
     }
@@ -187,9 +238,14 @@ impl Session {
             .collect();
         let lookup = &mut self.settings.business_extra.lookup;
         if lookup.generation == generation {
+            let id = pending.map(|p| p.id);
             match part {
-                BotLookupPart::Mine => lookup.mine = Some(users),
-                BotLookupPart::Global => lookup.global = Some(users),
+                BotLookupPart::Mine => {
+                    lookup.mine.answered(id, users);
+                }
+                BotLookupPart::Global => {
+                    lookup.global.answered(id, users);
+                }
                 BotLookupPart::Exact => {}
             }
         }
@@ -208,54 +264,64 @@ impl Session {
         };
         let reason = error_reason(err);
         let extra = &mut self.settings.business_extra;
-        let error = match purpose {
+        let (area, error) = match purpose {
             SettingsPurpose::GetChatLinks => {
                 let error = format!("Couldn't load the links: {reason}");
-                extra.chat_links.fail(error.clone());
-                error
+                extra.chat_links.failed(extra_id, error.clone(), false);
+                (BusinessArea::ChatLinks, error)
             }
             SettingsPurpose::MutateChatLink { op } => {
                 if op != ChatLinkOp::Delete
-                    && extra_id.is_some_and(|id| extra.chat_link_save == ChatLinkSave::Saving(id))
+                    && let Some(id) = extra_id
                 {
-                    extra.chat_link_save = ChatLinkSave::Idle;
+                    extra.chat_link_answer = ChatLinkAnswer::Refused(id);
                 }
-                format!("Couldn't save the link: {reason}")
+                (
+                    BusinessArea::ChatLinks,
+                    format!("Couldn't save the link: {reason}"),
+                )
             }
             // No connected bot answers "Not Found".
             SettingsPurpose::GetConnectedBot if err.code == 404 => {
-                extra.connected_bot.succeed(None);
+                extra.connected_bot.answered(extra_id, None);
                 return true;
             }
             SettingsPurpose::GetConnectedBot => {
                 let error = format!("Couldn't load the chatbot: {reason}");
-                extra.connected_bot.fail(error.clone());
-                error
+                if !extra.connected_bot.failed(extra_id, error.clone(), false) {
+                    return true;
+                }
+                (BusinessArea::Chatbot, error)
             }
             SettingsPurpose::SaveConnectedBot => {
                 // The save wrote its bot ahead of the answer: forget it, so
                 // the next visit asks TDLib what is connected instead of
                 // showing the refused bot as saved.
-                extra.connected_bot = Fetch::Idle;
-                format!("Couldn't save the chatbot: {reason}")
+                self.forget_written_bot(extra_id);
+                (
+                    BusinessArea::Chatbot,
+                    format!("Couldn't save the chatbot: {reason}"),
+                )
             }
             SettingsPurpose::LookupBusinessBot { generation, part } => {
                 let lookup = &mut extra.lookup;
                 if lookup.generation == generation {
+                    let message = format!("Couldn't search for bots: {reason}");
                     match part {
-                        BotLookupPart::Exact => lookup.exact = Some(None),
-                        BotLookupPart::Mine => lookup.mine = Some(Vec::new()),
-                        BotLookupPart::Global => lookup.global = Some(Vec::new()),
-                    }
+                        BotLookupPart::Exact => lookup.exact.failed(extra_id, message, true),
+                        BotLookupPart::Mine => lookup.mine.failed(extra_id, message, true),
+                        BotLookupPart::Global => lookup.global.failed(extra_id, message, true),
+                    };
                 }
                 return true;
             }
-            SettingsPurpose::SetSponsoredEnabled => {
-                format!("Couldn't change the ads setting: {reason}")
-            }
+            SettingsPurpose::SetSponsoredEnabled => (
+                BusinessArea::Ads,
+                format!("Couldn't change the ads setting: {reason}"),
+            ),
             _ => return false,
         };
-        self.settings.business.error = Some(error);
+        self.settings.business.refuse(area, error);
         true
     }
 }

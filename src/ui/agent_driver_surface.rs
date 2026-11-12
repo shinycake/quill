@@ -16,6 +16,7 @@ use super::agent_state::{active_account, is_secret_chat_id};
 use super::app::{PaneMode, QuillApp};
 use super::esc_stack::ESC_LAYERS;
 use super::first_run_state::FirstRun;
+use super::on_screen::ScreenEpoch;
 use super::shell::QuillShell;
 use gpui_kit::{App, Entity, Window};
 use quill::agent::grants::{self, ChatClass, Scope};
@@ -104,9 +105,20 @@ pub(super) enum Opened {
     Layer(&'static str),
 }
 
+/// An [`Opened`] with whose it is: the screen and the window its step ran
+/// in. Only that window's shell closes it, and a switch to another account
+/// drops it, so a box of the same name elsewhere is never closed for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Blocked {
+    screen: ScreenEpoch,
+    host: Option<ChatId>,
+    opened: Opened,
+}
+
 thread_local! {
     /// What agents' steps opened since the shell last closed it (UI thread).
-    static BLOCKED: std::cell::RefCell<Vec<Opened>> = const { std::cell::RefCell::new(Vec::new()) };
+    /// Taken out whole to be read or changed, so nothing is ever borrowed.
+    static BLOCKED: std::cell::Cell<Vec<Blocked>> = const { std::cell::Cell::new(Vec::new()) };
 }
 
 /// The hard dialogs and layers whose open flag is set now.
@@ -138,27 +150,41 @@ pub(super) fn block_opened_by_agent(app: &QuillApp, before: &[Opened]) {
         return;
     }
     guard::refuse_hard_dialog();
-    BLOCKED.with(|blocked| {
-        let mut blocked = blocked.borrow_mut();
-        for open in opened {
-            if !blocked.contains(&open) {
-                blocked.push(open);
-            }
+    let (screen, host) = (app.screen_epoch(), app.windows.scope);
+    let mut queue = BLOCKED.with(std::cell::Cell::take);
+    for opened in opened {
+        let entry = Blocked {
+            screen,
+            host,
+            opened,
+        };
+        if !queue.contains(&entry) {
+            queue.push(entry);
         }
-    });
+    }
+    BLOCKED.with(|blocked| blocked.set(queue));
 }
 
-/// The dialog names queued by [`block_opened_by_agent`], taken. The layers
-/// are closed here, with their Escape close.
+/// The dialog names queued by [`block_opened_by_agent`] for the window
+/// `host` of the screen on show, taken. The layers are closed here, with
+/// their Escape close. Another window's entries stay for its shell; those
+/// of an earlier screen are dropped.
 pub(super) fn take_blocked_closing_layers(
     app: &Entity<QuillApp>,
+    host: Option<ChatId>,
     window: &mut Window,
     cx: &mut App,
 ) -> Vec<&'static str> {
-    let blocked = BLOCKED.with(|blocked| std::mem::take(&mut *blocked.borrow_mut()));
+    let screen = app.read(cx).screen_epoch();
+    let queued = BLOCKED.with(std::cell::Cell::take);
+    let (mine, others): (Vec<Blocked>, Vec<Blocked>) = queued
+        .into_iter()
+        .filter(|entry| entry.screen == screen)
+        .partition(|entry| entry.host == host);
+    BLOCKED.with(|blocked| blocked.set(others));
     let mut dialogs = Vec::new();
-    for open in blocked {
-        match open {
+    for entry in mine {
+        match entry.opened {
             Opened::Dialog(name) => dialogs.push(name),
             Opened::Layer(name) => {
                 let Some(layer) = ESC_LAYERS.iter().find(|layer| layer.name == name) else {
@@ -313,7 +339,7 @@ impl QuillApp {
         if !matches!(self.first_run, FirstRun::Done) {
             return blocked("the welcome screen");
         }
-        if self.settings.open {
+        if self.settings.open() {
             return blocked("Settings");
         }
         if self.agent_ui.consent.is_some() || self.agent_request_open() {

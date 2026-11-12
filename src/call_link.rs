@@ -175,8 +175,8 @@ pub struct OfferedCallLink {
     pub live_stream: bool,
 }
 
-/// Where a call link that met a running call is: one stage, since each
-/// follows the last (asked, waiting for the old call to end, offered).
+/// Where a call link is: one stage, since each follows the last (asked,
+/// waiting for the old call to end, offered, kept for the join).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum CallLinkStage {
     #[default]
@@ -185,8 +185,15 @@ pub enum CallLinkStage {
     Confirm(CallLinkConfirm),
     /// Confirmed; offered once the old call has ended.
     Leaving(CallLinkLeaving),
-    /// What the offer found, until the UI takes it.
-    Offered(OfferedCallLink),
+    /// What the offer found, until the UI takes it; the link's hash waits
+    /// for the join.
+    Offered {
+        offered: OfferedCallLink,
+        link: PendingCallLink,
+    },
+    /// The call the link offered is fetched; its hash goes out with the
+    /// join. Left by leaving the call, or the fetch failing.
+    Joinable(PendingCallLink),
 }
 
 impl CallLinkStage {
@@ -208,15 +215,53 @@ impl CallLinkStage {
         }
     }
 
-    /// The offered call, once; any other stage stays as it is.
+    /// The offered call, once; its hash stays for the join. Any other
+    /// stage stays as it is.
     pub fn take_offered(&mut self) -> Option<OfferedCallLink> {
         match std::mem::take(self) {
-            Self::Offered(offered) => Some(offered),
+            Self::Offered { offered, link } => {
+                *self = Self::Joinable(link);
+                Some(offered)
+            }
             other => {
                 *self = other;
                 None
             }
         }
+    }
+
+    /// The hash to send with a join of `group_call_id` (empty for any
+    /// other call).
+    pub fn hash_for(&self, group_call_id: i32) -> &str {
+        match self {
+            Self::Joinable(link) | Self::Offered { link, .. }
+                if link.group_call_id == group_call_id =>
+            {
+                &link.invite_hash
+            }
+            _ => "",
+        }
+    }
+
+    /// The call is left (or could not be fetched): its hash goes, a
+    /// question or wait for another link stays. `group_call_id` limits it
+    /// to one call.
+    pub fn forget_hash(&mut self, group_call_id: Option<i32>) {
+        if let Self::Joinable(link) | Self::Offered { link, .. } = self
+            && group_call_id.is_none_or(|id| id == link.group_call_id)
+        {
+            *self = Self::Idle;
+        }
+    }
+
+    /// The account is left: a question or wait is abandoned (it must not
+    /// open a join screen after switching back), the hash is kept.
+    pub fn abandon(&mut self) {
+        *self = match std::mem::take(self) {
+            Self::Offered { link, .. } => Self::Joinable(link),
+            Self::Joinable(link) => Self::Joinable(link),
+            Self::Idle | Self::Confirm(_) | Self::Leaving(_) => Self::Idle,
+        };
     }
 
     /// The link waiting for `call` to end is dropped (its leave failed).
@@ -232,17 +277,6 @@ impl CallLinkStage {
 pub struct PendingCallLink {
     pub group_call_id: i32,
     pub invite_hash: String,
-}
-
-impl PendingCallLink {
-    /// The hash to send with a join of `group_call_id` (empty for any other
-    /// call).
-    pub fn hash_for(link: Option<&Self>, group_call_id: i32) -> &str {
-        match link {
-            Some(link) if link.group_call_id == group_call_id => &link.invite_hash,
-            _ => "",
-        }
-    }
 }
 
 #[cfg(test)]
@@ -353,12 +387,12 @@ mod tests {
 
     #[test]
     fn the_hash_only_goes_with_its_own_call() {
-        let link = PendingCallLink {
+        let stage = CallLinkStage::Joinable(PendingCallLink {
             group_call_id: 4,
             invite_hash: "abc".into(),
-        };
-        assert_eq!(PendingCallLink::hash_for(Some(&link), 4), "abc");
-        assert_eq!(PendingCallLink::hash_for(Some(&link), 5), "");
-        assert_eq!(PendingCallLink::hash_for(None, 4), "");
+        });
+        assert_eq!(stage.hash_for(4), "abc");
+        assert_eq!(stage.hash_for(5), "");
+        assert_eq!(CallLinkStage::Idle.hash_for(4), "");
     }
 }

@@ -130,7 +130,8 @@ fn driver_search_happy_empty_error_and_select() {
     assert_eq!(
         driver.session.search.chat_search.jump,
         crate::state::ChatSearchJump::Loading {
-            message_id: MessageId(50)
+            message_id: MessageId(50),
+            then: crate::state::JumpLanding::Message,
         }
     );
     assert!(recorder.snapshot().iter().any(|j| {
@@ -431,7 +432,7 @@ fn driver_chat_search_debounce_jump_empty_and_close() {
             )
             .unwrap();
     assert_eq!(
-        driver.session.search.chat_search.status,
+        driver.session.search.chat_search.status(),
         SearchStatus::Ready
     );
     assert_eq!(
@@ -498,7 +499,7 @@ fn driver_chat_search_debounce_jump_empty_and_close() {
             )
             .unwrap();
     assert_eq!(
-        driver.session.search.chat_search.status,
+        driver.session.search.chat_search.status(),
         SearchStatus::Empty
     );
 
@@ -509,7 +510,7 @@ fn driver_chat_search_debounce_jump_empty_and_close() {
     assert!(driver.session.history_has_newer(ChatId(7)));
     driver.close_chat_search();
     assert_eq!(
-        driver.session.search.chat_search.status,
+        driver.session.search.chat_search.status(),
         SearchStatus::Closed
     );
     assert_eq!(driver.session.open_chat_id(), Some(ChatId(7)));

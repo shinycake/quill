@@ -57,7 +57,7 @@ fn ticket(qr: &PeerQrBox, request: FreeRequest) -> FreeTicket {
     FreeTicket {
         request,
         box_id: qr.id,
-        serial: qr.free.serial,
+        serial: qr.free.last_serial,
     }
 }
 
@@ -153,7 +153,10 @@ fn hidden_number_asks_for_a_contact_link() {
         })
     };
     assert_eq!(hidden(&UserLinkFetch::Idle), OwnLinkState::NeedsContactLink);
-    assert_eq!(hidden(&UserLinkFetch::Loading), OwnLinkState::Waiting);
+    assert_eq!(
+        hidden(&UserLinkFetch::Loading(crate::ids::RequestId(1))),
+        OwnLinkState::Waiting
+    );
     assert_eq!(
         hidden(&UserLinkFetch::Failed(None)),
         OwnLinkState::Unavailable
@@ -246,7 +249,7 @@ fn picking_a_color_changes_the_appearance() {
     assert_eq!(qr.appearance(&list).center, Rgb::hex(0x5A_8CF0));
     qr.apply(QrAction::ClosePanel, env(0));
     assert_eq!(qr.panel, None);
-    assert_eq!(qr.color, SwatchKey::Backdrop(3));
+    assert_eq!(qr.color(), SwatchKey::Backdrop(3));
     assert_eq!(qr.appearance(&[Swatch::DEFAULT]).center, DEFAULT_CENTER);
 }
 
@@ -256,11 +259,11 @@ fn emoji_toggle_and_keep_the_last_six() {
     for emoji in ["😀", "🐱", "🍕", "🎉", "🚀", "🌈", "⭐"] {
         qr.apply(QrAction::ToggleEmoji(emoji.into()), env(0));
     }
-    assert_eq!(qr.emoji.len(), MAX_EMOJI);
-    assert_eq!(qr.emoji.first().and_then(|e| e.plain()), Some("🐱"));
+    assert_eq!(qr.emoji().len(), MAX_EMOJI);
+    assert_eq!(qr.emoji().first().and_then(|e| e.plain()), Some("🐱"));
     qr.apply(QrAction::ToggleEmoji("🍕".into()), env(0));
-    assert_eq!(qr.emoji, vec!["🐱", "🎉", "🚀", "🌈", "⭐"]);
-    assert_eq!(qr.appearance(&[]).emoji, qr.emoji);
+    assert_eq!(qr.emoji(), vec!["🐱", "🎉", "🚀", "🌈", "⭐"]);
+    assert_eq!(qr.appearance(&[]).emoji, qr.emoji());
 }
 
 #[test]

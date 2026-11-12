@@ -26,17 +26,14 @@ fn save_does_nothing_while_the_folder_is_loading(cx: &mut TestAppContext) {
     let app = slot.borrow().clone().expect("app");
     let mut vcx = gpui_kit::VisualTestContext::from_window(handle.into(), cx);
     app.update_in(&mut vcx, |app, window, cx| {
-        let dialog = FolderEditorDialog::new(window, cx, Some(5));
-        assert_eq!(
-            dialog.load,
-            FolderLoad::Loading,
-            "an existing folder is fetched first"
-        );
+        let load = FolderLoad::Loading(quill::ids::RequestId(7));
+        let dialog = FolderEditorDialog::new(window, cx, Some(5), load.clone());
+        assert_eq!(dialog.load, load, "an existing folder is fetched first");
         app.folders.editor = Some(dialog);
         app.save_folder_editor(cx);
         let dialog = app.folders.editor.as_ref().expect("still open");
         assert!(
-            dialog.error.is_none(),
+            dialog.load.error().is_none(),
             "the blank form was not even validated, let alone saved"
         );
     });
@@ -58,14 +55,24 @@ fn a_failed_load_cannot_save_and_retry_loads_again(cx: &mut TestAppContext) {
     let app = slot.borrow().clone().expect("app");
     let mut vcx = gpui_kit::VisualTestContext::from_window(handle.into(), cx);
     app.update_in(&mut vcx, |app, window, cx| {
-        let mut dialog = FolderEditorDialog::new(window, cx, Some(5));
-        dialog.load = FolderLoad::Failed("Couldn't load the folder.".into());
+        let dialog = FolderEditorDialog::new(
+            window,
+            cx,
+            Some(5),
+            FolderLoad::Failed("Couldn't load the folder.".into()),
+        );
         app.folders.editor = Some(dialog);
         app.save_folder_editor(cx);
         let dialog = app.folders.editor.as_ref().expect("still open");
-        assert!(dialog.error.is_none(), "nothing was validated or saved");
+        assert!(
+            dialog.load.error().is_none(),
+            "nothing was validated or saved"
+        );
         app.retry_folder_editor_load(cx);
         let dialog = app.folders.editor.as_ref().expect("still open");
-        assert_eq!(dialog.load, FolderLoad::Loading, "Retry asks again");
+        assert!(
+            matches!(&dialog.load, FolderLoad::Failed(line) if !line.is_empty()),
+            "Retry with no connection ends in the error again, not in a load that never ends"
+        );
     });
 }

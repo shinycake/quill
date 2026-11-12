@@ -19,29 +19,11 @@ impl Session {
             return;
         }
         match pending.map(|p| p.purpose) {
-            // A5: profile-edit failures surface in the
-            // edit-profile dialog. The message is classified by
-            // `error_reason`, never the raw TDLib text.
-            Some(
-                RequestPurpose::SetName
-                | RequestPurpose::SetBio
-                | RequestPurpose::SetUsername
-                | RequestPurpose::CheckUsername
-                | RequestPurpose::ReorderActiveUsernames
-                | RequestPurpose::ToggleUsernameIsActive
-                | RequestPurpose::SetProfilePhoto
-                | RequestPurpose::DeleteProfilePhoto,
-            ) => {
-                self.users_state.profile_edit_error =
-                    Some(format!("Profile update failed: {}", error_reason(err)));
-            }
-            Some(
-                RequestPurpose::SetProfileAccentColor
-                | RequestPurpose::SetAccentColor
-                | RequestPurpose::SetUpgradedGiftColors,
-            ) => {
-                self.users_state.peer_color_error =
-                    Some(format!("Profile update failed: {}", error_reason(err)));
+            // The own id stays unknown: the probe is not asked again.
+            Some(RequestPurpose::GetMe) => {
+                self.users_state
+                    .my_id_probe
+                    .failed(extra, error_reason(err), false);
             }
             Some(RequestPurpose::GetUserFullInfo) => {
                 let user = pending.and_then(|p| {
@@ -56,22 +38,23 @@ impl Session {
                         .fail(user, error_reason(err));
                 }
             }
-            // One filter's count failed: drop the chat's entry so the next
-            // open asks for all of them again, not a zero for good.
-            Some(RequestPurpose::Users(UsersPurpose::GetChatMessageCount { .. })) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.media.chat_media_counts.remove(&chat_id.0);
-                }
-            }
+            // One filter's count failed: its count stays unknown (or the
+            // older one stays shown) and the next open asks for all of
+            // them again, never a zero for good.
+            Some(RequestPurpose::Users(UsersPurpose::GetChatMessageCount { .. })) => {}
             Some(RequestPurpose::GetProfilePhotoEmojiIcons) => {
-                self.users_state
-                    .profile_photo_emoji_icons
-                    .fail(error_reason(err));
+                self.users_state.profile_photo_emoji_icons.failed(
+                    pending.map(|p| p.id),
+                    error_reason(err),
+                    false,
+                );
             }
             Some(RequestPurpose::GetChatPhotoEmojiIcons) => {
-                self.users_state
-                    .chat_photo_emoji_icons
-                    .fail(error_reason(err));
+                self.users_state.chat_photo_emoji_icons.failed(
+                    pending.map(|p| p.id),
+                    error_reason(err),
+                    false,
+                );
             }
             Some(RequestPurpose::GetProfileShareThemeBackdrops) => {
                 if let Some(pending) = pending {
@@ -92,12 +75,18 @@ impl Session {
                     .fail_save(ticket, error_reason(err));
             }
             Some(RequestPurpose::Users(UsersPurpose::GetUserLink { free })) => {
-                self.users_state.peer_qr.fail_link(free, error_reason(err));
+                if let Some(id) = pending.map(|p| p.id) {
+                    self.users_state
+                        .peer_qr
+                        .fail_link(free, id, error_reason(err));
+                }
             }
             Some(RequestPurpose::GetBackgroundEmojiIcons) => {
-                self.users_state
-                    .background_emoji_icons
-                    .fail(error_reason(err));
+                self.users_state.background_emoji_icons.failed(
+                    pending.map(|p| p.id),
+                    error_reason(err),
+                    false,
+                );
             }
             // B10: profile panel fetches keep the reason for a Retry row;
             // refused edits surface as a toast.

@@ -10,6 +10,7 @@ use crate::premium_hub::ton::{
     GramWithdraw, GramsPurpose, PAGE, get_gram_revenue_statistics, get_gram_withdrawal_url,
     get_ton_transactions, get_user,
 };
+use crate::premium_hub::ton::{PeerAsk, PeerKey};
 use crate::state::{PaymentsPurpose, RequestPurpose};
 use crate::telegram::envelope::MessageSender;
 
@@ -19,38 +20,42 @@ impl<S: JsonSender> ConnectDriver<S> {
         purpose: GramsPurpose,
         build: impl FnOnce(RequestId) -> String,
     ) -> Result<RequestId, ConnectSendError> {
-        self.send_grams_for(purpose, None, build)
-    }
-
-    fn send_grams_for(
-        &mut self,
-        purpose: GramsPurpose,
-        peer: Option<ChatId>,
-        build: impl FnOnce(RequestId) -> String,
-    ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(
             RequestPurpose::Payments(PaymentsPurpose::Grams(purpose)),
-            peer,
+            None,
         );
         let json = build(extra);
         self.send_json_request(extra, &json)?;
         Ok(extra)
     }
 
-    /// Ask for the Grams balance once per session, for the Settings row
-    /// (tdesktop `Credits::tonLoad`). `Ok(None)` when already asked.
+    /// Ask for the Grams balance for the Settings row (tdesktop
+    /// `Credits::tonLoad`) once per Settings open. `Ok(None)` when it is
+    /// asked, answered or failed already (a failure waits for the next
+    /// open, [`GramsHub::settings_closed`]). A send that never left is a
+    /// failure too, so the tick cannot send it again every poll.
     pub fn probe_grams_balance(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.session.payments.hub.grams.probe.is_idle() {
             return Ok(None);
         }
         let sent = self.send_grams(GramsPurpose::Probe, |extra| {
             get_ton_transactions(extra, TxFilter::All, "", 1)
-        })?;
-        self.session.payments.hub.grams.probe.begin();
-        Ok(Some(sent))
+        });
+        let probe = &mut self.session.payments.hub.grams.probe;
+        probe.begin();
+        match sent {
+            Ok(request) => {
+                probe.sent(request);
+                Ok(Some(request))
+            }
+            Err(err) => {
+                probe.fail(crate::lang::tr(crate::lang::keys::Q_GRAMS_COULD_NOT_LOAD));
+                Err(err)
+            }
+        }
     }
 
     /// Called from the poll loop: probes the balance while Settings is
@@ -59,55 +64,62 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Returns whether anything was sent.
     pub fn grams_tick(&mut self, settings_open: bool) -> bool {
         let mut sent = false;
-        if settings_open && self.session.payments.hub.grams.probe.is_idle() {
-            sent |= matches!(self.probe_grams_balance(), Ok(Some(_)));
+        if settings_open {
+            if self.session.payments.hub.grams.probe.is_idle() {
+                sent |= matches!(self.probe_grams_balance(), Ok(Some(_)));
+            }
+        } else {
+            self.session.payments.hub.grams.settings_closed();
         }
         if !self.chats_path_active() {
             return sent;
         }
-        let rows: Vec<(usize, Option<MessageSender>)> =
-            self.session.payments.hub.grams.unchecked_peers().collect();
-        let mut handled = self.session.payments.hub.grams.peers_checked;
+        let rows: Vec<(usize, Option<MessageSender>)> = self
+            .session
+            .payments
+            .hub
+            .grams
+            .rows
+            .unchecked_peers()
+            .collect();
+        let mut handled = self.session.payments.hub.grams.rows.peers_checked();
         for (index, peer) in rows {
             let grams = &self.session.payments.hub.grams;
             let ask = match peer {
                 Some(MessageSender::User { user_id }) => (self.session.user(user_id).is_none()
-                    && !grams.asked_users.contains(&user_id))
-                .then_some((GramsPurpose::PeerUser, user_id)),
+                    && !grams.peers.contains_key(&PeerKey::User(user_id)))
+                .then_some((GramsPurpose::PeerUser, PeerKey::User(user_id))),
                 Some(MessageSender::Chat { chat_id }) => {
                     (!self.session.chats.contains_key(&chat_id)
-                        && !grams.asked_chats.contains(&chat_id))
-                    .then_some((GramsPurpose::PeerChat, chat_id))
+                        && !grams.peers.contains_key(&PeerKey::Chat(chat_id)))
+                    .then_some((GramsPurpose::PeerChat, PeerKey::Chat(chat_id)))
                 }
                 None => None,
             };
-            let Some((purpose, id)) = ask else {
+            let Some((purpose, key)) = ask else {
                 handled = index.saturating_add(1);
                 continue;
             };
-            let result = self.send_grams_for(purpose, Some(ChatId(id)), |extra| {
-                if purpose == GramsPurpose::PeerUser {
-                    get_user(extra, id)
-                } else {
-                    crate::telegram::requests::get_chat(extra, ChatId(id))
-                }
+            let result = self.send_grams(purpose, |extra| match key {
+                PeerKey::User(id) => get_user(extra, id),
+                PeerKey::Chat(id) => crate::telegram::requests::get_chat(extra, ChatId(id)),
             });
-            let grams = &mut self.session.payments.hub.grams;
-            if result.is_err() {
+            let Ok(request) = result else {
                 // Never left: not asked. Try again on the next tick (the
                 // names still wait) instead of keeping the placeholder for
                 // the session.
                 break;
-            }
-            if purpose == GramsPurpose::PeerUser {
-                grams.asked_users.insert(id);
-            } else {
-                grams.asked_chats.insert(id);
-            }
+            };
+            self.session
+                .payments
+                .hub
+                .grams
+                .peers
+                .insert(key, PeerAsk::Asked(request));
             handled = index.saturating_add(1);
             sent = true;
         }
-        self.session.payments.hub.grams.peers_handled(handled);
+        self.session.payments.hub.grams.rows.peers_handled(handled);
         sent
     }
 
@@ -203,7 +215,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // tdesktop `cloudPassword().reload()`, then the state it has.
         let auth = &self.session.auth_state;
         let has_password = (!auth.password_state_loading())
-            .then(|| auth.password_state.as_ref().map(|s| s.has_password))
+            .then(|| auth.password_state.get().map(|s| s.has_password))
             .flatten();
         if !auth.password_state_loading() {
             let _ = self.refresh_password_state();
@@ -236,10 +248,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Only this request's answer counts: a late answer to an earlier
         // try that was cancelled is dropped.
         self.session.payments.hub.grams.withdraw = Some(match &sent {
-            Ok(request) => GramWithdraw::Password {
-                request: Some(*request),
-                error: None,
-            },
+            Ok(request) => GramWithdraw::Sending(*request),
             // Nothing went out: the box says so and Submit can try again.
             Err(_) => {
                 GramWithdraw::idle(Some(crate::gift_manage::ExportError::Other(String::new())))

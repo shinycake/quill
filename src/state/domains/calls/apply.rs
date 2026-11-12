@@ -157,8 +157,10 @@ impl Session {
                         (call_id, self.calls.active_group_call.as_mut())
                         && tracked.id == call_id
                     {
-                        tracked.rtmp_url = Some(url);
-                        tracked.rtmp_stream_key = Some(stream_key);
+                        tracked.rtmp = Some(crate::calls::rtmp_start::RtmpInfo {
+                            url,
+                            key: stream_key,
+                        });
                     }
                 }
             }

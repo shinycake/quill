@@ -36,8 +36,8 @@ pub fn parse_portal_accent(text: &str) -> Option<u32> {
         .filter(|token| !token.is_empty())
         .filter_map(|token| token.parse().ok())
         .collect();
-    match numbers[..] {
-        [r, g, b] => rgb_from_unit(r, g, b),
+    match numbers.as_slice() {
+        [r, g, b] => rgb_from_unit(*r, *g, *b),
         _ => None,
     }
 }
@@ -88,8 +88,9 @@ pub fn read() -> Option<u32> {
 
 /// Starts a background read of the accent (Linux only; the other
 /// platforms read in [`read`]). Nothing starts while one runs, and after
-/// one failed (neither tool, or no accent) it gives up for good, as the
-/// idle-time read in `passcode` does.
+/// one failed (neither tool, no accent, or the session bus not up yet) the
+/// next one waits [`RETRY_AFTER`], so opening Appearance or focusing the
+/// window later reads again without every frame spawning `gdbus`.
 pub fn refresh() {
     #[cfg(target_os = "linux")]
     linux_refresh();
@@ -110,9 +111,14 @@ pub fn pending() -> bool {
     }
 }
 
+/// How long after a read that found nothing the next one may start.
+#[cfg(target_os = "linux")]
+const RETRY_AFTER: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// Where the background accent read stands; the last value read stays in
 /// every stage.
 #[cfg(target_os = "linux")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AccentRead {
     Idle {
         last: Option<u32>,
@@ -120,9 +126,10 @@ enum AccentRead {
     Reading {
         last: Option<u32>,
     },
-    /// A read found nothing; never retried.
+    /// A read found nothing; the next may start at `retry_at`.
     Failed {
         last: Option<u32>,
+        retry_at: std::time::Instant,
     },
 }
 
@@ -130,7 +137,35 @@ enum AccentRead {
 impl AccentRead {
     fn last(&self) -> Option<u32> {
         match self {
-            Self::Idle { last } | Self::Reading { last } | Self::Failed { last } => *last,
+            Self::Idle { last } | Self::Reading { last } | Self::Failed { last, .. } => *last,
+        }
+    }
+
+    /// A read may start at `now`: move to `Reading` and say so.
+    fn begin(&mut self, now: std::time::Instant) -> bool {
+        match *self {
+            Self::Idle { last } => {
+                *self = Self::Reading { last };
+                true
+            }
+            Self::Failed { last, retry_at } if now >= retry_at => {
+                *self = Self::Reading { last };
+                true
+            }
+            Self::Reading { .. } | Self::Failed { .. } => false,
+        }
+    }
+
+    /// The read ended at `now` with `value` (`None`: it found nothing).
+    fn finish(&mut self, value: Option<u32>, now: std::time::Instant) {
+        if let Self::Reading { last } = *self {
+            *self = match value {
+                Some(value) => Self::Idle { last: Some(value) },
+                None => Self::Failed {
+                    last,
+                    retry_at: now + RETRY_AFTER,
+                },
+            };
         }
     }
 }
@@ -138,41 +173,31 @@ impl AccentRead {
 #[cfg(target_os = "linux")]
 static LINUX: std::sync::Mutex<AccentRead> = std::sync::Mutex::new(AccentRead::Idle { last: None });
 
-/// Ends a read: a read that panicked counts as failed, so it is not retried
-/// every frame. A finished read has already left `Reading`.
+/// Ends a read: a read that panicked counts as one that found nothing. A
+/// finished read has already left `Reading`.
 #[cfg(target_os = "linux")]
 struct ReadDone;
 
 #[cfg(target_os = "linux")]
 impl Drop for ReadDone {
     fn drop(&mut self) {
-        let mut state = crate::locks::lock_or_recover(&LINUX);
-        if let AccentRead::Reading { last } = *state {
-            *state = AccentRead::Failed { last };
-        }
+        crate::locks::lock_or_recover(&LINUX).finish(None, std::time::Instant::now());
     }
 }
 
 #[cfg(target_os = "linux")]
 fn linux_refresh() {
     let mut state = crate::locks::lock_or_recover(&LINUX);
-    let AccentRead::Idle { last } = *state else {
+    if !state.begin(std::time::Instant::now()) {
         return;
-    };
-    *state = AccentRead::Reading { last };
+    }
     let spawned = crate::thread_guard::spawn_guarded("system-accent", || {
         let _done = ReadDone;
         let value = read_native().map(|rgb| rgb.max(1));
-        let mut state = crate::locks::lock_or_recover(&LINUX);
-        if let AccentRead::Reading { last } = *state {
-            *state = match value {
-                Some(value) => AccentRead::Idle { last: Some(value) },
-                None => AccentRead::Failed { last },
-            };
-        }
+        crate::locks::lock_or_recover(&LINUX).finish(value, std::time::Instant::now());
     });
     if spawned.is_err() {
-        *state = AccentRead::Failed { last };
+        state.finish(None, std::time::Instant::now());
     }
 }
 
@@ -279,6 +304,32 @@ mod tests {
         assert_eq!(gnome_accent("'slate'"), Some(0x6f8396));
         assert_eq!(gnome_accent("'unknown'"), None);
         assert_eq!(gnome_accent(""), None);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_read_that_found_nothing_is_tried_again_after_the_wait() {
+        use std::time::Instant;
+        let t0 = Instant::now();
+        let mut read = AccentRead::Idle { last: None };
+        assert!(read.begin(t0));
+        assert!(!read.begin(t0), "one read at a time");
+        read.finish(None, t0);
+        assert!(!read.begin(t0), "not again at once");
+        assert!(!read.begin(t0 + RETRY_AFTER / 2));
+        assert!(read.begin(t0 + RETRY_AFTER), "a later refresh reads again");
+        read.finish(Some(0x3584e4), t0 + RETRY_AFTER);
+        assert_eq!(read.last(), Some(0x3584e4));
+        assert!(
+            read.begin(t0 + RETRY_AFTER),
+            "a found accent is read afresh"
+        );
+        read.finish(None, t0 + RETRY_AFTER);
+        assert_eq!(
+            read.last(),
+            Some(0x3584e4),
+            "the last value survives a miss"
+        );
     }
 
     #[test]

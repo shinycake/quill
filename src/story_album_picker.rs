@@ -37,6 +37,12 @@ impl AlbumPicker {
         self.selected.contains(&story_id)
     }
 
+    /// The album now holds `story_ids` (their add was answered): they are
+    /// no longer changes to send.
+    pub fn album_holds(&mut self, story_ids: &[i32]) {
+        self.initial.extend(story_ids.iter().copied());
+    }
+
     pub fn toggle(&mut self, story_id: i32) {
         if !self.selected.remove(&story_id) {
             self.selected.insert(story_id);
@@ -115,6 +121,17 @@ mod tests {
         assert!(picker.only_adds());
         picker.toggle(9);
         assert!(picker.unchanged());
+    }
+
+    #[test]
+    fn adds_the_album_holds_are_not_sent_again() {
+        let mut picker = AlbumPicker::new(AlbumPickerTarget::Album(3), [5, 7]);
+        picker.toggle(9);
+        picker.toggle(7);
+        picker.album_holds(&[9]);
+        assert!(picker.added().is_empty(), "a retry sends no adds");
+        assert_eq!(picker.removed(), vec![7], "the removes are still to send");
+        assert!(picker.is_selected(9), "the tick stays");
     }
 
     #[test]

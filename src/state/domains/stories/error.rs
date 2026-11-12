@@ -17,6 +17,14 @@ impl Session {
             Some(RequestPurpose::Stories(StoriesPurpose::Live(purpose))) => {
                 self.apply_live_story_error(purpose, pending.map(|p| p.id), err);
             }
+            // The picker shows no options and the next open asks again.
+            Some(RequestPurpose::GetStoryAvailableReactions) => {
+                self.stories.available_reactions.failed(
+                    pending.map(|p| p.id),
+                    error_reason(err),
+                    false,
+                );
+            }
             Some(RequestPurpose::PostStory) => {
                 if let Some(request) = pending.map(|p| p.id) {
                     self.stories.post.outcomes.record(StoryPostOutcome::Failed {
@@ -133,10 +141,11 @@ impl Session {
             // silently showing only "Myself"; it is not the eligibility
             // check's error.
             Some(RequestPurpose::GetChatsToPostStories) => {
-                self.stories.post_as.fail(format!(
-                    "Could not load \"Post as\" chats: {}",
-                    error_reason(err)
-                ));
+                self.stories.post_as.failed(
+                    pending.map(|p| p.id),
+                    format!("Could not load \"Post as\" chats: {}", error_reason(err)),
+                    false,
+                );
             }
             // Phase 9.7: a story-page mutation error — the page's
             // status line shows it instead of spinning forever.
@@ -167,11 +176,12 @@ impl Session {
                 // too: it fails instead of loading forever.
                 if purpose == RequestPurpose::GetChatPostedToChatPageStories
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                    && let Some(generation) = pending.and_then(|p| p.search_generation)
                 {
                     self.fail_profile_tab(
                         chat_id,
                         SharedMediaTab::Stories,
-                        pending.and_then(|p| p.search_generation),
+                        generation,
                         crate::state::request_errors::call_request_error_line(
                             err,
                             "Could not load this tab",

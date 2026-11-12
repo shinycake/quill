@@ -9,7 +9,7 @@ use crate::passkeys::login::{
     HANDLE_INVALID, LoginStage, check_authentication_passkey,
     get_authentication_passkey_parameters, user_handle_valid,
 };
-use crate::state::{RequestPurpose, SettingsPurpose, ShutdownPhase};
+use crate::state::{RequestPurpose, SettingsPurpose};
 use crate::telegram::envelope::AuthorizationState;
 use crate::webauthn::Assertion;
 use std::time::Instant;
@@ -27,7 +27,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.auth,
             AuthorizationState::WaitPhoneNumber
                 | AuthorizationState::WaitOtherDeviceConfirmation { .. }
-        ) && matches!(self.session.shutdown, ShutdownPhase::Running)
+        ) && self.session.shutdown.is_running()
     }
 
     /// "Log in using passkey" (tdesktop `setupPasskeyLink`'s click): the

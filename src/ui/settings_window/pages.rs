@@ -6,7 +6,6 @@
 use super::rows::{group, link_row};
 use super::{QuillApp, SubPage};
 use crate::ui::navigation::NavigationAction as Nav;
-use crate::ui::settings_state::SystemAccent;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
 use quill::settings_catalog::Page;
@@ -96,8 +95,8 @@ impl QuillApp {
                     ],
                 )),
             Page::Appearance => {
-                self.ensure_wallpapers_loaded(cx);
-                if self.preferences.system_accent == SystemAccent::Unread {
+                self.download_wallpaper_files();
+                if self.preferences.system_accent.is_unread() {
                     self.refresh_system_accent(cx);
                 }
                 column
@@ -124,8 +123,10 @@ impl QuillApp {
             Page::System => {
                 let tray_ready = quill::tray::tray_available();
                 let tray_options = self.tray_options(tray_ready);
-                let tray =
-                    quill::tray::tray_setting_switches(tray_ready, self.appearance.show_tray_icon);
+                let tray = quill::tray::tray_setting_switches(
+                    tray_ready,
+                    self.appearance.work_mode.has_tray(),
+                );
                 let autostart = self.general_autostart_section(cx);
                 let autostart = self.setting_stand_in(
                     !tray_options.tray_icon,

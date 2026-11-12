@@ -42,7 +42,7 @@ pub(crate) fn open_pip_window(open: PipOpen, cx: &mut App) -> Option<PipWindow> 
     });
     let available = place::to_rect(screen.visible_bounds());
     let placement = place_on_screen(&position, available, ratio);
-    let slot = Rc::new(std::cell::RefCell::new(None));
+    let slot = Rc::new(std::cell::Cell::new(None));
     let slot_in = slot.clone();
     let window = cx
         .open_window(
@@ -97,7 +97,7 @@ pub(crate) fn open_pip_window(open: PipOpen, cx: &mut App) -> Option<PipWindow> 
                         cx,
                     )
                 });
-                *slot_in.borrow_mut() = Some(view.downgrade());
+                slot_in.set(Some(view.downgrade()));
                 let close_view = view.downgrade();
                 // The system's close (Alt+F4, the window menu) closes it
                 // like the button.
@@ -109,7 +109,7 @@ pub(crate) fn open_pip_window(open: PipOpen, cx: &mut App) -> Option<PipWindow> 
             },
         )
         .ok()?;
-    let view = slot.borrow_mut().take()?;
+    let view = slot.take()?;
     Some(PipWindow { window, view })
 }
 

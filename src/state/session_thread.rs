@@ -6,7 +6,27 @@ impl Session {
     /// Start resolving a thread (`getMessageThread`) for `message_id` of
     /// `chat_id`. Replaces any open thread.
     pub fn begin_thread(&mut self, chat_id: ChatId, message_id: MessageId) {
+        self.begin_thread_for(chat_id, message_id, ThreadAsker::Nobody);
+    }
+
+    /// Open the thread view for the window that asked.
+    pub fn begin_thread_for(&mut self, chat_id: ChatId, message_id: MessageId, asker: ThreadAsker) {
         let mut view = ThreadView::resolving(chat_id, message_id);
+        view.asker = asker;
+        // Pages the replaced view asked for answer to a window that is gone:
+        // they are forgotten, so their answers are ignored.
+        if let Some(old) = self.threads.thread.as_ref() {
+            let id = old.origin_message_id.0;
+            let purposes = [
+                RequestPurpose::GetMessageThreadHistory { message_id: id },
+                RequestPurpose::Threads(ThreadsPurpose::GetMessageThreadHistoryNewer {
+                    message_id: id,
+                }),
+            ];
+            for id in self.requests.ids_for_chat(&purposes, old.origin_chat_id) {
+                drop(self.requests.take(id));
+            }
+        }
         // A thread opened from inside a forum topic keeps that topic.
         if self.open_chat_id() == Some(chat_id) && self.chat_has_topics(chat_id) {
             view.forum_topic_id = self.open_forum_topic();
@@ -145,7 +165,7 @@ impl Session {
         };
         if Some(thread.origin_chat_id) != origin_chat
             || thread.origin_message_id.0 != message_id
-            || thread.history.stale_pages.remove(&pending.id.0)
+            || !thread.status.takes_page_of(pending.id)
         {
             return;
         }
@@ -219,24 +239,31 @@ impl Session {
         let Some(thread) = self.threads.thread.as_mut() else {
             return;
         };
-        if Some(thread.origin_chat_id) != origin_chat
-            || thread.origin_message_id.0 != message_id
-            || thread.history.stale_pages.remove(&pending.id.0)
-        {
+        if Some(thread.origin_chat_id) != origin_chat || thread.origin_message_id.0 != message_id {
             return;
         }
+        let resolving = matches!(pending.purpose, RequestPurpose::GetMessageThread { .. });
         if newer {
-            thread.history.fail_newer();
-        } else if !thread.status.is_loaded() {
-            thread.status = ThreadStatus::Failed(line);
-        } else {
+            if thread.status.is_loaded() {
+                thread.history.fail_newer();
+            }
+        } else if resolving {
+            // Only a thread still waiting for its resolve fails by it.
+            if thread.status == ThreadStatus::Resolving {
+                thread.status = ThreadStatus::Failed(line);
+            }
+        } else if thread.status.is_loaded() {
             thread.history.fail_older();
+        } else if matches!(thread.status, ThreadStatus::LoadingHistory(_))
+            && thread.status.takes_page_of(pending.id)
+        {
+            thread.status = ThreadStatus::Failed(line);
         }
     }
 
     /// Replace the open thread's window (jump to the latest replies): the
-    /// pages still in flight are marked stale. Returns whether a thread
-    /// was open.
+    /// pages still in flight are forgotten, so their answers are ignored.
+    /// Returns whether a thread was open.
     pub(crate) fn reset_thread_window(&mut self) -> bool {
         let Some(thread) = self.threads.thread.as_ref() else {
             return false;
@@ -247,13 +274,12 @@ impl Session {
             RequestPurpose::Threads(ThreadsPurpose::GetMessageThreadHistoryNewer { message_id }),
         ];
         let stale = self.requests.ids_for_chat(&purposes, thread.origin_chat_id);
+        for id in stale {
+            drop(self.requests.take(id));
+        }
         let Some(thread) = self.threads.thread.as_mut() else {
             return false;
         };
-        thread
-            .history
-            .stale_pages
-            .extend(stale.into_iter().map(|id| id.0));
         thread.reset_window();
         true
     }
@@ -326,6 +352,17 @@ impl Session {
     /// thread's rows, or hold it outside a window that stops short of the
     /// newest replies.
     pub(crate) fn thread_upsert(&mut self, row: HistoryMessage) {
+        // An own reply while newer replies are unloaded replaces the window
+        // (`note_live`): the pages still out belong to the old one.
+        let replaces_window = row.is_outgoing
+            && self
+                .threads
+                .thread
+                .as_ref()
+                .is_some_and(|thread| thread.history.has_newer());
+        if replaces_window {
+            self.reset_thread_window();
+        }
         if let Some(thread) = self.threads.thread.as_mut()
             && thread.note_live(row)
         {
@@ -355,11 +392,8 @@ impl Session {
             })
             .collect();
         let stale = self.requests.ids_for_chat(&purposes, thread.origin_chat_id);
-        if let Some(thread) = self.threads.thread.as_mut() {
-            thread
-                .history
-                .stale_pages
-                .extend(stale.into_iter().map(|id| id.0));
+        for id in stale {
+            drop(self.requests.take(id));
         }
     }
 

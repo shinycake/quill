@@ -186,7 +186,7 @@ impl QuillApp {
         let Some(chat) = session.chats.get(&chat_id.0) else {
             return false;
         };
-        if !(chat.can_post() && chat.can_send_basic_messages) {
+        if !(chat.can_post() && chat.can_send_basic_messages()) {
             return false;
         }
         if self
@@ -234,7 +234,7 @@ impl QuillApp {
             session
                 .open_chat_id()
                 .and_then(|chat| session.chats.get(&chat.0))
-                .is_some_and(|chat| chat.can_post() && chat.can_send_basic_messages)
+                .is_some_and(|chat| chat.can_post() && chat.can_send_basic_messages())
         });
         if !can_attach {
             return false;
@@ -371,9 +371,9 @@ impl QuillApp {
         let Some(focus) = focus else {
             return false;
         };
-        self.chat_ui.selection_anchor = Some(focus);
         self.chat_ui.focus = A11yFocus::Row(focus);
         self.toggle_forward_select(chat_id, focus, false, cx);
+        self.set_selection_anchor(focus);
         if self.selecting_in(chat_id) {
             // The keyboard stays on the rows: Space keeps toggling, Up and
             // Down move the focus (tdesktop focuses `HistoryInner`).
@@ -490,8 +490,7 @@ impl QuillApp {
         };
         if extend {
             let anchor = self
-                .chat_ui
-                .selection_anchor
+                .selection_anchor()
                 .filter(|id| ids.contains(id))
                 .or(old)
                 .unwrap_or(new);
@@ -510,9 +509,9 @@ impl QuillApp {
                     draft.toggle(chat_id, topic, id, false);
                 }
             }
-            self.chat_ui.selection_anchor = Some(anchor);
+            self.set_selection_anchor(anchor);
         } else {
-            self.chat_ui.selection_anchor = Some(new);
+            self.set_selection_anchor(new);
         }
         self.chat_ui.focus = A11yFocus::Row(new);
         self.scroll_selection_focus_into_view(new, cx);
@@ -533,7 +532,8 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return false;
         };
-        let pinned = session.pinned_chat_ids(self.chat_list.filter == ChatListFilter::Archived);
+        let pinned =
+            session.pinned_chat_ids(self.chat_list.view.filter() == ChatListFilter::Archived);
         let chats = visible_pinned(&self.listed_chat_ids(), &pinned);
         let Some(&chat_id) = chats.get(index) else {
             return false;
@@ -626,7 +626,7 @@ impl QuillApp {
             .into_iter()
             .map(quill::folder_order::FolderTab::folder_id)
             .collect();
-        let Some(target) = near_folder(&tabs, self.folders.tab, forward) else {
+        let Some(target) = near_folder(&tabs, self.chat_list.view.folder(), forward) else {
             return false;
         };
         self.open_folder_tab(target, cx);
@@ -662,8 +662,8 @@ impl QuillApp {
             return false;
         };
         let size = window.viewport_size();
-        self.chat_list.peek = crate::ui::chat_list_state::PeekPreview::Idle;
-        self.chat_list.menu = Some(ChatMenuState::at(
+        // The menu replaces a peek that was open: one thing floats.
+        self.message_ui.menu.open_row(ChatMenuState::at(
             chat_id,
             point(size.width - px(220.), px(64.)),
         ));

@@ -45,15 +45,15 @@ impl<S: JsonSender> ConnectDriver<S> {
                 return Ok(extra);
             }
             let extra = self.send_end_screen_sharing(group_call_id)?;
-            if let Some(engine) = self.call_engine.as_deref_mut()
-                && let Err(err) = engine.stop_screen_share(group_call_id)
-                && let Some(call) = self.session.calls.active_group_call.as_mut()
-            {
-                call.screen_share_error = Some(err.to_string());
-            }
+            let stop_error = self
+                .call_engine
+                .as_deref_mut()
+                .and_then(|engine| engine.stop_screen_share(group_call_id).err());
             if let Some(call) = self.session.calls.active_group_call.as_mut() {
-                call.screen_share.stop();
-                call.screen_share_paused = false;
+                match stop_error {
+                    Some(err) => call.screen_share.fail(err.to_string()),
+                    None => call.screen_share.stop(),
+                }
             }
             return Ok(extra);
         }
@@ -69,7 +69,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         if let Err(err) = engine.start_screen_share(group_call_id) {
             if let Some(call) = self.session.calls.active_group_call.as_mut() {
-                call.screen_share_error = Some(err.to_string());
+                call.screen_share.fail(err.to_string());
             }
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -78,7 +78,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             None,
         );
         if let Some(call) = self.session.calls.active_group_call.as_mut() {
-            call.screen_share.start();
+            call.screen_share.start(extra);
         }
         self.wait_for_offer(
             GroupOfferKey::Screen(group_call_id),
@@ -193,7 +193,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let (group_call_id, enable) = match &self.session.calls.active_group_call {
-            Some(call) => (call.id, !call.is_my_video_enabled),
+            Some(call) => (call.id, !call.my_video.is_enabled()),
             None => return Err(ConnectSendError::InvalidRequest),
         };
         let extra = self.session.request(
@@ -221,7 +221,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let (group_call_id, pause) = match &self.session.calls.active_group_call {
-            Some(call) if call.is_my_video_enabled => (call.id, !call.is_my_video_paused),
+            Some(call) if call.my_video.is_enabled() => (call.id, !call.my_video.is_paused()),
             _ => return Err(ConnectSendError::InvalidRequest),
         };
         let extra = self.session.request(

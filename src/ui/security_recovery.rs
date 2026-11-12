@@ -49,7 +49,7 @@ impl QuillApp {
     /// The one-time result line of a finished step (tdesktop's inform
     /// boxes), shown above the status screen.
     pub(super) fn twofa_notice_line(&self) -> Option<String> {
-        let notice = self.session()?.auth_state.twofa_flow.notice?;
+        let notice = self.session()?.auth_state.twofa_flow.notice()?;
         Some(match notice {
             TwofaNotice::PasswordRemoved => tr(keys::CLOUD_PASSWORD_REMOVED).to_string(),
             TwofaNotice::PasswordRecovered => tr(keys::CLOUD_PASSWORD_UPDATED).to_string(),
@@ -75,22 +75,6 @@ impl QuillApp {
                 tr(keys::Q_PREFS_YOUR_RECOVERY_EMAIL_IS_CONFIRMED).to_string()
             }
         })
-    }
-
-    /// Forget the one-time notice and any half-finished recovery step.
-    pub(super) fn clear_twofa_flow(&mut self) {
-        let flow = if let Some(live) = self.live.as_mut() {
-            Some(&mut live.driver.session.auth_state.twofa_flow)
-        } else {
-            self.demo_session
-                .as_mut()
-                .map(|s| &mut s.auth_state.twofa_flow)
-        };
-        if let Some(flow) = flow {
-            flow.notice = None;
-            flow.code_wait = quill::state::CodeWait::None;
-        }
-        self.twofa.set_confirm(None);
     }
 
     /// The pending recovery email: code entry, resend, abort.
@@ -242,14 +226,10 @@ impl QuillApp {
         let session = self.session();
         let state = session
             .as_ref()
-            .and_then(|s| s.auth_state.password_state.clone());
-        let code_sent_to = session.as_ref().and_then(|s| {
-            s.auth_state
-                .twofa_flow
-                .code_wait
-                .recovery()
-                .map(str::to_string)
-        });
+            .and_then(|s| s.auth_state.password_state.get().cloned());
+        let code_sent_to = session
+            .as_ref()
+            .and_then(|s| s.auth_state.twofa_flow.recovery().map(str::to_string));
         let loading = session
             .as_ref()
             .is_some_and(|s| s.auth_state.password_state_loading());
@@ -288,14 +268,16 @@ impl QuillApp {
                             .primary()
                             .disabled(loading)
                             .on_click(cx.listener(|this, _, _, cx| {
-                                if let Some(live) = this.live.as_mut() {
-                                    let _ = live.driver.reset_twofa_password();
-                                }
+                                let sent = this
+                                    .live
+                                    .as_mut()
+                                    .is_none_or(|live| live.driver.reset_twofa_password().is_ok());
+                                this.twofa_sent(sent);
                                 cx.notify();
                             })),
                     );
             }
-            return self.twofa_back_row(cx, body);
+            return self.twofa_back_row(cx, self.twofa_refusal_line(body));
         }
         if let Some(pattern) = code_sent_to {
             body = body
@@ -353,9 +335,10 @@ impl QuillApp {
                                 .ghost()
                                 .disabled(loading)
                                 .on_click(cx.listener(|this, _, _, cx| {
-                                    if let Some(live) = this.live.as_mut() {
-                                        let _ = live.driver.request_twofa_recovery_code();
-                                    }
+                                    let sent = this.live.as_mut().is_none_or(|live| {
+                                        live.driver.request_twofa_recovery_code().is_ok()
+                                    });
+                                    this.twofa_sent(sent);
                                     cx.notify();
                                 })),
                         ),
@@ -380,9 +363,10 @@ impl QuillApp {
                         .primary()
                         .disabled(loading)
                         .on_click(cx.listener(|this, _, _, cx| {
-                            if let Some(live) = this.live.as_mut() {
-                                let _ = live.driver.request_twofa_recovery_code();
-                            }
+                            let sent = this.live.as_mut().is_none_or(|live| {
+                                live.driver.request_twofa_recovery_code().is_ok()
+                            });
+                            this.twofa_sent(sent);
                             cx.notify();
                         })),
                 )
@@ -405,8 +389,23 @@ impl QuillApp {
                 tr(keys::CANCEL),
                 loading,
             ));
+            body = self.twofa_refusal_line(body);
         }
         self.twofa_back_row(cx, body)
+    }
+
+    /// The notice line (a refused send), under a screen with no form.
+    fn twofa_refusal_line(&self, body: Div) -> Div {
+        body.when_some(self.twofa.notice().cloned(), |this, note| {
+            this.child(div().text_xs().text_color(danger()).child(note))
+        })
+    }
+
+    /// A button's request: say so when the driver refused it, clear the
+    /// line when it went.
+    fn twofa_sent(&mut self, sent: bool) {
+        self.twofa
+            .set_notice((!sent).then(|| tr(keys::Q_OPS_REQUEST_NOT_SENT).to_string()));
     }
 
     fn twofa_back_row(&self, cx: &mut Context<Self>, body: Div) -> Div {
@@ -462,9 +461,9 @@ impl QuillApp {
                             .primary()
                             .disabled(loading)
                             .on_click(cx.listener(move |this, _, _, cx| {
-                                this.twofa.set_confirm(None);
-                                if let Some(live) = this.live.as_mut() {
-                                    let _ = match confirm {
+                                // A refused send keeps the box open and says so.
+                                let sent = this.live.as_mut().is_none_or(|live| {
+                                    match confirm {
                                         TwofaConfirm::Reset { .. } => {
                                             live.driver.reset_twofa_password()
                                         }
@@ -475,8 +474,13 @@ impl QuillApp {
                                         TwofaConfirm::AbortRecoveryEmail => {
                                             live.driver.cancel_recovery_email_setup()
                                         }
-                                    };
+                                    }
+                                    .is_ok()
+                                });
+                                if sent {
+                                    this.twofa.set_confirm(None);
                                 }
+                                this.twofa_sent(sent);
                                 cx.notify();
                             })),
                     )
@@ -527,8 +531,8 @@ impl QuillApp {
         let Some(flow) = self.session().map(|s| &s.auth_state.twofa_flow) else {
             return;
         };
-        let finished = flow.notice.is_some();
-        let code_sent = flow.code_wait.login_email().is_some();
+        let finished = flow.notice().is_some();
+        let code_sent = flow.login_email().is_some();
         let twofa = &self.twofa;
         let lines = [
             (finished, twofa.code.clone()),
@@ -554,13 +558,9 @@ impl QuillApp {
     /// Login email: new address, then the code sent to it.
     pub(super) fn twofa_login_email_body(&self, cx: &mut Context<Self>, body: Div) -> Div {
         let session = self.session();
-        let code_sent_to = session.as_ref().and_then(|s| {
-            s.auth_state
-                .twofa_flow
-                .code_wait
-                .login_email()
-                .map(str::to_string)
-        });
+        let code_sent_to = session
+            .as_ref()
+            .and_then(|s| s.auth_state.twofa_flow.login_email().map(str::to_string));
         let loading = session
             .as_ref()
             .is_some_and(|s| s.auth_state.password_state_loading());
@@ -598,9 +598,10 @@ impl QuillApp {
                                 .ghost()
                                 .disabled(loading)
                                 .on_click(cx.listener(|this, _, _, cx| {
-                                    if let Some(live) = this.live.as_mut() {
-                                        let _ = live.driver.resend_login_email_code();
-                                    }
+                                    let sent = this.live.as_mut().is_none_or(|live| {
+                                        live.driver.resend_login_email_code().is_ok()
+                                    });
+                                    this.twofa_sent(sent);
                                     cx.notify();
                                 })),
                         ),
@@ -680,7 +681,7 @@ impl QuillApp {
     pub(super) fn drain_twofa_step(&mut self) -> bool {
         let finished = self
             .session()
-            .is_some_and(|s| s.auth_state.twofa_flow.notice.is_some());
+            .is_some_and(|s| s.auth_state.twofa_flow.notice().is_some());
         if !finished
             || !matches!(
                 self.twofa.view(),
@@ -689,7 +690,7 @@ impl QuillApp {
         {
             return false;
         }
-        self.twofa.goto(TwofaView::Status);
+        self.twofa_step_done();
         true
     }
 }

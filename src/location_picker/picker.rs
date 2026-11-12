@@ -43,16 +43,9 @@ enum AddressStage {
     Wanted(GeoPoint),
     /// The UI is looking this place up.
     Resolving(GeoPoint),
-    Shown {
-        point: GeoPoint,
-        text: String,
-    },
-    /// The pin is lifted: the address is kept for a return to the same
-    /// place.
-    HiddenWhileMoving {
-        point: GeoPoint,
-        text: String,
-    },
+    /// The address for `point`. While the pin is lifted ([`Pin::Moving`])
+    /// it is kept but not drawn, for a return to the same place.
+    Shown { point: GeoPoint, text: String },
 }
 
 impl AddressStage {
@@ -61,7 +54,7 @@ impl AddressStage {
         match self {
             Self::Idle | Self::Postponed(_) => None,
             Self::Wanted(point) | Self::Resolving(point) => Some(*point),
-            Self::Shown { point, .. } | Self::HiddenWhileMoving { point, .. } => Some(*point),
+            Self::Shown { point, .. } => Some(*point),
         }
     }
 }
@@ -138,21 +131,39 @@ impl SearchInput {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum TileState {
-    Requested(u64),
+    /// Asked under request `extra`, after `failed` asks for it failed.
+    Requested {
+        extra: u64,
+        failed: u8,
+    },
     Ready(FileId),
-    Failed,
+    /// This many asks in a row failed. Under [`TILE_TRIES`] the tile is
+    /// asked again; at it the tile waits for the map to move or resize.
+    Failed(u8),
+}
+
+/// How many times in a row a tile is asked for before it waits for the map
+/// to move or change size.
+const TILE_TRIES: u8 = 3;
+
+/// The pin: lifted while the map moves; once it rests away from the place
+/// the venues were asked for, the "search this area" button shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Pin {
+    Resting,
+    Moving,
+    RestedAway,
 }
 
 #[derive(Debug)]
 pub struct LocationPicker {
     chat_id: ChatId,
     view: MapView,
-    moving: bool,
+    pin: Pin,
     map_size: Option<MapSize>,
     here: HereState,
     address: Address,
     venues: VenueSearch,
-    places_in_area: bool,
     tiles: Vec<(TileKey, TileState)>,
 }
 
@@ -173,7 +184,7 @@ impl LocationPicker {
         let mut picker = Self {
             chat_id,
             view,
-            moving: false,
+            pin: Pin::Resting,
             map_size: None,
             here: HereState::Locating,
             address: Address::default(),
@@ -187,7 +198,6 @@ impl LocationPicker {
                 no_search_location: None,
                 input: SearchInput::Closed,
             },
-            places_in_area: false,
             tiles: Vec::new(),
         };
         if let Some(point) = last_exact {
@@ -207,7 +217,7 @@ impl LocationPicker {
     }
 
     pub fn is_moving(&self) -> bool {
-        self.moving
+        self.pin == Pin::Moving
     }
 
     pub fn here(&self) -> HereState {
@@ -219,7 +229,7 @@ impl LocationPicker {
     }
 
     pub fn places_in_area_shown(&self) -> bool {
-        self.places_in_area
+        self.pin == Pin::RestedAway
     }
 
     pub fn can_search(&self) -> bool {
@@ -242,7 +252,9 @@ impl LocationPicker {
     }
 
     pub fn address_line(&self) -> AddressLine<'_> {
-        if let AddressStage::Shown { text, .. } = &self.address.stage {
+        if let AddressStage::Shown { text, .. } = &self.address.stage
+            && self.pin != Pin::Moving
+        {
             AddressLine::Text(text)
         } else if self.address.ever_shown {
             AddressLine::Loading
@@ -258,6 +270,10 @@ impl LocationPicker {
 
     /// The UI's map area changed size (tiles are asked at this size).
     pub fn set_map_size(&mut self, size: MapSize) {
+        if self.map_size != Some(size) {
+            self.tiles
+                .retain(|(_, state)| !matches!(state, TileState::Failed(_)));
+        }
         self.map_size = Some(size);
     }
 
@@ -268,17 +284,15 @@ impl LocationPicker {
     /// tdesktop `move_start`: the pin lifts, the address hides (kept for a
     /// return to the same place), the venue button hides.
     pub fn move_started(&mut self) {
-        if self.moving {
+        if self.pin == Pin::Moving {
             return;
         }
-        self.moving = true;
-        self.address.stage = match std::mem::take(&mut self.address.stage) {
-            AddressStage::Shown { point, text } => AddressStage::HiddenWhileMoving { point, text },
-            // A lookup not started is dropped; one under way goes on.
-            AddressStage::Postponed(_) => AddressStage::Idle,
-            other => other,
-        };
-        self.places_in_area = false;
+        self.pin = Pin::Moving;
+        // A lookup not started is dropped; one under way goes on, and a
+        // shown address is kept (not drawn while the pin is lifted).
+        if matches!(self.address.stage, AddressStage::Postponed(_)) {
+            self.address.stage = AddressStage::Idle;
+        }
     }
 
     /// The map moved to `view` (a drag or a zoom step); no request yet.
@@ -289,23 +303,22 @@ impl LocationPicker {
 
     /// tdesktop `move_end`, sent half a second after the map stops.
     pub fn move_ended(&mut self) {
-        if !self.moving {
+        if self.pin != Pin::Moving {
             return;
         }
-        self.moving = false;
+        self.pin = Pin::Resting;
+        // A tile that failed is asked again once the map rests.
+        self.tiles
+            .retain(|(_, state)| !matches!(state, TileState::Failed(_)));
         let location = self.view.center();
         self.address.stage = match std::mem::take(&mut self.address.stage) {
-            // Back at the place the address is for.
-            AddressStage::HiddenWhileMoving { point, text }
-                if same_place(Some(point), Some(location)) =>
+            // The address, or a lookup already out, is for this place.
+            kept @ (AddressStage::Shown { .. }
+            | AddressStage::Wanted(_)
+            | AddressStage::Resolving(_))
+                if same_place(kept.point(), Some(location)) =>
             {
-                AddressStage::Shown { point, text }
-            }
-            // A lookup for this place is already out.
-            pending @ (AddressStage::Wanted(_) | AddressStage::Resolving(_))
-                if same_place(pending.point(), Some(location)) =>
-            {
-                pending
+                kept
             }
             _ => AddressStage::Postponed(location),
         };
@@ -313,7 +326,7 @@ impl LocationPicker {
             self.venues.request.as_ref().map(|r| r.point),
             Some(location),
         ) {
-            self.places_in_area = true;
+            self.pin = Pin::RestedAway;
         }
         self.venues.search_location = Some(location);
     }
@@ -356,13 +369,15 @@ impl LocationPicker {
             .map(|name| name.trim().to_string())
             .filter(|name| !name.is_empty())
             .unwrap_or_else(|| point.coordinates_label());
-        // An answer that lands while the pin is lifted waits for its return.
-        self.address.stage = if self.moving {
-            AddressStage::HiddenWhileMoving { point, text }
-        } else {
-            AddressStage::Shown { point, text }
-        };
+        // An answer that lands while the pin is lifted is drawn on its return.
+        self.address.stage = AddressStage::Shown { point, text };
         self.address.ever_shown = true;
+    }
+
+    /// A new "where am I" lookup began: the picker is locating again until
+    /// [`Self::geolocated`] answers it.
+    pub(super) fn locate_started(&mut self) {
+        self.here = HereState::Locating;
     }
 
     /// tdesktop `resolveCurrentLocation`'s callback. A new exact fix flies
@@ -401,7 +416,9 @@ impl LocationPicker {
     }
 
     pub fn search_places_in_area(&mut self) {
-        self.places_in_area = false;
+        if self.pin == Pin::RestedAway {
+            self.pin = Pin::Resting;
+        }
         self.request_venues(self.view.center(), "");
     }
 
@@ -526,13 +543,36 @@ impl LocationPicker {
         self.apply_venues(venues);
     }
 
+    /// The lookup failed: the list says so and offers a retry.
     pub(super) fn venues_failed(&mut self, generation: u64) {
         if generation == self.venues.generation {
             if let Some(ask) = self.venues.request.as_mut() {
                 ask.stage = AskStage::Failed;
             }
+            self.venues.list = VenueList::Failed;
+        }
+    }
+
+    /// There is no venue bot to ask: nothing to find, and nothing to retry.
+    pub(super) fn venues_unavailable(&mut self, generation: u64) {
+        if generation == self.venues.generation {
+            if let Some(ask) = self.venues.request.as_mut() {
+                ask.stage = AskStage::Answered;
+            }
             self.apply_venues(Vec::new());
         }
+    }
+
+    /// The Retry under a failed list: ask for the same place and text again.
+    pub fn retry_venues(&mut self) {
+        if self.venues.list != VenueList::Failed {
+            return;
+        }
+        let Some(point) = self.venues.request.as_ref().map(|ask| ask.point) else {
+            return;
+        };
+        let query = self.venues.initial_query.clone();
+        self.request_venues(point, &query);
     }
 
     fn apply_venues(&mut self, venues: Vec<Venue>) {
@@ -546,21 +586,44 @@ impl LocationPicker {
     }
 
     pub(super) fn tile_to_request(&self) -> Option<TileKey> {
-        if self.moving {
+        if self.pin == Pin::Moving {
             return None;
         }
         let key = TileKey::for_view(&self.view, self.map_size?);
-        (!self.tiles.iter().any(|(known, _)| *known == key)).then_some(key)
+        match self.tile_state(key) {
+            None => Some(key),
+            // A failed ask is repeated a few times, so a view the user
+            // leaves alone does not stay blank after one lost answer.
+            Some(TileState::Failed(failed)) if failed < TILE_TRIES => Some(key),
+            Some(_) => None,
+        }
+    }
+
+    fn tile_state(&self, key: TileKey) -> Option<TileState> {
+        self.tiles
+            .iter()
+            .find(|(known, _)| *known == key)
+            .map(|(_, state)| *state)
+    }
+
+    /// How many asks for `key` failed in a row so far.
+    fn tile_failures(&self, key: TileKey) -> u8 {
+        match self.tile_state(key) {
+            Some(TileState::Failed(failed) | TileState::Requested { failed, .. }) => failed,
+            Some(TileState::Ready(_)) | None => 0,
+        }
     }
 
     pub(super) fn tile_requested(&mut self, key: TileKey, extra: u64) {
+        let failed = self.tile_failures(key);
         self.tiles.retain(|(known, _)| *known != key);
-        self.tiles.push((key, TileState::Requested(extra)));
+        self.tiles
+            .push((key, TileState::Requested { extra, failed }));
         while self.tiles.len() > TILE_CAP {
             let Some(index) = self
                 .tiles
                 .iter()
-                .position(|(_, state)| !matches!(state, TileState::Requested(_)))
+                .position(|(_, state)| !matches!(state, TileState::Requested { .. }))
             else {
                 break;
             };
@@ -569,19 +632,29 @@ impl LocationPicker {
     }
 
     pub(super) fn tile_answered(&mut self, extra: u64, file_id: Option<FileId>) -> bool {
-        let Some(entry) = self
-            .tiles
-            .iter_mut()
-            .find(|(_, state)| *state == TileState::Requested(extra))
-        else {
-            return false;
-        };
-        entry.1 = file_id.map_or(TileState::Failed, TileState::Ready);
-        true
+        for (_, state) in &mut self.tiles {
+            if let TileState::Requested {
+                extra: asked,
+                failed,
+            } = *state
+                && asked == extra
+            {
+                *state = match file_id {
+                    Some(file_id) => TileState::Ready(file_id),
+                    None => TileState::Failed(failed.saturating_add(1)),
+                };
+                return true;
+            }
+        }
+        false
     }
 
+    /// The ask for `key` could not be sent: one more failed try, so a send
+    /// that is refused every time is not repeated on every pass.
     pub(super) fn tile_unsent(&mut self, key: TileKey) {
+        let failed = self.tile_failures(key).saturating_add(1);
         self.tiles.retain(|(known, _)| *known != key);
+        self.tiles.push((key, TileState::Failed(failed)));
     }
 
     /// Tiles with a file, oldest first; the one for the current view last

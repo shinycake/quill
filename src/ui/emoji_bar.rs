@@ -36,17 +36,47 @@ const FADE: f32 = 48.;
 /// Tiles treated as on screen before the bar has been laid out.
 const FIRST_FRAME_TILES: usize = 16;
 
-/// The bar's scroll positions and whether it is open as a grid.
+/// Who the composer's one bar is showing a list for.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) enum BarOwner {
+    /// No list: a closed strip at its start.
+    #[default]
+    Free,
+    /// The `:` query's suggestions.
+    Suggest,
+    /// A highlighted or asked word (`emoji_words_ui`).
+    Word,
+}
+
+/// The bar's scroll positions and whether it is open as a grid, for the
+/// list of its [`BarOwner`]. A new list claims it afresh; a closer lets
+/// go of it only while its own list is the one showing, so a word bar
+/// closing never resets the suggestions that took the bar over.
 #[derive(Default)]
 pub(super) struct EmojiBarUi {
+    owner: BarOwner,
     pub expanded: bool,
     pub strip: ScrollHandle,
     pub grid: ScrollHandle,
 }
 
 impl EmojiBarUi {
-    /// Back to a closed strip at its start, for a new list.
-    pub fn reset(&mut self) {
+    /// `owner` starts a new list: a closed strip at its start.
+    pub fn restart(&mut self, owner: BarOwner) {
+        self.reset();
+        self.owner = owner;
+    }
+
+    /// `owner` closed its list: the bar goes back to a closed strip,
+    /// unless another owner's list has the bar now.
+    pub fn release(&mut self, owner: BarOwner) {
+        if self.owner == owner {
+            self.reset();
+            self.owner = BarOwner::Free;
+        }
+    }
+
+    fn reset(&mut self) {
         self.expanded = false;
         self.strip.set_offset(point(px(0.), px(0.)));
         self.grid.set_offset(point(px(0.), px(0.)));
@@ -165,7 +195,9 @@ enum Side {
 
 impl QuillApp {
     /// The custom emoji for `items`, after them, when the user can send
-    /// custom emoji; asks for the installed sets' contents it lacks.
+    /// custom emoji; asks for the installed sets' contents it lacks (a
+    /// failed installed list is asked for again by
+    /// [`Self::retry_suggestion_emoji_sets`] when a list opens).
     pub(super) fn with_custom_emoji(&mut self, mut items: Vec<SuggestItem>) -> Vec<SuggestItem> {
         let Some(session) = self.session() else {
             return items;
@@ -191,6 +223,14 @@ impl QuillApp {
         items
     }
 
+    /// A new list opens (a `:` query, a word's bar): ask for the
+    /// installed emoji sets again if their list failed.
+    pub(super) fn retry_suggestion_emoji_sets(&mut self) {
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.retry_suggestion_emoji_sets();
+        }
+    }
+
     /// How many installed emoji sets have their contents: the bar is
     /// rebuilt when this moves.
     pub(super) fn custom_sets_loaded(&self) -> usize {
@@ -212,7 +252,7 @@ impl QuillApp {
         bar.expanded = !bar.expanded;
         bar.grid.set_offset(point(px(0.), px(0.)));
         // Keep the highlighted tile in view in the new layout.
-        if let Some(at) = self.composer_ui.suggest.selected {
+        if let Some(at) = self.composer_ui.suggest.selected() {
             self.composer_ui.suggest.bar.handle().scroll_to_item(at);
         }
         cx.notify();
@@ -450,11 +490,11 @@ impl QuillApp {
     /// hovered word's. Place it inside the input row (`relative()`).
     pub(super) fn emoji_bar_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let suggest = &self.composer_ui.suggest;
-        let spec = match suggest.active.as_ref() {
+        let spec = match suggest.active() {
             Some(active) if active.query.kind != quill::suggest::SuggestKind::Hashtag => BarSpec {
                 id: "suggest-item",
-                items: &active.items,
-                selected: suggest.selected,
+                items: active.items,
+                selected: active.selected,
                 pick: QuillApp::pick_suggest_index,
                 bounds_out: None,
                 on_leave: None,

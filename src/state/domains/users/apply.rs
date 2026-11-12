@@ -63,9 +63,14 @@ impl Session {
                         .answered(pending.map(|p| p.id), user_ids);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetCloseFriends) {
                     // B14: `getCloseFriends` answer.
-                    self.stories.close_friends = CloseFriendsList::Ready(user_ids);
+                    self.stories
+                        .close_friends
+                        .answered(pending.map(|p| p.id), user_ids);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetRecentInlineBots) {
-                    self.bots.reply_keyboards.recent_inline_bots = Some(user_ids);
+                    self.bots
+                        .reply_keyboards
+                        .recent_inline_bots
+                        .answered(pending.map(|p| p.id), user_ids);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBotSimilarBots)
                     && let Some(pending) = pending
                     && let Some(bot_user_id) = pending.user_id
@@ -74,9 +79,9 @@ impl Session {
                     // objects arrive via `updateUser`; ids alone drive the
                     // list (Telegram X `SharedChatsController` similarly
                     // resolves users from its cache).
-                    self.bots
-                        .similar_bots
-                        .insert(bot_user_id, SimilarBotsFetch::Loaded(user_ids));
+                    if let Some(fetch) = self.bots.similar_bots.get_mut(&bot_user_id) {
+                        fetch.answered(Some(pending.id), user_ids);
+                    }
                 }
             }
             // Phase B1: secret chat lifecycle (schema 1.8.67, lines
@@ -100,6 +105,17 @@ impl Session {
                 ) {
                     // Settings → My Grams asked for a user its history
                     // names; store it unless an update already did.
+                    if let Some(pending) = pending
+                        && pending.purpose == RequestPurpose::Bots(BotsPurpose::GroupBotUser)
+                        && let Some(bot) = pending.user_id
+                        && self
+                            .bots
+                            .bot_users
+                            .get(&bot)
+                            .is_some_and(|fetch| fetch.waits_for(pending.id))
+                    {
+                        self.bots.bot_users.remove(&bot);
+                    }
                     if let Some(user) = user
                         && !self.users.contains_key(&user_id)
                     {
@@ -128,6 +144,7 @@ impl Session {
                     self.accept_message_author(chat_id, message_id, user_id);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetMe) {
                     self.my_user_id = Some(user_id);
+                    self.users_state.my_id_probe.answered(extra, ());
                 } else if matches!(
                     pending.map(|p| p.purpose),
                     Some(RequestPurpose::Bots(BotsPurpose::CreateBot { .. }))
@@ -140,7 +157,7 @@ impl Session {
                     == Some(RequestPurpose::GetChatOwnerAfterLeaving)
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
                 {
-                    self.accept_owner_after_leaving(chat_id.0, user_id);
+                    self.accept_owner_after_leaving(chat_id.0, pending.map(|p| p.id), user_id);
                 } else if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve {
                     generation,
                 })) = pending.map(|p| p.purpose)
@@ -258,7 +275,7 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::AddContactByPhone) {
                     // tdesktop `AddContactBox::save`: a user id means the
                     // phone is on Telegram (open the chat), 0 means not.
-                    self.users_state.contacts = crate::state::fetch::Fetch::Idle;
+                    self.users_state.contacts.outdate();
                     // A box closed before its answer opens nothing.
                     let Some(id) = pending.map(|p| p.id) else {
                         return;
@@ -275,7 +292,7 @@ impl Session {
                         NewContact::Done(id, NewContactOutcome::NotJoined)
                     };
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::ImportContacts) {
-                    self.users_state.contacts = crate::state::fetch::Fetch::Idle;
+                    self.users_state.contacts.outdate();
                     self.users_state.contacts_notice = Some("Contacts imported.".to_string());
                 }
             }
@@ -294,7 +311,9 @@ impl Session {
                     pending.map(|p| p.purpose)
                 {
                     let now = i64::try_from(crate::state::unix_ms_now() / 1000).unwrap_or(0);
-                    self.users_state.peer_qr.accept_link(free, answer, now);
+                    if let Some(id) = pending.map(|p| p.id) {
+                        self.users_state.peer_qr.accept_link(free, id, answer, now);
+                    }
                 }
             }
         }

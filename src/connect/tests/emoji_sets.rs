@@ -64,7 +64,7 @@ fn custom_emoji_pack_search_paging_previews_and_mutation_races() {
         &mut driver,
         json!({"@type":"trendingStickerSets","@extra":first.as_extra(),"total_count":3,"sets":[set(1,true),set(2,false)],"is_premium":false}),
     );
-    assert!(driver.session.stickers.emoji.trending_has_more);
+    assert!(driver.session.stickers.emoji.lists.trending.has_more());
     assert_eq!(
         sent_request(&recorder, "viewTrendingStickerSets")["sticker_set_ids"],
         json!([1, 2])
@@ -78,9 +78,17 @@ fn custom_emoji_pack_search_paging_previews_and_mutation_races() {
         &mut driver,
         json!({"@type":"trendingStickerSets","@extra":more.as_extra(),"total_count":3,"sets":[set(2,false)]}),
     );
-    assert_eq!(driver.session.stickers.emoji.trending_sets.len(), 2);
-    assert!(!driver.session.stickers.emoji.trending_has_more); // Raw page length, not deduped count.
-    assert!(driver.session.stickers.stickers.stickers.is_empty());
+    assert_eq!(driver.session.stickers.emoji.lists.trending.sets().len(), 2);
+    assert!(!driver.session.stickers.emoji.lists.trending.has_more()); // Raw page length, not deduped count.
+    assert!(
+        driver
+            .session
+            .stickers
+            .stickers
+            .selection
+            .stickers
+            .is_empty()
+    );
     let remove = driver.set_emoji_pack_installed(1, false).unwrap().unwrap();
     assert_eq!(
         driver.session.stickers.emoji.mutation.running(),
@@ -151,7 +159,9 @@ fn custom_emoji_pack_search_paging_previews_and_mutation_races() {
             .session
             .stickers
             .emoji
-            .trending_sets
+            .lists
+            .trending
+            .sets()
             .iter()
             .all(|set| !set.is_installed)
     );
@@ -422,14 +432,14 @@ fn animated_emoji_suggestion_requests_once_per_emoji_and_clears() {
         &mut driver,
         json!({"@type":"animatedEmoji","@extra":first.as_extra(),"sticker":null,"sticker_width":0,"sticker_height":0,"fitzpatrick_type":0,"sound":null}),
     );
-    assert!(driver.session.stickers.emoji.animated_emoji.is_none());
+    assert!(driver.session.stickers.emoji.animated.sticker().is_none());
     // No trailing emoji clears the suggestion and the dedupe marker.
     assert_eq!(
         driver.update_animated_emoji_suggestion("hello").unwrap(),
         None
     );
-    assert!(driver.session.stickers.emoji.animated_emoji.is_none());
-    assert!(driver.session.stickers.emoji.animated_emoji_for.is_none());
+    assert!(driver.session.stickers.emoji.animated.sticker().is_none());
+    assert!(driver.session.stickers.emoji.animated.emoji_for().is_none());
     drop(driver);
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -455,9 +465,15 @@ fn the_suggestion_bar_asks_for_the_installed_sets_until_they_answer() {
     assert!(driver.ensure_suggestion_emoji_sets().is_err());
     assert_eq!(asked(&recorder), 0);
     recorder.refuse_sends(false);
-    driver.ensure_suggestion_emoji_sets().unwrap();
+    assert!(driver.ensure_suggestion_emoji_sets().is_ok());
+    assert_eq!(
+        asked(&recorder),
+        0,
+        "a refused send is not re-asked by a rebuild"
+    );
+    driver.retry_suggestion_emoji_sets().unwrap();
     assert_eq!(asked(&recorder), 1);
-    driver.ensure_suggestion_emoji_sets().unwrap();
+    driver.retry_suggestion_emoji_sets().unwrap();
     assert_eq!(asked(&recorder), 1, "one request in flight is enough");
     let sent = recorder
         .snapshot()
@@ -481,6 +497,12 @@ fn the_suggestion_bar_asks_for_the_installed_sets_until_they_answer() {
             .is_some()
     );
     driver.ensure_suggestion_emoji_sets().unwrap();
-    assert_eq!(asked(&recorder), 2, "a failed list is asked for again");
+    assert_eq!(asked(&recorder), 1, "a rebuild does not re-ask a failure");
+    driver.retry_suggestion_emoji_sets().unwrap();
+    assert_eq!(
+        asked(&recorder),
+        2,
+        "a new list asks for a failed list again"
+    );
     let _ = dir;
 }

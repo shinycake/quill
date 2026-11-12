@@ -24,8 +24,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self
             .session
             .chat_list
-            .folder_chats_exhausted
-            .contains(&folder_id)
+            .folder_paging_of(folder_id)
+            .is_exhausted()
         {
             return Ok(None);
         }
@@ -189,6 +189,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         folder_id: i32,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
+            self.session
+                .chat_list
+                .folder_specs
+                .fail(folder_id, ConnectSendError::InvalidRequest.stage_line());
             return Err(ConnectSendError::InvalidRequest);
         }
         if self
@@ -222,6 +226,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         folder_id: i32,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
+            self.session
+                .chat_list
+                .folder_chats_to_leave
+                .entry(folder_id)
+                .or_default()
+                .fail(ConnectSendError::InvalidRequest.stage_line());
             return Err(ConnectSendError::InvalidRequest);
         }
         if self
@@ -234,12 +244,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request_for_folder(RequestPurpose::GetChatFolderChatsToLeave, folder_id);
-        self.session
+        let to_leave = self
+            .session
             .chat_list
             .folder_chats_to_leave
             .entry(folder_id)
-            .or_default()
-            .begin();
+            .or_default();
+        to_leave.begin();
+        to_leave.sent(extra);
         if let Err(err) = self.sender.send_json(&{
             serde_json::json!({
                 "@type": "getChatFolderChatsToLeave",
@@ -270,6 +282,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
+            self.session
+                .chat_list
+                .chat_lists_for_add
+                .entry(chat_id.0)
+                .or_default()
+                .fail(ConnectSendError::InvalidRequest.stage_line());
             return Err(ConnectSendError::InvalidRequest);
         }
         if self

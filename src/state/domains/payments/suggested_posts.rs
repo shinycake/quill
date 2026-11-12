@@ -3,7 +3,8 @@
 //! group, offer state updates, the Grams balance and refused requests.
 use crate::state::*;
 use crate::suggested_posts::{
-    BarSend, DirectMessagesRole, SuggestedPostPayload, SuggestedPostPurpose, error_note,
+    BarSend, DirectMessagesRole, SuggestedPostFailure, SuggestedPostPayload, SuggestedPostPurpose,
+    error_note,
 };
 
 fn suggested_purpose(pending: Option<&PendingRequest>) -> Option<SuggestedPostPurpose> {
@@ -34,6 +35,19 @@ impl Session {
                 .has_purpose(RequestPurpose::Payments(PaymentsPurpose::SuggestedPost(
                     purpose,
                 )))
+        })
+    }
+
+    /// An `addOffer` for this message is on its way (at any price): a second
+    /// submit of the box must not send another offer message.
+    pub fn suggested_offer_busy(&self, chat_id: i64, message_id: i64) -> bool {
+        self.requests.pending.values().any(|pending| {
+            matches!(
+                pending.purpose,
+                RequestPurpose::Payments(PaymentsPurpose::SuggestedPost(
+                    SuggestedPostPurpose::AddOffer { chat_id: c, message_id: m, .. }
+                )) if c == chat_id && m == message_id
+            )
         })
     }
 
@@ -84,9 +98,12 @@ impl Session {
             bar.set_send(BarSend::Idle);
         }
         if err.earn_hint == Some(crate::earn::EarnErrorHint::BalanceTooLow) {
-            posts.balance_low.push(purpose);
+            posts.push_failure(SuggestedPostFailure::BalanceLow(purpose));
         } else {
-            posts.notes.push(error_note(purpose, &error_reason(err)));
+            posts.push_failure(SuggestedPostFailure::Note(error_note(
+                purpose,
+                &error_reason(err),
+            )));
         }
     }
 
@@ -134,13 +151,10 @@ impl Session {
         });
     }
 
-    /// Takes the requests refused for a low balance.
-    pub fn take_suggested_post_balance_low(&mut self) -> Vec<SuggestedPostPurpose> {
-        std::mem::take(&mut self.payments.suggested_posts.balance_low)
-    }
-
-    /// Takes the one-shot error notes for the UI's toasts.
-    pub fn take_suggested_post_notes(&mut self) -> Vec<String> {
-        std::mem::take(&mut self.payments.suggested_posts.notes)
+    /// Takes the refused requests the UI has not shown, oldest first.
+    pub fn take_suggested_post_failures(&mut self) -> Vec<SuggestedPostFailure> {
+        std::mem::take(&mut self.payments.suggested_posts.failures)
+            .into_iter()
+            .collect()
     }
 }

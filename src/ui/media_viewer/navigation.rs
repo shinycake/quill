@@ -2,6 +2,7 @@
 //! files it shows.
 
 use super::*;
+use crate::ui::viewer_parts::{Pointer, SwipeTimer};
 use std::time::Instant;
 
 impl QuillApp {
@@ -113,7 +114,7 @@ impl QuillApp {
             return false;
         };
         let state = &session.media.shared_media;
-        let Some(chat_id) = state.chat_id else {
+        let Some(chat_id) = state.chat_id() else {
             return false;
         };
         let tab = state.active_tab;
@@ -166,7 +167,7 @@ impl QuillApp {
         let viewer_chat = self.viewer.state.current().map(|item| item.chat_id);
         let same_chat = self
             .session()
-            .is_some_and(|session| session.media.shared_media.chat_id == viewer_chat);
+            .is_some_and(|session| session.media.shared_media.chat_id() == viewer_chat);
         if !same_chat {
             return;
         }
@@ -192,7 +193,16 @@ impl QuillApp {
                 cx.notify();
             }
         }
-        if self.viewer.state.wants_older()
+        let askable = self.session().is_some_and(|session| {
+            session
+                .media
+                .shared_media
+                .tabs
+                .get(tab.index())
+                .is_some_and(|state| state.can_load_more())
+        });
+        if askable
+            && self.viewer.state.wants_older()
             && let Some(live) = self.live.as_mut()
         {
             let _ = live.driver.fetch_more_shared_media(tab);
@@ -203,17 +213,14 @@ impl QuillApp {
     /// and the download / delete-permission lookups for the new current
     /// item. Shared by open, step, and "the current item was deleted".
     pub(in crate::ui) fn reset_viewer_item_state(&mut self, cx: &mut Context<Self>) {
-        self.viewer.zoom.reset();
-        self.viewer.drag = None;
-        self.viewer.wheel.new_item();
-        self.viewer.swipe.new_item();
         self.viewer_leave_video_fullscreen();
         // MED1: orientation and playback error are per-item state.
-        self.viewer.orientation = Default::default();
-        self.viewer.reorient.reset();
-        self.viewer.hdr.reset();
-        self.viewer.clip.clear_error();
-        self.viewer.extra.share_at = None;
+        let mut orientation = ViewerOrientation::default();
+        if let Some(owner) = self.viewer.state.source().profile_owner()
+            && let Some(live) = self.live.as_mut()
+        {
+            live.driver.retry_photo_page(owner);
+        }
         if let Some(item) = self.viewer.state.current()
             && let Some(turns) = self
                 .viewer
@@ -221,14 +228,26 @@ impl QuillApp {
                 .rotations
                 .get(&(item.chat_id.0, item.message_id.0))
         {
-            self.viewer.orientation.turns = *turns;
+            orientation.turns = *turns;
         }
+        self.viewer.new_item(orientation);
         self.apply_viewer_quality_pref();
-        self.viewer.extra.loop_pause = LoopPause::Free;
         self.stop_viewer_video();
         self.ensure_viewer_download(cx);
         self.download_viewer_strip_thumbs();
         self.maybe_autoplay_viewer_video(cx);
+        // A timestamp start belongs to the item it was set for (the open or
+        // the quality change that called this): stepping to another item
+        // drops it, so coming back later starts from 0.
+        let current = self
+            .viewer
+            .state
+            .current()
+            .map(|item| quill::ids::ChatMessage::new(item.chat_id, item.message_id));
+        let _ = self
+            .viewer
+            .pending_seek
+            .take_if(|(key, _)| Some(*key) != current);
         // What TDLib allows for this message (Delete in the toolbar).
         // Profile photos and poll option media are not messages; an
         // earlier group or channel photo has its service message.
@@ -259,22 +278,7 @@ impl QuillApp {
     pub(in crate::ui) fn close_media_viewer(&mut self, cx: &mut Context<Self>) {
         self.viewer_leave_video_fullscreen();
         self.stop_viewer_video();
-        // A timestamp link's start belongs to this open: a clip that never
-        // played here must not start there the next time it opens.
-        self.viewer.pending_seek = None;
-        self.viewer.extra.saved_toast = None;
-        // Reopening the same item starts with its caption collapsed.
-        self.viewer.extra.caption = Default::default();
-        self.viewer.state.close();
-        // A turned photo is a full-size picture of its own (up to about
-        // 20 MB, and as much again on the GPU); opening the next item
-        // replaced it, but nothing did until then.
-        self.viewer.reorient.reset();
-        self.viewer.hdr.reset();
-        self.viewer.over_controls = false;
-        // A pan or controller drag held when the viewer closed ends with it.
-        self.viewer.drag = None;
-        self.viewer.controller.release();
+        self.viewer.closed();
         cx.notify();
     }
 
@@ -288,16 +292,16 @@ impl QuillApp {
         held: bool,
         cx: &mut Context<Self>,
     ) {
-        let Some((lx, ly)) = self.viewer.drag else {
+        let Some((lx, ly)) = self.viewer.pointer.anchor() else {
             return;
         };
         if !held {
-            self.viewer.drag = None;
+            self.viewer.pointer.end_pan();
             cx.notify();
             return;
         }
         self.viewer_pan_drag(pos.0 - lx, pos.1 - ly, cx);
-        self.viewer.drag = Some(pos);
+        self.viewer.pointer = Pointer::Panning(pos);
     }
 
     pub(in crate::ui) fn step_media_viewer(&mut self, delta: i32, cx: &mut Context<Self>) {
@@ -381,7 +385,6 @@ impl QuillApp {
         at: Instant,
         cx: &mut Context<Self>,
     ) -> bool {
-        let had_timeout = self.viewer.swipe.timeout_at().is_some();
         let action = self.screen.viewer.swipe.feed(SwipeInput {
             dx,
             dy,
@@ -412,8 +415,8 @@ impl QuillApp {
         if let Some(dir) = step {
             self.step_viewer_swipe(dir, cx);
         }
-        if !had_timeout && self.viewer.swipe.timeout_at().is_some() {
-            self.arm_viewer_swipe_timeout(cx);
+        if self.viewer.swipe.timeout_at().is_some() && !self.viewer.swipe_timer.is_armed() {
+            self.arm_viewer_swipe_timeout(VIEWER_TRACKPAD_GESTURE_GAP, cx);
         }
         action != SwipeAction::None
     }
@@ -428,33 +431,31 @@ impl QuillApp {
 
     /// A swipe without phases (Wayland, X11, some Windows drivers) ends
     /// after the trackpad pause, since no end phase will come.
-    fn arm_viewer_swipe_timeout(&mut self, cx: &mut Context<Self>) {
-        self.spawn_scoped(cx, async move |this, cx| {
-            let mut wait = VIEWER_TRACKPAD_GESTURE_GAP;
-            loop {
-                cx.background_executor().timer(wait).await;
-                let again = this
-                    .update(cx, |this, cx| {
-                        let deadline = this.viewer.swipe.timeout_at()?;
-                        let now = cx.background_executor().now();
-                        if now < deadline {
-                            return Some(deadline.saturating_duration_since(now));
-                        }
-                        match this.viewer.swipe.end(now) {
-                            Some(dir) => this.step_viewer_swipe(dir, cx),
-                            None => cx.notify(),
-                        }
-                        None
-                    })
-                    .ok()
-                    .flatten();
-                match again {
-                    Some(left) => wait = left,
-                    None => break,
-                }
-            }
-        })
-        .detach();
+    fn arm_viewer_swipe_timeout(&mut self, wait: Duration, cx: &mut Context<Self>) {
+        let timer = self.spawn_scoped(cx, async move |this, cx| {
+            cx.background_executor().timer(wait).await;
+            let _ = this.update(cx, |this, cx| this.viewer_swipe_timed_out(cx));
+        });
+        self.viewer.swipe_timer = SwipeTimer::Armed { _task: timer };
+    }
+
+    /// The swipe timer woke: end the swipe when its pause is over, else
+    /// wait out what is left of it. The timer is the stage's, so a close
+    /// drops it.
+    fn viewer_swipe_timed_out(&mut self, cx: &mut Context<Self>) {
+        self.viewer.swipe_timer = SwipeTimer::Idle;
+        let Some(deadline) = self.viewer.swipe.timeout_at() else {
+            return;
+        };
+        let now = cx.background_executor().now();
+        if now < deadline {
+            self.arm_viewer_swipe_timeout(deadline.saturating_duration_since(now), cx);
+            return;
+        }
+        match self.viewer.swipe.end(now) {
+            Some(dir) => self.step_viewer_swipe(dir, cx),
+            None => cx.notify(),
+        }
     }
 
     /// A trackpad pinch zooms at the event position (tdesktop

@@ -60,30 +60,23 @@ impl ScrollAim {
     }
 }
 
-/// Where the forum topic column stands in one window. `Peek` leaves when a
-/// chat is chosen from the list or the open chat stops being a forum;
-/// `Column` and `Hidden` are laid out again every frame
-/// (`forum_column_layout`).
+/// The user's choice, on a narrow window where the forum's topic column
+/// replaces the chat list, to see the list again. It belongs to the forum
+/// it was made over: it counts only while that chat is the open one, and
+/// opening any chat ends it. Where the column sits is a pure function of
+/// this, the session and the window's width (`forum_column_layout`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum ForumColumnUi {
-    /// No topic column is on screen.
+pub(crate) enum ForumPeek {
     #[default]
-    Hidden,
-    /// The column is on screen, so the conversation shows a hint instead
-    /// of repeating the topic list.
-    Column,
-    /// On a narrow window the column replaces the chat list; the user
-    /// brought the list back until another chat opens.
-    Peek,
+    Off,
+    /// The chat list is shown over the topics of `forum`.
+    Chats { forum: ChatId },
 }
 
-impl ForumColumnUi {
-    pub(crate) fn peeking(self) -> bool {
-        self == Self::Peek
-    }
-
-    pub(crate) fn on_screen(self) -> bool {
-        self == Self::Column
+impl ForumPeek {
+    /// Whether the peek is on while `open` is the open chat.
+    pub(crate) fn is_for(self, open: Option<ChatId>) -> bool {
+        matches!(self, Self::Chats { forum } if Some(forum) == open)
     }
 }
 
@@ -100,10 +93,8 @@ pub(crate) struct HistoryUi {
     /// list's paint (overdraw rows included); the history's own canvas
     /// turns them into `seen`.
     pub(super) painted_ids: std::rc::Rc<std::cell::RefCell<Vec<(Bounds<Pixels>, Vec<MessageId>)>>>,
-    /// The forum topic column in this window: on screen, hidden, or
-    /// pushed aside by a peek at the chat list. Each window lays out its
-    /// own column.
-    pub(super) forum_column: ForumColumnUi,
+    /// The user's peek at the chat list over the forum's topic column.
+    pub(super) forum_peek: ForumPeek,
     /// Messages whose row's bottom edge was inside the viewport at the last
     /// paint (tdesktop `HistoryInner` reads an unread message once its
     /// bottom is shown), not the list's overdraw. Reported as
@@ -111,8 +102,8 @@ pub(crate) struct HistoryUi {
     pub(super) seen: std::rc::Rc<std::cell::RefCell<Option<(ChatId, Vec<MessageId>)>>>,
     /// Messages of the rows inside the viewport at the last paint.
     pub(super) on_screen: std::rc::Rc<std::cell::RefCell<Vec<MessageId>>>,
-    /// Last `(chat, message ids)` reported as visible, to skip repeats.
-    pub(super) reported_visible: Option<(ChatId, Vec<MessageId>)>,
+    /// What was last reported as visible, to skip repeats within one open.
+    pub(super) reported_visible: Option<ReportedVisible>,
     /// Window activity at the last render (message effects play only
     /// while it is active).
     pub(super) window_active: bool,
@@ -137,6 +128,10 @@ pub(crate) struct HistoryUi {
     /// rows appended since are a newer page, not live messages.
     pub(super) had_newer: bool,
     /// What `history_rows` were last built from (`None`: not built yet).
+    /// Cleared only by [`HistoryUi::invalidate_rows`]. `ends`, `had_newer`,
+    /// the chrome marks and `media_signature` describe the rows that are
+    /// still there, which the next build is compared against (the splice
+    /// keeps the reader's anchor); they are not reset with the key.
     pub(super) rows_key: Option<super::conversation::HistoryRowsKey>,
     /// Generation of the rows' chrome (`HistoryRow::chrome_stamp`): rows
     /// stamped with an older one are derived again when drawn.
@@ -157,8 +152,10 @@ pub(crate) struct HistoryUi {
     pub(super) sponsored: super::sponsored_spots::SponsoredInHistory,
     /// `(jump serial, start)` of the running jump-highlight fade.
     pub(super) highlight_fade: Option<(u64, std::time::Instant)>,
-    /// B11: the reaction that just flew from the message (message, glyph, start).
-    pub(super) reaction_fly: Option<super::history_fx::ReactionFly>,
+    /// B11: the reaction that just flew from the message (message, glyph,
+    /// start). The first frame after the fly's run takes it out
+    /// (`reaction_fly_for`), so none outlives its animation.
+    pub(super) reaction_fly: std::cell::Cell<Option<super::history_fx::ReactionFly>>,
     /// Floating date pill state (shown while scrolling the history).
     pub(super) scroll_date: super::history_fx::ScrollDate,
     /// Rows painted this frame: `(row, bounds, starts its day)`.
@@ -262,12 +259,19 @@ impl HistoryUi {
         row.expect("the row is painted").1.center()
     }
 
+    /// The rows must be built again on the next render (a setting that
+    /// changes how they look, a resize): the one place that clears
+    /// `rows_key`.
+    pub(in crate::ui) fn invalidate_rows(&mut self) {
+        self.rows_key = None;
+    }
+
     pub(super) fn new(cx: &mut App) -> Self {
         Self {
             scroller: cx.new(|cx| MessageScrollerState::new(0, cx)),
             rows: Vec::new(),
             painted_ids: Default::default(),
-            forum_column: ForumColumnUi::Hidden,
+            forum_peek: ForumPeek::Off,
             seen: Default::default(),
             on_screen: Default::default(),
             reported_visible: None,
@@ -288,7 +292,7 @@ impl HistoryUi {
             media_signature: (0, 0),
             sponsored: Default::default(),
             highlight_fade: None,
-            reaction_fly: None,
+            reaction_fly: Default::default(),
             scroll_date: Default::default(),
             scroll_probe: Default::default(),
             scroll_top_probe: Default::default(),
@@ -314,4 +318,13 @@ impl HistoryUi {
             subsection_tabs: Default::default(),
         }
     }
+}
+
+/// The rows last reported as visible, and the open of the chat's history
+/// they were reported in: reopening the chat reports its rows again.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct ReportedVisible {
+    pub(super) chat: ChatId,
+    pub(super) open: u64,
+    pub(super) ids: Vec<MessageId>,
 }

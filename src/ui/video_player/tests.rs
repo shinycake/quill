@@ -3,7 +3,9 @@
 //! viewer opening a clip and closing while it still opens.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 
-use super::transport::{BackendStatus, Correction, Engine, RATE_TOLERANCE, Want, reconcile};
+use super::transport::{
+    BackendStatus, Correction, Engine, EngineHealth, RATE_TOLERANCE, Want, reconcile,
+};
 use super::{
     Backend, ErrorKind, Picture, PictureStats, PlayState, PlayerError, Present, Pulled,
     VideoPlayer, WATCH_INTERVAL, picture_trace_line, trace_line,
@@ -93,12 +95,14 @@ impl Backend for Scripted {
             script.running = false;
         }
         BackendStatus {
-            ready: script.ready,
+            health: EngineHealth::read(
+                script.ready,
+                script.error.is_some(),
+                script.stalled,
+                script.at_end,
+            ),
             position: script.position,
             duration: Some(script.duration.unwrap_or(10.0)),
-            at_end: script.at_end,
-            stalled: script.stalled,
-            failed: script.error.is_some(),
             buffered: vec![0.0..10.0],
             has_sound: true,
         }

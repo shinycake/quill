@@ -30,6 +30,7 @@ SENDERS = {
     "CheckChatFolderInviteLink": "check_folder_invite_link",
     "AddChatFolderByInviteLink": "add_folder_by_invite_link",
     "AddContact": "add_contact",
+    "DeleteChatFolder": "delete_chat_folder",
 }
 
 

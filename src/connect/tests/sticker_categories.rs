@@ -84,7 +84,7 @@ fn category_strip_loads_once_and_each_category_searches_its_own_way() {
             .unwrap(),
         )
         .unwrap();
-    let found = &driver.session.stickers.stickers.found_stickers;
+    let found = &driver.session.stickers.stickers.search.stickers;
     assert_eq!(found.len(), 1);
     assert!(found[0].premium_animation().is_some());
 
@@ -92,7 +92,7 @@ fn category_strip_loads_once_and_each_category_searches_its_own_way() {
     // Premium list the moment it is chosen.
     let source = category_source(&driver, 1);
     driver.search_sticker_category(&source).unwrap();
-    assert!(driver.session.stickers.stickers.found_stickers.is_empty());
+    assert!(driver.session.stickers.stickers.search.stickers.is_empty());
     let search = sent_request(&recorder, "searchStickers");
     assert_eq!(search["emojis"], "😀 😄");
     assert_eq!(search["query"], "");

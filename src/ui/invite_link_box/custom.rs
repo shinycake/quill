@@ -3,7 +3,7 @@
 //! shows in place of the link box and returns to it.
 #![deny(clippy::indexing_slicing)]
 
-use super::{CustomBox, LimitFocus};
+use super::CustomBox;
 use crate::ui::app::QuillApp;
 use crate::ui::scheduled::{new_date_time_picker, picked_unix};
 use crate::ui::shell::{DialogKind, QuillShell};
@@ -86,13 +86,11 @@ impl QuillApp {
             },
         )
         .detach();
-        self.set_invite_link_custom(
-            Some(CustomBox::Limit {
-                input,
-                focus: LimitFocus::Requested,
-            }),
-            cx,
-        );
+        let focus = input.clone();
+        self.set_invite_link_custom(Some(CustomBox::Limit { input }), cx);
+        window.defer(cx, move |window, cx| {
+            focus.update(cx, |input, cx| input.focus(window, cx));
+        });
     }
 
     /// The Custom box's value, when it is one tdesktop takes.
@@ -102,7 +100,7 @@ impl QuillApp {
                 .filter(|date| custom_date_ok(*date, WallClock::of(cx).now()))
                 .and_then(|date| i32::try_from(date).ok())
                 .map(CustomValue::Date),
-            CustomBox::Limit { input, .. } => {
+            CustomBox::Limit { input } => {
                 custom_limit(&input.read(cx).value()).map(CustomValue::Limit)
             }
         }
@@ -119,19 +117,6 @@ impl QuillApp {
             }
         }
         self.set_invite_link_custom(None, cx);
-    }
-
-    /// The number field, once, when it still has to take focus (the kit
-    /// focuses a dialog as it opens, so the field asks after the dialog is
-    /// built). The request moves to `Done` here, not in drawing code.
-    fn take_invite_link_limit_focus(&mut self) -> Option<Entity<InputState>> {
-        match self.admin.invite_link_box.as_mut()?.custom.as_mut()? {
-            CustomBox::Limit { input, focus } if *focus == LimitFocus::Requested => {
-                *focus = LimitFocus::Done;
-                Some(input.clone())
-            }
-            _ => None,
-        }
     }
 
     fn invite_link_custom_open(&self, date: bool) -> bool {
@@ -163,11 +148,10 @@ impl QuillApp {
                 Some(CustomBox::Date(picker)) => DatePicker::new(&picker.state)
                     .placeholder(tr(keys::GROUP_INVITE_EXPIRE_AFTER))
                     .into_any_element(),
-                Some(CustomBox::Limit { input, .. }) => Input::new(input).into_any_element(),
+                Some(CustomBox::Limit { input }) => Input::new(input).into_any_element(),
                 None => return dialog.on_close(on_close),
             };
             let valid = this.invite_link_custom_value(cx).is_some();
-            let focus = this.take_invite_link_limit_focus();
             let footer = div()
                 .flex()
                 .justify_end()
@@ -191,20 +175,11 @@ impl QuillApp {
                             this.close_kit_dialog_if_done(kind, window, cx);
                         })),
                 );
-            let field = std::rc::Rc::new(std::cell::RefCell::new(Some(field)));
-            let focus = std::cell::Cell::new(focus);
+            let field = std::cell::Cell::new(Some(field));
             dialog
                 .content(crate::ui::shell::scrollable_dialog_content(
-                    move |content, window, cx| {
-                        if let Some(input) = focus.take() {
-                            window.defer(cx, move |window, cx| {
-                                input.update(cx, |input, cx| input.focus(window, cx));
-                            });
-                        }
-                        let field = field
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                    move |content, _, _| {
+                        let field = field.take().unwrap_or_else(|| div().into_any_element());
                         content.child(div().py_2().child(field))
                     },
                 ))

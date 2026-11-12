@@ -171,7 +171,9 @@ pub(super) fn pump(app: &mut QuillApp) {
             let sharing = &mut session.location;
             sharing.request_sent(&request, extra);
             match request {
-                PickerRequest::ResolveVenueBot { .. } => sharing.venue_bot_resolved(Some(DEMO_BOT)),
+                PickerRequest::ResolveVenueBot { .. } => {
+                    sharing.venue_bot_resolved(extra, Some(DEMO_BOT))
+                }
                 PickerRequest::Venues {
                     generation,
                     point,
@@ -196,7 +198,7 @@ impl QuillApp {
             if let Some(input) = self.location_ui.search.input().cloned() {
                 input.update(cx, |input, cx| input.set_value(text.clone(), window, cx));
             }
-            self.location_search_changed(Some(text), cx);
+            self.location_search_changed(super::state::SearchEdit::Text(text), cx);
         }
     }
 }

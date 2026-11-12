@@ -140,3 +140,67 @@ fn an_unsent_reply_waits_out_the_lock(cx: &mut TestAppContext) {
         assert!(app.delivery.unsent_replies.is_empty());
     });
 }
+
+/// Quill's own toast hands its typed text over like the platform's reply
+/// field: any outcome but a send keeps it for the chat that opens.
+#[gpui_kit::test]
+fn a_reply_typed_into_our_own_toast_is_kept_unless_sent(cx: &mut TestAppContext) {
+    use crate::ui::notifications::inline_reply::InlineReplyOutcome;
+    let (app, mut vcx) = demo_app(cx);
+    app.update_in(&mut vcx, |app, _, _| {
+        let account = app.current_account().expect("the demo account");
+        let key = (account.clone(), CHAT);
+        app.keep_unsent_reply(&account, CHAT, "sent".into(), InlineReplyOutcome::Sent);
+        assert!(
+            app.delivery.unsent_replies.is_empty(),
+            "a sent reply is gone"
+        );
+        app.keep_unsent_reply(&account, CHAT, "  ".into(), InlineReplyOutcome::Refused);
+        assert!(
+            app.delivery.unsent_replies.is_empty(),
+            "blank text is not kept"
+        );
+        app.keep_unsent_reply(
+            &account,
+            CHAT,
+            "no rights".into(),
+            InlineReplyOutcome::Refused,
+        );
+        assert_eq!(
+            app.delivery.unsent_replies.get(&key).map(String::as_str),
+            Some("no rights")
+        );
+    });
+}
+
+/// An account that logs out or is removed takes its parked reply texts,
+/// reply targets and photo waits with it; another account's stay.
+#[gpui_kit::test]
+fn a_removed_accounts_notification_state_goes_with_it(cx: &mut TestAppContext) {
+    let (app, mut vcx) = demo_app(cx);
+    app.update(&mut vcx, |app, _| {
+        let account = app.current_account().expect("the demo account");
+        let other = quill::ids::AccountKey("someone-else".into());
+        for owner in [&account, &other] {
+            app.delivery
+                .unsent_replies
+                .insert((owner.clone(), CHAT), "typed".into());
+            app.delivery
+                .reply_targets
+                .insert((owner.clone(), CHAT), quill::ids::MessageId(5));
+        }
+        app.delivery.forget_account(&account);
+        assert!(
+            !app.delivery
+                .unsent_replies
+                .contains_key(&(account.clone(), CHAT))
+        );
+        assert!(!app.delivery.reply_targets.contains_key(&(account, CHAT)));
+        assert!(
+            app.delivery
+                .unsent_replies
+                .contains_key(&(other.clone(), CHAT))
+        );
+        assert!(app.delivery.reply_targets.contains_key(&(other, CHAT)));
+    });
+}

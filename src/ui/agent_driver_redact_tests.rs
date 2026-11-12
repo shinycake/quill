@@ -114,7 +114,8 @@ fn list_parts_hide_rows_of_ungranted_chats_and_untagged_rows(cx: &mut TestAppCon
     app.update_in(vcx, |app, _, cx| {
         app.chat_ui
             .set_reply(Some(ComposerReplyTo::new(ChatId(11), MessageId(101))));
-        app.share.forward.open_reply_chooser();
+        app.chat_ui
+            .show_reply_panel(crate::ui::reply_options_ui::ReplyPanel::chooser());
         cx.notify();
     });
     settle(vcx);

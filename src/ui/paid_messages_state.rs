@@ -20,6 +20,35 @@ pub(crate) struct ComposerPaidConfirm {
     pub(super) once: super::composer_sends::SendOnce,
 }
 
+/// The confirmation before a paid send, with its "Don't ask me again" tick:
+/// the tick is part of the stage, so it ends with the confirmation (Pay,
+/// Cancel, another confirmation, the account going away) and never trusts a
+/// price the user did not see.
+pub(crate) enum PaidConfirmStage {
+    /// Nothing is asked.
+    None,
+    /// A composer send waits for Pay.
+    Composer {
+        confirm: ComposerPaidConfirm,
+        /// "Don't ask me again" is ticked.
+        trust: bool,
+    },
+    /// The send the guard holds (a sticker, GIF, voice note, forward...) is
+    /// on screen with the tick set for (`chat_id`, `per_message`); an
+    /// untick or a held send for another price is `None`.
+    Held { trusted: (i64, i64) },
+}
+
+impl PaidConfirmStage {
+    /// The composer send waiting for Pay, if that is what is asked.
+    pub(super) fn composer(&self) -> Option<&ComposerPaidConfirm> {
+        match self {
+            Self::Composer { confirm, .. } => Some(confirm),
+            Self::None | Self::Held { .. } => None,
+        }
+    }
+}
+
 /// A price chosen on a slider: the steps it moves over and the value.
 pub(crate) struct PriceSlider {
     pub(super) steps: Vec<i64>,
@@ -45,7 +74,6 @@ pub(crate) struct DirectMessagesBox {
     pub(super) price: PriceSlider,
     /// Where the slider's price came from.
     pub(super) source: PriceSource,
-    pub(super) stage: DirectStage,
 }
 
 /// Where a Direct Messages box's price came from.
@@ -60,27 +88,12 @@ pub(crate) enum PriceSource {
     Chosen,
 }
 
-/// Where Save stands. The box stays open through `Saving` and closes from
-/// the answer; a refusal returns to `Editing` with the error in the box.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DirectStage {
-    Editing,
-    /// `setChatDirectMessagesGroup` is out; the session's `PaidSave` says
-    /// how it ended.
-    Saving,
-}
-
 pub(crate) struct PaidMessagesUi {
     /// Messages privacy: the "Charge for messages" choice is open with
     /// this staged price. Nothing is charged until Save.
     pub(super) charge: Option<PriceSlider>,
-    /// The confirmation before a paid send.
-    pub(super) confirm: Option<ComposerPaidConfirm>,
-    /// "Don't ask me again", ticked on the confirmation for this chat and
-    /// price (`chat_id`, `per_message`). Another confirmation shows it
-    /// unticked, and Pay or Cancel clears it, so a tick never trusts a
-    /// price the user did not see.
-    pub(super) confirm_trust: Option<(i64, i64)>,
+    /// The confirmation before a paid send and its tick.
+    pub(super) confirm: PaidConfirmStage,
     pub(super) remove_fee: Option<RemoveFeeBox>,
     pub(super) direct: Option<DirectMessagesBox>,
 }
@@ -101,8 +114,7 @@ impl PaidMessagesUi {
     pub(super) fn new() -> Self {
         Self {
             charge: None,
-            confirm: None,
-            confirm_trust: None,
+            confirm: PaidConfirmStage::None,
             remove_fee: None,
             direct: None,
         }

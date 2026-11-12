@@ -9,10 +9,21 @@ use gpui_kit::*;
 use quill::agent::ui_driver::{guard, takeover};
 use std::cell::Cell;
 
+/// The one-shot timer for the next phase change nothing animates towards.
+/// It owns its task: replacing the stage drops the earlier timer, and so
+/// does dropping the app.
+#[derive(Default)]
+pub(super) enum Wake {
+    #[default]
+    None,
+    /// Fires at `at` (takeover clock), so one timer covers each change.
+    At { at: u64, _task: Task<()> },
+}
+
 pub(crate) struct TakeoverUi {
-    /// When the pending wake-up fires (takeover clock, 0: none), so one
-    /// timer covers each change.
-    pub(super) wake_at: Cell<u64>,
+    /// Kept in a cell: the render path that asks for the timer only has
+    /// `&self`. Taken out and put back whole, never borrowed.
+    pub(super) wake: Cell<Wake>,
 }
 
 impl TakeoverUi {
@@ -48,7 +59,7 @@ impl TakeoverUi {
         })
         .detach();
         Self {
-            wake_at: Cell::new(0),
+            wake: Cell::new(Wake::None),
         }
     }
 }

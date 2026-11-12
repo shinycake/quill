@@ -173,7 +173,7 @@ impl QuillApp {
     pub(in crate::ui) fn story_reaction_picker(&self, cx: &mut Context<Self>) -> AnyElement {
         let reactions = self
             .session()
-            .and_then(|session| session.stories.available_reactions.clone())
+            .map(|session| session.stories.available_reactions.items().to_vec())
             .unwrap_or_default();
         let mut picker = div()
             .id("story-reaction-picker")

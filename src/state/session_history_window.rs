@@ -2,6 +2,7 @@
 //! opened at the first unread message when there is one, paged in both
 //! directions, and replaced (never patched) when a jump lands outside it.
 use super::*;
+use crate::state::fetch::Fetch;
 
 /// The edge of the history window a page request extends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,8 +31,7 @@ impl ChatSummary {
         (self.unread_count > 0
             && last_read.0 > 0
             && self
-                .last_message
-                .as_ref()
+                .last_message()
                 .is_none_or(|last| last.id.0 > last_read.0))
         .then_some(last_read)
     }
@@ -43,11 +43,26 @@ pub struct MentionSearch {
     pub chat_id: ChatId,
     pub query: String,
     /// Matching members (users only, excluding the current user), in
-    /// TDLib's order.
-    pub user_ids: Vec<i64>,
-    /// The in-flight `searchChatMembers`; answers for any other request
-    /// (an older query) are dropped.
-    pub request: Option<RequestId>,
+    /// TDLib's order. The in-flight `searchChatMembers` holds its request
+    /// (answers for any other, an older query, are dropped) and the
+    /// previous matches meanwhile.
+    pub members: Fetch<Vec<i64>>,
+}
+
+impl MentionSearch {
+    /// The matches to list: the answer, or the previous ones while the
+    /// new query loads.
+    pub fn user_ids(&self) -> &[i64] {
+        self.members.data().map_or(&[], Vec::as_slice)
+    }
+
+    /// The `searchChatMembers` request the search waits for.
+    pub fn asking(&self) -> Option<RequestId> {
+        match self.members {
+            Fetch::Loading { request, .. } => request,
+            _ => None,
+        }
+    }
 }
 
 impl Session {
@@ -62,18 +77,31 @@ impl Session {
             .messages
             .mention_search
             .as_mut()
-            .filter(|s| s.request == Some(request))
+            .filter(|s| s.members.waits_for(request))
         else {
             return;
         };
-        search.request = None;
-        search.user_ids = members
+        let user_ids = members
             .iter()
             .filter_map(|member| match member.member_id {
                 MessageSender::User { user_id } if Some(user_id) != me => Some(user_id),
                 _ => None,
             })
             .collect();
+        search.members.answered(Some(request), user_ids);
+    }
+
+    /// `chat`'s `@` search ends (its menu closed or completed, or its
+    /// query is gone). Another chat's search is another window's and stays.
+    pub fn end_mention_search(&mut self, chat: ChatId) {
+        if self
+            .messages
+            .mention_search
+            .as_ref()
+            .is_some_and(|search| search.chat_id == chat)
+        {
+            self.messages.mention_search = None;
+        }
     }
 
     /// The `searchChatMembers` `request` failed: its search ends, so the
@@ -83,7 +111,7 @@ impl Session {
             .messages
             .mention_search
             .as_ref()
-            .is_some_and(|s| s.request == Some(request))
+            .is_some_and(|s| s.members.waits_for(request))
         {
             self.messages.mention_search = None;
         }
@@ -95,6 +123,13 @@ impl Session {
         self.histories
             .get(&chat_id.0)
             .is_some_and(|h| h.load_failed() && h.messages.is_empty())
+    }
+
+    /// The page request for `chat_id` could not be sent: the history ends in
+    /// its failed stage (the Retry row) rather than being asked again from
+    /// every render.
+    pub fn fail_history_load(&mut self, chat_id: ChatId) {
+        self.history_entry(chat_id).fail_load();
     }
 
     /// The open history waits for its first page (no entry yet, or a page
@@ -217,7 +252,7 @@ impl Session {
         }
         self.chats
             .get(&chat_id.0)
-            .and_then(|chat| chat.last_message.as_ref())
+            .and_then(|chat| chat.last_message())
             .map_or(0, |last| last.id.0)
     }
 
@@ -349,6 +384,12 @@ impl Session {
         let has_newer = self.history_has_newer(chat_id);
         let history = self.histories.entry(chat_id.0).or_default();
         history.clear_newer_failed();
+        // An older page that failed on a window with messages has no Retry
+        // row (that is the empty window's), and a short window cannot be
+        // scrolled away from its top: the chat opened again asks once more.
+        if !history.messages.is_empty() {
+            history.clear_load_failed();
+        }
         let keep = !has_newer
             && match history.unread_anchor {
                 // A tail window that reaches back to the boundary shows the

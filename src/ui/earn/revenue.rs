@@ -106,7 +106,7 @@ fn open_learn(cx: &mut Context<QuillApp>) -> impl Fn(&mut Window, &mut App) + 's
     let owner = cx.entity().downgrade();
     move |_, cx| {
         let _ = owner.update(cx, |this, cx| {
-            this.earn.learn = true;
+            this.earn.learn = Some(Default::default());
             this.open_box(crate::ui::shell::DialogKind::EarnLearn);
             cx.notify();
         });
@@ -120,6 +120,7 @@ impl QuillApp {
         screen: EarnScreen,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let panel = EarnPanel::Revenue { peer, screen };
         let Some(session) = self.session() else {
             return loading();
         };
@@ -130,7 +131,7 @@ impl QuillApp {
             .as_ref()
             .filter(|p| p.peer == peer && p.screen == screen)
         else {
-            return loading();
+            return self.earn_unloaded(panel, loading(), cx);
         };
         if !page.loaded() {
             return loading();
@@ -726,6 +727,21 @@ impl QuillApp {
         Some(block.child(self.star_rows(session, page, active, cx)))
     }
 
+    /// Ask again for the boost level and features behind the lock.
+    fn ask_boost_level(&mut self, chat_id: i64) {
+        let chat_id = quill::ids::ChatId(chat_id);
+        let refused = self.live.as_mut().is_some_and(|live| {
+            let status = live.driver.fetch_chat_boost_status(chat_id);
+            let features = live.driver.fetch_chat_boost_features(chat_id);
+            status.is_err() || features.is_err()
+        });
+        if refused {
+            self.set_note(StatusNote::error(tr(
+                keys::Q_MONEY_COULDNT_CHANGE_THE_ADS_SETTING,
+            )));
+        }
+    }
+
     /// "Switch Off Ads" with its boost-level lock (tdesktop
     /// `lng_channel_earn_off`).
     fn switch_off_ads(&self, session: &Session, chat_id: i64, cx: &mut Context<Self>) -> Div {
@@ -743,7 +759,8 @@ impl QuillApp {
                     .find(|l| l.can_disable_sponsored_messages)
                     .map(|l| l.level)
             });
-        let level = session.groups.chat_boost_status.get(&chat_id).map(|s| s.0);
+        let level = session.groups.boost_level(chat_id);
+        let lock_known = level.is_some() && required.is_some();
         let locked = matches!((level, required), (Some(level), Some(required)) if level < required);
         let mut row = crate::ui::pressable::action_row(
             "earn-ads-off",
@@ -773,18 +790,19 @@ impl QuillApp {
             .child(div().flex_1())
             .child(Switch::new(("earn-ads-off", 1u64)).checked(off).small())
             .on_click(cx.listener(move |this, _, _, cx| {
-                if locked && !off {
+                if !off && !lock_known {
+                    // Whether the switch is locked is not known yet: ask
+                    // again for the boost level instead of sending an
+                    // unlocked change the server would refuse.
+                    this.ask_boost_level(chat_id);
+                } else if locked && !off {
                     this.earn.ask_boost = Some(crate::ui::earn_state::AskBoost {
                         chat_id,
                         level: required.unwrap_or(0),
                         reason: crate::ui::earn_state::AskBoostReason::Cpm,
                     });
                     this.open_box(crate::ui::shell::DialogKind::EarnAskBoost);
-                    if let Some(live) = this.live.as_mut() {
-                        let _ = live
-                            .driver
-                            .fetch_chat_boost_link(quill::ids::ChatId(chat_id));
-                    }
+                    this.ask_boost_link(chat_id, cx);
                 } else if let Some(live) = this.live.as_mut() {
                     let sent = live
                         .driver

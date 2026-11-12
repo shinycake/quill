@@ -367,25 +367,30 @@ impl QuillApp {
         if !other_theme || self.live.is_none() {
             return false;
         }
-        self.refresh_statistics(chat_id, cx);
-        true
+        // Only a request that went out is progress: a refusal leaves the
+        // panel failed (it no longer holds the other theme's graphs).
+        self.refresh_statistics(chat_id, cx)
     }
 
     /// Phase D2: explicit statistics refresh — clears the cached result
-    /// and re-sends `getChatStatistics`.
-    pub(super) fn refresh_statistics(&mut self, chat_id: i64, cx: &mut Context<Self>) {
+    /// and re-sends `getChatStatistics`. Whether a request went out.
+    pub(super) fn refresh_statistics(&mut self, chat_id: i64, cx: &mut Context<Self>) -> bool {
         let is_dark = super::chat_theme::is_dark_palette();
-        if let Some(live) = self.live.as_mut()
-            && let Err(err) = live
+        let mut sent = false;
+        if let Some(live) = self.live.as_mut() {
+            match live
                 .driver
                 .refresh_chat_statistics(ChatId(chat_id), is_dark)
-        {
-            self.set_note(StatusNote::error(user_error_for(
-                keys::Q_NOTES_FAILED_STATISTICS,
-                &err,
-            )));
+            {
+                Ok(request) => sent = request.is_some(),
+                Err(err) => self.set_note(StatusNote::error(user_error_for(
+                    keys::Q_NOTES_FAILED_STATISTICS,
+                    &err,
+                ))),
+            }
         }
         cx.notify();
+        sent
     }
 }
 

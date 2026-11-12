@@ -19,12 +19,14 @@ use std::time::{Duration, Instant};
 
 use super::app::QuillApp;
 use super::composer_suggest::{SuggestItem, suggest_items};
+use super::emoji_bar::BarOwner;
 use gpui_base::input::InputContent;
 use gpui_kit::component::input::{Rope, TextareaState};
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::composer_doc::ComposerTag;
 use quill::emoji_words::{Highlight, candidates, pick};
+use quill::ids::RequestId;
 use quill::suggest::{RecentHashtags, SuggestKind, SuggestQuery};
 
 /// How long a word's glimmer runs when it first lights up.
@@ -75,6 +77,9 @@ pub(super) enum WordBar {
     Asking {
         range: Range<usize>,
         word: String,
+        /// The keyword lookup in flight for the word, the one whose
+        /// answer or failure settles this stage (a retry replaces it).
+        request: RequestId,
     },
     Hover(OpenBar),
     Pinned(OpenBar),
@@ -127,14 +132,30 @@ impl EmojiWordsUi {
 
     /// Close the word's bar. The bar's grid and scroll are the composer's
     /// one `EmojiBarUi`, shared with the `:` suggestions: closing the word
-    /// bar puts it back to a closed strip unless the suggestions are using
-    /// it, so the next word's bar does not open expanded and scrolled.
+    /// bar lets go of it (a closed strip, unless the suggestions have
+    /// taken it over), so the next word's bar does not open expanded and
+    /// scrolled.
     pub(super) fn unhover(&mut self, suggest: &mut super::composer_suggest::SuggestUi) {
         self.bar = WordBar::Closed;
         self.strip_bounds.set(None);
-        if suggest.active.is_none() {
-            suggest.bar.reset();
-        }
+        suggest.bar.release(BarOwner::Word);
+    }
+
+    /// Show `open` as the word bar, over the composer's shared bar
+    /// started afresh for it.
+    pub(super) fn show(
+        &mut self,
+        open: OpenBar,
+        pinned: bool,
+        suggest: &mut super::composer_suggest::SuggestUi,
+    ) {
+        self.unhover(suggest);
+        suggest.bar.restart(BarOwner::Word);
+        self.bar = if pinned {
+            WordBar::Pinned(open)
+        } else {
+            WordBar::Hover(open)
+        };
     }
 }
 
@@ -195,7 +216,9 @@ impl QuillApp {
     pub(super) fn hover_highlight(&mut self, index: usize) {
         if let Some(h) = self.composer_ui.emoji_words.highlights.get(index).cloned() {
             let items = self.word_strip_items(&h);
-            self.composer_ui.emoji_words.bar = WordBar::Hover(OpenBar::new((h, items)));
+            let ui = &mut self.screen.composer_ui;
+            ui.emoji_words
+                .show(OpenBar::new((h, items)), false, &mut ui.suggest);
         }
     }
     fn emoji_words_on(&self) -> bool {
@@ -282,7 +305,7 @@ impl QuillApp {
         }) {
             ui.unhover(&mut self.screen.composer_ui.suggest);
         }
-        if matches!(&ui.bar, WordBar::Asking { range, word }
+        if matches!(&ui.bar, WordBar::Asking { range, word, .. }
             if text.get(range.clone()).map(str::to_lowercase).as_deref() != Some(word.as_str()))
         {
             ui.bar = WordBar::Closed;
@@ -378,12 +401,7 @@ impl QuillApp {
         match aim {
             BarAim::Hold => {}
             BarAim::Word(word) => self.show_word_bar(Some(word), cx),
-            BarAim::Close => {
-                self.show_word_bar(None, cx);
-                if self.composer_ui.suggest.active.is_none() {
-                    self.composer_ui.suggest.bar.reset();
-                }
-            }
+            BarAim::Close => self.show_word_bar(None, cx),
         }
     }
 
@@ -393,10 +411,17 @@ impl QuillApp {
             (h, items)
         });
         let ui = &mut self.screen.composer_ui.emoji_words;
-        ui.unhover(&mut self.screen.composer_ui.suggest);
-        ui.bar = bar
-            .filter(|(_, items)| !items.is_empty())
-            .map_or(WordBar::Closed, |strip| WordBar::Hover(OpenBar::new(strip)));
+        match bar.filter(|(_, items)| !items.is_empty()) {
+            Some(strip) => {
+                ui.show(
+                    OpenBar::new(strip),
+                    false,
+                    &mut self.screen.composer_ui.suggest,
+                );
+                self.retry_suggestion_emoji_sets();
+            }
+            None => ui.unhover(&mut self.screen.composer_ui.suggest),
+        }
         cx.notify();
     }
 
@@ -466,7 +491,6 @@ impl QuillApp {
             .composer_ui
             .emoji_words
             .unhover(&mut self.screen.composer_ui.suggest);
-        self.composer_ui.suggest.bar.reset();
         let Some(item) = items.get(index) else {
             return;
         };

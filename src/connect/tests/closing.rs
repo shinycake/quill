@@ -443,9 +443,9 @@ fn active_call(is_outgoing: bool, state: CallState) -> ActiveCall {
         user_id: 11,
         is_outgoing,
         is_video: false,
-        state,
+        progress: crate::state::CallProgress::first(state, Instant::now()),
+        action: crate::state::CallAction::Idle,
         started_at: Instant::now(),
-        ready: None,
         transport: Default::default(),
         signaling_queue: Vec::new(),
         signaling_dropped: 0,
@@ -456,6 +456,7 @@ fn active_call(is_outgoing: bool, state: CallState) -> ActiveCall {
         remote_audio_muted: false,
         remote_battery_low: false,
         signal_bars: None,
+        media_note: None,
     }
 }
 
@@ -530,9 +531,13 @@ fn the_hold_is_over() -> Instant {
 
 #[test]
 fn closing_hangs_up_a_running_call_and_sends_close_behind_the_terminal_update() {
-    let mut client = calling_driver().with_call(true, CallState::Ready);
+    let mut client = calling_driver().with_call(true, CallState::Ready(Default::default()));
     crate::connect::closing::begin_close(&mut client.driver);
     assert_eq!(client.sent(), ["discardCall", "setOption"]);
+    assert!(
+        !client.driver.chats_path_active(),
+        "an account on its way out starts nothing while close is held"
+    );
 
     let before_the_hold_ends = Instant::now();
     crate::connect::closing::release_close(&mut client.driver, before_the_hold_ends);
@@ -565,7 +570,7 @@ fn what_a_stopped_export_left_queued_goes_out_ahead_of_close() {
 
 #[test]
 fn a_hang_up_nobody_answers_holds_close_back_only_so_long() {
-    let mut client = calling_driver().with_call(false, CallState::Ready);
+    let mut client = calling_driver().with_call(false, CallState::Ready(Default::default()));
     crate::connect::closing::begin_close(&mut client.driver);
     crate::connect::closing::release_close(&mut client.driver, the_hold_is_over());
     assert_eq!(client.sent(), ["discardCall", "setOption", "close"]);
@@ -623,6 +628,26 @@ fn a_call_whose_answer_failed_is_left_to_ring() {
     ));
     crate::connect::closing::begin_close(&mut client.driver);
     assert_eq!(client.sent(), ["acceptCall", "setOption", "close"]);
+}
+
+/// r2-14, 02-032: a second click on Accept while the first `acceptCall` is
+/// out sends nothing and returns the first request.
+#[test]
+fn a_second_accept_click_sends_one_accept() {
+    let mut client = calling_driver().with_call(
+        false,
+        CallState::Pending {
+            is_created: true,
+            is_received: true,
+        },
+    );
+    client
+        .driver
+        .set_call_engine(Box::new(crate::calls::engine::MockEngine::new()));
+    let first = client.driver.accept_call().expect("accept");
+    let second = client.driver.accept_call().expect("accept again");
+    assert_eq!(first, second);
+    assert_eq!(client.sent(), ["acceptCall"]);
 }
 
 #[test]
@@ -711,7 +736,8 @@ fn a_group_call_only_looked_at_is_not_left() {
 fn a_closing_client_sends_close_from_its_poll_once_its_call_ended() {
     let (hub, tx) = dying_hub();
     let (mut client, handle) = test_client(hub, tx);
-    client.driver.session.calls.active_call = Some(active_call(true, CallState::Ready));
+    client.driver.session.calls.active_call =
+        Some(active_call(true, CallState::Ready(Default::default())));
     let mut set = ClosingSet::new();
     set.push(key(1), Box::new(client), false);
     let recorder = handle.recorder.clone();
@@ -745,7 +771,7 @@ fn a_running_call_or_joined_voice_chat_is_a_call_in_progress() {
     assert!(!calling_driver().driver.call_in_progress());
     assert!(
         calling_driver()
-            .with_call(true, CallState::Ready)
+            .with_call(true, CallState::Ready(Default::default()))
             .driver
             .call_in_progress()
     );

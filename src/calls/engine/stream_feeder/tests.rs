@@ -1,8 +1,8 @@
 use crate::calls::engine::{
     BroadcastChannel, BroadcastPartAnswer, BroadcastPartRequest, BroadcastPartStatus,
     BroadcastRequestId, FeederState, GroupCallMode, MAX_PENDING_PARTS, ReplyOutcome, SegmentFetch,
-    StreamChannel, StreamFeeder, StreamFetchError, StreamPort, StreamQuality, StreamQualityTracker,
-    StreamReply, StreamState,
+    StreamChannel, StreamFeeder, StreamFetchError, StreamPort, StreamQuality, StreamReply,
+    StreamState,
 };
 use crate::ids::RequestId;
 use std::time::{Duration, Instant};
@@ -108,7 +108,7 @@ fn an_rtmp_time_request_answers_the_first_channels_time_offset() {
     let mut feeder = feeder();
     feeder.on_time_request(engine_id(1), &mut port);
     assert_eq!(port.streams_requests, vec![555]);
-    assert_eq!(feeder.state(), FeederState::Syncing);
+    assert_eq!(feeder.state(), FeederState::Idle, "asking is not a state");
     assert_eq!(feeder.stream_state(), StreamState::Connecting);
     let channels = [
         StreamChannel {
@@ -238,6 +238,44 @@ fn streams_membership_error_answers_zero_and_rejoins() {
     assert_eq!(outcome, ReplyOutcome::Rejoin);
     assert_eq!(port.time_answers(), vec![(1, 0)]);
     assert_eq!(feeder.state(), FeederState::Failed);
+}
+
+#[test]
+fn a_failed_feeder_sends_nothing_while_it_waits_for_the_rejoin() {
+    let mut port = FakePort::default();
+    let mut feeder = feeder();
+    feeder.on_time_request(engine_id(1), &mut port);
+    feeder.on_reply(
+        RequestId(1),
+        StreamReply::Error(StreamFetchError::RejoinNeeded),
+        Instant::now(),
+        &mut port,
+    );
+    assert_eq!(feeder.state(), FeederState::Failed);
+    let (streams, segments) = (port.streams_requests.len(), port.segment_requests.len());
+    feeder.on_time_request(engine_id(2), &mut port);
+    ask(&mut feeder, &mut port, 3, audio(1));
+    assert_eq!(port.streams_requests.len(), streams);
+    assert_eq!(port.segment_requests.len(), segments);
+    assert_eq!(port.time_answers().last(), Some(&(2, 0)));
+    assert_eq!(last_part(&port).status, BroadcastPartStatus::NotReady);
+    assert_eq!(feeder.pending_parts(), 0);
+}
+
+#[test]
+fn an_ended_feeder_resyncs_parts_without_sending() {
+    let mut port = FakePort::default();
+    let mut feeder = feeder();
+    feeder.on_time_request(engine_id(1), &mut port);
+    feeder.on_reply(
+        RequestId(1),
+        StreamReply::Error(StreamFetchError::CallLeft),
+        Instant::now(),
+        &mut port,
+    );
+    ask(&mut feeder, &mut port, 2, audio(1));
+    assert!(port.segment_requests.is_empty());
+    assert_eq!(last_part(&port).status, BroadcastPartStatus::ResyncNeeded);
 }
 
 #[test]
@@ -576,16 +614,15 @@ fn unknown_request_ids_are_ignored() {
 }
 
 #[test]
-fn quality_is_reported_only_when_the_bucket_changes() {
-    let mut tracker = StreamQualityTracker::default();
-    assert_eq!(tracker.observe(720.0), Some(StreamQuality::Full));
-    assert_eq!(tracker.observe(700.0), None);
-    assert_eq!(tracker.observe(640.0), None);
-    assert_eq!(tracker.observe(500.0), Some(StreamQuality::Medium));
-    assert_eq!(tracker.observe(320.0), None);
-    assert_eq!(tracker.observe(240.0), Some(StreamQuality::Thumbnail));
-    assert_eq!(tracker.observe(100.0), None);
-    assert_eq!(tracker.observe(1280.0), Some(StreamQuality::Full));
+fn a_tile_width_maps_to_a_quality_bucket() {
+    assert_eq!(StreamQuality::for_tile_width(720.0), StreamQuality::Full);
+    assert_eq!(StreamQuality::for_tile_width(640.0), StreamQuality::Full);
+    assert_eq!(StreamQuality::for_tile_width(500.0), StreamQuality::Medium);
+    assert_eq!(
+        StreamQuality::for_tile_width(240.0),
+        StreamQuality::Thumbnail
+    );
+    assert_eq!(StreamQuality::for_tile_width(1280.0), StreamQuality::Full);
 }
 
 #[test]

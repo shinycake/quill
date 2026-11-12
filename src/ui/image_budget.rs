@@ -50,7 +50,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 mod cache_scope;
+mod cells;
+mod entry_stage;
 pub(in crate::ui) use cache_scope::CacheScope;
+use cells::{read_cell, with_cell};
+use entry_stage::EntryStage;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod gif_still_tests;
@@ -161,8 +165,7 @@ fn next_frame(window: Option<ChatId>, draw: WindowDraw) -> u64 {
         frame.set(frame.get() + 1);
         frame.get()
     });
-    WHOLE.with(|whole| {
-        let mut whole = whole.borrow_mut();
+    with_cell(&WHOLE, |whole| {
         let whole = whole.entry(window).or_default();
         whole.on_screen = whole.latest;
         if draw == WindowDraw::Whole {
@@ -174,14 +177,16 @@ fn next_frame(window: Option<ChatId>, draw: WindowDraw) -> u64 {
 
 /// What `window`'s frames drew in full; `None` once it closed.
 fn whole_of(window: Option<ChatId>) -> Option<WholeFrames> {
-    let whole = WHOLE.with(|whole| whole.borrow().get(&window).copied());
+    let whole = read_cell(&WHOLE, |whole| whole.get(&window).copied()).flatten();
     whole.or_else(|| window.is_none().then(WholeFrames::default))
 }
 
 /// `chat`'s window closed: nothing it drew shows any more.
 pub(super) fn forget_window(chat: ChatId) {
-    WHOLE.with(|whole| whole.borrow_mut().remove(&Some(chat)));
-    SLICES.with(|slices| slices.borrow_mut().retain(|_, s| s.window != Some(chat)));
+    with_cell(&WHOLE, |whole| whole.remove(&Some(chat)));
+    with_cell(&SLICES, |slices| {
+        slices.retain(|_, s| s.window != Some(chat))
+    });
 }
 
 /// The id the next `RenderImage` will get. GPUI numbers images from one
@@ -198,8 +203,7 @@ pub(super) fn frame() -> u64 {
 /// A slice of `window` rendered its content this frame.
 pub(super) fn slice_rendered(id: EntityId, window: Option<ChatId>) {
     let now = frame();
-    SLICES.with(|slices| {
-        let mut slices = slices.borrow_mut();
+    with_cell(&SLICES, |slices| {
         let entry = slices.entry(id).or_default();
         if entry.rendered != now {
             entry.previous_render = entry.rendered;
@@ -214,8 +218,7 @@ pub(super) fn slice_rendered(id: EntityId, window: Option<ChatId>) {
 /// A slice of `window` is part of this frame (rendered or replayed).
 pub(super) fn slice_shown(id: EntityId, window: Option<ChatId>) {
     let now = frame();
-    SLICES.with(|slices| {
-        let mut slices = slices.borrow_mut();
+    with_cell(&SLICES, |slices| {
         let entry = slices.entry(id).or_default();
         entry.window = window;
         entry.shown = now;
@@ -228,12 +231,14 @@ pub(super) fn slice_shown(id: EntityId, window: Option<ChatId>) {
 fn may_be_visible(window: Option<ChatId>, scope: Option<EntityId>, used: u64) -> bool {
     match scope {
         None => whole_of(window).is_some_and(|whole| used >= whole.on_screen),
-        Some(id) => SLICES.with(|slices| {
-            slices.borrow().get(&id).is_some_and(|s| {
+        Some(id) => read_cell(&SLICES, |slices| {
+            slices.get(&id).is_some_and(|s| {
                 let on_screen = whole_of(s.window).map(|whole| whole.on_screen);
                 on_screen.is_some_and(|on_screen| s.shown >= on_screen) && used >= s.rendered
             })
-        }),
+        })
+        // Borrowed: keep the image rather than evict one that may show.
+        .unwrap_or(true),
     }
 }
 
@@ -254,13 +259,18 @@ impl PaintStamp {
 
 /// A stamp for content painted now.
 pub(super) fn paint_stamp() -> PaintStamp {
-    paint_stamp_in(SCOPED.with(|scoped| scoped.borrow().last().and_then(|(_, window)| *window)))
+    paint_stamp_in(
+        read_cell(&SCOPED, |scoped| {
+            scoped.last().and_then(|(_, window)| *window)
+        })
+        .flatten(),
+    )
 }
 
 pub(super) fn paint_stamp_in(window: Option<ChatId>) -> PaintStamp {
     PaintStamp {
         window,
-        scope: SCOPE.with(|scope| scope.borrow().as_ref().and_then(|scope| scope.get())),
+        scope: read_cell(&SCOPE, |scope| scope.as_ref().and_then(|scope| scope.get())).flatten(),
         frame: frame(),
     }
 }
@@ -282,11 +292,11 @@ pub(super) fn shows_now(stamp: PaintStamp) -> bool {
     };
     match stamp.scope {
         None => stamp.frame >= whole.latest,
-        Some(id) => SLICES.with(|slices| {
-            let slices = slices.borrow();
+        Some(id) => read_cell(&SLICES, |slices| {
             let slice = slices.get(&id);
             slice.is_some_and(|s| s.shown >= whole.latest && stamp.frame >= s.rendered)
-        }),
+        })
+        .unwrap_or(false),
     }
 }
 
@@ -299,12 +309,10 @@ fn newly_shown(window: Option<ChatId>, scope: Option<EntityId>, previous: Option
     };
     match scope {
         None => whole_of(window).is_none_or(|whole| previous < whole.on_screen),
-        Some(id) => SLICES.with(|slices| {
-            slices
-                .borrow()
-                .get(&id)
-                .is_none_or(|s| previous < s.previous_render)
-        }),
+        Some(id) => read_cell(&SLICES, |slices| {
+            slices.get(&id).is_none_or(|s| previous < s.previous_render)
+        })
+        .unwrap_or(false),
     }
 }
 
@@ -417,7 +425,11 @@ fn sized_image_with(
             source: source.clone(),
             edge: edge(window.scale_factor()),
         };
-        match SCOPED.with(|scoped| scoped.borrow().last().map(|(cache, _)| cache.clone())) {
+        match read_cell(&SCOPED, |scoped| {
+            scoped.last().map(|(cache, _)| cache.clone())
+        })
+        .flatten()
+        {
             Some(cache) => cache.update(cx, |cache, cx| cache.load_sized(&key, window, cx)),
             None => window.use_asset::<SizedAsset>(&key, cx),
         }
@@ -616,7 +628,13 @@ impl SizedLoad {
             let Some(state) = weak.upgrade() else {
                 return;
             };
-            let previous = std::mem::replace(&mut *state.borrow_mut(), SizedState::Loaded(result));
+            // Nothing holds the state across a turn; if it is borrowed all
+            // the same, the picture stays unloaded rather than panic.
+            let Ok(mut guard) = state.try_borrow_mut() else {
+                return;
+            };
+            let previous = std::mem::replace(&mut *guard, SizedState::Loaded(result));
+            drop(guard);
             if let SizedState::Loading(views) = previous {
                 cx.update(|cx| {
                     for view in views {
@@ -629,14 +647,14 @@ impl SizedLoad {
     }
 
     fn get(&self) -> Option<LoadResult> {
-        match &*self.state.borrow() {
+        match &*self.state.try_borrow().ok()? {
             SizedState::Loading(_) => None,
             SizedState::Loaded(result) => Some(result.clone()),
         }
     }
 
     fn use_by(&self, view: EntityId) -> Option<LoadResult> {
-        match &mut *self.state.borrow_mut() {
+        match &mut *self.state.try_borrow_mut().ok()? {
             SizedState::Loading(views) => {
                 if !views.contains(&view) {
                     views.push(view);
@@ -677,10 +695,7 @@ const RETRY_FAILED_AFTER: Duration = Duration::from_secs(30);
 
 struct Entry {
     load: Load,
-    /// Decoded size once loaded (0 for failures).
-    bytes: Option<usize>,
-    /// When the decode was seen to fail, on the executor clock.
-    failed_at: Option<Instant>,
+    stage: EntryStage,
     /// The last frame each scope (slice, or `None` for the app) used it.
     uses: SmallVec<[(Option<EntityId>, u64); 2]>,
 }
@@ -716,7 +731,7 @@ pub(super) struct BoundedImageCache {
 
 impl BoundedImageCache {
     pub(super) fn new(scope: Rc<Cell<Option<EntityId>>>) -> Self {
-        SCOPE.with(|current| *current.borrow_mut() = Some(scope.clone()));
+        with_cell(&SCOPE, |current| *current = Some(scope.clone()));
         Self::in_window(scope, None)
     }
 
@@ -813,14 +828,14 @@ impl BoundedImageCache {
             .entries
             .iter()
             .filter(|(_, entry)| !entry.may_be_visible(self.window))
-            .map(|(key, entry)| (entry.last_used(), *key, entry.bytes.unwrap_or(0)))
+            .map(|(key, entry)| (entry.last_used(), *key, entry.stage.bytes()))
             .collect();
         let mut images = Vec::new();
         for key in plan_eviction(candidates, (self.bytes, self.entries.len()), budget) {
             let Some(entry) = self.entries.remove(&key) else {
                 continue;
             };
-            self.bytes -= entry.bytes.unwrap_or(0);
+            self.bytes -= entry.stage.bytes();
             if let Some(Ok(image)) = entry.load.get() {
                 images.push(image);
             }
@@ -844,17 +859,15 @@ impl BoundedImageCache {
         let (scope, now) = (self.scope.get(), frame());
         let clock = cx.background_executor().now();
         if self.entries.get(&key).is_some_and(|entry| {
-            entry
-                .failed_at
-                .is_some_and(|at| clock.saturating_duration_since(at) >= RETRY_FAILED_AFTER)
+            matches!(entry.stage, EntryStage::Failed { at }
+                if clock.saturating_duration_since(at) >= RETRY_FAILED_AFTER)
         }) && let Some(failed) = self.entries.remove(&key)
         {
-            self.bytes -= failed.bytes.unwrap_or(0);
+            self.bytes -= failed.stage.bytes();
         }
         let entry = self.entries.entry(key).or_insert_with(|| Entry {
             load: start(cx),
-            bytes: None,
-            failed_at: None,
+            stage: EntryStage::Loading,
             uses: SmallVec::new(),
         });
         let previous = match entry.uses.iter_mut().find(|(s, _)| *s == scope) {
@@ -868,23 +881,21 @@ impl BoundedImageCache {
             note_activity();
         }
         let result = entry.load.use_image(window);
-        if entry.bytes.is_none()
+        if entry.stage == EntryStage::Loading
             && let Some(result) = &result
         {
-            let bytes = match result {
-                Ok(image) => (0..image.frame_count())
-                    .map(|frame| {
-                        let size = image.size(frame);
-                        atlas_cost(size.width.0.max(0) as u32, size.height.0.max(0) as u32)
-                    })
-                    .sum(),
-                Err(_) => {
-                    entry.failed_at = Some(clock);
-                    0
-                }
+            entry.stage = match result {
+                Ok(image) => EntryStage::Ready {
+                    bytes: (0..image.frame_count())
+                        .map(|frame| {
+                            let size = image.size(frame);
+                            atlas_cost(size.width.0.max(0) as u32, size.height.0.max(0) as u32)
+                        })
+                        .sum(),
+                },
+                Err(_) => EntryStage::Failed { at: clock },
             };
-            entry.bytes = Some(bytes);
-            self.bytes += bytes;
+            self.bytes += entry.stage.bytes();
         }
         result
     }
@@ -1483,7 +1494,7 @@ mod tests {
     #[cfg(feature = "demo-capture")]
     #[gpui_kit::test]
     fn evicted_sizes_leave_the_index(cx: &mut gpui_kit::TestAppContext) {
-        use super::{BoundedImageCache, Entry, Load, SizedKey, SizedLoad, SizedSource};
+        use super::{BoundedImageCache, Entry, EntryStage, Load, SizedKey, SizedLoad, SizedSource};
         cx.update(|cx| {
             let mut cache = BoundedImageCache::new(Default::default());
             let source = SizedSource::Path(std::path::Path::new("gone.jpg").into());
@@ -1494,8 +1505,7 @@ mod tests {
                 };
                 let entry = Entry {
                     load: Load::Sized(SizedLoad::new(sized, cx)),
-                    bytes: Some(10),
-                    failed_at: None,
+                    stage: EntryStage::Ready { bytes: 10 },
                     uses: SmallVec::new(),
                 };
                 cache.entries.insert(key, entry);
@@ -1645,7 +1655,7 @@ mod tests {
     #[cfg(feature = "demo-capture")]
     #[gpui_kit::test]
     fn a_failed_decode_is_tried_again_after_a_while(cx: &mut gpui_kit::TestAppContext) {
-        use super::{BoundedImageCache, CacheScope, RETRY_FAILED_AFTER};
+        use super::{BoundedImageCache, CacheScope, EntryStage, RETRY_FAILED_AFTER};
         use gpui_kit::test::TestWindowExt;
         use gpui_kit::{
             AppContext, Context, Entity, IntoElement, Render, Styled, VisualTestContext, Window,
@@ -1687,7 +1697,10 @@ mod tests {
                 cache
                     .entries
                     .values()
-                    .map(|entry| entry.failed_at)
+                    .map(|entry| match entry.stage {
+                        EntryStage::Failed { at } => Some(at),
+                        EntryStage::Loading | EntryStage::Ready { .. } => None,
+                    })
                     .collect::<Vec<_>>()
             })
         };

@@ -130,8 +130,23 @@ impl QuillApp {
             move |this, _, cx| {
                 this.close_message_menu();
                 if let Some(session) = this.origin_session_mut() {
-                    session.users_state.replies_block = Some(block.clone());
-                    this.open_box(DialogKind::BlockFromReplies);
+                    // A block already out is not replaced: its answer
+                    // would find another target.
+                    let submitting =
+                        session
+                            .users_state
+                            .replies_block
+                            .as_ref()
+                            .is_some_and(|open| {
+                                matches!(
+                                    open.stage,
+                                    quill::message_menu_origin::RepliesBlockStage::Submitting(_)
+                                )
+                            });
+                    if !submitting {
+                        session.users_state.replies_block = Some(block.clone());
+                        this.open_box(DialogKind::BlockFromReplies);
+                    }
                 }
                 cx.notify();
             },
@@ -298,12 +313,9 @@ impl QuillApp {
                     &[("name", &block.name)],
                 )))
                 .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    let body = std::cell::Cell::new(Some(body.into_any_element()));
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
                 }))

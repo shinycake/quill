@@ -34,10 +34,8 @@ impl Session {
             // answer (schema 1.8.67, line 7716). A first page replaces the
             // slot; a later page appends, deduped by result id, keeping
             // the new page's id/offset.
-            // ponytail: rapid re-queries can let an older response land on
-            // a newer slot — the response never echoes the query text, so
-            // the slot keys on (chat, bot) only; the UI slice debounces
-            // queries anyway.
+            // The first page is matched to the slot by the `RequestId` its
+            // `Loading` stage holds, so an older query's answer is dropped.
             BotsPayload::InlineQueryResults(page) => {
                 self.apply_inline_query_results(page, pending, extra, seq)
             }
@@ -79,9 +77,10 @@ impl Session {
                         (pending.chat_id, pending.around_message_id)
                 {
                     // Guard: a panel the user closed while the answer was in
-                    // flight must stay closed — only fill the loading entry.
+                    // flight must stay closed, and only the request the
+                    // panel waits for fills it.
                     if let Some(panel) = self.bots.game_scores.get_mut(&(chat_id.0, message_id.0)) {
-                        panel.succeed(scores);
+                        panel.answered(Some(pending.id), scores);
                     }
                 }
             }
@@ -103,7 +102,7 @@ impl Session {
                 // B1: `getLoginUrlInfo` response to our own login-button
                 // press (matched by `@extra`).
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetLoginUrlInfo) {
-                    self.bots.last_login_url_info = Some(info);
+                    self.bots.login_url.answer(pending.map(|p| p.id), info);
                 }
             }
         }
