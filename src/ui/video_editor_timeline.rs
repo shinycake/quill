@@ -957,6 +957,7 @@ fn paint_labels(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use core::prelude::v1::test;
 
     /// A drag that lost its mouse-up ends with `end_drag`, so the loop and
     /// the cover bubble it kept held go on.
