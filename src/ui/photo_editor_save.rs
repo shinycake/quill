@@ -8,9 +8,27 @@ use super::photo_editor::{EditorPurpose, PhotoEditor};
 use super::send_box_media_check::check_photo;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
-use quill::composer::{EditRender, RenderJob, RenderToken};
+use quill::composer::RenderJob as OwnedRender;
+use quill::composer::{EditRender, RenderToken};
 use quill::lang::{keys, tr};
 use std::path::PathBuf;
+
+/// Render and write the edit, unless its job was dropped already; a PNG
+/// written by a render that was cancelled meanwhile goes at once.
+fn render_unless_cancelled(
+    token: &RenderToken,
+    job: super::photo_edit::RenderJob,
+) -> Option<PathBuf> {
+    if token.is_cancelled() {
+        return None;
+    }
+    let saved = super::edit_media_tools::write_edited_png(&job.render())?;
+    if token.is_cancelled() {
+        let _ = std::fs::remove_file(saved);
+        return None;
+    }
+    Some(saved)
+}
 
 impl QuillApp {
     /// The editor's Masks strip is wanted while some window's editor is in
@@ -52,9 +70,9 @@ impl QuillApp {
                 let token = RenderToken::new();
                 let landing = token.clone();
                 let job = editor.into_render_job();
-                let render = cx.background_spawn(async move {
-                    super::edit_media_tools::write_edited_png(&job.render())
-                });
+                let cancel = token.clone();
+                let render =
+                    cx.background_spawn(async move { render_unless_cancelled(&cancel, job) });
                 let task = self.spawn_scoped(cx, async move |app, cx| {
                     let saved = render.await;
                     let kept = saved.clone();
@@ -83,7 +101,7 @@ impl QuillApp {
                 // drops the task.
                 if let Some(edit) = self.chat_ui.pending_edit_mut() {
                     edit.media_edit.render = EditRender::Rendering {
-                        job: RenderJob::new(token, task),
+                        job: OwnedRender::new(token, task),
                     };
                 }
             }
@@ -113,10 +131,8 @@ impl QuillApp {
         let landing = token.clone();
         let tray_item = item.clone();
         let job = editor.into_render_job();
-        let task =
-            cx.background_spawn(
-                async move { super::edit_media_tools::write_edited_png(&job.render()) },
-            );
+        let cancel = token.clone();
+        let task = cx.background_spawn(async move { render_unless_cancelled(&cancel, job) });
         let render_task = self.spawn_scoped_in(window, cx, async move |app, cx| {
             let saved = task.await;
             let kept = saved.clone();
@@ -172,7 +188,7 @@ impl QuillApp {
         });
         // The tray item owns the render: removing the photo, or a later
         // Done, drops the task.
-        let job = RenderJob::new(token, render_task);
+        let job = OwnedRender::new(token, render_task);
         self.composer_sends.update_item(&tray_item, |attachment| {
             attachment.extras.begin_render(job);
         });
