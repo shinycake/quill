@@ -60,7 +60,13 @@ impl<T: SlotFarewell> SlotFarewell for Box<T> {
 impl SlotFarewell for HistoryUi {}
 impl SlotFarewell for Entity<TextareaState> {}
 impl SlotFarewell for ComposerUi {}
-impl SlotFarewell for ChatUi {}
+/// A closed window's chat value goes through the one writer, so the acks
+/// its bar work waits on are forgotten with it.
+impl SlotFarewell for ChatUi {
+    fn farewell(app: &mut QuillApp, _cx: &mut Context<QuillApp>) {
+        app.leave_chat_ui();
+    }
+}
 impl SlotFarewell for MessageUi {}
 impl SlotFarewell for PickerUi {}
 impl SlotFarewell for ShareUi {}

@@ -238,8 +238,8 @@ pub(crate) struct ChatUi {
     pub(super) bot_alert: super::inline_mode::BotAlert,
     /// A bot's Restart whose unblock is out (`bottom_action`).
     pub(super) restart: super::bottom_action::BotRestart,
-    /// The spam bar's report and leave, until both are answered.
-    pub(super) bar_report: super::bar_report::BarReport,
+    /// What the chat's action bar sent (report, hide, unarchive, block), until its requests are answered.
+    pub(super) bar_work: super::bar_report::BarWork,
     /// What the last rich send took out of the field, until TDLib answers.
     pub(super) sent_text: super::composer::SentText,
     /// The draft the last AI composer action was asked about.
@@ -629,7 +629,7 @@ impl QuillApp {
         {
             live.driver.session.acks.forget(request);
         }
-        for request in old.bar_report.requests() {
+        for request in old.bar_work.requests() {
             if let Some(live) = self.live.as_mut() {
                 live.driver.session.acks.forget(*request);
             }
