@@ -616,7 +616,9 @@ impl QuillApp {
                 SetChangeStage::Failed(SetChange::Archive) => {
                     StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_ARCHIVE_THE_STICKER))
                 }
-                SetChangeStage::Failed(_) | SetChangeStage::Idle | SetChangeStage::Working(_) => {
+                SetChangeStage::Failed(_)
+                | SetChangeStage::Idle
+                | SetChangeStage::Working { .. } => {
                     StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_CHANGE_THE_STICKER))
                 }
             };

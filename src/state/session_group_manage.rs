@@ -99,12 +99,7 @@ impl Session {
                 supergroup_id,
                 is_channel,
             } => {
-                let broadcast_group = self
-                    .groups
-                    .supergroup_is_broadcast
-                    .get(&supergroup_id)
-                    .copied()
-                    .unwrap_or(false);
+                let broadcast_group = self.groups.supergroup(supergroup_id).is_broadcast_group;
                 let full = self.supergroup_full_info(supergroup_id);
                 let counts = full.map(|info| info.member_counts).unwrap_or_default();
                 let hidden = full.is_some_and(|info| info.admin.has_hidden_members);
@@ -129,16 +124,8 @@ impl Session {
                     }),
                     signatures: channel_settings.then(|| {
                         Signatures::new(
-                            self.groups
-                                .supergroup_sign_messages
-                                .get(&supergroup_id)
-                                .copied()
-                                .unwrap_or(false),
-                            self.groups
-                                .supergroup_show_message_sender
-                                .get(&supergroup_id)
-                                .copied()
-                                .unwrap_or(false),
+                            self.groups.supergroup(supergroup_id).sign_messages,
+                            self.groups.supergroup(supergroup_id).show_message_sender,
                         )
                     }),
                 }

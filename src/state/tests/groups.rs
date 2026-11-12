@@ -225,7 +225,9 @@ fn invite_link_replace_failure_surfaces_and_broadcast_rolls_back() {
         is_channel: false,
     };
     session.chats.insert(14, chat);
-    session.groups.supergroup_is_broadcast.insert(14, true);
+    session
+        .groups
+        .edit_supergroup(14, |facts| facts.is_broadcast_group = true);
     let extra = session.request(RequestPurpose::ToggleBroadcastGroup, Some(ChatId(14)));
     apply_json(
         &mut session,
@@ -236,7 +238,7 @@ fn invite_link_replace_failure_surfaces_and_broadcast_rolls_back() {
             extra.0
         ),
     );
-    assert!(!session.groups.supergroup_is_broadcast.contains_key(&14));
+    assert!(!session.groups.supergroup(14).is_broadcast_group);
 }
 
 #[test]
@@ -1031,10 +1033,14 @@ fn can_manage_admins_gate() {
         .groups
         .supergroup_member_status
         .insert(15, ChannelMemberStatus::Administrator);
-    session.groups.supergroup_promote_right.insert(15, true);
+    session
+        .groups
+        .edit_supergroup(15, |facts| facts.can_promote_members = true);
     assert!(session.chat_can_manage_admins(ChatId(15)));
 
-    session.groups.supergroup_promote_right.insert(15, false);
+    session
+        .groups
+        .edit_supergroup(15, |facts| facts.can_promote_members = false);
     assert!(!session.chat_can_manage_admins(ChatId(15)));
 }
 

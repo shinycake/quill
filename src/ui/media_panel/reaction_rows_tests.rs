@@ -10,7 +10,7 @@ use quill::ids::{ChatId, MessageId};
 use quill::premium_hub::PremiumFeature;
 use quill::premium_hub::promo::{PreviewOpen, PromoPage};
 use quill::reaction_limit::ReactionLimits;
-use quill::state::{MessageReactionsState, ReactionChoice};
+use quill::state::ReactionChoice;
 
 const CHAT: ChatId = ChatId(11);
 const MESSAGE: MessageId = MessageId(101);

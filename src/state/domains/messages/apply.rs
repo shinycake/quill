@@ -111,32 +111,35 @@ impl Session {
             }
             // The message menu's "N Seen" / "Seen at" / "N Reacted" rows.
             MessagesPayload::MessageViewers(viewers) => {
-                if let Some(RequestPurpose::Messages(MessagesPurpose::GetMessageViewers {
-                    chat_id,
-                    message_id,
-                })) = pending.map(|p| p.purpose)
+                if let Some(pending) = pending
+                    && let RequestPurpose::Messages(MessagesPurpose::GetMessageViewers {
+                        chat_id,
+                        message_id,
+                    }) = pending.purpose
                 {
-                    self.accept_message_viewers(chat_id, message_id, viewers);
+                    self.accept_message_viewers(pending.id, chat_id, message_id, viewers);
                 }
             }
             MessagesPayload::MessageReadDate(date) => {
-                if let Some(RequestPurpose::Messages(MessagesPurpose::GetMessageReadDate {
-                    chat_id,
-                    message_id,
-                })) = pending.map(|p| p.purpose)
+                if let Some(pending) = pending
+                    && let RequestPurpose::Messages(MessagesPurpose::GetMessageReadDate {
+                        chat_id,
+                        message_id,
+                    }) = pending.purpose
                 {
-                    self.accept_message_read_date(chat_id, message_id, date);
+                    self.accept_message_read_date(pending.id, chat_id, message_id, date);
                 }
             }
             MessagesPayload::AddedReactions(page) => {
-                if let Some(RequestPurpose::Messages(MessagesPurpose::GetMessageAddedReactions {
-                    chat_id,
-                    message_id,
-                    filter,
-                    append,
-                })) = pending.map(|p| p.purpose)
+                if let Some(pending) = pending
+                    && let RequestPurpose::Messages(MessagesPurpose::GetMessageAddedReactions {
+                        chat_id,
+                        message_id,
+                        filter,
+                        ..
+                    }) = pending.purpose
                 {
-                    self.accept_added_reactions(chat_id, message_id, filter, append, page);
+                    self.accept_added_reactions(pending.id, chat_id, message_id, filter, page);
                 }
             }
             MessagesPayload::UpdatePendingMessage {
@@ -501,12 +504,13 @@ impl Session {
                         .accept_post(chat_id, message_id, pending.id, &message);
                     return;
                 }
-                if let Some(RequestPurpose::GetRepliedMessage {
-                    chat_id,
-                    message_id,
-                }) = pending.map(|p| p.purpose)
+                if let Some(pending) = pending
+                    && let RequestPurpose::GetRepliedMessage {
+                        chat_id,
+                        message_id,
+                    } = pending.purpose
                 {
-                    self.accept_replied_message(chat_id, message_id, message);
+                    self.accept_replied_message(pending.id, chat_id, message_id, message);
                     return;
                 }
                 if let Some(p) = pending

@@ -305,9 +305,10 @@ impl Session {
                 previous,
                 shown,
             } => {
-                let flags = &mut self.groups.supergroup_join_by_request;
-                if flags.get(&supergroup_id) == Some(&shown) {
-                    restore_flag(flags, supergroup_id, previous);
+                if self.groups.supergroup(supergroup_id).join_by_request == shown {
+                    self.groups.edit_supergroup(supergroup_id, |facts| {
+                        facts.join_by_request = previous.unwrap_or(false);
+                    });
                 }
             }
             RequestRollback::SignMessages {
@@ -317,23 +318,12 @@ impl Session {
                 shown_sign,
                 shown_show,
             } => {
-                if self.groups.supergroup_sign_messages.get(&supergroup_id) == Some(&shown_sign)
-                    && self
-                        .groups
-                        .supergroup_show_message_sender
-                        .get(&supergroup_id)
-                        == Some(&shown_show)
-                {
-                    restore_flag(
-                        &mut self.groups.supergroup_sign_messages,
-                        supergroup_id,
-                        previous_sign,
-                    );
-                    restore_flag(
-                        &mut self.groups.supergroup_show_message_sender,
-                        supergroup_id,
-                        previous_show,
-                    );
+                let now = self.groups.supergroup(supergroup_id);
+                if now.sign_messages == shown_sign && now.show_message_sender == shown_show {
+                    self.groups.edit_supergroup(supergroup_id, |facts| {
+                        facts.sign_messages = previous_sign.unwrap_or(false);
+                        facts.show_message_sender = previous_show.unwrap_or(false);
+                    });
                 }
             }
             RequestRollback::AntiSpam {
@@ -341,9 +331,11 @@ impl Session {
                 previous,
                 shown,
             } => {
-                let flags = &mut self.groups.supergroup_anti_spam_enabled;
-                if flags.get(&supergroup_id) == Some(&shown) {
-                    restore_flag(flags, supergroup_id, previous);
+                if self.groups.supergroup_anti_spam(supergroup_id).enabled == shown {
+                    self.groups
+                        .edit_supergroup_anti_spam(supergroup_id, |anti_spam| {
+                            anti_spam.enabled = previous.unwrap_or(false);
+                        });
                 }
             }
             RequestRollback::ChatIsTranslatable {
@@ -460,23 +452,6 @@ impl Session {
                     }
                 }
             }
-        }
-    }
-}
-
-/// Put a remembered flag back: its old value, or no value when it was
-/// unknown.
-fn restore_flag(
-    flags: &mut std::collections::HashMap<i64, bool>,
-    key: i64,
-    previous: Option<bool>,
-) {
-    match previous {
-        Some(flag) => {
-            flags.insert(key, flag);
-        }
-        None => {
-            flags.remove(&key);
         }
     }
 }

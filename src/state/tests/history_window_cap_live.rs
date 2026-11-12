@@ -1,6 +1,6 @@
 //! State reducer tests: live messages in chats nobody has open are capped
 //! like page loads.
-use super::common::session;
+use super::common::{accept_reply, session};
 use super::{
     ChatId, FileId, HISTORY_WINDOW_CAP, HISTORY_WINDOW_TRIM_TO, MAX_REPLY_TARGETS_OUTSIDE_WINDOW,
     MessageContent, MessageId, ParsedFile, ParsedMessage, ReaderPosition, Session, WindowEnd,
@@ -192,7 +192,7 @@ fn reply_strips_stay_near_the_window_while_paging_through_a_long_chat() {
     session.open_chat(ChatId(7));
     let page = 100;
     let replied = |session: &mut Session, id: i64| {
-        session.accept_replied_message(ChatId(7), MessageId(id), live(7, 1, Vec::new()));
+        accept_reply(session, ChatId(7), MessageId(id), live(7, 1, Vec::new()));
     };
     let mut newest = 0;
     for _ in 0..200 {
@@ -228,7 +228,12 @@ fn reply_strips_of_a_loaded_topic_stay() {
         .topic_history_entry(ChatId(7), 3)
         .upsert(history_message(live(7, topic_row, Vec::new()), false));
     for id in 1..=MAX_REPLY_TARGETS_OUTSIDE_WINDOW as i64 + 10 {
-        session.accept_replied_message(ChatId(7), MessageId(id), live(7, 1, Vec::new()));
+        accept_reply(
+            &mut session,
+            ChatId(7),
+            MessageId(id),
+            live(7, 1, Vec::new()),
+        );
     }
     for id in 1_000..=1_000 + total {
         session.upsert_message(live(7, id, Vec::new()), false);
@@ -299,7 +304,12 @@ fn reply_strips_of_trimmed_topic_rows_go_when_only_the_topic_is_loaded() {
         message.extras.topic = Some(crate::telegram::envelope::MessageTopic::Forum(3));
         session.apply_update_new_message(message);
         session.histories.remove(&7);
-        session.accept_replied_message(ChatId(7), MessageId(id - 500_000), live(7, 1, Vec::new()));
+        accept_reply(
+            &mut session,
+            ChatId(7),
+            MessageId(id - 500_000),
+            live(7, 1, Vec::new()),
+        );
     }
     let window = session.threads.topic_histories[&(7, 3)].messages.len();
     assert!(window <= HISTORY_WINDOW_CAP);

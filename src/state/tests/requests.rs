@@ -131,7 +131,9 @@ fn optimistic_mutations_roll_back_on_error() {
     assert!(!chat.can_send_basic_messages());
 
     // Join-by-request: previous flag restored.
-    session.groups.supergroup_join_by_request.insert(21, true);
+    session
+        .groups
+        .edit_supergroup(21, |facts| facts.join_by_request = true);
     let extra = session.request(
         RequestPurpose::ToggleSupergroupJoinByRequest,
         Some(ChatId(21)),
@@ -143,7 +145,9 @@ fn optimistic_mutations_roll_back_on_error() {
             shown: false,
         });
     }
-    session.groups.supergroup_join_by_request.insert(21, false);
+    session
+        .groups
+        .edit_supergroup(21, |facts| facts.join_by_request = false);
     apply_json(
         &mut session,
         &seq,
@@ -153,10 +157,7 @@ fn optimistic_mutations_roll_back_on_error() {
             extra.0
         ),
     );
-    assert_eq!(
-        session.groups.supergroup_join_by_request.get(&21),
-        Some(&true)
-    );
+    assert_eq!(session.groups.supergroup(21).join_by_request, true);
 
     // Username: absent stays absent, present is restored.
     session
@@ -741,10 +742,14 @@ fn chat_can_invite_users_gate() {
         .groups
         .supergroup_member_status
         .insert(15, ChannelMemberStatus::Administrator);
-    session.groups.supergroup_invite_right.insert(15, true);
+    session
+        .groups
+        .edit_supergroup(15, |facts| facts.can_invite_users = true);
     assert!(session.chat_can_invite_users(ChatId(15)));
 
-    session.groups.supergroup_invite_right.insert(15, false);
+    session
+        .groups
+        .edit_supergroup(15, |facts| facts.can_invite_users = false);
     assert!(!session.chat_can_invite_users(ChatId(15)));
 
     let mut member_group = placeholder_chat(ChatId(16));

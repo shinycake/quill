@@ -539,18 +539,16 @@ impl QuillApp {
     /// Slice G1: cached join-by-request flag for a supergroup chat.
     pub(super) fn chat_join_by_request(&self, chat_id: ChatId) -> bool {
         self.chat_supergroup_id(chat_id).is_some_and(|id| {
-            self.session().is_some_and(|session| {
-                session.groups.supergroup_join_by_request.get(&id) == Some(&true)
-            })
+            self.session()
+                .is_some_and(|session| session.groups.supergroup(id).join_by_request)
         })
     }
 
     /// Slice G1: cached broadcast-group flag for a supergroup chat.
     pub(super) fn chat_is_broadcast(&self, chat_id: ChatId) -> bool {
         self.chat_supergroup_id(chat_id).is_some_and(|id| {
-            self.session().is_some_and(|session| {
-                session.groups.supergroup_is_broadcast.get(&id) == Some(&true)
-            })
+            self.session()
+                .is_some_and(|session| session.groups.supergroup(id).is_broadcast_group)
         })
     }
 

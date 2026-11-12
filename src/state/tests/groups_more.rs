@@ -592,25 +592,13 @@ fn g2_update_supergroup_caches_sign_flags_and_rights() {
         &sink,
         r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":25,"sign_messages":true,"show_message_sender":true,"status":{"@type":"chatMemberStatusAdministrator","rights":{"@type":"chatAdministratorRights","can_change_info":true,"can_manage_topics":true,"can_send_welcome_messages":true}}}}"#,
     );
+    assert_eq!(session.groups.supergroup(25).sign_messages, true);
+    assert_eq!(session.groups.supergroup(25).show_message_sender, true);
+    assert_eq!(session.groups.supergroup(25).can_manage_topics, true);
+    assert_eq!(session.groups.supergroup(25).can_change_info, true);
     assert_eq!(
-        session.groups.supergroup_sign_messages.get(&25),
-        Some(&true)
-    );
-    assert_eq!(
-        session.groups.supergroup_show_message_sender.get(&25),
-        Some(&true)
-    );
-    assert_eq!(
-        session.groups.supergroup_manage_topics_right.get(&25),
-        Some(&true)
-    );
-    assert_eq!(
-        session.groups.supergroup_change_info_right.get(&25),
-        Some(&true)
-    );
-    assert_eq!(
-        session.groups.supergroup_send_welcome_right.get(&25),
-        Some(&true)
+        session.groups.supergroup(25).can_send_welcome_messages,
+        true
     );
     assert!(session.chat_can_manage_topics(ChatId(13)));
     assert!(session.chat_can_change_info(ChatId(13)));
@@ -846,11 +834,12 @@ fn g2_sign_toggle_error_rolls_back() {
     // previous flags when TDLib answers `error`.
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.groups.supergroup_sign_messages.insert(25, false);
     session
         .groups
-        .supergroup_show_message_sender
-        .insert(25, false);
+        .edit_supergroup(25, |facts| facts.sign_messages = false);
+    session
+        .groups
+        .edit_supergroup(25, |facts| facts.show_message_sender = false);
     let extra = session.request(
         RequestPurpose::ToggleSupergroupSignMessages,
         Some(ChatId(13)),
@@ -866,11 +855,12 @@ fn g2_sign_toggle_error_rolls_back() {
         shown_sign: true,
         shown_show: true,
     });
-    session.groups.supergroup_sign_messages.insert(25, true);
     session
         .groups
-        .supergroup_show_message_sender
-        .insert(25, true);
+        .edit_supergroup(25, |facts| facts.sign_messages = true);
+    session
+        .groups
+        .edit_supergroup(25, |facts| facts.show_message_sender = true);
     apply_json(
         &mut session,
         &seq,
@@ -880,14 +870,8 @@ fn g2_sign_toggle_error_rolls_back() {
             extra.0
         ),
     );
-    assert_eq!(
-        session.groups.supergroup_sign_messages.get(&25),
-        Some(&false)
-    );
-    assert_eq!(
-        session.groups.supergroup_show_message_sender.get(&25),
-        Some(&false)
-    );
+    assert_eq!(session.groups.supergroup(25).sign_messages, false);
+    assert_eq!(session.groups.supergroup(25).show_message_sender, false);
 }
 
 #[test]
@@ -898,8 +882,7 @@ fn g2_anti_spam_toggle_error_rolls_back() {
     let seq = AtomicU64::new(0);
     session
         .groups
-        .supergroup_anti_spam_enabled
-        .insert(25, false);
+        .edit_supergroup_anti_spam(25, |anti| anti.enabled = false);
     let extra = session.request(
         RequestPurpose::ToggleSupergroupAggressiveAntiSpam,
         Some(ChatId(13)),
@@ -913,7 +896,9 @@ fn g2_anti_spam_toggle_error_rolls_back() {
         previous: Some(false),
         shown: true,
     });
-    session.groups.supergroup_anti_spam_enabled.insert(25, true);
+    session
+        .groups
+        .edit_supergroup_anti_spam(25, |anti| anti.enabled = true);
     apply_json(
         &mut session,
         &seq,
@@ -923,10 +908,7 @@ fn g2_anti_spam_toggle_error_rolls_back() {
             extra.0
         ),
     );
-    assert_eq!(
-        session.groups.supergroup_anti_spam_enabled.get(&25),
-        Some(&false)
-    );
+    assert_eq!(session.groups.supergroup_anti_spam(25).enabled, false);
 }
 
 #[test]
@@ -1182,11 +1164,13 @@ fn a_refused_toggle_keeps_a_value_an_update_changed_meanwhile() {
         .expect("pending")
         .rollback = Some(RequestRollback::AntiSpam {
         supergroup_id: 25,
-        previous: Some(false),
+        previous: Some(true),
         shown: true,
     });
     // Another admin's change arrived: the flag is no longer what we showed.
-    session.groups.supergroup_anti_spam_enabled.remove(&25);
+    session
+        .groups
+        .edit_supergroup_anti_spam(25, |anti| anti.enabled = false);
     apply_json(
         &mut session,
         &seq,
@@ -1196,7 +1180,7 @@ fn a_refused_toggle_keeps_a_value_an_update_changed_meanwhile() {
             extra.0
         ),
     );
-    assert_eq!(session.groups.supergroup_anti_spam_enabled.get(&25), None);
+    assert!(!session.groups.supergroup_anti_spam(25).enabled);
 }
 
 #[test]
@@ -1282,5 +1266,34 @@ fn ownership_answers_are_matched_to_their_request() {
     assert_eq!(
         session.groups.ownership.owner_after_leaving.get(&13),
         Some(&crate::state::OwnerLookup::Loaded(5))
+    );
+}
+
+/// r3-05 09-004: the viewer's rights and the group's flags are one value
+/// per supergroup, replaced whole by the update that carries them.
+#[test]
+fn a_supergroup_update_replaces_the_rights_and_flags_together() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":26,"join_by_request":true,"sign_messages":true,"status":{"@type":"chatMemberStatusAdministrator","rights":{"@type":"chatAdministratorRights","can_change_info":true,"can_invite_users":true}}}}"#,
+    );
+    let first = session.groups.supergroup(26);
+    assert!(first.can_change_info && first.can_invite_users);
+    assert!(first.join_by_request && first.sign_messages);
+    // The viewer lost the administrator status: no right or flag of the
+    // earlier update survives next to the new ones.
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":26,"status":{"@type":"chatMemberStatusMember"}}}"#,
+    );
+    assert_eq!(
+        session.groups.supergroup(26),
+        crate::state::SupergroupFacts::default()
     );
 }

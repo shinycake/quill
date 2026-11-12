@@ -341,7 +341,8 @@ impl Session {
                     && let Some(chat) = self.chats.get(&chat_id.0)
                     && let ChatKind::Supergroup { supergroup_id, .. } = chat.kind
                 {
-                    self.groups.supergroup_is_broadcast.remove(&supergroup_id);
+                    self.groups
+                        .edit_supergroup(supergroup_id, |facts| facts.is_broadcast_group = false);
                 }
             }
             // Only the request the list waits for fails it, and it is

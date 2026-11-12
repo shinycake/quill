@@ -208,7 +208,7 @@ impl Session {
         let order = lists.map(|l| l.active.clone()).unwrap_or_default();
         let request_to_join = self
             .chat_supergroup(chat_id)
-            .is_some_and(|sg| self.groups.supergroup_join_by_request.get(&sg) == Some(&true));
+            .is_some_and(|sg| self.groups.supergroup(sg).join_by_request);
         crate::group_type::GroupTypeData {
             public: !username.is_empty() || !order.is_empty(),
             username,

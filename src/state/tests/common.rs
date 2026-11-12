@@ -119,6 +119,29 @@ pub(crate) fn event_log_request(session: &mut Session, purpose: GroupsPurpose) -
     extra
 }
 
+/// `getRepliedMessage` for the row sent and answered, as the driver does.
+pub(crate) fn accept_reply(
+    session: &mut Session,
+    chat_id: ChatId,
+    message_id: MessageId,
+    message: ParsedMessage,
+) {
+    let request = session.begin_reply_fetch(chat_id, message_id);
+    session.accept_replied_message(request, chat_id, message_id, message);
+}
+
+/// `getRepliedMessage` for the row sent and refused with `code`.
+pub(crate) fn reject_reply(
+    session: &mut Session,
+    chat_id: ChatId,
+    message_id: MessageId,
+    code: i32,
+    now: std::time::Instant,
+) {
+    let request = session.begin_reply_fetch(chat_id, message_id);
+    session.reject_replied_message(request, chat_id, message_id, code, now);
+}
+
 /// The invoice a test's checkout pays.
 pub(crate) fn test_invoice() -> PaymentRequest {
     PaymentRequest {
