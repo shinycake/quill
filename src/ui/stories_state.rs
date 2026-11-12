@@ -305,40 +305,14 @@ pub(super) struct ManageCall {
     pub request: quill::ids::RequestId,
 }
 
-/// The viewer's 100 ms tick. The task is owned here, so dropping the
-/// state stops it; it ends its own stage with `finish` when the viewer
-/// has closed.
-#[derive(Default)]
-pub(super) enum StoryTick {
-    #[default]
-    Off,
-    Running(Task<()>),
-}
-
-impl StoryTick {
-    pub(super) fn is_running(&self) -> bool {
-        matches!(self, Self::Running(_))
-    }
-
-    /// The tick task is done: it ends its own stage without cancelling
-    /// itself from inside.
-    pub(super) fn finish(&mut self) {
-        if let Self::Running(task) = std::mem::replace(self, Self::Off) {
-            // This task is the one running this call: detach lets it end, dropping would cancel it.
-            task.detach();
-        }
-    }
-}
-
 pub(crate) struct StoryUi {
     /// Stories strip tiles and sideways scroll (`quill::stories_strip`).
     pub(super) strip: super::stories_strip_ui::StoryStripState,
     /// Phase 9.1: fullscreen story viewer (active-story tray → overlay).
     pub(super) viewer: super::story_viewer::StoryOpen,
     /// Phase 9.6: playback clock + segmented progress bar for the viewer;
-    /// `tick` is the at-most-one 100ms tick task.
+    /// the frame clock moves it (`story_viewer::tick_rest`).
     pub(super) playback: StoryPlayback,
-    pub(super) tick: StoryTick,
     /// What the tick last warmed custom-emoji reaction stickers for (the
     /// story, the ids it needs, how many stickers were known): the work
     /// repeats only when this changes.
@@ -379,8 +353,8 @@ pub(crate) struct StoryUi {
     /// panels (close friends, share) share.
     pub(super) muted: bool,
     pub(super) more_search: Entity<TextareaState>,
-    /// The stealth-mode box and its once-a-second tick, one value: the tick
-    /// ends with the box.
+    /// The stealth-mode box; its countdown redraws on the frame clock while
+    /// the box shows one.
     pub(super) stealth_box: Option<super::story_stealth_ui::StealthBox>,
     /// What the viewer has open over its story; `Some` only while the
     /// viewer is open (`viewer_ui_mut`), dropped by every close
@@ -579,7 +553,6 @@ impl StoryUi {
             stealth_box: None,
             viewer: super::story_viewer::StoryOpen::closed(),
             playback: StoryPlayback::default(),
-            tick: StoryTick::Off,
             emoji_warm: None,
             open: None,
             media_saves: std::collections::HashMap::new(),

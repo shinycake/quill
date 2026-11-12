@@ -1,7 +1,6 @@
 # In-flight stages that hold nothing to match or cancel (scripts/check-stage-enums.py).
 # <rule>:<Enum>::<Variant> <count>. Only remove lines.
 bare:AccessStage::Asking 1
-bare:Answer::Waiting 1
 bare:ApplyStage::Sent 1
 bare:BackgroundStatus::Connecting 1
 bare:BoxStage::Opening 1
@@ -29,13 +28,11 @@ bare:GoalNow::Waiting 1
 bare:Kind::Applying 1
 bare:LinkHandlerState::Checking 1
 bare:LinkStatus::Pending 1
-bare:ListStatus::Loading 1
 bare:LookStage::Rendering 1
 bare:Lookup::Pending 1
 bare:MediaFile::Downloading 1
 bare:MenuSend::Sent 1
 bare:MuteState::Connecting 1
-bare:Opening::Pending 1
 bare:OwnLinkState::Waiting 1
 bare:PaidStage::Waiting 1
 bare:PaneMode::Connecting 1
@@ -75,13 +72,11 @@ bare:TypeSave::Sent 1
 bare:Unavailable::Checking 1
 bare:VenueList::Loading 1
 bare:VideoFullscreen::Leaving 1
-bare:ViewState::Opening 1
 bare:ViewState::Waiting 1
 bare:WebRowState::Connecting 1
 bare:WorkerLife::Running 1
 bare:WriteAccess::Asking 1
 optional:Fetch::Loading 1
-optional:LiveJoin::Joining 1
 optional:SetStage::Resolving 1
 rawid:EditorStage::Encoding 1
 rawid:EditorStage::Reading 1
@@ -106,7 +101,6 @@ unkeyed:Lifecycle::Running 1
 unkeyed:Lifecycle::Waiting 1
 unkeyed:ListEdit::InFlight 1
 unkeyed:Neighbour::Asking 1
-unkeyed:PickWait::Downloading 1
 unkeyed:PickerFill::Waiting 1
 unkeyed:PictureState::Downloading 1
 unkeyed:RegistrationStep::Asking 1

@@ -74,6 +74,10 @@ impl QuillApp {
         // The composer's Post and Save presses, each answered by its own
         // request (`story_composer_stage.rs`).
         self.story_composer_upkeep(cx);
+        // The viewer's frame: it moves the story on and asks for the next
+        // frame while something moves; a redraw that finds a held story due
+        // again (the window active, a panel closed) starts the clock.
+        self.story_viewer_upkeep(cx);
         // A cover picker opened on a clip still downloading reads it once
         // it is local (`story_albums/cover_strip.rs`).
         self.cover_upkeep(cx);

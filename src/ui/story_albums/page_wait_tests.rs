@@ -255,3 +255,43 @@ fn a_partly_sent_save_keeps_the_picker_and_drops_the_sent_adds(cx: &mut TestAppC
         assert!(picker.is_selected(11));
     });
 }
+
+/// A frame with a call still out asks for no redraw: the answer's own wake
+/// does, so the upkeep must not keep the frame loop running meanwhile.
+#[gpui_kit::test]
+fn a_frame_with_the_call_still_out_does_not_ask_for_another(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let request = RequestId(730);
+    app.update_in(&mut vcx, |app, window, cx| {
+        let mut page = StoryPage::new(CHAT, window, cx);
+        page.view = AlbumView::album(3);
+        page.view.delete_sent(request);
+        page.wait = PageWait::Creating(RequestId(731));
+        app.stories.page = Some(page);
+    });
+    app.update(&mut vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_deref_mut() {
+            for request in [request, RequestId(731)] {
+                session.stories.page_ops.begin(StoryPageOp {
+                    kind: quill::story_page::StoryPageOpKind::CreateAlbum,
+                    state: StoryPageOpState::Sending,
+                    request,
+                    chat_id: Some(CHAT),
+                });
+            }
+        }
+    });
+    vcx.run_until_parked();
+    let notified = std::rc::Rc::new(std::cell::Cell::new(0_u32));
+    let counted = notified.clone();
+    let _watch = vcx.update(|_, cx| cx.observe(&app, move |_, _| counted.set(counted.get() + 1)));
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.story_page_upkeep(window, cx)
+    });
+    assert_eq!(notified.get(), 0, "no redraw while both calls are out");
+    app.update_in(&mut vcx, |app, window, cx| {
+        set_op(app, request, StoryPageOpState::Succeeded);
+        app.story_page_upkeep(window, cx);
+    });
+    assert_eq!(notified.get(), 1, "the answer redraws once");
+}

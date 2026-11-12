@@ -44,13 +44,9 @@ purpose:ConnectDriver::toggle_saved_topic_pinned 1
 purpose:ConnectDriver::update_animated_emoji_suggestion 2
 purpose:QuillApp::chat_appearance_level_line 1
 purpose:QuillApp::gif_grid 2
-purpose:QuillApp::manager_set_pending 1
-purpose:QuillApp::manager_view 3
 purpose:QuillApp::onboarding 1
 purpose:QuillApp::registration_form 1
-purpose:QuillApp::set_sticker_suggest_mode 1
 purpose:QuillApp::sidebar_auth 1
-purpose:QuillApp::sticker_set_action 1
 purpose:QuillApp::topic_editor_body 1
 purpose:Session::accept_group_call_participant_update 1
 purpose:Session::apply_ok 2

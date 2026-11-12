@@ -33,6 +33,17 @@ pub(super) fn live_item(item: Option<&StoryViewerItem>) -> Option<(ChatId, i32)>
 }
 
 impl QuillApp {
+    /// The live story to be watching: the one the viewer shows, else the
+    /// one in Picture-in-Picture.
+    pub(super) fn live_story_target(&self) -> Option<(ChatId, i32)> {
+        let shown = if self.stories.viewer.is_open() {
+            live_item(self.stories.viewer.current())
+        } else {
+            None
+        };
+        shown.or_else(|| self.live_pip_story())
+    }
+
     fn live_session_mut(&mut self) -> Option<&mut Session> {
         match self.live.as_mut() {
             Some(live) => Some(&mut live.driver.session),
@@ -45,12 +56,7 @@ impl QuillApp {
     /// shows no other. Runs on open, on every step and close, on the tick
     /// and when a live PiP goes.
     pub(in crate::ui) fn sync_live_story(&mut self, cx: &mut Context<Self>) {
-        let shown = if self.stories.viewer.is_open() {
-            live_item(self.stories.viewer.current())
-        } else {
-            None
-        };
-        let target = shown.or_else(|| self.live_pip_story());
+        let target = self.live_story_target();
         let watching = self.stories.live.watching();
         if watching.is_some() && watching != target {
             self.leave_live_story_view(cx);
@@ -93,12 +99,12 @@ impl QuillApp {
     fn join_watched_live_story(&mut self, target: (ChatId, i32), cx: &mut Context<Self>) {
         let (chat_id, story_id) = target;
         let Some(live) = self.live.as_mut() else {
-            self.stories.live.start_watching(target, None);
+            self.stories.live.watch_offline(target);
             cx.notify();
             return;
         };
         match live.driver.join_live_story(chat_id, story_id) {
-            Ok(request) => self.stories.live.start_watching(target, Some(request)),
+            Ok(request) => self.stories.live.start_watching(target, request),
             Err(err) => {
                 // Not watching: the viewer shows its "Join live" button
                 // instead of an opening spinner nothing will end.

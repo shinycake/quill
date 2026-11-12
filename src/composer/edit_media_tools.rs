@@ -48,7 +48,7 @@ pub enum EditImageFetch {
     /// it: the tracker owns the transfer, and the wait ends on one of two
     /// exits, the file landing (the editor opens) or
     /// `downloads.gave_up(file_id)` (a note says it failed).
-    Tracked { file_id: FileId },
+    Downloading { file: FileId },
 }
 
 impl EditImageFetch {
@@ -60,7 +60,7 @@ impl EditImageFetch {
         file_id: FileId,
         sent: &Result<Option<crate::ids::RequestId>, E>,
     ) -> Option<Self> {
-        sent.is_ok().then_some(Self::Tracked { file_id })
+        sent.is_ok().then_some(Self::Downloading { file: file_id })
     }
 }
 
@@ -220,7 +220,7 @@ mod tests {
     #[test]
     fn edit_image_waits_for_a_photo_already_downloading() {
         let file = FileId(7);
-        let waiting = Some(EditImageFetch::Tracked { file_id: file });
+        let waiting = Some(EditImageFetch::Downloading { file });
         // `Ok(None)`: the history row or viewer already asked for it.
         assert_eq!(EditImageFetch::asked::<()>(file, &Ok(None)), waiting);
         assert_eq!(

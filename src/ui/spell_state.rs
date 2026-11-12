@@ -17,8 +17,26 @@ pub(crate) struct SpellUi {
     /// Builds the platform engine for the user's language picks; runs on a
     /// background task (a field so tests can slow it down).
     pub(super) engine_builder: EngineBuilder,
-    /// The pending background engine build (dropping it discards the result).
-    pub(super) engine_task: Option<Task<()>>,
+    pub(super) engine_build: EngineBuild,
+}
+
+/// The background engine build: holding the task is the building stage, and
+/// replacing or dropping it discards the result, so only the newest build
+/// ever installs.
+#[derive(Default)]
+pub(super) enum EngineBuild {
+    #[default]
+    Idle,
+    Building {
+        _task: Task<()>,
+    },
+}
+
+impl EngineBuild {
+    #[cfg(test)]
+    pub(super) fn is_building(&self) -> bool {
+        matches!(self, EngineBuild::Building { .. })
+    }
 }
 
 pub(super) type EngineBuilder = std::sync::Arc<
@@ -44,7 +62,7 @@ impl SpellUi {
             dict_manager: Default::default(),
             dict_filter_input,
             engine_builder: std::sync::Arc::new(super::app::QuillApp::build_spell_engine),
-            engine_task: None,
+            engine_build: EngineBuild::Idle,
         }
     }
 }

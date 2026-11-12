@@ -40,6 +40,20 @@ impl Session {
         self.stickers.stickers.batch.finish_item(request, success);
     }
 
+    /// A change of the set is in flight: its request has not come back.
+    pub fn sticker_set_change_pending(&self, set_id: i64) -> bool {
+        self.stickers.stickers.changes.set_busy(set_id)
+    }
+
+    /// The composer's suggestions are dropped, and the search that was out
+    /// for them with the stage that waited for it.
+    pub fn cancel_sticker_suggestions(&mut self) {
+        if let SuggestFor::Asked { request, .. } = &self.stickers.stickers.suggest_for {
+            drop(self.requests.take(*request));
+        }
+        self.clear_sticker_suggestions();
+    }
+
     /// The box's change of the viewed set went out as `request`.
     pub fn begin_set_change(&mut self, set_id: i64, change: SetChange, request: RequestId) {
         if let Some(view) = self.stickers.sticker_set_view.as_mut()

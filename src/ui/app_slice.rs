@@ -469,6 +469,17 @@ impl QuillApp {
         }
     }
 
+    /// [`Self::notify_story`] from code that runs inside the app's own draw
+    /// (which already shows the rest): the overlay's slice, and nothing
+    /// before the slices exist.
+    pub(super) fn notify_story_slice(&self, cx: &mut Context<Self>) {
+        if let Some(slice) = &self.slices.story {
+            let id = slice.entity_id();
+            let app: &mut App = cx;
+            app.notify(id);
+        }
+    }
+
     /// Redraw the open chat in every window (a playing track's position):
     /// each window's conversation and composer slices.
     pub(super) fn notify_conversations(&self, cx: &mut Context<Self>) {

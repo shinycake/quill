@@ -46,13 +46,25 @@ impl DownloadStage {
 }
 
 /// Shared between the download thread and the UI.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct Progress {
+    /// Poked when bytes arrive and when the stage moves, so the UI follows
+    /// the download without a timer.
+    pub changed: crate::wake::Signal,
     /// Bytes received over both files.
     pub received: AtomicU64,
     /// A [`DownloadStage`], moved only by [`Progress::cancel`] and
     /// [`Progress::finish`].
     stage: AtomicU8,
+}
+
+impl std::fmt::Debug for Progress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Progress")
+            .field("received", &self.received())
+            .field("stage", &self.stage())
+            .finish()
+    }
 }
 
 impl Progress {
@@ -97,7 +109,10 @@ impl Progress {
                 .stage
                 .compare_exchange(raw, next, Ordering::AcqRel, Ordering::Acquire)
             {
-                Ok(_) => return,
+                Ok(_) => {
+                    self.changed.poke();
+                    return;
+                }
                 Err(seen) => raw = seen,
             }
         }
@@ -179,6 +194,7 @@ fn fetch(url: &str, progress: &Progress) -> Result<Vec<u8>, DownloadError> {
         }
         out.extend_from_slice(chunk.get(..n).unwrap_or_default());
         progress.received.fetch_add(n as u64, Ordering::Relaxed);
+        progress.changed.poke();
         if out.len() as u64 > limit {
             return Err("The dictionary is larger than expected.".into());
         }

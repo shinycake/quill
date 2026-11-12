@@ -22,7 +22,7 @@ use std::time::Duration;
 use super::actions::{SpellingIgnore, SpellingLearn, SpellingReplace, SpellingUnlearn};
 use super::app::QuillApp;
 use super::chat_theme::danger;
-use super::spell_state::Check;
+use super::spell_state::{Check, EngineBuild};
 use gpui_kit::component::input::{Copy, Cut, Paste, SelectAll, TextareaState};
 use gpui_kit::component::native_menu::NativeMenu;
 use gpui_kit::*;
@@ -193,10 +193,11 @@ impl QuillApp {
         let build = self.spell.engine_builder.clone();
         // screen-scope: the spell engine belongs to the app, not to an
         // account; it installs on whichever screen is up when it is built
-        self.spell.engine_task = Some(Self::spawn_app(cx, async move |this, cx| {
+        let task = Self::spawn_app(cx, async move |this, cx| {
             let (checker, info) = cx.background_spawn(async move { build(&chosen) }).await;
             let _ = this.update(cx, |this, cx| this.install_spell_engine(checker, info, cx));
-        }));
+        });
+        self.spell.engine_build = EngineBuild::Building { _task: task };
     }
 
     fn install_spell_engine(
@@ -205,7 +206,7 @@ impl QuillApp {
         info: SpellInfo,
         cx: &mut Context<Self>,
     ) {
-        self.spell.engine_task = None;
+        self.spell.engine_build = EngineBuild::Idle;
         // Words learned while the engine was loading carry over.
         checker.set_app_words(self.spell.checker.app_words());
         self.spell.checker = checker;

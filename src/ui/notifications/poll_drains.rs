@@ -56,6 +56,10 @@ impl QuillApp {
         // `getDeepLinkInfo` once auth is Ready, then follow-ups / dialog /
         // deferred chat open from each terminal session state.
         self.pump_deep_link(cx);
+        // A sticker the set box waits on lands (or fails) with its download.
+        if self.settle_sticker_pick_download(cx) {
+            progressed = true;
+        }
         // A box that sent its request closes on the answer (`box_submits`).
         self.settle_box_submits(cx);
         // M1 fix-up: a "Share link" gated off by

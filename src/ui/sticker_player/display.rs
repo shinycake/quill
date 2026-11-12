@@ -31,16 +31,18 @@ thread_local! {
 pub(in crate::ui) fn display_of(window: Option<ChatId>) -> WindowDisplay {
     DISPLAYS.with(|displays| {
         displays
-            .borrow()
-            .iter()
-            .find(|(of, _)| *of == window)
-            .map_or(WindowDisplay::UNKNOWN, |(_, display)| *display)
+            .try_borrow()
+            .ok()
+            .and_then(|displays| displays.iter().find(|(of, _)| *of == window).copied())
+            .map_or(WindowDisplay::UNKNOWN, |(_, display)| display)
     })
 }
 
 pub(in crate::ui) fn set_display(window: Option<ChatId>, display: WindowDisplay) {
     DISPLAYS.with(|displays| {
-        let mut displays = displays.borrow_mut();
+        let Ok(mut displays) = displays.try_borrow_mut() else {
+            return;
+        };
         match displays.iter_mut().find(|(of, _)| *of == window) {
             Some((_, known)) => *known = display,
             None => displays.push((window, display)),
@@ -66,5 +68,9 @@ pub(in crate::ui) fn note_display(
 }
 
 pub(super) fn forget_display(window: Option<ChatId>) {
-    DISPLAYS.with(|displays| displays.borrow_mut().retain(|(of, _)| *of != window));
+    DISPLAYS.with(|displays| {
+        if let Ok(mut displays) = displays.try_borrow_mut() {
+            displays.retain(|(of, _)| *of != window);
+        }
+    });
 }

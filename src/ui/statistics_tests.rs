@@ -343,3 +343,25 @@ fn a_failed_story_statistics_page_has_a_retry(cx: &mut TestAppContext) {
     frames(vcx);
     assert!(vcx.update(|window, _| window.try_find("story-stats-retry").is_some()));
 }
+
+#[gpui_kit::test]
+fn a_second_export_press_waits_for_the_first_save_dialog(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_statistics(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.export_statistics(CHANNEL, cx);
+        app.export_statistics(CHANNEL, cx);
+    });
+    vcx.run_until_parked();
+    // One dialog is open: answering it (cancelled) leaves none behind.
+    vcx.simulate_new_path_selection(|_| None);
+    vcx.run_until_parked();
+    assert!(
+        !vcx.did_prompt_for_new_path(),
+        "the second press opened none"
+    );
+    // The cancel is a way out: the button works again.
+    app.update(vcx, |app, cx| app.export_statistics(CHANNEL, cx));
+    vcx.run_until_parked();
+    assert!(vcx.did_prompt_for_new_path(), "asks again after a cancel");
+}

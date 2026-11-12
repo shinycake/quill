@@ -576,7 +576,8 @@ impl QuillApp {
     /// Per-tick upkeep of the editor: a save leaves with the answer to its
     /// own request (closing on success, back to the edit on failure), and
     /// the loaded list is adopted while the user has not touched it.
-    pub(super) fn tick_close_friends(&mut self, cx: &mut Context<Self>) {
+    /// Returns whether it moved the stage (the editor then needs a redraw).
+    pub(super) fn tick_close_friends(&mut self, cx: &mut Context<Self>) -> bool {
         let loaded = self
             .session()
             .and_then(|s| s.stories.close_friends.ids().cloned());
@@ -591,7 +592,7 @@ impl QuillApp {
                 .and_then(|s| s.stories.page_ops.get(request))
                 .map(|op| op.state.clone());
             match state {
-                Some(S::Sending | S::Checking) => {}
+                Some(S::Sending | S::Checking) => return false,
                 // The list is saved: the editor closes. A finished op that was
                 // settled away (the viewer stepped on) is read from the list
                 // the answer left in the session.
@@ -601,6 +602,7 @@ impl QuillApp {
                         open.notice = Some(tr(keys::Q_MEDIA_CLOSE_FRIENDS_UPDATED).into());
                     });
                     self.refresh_story_pause(cx);
+                    return true;
                 }
                 // The call failed (its line shows under the story): the edit
                 // is back, Save asks again.
@@ -608,6 +610,7 @@ impl QuillApp {
                     self.stories.with_viewer_ui(|open| {
                         open.set_close_friends(CloseFriendsStage::Editing(edit))
                     });
+                    return true;
                 }
                 // Its op is gone (the viewer stepped on and the finished op
                 // was settled away): the list the answer left in the session
@@ -626,29 +629,34 @@ impl QuillApp {
                     if saved {
                         self.refresh_story_pause(cx);
                     }
+                    return true;
                 }
             }
-            return;
         }
         // No list yet: the panel keeps showing the session's load (loading,
         // or failed with a retry).
         let Some(loaded) = loaded else {
-            return;
+            return false;
         };
         let Some(stage) = self
             .stories
             .viewer_ui_mut()
             .and_then(|open| open.close_friends_mut())
         else {
-            return;
+            return false;
         };
         match stage {
-            CloseFriendsStage::Closed | CloseFriendsStage::Saving { .. } => {}
-            CloseFriendsStage::Awaiting => stage.loaded(&loaded),
+            CloseFriendsStage::Closed | CloseFriendsStage::Saving { .. } => false,
+            CloseFriendsStage::Awaiting => {
+                stage.loaded(&loaded);
+                true
+            }
             CloseFriendsStage::Editing(edit) => {
-                if !edit.changed() && CloseFriendsEdit::new(&loaded) != *edit {
+                let adopt = !edit.changed() && CloseFriendsEdit::new(&loaded) != *edit;
+                if adopt {
                     *edit = CloseFriendsEdit::new(&loaded);
                 }
+                adopt
             }
         }
     }

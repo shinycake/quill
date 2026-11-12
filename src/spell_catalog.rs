@@ -469,8 +469,12 @@ pub fn install(dir: &Path, code: &str, aff: &[u8], dic: &[u8]) -> Result<(), Ins
         return Err(InstallError::Invalid);
     }
     std::fs::create_dir_all(dir).map_err(InstallError::Io)?;
+    // A cancelled install may still be running when the same code is started
+    // again: each call writes its own temporary files.
+    static CALLS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let call = CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     for (ext, bytes) in [("aff", aff), ("dic", dic)] {
-        let tmp = dir.join(format!(".{code}.{ext}.part"));
+        let tmp = dir.join(format!(".{code}.{ext}.{call}.part"));
         let target = dir.join(format!("{code}.{ext}"));
         std::fs::write(&tmp, bytes).map_err(InstallError::Io)?;
         if let Err(err) = crate::fs_retry::rename_retrying(&tmp, &target, crate::fs_retry::LONG) {
@@ -747,6 +751,22 @@ mod tests {
         assert_eq!(out[0], managed_dir(root));
         assert_eq!(out.len(), 2);
         assert_eq!(with_managed_dir(None, dirs.clone()), dirs);
+    }
+
+    #[test]
+    fn two_installs_of_one_code_at_once_both_succeed() {
+        let tmp = TempDir::new();
+        let dir = tmp.0.join("dictionaries");
+        let (aff, dic) = (fixture("de_DE.aff"), fixture("de_DE.dic"));
+        std::thread::scope(|scope| {
+            let runs: Vec<_> = (0..4)
+                .map(|_| scope.spawn(|| (0..10).all(|_| install(&dir, "de", &aff, &dic).is_ok())))
+                .collect();
+            for run in runs {
+                assert!(run.join().unwrap_or(false), "own temp names, no clash");
+            }
+        });
+        assert_eq!(installed_codes(&dir), BTreeSet::from(["de".to_string()]));
     }
 
     #[test]

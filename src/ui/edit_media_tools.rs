@@ -224,7 +224,7 @@ impl QuillApp {
         let Some(edit) = self.chat_ui.pending_edit() else {
             return;
         };
-        let EditImageFetch::Tracked { file_id } = edit.media_edit.image else {
+        let EditImageFetch::Downloading { file: file_id } = edit.media_edit.image else {
             return;
         };
         let landed = self
