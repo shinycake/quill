@@ -241,9 +241,8 @@ fn refusal_after_leaving(
     app.update(vcx, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {
             let seq = AtomicU64::new(session.last_seq);
-            let json = format!(
-                r#"{{"@type":"error","@extra":"{extra}","code":400,"message":"BROKEN"}}"#
-            );
+            let json =
+                format!(r#"{{"@type":"error","@extra":"{extra}","code":400,"message":"BROKEN"}}"#);
             let owned = copy_and_parse(&json, &seq, &sink).expect("the error parses");
             session.apply(owned);
         }
@@ -349,10 +348,10 @@ fn a_mask_change_refused_after_closing_the_manager_is_not_on_the_next_open(
         vcx,
         |session| {
             let id = session.request(StickersPurpose::ReorderInstalledMaskSets.into(), None);
-            session.stickers.masks.begin_change(
-                id,
-                quill::state::MaskChangeTarget::Reorder,
-            );
+            session
+                .stickers
+                .masks
+                .begin_change(id, quill::state::MaskChangeTarget::Reorder);
             id
         },
         |app, cx| app.close_mask_sets(cx),

@@ -137,7 +137,7 @@ impl NewChatState {
             Some(TypeSave::Done) => None,
             Some(TypeSave::Failed(reason)) => Some(reason.clone()),
             // Gone without an answer: the Save did not happen.
-            Some(TypeSave::Sent(*id)) | None => {
+            Some(TypeSave::Sent(_)) | None => {
                 Some(tr(keys::Q_MISC_COULDNT_REACH_TELEGRAM_TRY_AGAIN).to_string())
             }
         }
