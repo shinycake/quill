@@ -63,8 +63,7 @@ impl QuillApp {
         let Some(index) = items.iter().position(|item| item.message_id == message_id) else {
             return false;
         };
-        self.viewer.state = MediaViewer::open(items, index);
-        self.viewer.open_gen += 1;
+        self.viewer.open_viewer(MediaViewer::open(items, index));
         self.viewer_note_activity(cx);
         self.reset_viewer_item_state(cx);
         cx.notify();

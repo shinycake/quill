@@ -307,11 +307,10 @@ impl QuillApp {
                 collect_media_items(&history.ordered().into_iter().cloned().collect::<Vec<_>>())
             })
             .unwrap_or_default();
-        self.viewer.state = match reopen_index(&items, &clip) {
+        self.viewer.open_viewer(match reopen_index(&items, &clip) {
             Some(index) => MediaViewer::open(items, index),
             None => MediaViewer::open(vec![item], 0),
-        };
-        self.viewer.open_gen += 1;
+        });
         self.viewer_note_activity(cx);
         self.reset_viewer_item_state(cx);
         let taken = self

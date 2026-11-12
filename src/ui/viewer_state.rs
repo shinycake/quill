@@ -102,6 +102,13 @@ impl super::on_screen::Farewell for ViewerUi {
 }
 
 impl ViewerUi {
+    /// Open the viewer on `state`: the one place that sets it and counts the
+    /// open, which keys the fade-in and the pending-gallery guard.
+    pub(in crate::ui) fn open_viewer(&mut self, state: MediaViewer) {
+        self.state = state;
+        self.open_gen += 1;
+    }
+
     /// Another item is on screen: what belongs to the item before it goes,
     /// and `orientation` is the turn the new one starts with. Open, step
     /// and "the current item was deleted" all come here; what outlives the

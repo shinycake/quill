@@ -130,3 +130,16 @@ fn the_idle_clock_arms_no_timer_while_the_pointer_rests_on_a_control(
         assert!(app.viewer.visibility.has_timer());
     });
 }
+
+#[gpui_kit::test]
+fn every_open_counts_once_through_open_viewer(cx: &mut gpui_kit::TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    add_photo(&app, vcx, 8801);
+    let before = app.read_with(vcx, |app, _| app.viewer.open_gen);
+    open(&app, vcx, 8801);
+    let once = app.read_with(vcx, |app, _| app.viewer.open_gen);
+    assert_eq!(once, before + 1, "one open, one count");
+    app.update(vcx, |app, cx| app.close_media_viewer(cx));
+    assert_eq!(app.read_with(vcx, |app, _| app.viewer.open_gen), once);
+}

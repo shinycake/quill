@@ -42,8 +42,7 @@ impl QuillApp {
             })
             .and_then(quill::media_viewer::timed_viewer_item);
         if let Some(item) = timed {
-            self.viewer.state = MediaViewer::open(vec![item], 0);
-            self.viewer.open_gen += 1;
+            self.viewer.open_viewer(MediaViewer::open(vec![item], 0));
             self.mark_timed_media_read(chat_id, message_id);
             self.viewer_note_activity(cx);
             self.reset_viewer_item_state(cx);
@@ -79,8 +78,7 @@ impl QuillApp {
         let Some(index) = index else {
             return;
         };
-        self.viewer.state = MediaViewer::open(items, index);
-        self.viewer.open_gen += 1;
+        self.viewer.open_viewer(MediaViewer::open(items, index));
         self.viewer_note_activity(cx);
         self.reset_viewer_item_state(cx);
         cx.notify();
@@ -93,8 +91,7 @@ impl QuillApp {
         item: MediaViewerItem,
         cx: &mut Context<Self>,
     ) {
-        self.viewer.state = MediaViewer::open_poll(item);
-        self.viewer.open_gen += 1;
+        self.viewer.open_viewer(MediaViewer::open_poll(item));
         self.viewer_note_activity(cx);
         self.reset_viewer_item_state(cx);
         cx.notify();
@@ -142,10 +139,10 @@ impl QuillApp {
             return false;
         }
         debug_assert!(items.iter().all(|item| item.chat_id == chat_id));
-        self.viewer.state = MediaViewer::open_shared(items, index, total);
+        self.viewer
+            .open_viewer(MediaViewer::open_shared(items, index, total));
         self.viewer.extra.shared_tab = tab;
         self.viewer.extra.shared_seen = loaded;
-        self.viewer.open_gen += 1;
         self.viewer_note_activity(cx);
         self.reset_viewer_item_state(cx);
         self.sync_shared_media_viewer(cx);
