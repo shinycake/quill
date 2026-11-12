@@ -185,7 +185,10 @@ fn a_refused_ask_waits_out_the_retry_and_is_then_asked_again() {
     session.userpic_full_info_sent(USER, request);
     assert!(!session.userpic_full_info_due(USER, now), "out");
     session.userpic_full_info_failed(request, now);
-    assert!(!session.userpic_full_info_due(USER, now), "refused: not on every draw");
+    assert!(
+        !session.userpic_full_info_due(USER, now),
+        "refused: not on every draw"
+    );
     assert!(
         !session.userpic_full_info_due(USER, now + USERPIC_INFO_RETRY - Duration::from_secs(1)),
         "still waiting"

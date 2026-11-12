@@ -5,9 +5,9 @@
 #![deny(clippy::indexing_slicing)]
 
 use crate::ids::{FileId, RequestId};
-use std::time::{Duration, Instant};
 use crate::state::Session;
 use crate::telegram::envelope::ParsedProfilePhoto;
+use std::time::{Duration, Instant};
 
 /// What a small userpic of a user shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
