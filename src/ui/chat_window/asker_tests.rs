@@ -775,7 +775,7 @@ fn closing_the_panel_drops_the_gif_typing_pause(cx: &mut TestAppContext) {
 /// and settles to `Asked` when it ends, however it ended.
 #[gpui_kit::test]
 fn a_gif_ask_settles_when_its_own_request_ends(cx: &mut TestAppContext) {
-    use crate::ui::gifs_ui::{AskEnd, GifTab, GifWanted};
+    use crate::ui::gifs_ui::{AskRound, GifTab, GifWanted};
     use quill::state::RequestPurpose;
     let h = new_app(cx);
     h.app.update(cx, |app, cx| {
@@ -790,6 +790,7 @@ fn a_gif_ask_settles_when_its_own_request_ends(cx: &mut TestAppContext) {
         app.pickers.gif_tab = GifTab::Asking {
             wanted: wanted.clone(),
             request,
+            round: AskRound::First,
         };
         app.gif_tab_upkeep(cx);
         assert!(
@@ -801,8 +802,8 @@ fn a_gif_ask_settles_when_its_own_request_ends(cx: &mut TestAppContext) {
         }
         app.gif_tab_upkeep(cx);
         assert!(
-            matches!(&app.pickers.gif_tab, GifTab::Asked { wanted: shown, ended: AskEnd::Failed } if *shown == wanted),
-            "the request ended with nothing held: the ask is settled and is not asked again"
+            matches!(&app.pickers.gif_tab, GifTab::Asked { wanted: shown, round: AskRound::First } if *shown == wanted),
+            "the request ended: the ask is settled"
         );
     });
 }
@@ -876,7 +877,7 @@ fn typed_gif_text_keeps_its_pause_through_the_upkeep(cx: &mut TestAppContext) {
 /// session's one list no longer shows or keeps, asks again without a press.
 #[gpui_kit::test]
 fn an_asked_gif_tab_whose_answer_was_replaced_asks_again(cx: &mut TestAppContext) {
-    use crate::ui::gifs_ui::{AskEnd, GifTab, GifWanted};
+    use crate::ui::gifs_ui::{AskRound, GifTab, GifWanted};
     use crate::ui::media_panel::PanelTab;
     let h = new_app(cx);
     let _chat_window = h.open_in_new_window(OTHER, cx);
@@ -900,7 +901,7 @@ fn an_asked_gif_tab_whose_answer_was_replaced_asks_again(cx: &mut TestAppContext
         app.pickers.media_panel.tab = PanelTab::Gifs;
         app.pickers.gif_tab = GifTab::Asked {
             wanted: GifWanted::Search("cats".into()),
-            ended: AskEnd::Answered,
+            round: AskRound::First,
         };
         app.gif_tab_upkeep(cx);
         assert_eq!(
@@ -911,11 +912,12 @@ fn an_asked_gif_tab_whose_answer_was_replaced_asks_again(cx: &mut TestAppContext
     });
 }
 
-/// Sweep r4-08 fix round (16-008): a window whose search failed does not
-/// ask again from upkeep, so two windows never trade the list for ever.
+/// Sweep r4-08 fix round (16-008): a window asks again from upkeep once
+/// (`First` -> `Again`); a spent ask waits for a press, so two windows whose
+/// answers the list cannot both keep never trade it for ever.
 #[gpui_kit::test]
-fn a_failed_gif_ask_waits_for_a_press(cx: &mut TestAppContext) {
-    use crate::ui::gifs_ui::{AskEnd, GifTab, GifWanted};
+fn a_spent_gif_ask_waits_for_a_press(cx: &mut TestAppContext) {
+    use crate::ui::gifs_ui::{AskRound, GifTab, GifWanted};
     use crate::ui::media_panel::PanelTab;
     let h = new_app(cx);
     let _chat_window = h.open_in_new_window(OTHER, cx);
@@ -937,7 +939,7 @@ fn a_failed_gif_ask_waits_for_a_press(cx: &mut TestAppContext) {
         app.pickers.media_panel.tab = PanelTab::Gifs;
         app.pickers.gif_tab = GifTab::Asked {
             wanted: GifWanted::Search("cats".into()),
-            ended: AskEnd::Failed,
+            round: AskRound::Again,
         };
         for _ in 0..3 {
             app.gif_tab_upkeep(cx);
@@ -945,7 +947,7 @@ fn a_failed_gif_ask_waits_for_a_press(cx: &mut TestAppContext) {
         assert_eq!(
             searching(app).as_deref(),
             Some("dogs"),
-            "a failed ask is not asked again without a press"
+            "a spent ask is not asked again without a press"
         );
     });
 }

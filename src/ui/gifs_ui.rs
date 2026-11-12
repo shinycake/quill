@@ -99,27 +99,29 @@ pub(in crate::ui) enum GifTab {
     Asking {
         wanted: GifWanted,
         request: RequestId,
+        round: AskRound,
     },
-    /// The ask ended. Upkeep does not ask again while the session still
-    /// shows or keeps its answer. If another window's list replaced an
-    /// `Answered` ask's answer, upkeep asks once more (`gif_tab_upkeep`);
-    /// a `Failed` ask is asked again only by a press, so a refused search
-    /// never trades the list back and forth with another window.
-    Asked { wanted: GifWanted, ended: AskEnd },
+    /// The ask ended (answered, refused or cancelled): upkeep does not ask
+    /// again while the session still shows or keeps its answer. If another
+    /// window's list replaced a `First` ask's answer, upkeep asks once more
+    /// (`gif_tab_upkeep`); an `Again` ask is spent, so an answer the list
+    /// cannot keep (a refused or empty search) never trades the list back
+    /// and forth with another window. A press asks afresh.
+    Asked { wanted: GifWanted, round: AskRound },
     /// Typed text waits for the pause before it searches, while `wanted`
     /// stays shown. The timer is owned here: the next keystroke, a section
     /// choice, closing the panel or leaving the account drops it.
     Typing { wanted: GifWanted, _pause: Task<()> },
 }
 
-/// How a window's ask for its section ended (`GifTab::Asked`).
+/// Which ask of its section a window is on (`GifTab::Asking`, `Asked`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::ui) enum AskEnd {
-    /// The session showed or kept the answer when the request ended.
-    Answered,
-    /// The request ended and the session holds nothing for it: a refusal,
-    /// or another window's search took its place.
-    Failed,
+pub(in crate::ui) enum AskRound {
+    /// Asked by the window's first frame, a press or a section choice.
+    First,
+    /// Asked again by upkeep because another window's list replaced the
+    /// answer: the last time upkeep asks.
+    Again,
 }
 
 impl Default for GifTab {
@@ -212,13 +214,17 @@ impl QuillApp {
 
     fn search_gifs_for(&mut self, query: &str, cx: &mut Context<Self>) {
         self.pickers.gif_scroll.set_offset(point(px(0.), px(0.)));
-        self.request_gifs(GifWanted::Search(query.trim().to_string()), cx);
+        self.request_gifs(
+            GifWanted::Search(query.trim().to_string()),
+            AskRound::First,
+            cx,
+        );
     }
 
     /// Put `wanted` in the session's GIF list as this window's. A request
     /// that cannot be sent leaves the window on what the list holds, so
     /// nothing asks again every frame.
-    fn request_gifs(&mut self, wanted: GifWanted, cx: &mut Context<Self>) {
+    fn request_gifs(&mut self, wanted: GifWanted, round: AskRound, cx: &mut Context<Self>) {
         let chat = self.viewed_chat();
         // `Some(request)`: the request now out; `Some(None)` is a send that
         // had nothing to wait for; `None`, one that could not be sent.
@@ -248,11 +254,12 @@ impl QuillApp {
         };
         // Replacing the stage drops typing that was waiting for its pause.
         self.pickers.gif_tab = match sent {
-            Some(Some(request)) => GifTab::Asking { wanted, request },
-            Some(None) => GifTab::Asked {
+            Some(Some(request)) => GifTab::Asking {
                 wanted,
-                ended: AskEnd::Answered,
+                request,
+                round,
             },
+            Some(None) => GifTab::Asked { wanted, round },
             None => {
                 if matches!(wanted, GifWanted::Search(_)) && self.live.is_some() {
                     self.set_note(StatusNote::error(tr(keys::Q_MISC_COULD_NOT_SEARCH_GIFS)));
@@ -261,10 +268,7 @@ impl QuillApp {
                 // the list holds, so nothing asks again every frame.
                 match self.session().map(|session| &session.stickers.gifs) {
                     Some(panel) => GifTab::Wants(GifWanted::shown(panel)),
-                    None => GifTab::Asked {
-                        wanted,
-                        ended: AskEnd::Answered,
-                    },
+                    None => GifTab::Asked { wanted, round },
                 }
             }
         };
@@ -272,24 +276,23 @@ impl QuillApp {
     }
 
     /// An ask whose request has ended settles to `Asked`, whatever ended
-    /// it, so the stage never waits for a request that is gone. It
-    /// is `Failed` when the session holds nothing for the section.
+    /// it, so the stage never waits for a request that is gone.
     fn settle_gif_ask(&mut self) {
-        let GifTab::Asking { wanted, request } = &self.pickers.gif_tab else {
+        let GifTab::Asking {
+            wanted,
+            request,
+            round,
+        } = &self.pickers.gif_tab
+        else {
             return;
         };
-        let Some(session) = self.session() else {
-            return;
-        };
-        if session.requests.get(*request).is_some() {
-            return;
+        let waits = self
+            .session()
+            .is_some_and(|session| session.requests.get(*request).is_some());
+        if !waits {
+            let (wanted, round) = (wanted.clone(), *round);
+            self.pickers.gif_tab = GifTab::Asked { wanted, round };
         }
-        let ended = match self.gif_shown(&session.stickers.gifs) {
-            GifShown::Missing => AskEnd::Failed,
-            GifShown::Live | GifShown::Saved(_) | GifShown::Found(_) => AskEnd::Answered,
-        };
-        let wanted = wanted.clone();
-        self.pickers.gif_tab = GifTab::Asked { wanted, ended };
     }
 
     /// A footer section was picked: the field empties (tdesktop cancels its
@@ -298,7 +301,7 @@ impl QuillApp {
         // Typing that was waiting no longer searches: the request below
         // replaces its stage.
         self.pickers.gif_scroll.set_offset(point(px(0.), px(0.)));
-        self.request_gifs(GifWanted::of_section(&section), cx);
+        self.request_gifs(GifWanted::of_section(&section), AskRound::First, cx);
     }
 
     /// The GIF tab shows in the window in place: the session keeps one
@@ -341,7 +344,7 @@ impl QuillApp {
         };
         if ask {
             let wanted = self.pickers.gif_tab.wanted().clone();
-            self.request_gifs(wanted, cx);
+            self.request_gifs(wanted, AskRound::First, cx);
         }
     }
 
@@ -364,23 +367,20 @@ impl QuillApp {
             return;
         };
         let wanted = self.pickers.gif_tab.wanted().clone();
-        // `Wants`, or an `Answered` ask whose answer the session has since
-        // replaced with another window's list (and not kept), asks again;
-        // an answer that is shown is never asked for again, and a `Failed`
-        // ask waits for a press. Typed text waiting for its pause keeps its
-        // timer (as above).
-        if matches!(self.gif_shown(panel), GifShown::Missing)
-            && !gifs_on_their_way(panel)
-            && matches!(
-                self.pickers.gif_tab,
-                GifTab::Wants(_)
-                    | GifTab::Asked {
-                        ended: AskEnd::Answered,
-                        ..
-                    }
-            )
-        {
-            self.request_gifs(wanted, cx);
+        // `Wants`, or a `First` ask whose answer the session has since
+        // replaced with another window's list (and not kept), asks again,
+        // once; an answer that is shown is never asked for again. Typed
+        // text waiting for its pause keeps its timer (as above).
+        if matches!(self.gif_shown(panel), GifShown::Missing) && !gifs_on_their_way(panel) {
+            let round = match self.pickers.gif_tab {
+                GifTab::Wants(_) => AskRound::First,
+                GifTab::Asked {
+                    round: AskRound::First,
+                    ..
+                } => AskRound::Again,
+                _ => return,
+            };
+            self.request_gifs(wanted, round, cx);
         }
     }
 
