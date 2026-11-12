@@ -184,3 +184,44 @@ fn the_calendar_goes_when_its_chat_is_left_and_a_stale_one_jumps_nowhere() {
     assert_eq!(h.driver.jump_to_date(19_000).unwrap(), None);
     assert_eq!(h.sent("getChatMessageByDate", ALICE).len(), sent);
 }
+
+#[test]
+fn a_date_lookup_that_fails_says_so_after_the_box_closed() {
+    let mut h = bob_main_alice_window();
+    let asked = pick_date_in_alice_window(&mut h);
+    // The box closed when the day was picked.
+    assert!(h.driver.session.search.history_calendar.is_none());
+    h.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":420,"message":"FLOOD_WAIT_3"}}"#,
+        asked.0
+    ));
+    assert!(
+        h.driver.session.chats_state.chat_action_error.last().is_some(),
+        "the failed lookup is a line in the status note"
+    );
+}
+
+#[test]
+fn a_date_lookup_the_chat_left_does_not_say_anything_when_it_fails() {
+    let mut h = bob_main_alice_window();
+    let asked = pick_date_in_alice_window(&mut h);
+    h.driver.close_chat_window(ALICE).unwrap();
+    h.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":420,"message":"FLOOD_WAIT_3"}}"#,
+        asked.0
+    ));
+    assert!(h.driver.session.chats_state.chat_action_error.is_empty());
+}
+
+#[test]
+fn the_main_window_leaving_a_chat_keeps_a_chat_windows_no_media_note() {
+    use crate::state::JumpLookup;
+    let mut h = bob_main_alice_window();
+    let jumps = &mut h.driver.session.search.jump_lookups;
+    jumps.set(Some(ALICE), JumpLookup::NoMedia);
+    jumps.set(None, JumpLookup::NoMedia);
+    h.driver.session.clear_date_jump_ui(Some(BOB));
+    let search = &h.driver.session.search;
+    assert!(search.date_jump_note(Some(ALICE)).is_some());
+    assert!(search.date_jump_note(None).is_none());
+}

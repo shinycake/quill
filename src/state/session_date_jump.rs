@@ -37,15 +37,15 @@ impl JumpLookups {
     }
 
     /// The main window left `chat` (`Some`), or every window's lookup goes
-    /// (`None`): what the main window asked or resolved for that chat, and
-    /// every note.
+    /// (`None`): what the main window asked, resolved or found nothing for
+    /// in that chat. A chat window's lookup is its own and stays.
     fn forget_chat(&mut self, chat: Option<ChatId>) {
         let Some(chat) = chat else {
             self.0.clear();
             return;
         };
         self.0.retain(|window, lookup| match lookup {
-            JumpLookup::NotFound(_) => false,
+            JumpLookup::NoMedia => window.is_some(),
             JumpLookup::Asking { chat: asked, .. } => !(window.is_none() && *asked == chat),
             JumpLookup::Resolved(jump) => !(window.is_none() && jump.chat_id == chat),
         });
@@ -70,36 +70,32 @@ impl JumpLookups {
         jumps
     }
 
-    /// The note `window`'s calendar box draws.
-    fn note(&self, window: Option<ChatId>) -> Option<DateJumpNote> {
-        match self.0.get(&window) {
-            Some(JumpLookup::NotFound(note)) => Some(*note),
-            _ => None,
-        }
+    /// Whether `window`'s calendar box says "no media".
+    fn no_media(&self, window: Option<ChatId>) -> bool {
+        matches!(self.0.get(&window), Some(JumpLookup::NoMedia))
     }
 
-    /// Every note goes; asks and resolved jumps stay.
-    fn clear_notes(&mut self) {
-        self.0
-            .retain(|_, lookup| !matches!(lookup, JumpLookup::NotFound(_)));
+    /// `window`'s note goes; its ask or resolved jump and every other
+    /// window's lookup stay.
+    fn clear_note_in(&mut self, window: Option<ChatId>) {
+        if self.no_media(window) {
+            self.0.remove(&window);
+        }
     }
 }
 
 impl SearchDomainState {
-    /// The line `window`'s calendar box draws for a jump that found
-    /// nothing.
+    /// The line `window`'s calendar box draws for a shared-media day with
+    /// no media.
     pub fn date_jump_note(&self, window: Option<ChatId>) -> Option<String> {
-        match self.jump_lookups.note(window)? {
-            DateJumpNote::Failed => Some("Couldn't jump to that date.".into()),
-            DateJumpNote::NoMedia => {
-                Some(crate::lang::tr(crate::lang::keys::Q_MISC_NO_MEDIA_TO_JUMP_TO).to_string())
-            }
-        }
+        self.jump_lookups.no_media(window).then(|| {
+            crate::lang::tr(crate::lang::keys::Q_MISC_NO_MEDIA_TO_JUMP_TO).to_string()
+        })
     }
 
-    /// The "nothing found" notes go; resolved jumps stay.
-    pub(crate) fn clear_date_jump_note(&mut self) {
-        self.jump_lookups.clear_notes();
+    /// `window`'s "no media" note goes; its resolved jump stays.
+    pub(crate) fn clear_date_jump_note_for(&mut self, window: Option<ChatId>) {
+        self.jump_lookups.clear_note_in(window);
     }
 }
 
@@ -113,7 +109,8 @@ impl Session {
             SearchMediaKind::All
         };
         let generation = self.next_calendar_generation();
-        self.search.clear_date_jump_note();
+        let window = self.view_in_place();
+        self.search.clear_date_jump_note_for(window);
         self.search.history_calendar = Some(HistoryCalendar::new(chat_id, media, now, generation));
         self.search.history_calendar.as_ref()
     }
@@ -195,7 +192,6 @@ impl Session {
                 then: JumpLanding::Message,
             };
         }
-        self.search.clear_date_jump_note();
     }
 
     pub(crate) fn apply_message_calendar(
@@ -252,32 +248,33 @@ impl Session {
     }
 
     /// `getChatMessageByDate` failed: a 404 means nothing is that old, so
-    /// the jump goes to the start of the chat.
-    pub(crate) fn fail_date_jump(&mut self, not_found: bool, pending: Option<&PendingRequest>) {
+    /// the jump goes to the start of the chat. Any other error is a line in
+    /// the status note (the box closed when the day was picked, so nothing
+    /// there could draw it).
+    pub(crate) fn fail_date_jump(
+        &mut self,
+        not_found: bool,
+        pending: Option<&PendingRequest>,
+    ) {
         if !self.search.jump_lookups.settle(pending) {
             return;
         }
         let Some(pending) = pending else {
             return;
         };
-        let window = pending.asked_in.chat();
-        let lookup = if not_found {
-            ViewJump::for_request(Some(pending), FIRST_MESSAGE_ID, DateJumpMode::Oldest)
-                .map(JumpLookup::Resolved)
-        } else {
-            Some(JumpLookup::NotFound(DateJumpNote::Failed))
-        };
-        if let Some(lookup) = lookup {
-            self.search.jump_lookups.set(window, lookup);
+        if !not_found {
+            self.chats_state.chat_action_error.push(
+                crate::lang::tr(crate::lang::keys::Q_MISC_COULD_NOT_JUMP_TO_THAT).to_string(),
+            );
+            return;
         }
-    }
-
-    /// The lookup could not be sent: the box says so.
-    pub fn date_jump_refused(&mut self) {
-        let window = self.view_in_place();
-        self.search
-            .jump_lookups
-            .set(window, JumpLookup::NotFound(DateJumpNote::Failed));
+        if let Some(jump) =
+            ViewJump::for_request(Some(pending), FIRST_MESSAGE_ID, DateJumpMode::Oldest)
+        {
+            self.search
+                .jump_lookups
+                .set(pending.asked_in.chat(), JumpLookup::Resolved(jump));
+        }
     }
 
     /// A chat window closed: its date lookup goes with it.

@@ -50,10 +50,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let Some((target, day)) = nearest_media_day(&calendar.days, day_number) else {
             let window = self.session.view_in_place();
-            self.session.search.jump_lookups.set(
-                window,
-                crate::state::JumpLookup::NotFound(crate::state::DateJumpNote::NoMedia),
-            );
+            self.session
+                .search
+                .jump_lookups
+                .set(window, crate::state::JumpLookup::NoMedia);
             return Ok(SharedMediaJump::NoMedia);
         };
         let (from, offset) = (

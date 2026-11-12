@@ -31,17 +31,8 @@ pub enum JumpLookup {
         chat: ChatId,
     },
     Resolved(ViewJump),
-    /// The jump found nothing to land on (the note's text is the line
-    /// drawn).
-    NotFound(DateJumpNote),
-}
-
-/// Why a date jump found nothing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DateJumpNote {
-    /// `getChatMessageByDate` failed for another reason than "too old".
-    Failed,
-    /// The picked day of the shared-media calendar has no media near it.
+    /// The picked day of the shared-media calendar has no media near it:
+    /// the box draws "No media" until it is opened again.
     NoMedia,
 }
 
