@@ -87,17 +87,18 @@ impl Session {
             )) => {
                 self.chats_state.chat_action_error.push(error_reason(err));
             }
-            Some((RequestPurpose::GetRecommendedChatFolders, _)) => {
-                // Only the request the list waits for says why; an older
-                // one's refusal is not a new line.
+            // Only the request the list waits for says why; an older one's
+            // refusal is not a new line.
+            Some((RequestPurpose::GetRecommendedChatFolders, _))
                 if self.chat_list.recommended_folders.failed(
                     pending.map(|p| p.id),
                     error_reason(err),
                     false,
-                ) {
-                    self.chats_state.chat_action_error.push(error_reason(err));
-                }
+                ) =>
+            {
+                self.chats_state.chat_action_error.push(error_reason(err));
             }
+            Some((RequestPurpose::GetRecommendedChatFolders, _)) => {}
             _ => {}
         }
         // The Add to folder box ends in the error with a Retry.
