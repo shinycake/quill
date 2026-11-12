@@ -574,10 +574,10 @@ fn a_transfer_ok_leaves_a_different_open_flow_alone() {
         },
     );
     let extra = p.0.transfer_picked_gift().unwrap();
-    // The picker is replaced by a resale form before the ok lands.
-    p.0.session.payments.gifts_manage.flow = Some(GiftFlow::resale("open".into()));
+    // The picker is replaced by a collection form before the ok lands.
+    p.0.session.payments.gifts_manage.flow = Some(GiftFlow::NewCollection(Default::default()));
     feed(&mut p, json!({"@type": "ok", "@extra": extra.as_extra()}));
     let manage = &p.0.session.payments.gifts_manage;
-    assert!(matches!(manage.flow, Some(GiftFlow::Resale { .. })));
+    assert!(matches!(manage.flow, Some(GiftFlow::NewCollection(_))));
     assert_eq!(manage.transferred(), None);
 }

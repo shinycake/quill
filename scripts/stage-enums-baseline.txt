@@ -16,7 +16,6 @@ bare:CallLinkStep::Busy 1
 bare:CallPhase::Busy 1
 bare:CallSound::Busy 1
 bare:CallWindow::Opening 2
-bare:CameraStage::Starting 1
 bare:CandidateStatus::Loading 1
 bare:CaptureStage::Running 1
 bare:CardState::Waiting 1
@@ -143,6 +142,7 @@ unkeyed:Beats::Running 1
 unkeyed:BotUsernameCheck::Checking 1
 unkeyed:CallLinkStage::Leaving 1
 unkeyed:CameraStage::Saving 1
+unkeyed:CallTransport::Connecting 1
 unkeyed:Cancellation::InFlight 1
 unkeyed:CardState::Loading 1
 unkeyed:ChatSearchPaging::Loading 1

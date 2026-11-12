@@ -74,7 +74,6 @@ impl Session {
                 hub.received.view.select(None);
                 hub.stars.page.invalidate();
                 let manage = &mut self.payments.gifts_manage;
-                manage.close_flow_answered_by(pending.map(|p| p.id));
                 manage.note = Some(if summary.title.is_empty() {
                     "Gift upgraded.".to_string()
                 } else {
@@ -149,7 +148,9 @@ impl Session {
             PaymentsPurpose::SetGiftResalePrice => {
                 hub.received.op.changed(pending.map(|p| p.id));
                 hub.received.notice = None;
-                manage.close_flow_answered_by(pending.map(|p| p.id));
+                hub.received
+                    .view
+                    .close_form_answered_by(pending.map(|p| p.id));
                 manage.note = Some("Resale price updated.".into());
             }
             PaymentsPurpose::DeleteGiftCollection => {
@@ -349,6 +350,11 @@ impl Session {
         let reason = error_reason(err);
         let manage = &mut self.payments.gifts_manage;
         manage.flow_refused(pending.map(|p| p.id));
+        self.payments
+            .hub
+            .received
+            .view
+            .form_refused(pending.map(|p| p.id));
         match purpose {
             PaymentsPurpose::GetGiftOption(_) => manage.limits_ask.fail(pending.map(|p| p.id)),
             PaymentsPurpose::GetGiftCollections { owner } => {

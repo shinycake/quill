@@ -184,6 +184,22 @@ impl AddBotStep {
     }
 }
 
+impl ProfileDialog {
+    /// Which box this is, for a continuation that must find its own box
+    /// again: the kind and the person it is about. Two Edit contact boxes
+    /// for different people are different boxes.
+    pub(crate) fn owner(&self) -> (std::mem::Discriminant<Self>, Option<i64>) {
+        let user = match self {
+            Self::EditContact(dialog) => Some(dialog.user_id),
+            Self::ShareContact { user_id, .. } | Self::PersonalPhoto { user_id, .. } => {
+                Some(*user_id)
+            }
+            _ => None,
+        };
+        (std::mem::discriminant(self), user)
+    }
+}
+
 impl EditContactDialog {
     pub(crate) fn new(
         window: &mut Window,

@@ -3,7 +3,7 @@
 //! `Session::proxy`. Mutations never touch the list optimistically: the
 //! answer marks it stale and the driver refetches `getProxies`.
 use super::*;
-use crate::proxy::{LinkCheck, PingStatus};
+use crate::proxy::PingStatus;
 
 impl Session {
     /// `getProxies` answer: replaces the list; pings of proxies that no
@@ -113,12 +113,7 @@ impl Session {
     /// stage carries settles it.
     fn settle_link_check(&mut self, pending: Option<&PendingRequest>, status: PingStatus) {
         let Some(pending) = pending else { return };
-        if self.settings.proxy.link_check == LinkCheck::Checking(pending.id) {
-            self.settings.proxy.link_check = match status {
-                PingStatus::Available(ms) => LinkCheck::Available(ms),
-                PingStatus::Checking(_) | PingStatus::Unavailable => LinkCheck::Unavailable,
-            };
-        }
+        self.settings.proxy.settle_link(pending.id, status);
     }
 
     /// `pingProxy` answer, in seconds.

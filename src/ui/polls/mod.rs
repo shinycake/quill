@@ -626,7 +626,7 @@ impl QuillApp {
             .chat_ui
             .poll_dialog
             .as_ref()
-            .is_some_and(|dialog| dialog.limit_by_country && dialog.country_codes.is_empty())
+            .is_some_and(|dialog| dialog.limit_by_country() && dialog.country_codes().is_empty())
         {
             self.set_note(StatusNote::error(tr(keys::POLLS_CREATE_CHOOSE_COUNTRY)));
             cx.notify();

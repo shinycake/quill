@@ -652,32 +652,58 @@ impl SystemStepState {
     }
 }
 
-/// Where the proxy-link box stands. The check's request id is part of the
-/// stage, so only its own answer settles it; a new link, a close or a
-/// connect puts it back to `Review`.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub enum LinkCheck {
-    /// The proxy's details, with Check Status and Connect Proxy.
+/// The proxy-link box: closed, or open on one proxy's draft at one of its
+/// stages. The draft and the check are one value, so closing the box, a new
+/// link or Connect is a single transition, and a check still in flight no
+/// longer matches anything (only its own request settles `Checking`).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum LinkBox {
+    /// No box.
     #[default]
-    Review,
+    Closed,
+    /// The proxy's details, with Check Status and Connect Proxy.
+    Review(ProxyDraft),
     /// The one-time "this exposes your IP" warning before a check.
-    Warn,
+    Warn(ProxyDraft),
     /// `pingProxy` sent; this request's answer settles it.
-    Checking(crate::ids::RequestId),
+    Checking {
+        draft: ProxyDraft,
+        request: crate::ids::RequestId,
+    },
     /// The ping answered after this many milliseconds.
-    Available(u32),
+    Available { draft: ProxyDraft, ms: u32 },
     /// The ping failed.
-    Unavailable,
+    Unavailable(ProxyDraft),
 }
 
-impl LinkCheck {
-    /// The proxy status the box shows for this stage; `None` before a check.
-    pub fn status(self) -> Option<PingStatus> {
+impl LinkBox {
+    pub fn is_open(&self) -> bool {
+        *self != Self::Closed
+    }
+
+    /// The proxy the open box is about.
+    pub fn draft(&self) -> Option<&ProxyDraft> {
         match self {
-            Self::Review | Self::Warn => None,
-            Self::Checking(request) => Some(PingStatus::Checking(request)),
-            Self::Available(ms) => Some(PingStatus::Available(ms)),
-            Self::Unavailable => Some(PingStatus::Unavailable),
+            Self::Closed => None,
+            Self::Review(draft)
+            | Self::Warn(draft)
+            | Self::Checking { draft, .. }
+            | Self::Available { draft, .. }
+            | Self::Unavailable(draft) => Some(draft),
+        }
+    }
+
+    pub fn is_warning(&self) -> bool {
+        matches!(self, Self::Warn(_))
+    }
+
+    /// The proxy status the box shows; `None` before a check.
+    pub fn status(&self) -> Option<PingStatus> {
+        match self {
+            Self::Closed | Self::Review(_) | Self::Warn(_) => None,
+            Self::Checking { request, .. } => Some(PingStatus::Checking(*request)),
+            Self::Available { ms, .. } => Some(PingStatus::Available(*ms)),
+            Self::Unavailable(_) => Some(PingStatus::Unavailable),
         }
     }
 }
@@ -724,8 +750,9 @@ pub struct ProxyState {
     pub system_step: SystemStepState,
     /// Per-proxy-id ping results.
     pub pings: HashMap<i32, PingStatus>,
-    /// The proxy-link box's stage (its proxy is not in the list).
-    pub link_check: LinkCheck,
+    /// The proxy-link box, with the draft it is about (its proxy is not in
+    /// the list).
+    pub link: LinkBox,
     /// Option `prefer_ipv6` (tdesktop "Try connecting through IPv6").
     pub prefer_ipv6: bool,
     pub prefs: ProxyPrefs,
@@ -737,6 +764,71 @@ pub struct ProxyState {
 }
 
 impl ProxyState {
+    /// A link box opens on `draft`: a box or a check before it is gone, and
+    /// its late answer matches nothing.
+    pub fn open_link(&mut self, draft: ProxyDraft) {
+        self.link = LinkBox::Review(draft);
+    }
+
+    /// The box closes (cancel, or the owner going away).
+    pub fn close_link(&mut self) {
+        self.link = LinkBox::Closed;
+    }
+
+    /// Connect: the box closes and hands over the proxy it showed.
+    pub fn take_link(&mut self) -> Option<ProxyDraft> {
+        match std::mem::take(&mut self.link) {
+            LinkBox::Closed => None,
+            LinkBox::Review(draft)
+            | LinkBox::Warn(draft)
+            | LinkBox::Checking { draft, .. }
+            | LinkBox::Available { draft, .. }
+            | LinkBox::Unavailable(draft) => Some(draft),
+        }
+    }
+
+    /// Check Status asks for the one-time "this exposes your IP" warning
+    /// first.
+    pub fn warn_link(&mut self) {
+        if let Some(draft) = self.link.draft().cloned() {
+            self.link = LinkBox::Warn(draft);
+        }
+    }
+
+    /// `pingProxy` for the open box went out under `request`.
+    pub fn link_checking(&mut self, request: crate::ids::RequestId) {
+        if let Some(draft) = self.link.draft().cloned() {
+            self.link = LinkBox::Checking { draft, request };
+        }
+    }
+
+    /// The ping `request` answered (or failed): only the box that is
+    /// `Checking` under that request settles.
+    pub fn settle_link(&mut self, request: RequestId, status: PingStatus) {
+        self.link = match std::mem::take(&mut self.link) {
+            LinkBox::Checking {
+                draft,
+                request: open,
+            } if open == request => match status {
+                PingStatus::Available(ms) => LinkBox::Available { draft, ms },
+                PingStatus::Checking(_) | PingStatus::Unavailable => LinkBox::Unavailable(draft),
+            },
+            other => other,
+        };
+    }
+
+    /// The auto-switch settings changed: the rotation restarts with them.
+    /// The one place that resets it on a prefs change.
+    pub fn set_auto_switch(&mut self, on: Option<bool>, secs: Option<u32>) {
+        if let Some(on) = on {
+            self.prefs.auto_switch = on;
+        }
+        if let Some(secs) = secs {
+            self.prefs.auto_switch_secs = secs;
+        }
+        self.rotation = Rotation::Watching;
+    }
+
     pub fn entries(&self) -> &[ProxyEntry] {
         self.list.as_deref().unwrap_or(&[])
     }
@@ -1015,6 +1107,62 @@ mod tests {
     }
 
     #[test]
+    fn changing_the_auto_switch_settings_restarts_the_rotation_itself() {
+        let mut state = ProxyState {
+            rotation: Rotation::Disconnected { since_ms: 5 },
+            ..ProxyState::default()
+        };
+        state.set_auto_switch(Some(true), Some(30));
+        assert!(state.prefs.auto_switch);
+        assert_eq!(state.prefs.auto_switch_secs, 30);
+        assert_eq!(state.rotation, Rotation::Watching);
+        state.rotation = Rotation::Probing {
+            since_ms: 1,
+            id: 2,
+            asked_ms: 1,
+        };
+        state.set_auto_switch(None, None);
+        assert_eq!(state.rotation, Rotation::Watching, "any change restarts it");
+    }
+
+    #[test]
+    fn the_link_box_is_one_stage_that_holds_its_draft() {
+        let draft = |server: &str| ProxyDraft {
+            server: server.into(),
+            ..ProxyDraft::empty(ProxyKind::Socks5)
+        };
+        let mut state = ProxyState::default();
+        state.warn_link();
+        assert_eq!(state.link, LinkBox::Closed, "no box, no warning");
+        state.open_link(draft("a"));
+        state.warn_link();
+        assert_eq!(state.link, LinkBox::Warn(draft("a")));
+        state.link_checking(RequestId(4));
+        // Closed, then another link opened: the first check's answer is late.
+        state.close_link();
+        state.open_link(draft("b"));
+        state.settle_link(RequestId(4), PingStatus::Available(9));
+        assert_eq!(state.link, LinkBox::Review(draft("b")));
+        state.link_checking(RequestId(5));
+        state.settle_link(RequestId(4), PingStatus::Unavailable);
+        assert_eq!(
+            state.link.status(),
+            Some(PingStatus::Checking(RequestId(5)))
+        );
+        state.settle_link(RequestId(5), PingStatus::Available(30));
+        assert_eq!(
+            state.link,
+            LinkBox::Available {
+                draft: draft("b"),
+                ms: 30
+            }
+        );
+        assert_eq!(state.take_link(), Some(draft("b")));
+        assert_eq!(state.link, LinkBox::Closed);
+        assert_eq!(state.take_link(), None);
+    }
+
+    #[test]
     fn added_proxies_answer_parses_all_three_types() {
         let json: Value = serde_json::from_str(
             r#"{"@type":"addedProxies","proxies":[
@@ -1097,7 +1245,8 @@ mod tests {
         let mut s = state(vec![entry(1, true), entry(2, false)], true);
         s.rotation_step(0, false);
         // The link test of the proxy box is out, not the rotation's probe.
-        s.link_check = LinkCheck::Checking(crate::ids::RequestId(5));
+        s.open_link(ProxyDraft::empty(ProxyKind::Socks5));
+        s.link_checking(crate::ids::RequestId(5));
         assert_eq!(s.rotation_step(10_000, false), RotationAction::Ping(2));
         assert_eq!(
             s.rotation,

@@ -30,6 +30,10 @@ fn dialog(app: &QuillApp) -> &crate::ui::dialogs::poll::PollDialog {
     app.chat_ui.poll_dialog.as_ref().unwrap()
 }
 
+fn dialog_rows(app: &QuillApp) -> Vec<usize> {
+    dialog(app).correct_rows()
+}
+
 fn open(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, lock: QuizLock) {
     app.update_in(vcx, |app, window, cx| {
         app.open_poll_dialog_locked(lock, window, cx);
@@ -49,7 +53,7 @@ fn the_box_opens_with_tdesktops_defaults(cx: &mut TestAppContext) {
         assert!(dialog.allows_revoting);
         assert!(dialog.shuffle_options);
         assert!(!dialog.is_quiz);
-        assert!(!dialog.limit_duration);
+        assert!(!dialog.limit_duration());
     });
     vcx.update(|window, _| {
         for id in [
@@ -114,22 +118,25 @@ fn a_poll_that_names_voters_only_can_take_new_options(cx: &mut TestAppContext) {
 fn several_answers_can_be_right_only_with_multiple_answers(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     open(&app, &mut vcx, QuizLock::Free);
-    app.update(&mut vcx, |app, _| {
+    app.update_in(&mut vcx, |app, window, cx| {
+        for _ in 0..3 {
+            app.add_poll_option_row(window, cx);
+        }
         let dialog = app.chat_ui.poll_dialog.as_mut().unwrap();
         dialog.set_quiz(true);
-        let marked = |dialog: &crate::ui::dialogs::PollDialog| -> Vec<usize> {
-            (0..dialog.options.len())
-                .filter(|row| dialog.options[*row].correct)
-                .collect()
-        };
         dialog.set_correct_row(0, true);
-        dialog.set_correct_row(1, true);
-        assert_eq!(marked(dialog), [0, 1]);
+        dialog.set_correct_row(2, true);
+        assert_eq!(dialog.correct_rows(), [0, 2]);
         // Switching multiple off keeps one.
         dialog.set_multiple(false);
-        assert_eq!(marked(dialog), [0]);
+        assert_eq!(dialog.correct_rows(), [0]);
         dialog.set_correct_row(1, true);
-        assert_eq!(marked(dialog), [1]);
+        assert_eq!(dialog.correct_rows(), [1]);
+        // A removed option moves the marks after it.
+        dialog.set_multiple(true);
+        dialog.set_correct_row(3, true);
+        app.remove_poll_option_row(0, cx);
+        assert_eq!(dialog_rows(app), [0, 2]);
     });
 }
 
@@ -149,7 +156,10 @@ fn limit_duration_shows_the_ends_row_and_sends_the_period(cx: &mut TestAppContex
     });
     app.update(&mut vcx, |app, cx| {
         let dialog = app.chat_ui.poll_dialog.as_mut().unwrap();
-        assert_eq!(dialog.close, PollClose::Period(POLL_DEFAULT_PERIOD_SECS));
+        assert_eq!(
+            dialog.close(),
+            Some(PollClose::Period(POLL_DEFAULT_PERIOD_SECS))
+        );
         dialog.hide_results_until_closes = true;
         let draft = dialog.draft(cx);
         assert_eq!(
@@ -158,7 +168,7 @@ fn limit_duration_shows_the_ends_row_and_sends_the_period(cx: &mut TestAppContex
         );
         assert!(draft.hide_results_until_closes);
         // Switching it off again drops the period and the hidden results.
-        dialog.limit_duration = false;
+        dialog.set_limit_duration(false);
         let draft = dialog.draft(cx);
         assert_eq!(draft.deadline, None);
         assert!(!draft.hide_results_until_closes);
@@ -170,7 +180,11 @@ fn a_custom_deadline_is_picked_in_its_own_box(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     open(&app, &mut vcx, QuizLock::Free);
     app.update_in(&mut vcx, |app, window, cx| {
-        app.chat_ui.poll_dialog.as_mut().unwrap().limit_duration = true;
+        app.chat_ui
+            .poll_dialog
+            .as_mut()
+            .unwrap()
+            .set_limit_duration(true);
         app.open_poll_deadline_box(window, cx);
         assert!(app.poll_deadline_box_open());
     });
@@ -183,7 +197,7 @@ fn a_custom_deadline_is_picked_in_its_own_box(cx: &mut TestAppContext) {
     vcx.update(|window, cx| window.click("poll-deadline-set", cx));
     app.update(&mut vcx, |app, cx| {
         assert!(!app.poll_deadline_box_open());
-        let PollClose::Date(date) = dialog(app).close else {
+        let Some(PollClose::Date(date)) = dialog(app).close() else {
             panic!("a custom deadline replaces the span");
         };
         assert!((date - now_unix() - POLL_DEFAULT_PERIOD_SECS).abs() < 120);
@@ -198,15 +212,23 @@ fn cancelling_the_deadline_box_keeps_the_choice(cx: &mut TestAppContext) {
     open(&app, &mut vcx, QuizLock::Free);
     app.update_in(&mut vcx, |app, window, cx| {
         let dialog = app.chat_ui.poll_dialog.as_mut().unwrap();
-        dialog.limit_duration = true;
-        dialog.close = PollClose::Period(3 * 3600);
+        dialog.set_limit_duration(true);
+        dialog.set_close(PollClose::Period(3 * 3600));
         app.open_poll_deadline_box(window, cx);
     });
     vcx.run_until_parked();
     vcx.update(|window, cx| window.click("poll-deadline-cancel", cx));
     app.update(&mut vcx, |app, _| {
         assert!(!app.poll_deadline_box_open());
-        assert_eq!(dialog(app).close, PollClose::Period(3 * 3600));
+        assert_eq!(dialog(app).close(), Some(PollClose::Period(3 * 3600)));
+    });
+    // Off and on again: the chosen moment is still there, as in tdesktop.
+    app.update(&mut vcx, |app, _| {
+        let dialog = app.chat_ui.poll_dialog.as_mut().unwrap();
+        dialog.set_limit_duration(false);
+        assert_eq!(dialog.close(), None);
+        dialog.set_limit_duration(true);
+        assert_eq!(dialog.close(), Some(PollClose::Period(3 * 3600)));
     });
 }
 

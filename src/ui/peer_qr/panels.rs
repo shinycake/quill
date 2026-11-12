@@ -481,7 +481,7 @@ impl QuillApp {
 
     /// The box's toast, over its bottom edge.
     pub(super) fn qr_toast_element(&self) -> Option<Div> {
-        let (toast, _) = self.peer_qr.open.as_ref()?.toast.as_ref()?;
+        let toast = self.peer_qr.open.as_ref()?.toast.toast()?;
         Some(
             div()
                 .absolute()

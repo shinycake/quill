@@ -181,3 +181,43 @@ fn a_birthday_refusal_goes_when_a_field_is_corrected(cx: &mut TestAppContext) {
         assert!(dialog.shown_error(cx).is_none(), "corrected: it goes");
     });
 }
+
+/// A box replaced while its save is out no longer waits for the request,
+/// and the box that replaced it is the one on screen.
+#[gpui_kit::test]
+fn replacing_a_saving_edit_contact_box_drops_its_wait(cx: &mut TestAppContext) {
+    use crate::ui::dialogs::ContactSave;
+    use quill::ids::RequestId;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, window, cx| {
+        app.open_edit_contact_dialog(USER, window, cx);
+        if let Some(ProfileDialog::EditContact(dialog)) = &mut app.dialogs.profile_dialog {
+            dialog.save = ContactSave::Saving(RequestId(77));
+        }
+        app.open_birthday_privacy(cx);
+        assert!(
+            app.dialogs.profile_dialog.is_none(),
+            "the birthday privacy link closes the box it was in"
+        );
+        app.open_edit_contact_dialog(USER, window, cx);
+        app.open_profile_dialog(ProfileDialog::ChangePhone);
+        assert!(matches!(
+            app.dialogs.profile_dialog,
+            Some(ProfileDialog::ChangePhone)
+        ));
+    });
+}
+
+#[test]
+fn a_box_is_found_again_by_its_kind_and_person() {
+    use quill::profile_forms::PersonalPhotoMode;
+    let photo = |user_id| ProfileDialog::PersonalPhoto {
+        user_id,
+        mode: PersonalPhotoMode::Set,
+        path: None,
+    };
+    assert_eq!(photo(1).owner(), photo(1).owner());
+    assert_ne!(photo(1).owner(), photo(2).owner(), "another person's box");
+    assert_ne!(photo(1).owner(), ProfileDialog::ChangePhone.owner());
+}

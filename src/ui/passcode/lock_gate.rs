@@ -53,7 +53,7 @@ impl QuillApp {
     /// (`lock_layer`), the agent socket pauses or resumes, and the links
     /// held for the unlock are taken again.
     pub(in crate::ui) fn set_locked(&mut self, locked: bool, cx: &mut Context<Self>) {
-        self.account.passcode.set_lock_flag(locked);
+        let changed = self.account.passcode.set_lock_flag(locked);
         // The GIF gate follows what is drawn: shut under the lock, open
         // again for a panel left on its GIFs tab.
         self.sync_gif_downloads();
@@ -68,7 +68,9 @@ impl QuillApp {
                 .toasts
                 .pointer_gone(std::time::Instant::now());
         }
-        super::lock_layer::publish(locked, cx);
+        if changed {
+            super::lock_layer::refresh(cx);
+        }
         // The demo apps share the process with the tests: only a real
         // lock pauses the agent socket.
         if !self.account.passcode.demo {

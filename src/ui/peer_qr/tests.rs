@@ -89,8 +89,7 @@ fn toast(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<QrToast>
         app.peer_qr
             .open
             .as_ref()
-            .and_then(|open| open.toast.clone())
-            .map(|(toast, _)| toast)
+            .and_then(|open| open.toast.toast().cloned())
     })
 }
 
@@ -695,4 +694,44 @@ fn a_save_that_fails_after_the_box_closed_is_told(cx: &mut TestAppContext) {
     app.read_with(vcx, |app, _| {
         assert_eq!(app.connection.status_note(), "Too many requests");
     });
+}
+
+#[test]
+fn a_closed_panel_settles_and_stops_being_shown() {
+    use super::PanelMotion;
+    use std::time::{Duration, Instant};
+    let t0 = Instant::now();
+    let motion = PanelMotion::Idle.changed(Some(QrPanel::Gifts), t0);
+    assert_eq!(motion.visible(t0), Some(QrPanel::Gifts));
+    let opened = t0 + Duration::from_secs(5);
+    let mut motion = motion.changed(None, opened);
+    assert_eq!(
+        motion.visible(opened),
+        Some(QrPanel::Gifts),
+        "drawn while closing"
+    );
+    let closed = opened + Duration::from_secs(5);
+    assert_eq!(motion.visible(closed), None, "no list held at rest");
+    motion.settle(closed);
+    assert_eq!(motion, PanelMotion::Idle);
+}
+
+#[gpui_kit::test]
+fn a_newer_toast_is_not_hidden_by_the_older_toasts_timer(cx: &mut TestAppContext) {
+    let (app, _, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    frames(vcx);
+    app.update(vcx, |app, cx| app.show_qr_toast(QrToast::Copied, cx));
+    vcx.executor()
+        .advance_clock(std::time::Duration::from_millis(2_000));
+    vcx.run_until_parked();
+    app.update(vcx, |app, cx| app.show_qr_toast(QrToast::LinkCopied, cx));
+    vcx.executor()
+        .advance_clock(std::time::Duration::from_millis(1_000));
+    vcx.run_until_parked();
+    assert_eq!(toast(&app, vcx), Some(QrToast::LinkCopied));
+    vcx.executor()
+        .advance_clock(std::time::Duration::from_millis(2_000));
+    vcx.run_until_parked();
+    assert_eq!(toast(&app, vcx), None, "the toast's own timer hides it");
 }

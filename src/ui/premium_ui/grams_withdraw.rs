@@ -31,7 +31,13 @@ crate::ui::shell::register_dialogs! {
         3804,
         |app| {
             app.session().is_some_and(|s| {
-                s.payments.hub.grams.open && s.payments.hub.grams.withdraw.as_ref().is_some()
+                s.payments.hub.grams.open
+                    && s.payments
+                        .hub
+                        .grams
+                        .withdraw
+                        .as_ref()
+                        .is_some_and(GramWithdraw::shows_box)
             })
         },
         QuillApp::build_grams_withdraw_dialog,
@@ -60,6 +66,20 @@ impl QuillApp {
             .withdraw
             .as_ref()
             .cloned()
+    }
+
+    /// The window that acts on a finished withdrawal: the one that hosted
+    /// the box (or else the Grams screen it was opened from), the main
+    /// window once that one is closed. `None` while none has finished. Not
+    /// tied to the box's flag, so an answer that landed after the box closed
+    /// is still taken at once.
+    pub(in crate::ui) fn grams_outcome_window(&self) -> Option<Option<quill::ids::ChatId>> {
+        let done = matches!(self.grams_withdraw(), Some(GramWithdraw::Done(_)));
+        done.then(|| {
+            self.windows
+                .window_of_box_or(DialogKind::GramsWithdraw, DialogKind::Grams)
+                .filter(|chat| self.windows.has(*chat))
+        })
     }
 
     fn clear_grams_withdraw_password(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -164,7 +184,7 @@ impl QuillApp {
                     (true, true) => Showing::Idle,
                     (true, false) => Showing::Sending,
                 };
-                (grams.withdraw_outcome.take(), field)
+                (GramWithdraw::take_done(&mut grams.withdraw), field)
             }
             None => (None, Showing::Off),
         };
@@ -221,6 +241,7 @@ impl QuillApp {
                     }
                     .render(session, cx),
                 ),
+                GramWithdraw::Done(_) => return dialog.on_close(on_close),
                 GramWithdraw::SecurityCheck { later } => (
                     tr(keys::Q_MONEY_SECURITY_CHECK),
                     SecurityCheck {

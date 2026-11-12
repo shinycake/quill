@@ -15,33 +15,40 @@
 //! so a new kind of window is covered without anyone listing it.
 #![deny(clippy::indexing_slicing)]
 
+use super::LockState;
 use gpui_base::{Root, RootPlugin};
 use gpui_kit::component::{ActiveTheme, window_border};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use std::any::TypeId;
+use std::cell::Cell;
+use std::rc::Rc;
 
 /// Whether Quill is locked, for code that has no `QuillApp` at hand (the
-/// root plugin of every window). Written only by `QuillApp::set_locked`,
-/// together with `PasscodeUi`'s own flag.
-#[derive(Clone, Copy, Default)]
+/// root plugin of every window). It holds the very cell `PasscodeUi` reads
+/// (`LockState`), so the flag exists once; `QuillApp::set_locked` is the
+/// only writer.
+#[derive(Clone)]
 pub(crate) struct LockGate {
-    locked: bool,
+    state: Rc<Cell<LockState>>,
 }
 
 impl Global for LockGate {}
 
 /// Whether the app is locked now.
 pub(crate) fn app_locked(cx: &App) -> bool {
-    cx.try_global::<LockGate>().is_some_and(|gate| gate.locked)
+    cx.try_global::<LockGate>()
+        .is_some_and(|gate| matches!(gate.state.get(), LockState::Locked { .. }))
 }
 
-/// Record the lock state for every window and draw them all again.
-pub(super) fn publish(locked: bool, cx: &mut App) {
-    if app_locked(cx) == locked && cx.has_global::<LockGate>() {
-        return;
-    }
-    cx.set_global(LockGate { locked });
+/// Share `PasscodeUi`'s lock cell with every window's root plugin.
+pub(super) fn install(state: Rc<Cell<LockState>>, cx: &mut App) {
+    cx.set_global(LockGate { state });
+    cx.refresh_windows();
+}
+
+/// The lock changed: every window draws again.
+pub(super) fn refresh(cx: &mut App) {
     cx.refresh_windows();
 }
 

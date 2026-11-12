@@ -16,7 +16,7 @@ impl QuillApp {
             });
         app.update(cx, |this, cx| {
             let body = this.passcode_body(cx);
-            let title = match this.account.passcode.view {
+            let title = match this.account.passcode.view() {
                 PasscodeView::Status => tr(keys::SETTINGS_PASSCODE_TITLE),
                 PasscodeView::Create => tr(keys::PASSCODE_CREATE_TITLE),
                 PasscodeView::Change => tr(keys::PASSCODE_CHANGE),
@@ -72,7 +72,7 @@ impl QuillApp {
         let ui = &self.account.passcode;
         let busy = ui.job.is_running();
         let mut body = div().flex().flex_col().gap_3().w_full();
-        if let Some(error) = ui.error.clone() {
+        if let Some(error) = ui.error().map(str::to_string) {
             body = body.child(
                 div()
                     .id("passcode-error")
@@ -82,7 +82,7 @@ impl QuillApp {
                     .child(error),
             );
         }
-        match ui.view {
+        match ui.view() {
             PasscodeView::Status => {
                 body = body
                     .child(
@@ -227,7 +227,7 @@ impl QuillApp {
                     .outline()
                     .selected(preset == secs)
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.account.passcode.error = None;
+                        this.account.passcode.set_error(None);
                         this.set_autolock_secs(preset, cx)
                     })),
             );
@@ -301,7 +301,7 @@ impl QuillApp {
                     )
                     .child(
                         Switch::new("passcode-system-unlock")
-                            .checked(self.account.passcode.system_unlock)
+                            .checked(self.account.passcode.system_unlock.is_on())
                             .accessibility_label(super::system_unlock::label())
                             .on_click(cx.listener(|this, &on, _, cx| {
                                 this.set_system_unlock(on, cx);

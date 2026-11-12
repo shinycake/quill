@@ -146,6 +146,7 @@ fn removing_a_row_keeps_the_media_with_its_option(cx: &mut TestAppContext) {
             dialog.options[0].attach.media = link("a");
             dialog.options[2].attach.media = link("c");
             dialog.options[2].attach.mode = crate::ui::dialogs::AttachMode::Menu;
+            dialog.options[2].correct = true;
         }
         app.remove_poll_option_row(1, cx);
         let dialog = app.chat_ui.poll_dialog.as_ref().unwrap();
@@ -162,6 +163,7 @@ fn removing_a_row_keeps_the_media_with_its_option(cx: &mut TestAppContext) {
             ),
             "the open menu follows its row"
         );
+        assert_eq!(dialog.correct_rows(), [1], "so does the correct mark");
         app.clear_poll_option_media(AttachTarget::Row(0), cx);
         assert_eq!(slot(app, 0), None);
     });
@@ -281,6 +283,25 @@ fn a_pick_for_a_removed_option_is_dropped_and_the_panel_has_one_recipient(cx: &m
             crate::ui::dialogs::PollPick::None,
             "nobody waits for the next sticker"
         );
+    });
+}
+
+#[gpui_kit::test]
+fn closing_the_panel_ends_the_wait_for_a_sticker_or_emoji(cx: &mut TestAppContext) {
+    use crate::ui::dialogs::PollPick;
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.open_poll_dialog(window, cx);
+        app.choose_poll_option_sticker(AttachTarget::Row(0), cx);
+        assert!(matches!(app.pickers.poll_pick, PollPick::Sticker(_)));
+        app.close_media_panel(cx);
+        assert_eq!(app.pickers.poll_pick, PollPick::None);
+        // A panel opened later does not route its pick into that option.
+        app.open_media_panel(crate::ui::media_panel::PanelTab::Stickers, cx);
+        assert!(!app.route_poll_option_sticker(FileId(9), "x", (1, 1), cx));
+        app.choose_poll_option_emoji(AttachTarget::Row(1), cx);
+        app.close_media_panel(cx);
+        assert_eq!(app.pickers.poll_pick, PollPick::None);
     });
 }
 

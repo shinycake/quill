@@ -379,13 +379,13 @@ impl QuillApp {
         }
         // The box under the picker (Edit contact stays up; Add contact has
         // closed): the answer opens the confirm step only over that same
-        // stage, and only then names a box host, so a cancelled picker
-        // leaves none.
+        // box (its kind and person, not another person's Edit contact), and
+        // only then names a box host, so a cancelled picker leaves none.
         let under = self
             .dialogs
             .profile_dialog
             .as_ref()
-            .map(std::mem::discriminant);
+            .map(ProfileDialog::owner);
         let window = self.asking_window_or_last_press();
         let picker = cx.prompt_for_paths(PathPromptOptions {
             files: true,
@@ -413,7 +413,7 @@ impl QuillApp {
                         .dialogs
                         .profile_dialog
                         .as_ref()
-                        .map(std::mem::discriminant);
+                        .map(ProfileDialog::owner);
                     if now != under {
                         return;
                     }

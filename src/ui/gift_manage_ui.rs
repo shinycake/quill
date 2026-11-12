@@ -13,6 +13,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::gift_manage::{GiftFlow, GiftManageState};
 use quill::lang::{keys, tr, tr_with};
+use quill::premium_hub::gift_view::GiftForm;
 use quill::premium_hub::group_digits;
 use quill::state::Session;
 
@@ -58,37 +59,48 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (price, name) = {
-            let session = self.session();
-            let manage = session.map(|s| &s.payments.gifts_manage);
-            let price = match (&flow, session) {
-                (Some(GiftFlow::Resale { id, .. }), Some(s)) => s
-                    .payments
-                    .hub
-                    .received
-                    .rows
-                    .iter()
-                    .find(|g| g.id == *id)
-                    .filter(|g| g.manage.listed && !g.manage.resale_gram_only)
-                    .map(|g| g.manage.resale_star_count.to_string()),
-                _ => None,
-            };
-            let name = match (&flow, manage) {
-                (Some(GiftFlow::RenameCollection(id, _)), Some(m)) => {
-                    m.collection(*id).map(|c| c.name.clone())
-                }
-                _ => None,
-            };
-            (price.unwrap_or_default(), name.unwrap_or_default())
+        let name = match (&flow, self.session()) {
+            (Some(GiftFlow::RenameCollection(id, _)), Some(s)) => s
+                .payments
+                .gifts_manage
+                .collection(*id)
+                .map(|c| c.name.clone()),
+            _ => None,
         };
-        self.payments
-            .gift_price_input
-            .update(cx, |input, cx| input.set_value(price, window, cx));
-        self.payments
-            .gift_collection_input
-            .update(cx, |input, cx| input.set_value(name, window, cx));
+        self.payments.gift_collection_input.update(cx, |input, cx| {
+            input.set_value(name.unwrap_or_default(), window, cx)
+        });
         if let Some(manage) = self.gift_manage_mut() {
             manage.flow = flow;
+        }
+        cx.notify();
+    }
+
+    /// Show `form` in the open gift's panel (or close the open one) and
+    /// prefill the price input.
+    pub(super) fn set_gift_form(
+        &mut self,
+        form: Option<GiftForm>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let price = match (&form, self.session()) {
+            (Some(GiftForm::Resale { .. }), Some(s)) => {
+                let hub = &s.payments.hub;
+                hub.received
+                    .view
+                    .selected()
+                    .and_then(|id| hub.received.rows.iter().find(|g| g.id == id))
+                    .filter(|g| g.manage.listed && !g.manage.resale_gram_only)
+                    .map(|g| g.manage.resale_star_count.to_string())
+            }
+            _ => None,
+        };
+        self.payments.gift_price_input.update(cx, |input, cx| {
+            input.set_value(price.unwrap_or_default(), window, cx)
+        });
+        if let Some(hub) = self.hub_mut() {
+            hub.received.view.set_form(form);
         }
         cx.notify();
     }
@@ -120,8 +132,8 @@ impl QuillApp {
     }
 
     pub(super) fn toggle_keep_details(&mut self, cx: &mut Context<Self>) {
-        if let Some(GiftFlow::Upgrade { keep_details, .. }) =
-            self.gift_manage_mut().and_then(|m| m.flow.as_mut())
+        if let Some(GiftForm::Upgrade { keep_details, .. }) =
+            self.hub_mut().and_then(|h| h.received.view.form_mut())
         {
             *keep_details = !*keep_details;
         }

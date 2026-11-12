@@ -191,8 +191,7 @@ impl QuillApp {
                 self.open_custom_qr_box(link, keys::PROXY_EDIT_SHARE_QR_BOX_TITLE, None, cx);
             }
             None => {
-                self.settings.proxy.notice =
-                    Some(tr(keys::Q_MISC_HTTP_PROXIES_CANT_BE_SHARED).into());
+                self.proxy_notice(tr(keys::Q_MISC_HTTP_PROXIES_CANT_BE_SHARED), cx);
                 cx.notify();
             }
         }

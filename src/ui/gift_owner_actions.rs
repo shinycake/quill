@@ -13,12 +13,11 @@ use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::*;
 use gpui_kit::*;
-use quill::gift_manage::{
-    GiftFlow, PinGate, ResaleGate, TransferGate, parse_stars_input, pinned_ids,
-};
+use quill::gift_manage::{PinGate, ResaleGate, TransferGate, parse_stars_input, pinned_ids};
 use quill::lang::{keys, tr, tr_with};
 use quill::local_time::now_unix;
 use quill::premium_hub::ReceivedGift;
+use quill::premium_hub::gift_view::GiftForm;
 use quill::state::Session;
 
 /// The owner's actions for the gift on screen, below the show/hide and
@@ -53,7 +52,7 @@ pub(super) fn gift_owner_actions(
         col = upgrade_section(
             col,
             gift,
-            manage,
+            hub.received.view.form_of(&gift.id),
             cost,
             poor(cost),
             &balance_line(),
@@ -99,7 +98,8 @@ pub(super) fn gift_owner_actions(
             col = col.child(hint(tr(keys::Q_MONEY_THIS_GIFT_IS_LISTED_FOR), cx));
         }
         ResaleGate::Ready => {
-            col = resale_section(col, gift, manage, price_input, price_text, busy, cx);
+            let form = hub.received.view.form_of(&gift.id);
+            col = resale_section(col, gift, manage, form, price_input, price_text, busy, cx);
         }
         ResaleGate::Unavailable => {}
     }
@@ -206,7 +206,7 @@ fn pin_section(
 fn upgrade_section(
     col: Div,
     gift: &ReceivedGift,
-    manage: &quill::gift_manage::GiftManageState,
+    form: Option<&GiftForm>,
     cost: i64,
     too_poor: bool,
     balance_line: &str,
@@ -214,12 +214,7 @@ fn upgrade_section(
     cx: &mut Context<QuillApp>,
 ) -> Div {
     let id = gift.id.clone();
-    let Some(GiftFlow::Upgrade {
-        id: open,
-        keep_details,
-        ..
-    }) = &manage.flow
-    else {
+    let Some(GiftForm::Upgrade { keep_details, .. }) = form else {
         return col.child(
             Button::new("gift-upgrade")
                 .label(if cost == 0 {
@@ -233,13 +228,10 @@ fn upgrade_section(
                 .ghost()
                 .disabled(busy)
                 .on_click(cx.listener(move |this, _, window, cx| {
-                    this.set_gift_flow(Some(GiftFlow::upgrade(id.clone(), false)), window, cx)
+                    this.set_gift_form(Some(GiftForm::upgrade(false)), window, cx)
                 })),
         );
     };
-    if *open != gift.id {
-        return col;
-    }
     let keep = *keep_details;
     let mut p = panel(cx).child(div().text_sm().child(if cost == 0 {
         tr(keys::Q_MONEY_UPGRADE_THIS_GIFT_TO_A).to_string()
@@ -283,7 +275,7 @@ fn upgrade_section(
                         .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(
-                            cx.listener(|this, _, window, cx| this.set_gift_flow(None, window, cx)),
+                            cx.listener(|this, _, window, cx| this.set_gift_form(None, window, cx)),
                         ),
                 ),
         ),
@@ -304,6 +296,7 @@ fn resale_section(
     col: Div,
     gift: &ReceivedGift,
     manage: &quill::gift_manage::GiftManageState,
+    form: Option<&GiftForm>,
     price_input: &Entity<InputState>,
     price_text: &str,
     busy: bool,
@@ -311,9 +304,8 @@ fn resale_section(
 ) -> Div {
     let id = gift.id.clone();
     let listed = gift.manage.listed;
-    let open = matches!(&manage.flow, Some(GiftFlow::Resale { id: open, .. }) if *open == gift.id);
+    let open = matches!(form, Some(GiftForm::Resale { .. }));
     if !open {
-        let open_id = id.clone();
         let edit = Button::new("gift-resale")
             .label(if listed {
                 tr(keys::Q_MONEY_CHANGE_THE_PRICE)
@@ -323,7 +315,7 @@ fn resale_section(
             .ghost()
             .disabled(busy)
             .on_click(cx.listener(move |this, _, window, cx| {
-                this.set_gift_flow(Some(GiftFlow::resale(open_id.clone())), window, cx)
+                this.set_gift_form(Some(GiftForm::resale()), window, cx)
             }));
         if !listed {
             return col.child(edit);
@@ -400,7 +392,7 @@ fn resale_section(
                             .label(tr(keys::CANCEL))
                             .ghost()
                             .on_click(cx.listener(|this, _, window, cx| {
-                                this.set_gift_flow(None, window, cx)
+                                this.set_gift_form(None, window, cx)
                             })),
                     ),
             ),

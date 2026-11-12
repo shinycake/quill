@@ -81,10 +81,7 @@ impl Session {
         if !grams.withdraw.as_ref().is_some_and(|w| w.waits_for(id)) {
             return;
         }
-        grams.withdraw = None;
-        if !url.is_empty() {
-            grams.withdraw_outcome = Some(WithdrawOutcome::Url(url));
-        }
+        grams.withdraw = (!url.is_empty()).then_some(GramWithdraw::Done(WithdrawOutcome::Url(url)));
     }
 
     /// A fresh `passwordState` arrived: with no password, the idle
@@ -107,8 +104,7 @@ impl Session {
             return;
         }
         if err.earn_hint == Some(EarnErrorHint::AmountTooSmall) {
-            grams.withdraw = None;
-            grams.withdraw_outcome = Some(WithdrawOutcome::TooSmall);
+            grams.withdraw = Some(GramWithdraw::Done(WithdrawOutcome::TooSmall));
             return;
         }
         grams.withdraw = Some(match password_check_failure(err, &error_reason(err)) {
