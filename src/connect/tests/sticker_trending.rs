@@ -49,6 +49,6 @@ fn a_first_page_asked_while_a_later_one_is_out_replaces_it() {
     let trending = &driver.session.stickers.stickers.trending;
     assert_eq!(trending.sets.len(), 1);
     assert_eq!(trending.sets[0].id, 7);
-    assert_eq!(trending.page, TrendingPage::End);
+    assert_eq!(trending.page, TrendingPage::More { next: 1 });
     let _ = std::fs::remove_dir_all(dir);
 }

@@ -201,8 +201,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         // Viewed pages are independent: a new page may arrive while the prior ack is pending.
-        if purpose != RequestPurpose::ViewTrendingStickerSets
-            && self.session.requests.has_purpose(purpose)
+        // The trending list's page stage (`TrendingSets`) holds the page in
+        // flight, so it decides what is asked, not the request table.
+        if !matches!(
+            purpose,
+            RequestPurpose::ViewTrendingStickerSets | RequestPurpose::GetTrendingStickerSets
+        ) && self.session.requests.has_purpose(purpose)
         {
             return Ok(None);
         }
@@ -503,18 +507,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self
-            .session
-            .requests
-            .has_purpose(RequestPurpose::GetTrendingStickerSets)
-        {
-            return Ok(None);
-        }
+        // The stage decides, not the request table: a next page waits for
+        // the page out (`next_offset` is `None` while one is), the first
+        // page is not asked twice, and a first page asked while a later one
+        // is out replaces it (its answer then lands nowhere).
+        let trending = &self.session.stickers.stickers.trending;
         let offset = if more {
-            let Some(next) = self.session.stickers.stickers.trending.next_offset() else {
+            let Some(next) = trending.next_offset() else {
                 return Ok(None);
             };
             next
+        } else if matches!(trending.page, crate::state::TrendingPage::Asking { from: 0, .. }) {
+            return Ok(None);
         } else {
             0
         };
