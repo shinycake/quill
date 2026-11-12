@@ -275,7 +275,7 @@ impl QuillApp {
         // forward as it is instead of restarting.
         self.retire_live_to_background(cx);
         quill::icon_badge::invalidate_icon_badge();
-        self.disk_account_switched(key.clone(), cx);
+        self.disk_account_switched(cx);
         match self.take_background_live(key, cx) {
             Some(live) => self.adopt_live(live, cx),
             None => self.start_connection(cx),

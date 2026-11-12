@@ -519,7 +519,7 @@ fn manage_local_storage_shows_the_message_database_size(cx: &mut TestAppContext)
 }
 
 #[gpui_kit::test]
-fn a_switch_drops_the_previous_accounts_storage_figures(cx: &mut TestAppContext) {
+fn a_reading_for_another_account_is_not_kept(cx: &mut TestAppContext) {
     use quill::ids::AccountKey;
     let (app, mut vcx) = new_app(cx);
     let files = |account: &AccountKey, bytes: u64| super::AccountFiles {
@@ -527,45 +527,21 @@ fn a_switch_drops_the_previous_accounts_storage_figures(cx: &mut TestAppContext)
         cache_folder: None,
         database_bytes: Some(bytes),
     };
-    let first = AccountKey::primary();
-    let second = AccountKey("second".into());
+    let on_screen = app
+        .read_with(&vcx, |app, _| app.current_account())
+        .expect("an account on screen");
+    let other = AccountKey("second".into());
     let bytes = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
-        app.read_with(vcx, |app, _| app.disk.database_bytes())
+        app.read_with(vcx, |app, _| app.account_files.database_bytes())
     };
     app.update_in(&mut vcx, |app, _, cx| {
-        app.note_account_files(files(&first, 7 << 20), cx)
+        app.note_account_files(files(&other, 7 << 20), cx)
     });
-    assert_eq!(bytes(&app, &mut vcx), Some(7 << 20));
+    assert_eq!(bytes(&app, &mut vcx), None, "not the account on screen's");
     app.update_in(&mut vcx, |app, _, cx| {
-        app.disk_account_switched(second.clone(), cx)
-    });
-    assert_eq!(bytes(&app, &mut vcx), None, "not the previous account's");
-    app.update_in(&mut vcx, |app, _, cx| {
-        app.note_account_files(files(&first, 7 << 20), cx)
-    });
-    assert_eq!(bytes(&app, &mut vcx), None, "a read from before the switch");
-    app.update_in(&mut vcx, |app, _, cx| {
-        app.note_account_files(files(&second, 3 << 20), cx)
+        app.note_account_files(files(&on_screen, 3 << 20), cx)
     });
     assert_eq!(bytes(&app, &mut vcx), Some(3 << 20));
-}
-
-#[gpui_kit::test]
-fn storage_figures_go_on_after_every_account_was_wiped(cx: &mut TestAppContext) {
-    use quill::ids::AccountKey;
-    let (app, mut vcx) = new_app(cx);
-    app.update_in(&mut vcx, |app, _, cx| {
-        app.disk_account_switched(AccountKey("second".into()), cx);
-        app.disk_accounts_wiped();
-        let files = super::AccountFiles {
-            account: AccountKey::primary(),
-            cache_folder: None,
-            database_bytes: Some(5 << 20),
-        };
-        app.note_account_files(files, cx)
-    });
-    let shown = app.read_with(&vcx, |app, _| app.disk.database_bytes());
-    assert_eq!(shown, Some(5 << 20));
 }
 
 #[gpui_kit::test]

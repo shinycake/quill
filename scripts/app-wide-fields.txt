@@ -108,8 +108,6 @@ disk.floors | the floors for that level
 disk.waited | how long the disk has been short
 disk._watcher | the disk poll, which ends with the disk state
 disk.full_notices | how many full-disk notices were shown
-disk.cache_folder | the cache folder measured
-disk.database_bytes | the database size measured
 disk.main_window | the window the space notice opens on
 demo_ui.call_devices | the screenshot demos' call devices
 demo_ui.selected_devices | the screenshot demos' chosen devices

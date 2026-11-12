@@ -222,7 +222,7 @@ impl QuillApp {
         };
         // Telegram Desktop keeps no message database; TDLib's stays and
         // is not part of the cache above, so its size is shown apart.
-        if let Some(bytes) = self.disk.database_bytes() {
+        if let Some(bytes) = self.account_files.database_bytes() {
             let size = format_storage_bytes(i64::try_from(bytes).unwrap_or(i64::MAX));
             usage = usage.child(
                 div()

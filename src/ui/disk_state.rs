@@ -36,56 +36,31 @@ pub(crate) struct DiskUi {
     /// How many times this run the full-disk screen went up, each with one
     /// system notification.
     full_notices: u32,
-    /// The on-screen account's files (the cached files folder while it
-    /// exists, and the message database for Manage local storage), and
-    /// which account's reading is wanted.
-    files: FilesStage,
     main_window: AnyWindowHandle,
     /// The poll of the disk, which ends with this value.
     _watcher: Option<Task<()>>,
 }
 
-/// The on-screen account's files and the account they are read for. Each
-/// switch, and the wipe of every account, set it whole.
-enum FilesStage {
-    /// No switch since the start (or since every account was wiped): the
-    /// reading's own account is the one on screen, whichever it is.
-    AnyAccount { read: Option<AccountFiles> },
-    /// Switched to this account; its first reading has not landed. A read
-    /// that started for another account before the switch is dropped.
-    Waiting(quill::ids::AccountKey),
-    /// This account's files, read.
-    Read(AccountFiles),
+/// The on-screen account's files, read by the disk poll: the cached files
+/// folder while it exists, and the message database for Manage local
+/// storage. A field of `OnScreen`, so a switch replaces it whole and the
+/// previous account's figures are gone with it.
+#[derive(Default)]
+pub(crate) struct AccountFilesUi {
+    read: Option<AccountFiles>,
 }
 
-impl FilesStage {
-    fn read(&self) -> Option<&AccountFiles> {
-        match self {
-            Self::AnyAccount { read } => read.as_ref(),
-            Self::Waiting(_) => None,
-            Self::Read(files) => Some(files),
-        }
-    }
+impl super::on_screen::Farewell for AccountFilesUi {}
 
-    /// Whether a reading for `account` is the on-screen account's.
-    fn wants(&self, account: &quill::ids::AccountKey) -> bool {
-        match self {
-            Self::AnyAccount { .. } => true,
-            Self::Waiting(on_screen) => on_screen == account,
-            Self::Read(files) => files.account == *account,
-        }
-    }
-}
-
-impl DiskUi {
+impl AccountFilesUi {
     /// The on-screen account's message database size, once read.
     pub(super) fn database_bytes(&self) -> Option<u64> {
-        self.files.read()?.database_bytes
+        self.read.as_ref()?.database_bytes
     }
 
     /// The on-screen account's cached files folder, while it exists.
     fn cache_folder(&self) -> Option<&PathBuf> {
-        self.files.read()?.cache_folder.as_ref()
+        self.read.as_ref()?.cache_folder.as_ref()
     }
 }
 
@@ -121,7 +96,6 @@ impl DiskUi {
             floors: FLOORS,
             waited: Duration::ZERO,
             full_notices: 0,
-            files: FilesStage::AnyAccount { read: None },
             main_window: window.window_handle(),
             _watcher: watcher,
         }
@@ -238,36 +212,23 @@ fn demo_reading() -> Option<u64> {
 
 impl QuillApp {
     /// The cache folder and database size read for an account: kept only
-    /// while that account is on screen, since a read that started before a
-    /// switch can land after it.
+    /// while that account is on screen (or about to be), since a read that
+    /// started before a switch can land after it.
     pub(super) fn note_account_files(&mut self, files: AccountFiles, cx: &mut Context<Self>) {
-        if !self.disk.files.wants(&files.account) {
+        if self
+            .current_account()
+            .is_some_and(|on_screen| on_screen != files.account)
+        {
             return;
         }
-        self.disk.files = match self.disk.files {
-            FilesStage::AnyAccount { .. } => FilesStage::AnyAccount { read: Some(files) },
-            _ => FilesStage::Read(files),
-        };
+        self.account_files.read = Some(files);
         cx.notify();
     }
 
-    /// The account on screen changed to `account`: the old figures go at
-    /// once (Manage local storage must not show the previous account's
-    /// database), and the new ones are read now instead of at the next
-    /// reading, up to 30 s away.
-    /// The lock-screen log out deleted every account and the next one on
-    /// screen comes without a switch: until one is recorded, any reading is
-    /// that account's.
-    pub(super) fn disk_accounts_wiped(&mut self) {
-        self.disk.files = FilesStage::AnyAccount { read: None };
-    }
-
-    pub(super) fn disk_account_switched(
-        &mut self,
-        account: quill::ids::AccountKey,
-        cx: &mut Context<Self>,
-    ) {
-        self.disk.files = FilesStage::Waiting(account);
+    /// The account on screen changed to `account`: the new account's
+    /// figures are read now instead of at the next reading, up to 30 s
+    /// away. (The screen's replacement drops the old account's figures.)
+    pub(super) fn disk_account_switched(&mut self, cx: &mut Context<Self>) {
         cx.notify();
         if cfg!(test) {
             return;
@@ -275,7 +236,8 @@ impl QuillApp {
         let Some(root) = quill::settings::safe_app_root() else {
             return;
         };
-        QuillApp::spawn_app(cx, async move |this, cx| {
+        // The read is for the screen it starts on: another switch drops it.
+        self.spawn_screen(cx, async move |this, cx| {
             let files = cx
                 .background_executor()
                 .spawn(async move { account_files(&root) })
@@ -529,7 +491,7 @@ impl QuillApp {
         if !self.shows_disk_screen() || self.disk.seen.unwritable {
             return None;
         }
-        let folder = self.disk.cache_folder()?.clone();
+        let folder = self.account_files.cache_folder()?.clone();
         Some(
             Button::new("disk-full-reveal")
                 .label(tr(keys::Q_DISK_SHOW_CACHED_FILES))
