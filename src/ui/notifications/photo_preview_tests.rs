@@ -12,9 +12,8 @@ fn wait_for(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, key: &(AccountK
         app.arm_preview_wait(
             key.clone(),
             |deadline| PreviewWait {
-                account: Some(key.0.clone()),
+                account: key.0.clone(),
                 file: FileId(1),
-                on_screen: None,
                 locked: false,
                 notification: quill::notify::OsNotification::about_app("t".into(), "b".into()),
                 photo: None,
@@ -46,4 +45,22 @@ fn a_wait_settled_early_leaves_no_deadline_to_end_the_next_wait(cx: &mut TestApp
     vcx.executor().advance_clock(Duration::from_secs(1));
     vcx.run_until_parked();
     assert!(!waiting(&app, &vcx, &key), "its own deadline settles it");
+}
+
+/// A wait names its account once, when it is queued: the account on screen
+/// reads as `None` and any other as its own key, whichever account is on
+/// screen when the wait settles (a switch no longer drops the notification).
+#[gpui_kit::test]
+fn a_wait_keeps_its_account_through_a_switch(cx: &mut TestAppContext) {
+    let (app, vcx) = open_app(cx, "ready-voice-playing");
+    let other = AccountKey::new("account-2").expect("a key");
+    app.read_with(&vcx, |app, _| {
+        let on_screen = app.notification_account(None);
+        assert_eq!(app.account_arg(&on_screen), None, "on screen: the app's own");
+        assert_eq!(
+            app.account_arg(&other),
+            Some(other.clone()),
+            "another account: its background client"
+        );
+    });
 }

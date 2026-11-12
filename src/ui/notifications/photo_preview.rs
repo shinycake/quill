@@ -20,9 +20,11 @@ const PHOTO_PRIORITY: i32 = 32;
 /// (`settle_preview_waits`). Removing the entry (a newer notification for the
 /// chat, its dismissal, the account going) cancels the task and shows nothing.
 pub(in crate::ui) struct PreviewWait {
-    account: Option<AccountKey>,
+    /// The account the notification belongs to, resolved when it was
+    /// queued: whichever account is on screen later, it shows under this
+    /// one (`account_arg`).
+    account: AccountKey,
     file: FileId,
-    on_screen: Option<AccountKey>,
     locked: bool,
     notification: quill::notify::OsNotification,
     photo: Option<PathBuf>,
@@ -62,15 +64,12 @@ impl QuillApp {
             );
             return;
         };
-        // `None` means the account on screen: a switch while waiting would
-        // post this one under the other account.
-        let on_screen = self.session().map(|session| session.account.clone());
+        let owner = key.0.clone();
         self.arm_preview_wait(
             key,
             |deadline| PreviewWait {
-                account,
+                account: owner,
                 file,
-                on_screen,
                 locked,
                 notification,
                 photo,
@@ -107,7 +106,7 @@ impl QuillApp {
             .preview_waits
             .iter()
             .filter(|(_, wait)| {
-                self.preview_path(wait.account.as_ref(), wait.file)
+                self.preview_path(self.account_arg(&wait.account).as_ref(), wait.file)
                     .is_some()
             })
             .map(|(key, _)| key.clone())
@@ -128,7 +127,6 @@ impl QuillApp {
         let PreviewWait {
             account,
             file,
-            on_screen,
             locked,
             notification,
             photo,
@@ -138,9 +136,9 @@ impl QuillApp {
         // the future once this update returns, and keeps it from settling a
         // newer wait for the same chat.
         drop(_deadline);
-        if account.is_none() && self.session().map(|session| session.account.clone()) != on_screen {
-            return;
-        }
+        // The account may have moved to the background (or come on screen)
+        // since the wait began: the notification stays its own.
+        let account = self.account_arg(&account);
         let path = self.preview_path(account.as_ref(), file);
         let (mut notification, mut photo) = (notification, photo);
         // The passcode lock came up while waiting: show what a locked app
@@ -153,6 +151,16 @@ impl QuillApp {
             photo = None;
         }
         self.show_notification_with_photo(account, notification, photo, path, now_locked, cx);
+    }
+
+    /// `account` as the account argument of the notification calls: `None`
+    /// while it is the account on screen, else the key of its background
+    /// client.
+    fn account_arg(&self, account: &AccountKey) -> Option<AccountKey> {
+        match self.session() {
+            Some(session) if &session.account == account => None,
+            _ => Some(account.clone()),
+        }
     }
 
     /// The downloaded photo file, on the account that queued it.
