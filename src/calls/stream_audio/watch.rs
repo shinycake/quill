@@ -122,7 +122,7 @@ impl PlaybackWatch {
 #[cfg(test)]
 mod tests {
     use super::{FallBack, NO_SOUND_LIMIT, PlaybackHealth, PlaybackWatch, REOPEN_RETRY};
-    use crate::calls::engine::StreamState::{Connecting, Live, NoStream};
+    use crate::calls::engine::StreamState::{Joined, Live, NoStream};
     use std::time::{Duration, Instant};
 
     const SILENT: PlaybackHealth = PlaybackHealth {
@@ -154,7 +154,7 @@ mod tests {
         let start = Instant::now();
         let mut watch = PlaybackWatch::default();
         assert_eq!(
-            watch.observe(start + Duration::from_secs(10), Connecting, SILENT),
+            watch.observe(start + Duration::from_secs(10), Joined, SILENT),
             None
         );
         let live = start + Duration::from_secs(11);

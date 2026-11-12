@@ -344,7 +344,7 @@ fn call_ready_connects_transport_once_with_mapped_params() {
     assert!(webrtc.peer_tag.is_empty());
 
     let call = driver.session.calls.active_call.as_ref().unwrap();
-    assert_eq!(call.transport.state(), Some(TransportState::Connecting));
+    assert_eq!(call.transport.state(), Some(TransportState::Establishing));
     assert_eq!(call.transport.error(), None);
 
     // A second Ready update must not reconnect.
@@ -467,7 +467,7 @@ fn call_transport_reconnect_error_is_reported() {
     driver.session.calls.active_call.as_mut().unwrap().muted = true;
     handle.fail_mute();
     handle.emit_transport_state(77, TransportState::Failed);
-    handle.emit_transport_state(77, TransportState::Connecting);
+    handle.emit_transport_state(77, TransportState::Establishing);
     ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
     let call = driver.session.calls.active_call.as_ref().unwrap();
     assert_eq!(call.transport.state(), Some(TransportState::Failed));

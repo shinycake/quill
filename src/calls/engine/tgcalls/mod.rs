@@ -86,7 +86,7 @@ impl<T> Native<T> {
 enum P2pStage {
     /// Before `connect`, or after a retry retired the instance: TDLib
     /// signaling that arrived meanwhile waits here, in order.
-    Waiting {
+    Unconnected {
         pending_signaling: Vec<Vec<u8>>,
     },
     Live {
@@ -260,7 +260,7 @@ impl P2pCall {
     fn handle(&self) -> Option<Native<qc_p2p>> {
         match self.stage {
             P2pStage::Live { handle } => Some(handle),
-            P2pStage::Waiting { .. } => None,
+            P2pStage::Unconnected { .. } => None,
         }
     }
 
@@ -268,7 +268,7 @@ impl P2pCall {
         let Some(handle) = self.handle() else {
             return;
         };
-        self.stage = P2pStage::Waiting {
+        self.stage = P2pStage::Unconnected {
             pending_signaling: Vec::new(),
         };
         let fresh = CallContext::new(self.context.call_id, &self.context.shared);
@@ -308,7 +308,7 @@ fn retire(api: &'static Loader, reaper: &Reaper, mut call: P2pCall) {
 
 fn destroy(api: &Loader, call: &mut P2pCall) {
     if let Some(handle) = call.handle() {
-        call.stage = P2pStage::Waiting {
+        call.stage = P2pStage::Unconnected {
             pending_signaling: Vec::new(),
         };
         crate::advanced::debug_mode::call_log(&format!(
@@ -359,7 +359,7 @@ fn take_string(api: &Loader, raw: *mut std::ffi::c_char) -> Option<String> {
 fn new_call(call_id: i32, shared: &Arc<CallbackShared>) -> P2pCall {
     P2pCall {
         context: Arc::new(CallContext::new(call_id, shared)),
-        stage: P2pStage::Waiting {
+        stage: P2pStage::Unconnected {
             pending_signaling: Vec::new(),
         },
         gate: Arc::new(sender::Gate::default()),

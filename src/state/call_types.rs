@@ -263,7 +263,7 @@ impl CallTransport {
     pub fn state(&self) -> Option<TransportState> {
         match self {
             Self::NotStarted { .. } => None,
-            Self::Connecting(_) => Some(TransportState::Connecting),
+            Self::Connecting(_) => Some(TransportState::Establishing),
             Self::Connected(_) => Some(TransportState::Connected),
             Self::Reconnecting(_) => Some(TransportState::Reconnecting),
             Self::Closed(_) => Some(TransportState::Closed),
@@ -319,7 +319,7 @@ impl CallTransport {
     /// one: a reported failure goes through the reconnect decision.
     pub fn reported(state: TransportState, link: CallLink) -> Option<Self> {
         match state {
-            TransportState::Connecting => Some(Self::Connecting(link)),
+            TransportState::Establishing => Some(Self::Connecting(link)),
             TransportState::Connected => Some(Self::Connected(CallLink {
                 reconnect_attempts: 0,
                 ..link

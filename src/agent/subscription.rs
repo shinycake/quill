@@ -46,6 +46,8 @@ impl Subscription {
     /// Unsubscribe, or the connection ended: every watcher stops.
     pub(super) fn stop(&self) {
         *crate::locks::lock_or_recover(&self.0) = Stage::None;
+        // A watcher parked while Quill is locked or signed out ends now.
+        crate::agent::events::wake_waiters();
     }
 
     /// The watcher under `token` ended by itself.

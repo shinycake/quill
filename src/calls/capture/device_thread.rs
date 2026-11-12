@@ -7,22 +7,41 @@ use crate::wake::Signal;
 use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 
-/// Where a device on a [`DeviceThread`] is: its open is running, or it
-/// answered and `T` is what runs on it.
+/// Where a device is: its open runs on `thread`, or it answered and `T` is
+/// what runs on it. Either way the stage holds the thread, so dropping the
+/// stage closes the device.
 pub enum DeviceRun<T> {
-    Opening,
-    Running(T),
+    Opening(DeviceThread),
+    Running { thread: DeviceThread, running: T },
 }
 
 impl<T> DeviceRun<T> {
     pub fn is_opening(&self) -> bool {
-        matches!(self, Self::Opening)
+        matches!(self, Self::Opening(_))
     }
 
     pub fn running(&self) -> Option<&T> {
         match self {
-            Self::Opening => None,
-            Self::Running(running) => Some(running),
+            Self::Opening(_) => None,
+            Self::Running { running, .. } => Some(running),
+        }
+    }
+
+    /// How the open went while it is the stage; `None` while it runs (and
+    /// once the device is up: nothing is left to ask).
+    pub fn opened(&self) -> Option<Result<(), CaptureError>> {
+        match self {
+            Self::Opening(thread) => thread.opened(),
+            Self::Running { .. } => None,
+        }
+    }
+
+    /// The open answered and `running` runs on its device. Any other stage
+    /// stays as it is.
+    pub fn start(&mut self, running: T) {
+        if let Self::Opening(thread) = self {
+            let thread = std::mem::replace(thread, DeviceThread::detached());
+            *self = Self::Running { thread, running };
         }
     }
 }
@@ -77,6 +96,16 @@ impl DeviceThread {
         }
         Self {
             opened: Mutex::new(Opened::Waiting(answer)),
+            _closing: closing,
+        }
+    }
+
+    /// A stand-in with no device and no thread, already answered; it only
+    /// holds the place of a thread being moved between stages.
+    fn detached() -> Self {
+        let (closing, _closed) = channel::<()>();
+        Self {
+            opened: Mutex::new(Opened::Answered(Ok(()))),
             _closing: closing,
         }
     }

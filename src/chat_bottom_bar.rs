@@ -22,8 +22,8 @@ pub enum BottomBar {
     MuteUnmute { muted: bool },
     /// A bot chat that has not been started.
     Start,
-    /// The same, with the start request out: the button is off.
-    Starting,
+    /// The same, with the start request out as `request`: the button is off.
+    Starting { request: RequestId },
     /// The user accepts messages only from contacts and Premium users,
     /// and the viewer is neither (`EmptyChatLockedBox::PremiumRequired`).
     PremiumRequired,
@@ -103,7 +103,7 @@ pub fn bottom_bar(facts: &BarFacts) -> Option<BottomBar> {
     match facts.start {
         StartState::NotStartable => None,
         StartState::Offered => Some(BottomBar::Start),
-        StartState::Starting(_) => Some(BottomBar::Starting),
+        StartState::Starting(request) => Some(BottomBar::Starting { request }),
     }
 }
 
@@ -118,7 +118,7 @@ impl BottomBar {
             BottomBar::ApplyToJoin => "Apply to join group",
             BottomBar::MuteUnmute { muted: true } => "Unmute",
             BottomBar::MuteUnmute { muted: false } => "Mute",
-            BottomBar::Start | BottomBar::Starting => "Start",
+            BottomBar::Start | BottomBar::Starting { .. } => "Start",
             BottomBar::PremiumRequired => "Go Premium",
         }
     }
@@ -278,7 +278,9 @@ mod tests {
                 start: StartState::Starting(crate::ids::RequestId(4)),
                 ..bot
             }),
-            Some(BottomBar::Starting)
+            Some(BottomBar::Starting {
+                request: crate::ids::RequestId(4)
+            })
         );
         // A chat the viewer cannot write in has nothing to start.
         assert_eq!(

@@ -309,6 +309,18 @@ pub(crate) fn wake_waiters() {
     ARRIVED.notify_all();
 }
 
+/// Sleep until something wakes the waiters (a message, Quill locking or
+/// unlocking, a watcher stopping) or `timeout` passes. For a watcher that
+/// has nothing to look at (locked, signed out) so it does not wake on a
+/// timer of its own.
+pub(crate) fn park(timeout: Duration) {
+    let guard = crate::locks::lock_or_recover(&MESSAGES);
+    drop(match ARRIVED.wait_timeout(guard, timeout) {
+        Ok((guard, _)) => guard,
+        Err(poisoned) => poisoned.into_inner().0,
+    });
+}
+
 /// Quill locked: wake every waiter and drop what the buffers hold.
 pub(crate) fn locked() {
     wake_waiters();

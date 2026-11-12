@@ -87,7 +87,6 @@ struct ActiveCapture {
     controls: Arc<MicControls>,
     sink: FrameSink<AudioFrame>,
     sender: Arc<dyn ExternalFrameSender>,
-    mic: DeviceThread,
     run: DeviceRun<CaptureFeeder>,
 }
 
@@ -247,8 +246,7 @@ impl CallCapture {
             controls,
             sink,
             sender,
-            mic,
-            run: DeviceRun::Opening,
+            run: DeviceRun::Opening(mic),
         });
     }
 
@@ -256,13 +254,13 @@ impl CallCapture {
         let Some(active) = self.active_mut().filter(|active| active.run.is_opening()) else {
             return;
         };
-        let Some(answer) = active.mic.opened() else {
+        let Some(answer) = active.run.opened() else {
             return;
         };
         let failure = match answer {
             Ok(()) => match CaptureFeeder::start(active.sink.clone(), active.sender.clone()) {
                 Ok(feeder) => {
-                    active.run = DeviceRun::Running(feeder);
+                    active.run.start(feeder);
                     return;
                 }
                 Err(err) => format!("Couldn't start the call microphone: {err}"),
@@ -307,7 +305,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             && matches!(
                 call.transport.state(),
                 Some(
-                    TransportState::Connecting
+                    TransportState::Establishing
                         | TransportState::Connected
                         | TransportState::Reconnecting
                 )

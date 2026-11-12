@@ -46,7 +46,7 @@ pub struct AiResult {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CardState {
     /// Nothing asked yet (Style tab with no style picked).
-    Waiting,
+    Idle,
     /// The request is out as `request`: only its answer or error leaves
     /// the stage (a new request replaces it).
     Loading {
@@ -141,7 +141,7 @@ impl AiComposeBox {
             translate_style: StyleChoice::None,
             style: StyleChoice::None,
             add_emojis: false,
-            card: CardState::Waiting,
+            card: CardState::Idle,
             original_expanded: false,
         }
     }
@@ -166,7 +166,7 @@ impl AiComposeBox {
             self.style = StyleChoice::None;
         }
         self.mode = mode;
-        self.card = CardState::Waiting;
+        self.card = CardState::Idle;
         self.request()
     }
 
@@ -380,7 +380,7 @@ impl AiComposeBox {
     fn request(&mut self) -> Option<AiSend> {
         let style_waiting = self.style == StyleChoice::None && !self.add_emojis;
         if self.mode == AiComposeMode::Style && style_waiting {
-            self.card = CardState::Waiting;
+            self.card = CardState::Idle;
             return None;
         }
         let text = self.source_text.clone();

@@ -127,7 +127,7 @@ pub enum FeederState {
     /// [`StreamsSync::Asking`], not a state of its own.
     Idle,
     /// The stream list names a stream and no segment has arrived yet.
-    Syncing,
+    Listed,
     Streaming,
     NoStream,
     /// The server said the call must be rejoined; the rejoin replaces
@@ -219,8 +219,8 @@ impl StreamFeeder {
             FeederState::Streaming => StreamState::Live,
             FeederState::NoStream => StreamState::NoStream,
             FeederState::Ended => StreamState::Ended,
-            FeederState::Idle | FeederState::Syncing | FeederState::Failed => {
-                StreamState::Connecting
+            FeederState::Idle | FeederState::Listed | FeederState::Failed => {
+                StreamState::Joined
             }
         }
     }
@@ -447,7 +447,7 @@ impl StreamFeeder {
                         // A stream exists; it is Live from its first
                         // segment on.
                         if matches!(self.state, FeederState::Idle | FeederState::NoStream) {
-                            self.state = FeederState::Syncing;
+                            self.state = FeederState::Listed;
                         }
                         self.answer_time_waiters(waiters, first.time_offset, port);
                     }

@@ -108,7 +108,7 @@ fn the_button_opens_the_box_on_the_style_tab(cx: &mut TestAppContext) {
     click(&mut main, "composer-ai");
     assert_eq!(
         card(&app, &mut main),
-        Some((AiComposeMode::Style, CardState::Waiting)),
+        Some((AiComposeMode::Style, CardState::Idle)),
         "nothing is asked until a style is picked"
     );
     assert_eq!(footer(&app, &mut main), Some(FooterAction::SelectStyle));

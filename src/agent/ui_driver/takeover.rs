@@ -80,10 +80,9 @@ pub struct Session {
     /// The MCP client's name.
     pub agent: String,
     pub started_ms: u64,
-    /// The last command or step.
-    pub last_ms: u64,
-    /// Whether the session was cut short: Stop, a disconnect, a switch
-    /// turned off. Otherwise it ends [`HOLD`] after `last_ms`.
+    /// Whether the session is live (and when its last command or step was)
+    /// or was cut short: Stop, a disconnect, a switch turned off.
+    /// Otherwise it ends [`HOLD`] after that last step.
     pub run: Run,
     pub action: Option<Action>,
 }
@@ -91,16 +90,17 @@ pub struct Session {
 /// Whether a session is still running or was cut short.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Run {
-    Running,
+    /// Live; `last_ms` is the last command or step.
+    Active { last_ms: u64 },
     Ended { at_ms: u64 },
 }
 
 impl Session {
     fn running(&self) -> bool {
-        self.run == Run::Running
+        matches!(self.run, Run::Active { .. })
     }
 
-    /// The transition from `Ended` back to `Running` for a pause that is
+    /// The transition from `Ended` back to `Active` for a pause that is
     /// seen again with an agent connected: a new run from `now`, with no
     /// action and no agent name (the one connected may not be the one the
     /// user paused). Only [`observe`] calls it, and only for an ended
@@ -112,10 +112,16 @@ impl Session {
         *self = Session {
             agent: String::new(),
             started_ms: now,
-            last_ms: now,
-            run: Run::Running,
+            run: Run::Active { last_ms: now },
             action: None,
         };
+    }
+
+    /// A step happened at `now`: a live session counts it as its latest.
+    fn touch(&mut self, now: u64) {
+        if let Run::Active { last_ms } = &mut self.run {
+            *last_ms = (*last_ms).max(now);
+        }
     }
 
     /// When it ends: when it was cut short, else [`HOLD`] after the last
@@ -123,7 +129,7 @@ impl Session {
     fn end_ms(&self) -> u64 {
         match self.run {
             Run::Ended { at_ms } => at_ms,
-            Run::Running => self.last_ms.saturating_add(ms(HOLD)),
+            Run::Active { last_ms } => last_ms.saturating_add(ms(HOLD)),
         }
     }
 }
@@ -319,15 +325,14 @@ pub fn command(facts: &mut Facts, agent: &str, now: u64) {
         .is_some_and(|session| session.running() && now < session.end_ms());
     match facts.session.as_mut() {
         Some(session) if running => {
-            session.last_ms = now;
+            session.run = Run::Active { last_ms: now };
             agent.clone_into(&mut session.agent);
         }
         _ => {
             facts.session = Some(Session {
                 agent: agent.to_string(),
                 started_ms: now,
-                last_ms: now,
-                run: Run::Running,
+                run: Run::Active { last_ms: now },
                 action: None,
             });
         }
@@ -378,7 +383,7 @@ pub fn aim(facts: &mut Facts, what: Aim, to: (f32, f32), now: u64) {
         at_ms: now,
         pressed_ms: None,
     });
-    session.last_ms = session.last_ms.max(now);
+    session.touch(now);
 }
 
 /// The aimed click went in.
@@ -387,7 +392,7 @@ pub fn press(facts: &mut Facts, now: u64) {
         if let Some(action) = session.action.as_mut() {
             action.pressed_ms = Some(now);
         }
-        session.last_ms = session.last_ms.max(now);
+        session.touch(now);
     }
 }
 
@@ -437,7 +442,7 @@ pub fn resume(facts: &mut Facts, now: u64) {
     if let Some(session) = facts.session.as_mut()
         && session.running()
     {
-        session.last_ms = session.last_ms.max(now);
+        session.touch(now);
     }
 }
 

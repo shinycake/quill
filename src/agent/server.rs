@@ -401,9 +401,9 @@ fn subscription<W: Write + Send + 'static>(
                         }
                     }
                     Ok(false) => {}
-                    // Signed out, not connected yet or locked: look again
-                    // later.
-                    Err(_) => std::thread::sleep(WATCH_WAIT),
+                    // Signed out, not connected yet or locked: park until a
+                    // message arrives, Quill unlocks or the watcher stops.
+                    Err(_) => super::events::park(WATCH_PARK),
                 }
             }
             flag.finished(mine);
@@ -418,6 +418,10 @@ fn subscription<W: Write + Send + 'static>(
 
 /// How long a watcher waits before it checks the switch again.
 const WATCH_WAIT: Duration = Duration::from_secs(10);
+
+/// The longest a watcher with nothing to look at parks; messages, unlocking
+/// and a stop end it sooner.
+const WATCH_PARK: Duration = Duration::from_secs(600);
 
 /// Agent access is on and has not been turned off since `generation`.
 fn still_on(generation: u64) -> bool {

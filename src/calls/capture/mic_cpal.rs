@@ -27,7 +27,7 @@ use std::time::Instant;
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Health {
     Stopped,
-    Running,
+    Live,
     /// The stream ended (device unplugged, …); dropouts and reroutes only
     /// go to the debug log. Kept until the next start.
     Failed(String),
@@ -47,7 +47,7 @@ impl MicHealth {
     pub fn error(&self) -> Option<String> {
         match &*self.0.lock_or_recover() {
             Health::Failed(text) => Some(text.clone()),
-            Health::Stopped | Health::Running => None,
+            Health::Stopped | Health::Live => None,
         }
     }
 
@@ -57,7 +57,7 @@ impl MicHealth {
     }
 
     fn running(&self) {
-        *self.0.lock_or_recover() = Health::Running;
+        *self.0.lock_or_recover() = Health::Live;
     }
 
     /// The first failure stays.
@@ -70,7 +70,7 @@ impl MicHealth {
 
     fn stopped(&self) {
         let mut health = self.0.lock_or_recover();
-        if *health == Health::Running {
+        if *health == Health::Live {
             *health = Health::Stopped;
         }
     }

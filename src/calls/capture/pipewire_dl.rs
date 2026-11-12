@@ -25,7 +25,7 @@ use std::sync::OnceLock;
 pub enum StreamState {
     Error,
     Unconnected,
-    Connecting,
+    Linking,
     Paused,
     Streaming,
 }
@@ -33,7 +33,7 @@ pub enum StreamState {
 impl StreamState {
     fn from_raw(state: c_int) -> Self {
         match state {
-            1 => StreamState::Connecting,
+            1 => StreamState::Linking,
             2 => StreamState::Paused,
             3 => StreamState::Streaming,
             0 => StreamState::Unconnected,

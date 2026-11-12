@@ -41,9 +41,6 @@ pub enum ArchiveReload {
     /// Nothing asked, or the last reload answered.
     #[default]
     Idle,
-    /// The suggestion arrived and the reload is about to go out
-    /// (`note_sent`); the box waits for the fresh answer.
-    Suggested,
     /// The reload went out as this request: only its answer (or its error)
     /// ends the wait, an older fetch that predates the suggestion does not.
     Reloading(RequestId),
@@ -70,17 +67,16 @@ impl ArchiveMute {
     ) {
         self.seen_on |= settings.archive_and_mute_new_chats_from_unknown_users;
         match self.reload {
-            ArchiveReload::Suggested => {}
             ArchiveReload::Reloading(waiting) if request != Some(waiting) => {}
             _ => self.reload = ArchiveReload::Idle,
         }
     }
 
-    /// The reload went out as `request`.
+    /// The reload the suggestion asks for went out as `request`. A reload
+    /// already in flight predates this suggestion: the new one takes its
+    /// place, and the older answer no longer matches the stage.
     pub fn note_sent(&mut self, request: RequestId) {
-        if self.reload == ArchiveReload::Suggested {
-            self.reload = ArchiveReload::Reloading(request);
-        }
+        self.reload = ArchiveReload::Reloading(request);
     }
 
     /// The reload failed (`request` answered with an error, or `None`: the
@@ -88,19 +84,10 @@ impl ArchiveMute {
     /// it. Another request's error changes nothing.
     pub fn note_reload_failed(&mut self, request: Option<RequestId>) {
         match self.reload {
-            ArchiveReload::Suggested => self.reload = ArchiveReload::Failed,
             ArchiveReload::Reloading(waiting) if request.is_none_or(|id| id == waiting) => {
                 self.reload = ArchiveReload::Failed;
             }
             _ => {}
-        }
-    }
-
-    /// Folds the actions `updateSuggestedActions` added: a new
-    /// archive-and-mute suggestion waits for the setting to reload.
-    pub fn note_suggested(&mut self, added: &[String]) {
-        if added.iter().any(|action| action == ACTION) {
-            self.reload = ArchiveReload::Suggested;
         }
     }
 
@@ -182,7 +169,6 @@ mod tests {
     fn a_failed_reload_stops_waiting_and_the_next_suggestion_asks_again() {
         let actions: BTreeSet<String> = [ACTION.to_string()].into();
         let mut state = ArchiveMute::default();
-        state.note_suggested(&[ACTION.to_string()]);
         state.note_sent(RequestId(7));
         assert!(!state.suggestion_due(&actions, Some(&settings(false))));
         state.note_reload_failed(Some(RequestId(3)));
@@ -197,15 +183,15 @@ mod tests {
             state.suggestion_due(&actions, Some(&settings(false))),
             "the cached copy decides once the reload failed"
         );
-        state.note_suggested(&[ACTION.to_string()]);
-        assert_eq!(state.reload, ArchiveReload::Suggested);
+        state.note_sent(RequestId(8));
+        assert_eq!(state.reload, ArchiveReload::Reloading(RequestId(8)));
     }
 
     #[test]
     fn a_send_that_never_left_stops_waiting() {
         let actions: BTreeSet<String> = [ACTION.to_string()].into();
         let mut state = ArchiveMute::default();
-        state.note_suggested(&[ACTION.to_string()]);
+        state.note_sent(RequestId(5));
         state.note_reload_failed(None);
         assert_eq!(state.reload, ArchiveReload::Failed);
         assert!(state.suggestion_due(&actions, Some(&settings(false))));
@@ -215,7 +201,6 @@ mod tests {
     fn an_older_fetch_answer_does_not_end_the_wait_for_the_reload() {
         let actions: BTreeSet<String> = [ACTION.to_string()].into();
         let mut state = ArchiveMute::default();
-        state.note_suggested(&[ACTION.to_string()]);
         state.note_sent(RequestId(9));
         state.note_settings(Some(RequestId(4)), &settings(false));
         assert!(
@@ -227,16 +212,24 @@ mod tests {
     }
 
     #[test]
+    fn a_second_reload_takes_the_place_of_one_in_flight() {
+        let actions: BTreeSet<String> = [ACTION.to_string()].into();
+        let mut state = ArchiveMute::default();
+        state.note_sent(RequestId(1));
+        state.note_sent(RequestId(2));
+        state.note_settings(Some(RequestId(1)), &settings(false));
+        assert!(
+            !state.suggestion_due(&actions, Some(&settings(false))),
+            "the older answer no longer matches"
+        );
+        state.note_settings(Some(RequestId(2)), &settings(false));
+        assert!(state.suggestion_due(&actions, Some(&settings(false))));
+    }
+
+    #[test]
     fn a_new_suggestion_waits_for_a_fresh_copy() {
         let actions: BTreeSet<String> = [ACTION.to_string()].into();
         let mut state = ArchiveMute::default();
-        state.note_suggested(&["suggestedActionUpgradePremium".to_string()]);
-        assert_eq!(
-            state.reload,
-            ArchiveReload::Idle,
-            "other actions don't wait"
-        );
-        state.note_suggested(&[ACTION.to_string()]);
         state.note_sent(RequestId(1));
         assert!(
             !state.suggestion_due(&actions, Some(&settings(false))),
@@ -247,7 +240,6 @@ mod tests {
             !state.suggestion_due(&actions, Some(&settings(true))),
             "turned on elsewhere"
         );
-        state.note_suggested(&[ACTION.to_string()]);
         state.note_sent(RequestId(2));
         state.note_settings(Some(RequestId(2)), &settings(false));
         assert!(state.suggestion_due(&actions, Some(&settings(false))));

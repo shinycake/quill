@@ -37,7 +37,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let state = if connected {
             StreamState::Live
         } else {
-            StreamState::Connecting
+            StreamState::Joined
         };
         let Some(reason) = watch.observe(now, state, health) else {
             return;

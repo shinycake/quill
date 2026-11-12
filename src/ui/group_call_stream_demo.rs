@@ -43,7 +43,7 @@ register_demos![
 
 impl QuillApp {
     fn demo_rtmp_connecting(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        self.demo_rtmp(StreamState::Connecting, cx);
+        self.demo_rtmp(StreamState::Joined, cx);
     }
 
     fn demo_rtmp_live(&mut self, _window: &mut Window, cx: &mut Context<Self>) {

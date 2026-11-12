@@ -47,7 +47,7 @@ pub enum PhoneSuggestion {
     #[default]
     Absent,
     /// Offered, the question shows.
-    Asking,
+    Offered,
     /// "No" was answered: the note about changing the number shows.
     NotMine,
 }
@@ -81,7 +81,7 @@ impl SuggestionFacts {
     pub fn add_action(&mut self, name: &str) {
         if name == ACTION_PHONE {
             if self.phone == PhoneSuggestion::Absent {
-                self.phone = PhoneSuggestion::Asking;
+                self.phone = PhoneSuggestion::Offered;
             }
         } else {
             self.actions.insert(name.to_string());
@@ -108,7 +108,7 @@ impl SuggestionFacts {
 
     /// "No" was pressed on the phone question.
     pub fn answer_phone_no(&mut self) {
-        if self.phone == PhoneSuggestion::Asking {
+        if self.phone == PhoneSuggestion::Offered {
             self.phone = PhoneSuggestion::NotMine;
         }
     }
@@ -329,13 +329,13 @@ mod tests {
         f.answer_phone_no();
         assert_eq!(f.phone, PhoneSuggestion::Absent, "nothing to answer");
         f.add_action(ACTION_PHONE);
-        assert_eq!(f.phone, PhoneSuggestion::Asking);
+        assert_eq!(f.phone, PhoneSuggestion::Offered);
         f.answer_phone_no();
         assert_eq!(f.phone, PhoneSuggestion::NotMine);
         f.remove_action(ACTION_PHONE);
         assert!(!f.has_action(ACTION_PHONE));
         f.add_action(ACTION_PHONE);
-        assert_eq!(f.phone, PhoneSuggestion::Asking);
+        assert_eq!(f.phone, PhoneSuggestion::Offered);
         f.answer_phone_no();
         f.add_action(ACTION_PHONE);
         assert_eq!(f.phone, PhoneSuggestion::NotMine, "already offered");

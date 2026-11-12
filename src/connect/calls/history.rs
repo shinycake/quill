@@ -25,7 +25,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .as_ref()
             .is_some_and(|engine| engine.is_available());
         let transport = summary.final_transport.map(|state| match state {
-            TransportState::Connecting => "connecting",
+            TransportState::Establishing => "connecting",
             TransportState::Reconnecting => "reconnecting",
             TransportState::Connected => "connected",
             TransportState::Failed => "failed",

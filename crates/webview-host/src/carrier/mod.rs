@@ -39,13 +39,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 /// Where the carrier is. The event loop owns it; the web view's callbacks
-/// read a copy of `Loading` (`armed`) from their own threads.
+/// read whether it is `Loading` from their own threads (`enter` keeps that
+/// copy in step: it is the only place a phase changes).
 #[derive(Clone, Copy)]
 enum Phase {
     /// The view is being locked down; nothing it does counts yet.
     LockingDown,
-    /// Quill's page was asked for; the relay judges the view.
-    Loading,
+    /// Quill's page was asked for (`asked_at`); the relay judges the view.
+    Loading { asked_at: Instant },
     /// A `close` came: only the end of the grace (`at`) matters now.
     /// `wait_for_browser` is set by a `close` that says no other carrier
     /// shares the data folder (read on Windows only).
@@ -56,6 +57,12 @@ enum Phase {
     },
     /// The event loop is destroyed and the view is gone.
     Gone,
+}
+/// Move to `next` and publish whether the view's callbacks count now. The
+/// only writer of `phase` after the loop starts.
+fn enter(phase: &mut Phase, armed: &AtomicBool, next: Phase) {
+    armed.store(matches!(next, Phase::Loading { .. }), Ordering::Release);
+    *phase = next;
 }
 use tao::event::Event;
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
@@ -345,7 +352,8 @@ fn host(
             // for the last carrier) the helper waits for the browser
             // process to let go of the data folder.
             drop(view.take());
-            let closing = std::mem::replace(&mut phase, Phase::Gone);
+            let closing = phase;
+            enter(&mut phase, &armed, Phase::Gone);
             #[cfg(windows)]
             {
                 drop(context.take());
@@ -377,7 +385,7 @@ fn host(
             }
             return;
         }
-        let loading = matches!(phase, Phase::Loading);
+        let loading = matches!(phase, Phase::Loading { .. });
         match event {
             // Ticks may bunch up behind a busy loop; about one per `TICK`
             // counts (the thread's clock and this one differ a little).
@@ -404,9 +412,10 @@ fn host(
                     *control_flow = ControlFlow::Exit;
                     return;
                 };
-                phase = Phase::Loading;
-                armed.store(true, Ordering::Release);
-                relay.load_started(now);
+                enter(&mut phase, &armed, Phase::Loading { asked_at: now });
+                if let Phase::Loading { asked_at } = phase {
+                    relay.load_started(asked_at);
+                }
                 if webview.load_url(page.url.expose()).is_err() {
                     return fail(
                         load_failed("the relay page could not be opened"),
@@ -423,10 +432,14 @@ fn host(
                 }
             }
             Event::UserEvent(Wake::Command(CarrierCommand::Close { notify_page, last })) => {
-                phase = Phase::Closing {
-                    at: now,
-                    wait_for_browser: last,
-                };
+                enter(
+                    &mut phase,
+                    &armed,
+                    Phase::Closing {
+                        at: now,
+                        wait_for_browser: last,
+                    },
+                );
                 match &page {
                     Some(page) if notify_page && relay.posted => {
                         let close = js_string(r#"{"t":"close"}"#);
@@ -435,10 +448,14 @@ fn host(
                             "deliver",
                             &format!("0, 't', {close}"),
                         ));
-                        phase = Phase::Closing {
-                            at: now + CLOSE_GRACE,
-                            wait_for_browser: last,
-                        };
+                        enter(
+                            &mut phase,
+                            &armed,
+                            Phase::Closing {
+                                at: now + CLOSE_GRACE,
+                                wait_for_browser: last,
+                            },
+                        );
                         let timer = close_timer.clone();
                         if !watchdog::wake_after(CLOSE_GRACE, move || {
                             let _ = timer.send_event(Wake::Tick);

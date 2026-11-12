@@ -14,6 +14,7 @@
 //! (`connect::group_calls::link`) fetches the call.
 #![deny(clippy::indexing_slicing)]
 
+use crate::ids::RequestId;
 use crate::telegram::envelope::ChatKind;
 
 /// tdesktop `lng_group_invite_bad_link`.
@@ -163,7 +164,9 @@ pub struct CallLinkLeaving {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LeavingCall {
-    Private(i32),
+    /// A private call, left by the hang-up sent as `request`: its refusal
+    /// (matched by the request) drops the link waiting for the call.
+    Private { call_id: i32, request: RequestId },
     Group(i32),
 }
 
@@ -264,9 +267,16 @@ impl CallLinkStage {
         };
     }
 
-    /// The link waiting for `call` to end is dropped (its leave failed).
-    pub fn drop_waiting_for(&mut self, call: LeavingCall) {
-        if matches!(self, Self::Leaving(waiting) if waiting.leaving == call) {
+    /// The link waiting for the call left by hang-up `request` is dropped
+    /// (the hang-up failed).
+    pub fn drop_waiting_for(&mut self, request: RequestId) {
+        if matches!(
+            self,
+            Self::Leaving(CallLinkLeaving {
+                leaving: LeavingCall::Private { request: sent, .. },
+                ..
+            }) if *sent == request
+        ) {
             *self = Self::Idle;
         }
     }

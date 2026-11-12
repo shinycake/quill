@@ -196,7 +196,7 @@ fn track_unjoined(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
             is_rtmp_stream: true,
             media: quill::state::GroupMedia::Stream {
                 mode: quill::calls::engine::GroupCallMode::Rtmp,
-                state: StreamState::Connecting,
+                state: StreamState::Joined,
             },
             ..ActiveGroupCall::fresh(CALL)
         });

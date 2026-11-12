@@ -124,13 +124,11 @@ struct ActiveScreen {
     paused: bool,
     /// The system audio shared with it, while running.
     audio: Option<SharedAudio>,
-    capture: DeviceThread,
     run: DeviceRun<CaptureFeeder>,
 }
 
 struct SharedAudio {
     mix: Arc<SystemAudioMix>,
-    capture: DeviceThread,
     run: DeviceRun<()>,
 }
 
@@ -151,8 +149,7 @@ impl SharedAudio {
         );
         Self {
             mix,
-            capture,
-            run: DeviceRun::Opening,
+            run: DeviceRun::Opening(capture),
         }
     }
 }
@@ -379,8 +376,7 @@ impl CallScreen {
                 last_preview: 0,
                 paused: false,
                 audio: None,
-                capture,
-                run: DeviceRun::Opening,
+                run: DeviceRun::Opening(capture),
             }),
             pick,
             audio_note: None,
@@ -400,7 +396,7 @@ impl CallScreen {
             return None;
         }
         let started = active
-            .capture
+            .run
             .opened()?
             .map_err(|err| err.to_string())
             .and_then(|()| {
@@ -409,7 +405,7 @@ impl CallScreen {
             });
         Some(match started {
             Ok(feeder) => {
-                active.run = DeviceRun::Running(feeder);
+                active.run.start(feeder);
                 let paused = active.paused;
                 *audio_note = None;
                 Ok(paused)
@@ -480,7 +476,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             let up = matches!(
                 call.transport.state(),
                 Some(
-                    TransportState::Connecting
+                    TransportState::Establishing
                         | TransportState::Connected
                         | TransportState::Reconnecting
                 )
@@ -517,8 +513,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .audio
                     .get_or_insert_with(|| SharedAudio::open(opener));
                 if audio.run.is_opening() {
-                    match audio.capture.opened() {
-                        Some(Ok(())) => audio.run = DeviceRun::Running(()),
+                    match audio.run.opened() {
+                        Some(Ok(())) => audio.run.start(()),
                         Some(Err(err)) => failed = Some(err.to_string()),
                         None => {}
                     }

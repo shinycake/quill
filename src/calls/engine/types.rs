@@ -84,7 +84,7 @@ pub struct GroupVideoSource {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransportState {
-    Connecting,
+    Establishing,
     /// Driver-only state while retrying the retained connect parameters.
     Reconnecting,
     Connected,

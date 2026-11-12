@@ -348,7 +348,7 @@ struct Shared {
 /// owner's `stop` or the source closing, whichever comes first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CaptureStage {
-    Running,
+    Live,
     Stopped,
 }
 
@@ -364,7 +364,7 @@ impl StageCell {
 
     fn get(&self) -> CaptureStage {
         match self.0.load(Ordering::Acquire) {
-            Self::RUNNING => CaptureStage::Running,
+            Self::RUNNING => CaptureStage::Live,
             _ => CaptureStage::Stopped,
         }
     }
