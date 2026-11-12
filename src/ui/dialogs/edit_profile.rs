@@ -1,7 +1,9 @@
 use super::super::app::QuillApp;
 use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::*;
+use quill::ids::RequestId;
 use quill::lang::{keys, tr};
+use quill::state::{Answer, RequestAcks};
 /// One-line fields.
 const SINGLE_LINE: (usize, usize) = (1, 1);
 /// The bio shows at least three lines and grows with its content, so a
@@ -27,6 +29,58 @@ pub struct EditProfileDialog {
     /// The last Save: the box closes when TDLib has answered the name and
     /// bio requests, and stays with the reason when one is refused.
     pub(crate) save: quill::state::Submit,
+    /// The last username or photo operation of the box.
+    pub(crate) op: SectionOp,
+}
+
+/// Where the username and photo sections' last operation stands: one
+/// operation at a time, settled on its own request's answer (`Session::acks`)
+/// so one operation's refusal is never shown for another. A newer operation
+/// replaces it whole.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) enum SectionOp {
+    #[default]
+    Idle,
+    /// Sent as this request; waits for its answer.
+    Sending(RequestId),
+    /// TDLib refused it, with the reason the box shows.
+    Failed(String),
+}
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "edit_profile_tests.rs"]
+mod tests;
+
+impl SectionOp {
+    pub(crate) fn in_flight(&self) -> Option<RequestId> {
+        match self {
+            Self::Sending(id) => Some(*id),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn error(&self) -> Option<&str> {
+        match self {
+            Self::Failed(reason) => Some(reason),
+            _ => None,
+        }
+    }
+
+    /// Take the answer of the request waited for. `true` when it came.
+    pub(crate) fn settle(&mut self, acks: &mut RequestAcks) -> bool {
+        let Self::Sending(id) = self else {
+            return false;
+        };
+        let Some(answer) = acks.take(*id) else {
+            return false;
+        };
+        *self = match answer {
+            Answer::Done => Self::Idle,
+            Answer::Failed(reason) => Self::Failed(reason),
+        };
+        true
+    }
 }
 
 impl EditProfileDialog {
@@ -76,6 +130,7 @@ impl EditProfileDialog {
             ),
             sources: Default::default(),
             save: Default::default(),
+            op: SectionOp::Idle,
         };
         // Save's enabled state and the bio counter follow every keystroke.
         for input in [

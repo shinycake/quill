@@ -80,8 +80,11 @@ fn a_start_cancelled_while_the_microphone_opens_leaves_nothing(cx: &mut TestAppC
     app.update(&mut vcx, |app, cx| app.cancel_recording_here(cx));
     vcx.run_until_parked();
     app.read_with(&vcx, |app, _| {
-        assert_eq!(opens.load(Ordering::SeqCst), 1);
-        assert!(!app.recording_active(), "what arrived was dropped");
+        // The stage holds the opening: cancelling drops it, so the device
+        // that had not started is never opened (and one that had is
+        // dropped with its file, `VoiceCapture::drop`).
+        assert_eq!(opens.load(Ordering::SeqCst), 0);
+        assert!(!app.recording_active(), "nothing was held");
         assert!(!app.recording_busy(), "the next recording may start");
     });
 }
@@ -246,19 +249,21 @@ fn play_once_and_lock_end_with_the_recording_whoever_takes_it(cx: &mut TestAppCo
 
 #[gpui_kit::test]
 fn a_press_that_needs_no_prompt_leaves_an_earlier_prompt_alone(cx: &mut TestAppContext) {
-    use crate::ui::recording_state::PermissionAsk;
     let (app, mut vcx) = open_chat(cx);
     app.update(&mut vcx, |app, cx| {
-        app.recording.permission = PermissionAsk::Asking {
-            id: 7,
-            _task: gpui_kit::Task::ready(()),
-        };
-        // Linux reports every device granted: the start runs at once.
-        app.with_capture_access(false, |_, _| {}, cx);
+        let ask = app.recording.next_start_id();
+        app.recording.begin_asking(ask, gpui_kit::Task::ready(()));
+        // Linux reports every device granted, but a prompt is up for the
+        // earlier press: this one starts nothing behind it.
+        let ran = std::rc::Rc::new(std::cell::Cell::new(false));
+        let flag = ran.clone();
+        app.with_capture_access(false, move |_, _| flag.set(true), cx);
+        assert!(!ran.get(), "nothing starts behind the prompt");
         assert!(
-            app.recording.permission.is_asking(7),
+            app.recording.finish_asking(ask),
             "the other press's ask is still the one waiting"
         );
+        assert!(!app.recording.starting(), "its answer ends the stage");
     });
 }
 

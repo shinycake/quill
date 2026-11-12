@@ -246,7 +246,7 @@ impl QuillApp {
         match self.players.audio.start(
             path,
             offset_secs,
-            self.players.volume,
+            self.players.volume(),
             self.players.speed,
             duration_secs,
         ) {
@@ -586,7 +586,7 @@ impl QuillApp {
                 is_playing: self.is_playing(),
                 // Speed, mute and the engine's error show on the active row.
                 speed: self.players.speed,
-                muted: self.players.volume < 0.01,
+                muted: self.players.volume.is_muted(),
                 error: self.players.audio.error().map(audio_error_text),
                 hover: self
                     .playback

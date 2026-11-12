@@ -375,7 +375,7 @@ impl QuillApp {
             option_chip("chip-schedule", label, cx)
                 .cursor_pointer()
                 .on_click(cx.listener(|this, _, window, cx| {
-                    if this.chat_ui.schedule_picker.is_some() {
+                    if this.chat_ui.schedule_picker.as_ref().is_some() {
                         this.chat_ui.hide_schedule_popup();
                         cx.notify();
                     } else {

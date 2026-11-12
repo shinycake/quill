@@ -278,6 +278,68 @@ fn clear_jump(app: &Entity<QuillApp>, cx: &mut VisualTestContext) {
     });
 }
 
+/// Sweep 12-C014: the quote picker and the chat chooser are never open
+/// together, whichever opens first, and closing leaves neither.
+#[gpui_kit::test]
+fn the_quote_picker_and_the_reply_chooser_are_never_open_together(cx: &mut TestAppContext) {
+    use crate::ui::reply_options_ui::ReplyPanel;
+    use quill::reply_options::ReplyOption;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    reply_to_ada(&app, vcx);
+    let panel = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| app.chat_ui.reply_panel())
+    };
+    app.update_in(vcx, |app, window, cx| {
+        app.apply_reply_option(ReplyOption::UpdateQuote, window, cx);
+    });
+    assert_eq!(panel(&app, vcx), ReplyPanel::QuotePicker);
+    app.update_in(vcx, |app, window, cx| {
+        app.apply_reply_option(ReplyOption::ReplyInAnotherChat, window, cx);
+    });
+    assert!(
+        matches!(panel(&app, vcx), ReplyPanel::Chooser(_)),
+        "the chooser is open"
+    );
+    assert!(app.read_with(vcx, |app, _| !app.reply_quote_open()));
+    app.update_in(vcx, |app, window, cx| {
+        app.apply_reply_option(ReplyOption::UpdateQuote, window, cx);
+    });
+    assert_eq!(panel(&app, vcx), ReplyPanel::QuotePicker);
+    assert!(app.read_with(vcx, |app, _| !app.reply_chooser_open()));
+    app.update_in(vcx, |app, window, cx| app.close_reply_panels(window, cx));
+    assert_eq!(panel(&app, vcx), ReplyPanel::None);
+}
+
+/// Sweep 12-C014: the chooser draws the forward box's destinations, so
+/// opening either ends the other.
+#[gpui_kit::test]
+fn the_forward_box_and_the_reply_chooser_are_never_open_together(cx: &mut TestAppContext) {
+    use crate::ui::forward_stage::ForwardStage;
+    use crate::ui::reply_options_ui::ReplyPanel;
+    use quill::composer::ForwardDraft;
+    use quill::ids::TopicId;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    reply_to_ada(&app, vcx);
+    app.update_in(vcx, |app, window, cx| {
+        let draft = ForwardDraft::from_message(GROUP, TopicId::None, MessageId(10), false)
+            .expect("a sent message");
+        app.share.forward = ForwardStage::Selecting(draft);
+        app.show_reply_panel(ReplyPanel::chooser(), window, cx);
+        assert!(app.reply_chooser_open() && !app.share.forward.picker_open());
+        app.open_forward_picker(window, cx);
+        assert!(app.share.forward.picker_open(), "the forward box opened");
+        assert!(!app.reply_chooser_open(), "and ended the chooser");
+        app.show_reply_panel(ReplyPanel::chooser(), window, cx);
+        assert!(app.reply_chooser_open());
+        assert!(
+            !app.share.forward.picker_open(),
+            "the chooser ended the box"
+        );
+    });
+}
+
 #[gpui_kit::test]
 fn clicking_the_reply_bar_opens_the_quote_picker(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
@@ -337,7 +399,7 @@ fn the_bar_handler_for_a_media_reply_offers_another_chat(cx: &mut TestAppContext
     reply_to_ada(&app, vcx);
     let clicks = app.update(vcx, |app, cx| app.bar_clicks(BarKind::Edit, None, cx));
     vcx.update(|window, cx| (clicks.run)(BarAction::ReplyElsewhere, window, cx));
-    assert!(app.read_with(vcx, |app, _| app.share.forward.reply_chooser_open()));
+    assert!(app.read_with(vcx, |app, _| app.reply_chooser_open()));
 }
 
 fn supergroup_status(app: &Entity<QuillApp>, cx: &mut VisualTestContext, status: &str) {

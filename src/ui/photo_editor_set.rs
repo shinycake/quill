@@ -189,7 +189,7 @@ impl PhotoEditor {
             None
         };
         self.selected = drag.is_some().then_some(0);
-        self.gesture = drag.map_or(Gesture::None, Gesture::Item);
+        self.gesture = drag.map_or(Gesture::None, |drag| Gesture::Item { index: 0, drag });
     }
 
     /// What "Done" renders, without the editor's UI handles, taken out of

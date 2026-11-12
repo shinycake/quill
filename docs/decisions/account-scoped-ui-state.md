@@ -8340,6 +8340,52 @@ Fresh review of each touched file found nothing more beyond what the table lists
 Files outside the bundle changed only to follow these types: `info_types.rs`
 (request ids in the `Loading` variants), the connect drivers that send the
 requests, and the UI readers.
+
+### Sweep fixes (r2-30)
+
+Round-two re-sweep, twenty-one files, every entry of the register for them.
+A file is done only with nothing left in it, so the extra readers of each
+field were fixed too (ids `new-NN` below were found on the fresh read).
+
+| ids | what |
+| --- | --- |
+| 11-044, 11-045 | `ApplyStage::Applying { waiting, refused }` holds the requests Apply sent and settles each on its own answer (`Session::acks`); `Sent` only when all were accepted, `Failed` with the first refusal. `UsersState::peer_color_error` (one slot shared by three request purposes) and the `has_purpose` busy check are gone. A box closed meanwhile forgets its requests, as the chat look box does. |
+| 12-A013 | `photo_edit::render` returns a zero-size picture unchanged (the crop sums underflowed). |
+| 12-A017 | `PhotoEditor::turn(Turn::{Quarter, Flip})` rebuilds items, orientation, preview, crop and strokes in one place and ends the gesture. |
+| 12-A016 | `Gesture::Item { index, drag }` names its item; `drag_item` reads only the gesture, and `delete_selected` ends a drag whose indexes shifted. |
+| 12-A002 | The profile crop's render continuation applies only while `photo_target()` still equals the target that asked, for the result and for its failure note. |
+| 12-A015 | The dialog body cells of the edit-profile, color, crop, request-share, schedule and password boxes are `Cell<Option<_>>` taken with `take()`; no `RefCell` borrow is left in them. The same pattern in `polls`, `premium_ui` is those files' own. Review round: the emoji-packs, open-link and save-to-rows boxes use `shell::one_shot_dialog_content` too (the emoji-packs body now sits in the shared scroll region). |
+| 12-A005 | `Debounce { Idle, Waiting { query, _timer } }` holds the search timer of the GIF and emoji-pack searches: a keystroke, a closed panel, a tab change or the screen going drops it. The keystroke counters are gone. Review round: every keystroke cancels the waiting search before the empty-field check, so clearing the field in the pause no longer lets the old search run over the restored list (`clearing_the_field_before_the_pause_drops_the_waiting_search`). |
+| 12-A003 | `ActiveTrack` is `None`, `Voice(Track)` or `Audio(Track)`; `Track` owns the message, chat, length, meta, row slider, per-window bar sliders, scrub and hover. Stopping replaces it whole, so `track_length`, `seek_slider`, `scrub`, `seek_hover` and `PlayerBarState::{chat, meta, sliders}` are gone. `stop_voice_playback` and `stop_audio_playback` stop only their own kind. After the merge with the follow-up branch the active track takes its shape (`Track { id, chat, meta, length, slider, scrub, hover }`; the bar sliders stay in `PlayerBarState::sliders`); the per-window bar sliders therefore still go with `note_track_started`. |
+| 12-A004 | `GifPlayback::{Waiting, Playing}` holds the `GifDecode` guard (dropping it cancels the decode); the `gif_decodes` map is gone. A late answer from an earlier decode of the same GIF is told apart by the guard's flag and dropped. Replaying while a decode runs starts a new decode (the old optimisation of reusing the first picture went with the map). |
+| 12-A021 | `Volume::{Level, Muted { restore }}`: the restore level cannot go stale beside the level; unmute never lands on silence. |
+| 12-A006 | `PlaylistDrag` carries the dragged track's `FileId`; `reorder_playlist_track(dragged, onto)` resolves both rows at the drop. |
+| 12-A012, 12-A014 | The premium sticker paint notes and the played set are one `Notes` per account (cleared on an account change, pruned also while no chat is viewed), reached through `try_borrow_mut` so a paint that lands inside another borrower skips its note. |
+| 12-B009 | `hide_check_password_suggestion` resets the card only once the request is sent; a refused send keeps the card and the box says so. |
+| 12-B010 | `SectionOp::{Idle, Sending(request), Failed(reason)}` on the edit-profile dialog settles each username or photo operation on its own answer; `UsersState::profile_edit_error` and its eight hand resets are gone. |
+| 12-B012 | `ModalFade::Closing { glide, _timer }` holds the close timer; a reopened modal drops the old timer. |
+| 12-B015, 12-B016 | The slide is `PullUi::slide`, not a process-wide cell. `Route::Found { next, window }` carries the window of the gesture that found it, and `Route::Jumping` the task; `PullUi::begin_jump` and `restart` change the machine and the route together. A jump whose window closed still ends (`end_jump_without_window`). |
+| 12-C013 | `OpenMenu::first_tab` carries the tab a chip asked for; `drain_wanted_reactor_tab` asks for it once the audience begins, and a menu closed first never does. `MessagesState::wanted_reactor_tab` is gone. |
+| 12-C003 | `CaptureStart::{Idle, Asking { id, _wait }, Opening { .., _opening }}` is the whole start of a recording: the permission prompt and the capture opening are one stage that holds its task, so a cancel drops the wait. A press during the prompt or the opening is ignored. |
+| 12-C014 | `ReplyPanel::{None, QuotePicker, Chooser(Mount)}` is one value in one owner, `ReplyBar::panel` on `ChatUi`: the picker and the chooser cannot both be open, and both go with the reply, a chat change or an account change. `ChatUi::quote_picker` and `ForwardStage::ReplyChooser` are gone. The chooser still draws the share box's destinations, so `show_reply_panel(Chooser)` ends the forward box and `open_forward_picker` ends the chooser (`the_forward_box_and_the_reply_chooser_are_never_open_together`, `the_quote_picker_and_the_reply_chooser_are_never_open_together`). |
+| 12-C015 | `RequestShareKind` carries its own stage per kind (`Phone`, `Location { stage: LocateStage }`, `Users { pick }`, `Chat { pick }`); the location box is never opened when the lookup is refused. |
+| 12-C018 | `RoundPreview` is a field of the recording (`Capture::round`), not a `RefCell` in `RecordingUi`; its picture retires as an `OwnedImage`. |
+| 12-C016 | The window's own mouse-up handler ends every seek (`InlineVideos::end_all_seeks`), so a drag ends with the button even when the ring is no longer painted. |
+| 12-C004, 12-C005 | `OnConfirm::{Keep, SendNow { effect }}`; `ScheduleFlow::{Closed, List(ScheduledDialog), Picking(picker)}` (in `scheduled_flow.rs`) replaces `scheduled_dialog_open`, the follow-up branch's `ChatUi::scheduled_dialog` and `schedule_picker`: the list's load stage (`Loading(request)`, `Ready`, `Failed`) lives in the flow, closing the list or opening the picker forgets a load still out. |
+| new-01 | The color box says "Loading icons" only while the icons are loading; a request that cannot go fails the fetch. |
+| new-02 | `check_remembered_password` leaves the card `Failed` when the send cannot start. |
+| new-03 | `round_seek`'s shade cache and the premium notes use `try_borrow_mut`. |
+| new-04 | The two "save a copy" prompts (`privacy_extra`, `playlist_manage`) run through `spawn_scoped`. |
+| review 2 | `chat_window::slot`: `swap_slot` and `chat_frame_starts` use `try_borrow_mut`/`try_borrow`. A busy slot makes `set_window_scope` report false with nothing moved (the next call, the next frame's, swaps), and the frame start is skipped untouched, so the next call of that frame does it. `send_effects::choose_send_effect` reads the measured areas with `try_borrow` (a busy cell puts the card at the menu's position). |
+| review 2 | Sleeps in tests: `the_bar_follows_consumed_frames_not_the_wall_clock` runs on the engine's manual clock; `PullUi::now` takes the executor's clock (`background_executor().now()`), so the pull test advances the dwell with `advance_clock`. |
+| review 2 nits | `PullMachine`'s jump stage and `Route::Jumping` stay two values: the machine is the core crate's and knows nothing of the route; `PullUi::begin_jump` and `restart` are their only writers. |
+
+- **Behaviour that changed.** Opening the schedule picker closes the
+  scheduled-messages dialog (they were two flags). A press of record while
+  the system prompt for the microphone is up is ignored. Replaying a GIF whose
+  first decode is still running decodes again. A color or profile request
+  that fails after its box was closed no longer raises a note.
+
 ### Sweep fixes (r2-05)
 
 | id | what changed |

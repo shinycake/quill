@@ -307,6 +307,10 @@ fn another_chat_drops_the_reschedule_picker_and_the_scheduled_list(cx: &mut Test
     app.update_in(&mut vcx, |app, window, cx| {
         app.chat_ui.scheduled_box.open_fresh();
         app.open_schedule_picker(ScheduleTarget::Reschedule(MessageId(5)), window, cx);
+        assert!(
+            !app.chat_ui.scheduled_box.is_open(),
+            "the picker replaced the list: one box at a time"
+        );
     });
     frames(&mut vcx);
     app.read_with(&vcx, |app, _| {
@@ -315,7 +319,7 @@ fn another_chat_drops_the_reschedule_picker_and_the_scheduled_list(cx: &mut Test
     open(&app, &mut vcx, other);
     app.read_with(&vcx, |app, _| {
         assert!(
-            app.chat_ui.schedule_picker.is_none(),
+            app.chat_ui.schedule_picker.as_ref().is_none(),
             "the picker was the last chat's"
         );
         assert!(!app.chat_ui.schedule_popup_shown());

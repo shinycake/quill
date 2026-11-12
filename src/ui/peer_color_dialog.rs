@@ -17,22 +17,72 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::ids::RequestId;
 use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
 use quill::peer_color::{
     ApplyOutcome, PeerColorDraft, PeerColorTab, name_swatches, profile_swatches,
 };
-use quill::state::RequestPurpose;
-use std::cell::RefCell;
+use quill::state::{Answer, RequestAcks};
+use std::cell::Cell;
 use std::rc::Rc;
 
 /// What the box says about its last Apply. Editing a swatch leaves
-/// `Sent` and `Failed`; the answer's error lands in `Failed`.
+/// `Sent` and `Failed`; `Applying` ends only on the answers of the requests
+/// it holds (`Session::acks`), so another request's answer never lands here.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ApplyStage {
     Editing,
+    /// The requests Apply sent that wait for their answer, and the first
+    /// refusal among those answered. Leaves for `Sent` when all were
+    /// accepted, `Failed` when one was refused, `Editing` when none went out.
+    Applying {
+        waiting: Vec<RequestId>,
+        refused: Option<String>,
+    },
     Sent,
     Failed(String),
+}
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "peer_color_dialog_tests.rs"]
+mod tests;
+
+impl ApplyStage {
+    /// Every request still waiting, for the box to forget on close.
+    fn in_flight(&self) -> &[RequestId] {
+        match self {
+            Self::Applying { waiting, .. } => waiting,
+            _ => &[],
+        }
+    }
+
+    /// Take the answers that came. `true` when the stage changed.
+    pub(super) fn settle(&mut self, acks: &mut RequestAcks) -> bool {
+        let Self::Applying { waiting, refused } = self else {
+            return false;
+        };
+        let before = waiting.len();
+        waiting.retain(|id| match acks.take(*id) {
+            None => true,
+            Some(Answer::Done) => false,
+            Some(Answer::Failed(why)) => {
+                refused.get_or_insert_with(|| {
+                    format!("{}: {why}", tr(keys::Q_MISC_COULD_NOT_CHANGE_THE_COLORS))
+                });
+                false
+            }
+        });
+        if !waiting.is_empty() {
+            return waiting.len() != before;
+        }
+        *self = match refused.take() {
+            Some(why) => Self::Failed(why),
+            None => Self::Sent,
+        };
+        true
+    }
 }
 
 /// The open box: the tab and the draft the swatches edit.
@@ -82,8 +132,15 @@ impl QuillApp {
             return;
         };
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.users_state.peer_color_error = None;
-            let _ = live.driver.load_background_emoji_icons();
+            // A request that cannot go leaves the icons failed (the box
+            // says so), not loading for good.
+            if live.driver.load_background_emoji_icons().is_err() {
+                live.driver
+                    .session
+                    .users_state
+                    .background_emoji_icons
+                    .fail(tr(keys::Q_MISC_COULD_NOT_LOAD_ICONS_REOPEN));
+            }
             let _ = live.driver.load_wearable_gifts();
         }
         self.dialogs.peer_color_dialog = Some(PeerColorDialog {
@@ -95,26 +152,33 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Move a color request's failure into the box that asked; with the
-    /// box closed it is a note, so the user does not believe the colors
-    /// changed.
-    pub(in crate::ui) fn take_peer_color_error(&mut self) -> bool {
-        let Some(err) = self
-            .live
-            .as_mut()
-            .and_then(|live| live.driver.session.users_state.peer_color_error.take())
-        else {
+    /// Poll-loop half of Apply: settle each request on its own answer.
+    pub(in crate::ui) fn drain_peer_color(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(live) = self.live.as_mut() else {
             return false;
         };
-        match self.dialogs.peer_color_dialog.as_mut() {
-            Some(dialog) => dialog.stage = ApplyStage::Failed(err),
-            None => self.set_note(StatusNote::error(err)),
+        let Some(dialog) = self.screen.dialogs.peer_color_dialog.as_mut() else {
+            return false;
+        };
+        if !dialog.stage.settle(&mut live.driver.session.acks) {
+            return false;
         }
+        cx.notify();
         true
     }
 
     pub(super) fn close_peer_color_dialog(&mut self, cx: &mut Context<Self>) {
-        self.dialogs.peer_color_dialog = None;
+        let waiting: Vec<RequestId> = self
+            .dialogs
+            .peer_color_dialog
+            .take()
+            .map(|d| d.stage.in_flight().to_vec())
+            .unwrap_or_default();
+        if let Some(live) = self.live.as_mut() {
+            for id in waiting {
+                live.driver.session.acks.forget(id);
+            }
+        }
         cx.notify();
     }
 
@@ -126,7 +190,9 @@ impl QuillApp {
         if let Some(dialog) = self.dialogs.peer_color_dialog.as_mut() {
             let tab = dialog.tab;
             edit(&mut dialog.draft, tab);
-            dialog.stage = ApplyStage::Editing;
+            if !matches!(dialog.stage, ApplyStage::Applying { .. }) {
+                dialog.stage = ApplyStage::Editing;
+            }
         }
         cx.notify();
     }
@@ -139,6 +205,9 @@ impl QuillApp {
         ) else {
             return;
         };
+        if matches!(dialog.stage, ApplyStage::Applying { .. }) {
+            return;
+        }
         let draft = dialog.draft;
         let premium = self.session().is_some_and(|s| s.my_is_premium());
         match draft.apply_outcome(&current, premium) {
@@ -152,22 +221,30 @@ impl QuillApp {
                     cx.notify();
                     return;
                 };
-                live.driver.session.users_state.peer_color_error = None;
+                let mut waiting = Vec::new();
                 let mut failed = false;
+                let mut sent =
+                    |result: Result<RequestId, _>, driver_acks: &mut RequestAcks| match result {
+                        Ok(id) => {
+                            driver_acks.expect(id);
+                            waiting.push(id);
+                        }
+                        Err(_) => failed = true,
+                    };
                 if name {
-                    failed |= if draft.gift_colors_id != 0 {
+                    let result = if draft.gift_colors_id != 0 {
                         live.driver.set_upgraded_gift_colors(draft.gift_colors_id)
                     } else {
                         live.driver
                             .set_accent_color(draft.name_color_id, draft.name_emoji_id)
-                    }
-                    .is_err();
+                    };
+                    sent(result, &mut live.driver.session.acks);
                 }
                 if profile {
-                    failed |= live
+                    let result = live
                         .driver
-                        .set_profile_colors(draft.profile_color_id, draft.profile_emoji_id)
-                        .is_err();
+                        .set_profile_colors(draft.profile_color_id, draft.profile_emoji_id);
+                    sent(result, &mut live.driver.session.acks);
                 }
                 self.set_note(if failed {
                     StatusNote::error(tr(keys::Q_MISC_COULD_NOT_CHANGE_THE_COLORS))
@@ -175,10 +252,14 @@ impl QuillApp {
                     StatusNote::silent(tr(keys::Q_MISC_STYLE_UPDATE_REQUESTED))
                 });
                 if let Some(dialog) = self.dialogs.peer_color_dialog.as_mut() {
-                    dialog.stage = if failed {
+                    dialog.stage = if waiting.is_empty() {
                         ApplyStage::Editing
                     } else {
-                        ApplyStage::Sent
+                        ApplyStage::Applying {
+                            waiting,
+                            refused: failed
+                                .then(|| tr(keys::Q_MISC_COULD_NOT_CHANGE_THE_COLORS).to_string()),
+                        }
                     };
                 }
                 cx.notify();
@@ -197,7 +278,6 @@ impl QuillApp {
                 this.close_peer_color_dialog(cx);
             });
         app.update(cx, |this, cx| {
-            this.take_peer_color_error();
             let dialog = dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(tr(
@@ -239,12 +319,9 @@ impl QuillApp {
                 );
             dialog
                 .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    let body = Rc::new(Cell::new(Some(body.into_any_element())));
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
                 }))
@@ -374,15 +451,12 @@ impl QuillApp {
             .map(|u| u.display_name())
             .unwrap_or_default();
         let premium = session.is_some_and(|s| s.my_is_premium());
-        let busy = session.is_some_and(|s| {
-            s.requests.has_purpose(RequestPurpose::SetAccentColor)
-                || s.requests
-                    .has_purpose(RequestPurpose::SetProfileAccentColor)
-        });
         let icons_failed =
             session.is_some_and(|s| s.users_state.background_emoji_icons.error().is_some());
-        let icons_empty =
-            session.is_some_and(|s| s.users_state.background_emoji_icons.items().is_empty());
+        let icons_loading = session.is_some_and(|s| {
+            s.users_state.background_emoji_icons.is_loading()
+                && s.users_state.background_emoji_icons.items().is_empty()
+        });
         let dark = super::chat_theme::is_dark_palette();
         let theme = cx.theme();
         let muted = theme.muted_foreground;
@@ -602,14 +676,13 @@ impl QuillApp {
             ),
         };
 
-        let status = if busy {
-            Some((tr(keys::Q_MISC_APPLYING_STYLE).to_string(), false))
-        } else {
-            match stage {
-                ApplyStage::Failed(error) => Some((error, true)),
-                ApplyStage::Sent => Some((tr(keys::Q_MISC_STYLE_UPDATED).to_string(), false)),
-                ApplyStage::Editing => None,
+        let status = match stage {
+            ApplyStage::Applying { .. } => {
+                Some((tr(keys::Q_MISC_APPLYING_STYLE).to_string(), false))
             }
+            ApplyStage::Failed(error) => Some((error, true)),
+            ApplyStage::Sent => Some((tr(keys::Q_MISC_STYLE_UPDATED).to_string(), false)),
+            ApplyStage::Editing => None,
         };
 
         let mut panel = div()
@@ -646,7 +719,7 @@ impl QuillApp {
         panel = panel
             .child(div().font_semibold().child(icon_title))
             .child(self.peer_color_icon_grid(selected_icon, cx))
-            .when(icons_empty && !icons_failed, |this| {
+            .when(icons_loading, |this| {
                 this.child(
                     div()
                         .text_xs()

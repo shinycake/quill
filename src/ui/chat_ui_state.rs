@@ -16,6 +16,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::reply_options_ui::ReplyPanel;
 use gpui_kit::*;
 use quill::composer::{ComposerEdit, ComposerReplyTo};
 use quill::ids::{ChatId, MessageId, TopicId};
@@ -135,28 +136,14 @@ impl Default for ChatVisit {
     }
 }
 
-/// The reply bar: the message the composer replies to, and whether
-/// "Update Quote" is picking the part to quote. The picker is a stage of
-/// the reply, so it goes with it however the reply goes (sent, cancelled,
-/// replaced by a reply to another message).
+/// The reply bar: the message the composer replies to, and the panel open
+/// for it (quote picker or chat chooser). One value, so the panel goes with
+/// the reply however the reply goes (sent, cancelled, replaced by a reply to
+/// another message, the chat view replaced).
 #[derive(Debug, Clone)]
-enum ReplyBar {
-    Plain(ComposerReplyTo),
-    PickingQuote(ComposerReplyTo),
-}
-
-impl ReplyBar {
-    fn reply(&self) -> &ComposerReplyTo {
-        match self {
-            Self::Plain(reply) | Self::PickingQuote(reply) => reply,
-        }
-    }
-
-    fn into_reply(self) -> ComposerReplyTo {
-        match self {
-            Self::Plain(reply) | Self::PickingQuote(reply) => reply,
-        }
-    }
+struct ReplyBar {
+    reply: ComposerReplyTo,
+    panel: ReplyPanel,
 }
 
 /// One view's state for the chat it shows.
@@ -371,46 +358,63 @@ impl ChatUi {
     /// The reply the bar shows. Display and bookkeeping only: anything that
     /// sends reads `QuillApp::reply_for_send`, which drops a deleted target.
     pub(super) fn reply(&self) -> Option<&ComposerReplyTo> {
-        self.pending_reply.as_ref().map(ReplyBar::reply)
+        self.pending_reply.as_ref().map(|bar| &bar.reply)
     }
 
     pub(super) fn has_reply(&self) -> bool {
         self.pending_reply.is_some()
     }
 
-    /// A new quote for the same message keeps its picker open; a reply to
+    /// A new quote for the same message keeps its panel open; a reply to
     /// another message, or none, closes it.
     pub(super) fn set_reply(&mut self, reply: Option<ComposerReplyTo>) {
-        self.pending_reply = reply.map(|next| match &self.pending_reply {
-            Some(bar @ ReplyBar::PickingQuote(_))
-                if (bar.reply().chat_id, bar.reply().message_id)
-                    == (next.chat_id, next.message_id) =>
+        let panel = |next: &ComposerReplyTo| match &self.pending_reply {
+            Some(bar)
+                if (bar.reply.chat_id, bar.reply.message_id) == (next.chat_id, next.message_id) =>
             {
-                ReplyBar::PickingQuote(next)
+                bar.panel
             }
-            _ => ReplyBar::Plain(next),
+            _ => ReplyPanel::None,
+        };
+        self.pending_reply = reply.map(|reply| ReplyBar {
+            panel: panel(&reply),
+            reply,
         });
     }
 
     pub(super) fn take_reply(&mut self) -> Option<ComposerReplyTo> {
-        self.pending_reply.take().map(ReplyBar::into_reply)
+        self.pending_reply.take().map(|bar| bar.reply)
     }
 
-    /// "Update Quote": the picker opens for the reply shown.
-    pub(super) fn open_quote_picker(&mut self) {
-        if let Some(bar) = self.pending_reply.take() {
-            self.pending_reply = Some(ReplyBar::PickingQuote(bar.into_reply()));
+    /// The panel open over the reply shown (`None` without a reply).
+    pub(super) fn reply_panel(&self) -> ReplyPanel {
+        self.pending_reply
+            .as_ref()
+            .map_or(ReplyPanel::None, |bar| bar.panel)
+    }
+
+    /// Open `panel` for the reply shown, in place of the one open (one
+    /// value: at most one panel). Nothing without a reply.
+    pub(super) fn show_reply_panel(&mut self, panel: ReplyPanel) {
+        if let Some(bar) = self.pending_reply.as_mut() {
+            bar.panel = panel;
         }
     }
 
-    pub(super) fn close_quote_picker(&mut self) {
-        if let Some(bar) = self.pending_reply.take() {
-            self.pending_reply = Some(ReplyBar::Plain(bar.into_reply()));
+    /// The forward box opens: a chat chooser open over the reply closes.
+    pub(super) fn close_reply_chooser(&mut self) {
+        if matches!(self.reply_panel(), ReplyPanel::Chooser(_)) {
+            self.show_reply_panel(ReplyPanel::None);
         }
     }
 
-    pub(super) fn quote_picker_open(&self) -> bool {
-        matches!(self.pending_reply, Some(ReplyBar::PickingQuote(_)))
+    /// The chat chooser's first draw asks: true once per opening, so its
+    /// search field takes focus after the dialog has mounted.
+    pub(super) fn take_chooser_first_draw(&mut self) -> bool {
+        match self.pending_reply.as_mut().map(|bar| &mut bar.panel) {
+            Some(ReplyPanel::Chooser(mount)) => mount.take_first_draw(),
+            _ => false,
+        }
     }
 
     pub(super) fn is_editing(&self) -> bool {
@@ -562,7 +566,7 @@ impl QuillApp {
         next.pending_reply = old
             .pending_reply
             .take()
-            .filter(|bar| bar.reply().belongs_to(chat));
+            .filter(|bar| bar.reply.belongs_to(chat));
         // An edit of another chat's message does not come along; one that
         // was already sent stops waiting for its answer.
         let dropped = match old.edit_mode.take() {

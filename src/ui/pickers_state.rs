@@ -6,6 +6,39 @@ use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
 use gpui_kit::*;
 use quill::lang::{keys, tr};
 
+/// A search that waits for typing to pause. The timer is held here, so a new
+/// keystroke, a close or the screen going away drops it and it never fires.
+#[derive(Default)]
+pub(crate) enum Debounce {
+    #[default]
+    Idle,
+    /// `query` goes out when the timer ends.
+    Waiting { query: String, _timer: Task<()> },
+}
+
+impl Debounce {
+    /// Wait for `timer` (replacing, and so cancelling, an earlier one).
+    pub(super) fn arm(&mut self, query: String, timer: Task<()>) {
+        *self = Self::Waiting {
+            query,
+            _timer: timer,
+        };
+    }
+
+    /// Typing that was waiting no longer searches.
+    pub(super) fn cancel(&mut self) {
+        *self = Self::Idle;
+    }
+
+    /// The timer ended: the query to search, once.
+    pub(super) fn fire(&mut self) -> Option<String> {
+        match std::mem::take(self) {
+            Self::Waiting { query, .. } => Some(query),
+            Self::Idle => None,
+        }
+    }
+}
+
 pub(crate) struct PickerUi {
     /// The composer's emoji / sticker / GIF popover.
     pub(super) media_panel: super::media_panel::MediaPanel,
@@ -15,11 +48,11 @@ pub(crate) struct PickerUi {
     /// The emoji status selector's search (cleared on each open).
     pub(super) status_search_input: Entity<TextareaState>,
     /// The emoji packs box's search: typing searches once it pauses
-    /// (`emoji_sets_search_typed`); `emoji_set_keystroke` counts the edits so
-    /// only the last one searches, and `emoji_set_return_tab` is the tab an
+    /// (`emoji_sets_search_typed`); `emoji_set_debounce` holds the timer so
+    /// only the last edit searches, and `emoji_set_return_tab` is the tab an
     /// emptied field goes back to.
     pub(super) emoji_set_search_input: Entity<InputState>,
-    pub(super) emoji_set_keystroke: u64,
+    pub(super) emoji_set_debounce: Debounce,
     pub(super) emoji_set_return_tab: quill::emoji::EmojiSetTab,
     pub(super) emoji_set_scroll: ScrollHandle,
     pub(super) emoji_search_input: Entity<TextareaState>,
@@ -89,7 +122,7 @@ impl PickerUi {
             poll_pick: Default::default(),
             status_search_input,
             emoji_set_search_input,
-            emoji_set_keystroke: 0,
+            emoji_set_debounce: Debounce::Idle,
             emoji_set_return_tab: quill::emoji::EmojiSetTab::default(),
             emoji_set_scroll: ScrollHandle::new(),
             emoji_search_input,

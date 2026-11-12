@@ -22,6 +22,7 @@ use quill::share_box::{ChatSend, ShareSend, forward_bar_lines, share_done_label}
 use quill::telegram::envelope::ChatKind;
 
 use super::forward_stage::ForwardStage;
+use super::reply_options_ui::ReplyPanel;
 impl QuillApp {
     pub(super) fn toggle_share_destination(&mut self, id: ChatId, cx: &mut Context<Self>) {
         self.share.selection.toggle(id);
@@ -30,7 +31,9 @@ impl QuillApp {
 
     /// The typed query changed: ask the server too (`searchChatsOnServer`).
     pub(super) fn sync_share_search(&mut self, text: &str, cx: &mut Context<Self>) {
-        if !self.share.forward.picker_open() && !self.share.forward.reply_chooser_open() {
+        if !self.share.forward.picker_open()
+            && !matches!(self.chat_ui.reply_panel(), ReplyPanel::Chooser(_))
+        {
             return;
         }
         if let Some(live) = self.live.as_mut() {

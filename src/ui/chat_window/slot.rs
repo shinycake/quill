@@ -448,12 +448,13 @@ impl QuillApp {
             return;
         };
         let frame = window.frame_number();
-        let Ok((started, images)) = slot
-            .try_borrow()
-            .map(|slot| (slot.frame_started.replace(frame), slot.images.clone()))
-        else {
+        // A slot borrowed elsewhere starts no frame now: `frame_started` is
+        // untouched, so the next call of this frame (or the next frame) does.
+        let Ok(slot) = slot.try_borrow() else {
             return;
         };
+        let (started, images) = (slot.frame_started.replace(frame), slot.images.clone());
+        drop(slot);
         if started == frame {
             return;
         }
@@ -509,6 +510,7 @@ pub(in crate::ui) fn scope_probe(
     canvas(
         |_, _, _| {},
         move |_, _, window, _| {
+            let app_for_up = app.clone();
             let press = {
                 let app = app.clone();
                 move |cx: &mut App| {
@@ -524,9 +526,18 @@ pub(in crate::ui) fn scope_probe(
                     on(cx);
                 }
             });
+            let released = app_for_up;
             window.on_mouse_event(move |_: &MouseUpEvent, phase, _, cx| {
                 if phase == DispatchPhase::Capture {
                     press(cx);
+                    // A drag along a round video's seek ring ends with the
+                    // button, wherever the pointer is and whether or not
+                    // the ring is still painted to hear it.
+                    let _ = released.update(cx, |app, cx| {
+                        if app.players.inline_videos.end_all_seeks() {
+                            cx.notify();
+                        }
+                    });
                 }
             });
             let on = pointer.clone();
