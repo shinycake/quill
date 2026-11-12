@@ -116,17 +116,15 @@ impl QuillApp {
     /// The pointer moved over the window outside the peeking column (which
     /// blocks the mouse from what is under it): start the grace period.
     pub(super) fn sidebar_pointer_moved_away(&mut self, cx: &mut Context<Self>) {
-        if !self.frame.sidebar.pointer_left(Instant::now()) {
-            return;
-        }
         // The wake is held by the `Leaving` stage: dropped with it.
-        let wake = cx.spawn(async move |this, cx| {
-            cx.background_executor()
-                .timer(LEAVE_GRACE + Duration::from_millis(10))
-                .await;
-            let _ = this.update(cx, |_, cx| cx.notify());
+        self.frame.sidebar.pointer_left(Instant::now(), || {
+            cx.spawn(async move |this, cx| {
+                cx.background_executor()
+                    .timer(LEAVE_GRACE + Duration::from_millis(10))
+                    .await;
+                let _ = this.update(cx, |_, cx| cx.notify());
+            })
         });
-        self.frame.sidebar.hold_wake(wake);
     }
 
     /// The chat list column in the layout: whole, narrowed while it slides

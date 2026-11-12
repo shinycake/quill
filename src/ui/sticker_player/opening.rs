@@ -27,7 +27,7 @@ pub(super) enum Opening {
 
 /// What a window lets go of (`Player::leave`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Leaving {
+pub(in crate::ui) enum Leaving {
     /// Its chat: another chat opens there, or the chat moves to a window
     /// of its own. The rest of the window stays as it is.
     Chat,

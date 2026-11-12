@@ -137,6 +137,12 @@ pub(crate) enum SetEditing {
     Picking(PickExisting),
     /// A chosen sticker or video on its way to the editor.
     Waiting(PickWait),
+    /// The open-file dialog for a new sticker's image is up; the stage holds
+    /// the task that waits for the pick.
+    Choosing { _task: Task<()> },
+    /// The edited image is written off the UI thread; the stage holds the
+    /// job, and the "New Sticker" box replaces it when it lands.
+    Writing { _task: Task<()> },
     /// The "New Sticker" / "New Emoji" box, and the encode behind its
     /// "Done" for a video.
     Creating {
@@ -181,6 +187,30 @@ impl SetEditing {
         match self {
             Self::Picking(pick) => Some(*pick),
             _ => None,
+        }
+    }
+
+    /// The image dialog opens, held by `task`.
+    pub(crate) fn begin_choosing(&mut self, task: Task<()>) {
+        self.enter(Self::Choosing { _task: task });
+    }
+
+    /// The image dialog answered; another flow stays.
+    pub(crate) fn finish_choosing(&mut self) {
+        if matches!(self, Self::Choosing { .. }) {
+            *self = Self::Idle;
+        }
+    }
+
+    /// The edited image is being written, held by `task`.
+    pub(crate) fn begin_writing(&mut self, task: Task<()>) {
+        self.enter(Self::Writing { _task: task });
+    }
+
+    /// The write ended without a sticker to create; another flow stays.
+    pub(crate) fn finish_writing(&mut self) {
+        if matches!(self, Self::Writing { .. }) {
+            *self = Self::Idle;
         }
     }
 
@@ -607,6 +637,26 @@ mod confirm_tests {
         assert!(!editing.download_gave_up(early));
         assert!(editing.download_gave_up(t0 + DOWNLOAD_GIVE_UP));
         assert!(!SetEditing::Idle.download_gave_up(t0 + DOWNLOAD_GIVE_UP));
+    }
+
+    /// The image dialog and the image write are stages that hold their task:
+    /// the answer ends them, and entering another flow drops the task.
+    #[test]
+    fn the_image_dialog_and_write_stages_end_with_their_answer_or_another_flow() {
+        use gpui_kit::Task;
+        let mut editing = SetEditing::Idle;
+        editing.begin_choosing(Task::ready(()));
+        assert!(!editing.is_idle());
+        editing.finish_writing();
+        assert!(!editing.is_idle(), "another stage's end leaves it");
+        editing.finish_choosing();
+        assert!(editing.is_idle());
+        editing.begin_writing(Task::ready(()));
+        assert!(!editing.is_idle());
+        editing.enter(SetEditing::Reordering);
+        assert!(editing.is_reordering(), "another flow replaces the write");
+        editing.finish_writing();
+        assert!(editing.is_reordering());
     }
 
     #[test]

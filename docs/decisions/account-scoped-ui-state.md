@@ -10225,7 +10225,7 @@ orders), `deep_link_routes_tests` (seek stays with its account).
 
 | Ids | What changed |
 | --- | --- |
-| 22-004 | `SidebarReveal::wake` is gone. The grace redraw task lives in `Pointer::Leaving { since, wake }`, so every change of the pointer stage drops it; `Peek` stays a `Copy` view of the stage (`pointer()`). |
+| 22-004 | `SidebarReveal::wake` and the `Wake` enum are gone. `pointer_left` takes a closure that makes the grace redraw task and stores it in `Pointer::Leaving { since, _wake }`, so every change of the pointer stage drops it; `Peek` stays a `Copy` view of the stage (`pointer()`). |
 | 22-007 | `spell_catalog::install` writes `.{code}.{ext}.{call}.part` with a per-call number, so a cancelled worker still inside `install` cannot clash with the next download of the same code. Test `two_installs_of_one_code_at_once_both_succeed`. |
 | g-301 | The dictionary download no longer polls every 120 ms. `Progress` carries a `wake::Signal` poked by every chunk and by the stage change (`finish`); the progress task waits on it and notifies only when the percent changed. The allow line in `owned-timers-allow.txt` is gone. |
 | 22-001 | `SpellUi::engine_task: Option<Task>` is `EngineBuild::{Idle, Building { _task }}`; a newer build replaces the stage whole, the install ends it. |
@@ -10246,3 +10246,4 @@ orders), `deep_link_routes_tests` (seek stays with its account).
 | g-293 | `LiveJoin::Joining` always holds its `RequestId`. A watch with no driver (the demo) is `LiveJoin::Offline(target)`; `mark_call_seen` moves either to `Joined`. |
 | g-302 | The stealth box's redraw is one wait per task held in `StealthBox::_tick`: each wake notifies and replaces the task with the next second's. |
 | 22-006, g-298 | The story tick is one wait per task (`story_tick_task`): a wake that finds the viewer open replaces `StoryTick::Running` with the next; a closed viewer ends it. A paused viewer (Space, a panel, the window behind another app) with no live story no longer redraws the overlay on each wake; what pauses or resumes it redraws itself. |
+| new-01 | The set box's two detached tasks are stages of `SetEditing`: `Choosing { _task }` (the open-file dialog for a new sticker's image; a second press replaces it, the answer or a cancel ends it) and `Writing { _task }` (the edited image's write; the box replaces it when it lands, a failed or stale write ends it). Test `the_image_dialog_and_write_stages_end_with_their_answer_or_another_flow`. |

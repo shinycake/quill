@@ -28,7 +28,7 @@ pub(super) use app::sidebar_emoji_head;
 pub(super) use app::{EmojiSide, PreviewEmoji, ViewAsk, mirrors, panel_sticker_head};
 pub(super) use display::note_display;
 use display::{display_of, forget_display};
-pub(super) use opening::Leaving;
+pub(in crate::ui) use opening::Leaving;
 use opening::{OPEN_GIVE_UP, Opening, open_gave_up};
 pub(super) use spec::{ClipSpec, HeadId, Part};
 pub(super) use view::StickerView;

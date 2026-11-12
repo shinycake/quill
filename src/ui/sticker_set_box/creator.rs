@@ -184,16 +184,21 @@ impl QuillApp {
         });
         // The set is the account's own: no editor for it over another
         // account (`spawn_scoped` carries the screen).
-        self.spawn_scoped(cx, async move |this, cx| {
-            if let Ok(Ok(Some(paths))) = picker.await
-                && let Some(path) = paths.into_iter().next()
-            {
-                let _ = this.update(cx, |this, cx| {
-                    this.edit_image_for_set(set_id, kind, &path, cx)
-                });
-            }
-        })
-        .detach();
+        let task = self.spawn_scoped(cx, async move |this, cx| {
+            let chosen = match picker.await {
+                Ok(Ok(Some(paths))) => paths.into_iter().next(),
+                _ => None,
+            };
+            let _ = this.update(cx, |this, cx| {
+                this.sticker_box.editing.finish_choosing();
+                if let Some(path) = chosen {
+                    this.edit_image_for_set(set_id, kind, &path, cx);
+                }
+                cx.notify();
+            });
+        });
+        self.sticker_box.editing.begin_choosing(task);
+        cx.notify();
     }
 
     /// Open `path` in the photo editor for the set: the image on a
@@ -245,16 +250,16 @@ impl QuillApp {
         corners: Corners,
         cx: &mut Context<Self>,
     ) {
-        let worker = cx.background_spawn(async move {
-            let prepared = prepared_sticker_image(&job.render(), kind.image_side(), corners);
-            super::super::edit_media_tools::write_edited_png(&prepared)
-        });
-        self.spawn_screen(cx, async move |this, cx| {
-            let written = worker.await;
-            let _ = this.update(cx, |this, cx| {
+        let task = self.run_off_ui_scoped_task(
+            move || {
+                let prepared = prepared_sticker_image(&job.render(), kind.image_side(), corners);
+                super::super::edit_media_tools::write_edited_png(&prepared)
+            },
+            move |this, written, cx| {
                 match written {
                     // The box moved to another set while it was written.
                     Some(path) if !this.sticker_box_shows(set_id) => {
+                        this.sticker_box.editing.finish_writing();
                         let _ = std::fs::remove_file(path);
                     }
                     Some(path) => {
@@ -269,13 +274,15 @@ impl QuillApp {
                         });
                     }
                     None => {
+                        this.sticker_box.editing.finish_writing();
                         this.set_note(StatusNote::error(tr(keys::Q_MEDIA_COULDNT_SAVE_THE_IMAGE)))
                     }
                 }
                 cx.notify();
-            });
-        })
-        .detach();
+            },
+            cx,
+        );
+        self.sticker_box.editing.begin_writing(task);
     }
 
     /// An emoji in the "New Sticker" box toggles on or off (at most seven).
