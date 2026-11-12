@@ -272,7 +272,7 @@ impl Session {
 
     /// Which edge of the window a history page request extends.
     fn window_edge(pending: &PendingRequest) -> WindowEdge {
-        let from = pending.around_message_id.map_or(0, |id| id.0);
+        let from = pending.around_message_id().map_or(0, |id| id.0);
         match pending.purpose {
             RequestPurpose::GetHistory if from != 0 => WindowEdge::Older(from),
             RequestPurpose::GetHistoryNewer => WindowEdge::Newer(from),
@@ -467,7 +467,7 @@ impl Session {
         let Some(chat_id) = pending.chat_id else {
             return;
         };
-        let from = pending.around_message_id.map_or(0, |id| id.0);
+        let from = pending.around_message_id().map_or(0, |id| id.0);
         let any_newer = messages.iter().any(|m| m.id.0 > from);
         for message in messages {
             self.upsert_message(message, false);

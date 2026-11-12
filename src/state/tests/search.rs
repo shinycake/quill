@@ -759,6 +759,8 @@ fn public_search_results_accepted() {
     session.open_search();
     session.search.search.begin_query("quill");
     let public_extra = session.request_search(RequestPurpose::SearchPublicChats);
+    let chats_extra = session.request_search(RequestPurpose::SearchChats);
+    let messages_extra = session.request_search(RequestPurpose::SearchMessages);
     apply_json(
         &mut session,
         &seq,
@@ -771,8 +773,6 @@ fn public_search_results_accepted() {
     assert_eq!(session.search.search.public_chat_ids, vec![ChatId(42)]);
     // Still waiting on `searchChats` / `searchMessages` → still Searching.
     assert_eq!(session.search.search.status(), SearchStatus::Searching);
-    let chats_extra = session.request_search(RequestPurpose::SearchChats);
-    let messages_extra = session.request_search(RequestPurpose::SearchMessages);
     apply_json(
         &mut session,
         &seq,
@@ -1051,6 +1051,9 @@ fn an_error_on_one_leg_with_results_on_another_is_ready() {
     let mut search = SearchState::default();
     search.open_field();
     search.begin_query("ada");
+    search.leg_sent(RequestPurpose::SearchChats, RequestId(1));
+    search.leg_sent(RequestPurpose::SearchMessages, RequestId(2));
+    search.leg_sent(RequestPurpose::SearchPublicChats, RequestId(3));
     assert_eq!(search.status(), SearchStatus::Searching);
     search.accept_chats(Vec::new(), true);
     search.accept_public_chats(Vec::new(), false);
@@ -1070,11 +1073,13 @@ fn status_follows_open_and_the_legs() {
     search.open_field();
     assert_eq!(search.status(), SearchStatus::Idle);
     search.begin_recents();
+    search.leg_sent(RequestPurpose::SearchRecentlyFoundChats, RequestId(1));
     assert_eq!(search.status(), SearchStatus::Searching);
     search.accept_chats(Vec::new(), false);
     assert_eq!(search.status(), SearchStatus::Idle);
     search.begin_query("x");
     search.begin_public_scope();
+    search.leg_sent(RequestPurpose::SearchPublicPosts, RequestId(2));
     assert_eq!(search.status(), SearchStatus::Searching);
     search.accept_messages(Vec::new(), false);
     assert_eq!(search.status(), SearchStatus::Empty);

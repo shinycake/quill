@@ -76,7 +76,7 @@ impl Session {
         }
         if let Some(RequestPurpose::Media(MediaPurpose::GetProfileAudios { .. })) =
             pending.map(|p| p.purpose)
-            && let Some(user_id) = pending.and_then(|p| p.user_id)
+            && let Some(user_id) = pending.and_then(|p| p.user_id())
         {
             self.fail_profile_audios(
                 user_id,

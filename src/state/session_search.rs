@@ -73,7 +73,7 @@ impl Session {
             // a topic switch) or left: the jump it served ends with it,
             // rather than wait on "Loading message..." for an answer that
             // was just dropped.
-            if let Some(message_id) = pending.around_message_id {
+            if let Some(message_id) = pending.around_message_id() {
                 self.abandon_history_around(pending.chat_id, message_id);
             }
             return;
@@ -84,7 +84,7 @@ impl Session {
         // Nothing older in an around page means only that TDLib's run in
         // memory ends there: older pages still ask the server.
         self.store_first_page(chat_id, messages);
-        if let Some(message_id) = pending.around_message_id {
+        if let Some(message_id) = pending.around_message_id() {
             self.finish_history_around(Some(pending), message_id, false, seq);
         }
     }

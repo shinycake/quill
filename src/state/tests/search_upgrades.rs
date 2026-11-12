@@ -68,6 +68,7 @@ fn a_failed_server_search_changes_nothing() {
     let seq = AtomicU64::new(0);
     session.open_search();
     session.search.search.begin_query("al");
+    let _chats = session.request_search(RequestPurpose::SearchChats);
     let server = session.request_search(RequestPurpose::SearchChatsOnServer);
     apply_json(
         &mut session,

@@ -8,7 +8,7 @@ fn scan(registry: &RequestRegistry, file_id: i32) -> bool {
     registry
         .pending
         .values()
-        .any(|p| p.purpose == RequestPurpose::DownloadFile && p.file_id == Some(file_id))
+        .any(|p| p.purpose == RequestPurpose::DownloadFile && p.file_id() == Some(file_id))
 }
 
 fn assert_matches_scan(registry: &RequestRegistry) {

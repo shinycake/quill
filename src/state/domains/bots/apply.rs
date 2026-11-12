@@ -74,7 +74,7 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetGameHighScores)
                     && let Some(pending) = pending
                     && let (Some(chat_id), Some(message_id)) =
-                        (pending.chat_id, pending.around_message_id)
+                        (pending.chat_id, pending.around_message_id())
                 {
                     // Guard: a panel the user closed while the answer was in
                     // flight must stay closed, and only the request the

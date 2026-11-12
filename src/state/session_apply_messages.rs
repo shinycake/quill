@@ -117,7 +117,7 @@ impl Session {
                 // empty (Telegram X `ListManager.processData`), or only the
                 // boundary message itself, which the identical next request
                 // would return again forever.
-                let from = pending.around_message_id.map_or(0, |id| id.0);
+                let from = pending.around_message_id().map_or(0, |id| id.0);
                 let reached_start = !messages.iter().any(|m| from == 0 || m.id.0 < from);
                 if from == 0 {
                     self.store_first_page(chat_id, &messages);
@@ -160,7 +160,7 @@ impl Session {
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::GetStoryAlbumStories) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id)
-                    && let Some(album_id) = pending.and_then(|p| p.story_album_id)
+                    && let Some(album_id) = pending.and_then(|p| p.story_album_id())
                 {
                     let list = self
                         .stories

@@ -196,7 +196,7 @@ impl Session {
             // A statistics panel waiting for this supergroup's full info
             // cannot learn whether the chat shows statistics: fail it.
             Some(RequestPurpose::GetSupergroupFullInfo) => {
-                if let Some(supergroup_id) = pending.and_then(|p| p.supergroup_id) {
+                if let Some(supergroup_id) = pending.and_then(|p| p.supergroup_id()) {
                     self.fail_statistics_waiting_for(supergroup_id);
                 }
             }

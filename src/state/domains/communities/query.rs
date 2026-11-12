@@ -13,7 +13,7 @@ impl Session {
             let RequestPurpose::Communities(purpose) = pending.purpose else {
                 return None;
             };
-            (pending.community_id == Some(community_id)).then_some((pending, purpose))
+            (pending.community_id() == Some(community_id)).then_some((pending, purpose))
         })
     }
 

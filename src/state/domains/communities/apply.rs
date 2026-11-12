@@ -13,7 +13,7 @@ fn communities_purpose(pending: Option<&PendingRequest>) -> Option<(CommunitiesP
     let RequestPurpose::Communities(purpose) = pending.purpose else {
         return None;
     };
-    Some((purpose, pending.community_id?))
+    Some((purpose, pending.community_id()?))
 }
 
 fn community_error(err: &TdError) -> CommunityError {
@@ -236,7 +236,7 @@ impl Session {
     ) {
         if let Some(pending) = pending
             && pending.purpose == RequestPurpose::GetCommunityFullInfo
-            && let Some(community_id) = pending.community_id
+            && let Some(community_id) = pending.community_id()
         {
             self.groups.community_full_infos.failed(
                 community_id,

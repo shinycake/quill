@@ -114,7 +114,7 @@ impl Session {
         }
         let download_id = pending
             .filter(|p| p.purpose == RequestPurpose::DownloadFile)
-            .and_then(|p| p.file_id)
+            .and_then(|p| p.file_id())
             .or_else(|| extra.and_then(|id| self.media.download_extras.get(&id.0).copied()));
         if let Some(file_id) = download_id {
             // A user download lands in the Failed section; an automatic

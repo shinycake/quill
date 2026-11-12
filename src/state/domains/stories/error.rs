@@ -93,7 +93,7 @@ impl Session {
             // Only a not-found or invalid answer means the story is gone; a
             // timeout, FLOOD_WAIT or 500 is asked for again after a wait.
             Some(RequestPurpose::GetStory) => {
-                if let Some(story) = pending.and_then(|p| Some((p.chat_id?.0, p.story_id?))) {
+                if let Some(story) = pending.and_then(|p| Some((p.chat_id?.0, p.story_id()?))) {
                     if matches!(err.code, 400 | 404) {
                         self.stories.story_fetch.gone(story);
                     } else {

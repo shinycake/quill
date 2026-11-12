@@ -33,15 +33,17 @@ impl<S: JsonSender> ConnectDriver<S> {
             && self.session.requests.pending.values().any(|p| {
                 p.purpose == purpose
                     && p.chat_id == chat_id
-                    && p.subject_id.as_ref() == Some(subject)
+                    && p.subject_id() == Some(subject.as_str())
             })
         {
             return Ok(None);
         }
-        let extra = self.session.request(purpose, chat_id);
-        if let Some(pending) = self.session.requests.pending_mut(extra) {
-            pending.subject_id = subject;
-        }
+        let extra = match &subject {
+            Some(subject) => self
+                .session
+                .request_for_subject_in(purpose, chat_id, subject),
+            None => self.session.request(purpose, chat_id),
+        };
         let json = build(&extra.as_extra());
         self.send_json_request(extra, &json).map(Some)
     }

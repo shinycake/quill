@@ -91,6 +91,7 @@ mod sweep_s4_links_tdlib_1;
 mod threads;
 mod topic_load;
 mod topic_window_cap;
+mod unread_open;
 mod unread_totals;
 mod update_batches;
 mod updates_sync;

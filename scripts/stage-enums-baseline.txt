@@ -5,7 +5,6 @@ bare:AccountStage::Starting 1
 bare:Answer::Waiting 1
 bare:ApplyStage::Sent 1
 bare:AskStage::InFlight 1
-bare:Audience::Loading 1
 bare:BackgroundStatus::Connecting 1
 bare:BoxStage::Opening 1
 bare:CalendarPaging::Loading 1
@@ -21,7 +20,6 @@ bare:CarrierStage::Closing 1
 bare:CarrierStage::Starting 1
 bare:CeremonySheet::Connecting 1
 bare:CeremonySheet::Probing 1
-bare:ChatEventLogFetch::Loading 1
 bare:ClipState::Opening 1
 bare:CloseProgress::Pending 1
 bare:CodeLanguageStage::Opening 1
@@ -44,7 +42,6 @@ bare:GoalNow::Waiting 1
 bare:GraphFetch::Loading 1
 bare:Health::Running 1
 bare:Kind::Applying 1
-bare:Leg::Pending 1
 bare:LinkHandlerState::Checking 1
 bare:LinkStatus::Pending 1
 bare:ListStatus::Loading 1
@@ -76,7 +73,6 @@ bare:Restore::Pending 1
 bare:RichHtmlStage::Running 1
 bare:Run::Running 1
 bare:SaveAnswer::Waiting 1
-bare:SearchPaging::Loading 1
 bare:SearchStatus::Searching 1
 bare:SendState::Sending 1
 bare:SendState::Sent 1
@@ -146,7 +142,6 @@ unkeyed:Lifecycle::Loading 1
 unkeyed:Lifecycle::Running 1
 unkeyed:Lifecycle::Waiting 1
 unkeyed:ListEdit::InFlight 1
-unkeyed:MessageReactionsState::Loading 1
 unkeyed:Neighbour::Asking 1
 unkeyed:P2pStage::Waiting 1
 unkeyed:PageLoad::Loading 1
@@ -161,7 +156,6 @@ unkeyed:RowDownload::Running 1
 unkeyed:RowState::Downloading 1
 unkeyed:SendStage::Sent 1
 unkeyed:SendToMenu::Applying 1
-unkeyed:SetChangeStage::Working 1
 unkeyed:SetState::Loading 1
 unkeyed:SizedState::Loading 1
 unkeyed:Stage::Running 1

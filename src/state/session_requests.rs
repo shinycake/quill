@@ -23,6 +23,21 @@ impl Session {
         id
     }
 
+    /// A request whose answer names nothing it is for: it records `key`
+    /// when it is registered, so the answer is read against what asked.
+    fn request_keyed(
+        &mut self,
+        purpose: RequestPurpose,
+        chat_id: Option<ChatId>,
+        key: RequestKey,
+    ) -> RequestId {
+        let id = self.request(purpose, chat_id);
+        if let Some(pending) = self.requests.pending_mut(id) {
+            pending.key = key;
+        }
+        id
+    }
+
     /// A history page asked for `chat_id` belongs to the window it has now.
     pub(crate) fn stamp_window_epoch(&mut self, id: RequestId, chat_id: Option<ChatId>) {
         let epoch = chat_id
@@ -43,11 +58,7 @@ impl Session {
         chat_id: ChatId,
         message_id: MessageId,
     ) -> RequestId {
-        let extra = self.request(purpose, Some(chat_id));
-        if let Some(pending) = self.requests.pending_mut(extra) {
-            pending.around_message_id = Some(message_id);
-        }
-        extra
+        self.request_keyed(purpose, Some(chat_id), RequestKey::Message(message_id))
     }
 
     /// Parity slice: like `request`, but also stamps the notification
@@ -58,11 +69,7 @@ impl Session {
         purpose: RequestPurpose,
         scope: NotificationSettingsScope,
     ) -> RequestId {
-        let extra = self.request(purpose, None);
-        if let Some(pending) = self.requests.pending_mut(extra) {
-            pending.scope = Some(scope);
-        }
-        extra
+        self.request_keyed(purpose, None, RequestKey::Scope(scope))
     }
 
     /// Phase 5.1: like `request`, but also stamps the forum topic id for
@@ -73,22 +80,24 @@ impl Session {
         chat_id: Option<ChatId>,
         forum_topic_id: i32,
     ) -> RequestId {
-        let id = self.request(purpose, chat_id);
-        if let Some(pending) = self.requests.pending.get_mut(&id.0) {
-            pending.forum_topic_id = Some(forum_topic_id);
-        }
-        id
+        self.request_keyed(purpose, chat_id, RequestKey::Topic(forum_topic_id))
     }
 
     /// Phase 6: like `request`, but stamps the user id for user-scoped
     /// requests (`GetUserFullInfo` from the contacts panel, `AddContact`)
     /// so id-less responses correlate (`PendingRequest::user_id`).
     pub fn request_for_user(&mut self, purpose: RequestPurpose, user_id: i64) -> RequestId {
-        let id = self.request(purpose, None);
-        if let Some(pending) = self.requests.pending.get_mut(&id.0) {
-            pending.user_id = Some(user_id);
-        }
-        id
+        self.request_keyed(purpose, None, RequestKey::User(user_id))
+    }
+
+    /// Like [`Self::request_for_user`] for a request that also names its chat.
+    pub fn request_for_user_in_chat(
+        &mut self,
+        purpose: RequestPurpose,
+        chat_id: ChatId,
+        user_id: i64,
+    ) -> RequestId {
+        self.request_keyed(purpose, Some(chat_id), RequestKey::User(user_id))
     }
 
     /// Phase 6: like `request`, but stamps the supergroup id for
@@ -99,11 +108,7 @@ impl Session {
         purpose: RequestPurpose,
         supergroup_id: i64,
     ) -> RequestId {
-        let id = self.request(purpose, None);
-        if let Some(pending) = self.requests.pending.get_mut(&id.0) {
-            pending.supergroup_id = Some(supergroup_id);
-        }
-        id
+        self.request_keyed(purpose, None, RequestKey::Supergroup(supergroup_id))
     }
 
     /// Slice (communities backend core): like `request`, but stamps the
@@ -114,11 +119,7 @@ impl Session {
         purpose: RequestPurpose,
         community_id: i64,
     ) -> RequestId {
-        let id = self.request(purpose, None);
-        if let Some(pending) = self.requests.pending.get_mut(&id.0) {
-            pending.community_id = Some(community_id);
-        }
-        id
+        self.request_keyed(purpose, None, RequestKey::Community(community_id))
     }
 
     /// Phase 9.1: like `request`, but stamps the chat id and story id for
@@ -130,11 +131,7 @@ impl Session {
         chat_id: ChatId,
         story_id: i32,
     ) -> RequestId {
-        let id = self.request(purpose, Some(chat_id));
-        if let Some(pending) = self.requests.pending.get_mut(&id.0) {
-            pending.story_id = Some(story_id);
-        }
-        id
+        self.request_keyed(purpose, Some(chat_id), RequestKey::Story(story_id))
     }
 
     /// Phase 9.7: like `request`, but stamps the sent id lists for album
@@ -149,22 +146,18 @@ impl Session {
         story_ids: Option<Vec<i32>>,
         story_album_id: Option<i32>,
     ) -> RequestId {
-        let id = self.request(purpose, Some(chat_id));
-        if let Some(pending) = self.requests.pending.get_mut(&id.0) {
-            pending.story_ids = story_ids;
-            pending.story_album_id = story_album_id;
-        }
-        id
+        let key = match (story_ids, story_album_id) {
+            (Some(ids), _) => RequestKey::StoryList(ids),
+            (None, Some(album)) => RequestKey::StoryAlbum(album),
+            (None, None) => RequestKey::None,
+        };
+        self.request_keyed(purpose, Some(chat_id), key)
     }
 
     /// Like `request`, but stamps the user ids a `setCloseFriends` sent
     /// (`PendingRequest::user_ids`); its `ok` carries none.
     pub fn request_for_user_ids(&mut self, purpose: RequestPurpose, user_ids: &[i64]) -> RequestId {
-        let id = self.request(purpose, None);
-        if let Some(pending) = self.requests.pending.get_mut(&id.0) {
-            pending.user_ids = Some(user_ids.to_vec());
-        }
-        id
+        self.request_keyed(purpose, None, RequestKey::UserIds(user_ids.to_vec()))
     }
 
     /// Like `request`, but stamps the invite link a link-scoped request
@@ -175,22 +168,28 @@ impl Session {
         chat_id: ChatId,
         invite_link: &str,
     ) -> RequestId {
-        let id = self.request(purpose, Some(chat_id));
-        if let Some(pending) = self.requests.pending.get_mut(&id.0) {
-            pending.invite_link = Some(invite_link.to_owned());
-        }
-        id
+        self.request_keyed(
+            purpose,
+            Some(chat_id),
+            RequestKey::InviteLink(invite_link.to_owned()),
+        )
     }
 
     /// Like `request`, but stamps the string id of what it acts on
     /// (`PendingRequest::subject_id`: the terms `acceptTermsOfService`
     /// accepts, the gift `sellGift` sells); its `ok` carries none.
     pub fn request_for_subject(&mut self, purpose: RequestPurpose, subject_id: &str) -> RequestId {
-        let id = self.request(purpose, None);
-        if let Some(pending) = self.requests.pending.get_mut(&id.0) {
-            pending.subject_id = Some(subject_id.to_owned());
-        }
-        id
+        self.request_keyed(purpose, None, RequestKey::Subject(subject_id.to_owned()))
+    }
+
+    /// Like [`Self::request_for_subject`] for a request that may name a chat.
+    pub fn request_for_subject_in(
+        &mut self,
+        purpose: RequestPurpose,
+        chat_id: Option<ChatId>,
+        subject_id: &str,
+    ) -> RequestId {
+        self.request_keyed(purpose, chat_id, RequestKey::Subject(subject_id.to_owned()))
     }
 
     /// Phase B1: like `request`, but stamps the secret chat id for
@@ -202,11 +201,7 @@ impl Session {
         purpose: RequestPurpose,
         secret_chat_id: i32,
     ) -> RequestId {
-        let id = self.request(purpose, None);
-        if let Some(pending) = self.requests.pending.get_mut(&id.0) {
-            pending.secret_chat_id = Some(secret_chat_id);
-        }
-        id
+        self.request_keyed(purpose, None, RequestKey::SecretChat(secret_chat_id))
     }
 
     /// Parity slice: like `request`, but stamps the folder id for
@@ -214,10 +209,6 @@ impl Session {
     /// `DeleteChatFolder`, `LoadFolderChats`) so responses correlate
     /// (`PendingRequest::folder_id`).
     pub fn request_for_folder(&mut self, purpose: RequestPurpose, folder_id: i32) -> RequestId {
-        let id = self.request(purpose, None);
-        if let Some(pending) = self.requests.pending.get_mut(&id.0) {
-            pending.folder_id = Some(folder_id);
-        }
-        id
+        self.request_keyed(purpose, None, RequestKey::Folder(folder_id))
     }
 }

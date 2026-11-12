@@ -373,7 +373,7 @@ impl Session {
             self.fail_history_newer(pending);
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetHistoryAround)
-            && let Some(message_id) = pending.and_then(|p| p.around_message_id)
+            && let Some(message_id) = pending.and_then(|p| p.around_message_id())
         {
             self.finish_history_around(pending, message_id, true, seq);
         }

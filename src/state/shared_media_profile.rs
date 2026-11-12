@@ -613,7 +613,7 @@ impl Session {
         page: ProfileAudiosPage,
         pending: Option<&PendingRequest>,
     ) {
-        let Some(user_id) = pending.and_then(|p| p.user_id) else {
+        let Some(user_id) = pending.and_then(|p| p.user_id()) else {
             return;
         };
         self.remember_files(&page.files);

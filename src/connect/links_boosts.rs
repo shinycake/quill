@@ -133,10 +133,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
             return Ok(None);
         }
-        let extra = self.session.request(purpose, Some(chat_id));
-        if let Some(pending) = self.session.requests.pending_mut(extra) {
-            pending.user_id = Some(creator);
-        }
+        let extra = self
+            .session
+            .request_for_user_in_chat(purpose, chat_id, creator);
         let payload = delete_all_revoked_chat_invite_links(extra, chat_id.0, creator);
         self.links_boosts_send(extra, &payload)
     }

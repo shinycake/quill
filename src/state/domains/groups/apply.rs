@@ -37,7 +37,7 @@ impl Session {
             } => {
                 let full_info_group = pending
                     .filter(|p| p.purpose == RequestPurpose::GetSupergroupFullInfo)
-                    .and_then(|p| p.supergroup_id);
+                    .and_then(|p| p.supergroup_id());
                 self.apply_supergroup_full_info(
                     description,
                     member_count,
@@ -178,7 +178,7 @@ impl Session {
             GroupsPayload::CommunityFullInfo { full_info } => {
                 if let Some(pending) = pending
                     && pending.purpose == RequestPurpose::GetCommunityFullInfo
-                    && let Some(community_id) = pending.community_id
+                    && let Some(community_id) = pending.community_id()
                 {
                     let infos = &mut self.groups.community_full_infos;
                     infos.answered(community_id, Some(pending.id), full_info);

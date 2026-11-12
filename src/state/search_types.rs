@@ -119,11 +119,6 @@ pub enum Leg {
     Idle,
     /// This search does not make the request.
     Skipped,
-    /// The query is typed and its request is not sent yet (the typing
-    /// debounce holds it). Leaves when the request goes out
-    /// ([`SearchState::leg_sent`]), the debounce is cancelled, or the
-    /// results are reset.
-    Queued,
     /// Asked as `request`; only its answer or failure leaves the stage.
     Pending {
         request: RequestId,
@@ -149,10 +144,7 @@ impl Leg {
 
     /// Asked, no answer yet.
     fn waiting(self) -> bool {
-        matches!(
-            self,
-            Self::Queued | Self::Pending { .. } | Self::Paying { .. }
-        )
+        matches!(self, Self::Pending { .. } | Self::Paying { .. })
     }
 
     /// The request this leg waits for.
@@ -254,15 +246,10 @@ impl SearchState {
         self.typed.cancel();
     }
 
-    /// The typed query's quiet window is cancelled: what waited for it
-    /// is not asked after all.
+    /// The typed query's quiet window is cancelled: it is not asked after
+    /// all.
     pub fn cancel_typed(&mut self) {
         self.typed.cancel();
-        for leg in [&mut self.chats, &mut self.messages_leg, &mut self.public] {
-            if *leg == Leg::Queued {
-                *leg = Leg::Idle;
-            }
-        }
     }
 
     /// The request for `purpose` went out as `request`: the leg it belongs
@@ -336,7 +323,9 @@ impl SearchState {
             return SearchStatus::Closed;
         }
         let legs = [self.chats, self.messages_leg, self.public];
-        if legs.iter().any(|leg| leg.waiting()) {
+        // A typed query waits out its quiet window (`typed`) before its
+        // requests go out: the panel already searches.
+        if self.typed.armed().is_some() || legs.iter().any(|leg| leg.waiting()) {
             return SearchStatus::Searching;
         }
         let any = !self.chat_ids.is_empty()
@@ -362,7 +351,6 @@ impl SearchState {
         self.query.clear();
         self.bump_epoch();
         self.clear_results();
-        self.chats = Leg::Queued;
         self.messages_leg = Leg::Skipped;
         self.public = Leg::Skipped;
     }
@@ -373,7 +361,6 @@ impl SearchState {
         self.surface = SearchSurface::Query;
         self.bump_epoch();
         self.clear_results();
-        self.mark_all_queued();
     }
 
     /// The filter bar changed: what was asked under the old tab is no
@@ -386,18 +373,11 @@ impl SearchState {
         }
     }
 
-    fn mark_all_queued(&mut self) {
-        self.chats = Leg::Queued;
-        self.messages_leg = Leg::Queued;
-        self.public = Leg::Queued;
-    }
-
     pub fn begin_query(&mut self, query: &str) {
         self.surface = SearchSurface::Query;
         self.query = query.to_string();
         self.bump_epoch();
         self.clear_results();
-        self.mark_all_queued();
     }
 
     pub(crate) fn clear_results(&mut self) {

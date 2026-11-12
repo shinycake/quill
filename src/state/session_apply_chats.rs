@@ -445,7 +445,7 @@ impl Session {
         // request's `supergroup_id`.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSupergroupFullInfo)
             && let Some(pending) = pending
-            && let Some(supergroup_id) = pending.supergroup_id
+            && let Some(supergroup_id) = pending.supergroup_id()
         {
             self.groups.supergroup_full_infos.insert(
                 supergroup_id,
@@ -591,7 +591,7 @@ impl Session {
         // delete-confirm dialog (correlated via folder_id). Runs
         // before the search branch below consumes `chat_ids`.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatFolderChatsToLeave)
-            && let Some(folder_id) = pending.and_then(|p| p.folder_id)
+            && let Some(folder_id) = pending.and_then(|p| p.folder_id())
         {
             self.chat_list
                 .folder_chats_to_leave
@@ -604,7 +604,7 @@ impl Session {
         }
         // `getChatFolderNewChats` answer: the "N new chats" bar.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatFolderNewChats)
-            && let Some(folder_id) = pending.and_then(|p| p.folder_id)
+            && let Some(folder_id) = pending.and_then(|p| p.folder_id())
         {
             // Asked now that it answered: a request that never left is
             // asked again, one that answered waits out the update period.
@@ -620,7 +620,7 @@ impl Session {
             return;
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatsForFolderInviteLink)
-            && let Some(folder_id) = pending.and_then(|p| p.folder_id)
+            && let Some(folder_id) = pending.and_then(|p| p.folder_id())
         {
             self.chat_list
                 .folder_shares
@@ -652,7 +652,7 @@ impl Session {
         // answer — the scope is correlated via `pending.scope`
         // (the `chats` response carries no scope field).
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatNotificationSettingsExceptions)
-            && let Some(scope) = pending.and_then(|p| p.scope)
+            && let Some(scope) = pending.and_then(|p| p.scope())
         {
             // Only the ask that waits for it takes the list: an answer for a
             // list dropped as stale meanwhile is not the list now wanted.

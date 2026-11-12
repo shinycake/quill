@@ -198,7 +198,7 @@ impl Session {
             self.remember_busy_declined(id);
         } else if let Some(pending) = pending
             && let RequestPurpose::Calls(CallsPurpose::CreateCall { is_video }) = pending.purpose
-            && let Some(user_id) = pending.user_id
+            && let Some(user_id) = pending.user_id()
         {
             self.calls.active_call = Some(ActiveCall {
                 id,

@@ -395,10 +395,12 @@ fn late_answer_for_an_earlier_message_leaves_the_loading_menu_alone() {
         &first.0.to_string(),
         &format!("{THUMB},{STAR}"),
     ));
+    // Each message has its own entry (a menu per window): the answer of
+    // message 50 fills 50 and leaves the loading entry of 51 alone.
     let state = &h.driver.session.stickers.message_reaction_options;
     assert!(state.is_loading_for(ChatId(7), MessageId(51)));
     assert!(
-        !h.driver
+        h.driver
             .session
             .paid_reaction_offered(ChatId(7), MessageId(50))
     );
@@ -429,13 +431,20 @@ fn late_answers_after_b_answered_keep_bs_strip() {
             .expect("request");
         h.ingest(&reactions_answer(&second.0.to_string(), THUMB));
         h.ingest(&reactions_answer(&first.0.to_string(), &late));
+        // B's strip stays; A's own entry takes A's answer, whichever came
+        // first.
         let state = &h.driver.session.stickers.message_reaction_options;
         assert!(state.ready_for(ChatId(7), MessageId(51)).is_some());
-        assert!(!state.is_unavailable_for(ChatId(7), MessageId(50)));
-        assert!(
-            !h.driver
+        assert_eq!(
+            state.ready_for(ChatId(7), MessageId(50)).is_some(),
+            !late.is_empty(),
+            "an empty answer leaves no strip for A"
+        );
+        assert_eq!(
+            h.driver
                 .session
-                .paid_reaction_offered(ChatId(7), MessageId(50))
+                .paid_reaction_offered(ChatId(7), MessageId(50)),
+            late.contains("reactionTypePaid")
         );
     }
 }
