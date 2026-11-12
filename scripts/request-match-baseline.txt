@@ -101,7 +101,6 @@ unmatched:QuillApp::refresh_storage_usage 1
 unmatched:Session::apply_auth_payload 1
 unmatched:Session::apply_chat_list_payload 1
 unmatched:Session::apply_quick_replies_ok 1
-unmatched:Session::apply_ton_wallet 1
 unmatched:SettingsState::apply_blocked_page 2
 unsent:ConnectDriver::ask_countries 1
 unsent:ConnectDriver::delete_account 1

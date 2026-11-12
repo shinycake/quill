@@ -464,7 +464,7 @@ fn install_main_window_tray(
                     quill::tray::tray_registering(),
                     std::time::Instant::now(),
                 );
-                if startup_step == quill::tray_reveal::StartupStep::Reveal {
+                if startup_step == quill::tray_reveal::StartupOutcome::Reveal {
                     let _ = tray_window.update(cx, |_, window, cx| {
                         cx.activate(true);
                         window.activate_window();
@@ -501,7 +501,7 @@ fn install_main_window_tray(
                 }
                 Some(ui::PassEnd {
                     work_left: false,
-                    due: (startup_step == quill::tray_reveal::StartupStep::Waiting)
+                    due: (startup_step == quill::tray_reveal::StartupOutcome::Waiting)
                         .then_some(quill::tray_reveal::LOOK_AGAIN),
                 })
             })

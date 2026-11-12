@@ -10220,3 +10220,39 @@ add and closed link save), `composer_sends_tests` (an ack never takes a
 neighbour's clear), `chat_window::asker_tests` (gif ask settles; two
 windows keep their own link text), `forum_extras::tests` (both answer
 orders), `deep_link_routes_tests` (seek stays with its account).
+
+### Sweep fixes (r4-06)
+
+| Ids | What changed |
+| --- | --- |
+| g-073, g-075, g-074, g-077, g-079, g-072, g-080, g-078, g-085, g-071, g-068, g-084, g-083, g-396, g-390, g-070, g-393 | Enums that are a derived view or a fact, not a stage, say so by name or stop looking like work in flight: `SearchStatus` is `SearchStateView`, `StoryCardState` is `StoryCardView`, `ReplyState` is `ReplyTargetView`, `ClipState` is `ClipView`, `PaneMode` is `PaneView`, `MenuFile` is `MenuFileView`, `StartupStep` is `StartupOutcome`; `SendState` is `Delivered` / `Unconfirmed` / `Failed`, `ShutdownPhase::Running` is `Active`, `WorkerLife::Running` is `Alive`, `PlayHead::Waiting` is `Unstarted`, `Stage::Opening` is `Taken` (the draw worker holds the clip; its `WorkerEnd` fails it), `ThreadStatus::Starting` is `ChatOpen`, `SuggestedPostState::Pending` is `Proposed`, `TonConnectRequestState::Pending` is `Unanswered`, `DebugConfirm::Asking` is `Open`. The two `allow` lines for `MenuFile` and `StartupStep` are gone. |
+| g-079, g-076 | `StickerSetViewStage::Loading { request }`: the view is made after its request exists (`view_sticker_set`, `fetch_attached_sticker_sets`), `accept_sticker_set_view` and `fail_sticker_set_view` act on that request only, and the error path hands them `pending.id`. `SetFiles` is gone: `download_file` already skips a file local, in flight or stalled, so the upkeep asks again without a flag (test `a_refused_preview_download_is_asked_again_for_the_set_view`). |
+| g-081, g-082, 10-003 | `StoryPageOpState` is `Checking`/`Sending`/`Succeeded`/`Failed { request, .. }`; `StoryPageOp` has no `request` field beside its state. The cap no longer drops a call in flight (finished ones go first; a list twice the cap sheds the oldest). |
+| g-086 | `AccentRead::Reading { deadline }`: a read still out past twice the query limit is taken for lost and another may start. |
+| g-062 | `profile_audio_ids` is `ProfileAudioMark::{Checking { request }, Saved, NotSaved}`. A check settles only by its own request, a failure other than 404 and a request gone from the table both ask again. Test `a_check_is_settled_by_its_own_request_and_asked_again_when_it_fails_or_is_lost`. |
+| g-064 | The recommended-chats fetch is begun and `sent` together after the send, answered and failed by its request. |
+| g-060, g-061 | `ChangeNumber::finish` returns the send/resend still out and the caller takes those requests by id, instead of `take_purpose`. |
+| g-059 | `CallsState::participant_mutes` (`ParticipantMuteToggles`): a mute toggle of a participant is on its way while its request is in the session's table. |
+| g-065, 09-002 | Network usage is answered and failed by its request (begun and `sent`); the reset's `ok` leaves the refetch alone. Test `a_reset_leaves_only_the_fetch_asked_after_it`. |
+| g-066, g-388 | `Fetch::pushed` is the value of a server push (an `updateSavedMessagesTags`, the demo session's auto-delete), whatever the stage; `succeed` stays for answers that name no request and is not called from these. |
+| g-067, g-063 | The GIF panel's saved list is asked with `saved_asked(request)` after the send (a refused send changes nothing), answered by `saved_answered(request, ..)` (or the answer an update outdated), and the search page by `search_answered(request)`. Test `a_saved_answer_nobody_waits_for_is_dropped`. |
+| g-398, g-397 | The agent bridge owns its wake task (`_wake`) and the read commands' tasks (`Reads`, removed when the read answers); neither is detached. |
+| g-394, 12-005 | `DebugConfirm::Open { logs_on }` is the question on screen. |
+| 09-001 | `DateAsks`: the `getChatMessageByDate` each window waits for; a newer pick of the window replaces its ask, so the older answer arriving later changes nothing. Test `the_older_date_answer_never_wins_over_the_newer_pick` (both orders). |
+| 09-003 | The registry notes the highest failure it forgot (`forgotten_through`); a request that is gone, has no failure on record and is at or below it reads as failed (`REQUEST_NOT_CONFIRMED`), not done. |
+| 09-004 | `StickerSelection` has no `set_id` beside its stage: `StickerSetStage::Selected { set_id }` is the new "selected, not asked". |
+| 09-005 | `AttachedStickers` (dead twin of `AttachedSets`) is deleted. |
+| 10-001 | `webm_ffi::api()` remembers a failed lookup for 30 s (`LoadSlot`). |
+| 10-002 | A topic's older page is `OlderEnd::Asking(request)` (`topic_older_asked` after the send); `forget_topic_pages` reopens the end; only the page waited for fails it. The loading read uses the stage, not the request scan. Test `only_the_older_page_the_topic_waits_for_fails_it`. |
+| 10-004 | `WebApps::forget_answers` empties every answer slot in one place. |
+| 12-001 | The apply shortcut sends nothing while its rewrite is out (`ai_apply_in_flight`: its request is in the table). |
+| 12-002 | `AiComposeView::Card { select_on_arrival }` holds the style waiting to be selected; leaving the card or closing the box drops it. |
+| 12-003 | `TonWalletState` keeps `explorer`, `own` and `rates` as `Fetch` values with the data inside; `ok` of `loadTonWalletState` with no update fails the fetch so it is asked again. |
+| 12-004 | `EventLogPage::{poll, typed, autoload}` are `EventLogPoll`, `EventLogTyped` (ends when the pause fires) and `EventLogAutoload`. |
+
+Left: the two `matches_generation` calls in `apply_found_chat_messages` and the calendar `generation` in `session_date_jump.rs` (g-057, g-058): the counter is `ChatSearchState::generation` / `HistoryCalendar::generation`, converted by r4-03 (04-001, 04-002, 08-002), which owns those types and removes `matches_generation`. The `allow` lines of `Launch`, `RunStage`, `CloseFriendsStage::Awaiting`, `Stage::Decoding` and the two owned-timers lines are unchanged: each names its owner and exit.
+
+Tests: `state::profile_music`, `state::session_date_jump`, `state::submit`,
+`state::tests::{gif_panel_stages, topic_load}`, `connect::tests::{privacy_data,
+sweep_r2_13}`, `ui::ai_compose::dialog_tests`, `ui::agent_driver_tests`
+(`read_tree` checks the read left the bridge), `sticker_playback::webm_ffi`.
