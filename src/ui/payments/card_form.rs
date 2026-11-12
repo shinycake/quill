@@ -445,8 +445,8 @@ impl QuillApp {
         // runs after that Change, so a press that changed nothing (at the
         // start or end of the text) leaves no snapshot for later typing,
         // even for a key already queued. The clear runs inside that second
-        // defer and only if the field still holds this press: a Change that
-        // took the snapshot, or a newer press, has replaced the number.
+        // defer and only if the field still holds this press (its cycle): a
+        // Change that took the snapshot, or a newer press, has replaced it.
         let Some(input) = self.card_form_mut().and_then(|form| form.input_mut(field)) else {
             return;
         };

@@ -289,6 +289,12 @@ impl QuillApp {
         if let Some(slot) = self.peer_qr.gift_art.tiles.get(&key) {
             return ready(Some(slot)).map(|(image, _)| image);
         }
+        // A new size is a resized layout: the tiles of the old size are not
+        // drawn again, so they go (and with them any job still making them).
+        self.peer_qr
+            .gift_art
+            .tiles
+            .retain(|tile, _| tile.width == width && tile.height == height);
         let job = self.run_off_ui_held(
             move || render(tile_pixels(center, edge, width, height)),
             move |this, image, cx| {
@@ -307,6 +313,14 @@ impl QuillApp {
             .tiles
             .insert(key, Slot::Loading { _job: job });
         None
+    }
+}
+
+#[cfg(test)]
+impl GiftArt {
+    /// How many gradient tiles are held (made or being made).
+    pub(super) fn tile_count(&self) -> usize {
+        self.tiles.len()
     }
 }
 

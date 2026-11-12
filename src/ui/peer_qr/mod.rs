@@ -272,13 +272,19 @@ impl Export {
     }
 }
 
+#[cfg(test)]
+impl PeerQrUi {
+    /// How many gift gradient tiles are held.
+    fn gift_art_tiles(&self) -> usize {
+        self.gift_art.tile_count()
+    }
+}
+
 /// The QR box's part of the app.
 pub(crate) struct PeerQrUi {
     pub(super) open: Option<Box<OpenQr>>,
     art: art::Art,
     gift_art: gift_art::GiftArt,
-    /// The last box's id; each box gets the next one.
-    last_box: u64,
     /// A shared card waiting for its chat's composer.
     pub(super) pending_attach: Option<(ChatId, PathBuf)>,
 }
@@ -305,7 +311,6 @@ impl PeerQrUi {
             open: None,
             art: art::Art::default(),
             gift_art: gift_art::GiftArt::default(),
-            last_box: 0,
             pending_attach: None,
         }
     }
@@ -343,10 +348,9 @@ impl QuillApp {
             QrSubject::Custom(_) => None,
         };
         self.drop_shared_card(cx);
-        self.peer_qr.last_box += 1;
         let now = Instant::now();
         self.peer_qr.open = Some(Box::new(OpenQr {
-            state: PeerQrBox::new(subject, self.peer_qr.last_box),
+            state: PeerQrBox::new(subject),
             opened: now,
             motion: PanelMotion::IDLE,
             toast: ToastStage::Hidden,

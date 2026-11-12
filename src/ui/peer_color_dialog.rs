@@ -91,6 +91,9 @@ pub(crate) struct PeerColorDialog {
     pub(super) tab: PeerColorTab,
     pub(super) draft: PeerColorDraft,
     pub(super) stage: ApplyStage,
+    /// How many icons and wearable gifts were listed when their pictures
+    /// were last asked for: a longer list asks again (`drain_peer_color`).
+    listed: (usize, usize),
 }
 
 impl QuillApp {
@@ -148,6 +151,7 @@ impl QuillApp {
             tab,
             draft,
             stage: ApplyStage::Editing,
+            listed: (0, 0),
         });
         self.open_box(DialogKind::PeerColor);
         cx.notify();
@@ -161,7 +165,20 @@ impl QuillApp {
         let Some(dialog) = self.screen.dialogs.peer_color_dialog.as_mut() else {
             return false;
         };
-        if !dialog.stage.settle(&mut live.driver.session.acks) {
+        // The lists the box draws arrive after it opens: their pictures are
+        // asked for when a list grows, not by each build.
+        let session = &live.driver.session;
+        let listed = (
+            session.users_state.background_emoji_icons.items().len(),
+            session.users_state.wearable_gifts.items().len(),
+        );
+        let grown = std::mem::replace(&mut dialog.listed, listed) != listed;
+        if grown {
+            live.driver.download_background_emoji_icons();
+            live.driver.download_wearable_gift_stickers();
+        }
+        let settled = dialog.stage.settle(&mut live.driver.session.acks);
+        if !settled && !grown {
             return false;
         }
         cx.notify();
@@ -175,9 +192,13 @@ impl QuillApp {
             .take()
             .map(|d| d.stage.in_flight().to_vec())
             .unwrap_or_default();
-        if let Some(live) = self.live.as_mut() {
+        let session = match self.live.as_mut() {
+            Some(live) => Some(&mut live.driver.session),
+            None => self.demo_session.as_deref_mut(),
+        };
+        if let Some(session) = session {
             for id in waiting {
-                live.driver.session.acks.forget(id);
+                session.acks.forget(id);
             }
         }
         cx.notify();
@@ -284,10 +305,6 @@ impl QuillApp {
                 .title(crate::ui::shell::dialog_title(tr(
                     keys::SETTINGS_COLOR_TITLE,
                 )));
-            if let Some(live) = this.live.as_mut() {
-                live.driver.download_background_emoji_icons();
-                live.driver.download_wearable_gift_stickers();
-            }
             let Some(body) = this.peer_color_body(cx) else {
                 return dialog.on_close(on_close);
             };

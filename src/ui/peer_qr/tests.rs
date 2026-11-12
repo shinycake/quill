@@ -782,3 +782,26 @@ fn a_newer_toast_is_not_hidden_by_the_older_toasts_timer(cx: &mut TestAppContext
     vcx.run_until_parked();
     assert_eq!(toast(&app, vcx), None, "the toast's own timer hides it");
 }
+
+/// Tiles are made for the layout on screen: a resize replaces them instead
+/// of leaving a set per size until the box closes.
+#[gpui_kit::test]
+fn a_resize_replaces_the_gift_tiles(cx: &mut TestAppContext) {
+    let (app, _, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let (center, edge) = (Rgb::hex(0xFF_0000), Rgb::hex(0x00_00FF));
+    let count = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| app.peer_qr.gift_art_tiles())
+    };
+    app.update(vcx, |app, cx| {
+        for _ in 0..2 {
+            let _ = app.qr_gift_tile_image(center, edge, 40, 50, cx);
+        }
+        let _ = app.qr_gift_tile_image(edge, center, 40, 50, cx);
+    });
+    assert_eq!(count(&app, vcx), 2, "two gifts at one size");
+    app.update(vcx, |app, cx| {
+        let _ = app.qr_gift_tile_image(center, edge, 60, 70, cx);
+    });
+    assert_eq!(count(&app, vcx), 1, "the old size's tiles went");
+}

@@ -24,7 +24,7 @@ fn answered(id: u64, answer: Answer) -> RequestAcks {
 }
 
 #[test]
-fn applying_ends_sent_only_when_every_request_was_accepted() {
+fn applying_ends_applied_only_when_every_request_was_accepted() {
     let mut stage = applying(&[1, 2]);
     assert!(stage.settle(&mut answered(1, Answer::Done)));
     assert!(
@@ -56,4 +56,34 @@ fn another_requests_answer_changes_nothing() {
     assert_eq!(stage, applying(&[1]));
     let mut editing = ApplyStage::Editing;
     assert!(!editing.settle(&mut answered(1, Answer::Done)));
+}
+
+/// An account switch drops the box with its Apply still waiting: the answers
+/// it waited for are forgotten with it, not left in the acks for good.
+#[gpui_kit::test]
+fn leaving_the_account_forgets_the_applys_waiting_answers(cx: &mut gpui_kit::TestAppContext) {
+    let (app, mut vcx) =
+        crate::ui::notifications::viewer_progress_tests::open_app(cx, "ready-privacy");
+    app.update(&mut vcx, |app, cx| {
+        app.open_peer_color_dialog(crate::ui::peer_color_dialog::PeerColorTab::Name, cx);
+        if let Some(dialog) = app.dialogs.peer_color_dialog.as_mut() {
+            dialog.stage = applying(&[7]);
+        }
+        if let Some(session) = app.demo_session.as_mut() {
+            session.acks.expect(RequestId(7));
+            session.acks.settle(RequestId(7), Answer::Done);
+        }
+    });
+    assert!(app.read_with(&vcx, |app, _| app.dialogs.peer_color_dialog.is_some()));
+    app.update_in(&mut vcx, |app, window, cx| app.farewell_screen(window, cx));
+    app.read_with(&vcx, |app, _| {
+        assert!(app.dialogs.peer_color_dialog.is_none());
+    });
+    app.update(&mut vcx, |app, _| {
+        let left = app
+            .demo_session
+            .as_mut()
+            .and_then(|session| session.acks.take(RequestId(7)));
+        assert!(left.is_none(), "the settled answer was forgotten");
+    });
 }

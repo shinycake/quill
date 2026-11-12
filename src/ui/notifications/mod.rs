@@ -86,9 +86,10 @@ pub(super) struct PolledRedraw {
     owed: Owed,
 }
 
-/// The redraws owed, three slots with one writer each: a full redraw
-/// subsumes the other two (`clear`), and a chat-list or conversation one is
-/// settled alone (`take_list`, `take_conversation`).
+/// The redraws owed, three slots: `record` adds to them by what was
+/// ingested, a full redraw subsumes the other two (`clear`), and a
+/// chat-list or conversation one is settled alone (`take_list`,
+/// `take_conversation`).
 #[derive(Debug)]
 struct Owed {
     /// The most urgent full redraw not drawn yet (`Nothing`, `Later` or
@@ -657,7 +658,7 @@ mod ringtone_tests;
 mod spawn_call_notification;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
-pub(super) mod viewer_progress_tests;
+pub(in crate::ui) mod viewer_progress_tests;
 
 #[cfg(test)]
 mod tests {
