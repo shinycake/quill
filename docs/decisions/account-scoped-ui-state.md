@@ -10220,3 +10220,12 @@ add and closed link save), `composer_sends_tests` (an ack never takes a
 neighbour's clear), `chat_window::asker_tests` (gif ask settles; two
 windows keep their own link text), `forum_extras::tests` (both answer
 orders), `deep_link_routes_tests` (seek stays with its account).
+
+### Sweep fixes (r4-04, `main.rs` part)
+
+`src/main.rs` is a no-edit hotspot, so this part is a branch of its own.
+
+| Where | Decision |
+|---|---|
+| g-476, g-477 | The screenshot demo's driver task is held by the `DemoDriver` global; its autoscroll task by the driver. No detach. The base line `detached:run_screenshot_demo 2` leaves `scripts/owned-timers-baseline.txt`. |
+| `main.rs` | The wake subscription, the first window open, the macOS menu install and the tray/chrome loop are held in globals (`WakeWatch`, `OpeningMainWindow`, `InstallingMenus`, `ChromeLoop`), like `DemoDriver`. |
