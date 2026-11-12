@@ -494,12 +494,14 @@ impl ComposerSends {
         }
     }
 
-    /// The pending clear for the ack of `message` in `account`, with the
-    /// slot it waits in: the send that made the message (the ack names the
+    /// The clear for the ack of `message` in `account`, with the slot it
+    /// waits in: the send that made the message (the ack names the
     /// message's own topic, which can differ from the composer's slot, as
-    /// for a reply from a supergroup's main composer), else the clear of
-    /// the slot the ack names (`ack_slot`). Never another send's: a send
-    /// that set none (a menu command) cannot clear a neighbour's draft.
+    /// for a reply from a supergroup's main composer). Only the first ack
+    /// of a send returns its clear; the entry stays until the send's last
+    /// message has acked, so a later ack of an album finds it by id. A
+    /// send that named no request (a menu command) is found by the slot
+    /// the ack names, once. Never another send's.
     pub(super) fn take_draft_clear(
         &mut self,
         account: &AccountKey,
@@ -507,19 +509,71 @@ impl ComposerSends {
         ack_slot: DraftKey,
     ) -> Option<(DraftKey, DraftClear)> {
         let sends = self.accounts.get_mut(account)?;
-        let slot = sends
+        let by_id = sends
             .draft_clears
             .iter()
-            .find_map(|(slot, clear)| clear.made(message).then_some(*slot))
-            .or_else(|| {
-                sends
-                    .draft_clears
-                    .contains_key(&ack_slot)
-                    .then_some(ack_slot)
-            });
-        let taken = slot.and_then(|slot| sends.draft_clears.remove(&slot).map(|c| (slot, c)));
+            .find_map(|(slot, clear)| clear.made(message).then_some(*slot));
+        let taken = match by_id {
+            Some(slot) => {
+                let clear = sends.draft_clears.get_mut(&slot);
+                let taken = clear.map(|clear| {
+                    let before = clear.clone();
+                    (clear.ack(message), before, clear.is_settled())
+                });
+                taken.and_then(|(clears, before, settled)| {
+                    if settled {
+                        sends.draft_clears.remove(&slot);
+                    }
+                    clears.then_some((slot, before))
+                })
+            }
+            None => sends
+                .draft_clears
+                .get(&ack_slot)
+                .is_some_and(DraftClear::is_unasked)
+                .then(|| sends.draft_clears.remove(&ack_slot))
+                .flatten()
+                .map(|clear| (ack_slot, clear)),
+        };
         self.drop_if_empty(account);
         taken
+    }
+
+    /// The send of `message` failed: its draft stays, and no later ack of
+    /// the same send (the rest of an album) clears it.
+    pub(super) fn fail_draft_clear(
+        &mut self,
+        account: &AccountKey,
+        message: MessageId,
+        ack_slot: DraftKey,
+    ) {
+        let Some(sends) = self.accounts.get_mut(account) else {
+            return;
+        };
+        let by_id = sends
+            .draft_clears
+            .iter()
+            .find_map(|(slot, clear)| clear.made(message).then_some(*slot));
+        match by_id {
+            Some(slot) => {
+                if let Some(clear) = sends.draft_clears.get_mut(&slot) {
+                    clear.fail(message);
+                    if clear.is_settled() {
+                        sends.draft_clears.remove(&slot);
+                    }
+                }
+            }
+            None => {
+                if sends
+                    .draft_clears
+                    .get(&ack_slot)
+                    .is_some_and(DraftClear::is_unasked)
+                {
+                    sends.draft_clears.remove(&ack_slot);
+                }
+            }
+        }
+        self.drop_if_empty(account);
     }
 
     /// Whether `slot` has a send waiting for its ack to clear the draft.

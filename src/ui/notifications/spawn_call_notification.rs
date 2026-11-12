@@ -431,7 +431,7 @@ impl QuillApp {
         // A send that failed clears nothing: its entry goes, the draft stays,
         // and the ack of a later send of the slot finds none to take.
         for ack in failed {
-            let _ = self.composer_sends.take_draft_clear(
+            self.composer_sends.fail_draft_clear(
                 &account,
                 ack.old_message_id,
                 ack.slot.key(ack.chat_id.0),

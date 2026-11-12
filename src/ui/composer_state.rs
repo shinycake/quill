@@ -19,29 +19,46 @@ pub(super) struct DraftClear {
     /// reply from a supergroup's main composer), so this is how it finds
     /// the clear of the send it ends.
     messages: Vec<SentMessage>,
+    stage: ClearStage,
 }
 
-/// One message of a send, from the request to its temporary id.
+/// Whether the clear is still to happen. A send of several messages (an
+/// album) keeps its entry until its last message has acked or failed, so a
+/// later ack of the same send finds it by id and never another send's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ClearStage {
+    Waiting,
+    /// One message acked (the draft was cleared then) or failed (the draft
+    /// stays): the rest of the send's acks clear nothing.
+    Spent,
+}
+
+/// One message of a send: asked for under a request, then made by it.
+/// A request that sends an album is answered once per message.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SentMessage {
     Asked(RequestId),
-    Made(MessageId),
+    Made {
+        request: RequestId,
+        message: MessageId,
+    },
 }
 
 impl DraftClear {
     pub(super) fn whole_composer(chat_id: ChatId) -> Self {
-        Self {
-            chat_id,
-            sent: None,
-            messages: Vec::new(),
-        }
+        Self::new(chat_id, None)
     }
 
     pub(super) fn of_text(chat_id: ChatId, sent: &str) -> Self {
+        Self::new(chat_id, Some(sent.to_string()))
+    }
+
+    fn new(chat_id: ChatId, sent: Option<String>) -> Self {
         Self {
             chat_id,
-            sent: Some(sent.to_string()),
+            sent,
             messages: Vec::new(),
+            stage: ClearStage::Waiting,
         }
     }
 
@@ -52,18 +69,66 @@ impl DraftClear {
         self
     }
 
-    /// `request` was answered with the temporary message `made`.
+    /// `request` was answered with the temporary message `made`: its first
+    /// answer replaces the ask, a later one (the next message of an album)
+    /// adds a message beside the ones made.
     pub(super) fn answered(&mut self, request: RequestId, made: MessageId) {
-        for message in &mut self.messages {
-            if *message == SentMessage::Asked(request) {
-                *message = SentMessage::Made(made);
-            }
+        let new = SentMessage::Made {
+            request,
+            message: made,
+        };
+        if let Some(asked) = self
+            .messages
+            .iter_mut()
+            .find(|m| **m == SentMessage::Asked(request))
+        {
+            *asked = new;
+        } else if self
+            .messages
+            .iter()
+            .any(|m| matches!(m, SentMessage::Made { request: r, .. } if *r == request))
+            && !self.messages.contains(&new)
+        {
+            self.messages.push(new);
         }
     }
 
     /// `message` is one the send made.
     pub(super) fn made(&self, message: MessageId) -> bool {
-        self.messages.contains(&SentMessage::Made(message))
+        self.messages
+            .iter()
+            .any(|m| matches!(m, SentMessage::Made { message: id, .. } if *id == message))
+    }
+
+    /// Whether the send named no request: only a slot match can find it.
+    pub(super) fn is_unasked(&self) -> bool {
+        self.messages.is_empty()
+    }
+
+    /// `message` acked. True for the ack that clears the draft: the first
+    /// of the send. The message leaves the send either way.
+    pub(super) fn ack(&mut self, message: MessageId) -> bool {
+        let clears = self.stage == ClearStage::Waiting;
+        self.stage = ClearStage::Spent;
+        self.settle(message);
+        clears
+    }
+
+    /// `message` failed: the draft stays, and no later ack of the send
+    /// clears it.
+    pub(super) fn fail(&mut self, message: MessageId) {
+        self.stage = ClearStage::Spent;
+        self.settle(message);
+    }
+
+    fn settle(&mut self, message: MessageId) {
+        self.messages
+            .retain(|m| !matches!(m, SentMessage::Made { message: id, .. } if *id == message));
+    }
+
+    /// Every message of the send has acked or failed.
+    pub(super) fn is_settled(&self) -> bool {
+        self.stage == ClearStage::Spent && self.messages.is_empty()
     }
 
     /// Whether the ack for `chat_id` may clear its draft, given the

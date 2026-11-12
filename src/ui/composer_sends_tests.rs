@@ -977,3 +977,83 @@ fn a_reply_from_the_main_composer_is_acked_under_another_topic() {
         None
     );
 }
+
+/// Sweep r3-08 round 3 (14-004): an album is one request answered once
+/// per message. A text send pending in the same slot keeps its clear while
+/// the album's later items ack or fail, whichever order they arrive in.
+fn album_and_text_in_one_slot() -> (
+    crate::ui::composer_sends::ComposerSends,
+    AccountKey,
+    SendSlot,
+) {
+    use crate::ui::composer_state::DraftClear;
+    let chat = ChatId(7);
+    let main = forum_slot(1);
+    let account = main.account.clone();
+    let mut sends = crate::ui::composer_sends::ComposerSends::default();
+    // The album's clear, then the text sent from the same slot (which
+    // replaces it in the slot) in another topic's slot for the album.
+    let album_slot = forum_slot(2);
+    sends.set_draft_clear(
+        &album_slot,
+        Some(DraftClear::whole_composer(chat).asked([RequestId(1)])),
+    );
+    sends.set_draft_clear(
+        &main,
+        Some(DraftClear::of_text(chat, "text").asked([RequestId(2)])),
+    );
+    sends.note_send_answer(&account, RequestId(1), MessageId(-1));
+    sends.note_send_answer(&account, RequestId(1), MessageId(-2));
+    sends.note_send_answer(&account, RequestId(2), MessageId(-3));
+    (sends, account, main)
+}
+
+#[test]
+fn a_later_album_ack_never_takes_a_neighbours_clear() {
+    let (mut sends, account, main) = album_and_text_in_one_slot();
+    let album = forum_slot(2);
+    // The first item clears the album's draft, once.
+    assert!(
+        sends
+            .take_draft_clear(&account, MessageId(-1), main.draft)
+            .is_some()
+    );
+    // The second finds the spent entry by id: nothing to clear, and the
+    // text's clear (the ack names its slot) stays.
+    assert_eq!(
+        sends.take_draft_clear(&account, MessageId(-2), main.draft),
+        None
+    );
+    assert!(sends.has_draft_clear(&main));
+    assert!(!sends.has_draft_clear(&album), "the album's entry is gone");
+    let text = sends.take_draft_clear(&account, MessageId(-3), main.draft);
+    assert_eq!(
+        text.map(|(slot, clear)| (slot, clear.sent)),
+        Some((main.draft, Some("text".to_string())))
+    );
+}
+
+#[test]
+fn a_later_album_failure_never_drops_a_neighbours_clear() {
+    let (mut sends, account, main) = album_and_text_in_one_slot();
+    assert!(
+        sends
+            .take_draft_clear(&account, MessageId(-1), main.draft)
+            .is_some()
+    );
+    sends.fail_draft_clear(&account, MessageId(-2), main.draft);
+    assert!(sends.has_draft_clear(&main), "the text's clear survives");
+    assert!(
+        sends
+            .take_draft_clear(&account, MessageId(-3), main.draft)
+            .is_some()
+    );
+    // A failed first item: the draft stays, the later ack clears nothing.
+    let (mut sends, account, main) = album_and_text_in_one_slot();
+    sends.fail_draft_clear(&account, MessageId(-1), main.draft);
+    assert_eq!(
+        sends.take_draft_clear(&account, MessageId(-2), main.draft),
+        None
+    );
+    assert!(sends.has_draft_clear(&main));
+}
