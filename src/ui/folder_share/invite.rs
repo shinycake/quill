@@ -26,6 +26,7 @@ impl QuillApp {
             self.folders.invite.as_mut().map(|d| &mut d.stage)
         {
             *next = Some(link);
+            // box-host: re-raises the box the add already shows, where it is.
             self.open_box(DialogKind::FolderInvite);
             cx.notify();
             return;
@@ -43,6 +44,8 @@ impl QuillApp {
             None => InviteStage::Failed(tr(keys::Q_NOTES_NO_CONNECTION).to_string()),
         };
         self.folders.invite = Some(FolderInviteDialog::new(link, stage));
+        // box-host: the folder box is the account's one, drawn where it was
+        // already shown; a link queued behind an add opens from the poll.
         self.open_box(DialogKind::FolderInvite);
         cx.notify();
     }
