@@ -368,12 +368,12 @@ fn ungroup_waits_while_show_as_one_chat_is_changing(cx: &mut TestAppContext) {
     frames(&mut vcx);
     app.update(&mut vcx, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.request_for_community(
-                quill::state::RequestPurpose::Communities(
-                    quill::state::CommunitiesPurpose::ToggleCollapsed { collapsed: true },
-                ),
+            let purpose = quill::state::CommunitiesPurpose::ToggleCollapsed { collapsed: true };
+            let request = session.request_for_community(
+                quill::state::RequestPurpose::Communities(purpose),
                 RUSTACEANS,
             );
+            session.communities.sent.begin(request, (RUSTACEANS, purpose));
         }
         app.show_community_box(
             CommunityBox::Ungroup {

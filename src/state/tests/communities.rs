@@ -231,6 +231,16 @@ fn add_all_counts_the_requests_left_once_single_answers_are_out() {
         }),
         42,
     );
+    session.communities.sent.begin(
+        extra,
+        (
+            42,
+            CommunitiesPurpose::ProcessAddChatRequest {
+                chat_id: 7,
+                approve: true,
+            },
+        ),
+    );
     assert_eq!(
         session.community_add_chat_requests_left(42),
         2,
@@ -262,6 +272,10 @@ fn show_as_one_chat_is_busy_while_its_toggle_is_in_flight() {
     let extra = session.request_for_community(
         RequestPurpose::Communities(CommunitiesPurpose::ToggleCollapsed { collapsed: true }),
         42,
+    );
+    session.communities.sent.begin(
+        extra,
+        (42, CommunitiesPurpose::ToggleCollapsed { collapsed: true }),
     );
     assert!(session.community_collapse_in_flight(42));
     assert!(!session.community_collapse_in_flight(43));

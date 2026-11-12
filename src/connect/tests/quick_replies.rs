@@ -250,7 +250,9 @@ fn a_send_whose_request_was_lost_does_not_block_the_next_tap() {
         .session
         .requests
         .take_purpose(crate::state::RequestPurpose::SendMessageAlbum);
-    assert!(lost.is_some());
+    driver
+        .session
+        .settle_lost_request(lost.expect("the send was out"));
     driver.send_quick_reply(ChatId(31), 2).unwrap();
     let sent = recorder
         .snapshot()
