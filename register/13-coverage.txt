@@ -93,3 +93,13 @@ src/ui/chat_list/view.rs 93 read
 src/ui/chat_list_state.rs 564 read
 src/ui/chat_list_pick.rs 136 read
 src/ui/chat_list_keys.rs 796 read
+src/ui/chat_look_ui.rs 981 read
+src/ui/chat_look_ui/apply.rs 117 read
+src/ui/chat_look_ui/choices.rs 77 read
+src/ui/chat_look_ui/stage.rs 190 read
+src/ui/chat_look_ui/demo.rs 187 read
+src/ui/chat_palette.rs 321 read
+src/ui/chat_row/pin_lift.rs 63 read
+src/ui/chat_row/mod.rs 968 read
+src/ui/chat_row/folder_tag_context.rs 235 read
+src/ui/chat_row/forum_titles_demo.rs 122 read
