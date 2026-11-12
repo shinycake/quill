@@ -4,6 +4,7 @@
 //! (a minute) or permanent.
 
 use super::link::UserLinkData;
+use crate::ids::RequestId;
 
 /// A `getUserLink` call with `remove_messages_fee` set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -27,16 +28,6 @@ impl FreeRequest {
             FreeRequest::ResetTemporary | FreeRequest::ResetPermanent
         )
     }
-}
-
-/// A sent free-code request: which box sent it and which of its requests
-/// it was, so an answer meant for an earlier box or a dropped request is
-/// ignored (tdesktop `generation`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct FreeTicket {
-    pub request: FreeRequest,
-    pub box_id: u64,
-    pub serial: u64,
 }
 
 /// A free-code `getUserLink` result: the code, or the server's reason.
@@ -84,18 +75,19 @@ pub enum FreeMenuItem {
 }
 
 /// What the free-code pill is doing: nothing, its menu open, or a request
-/// out. A request closes the menu by construction; the answer, a dropped
-/// request (`FreeState::drop_request`) and the box closing each leave it.
+/// out. A request closes the menu by construction; the answer (or the
+/// request found gone from the session's table), a dropped request
+/// (`FreeState::drop_request`) and the box closing each leave it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum FreeUi {
     #[default]
     Idle,
     MenuOpen,
-    /// The `getUserLink` out as the ticket with this `serial`; only its
+    /// The `getUserLink` out as `request` (of this `what`); only its own
     /// answer applies.
     Requesting {
-        request: FreeRequest,
-        serial: u64,
+        what: FreeRequest,
+        request: RequestId,
     },
 }
 
@@ -104,43 +96,41 @@ pub enum FreeUi {
 pub struct FreeState {
     pub mode: FreeMode,
     pub ui: FreeUi,
-    /// The serial of the last request sent; every request takes the next
-    /// (an id generator: the stage holds the serial that is current).
-    pub last_serial: u64,
 }
 
 impl FreeState {
     /// The request out, if one is.
     pub fn requesting(&self) -> Option<FreeRequest> {
         match self.ui {
+            FreeUi::Requesting { what, .. } => Some(what),
+            _ => None,
+        }
+    }
+
+    /// The session request the pill waits for, if one is out.
+    pub fn waiting_for(&self) -> Option<RequestId> {
+        match self.ui {
             FreeUi::Requesting { request, .. } => Some(request),
             _ => None,
         }
     }
 
-    /// A request goes out: the stage is `Requesting` it, closing the menu,
-    /// and the ticket's serial is the new one.
-    pub fn begin_request(&mut self, request: FreeRequest) -> u64 {
-        self.last_serial += 1;
-        self.ui = FreeUi::Requesting {
-            request,
-            serial: self.last_serial,
-        };
-        self.last_serial
+    /// The request of this `what` went out as `request`: the stage is
+    /// `Requesting` it, closing the menu.
+    pub fn sent(&mut self, what: FreeRequest, request: RequestId) {
+        self.ui = FreeUi::Requesting { what, request };
     }
 
-    /// The answer of `ticket`'s request: `true` (and the stage is `Idle`)
+    /// The answer of `request`: what it asked for (and the stage is `Idle`)
     /// only while it is the request out.
-    pub fn settle_request(&mut self, ticket: &FreeTicket) -> bool {
-        let current = FreeUi::Requesting {
-            request: ticket.request,
-            serial: ticket.serial,
-        };
-        if self.ui != current {
-            return false;
+    pub fn settle_request(&mut self, request: RequestId) -> Option<FreeRequest> {
+        match self.ui {
+            FreeUi::Requesting { what, request: out } if out == request => {
+                self.ui = FreeUi::Idle;
+                Some(what)
+            }
+            _ => None,
         }
-        self.ui = FreeUi::Idle;
-        true
     }
 
     /// The request out, or the menu, is dropped (tdesktop `dropPending`).

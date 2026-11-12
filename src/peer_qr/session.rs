@@ -3,12 +3,11 @@
 //! current user's temporary contact link and the answers the open box
 //! has not taken yet.
 
-use super::free::{FreeCode, FreeResult, FreeTicket};
+use super::free::{FreeCode, FreeRequest, FreeResult};
 use super::link::{UserLinkData, UserLinkFetch};
-use super::state::SaveTicket;
 use super::theme::{Backdrops, ShareTheme, ThemeChoice, ThemeGifts, ThemeOwner};
 use crate::ids::RequestId;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// A `getUserLink` answer before it is made absolute.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,21 +41,25 @@ pub struct PeerQrData {
     pub themes: HashMap<ThemeOwner, ShareTheme>,
     /// The gifts panel's owned upgraded gifts.
     pub gifts: ThemeGifts,
-    /// `setProfileShareTheme` requests on their way.
-    pub saves: Vec<(SaveTicket, ThemeOwner, ThemeChoice)>,
-    /// Save answers in arrival order.
-    pub save_answers: Vec<(SaveTicket, Result<ThemeChoice, String>)>,
+    /// `setProfileShareTheme` requests on their way, by request: whose
+    /// theme and what was sent, kept until the answer or the request is
+    /// found gone ([`Self::forget_dropped`]).
+    pub saves: HashMap<RequestId, (ThemeOwner, ThemeChoice)>,
+    /// Save answers in arrival order, by the request that was answered: the
+    /// open box takes the one it waits for, the rest are dropped.
+    pub save_answers: Vec<(RequestId, Result<ThemeChoice, String>)>,
     /// The plain `getUserLink`, for an account with no username and a
     /// hidden number.
     pub contact_link: UserLinkFetch,
-    /// Free-code answers in arrival order.
-    pub free_answers: Vec<(FreeTicket, FreeResult)>,
+    /// Free-code answers in arrival order, by the request that was
+    /// answered.
+    pub free_answers: Vec<(RequestId, FreeResult)>,
 }
 
 impl PeerQrData {
     pub fn accept_link(
         &mut self,
-        free: Option<FreeTicket>,
+        free: Option<FreeRequest>,
         request: RequestId,
         answer: UserLinkAnswer,
         now: i64,
@@ -68,8 +71,8 @@ impl PeerQrData {
                     self.contact_link = UserLinkFetch::Ready(link);
                 }
             }
-            Some(ticket) => self.free_answers.push((
-                ticket,
+            Some(_) => self.free_answers.push((
+                request,
                 Ok(FreeCode {
                     link,
                     can_permanent: answer.can_get_permanent_link,
@@ -79,14 +82,14 @@ impl PeerQrData {
     }
 
     /// `reason` is the error to show; empty when there is none to tell.
-    pub fn fail_link(&mut self, free: Option<FreeTicket>, request: RequestId, reason: String) {
+    pub fn fail_link(&mut self, free: Option<FreeRequest>, request: RequestId, reason: String) {
         match free {
             None => {
                 if self.contact_link == UserLinkFetch::Loading(request) {
                     self.contact_link = UserLinkFetch::Failed(Some(reason));
                 }
             }
-            Some(ticket) => self.free_answers.push((ticket, Err(reason))),
+            Some(_) => self.free_answers.push((request, Err(reason))),
         }
     }
 
@@ -107,7 +110,7 @@ impl PeerQrData {
         }
     }
 
-    pub fn take_free_answers(&mut self) -> Vec<(FreeTicket, FreeResult)> {
+    pub fn take_free_answers(&mut self) -> Vec<(RequestId, FreeResult)> {
         std::mem::take(&mut self.free_answers)
     }
 
@@ -116,29 +119,51 @@ impl PeerQrData {
         self.themes.insert(owner, theme);
     }
 
-    /// A save went out.
-    pub fn start_save(&mut self, ticket: SaveTicket, owner: ThemeOwner, choice: ThemeChoice) {
-        self.saves.push((ticket, owner, choice));
+    /// A save went out as `request`.
+    pub fn start_save(&mut self, request: RequestId, owner: ThemeOwner, choice: ThemeChoice) {
+        self.saves.insert(request, (owner, choice));
     }
 
-    /// The server took the save: the owner's theme is what was sent
-    /// (tdesktop sets `_kept` on done).
-    pub fn finish_save(&mut self, ticket: SaveTicket) {
-        let Some(at) = self.saves.iter().position(|(t, _, _)| *t == ticket) else {
+    /// The server took the save `request`: the owner's theme is what was
+    /// sent (tdesktop sets `_kept` on done).
+    pub fn finish_save(&mut self, request: RequestId) {
+        let Some((owner, choice)) = self.saves.remove(&request) else {
             return;
         };
-        let (ticket, owner, choice) = self.saves.remove(at);
         self.themes.insert(owner, choice.to_theme());
-        self.save_answers.push((ticket, Ok(choice)));
+        self.save_answers.push((request, Ok(choice)));
     }
 
     /// `reason` is the error to show; empty when there is none to tell.
-    pub fn fail_save(&mut self, ticket: SaveTicket, reason: String) {
-        self.saves.retain(|(t, _, _)| *t != ticket);
-        self.save_answers.push((ticket, Err(reason)));
+    pub fn fail_save(&mut self, request: RequestId, reason: String) {
+        self.saves.remove(&request);
+        self.save_answers.push((request, Err(reason)));
     }
 
-    pub fn take_save_answers(&mut self) -> Vec<(SaveTicket, Result<ThemeChoice, String>)> {
+    pub fn take_save_answers(&mut self) -> Vec<(RequestId, Result<ThemeChoice, String>)> {
         std::mem::take(&mut self.save_answers)
+    }
+
+    /// Something of the box waits for a request: a save, the gifts list or
+    /// the contact link.
+    pub fn waits(&self) -> bool {
+        !self.saves.is_empty()
+            || self.gifts.asking()
+            || matches!(self.contact_link, UserLinkFetch::Loading(_))
+    }
+
+    /// Requests of the box that are no longer pending and were not answered
+    /// (a reconnect or a client restart dropped them) end here: a save is
+    /// forgotten, the gifts list and the contact link stop waiting. The
+    /// open box's own save and free-code requests end through the
+    /// answers the UI gives them when it finds them gone.
+    pub fn forget_dropped(&mut self, pending: &HashSet<RequestId>) {
+        self.saves.retain(|request, _| pending.contains(request));
+        self.gifts.forget_dropped(pending);
+        if let UserLinkFetch::Loading(request) = self.contact_link
+            && !pending.contains(&request)
+        {
+            self.contact_link = UserLinkFetch::Failed(None);
+        }
     }
 }

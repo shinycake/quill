@@ -134,7 +134,6 @@ unkeyed:Encoding::Running 1
 unkeyed:ExtractionStage::Running 1
 unkeyed:FileState::Downloading 1
 unkeyed:First::Preparing 1
-unkeyed:FreeUi::Requesting 1
 unkeyed:GiftPurchaseStage::Sent 1
 unkeyed:GiftValueStage::Loading 1
 unkeyed:GiftsRest::Waiting 1

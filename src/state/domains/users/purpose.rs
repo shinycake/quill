@@ -133,20 +133,15 @@ pub enum UsersPurpose {
     /// `getUserLink` for the QR box: the contact link (`free` is `None`)
     /// or a free-message code. Response is `userLink`.
     GetUserLink {
-        free: Option<crate::peer_qr::free::FreeTicket>,
+        free: Option<crate::peer_qr::free::FreeRequest>,
     },
     /// The QR box's gifts panel: `getReceivedGifts` for the upgraded
-    /// gifts `owner` owns. `serial` tells the current request from an
-    /// older one; `first` is the first page. Response is `receivedGifts`.
-    GetShareThemeGifts {
-        owner: crate::peer_qr::theme::ThemeOwner,
-        serial: u64,
-        first: bool,
-    },
-    /// `setProfileShareTheme` (TDLib 1.8.69). Response is `ok`.
-    SetProfileShareTheme {
-        ticket: crate::peer_qr::state::SaveTicket,
-    },
+    /// gifts the box's peer owns. The list's stage holds the request it
+    /// waits for; `first` is the first page. Response is `receivedGifts`.
+    GetShareThemeGifts { first: bool },
+    /// `setProfileShareTheme` (TDLib 1.8.69), kept by request in
+    /// `PeerQrData::saves`. Response is `ok`.
+    SetProfileShareTheme,
 }
 
 flat_purposes!(Users(UsersPurpose) {

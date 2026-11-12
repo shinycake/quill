@@ -213,7 +213,7 @@ impl QuillApp {
         let Some((start, total)) = next else {
             return;
         };
-        if gifts.start(owner, true, now).is_some() {
+        if gifts.plan(owner, true, now).is_some() {
             let (list, offset) = demo_gifts_page(start, total);
             gifts.accept(list, offset, false);
         }
