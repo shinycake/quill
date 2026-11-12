@@ -41,6 +41,12 @@ impl GroupTransport {
         }
     }
 
+    /// No transport and no join on its way: after a join press this is the
+    /// join having ended without an answer (its error, or never sent).
+    pub fn is_empty(&self) -> bool {
+        matches!(self, Self::NoTransport)
+    }
+
     /// A join press was taken and its request is out.
     pub fn joining(&self) -> bool {
         matches!(self, Self::Joining { .. })

@@ -90,14 +90,11 @@ impl QuillApp {
             .session()
             .is_some_and(|s| s.calls.prefs.push_to_talk.enabled);
         if let Some(live) = self.live.as_mut() {
-            let result = live.driver.join_video_chat(id);
+            // The join carries the mute: the tracked mark follows it once the
+            // join goes out, and a join that never leaves (refused, or its
+            // offer failing) leaves the call as it was.
+            let result = live.driver.join_video_chat_with(id, ptt_on);
             let sent = result.is_ok();
-            // Only a join that went out mutes the mark: a refused one leaves
-            // the call as it was. The join's parameters are built from later
-            // updates, so the mark is in place by then.
-            if sent && ptt_on {
-                live.driver.session.set_group_call_self_muted(true);
-            }
             self.set_note(match result {
                 Ok(_) => StatusNote::silent(tr(keys::Q_AV_JOINING_VOICE_CHAT)),
                 Err(err) => {

@@ -112,6 +112,17 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// (`CallsUnavailable`): a join would show you in the call while you
     /// hear and see nothing.
     pub fn join_video_chat(&mut self, group_call_id: i32) -> Result<RequestId, ConnectSendError> {
+        self.join_video_chat_with(group_call_id, false)
+    }
+
+    /// [`Self::join_video_chat`] with the microphone closed when `muted`
+    /// (push-to-talk): the join carries it, and the tracked mark follows
+    /// once the join goes out.
+    pub fn join_video_chat_with(
+        &mut self,
+        group_call_id: i32,
+        muted: bool,
+    ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -143,11 +154,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             call.transport.clear_error();
         }
         self.decline_ringing_invite(None);
-        Ok(self.start_group_join(group_call_id))
+        Ok(self.start_group_join(group_call_id, muted))
     }
 
     /// One join at a time: a second press is the same join.
-    fn start_group_join(&mut self, group_call_id: i32) -> RequestId {
+    fn start_group_join(&mut self, group_call_id: i32, muted: bool) -> RequestId {
         if let Some(extra) = self.offer_waiting(GroupOfferKey::Call(group_call_id)) {
             return extra;
         }
@@ -158,7 +169,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
             call.transport.begin_join(extra);
         }
-        self.start_group_offer(group_call_id, extra, OfferSend::Join);
+        self.start_group_offer(group_call_id, extra, OfferSend::Join { muted });
         extra
     }
 
@@ -345,7 +356,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Err(ConnectSendError::InvalidRequest);
         }
-        Ok(self.start_group_join(group_call_id))
+        // Muted whatever is passed: `set_join_flags` closes the story's mic.
+        Ok(self.start_group_join(group_call_id, true))
     }
 
     /// Phase C3a: `getGroupCall` for a known call id (schema 1.8.67,

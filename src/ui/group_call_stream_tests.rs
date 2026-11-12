@@ -575,6 +575,7 @@ fn a_failed_share_does_not_fail_the_join(cx: &mut TestAppContext) {
         let session = app.demo_session.as_mut().expect("demo");
         if let Some(active) = session.calls.active_group_call.as_mut() {
             active.screen_share.fail("screen share failed".into());
+            active.transport.begin_join(quill::ids::RequestId(5));
         }
         // Join was pressed; TDLib has not answered yet.
         app.group_call_screen.stream_watch = crate::ui::group_call_state::StreamWatch::Joining(
@@ -592,6 +593,52 @@ fn a_failed_share_does_not_fail_the_join(cx: &mut TestAppContext) {
         })
     };
     assert_eq!(state(&app, &mut call), (Some(CALL), None), "still joining");
+}
+
+/// An error of something else in the call does not end the join on its
+/// way: only the join's own stage does (sweep 16-008).
+#[gpui_kit::test]
+fn an_unrelated_call_error_does_not_end_the_join(cx: &mut TestAppContext) {
+    let (app, mut main, _call) = open_stream(cx, StreamState::Live);
+    app.update(&mut main, |app, cx| {
+        app.leave_active_group_call(cx);
+        app.sync_group_call_window(cx);
+    });
+    track_unjoined(&app, &mut main);
+    let window = app
+        .read_with(&main, |app, _| app.group_call.window.handle())
+        .expect("the unjoined stream's window");
+    let mut call = VisualTestContext::from_window(window, cx);
+    app.update(&mut call, |app, cx| {
+        let session = app.demo_session.as_mut().expect("demo");
+        if let Some(active) = session.calls.active_group_call.as_mut() {
+            active.transport.begin_join(quill::ids::RequestId(5));
+        }
+        session.calls.group_call_error = Some("something else failed".into());
+        app.group_call_screen.stream_watch = crate::ui::group_call_state::StreamWatch::Joining(
+            crate::ui::group_call_state::StreamJoining::new(CALL, Task::ready(())),
+        );
+        app.sync_group_call_window(cx);
+    });
+    frames(&mut call);
+    assert_eq!(
+        app.read_with(&call, |app, _| app.group_call_screen.joining_call()),
+        Some(CALL),
+        "the join is still out"
+    );
+    // The join's own request fails: its stage ends and so does the wait.
+    app.update(&mut call, |app, cx| {
+        let session = app.demo_session.as_mut().expect("demo");
+        if let Some(active) = session.calls.active_group_call.as_mut() {
+            active.transport.join_failed(quill::ids::RequestId(5));
+        }
+        app.sync_group_call_window(cx);
+    });
+    frames(&mut call);
+    assert_eq!(
+        app.read_with(&call, |app, _| app.group_call_screen.joining_call()),
+        None
+    );
 }
 
 /// The row id the stream window's live controller and overlays use.

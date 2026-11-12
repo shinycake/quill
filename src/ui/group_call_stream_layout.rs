@@ -315,11 +315,26 @@ impl QuillApp {
         }) {
             // The connect failed without a join error.
             self.stream_join_failed();
-        } else if self
-            .session()
-            .is_some_and(|s| s.calls.group_call_error.is_some())
-        {
-            self.group_call_screen.clear_stream_joining();
+        } else if self.session().is_some_and(|session| {
+            // The join's own stage is the transport's: it left `Joining`
+            // with no answer and no connect (the request's error, or it
+            // never went out). An error of anything else in the call is not
+            // this join's end.
+            session
+                .calls
+                .active_group_call
+                .as_ref()
+                .is_some_and(|call| call.id == facts.id && call.transport.is_empty())
+        }) {
+            // The join's refusal is already noted; say so only when not.
+            if self
+                .session()
+                .is_some_and(|s| s.calls.group_call_error.is_some())
+            {
+                self.group_call_screen.clear_stream_joining();
+            } else {
+                self.stream_join_failed();
+            }
         }
     }
 
