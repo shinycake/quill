@@ -92,7 +92,7 @@ fn a_failed_page_is_asked_for_again_at_the_next_scroll(cx: &mut TestAppContext) 
 
 /// Recent members failed, so the block falls back to the administrators.
 /// That fallback is asked while the cache has no entry for it, so a list
-/// that fails too does not loop; Retry (the list going stale) drops the
+/// that fails too does not loop; Retry drops the
 /// failed entry and asks again.
 #[gpui_kit::test]
 fn the_administrators_fallback_is_asked_once_until_retry(cx: &mut TestAppContext) {
@@ -129,11 +129,18 @@ fn the_administrators_fallback_is_asked_once_until_retry(cx: &mut TestAppContext
         held(&app, cx),
         "a failed list is not asked again by a frame"
     );
+    // A membership change leaves a failed list as it is (it draws Retry).
     app.update(cx, |app, cx| {
         if let Some(session) = app.session_mut() {
             session.groups.members_changed(chat);
         }
         app.inline_members_refresh_stale(cx);
+    });
+    assert!(held(&app, cx), "a failed list keeps its Retry");
+    app.update(cx, |app, _| {
+        if let Some(session) = app.session_mut() {
+            session.groups.forget_failed_member_lists(chat);
+        }
     });
     assert!(!held(&app, cx), "Retry drops the failed list to ask again");
 }

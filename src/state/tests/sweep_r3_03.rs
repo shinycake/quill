@@ -208,3 +208,17 @@ fn a_sharing_lookup_answer_needs_the_flow_to_wait_for_it() {
         EnableSharing::AskToRequest(chat)
     );
 }
+
+/// The member dialog refreshes the list its tab shows: without the right
+/// to restrict, Restricted and Banned show (and refresh) Recent.
+#[test]
+fn a_viewer_without_the_right_refreshes_the_list_the_tab_shows() {
+    for filter in [MemberListFilter::Restricted, MemberListFilter::Banned] {
+        assert_eq!(filter.shown_for(false), MemberListFilter::Recent);
+        assert_eq!(filter.shown_for(true), filter);
+    }
+    assert_eq!(
+        MemberListFilter::Search.shown_for(false),
+        MemberListFilter::Search
+    );
+}

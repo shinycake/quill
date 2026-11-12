@@ -200,7 +200,9 @@ fn a_membership_change_keeps_the_last_page_until_the_refetch_answers() {
             .is_some_and(SupergroupMembersFetch::in_flight)
     );
     assert!(
-        session.groups.member_list_is_stale((13, MemberListFilter::Search)),
+        session
+            .groups
+            .member_list_is_stale((13, MemberListFilter::Search)),
         "a list on its first load owes its ask, it does not vanish"
     );
     // Dropped again before the refetch: still the same page.
