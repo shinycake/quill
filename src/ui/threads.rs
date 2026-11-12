@@ -229,7 +229,7 @@ impl QuillApp {
         }
         // "Jump to root" pages older replies until the root is in; the
         // history list scrolls there (`ScrollGoal::ThreadRoot`).
-        if let Some(ScrollGoal::ThreadRoot { thread_id }) = self.screen.history.aim.goal() {
+        if let Some(goal) = self.screen.history.aim.goal() {
             let open_thread = live
                 .driver
                 .session
@@ -238,7 +238,7 @@ impl QuillApp {
                 .as_ref()
                 .map(|thread| thread.thread_id);
             // A goal another thread set is not this thread's to page for.
-            if open_thread != Some(thread_id) {
+            if !goal.belongs_to(open_thread) {
                 self.screen.history.aim.take_goal();
                 return;
             }
@@ -550,7 +550,16 @@ fn thread_asker_is_here(
 #[cfg(test)]
 mod tests {
     use super::{ThreadAsker, thread_asker_is_here};
+    use crate::ui::history_state::ScrollGoal;
     use quill::ids::ChatId;
+
+    #[test]
+    fn a_goal_for_another_thread_is_dropped() {
+        let goal = ScrollGoal::ThreadRoot { thread_id: 5 };
+        assert!(goal.belongs_to(Some(5)));
+        assert!(!goal.belongs_to(Some(6)), "another thread's goal");
+        assert!(!goal.belongs_to(None), "no thread open");
+    }
 
     const WINDOW: ChatId = ChatId(7);
 

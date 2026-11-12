@@ -19,6 +19,16 @@ pub(super) enum ScrollGoal {
     ThreadRoot { thread_id: i64 },
 }
 
+impl ScrollGoal {
+    /// Whether the goal is the open thread's to page for: a goal another
+    /// thread set (or no thread open) is not.
+    pub(super) fn belongs_to(self, open_thread: Option<i64>) -> bool {
+        match self {
+            Self::ThreadRoot { thread_id } => open_thread == Some(thread_id),
+        }
+    }
+}
+
 /// Where the open history is being taken: nothing, a goal the reader asked
 /// for that waits for its rows, or a landing that scrolled to its target
 /// and corrects after each paint. A newer aim replaces the older; the

@@ -526,7 +526,15 @@ fn the_exports_ending_closes_the_alert_not_the_box_above(cx: &mut TestAppContext
     app.update(vcx, |app, _| {
         app.demo_session.as_mut().unwrap().settings.chat_export = Some(export);
     });
+    use gpui::Focusable as _;
+    let base = app.read_with(vcx, |app, cx| app.focus_handle(cx));
+    vcx.update(|window, cx| window.focus(&base, cx));
+    settle(vcx);
     assert!(!ask(&app, vcx).get(), "held back");
+    assert!(
+        !vcx.update(|window, _| base.is_focused(window)),
+        "the alert opened over the base focus"
+    );
     let above = vcx.update(|window, cx| {
         window.open_dialog(cx, |dialog, _, _| dialog.title("Other"));
         window.last_dialog_id(cx)
@@ -545,6 +553,16 @@ fn the_exports_ending_closes_the_alert_not_the_box_above(cx: &mut TestAppContext
     assert!(
         focus_before.is_some() && focus_after == focus_before,
         "focus stays in the box above"
+    );
+    assert!(
+        focus_after != Some(base.clone()),
+        "focus did not fall back to the base"
+    );
+    vcx.update(|window, cx| window.close_dialog(cx));
+    settle(vcx);
+    assert!(
+        vcx.update(|window, _| base.is_focused(window)),
+        "closing the box above hands back what was focused before the alert"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
