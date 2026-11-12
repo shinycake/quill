@@ -320,15 +320,9 @@ impl Session {
                 self.accept_chat_statistics(statistics, pending)
             }
             GroupsPayload::MessageStatistics { statistics } => {
-                if let Some(RequestPurpose::Groups(GroupsPurpose::GetMessageStatistics {
-                    chat_id,
-                    message_id,
-                })) = pending.map(|p| p.purpose)
-                {
-                    self.groups
-                        .stats
-                        .accept_message_statistics(chat_id, message_id, statistics);
-                }
+                self.groups
+                    .stats
+                    .accept_message_statistics_for(pending, statistics);
             }
             GroupsPayload::StatisticalGraph { graph } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStatisticalGraph)

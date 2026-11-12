@@ -32,15 +32,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !can_get {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.requests.has_purpose_for_story(
+        if let Some(waiting) = self.session.requests.request_for_story_in_flight(
             RequestPurpose::GetStoryStatistics,
             chat_id,
             story_id,
         ) {
             // Its answer is on the way: the insights wait for this story
-            // again (they may show another story opened since), so the
-            // answer lands (`insights_for`).
+            // again (they may show another story opened since), under that
+            // request, so the answer lands (`insights_for`).
             self.session.begin_story_insights(chat_id.0, story_id);
+            self.session
+                .story_statistics_requested(chat_id.0, story_id, waiting);
             // The first page is asked for only when it never was for these
             // insights: a page that answered, or one on its way, stays (a
             // second first page would show twice). Insights another story
@@ -61,6 +63,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra =
             self.session
                 .request_for_story(RequestPurpose::GetStoryStatistics, chat_id, story_id);
+        self.session
+            .story_statistics_requested(chat_id.0, story_id, extra);
         if let Err(err) = self
             .sender
             .send_json(&get_story_statistics(extra, chat_id, story_id, is_dark))

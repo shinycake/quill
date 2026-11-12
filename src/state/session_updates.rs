@@ -33,7 +33,7 @@ impl Session {
         {
             self.chat_list.main_paging = ListPaging::More;
             self.chat_list.archive_paging = ListPaging::More;
-            self.chat_list.folder_chats_exhausted.clear();
+            self.chat_list.folder_paging.clear();
         }
         if matches!(state, AuthorizationState::Closed) {
             self.shutdown = ShutdownPhase::Closed;

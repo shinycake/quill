@@ -488,7 +488,6 @@ fn an_own_send_while_newer_replies_are_unloaded_replaces_the_window() {
         assert!(!thread.history.loaded_complete());
         assert_eq!(thread.history.next_from_message_id, MessageId(0));
     }
-    assert!(session.reset_thread_window());
     apply_json(
         &mut session,
         &seq,
@@ -504,7 +503,7 @@ fn an_own_send_while_newer_replies_are_unloaded_replaces_the_window() {
         !thread.history.messages.contains_key(&42),
         "stale page dropped"
     );
-    assert_eq!(thread.history.window_epoch, 2);
+    assert_eq!(thread.history.window_epoch, 1);
     // The newest page lands in the fresh window and reaches the root.
     thread_page(
         &mut session,
@@ -772,4 +771,81 @@ fn a_page_on_the_way_past_a_page_trim_does_not_land_across_a_gap() {
     );
     let thread = session.thread_for_chat(ChatId(14)).unwrap();
     assert!(!thread.history.messages.contains_key(&top));
+}
+
+#[test]
+fn only_the_first_pages_own_answer_or_error_leaves_loading_history() {
+    let (mut session, sink, seq) = resolved();
+    let first = session.request(
+        RequestPurpose::GetMessageThreadHistory { message_id: 101 },
+        Some(ChatId(13)),
+    );
+    let other = session.request(
+        RequestPurpose::GetMessageThreadHistory { message_id: 101 },
+        Some(ChatId(13)),
+    );
+    let status = |session: &Session| session.threads.thread.as_ref().unwrap().status.clone();
+    if let Some(thread) = session.threads.thread.as_mut() {
+        thread.status = ThreadStatus::LoadingHistory(first);
+    }
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"messages","@extra":"{}","total_count":1,"messages":[{}]}}"#,
+            other.0,
+            msg(503, 14, 501, "b")
+        ),
+    );
+    assert_eq!(status(&session), ThreadStatus::LoadingHistory(first));
+    let again = session.request(
+        RequestPurpose::GetMessageThreadHistory { message_id: 101 },
+        Some(ChatId(13)),
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":500,"message":"x"}}"#,
+            again.0
+        ),
+    );
+    assert_eq!(status(&session), ThreadStatus::LoadingHistory(first));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"messages","@extra":"{}","total_count":1,"messages":[{}]}}"#,
+            first.0,
+            msg(503, 14, 501, "b")
+        ),
+    );
+    assert_eq!(status(&session), ThreadStatus::Ready);
+}
+
+#[test]
+fn a_page_asked_by_a_replaced_view_does_not_land_in_the_new_one() {
+    let (mut session, sink, seq) = resolved();
+    let page = session.request(
+        RequestPurpose::GetMessageThreadHistory { message_id: 101 },
+        Some(ChatId(13)),
+    );
+    // The same post is opened again before the first page answered.
+    session.begin_thread(ChatId(13), MessageId(101));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"messages","@extra":"{}","total_count":1,"messages":[{}]}}"#,
+            page.0,
+            msg(503, 14, 501, "old window")
+        ),
+    );
+    let thread = session.threads.thread.as_ref().unwrap();
+    assert!(!thread.history.messages.contains_key(&503));
+    assert_eq!(thread.status, ThreadStatus::Resolving);
 }

@@ -58,7 +58,6 @@ bare:Lookup::Pending 1
 bare:Lookup::Waiting 1
 bare:MediaFile::Downloading 1
 bare:MenuSend::Sent 1
-bare:MessageStatsFetch::Loading 1
 bare:MuteState::Connecting 1
 bare:NextPage::Loading 1
 bare:Opening::Pending 1
@@ -106,7 +105,6 @@ bare:StorageClear::Clearing 1
 bare:StoryCardState::Loading 1
 bare:StoryPageOpState::Checking 1
 bare:StoryPageOpState::Sending 1
-bare:StoryStatsFetch::Loading 1
 bare:StreamPhase::Connecting 1
 bare:StreamState::Connecting 2
 bare:SuggestedPostState::Pending 1

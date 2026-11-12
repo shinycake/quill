@@ -181,7 +181,10 @@ fn message_statistics_open_the_page_and_page_through_forwards() {
     let stats = &rig.driver.session.groups.stats;
     assert_eq!(stats.page(-100), StatsPage::Message(42 << 20));
     let state = stats.message_for(-100, 42 << 20).expect("tracked");
-    assert_eq!(state.statistics, MessageStatsFetch::Loading);
+    assert!(matches!(
+        state.statistics,
+        MessageStatsFetch::Loading(Some(_))
+    ));
     assert!(state.forwards.loading());
 
     rig.answer(
@@ -244,7 +247,10 @@ fn a_failed_message_statistics_load_is_shown_and_retried() {
         .expect("resends");
     assert!(rig.sent().len() > before);
     let state = rig.driver.session.groups.stats.message.as_ref().unwrap();
-    assert_eq!(state.statistics, MessageStatsFetch::Loading);
+    assert!(matches!(
+        state.statistics,
+        MessageStatsFetch::Loading(Some(_))
+    ));
     // A late answer for another post is dropped.
     let other = rig.driver.session.request(
         RequestPurpose::Groups(crate::state::GroupsPurpose::GetMessageStatistics {
@@ -261,7 +267,10 @@ fn a_failed_message_statistics_load_is_shown_and_retried() {
     );
     let state = rig.driver.session.groups.stats.message.as_ref().unwrap();
     assert_eq!(state.message_id, 7);
-    assert_eq!(state.statistics, MessageStatsFetch::Loading);
+    assert!(matches!(
+        state.statistics,
+        MessageStatsFetch::Loading(Some(_))
+    ));
 }
 
 #[test]
@@ -303,8 +312,33 @@ fn recent_post_previews_are_fetched_once() {
         .unwrap()
         .unwrap();
     rig.error(missing);
+    // A refusal that is not "not found" is asked again once the panel opens.
     assert_eq!(
         rig.driver.session.groups.stats.posts[&(-100, 10 << 20)],
+        PostFetch::Failed
+    );
+    rig.driver.session.groups.stats.reset(-100);
+    assert!(
+        !rig.driver
+            .session
+            .groups
+            .stats
+            .posts
+            .contains_key(&(-100, 10 << 20))
+    );
+    // Not found: gone for good.
+    let gone = rig
+        .driver
+        .fetch_stats_post(ChatId(-100), MessageId(11 << 20))
+        .unwrap()
+        .unwrap();
+    rig.answer(
+        gone,
+        r#"{"@type":"error","code":404,"message":"Message not found"}"#,
+    );
+    rig.driver.session.groups.stats.reset(-100);
+    assert_eq!(
+        rig.driver.session.groups.stats.posts[&(-100, 11 << 20)],
         PostFetch::Missing
     );
 }

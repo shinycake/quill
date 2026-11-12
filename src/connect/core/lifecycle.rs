@@ -166,6 +166,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.chat_list.archive_paging.retry_due(now) {
             sent |= matches!(self.maybe_load_archive_chats(), Ok(Some(_)));
         }
+        let due: Vec<i32> = self
+            .session
+            .chat_list
+            .folder_paging
+            .iter()
+            .filter(|(_, paging)| paging.retry_due(now))
+            .map(|(id, _)| *id)
+            .collect();
+        for folder_id in due {
+            sent |= matches!(self.maybe_load_folder_chats(folder_id), Ok(Some(_)));
+        }
         sent
     }
 

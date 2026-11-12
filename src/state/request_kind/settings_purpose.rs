@@ -59,9 +59,9 @@ impl SettingsPurpose {
             | Self::UploadSavedNotificationSound
             | Self::RemoveSavedNotificationSound
             | Self::SetPrivacyRules { .. }
-            | Self::SetNewChatPrivacy { .. }
+            | Self::SetNewChatPrivacy
             | Self::SetGiftSettings
-            | Self::SetInactiveSessionTtl { .. }
+            | Self::SetInactiveSessionTtl
             | Self::SetSensitiveContent
             | Self::SetContactJoinedNotifications
             | Self::ResetNetworkStatistics

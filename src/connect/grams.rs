@@ -215,7 +215,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // tdesktop `cloudPassword().reload()`, then the state it has.
         let auth = &self.session.auth_state;
         let has_password = (!auth.password_state_loading())
-            .then(|| auth.password_state.as_ref().map(|s| s.has_password))
+            .then(|| auth.password_state.get().map(|s| s.has_password))
             .flatten();
         if !auth.password_state_loading() {
             let _ = self.refresh_password_state();

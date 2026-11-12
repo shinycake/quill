@@ -208,7 +208,7 @@ impl QuillApp {
         let attach_bots = std::mem::take(&mut apps.attachment_menu_bot);
         let toggled = std::mem::take(&mut apps.attachment_menu_toggled);
         let found = std::mem::take(&mut apps.found);
-        let data_sent = apps.data_sent.take();
+        let data_sent = std::mem::take(&mut apps.data_sent);
 
         if let Some(result) = open_result {
             match result {
@@ -319,8 +319,13 @@ impl QuillApp {
                 self.as_asked_by(window, |this| this.found_web_app_answer(then, result, cx));
             }
         }
-        if let Some(result) = data_sent {
-            match result {
+        for sent in data_sent {
+            let sends = &mut self.mini_apps.data_sends;
+            let Some(at) = sends.iter().position(|request| *request == sent.request) else {
+                continue;
+            };
+            sends.remove(at);
+            match sent.result {
                 Ok(()) => {
                     self.set_status_note(StatusNote::silent(tr(keys::Q_MEDIA_SENT_TO_THE_BOT)), cx)
                 }
@@ -570,7 +575,9 @@ impl QuillApp {
                     .live
                     .as_mut()
                     .map(|live| live.driver.send_web_app_data(bot_id, &button_text, &data));
-                if !matches!(sent, Some(Ok(_))) {
+                if let Some(Ok(request)) = sent {
+                    self.mini_apps.data_sends.push(request);
+                } else {
                     self.set_status_note(
                         StatusNote::error(tr(keys::Q_MEDIA_COULDNT_SEND_THE_APPS_DATA)),
                         cx,

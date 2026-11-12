@@ -275,6 +275,9 @@ impl Session {
         {
             return;
         }
+        if self.stories.live_bursts == LiveBursts::Failed {
+            self.stories.live_bursts = LiveBursts::Unasked;
+        }
         self.stories.live = Some(LiveStoryState::new(chat_id, story_id, group_call_id));
     }
 

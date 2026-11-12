@@ -94,8 +94,8 @@ fn open_web_app_sends_theme_and_keeps_the_launch_context() {
             .session
             .bots
             .web_apps
-            .pending
-            .first()
+            .opening
+            .as_ref()
             .map(|p| p.bot_user_id),
         Some(42)
     );
@@ -114,7 +114,7 @@ fn open_web_app_sends_theme_and_keeps_the_launch_context() {
             url: "https://bot.example/app?tgWebAppData=x".into(),
         })
     );
-    assert!(h.driver.session.bots.web_apps.pending.is_empty());
+    assert!(h.driver.session.bots.web_apps.opening.is_none());
 }
 
 #[test]
@@ -137,7 +137,7 @@ fn a_refused_open_reports_a_failure_and_clears_the_context() {
             ..
         })
     ));
-    assert!(h.driver.session.bots.web_apps.pending.is_empty());
+    assert!(h.driver.session.bots.web_apps.opening.is_none());
 }
 
 /// Two keyboard-button launches before either answers (a double click):
@@ -161,7 +161,16 @@ fn only_the_latest_launch_asked_opens() {
         .driver
         .get_web_app_url(ChatId(5), 43, "https://bot.example/b", "Open", &theme)
         .expect("sent");
-    assert_eq!(h.driver.session.bots.web_apps.pending.len(), 1);
+    assert_eq!(
+        h.driver
+            .session
+            .bots
+            .web_apps
+            .opening
+            .as_ref()
+            .map(|o| o.request),
+        Some(second)
+    );
     h.ingest(&format!(
         r#"{{"@type":"webAppInfo","@extra":"{}","launch_id":"801","url":{{"@type":"webAppUrl","url":"https://bot.example/a?x","require_same_origin":false}}}}"#,
         first.as_extra()
@@ -183,7 +192,7 @@ fn only_the_latest_launch_asked_opens() {
     };
     assert!(source.allows_data_send(), "still the keyboard button");
     assert_eq!((chat_id, bot_user_id), (Some(5), 43));
-    assert!(h.driver.session.bots.web_apps.pending.is_empty());
+    assert!(h.driver.session.bots.web_apps.opening.is_none());
 }
 
 #[test]
@@ -217,7 +226,13 @@ fn keyboard_button_apps_use_get_web_app_url_and_may_send_data() {
         r#"{{"@type":"ok","@extra":"{}"}}"#,
         extra.as_extra()
     ));
-    assert_eq!(h.driver.session.bots.web_apps.data_sent, Some(Ok(())));
+    assert_eq!(
+        h.driver.session.bots.web_apps.data_sent,
+        vec![crate::state::DataSent {
+            request: extra,
+            result: Ok(())
+        }]
+    );
 }
 
 #[test]
@@ -296,7 +311,10 @@ fn emoji_status_access_follows_the_switch_and_comes_back_on_failure() {
     assert_eq!(emoji_access(&h), Some(true), "put back");
     assert_eq!(
         h.driver.session.bots.web_apps.emoji_access,
-        Some((42, false))
+        Some(crate::state::EmojiAccessAnswer {
+            request: extra,
+            result: crate::state::EmojiAccessResult::Refused
+        })
     );
 
     let extra = h
@@ -310,7 +328,10 @@ fn emoji_status_access_follows_the_switch_and_comes_back_on_failure() {
     assert_eq!(emoji_access(&h), Some(false));
     assert_eq!(
         h.driver.session.bots.web_apps.emoji_access,
-        Some((42, true))
+        Some(crate::state::EmojiAccessAnswer {
+            request: extra,
+            result: crate::state::EmojiAccessResult::Granted
+        })
     );
 }
 
@@ -403,7 +424,6 @@ fn attachment_menu_bots_and_custom_requests_round_trip() {
     assert_eq!(replies[0].req_id, "r9");
     assert_eq!(replies[0].launch_id, 77, "the answer names the launch");
     assert_eq!(replies[0].result, Ok("{\"ok\":true}".into()));
-    assert!(h.driver.session.bots.web_apps.custom_requests.is_empty());
 }
 
 /// Round 17 C finding 15: a refused search names the bot it was for, so a
@@ -457,7 +477,54 @@ fn a_data_send_is_due_until_it_answers() {
         extra.as_extra()
     ));
     assert!(!h.driver.session.web_app_answer_due());
-    assert_eq!(h.driver.session.bots.web_apps.data_sent, Some(Ok(())));
+    assert_eq!(
+        h.driver.session.bots.web_apps.data_sent,
+        vec![crate::state::DataSent {
+            request: extra,
+            result: Ok(())
+        }]
+    );
+}
+
+/// Two data sends close together: each outcome names its own request, so
+/// the flow that sent the second never reports the first's answer.
+#[test]
+fn data_send_outcomes_are_kept_per_request() {
+    let mut h = Harness::ready();
+    let first = h.driver.send_web_app_data(42, "Go", "{}").expect("sent");
+    let second = h.driver.send_web_app_data(43, "Go", "{}").expect("sent");
+    h.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":400,"message":"X"}}"#,
+        first.as_extra()
+    ));
+    h.ingest(&format!(
+        r#"{{"@type":"ok","@extra":"{}"}}"#,
+        second.as_extra()
+    ));
+    let sent = &h.driver.session.bots.web_apps.data_sent;
+    assert_eq!(sent.len(), 2);
+    assert_eq!((sent[0].request, sent[0].result.is_err()), (first, true));
+    assert_eq!((sent[1].request, sent[1].result.is_ok()), (second, true));
+}
+
+/// A custom-method failure names its request too, so the window that sent
+/// it (and no other) turns it into the app's reply.
+#[test]
+fn a_custom_request_error_names_its_request() {
+    let mut h = Harness::ready();
+    let extra = h
+        .driver
+        .send_web_app_custom_request(42, 77, "r9", "getRequestedContact", "{}")
+        .expect("sent");
+    h.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":400,"message":"X"}}"#,
+        extra.as_extra()
+    ));
+    let replies = &h.driver.session.bots.web_apps.custom_replies;
+    assert_eq!(replies.len(), 1);
+    assert_eq!(replies[0].req_id, "r9");
+    assert_eq!(replies[0].launch_id, 77);
+    assert_eq!(replies[0].result, Err("BAD_REQUEST".into()));
 }
 
 #[test]
@@ -486,8 +553,8 @@ fn named_app_links_search_first() {
             .session
             .bots
             .web_apps
-            .pending
-            .first()
+            .opening
+            .as_ref()
             .map(|p| p.source.clone()),
         Some(LaunchSource::Link {
             short_name: "shop".into()
