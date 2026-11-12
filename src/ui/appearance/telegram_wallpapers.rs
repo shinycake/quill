@@ -284,7 +284,7 @@ impl QuillApp {
     /// asked for as the page's arrival does.
     pub(in crate::ui) fn reload_account_wallpapers(&mut self, cx: &mut Context<Self>) {
         self.leave_wallpaper_gallery();
-        if self.settings.open
+        if self.settings.open()
             && self.settings.page() == Some(quill::settings_catalog::Page::Appearance)
         {
             self.retry_failed_wallpapers();

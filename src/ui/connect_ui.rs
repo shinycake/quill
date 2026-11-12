@@ -104,12 +104,12 @@ impl ScreenWorkers {
     }
 }
 
-impl QuillApp {
+impl super::app::QuillApp {
     /// A worker preparing the screen's connection starts. The work that
     /// waits for the account folders (`after_closing`) is looked at again
     /// when the claim is released, also when the connection that asked for
     /// the worker was replaced and no longer hears of its end.
-    pub(super) fn begin_screen_worker(&mut self, cx: &mut Context<Self>) -> ScreenClaim {
+    pub(super) fn begin_screen_worker(&mut self, cx: &mut gpui_kit::Context<Self>) -> ScreenClaim {
         let (claim, end) = self.background.screen_workers.begin();
         // screen-scope: the waiters it settles cover every account's folders, whichever account is on screen.
         let watch = Self::spawn_app(cx, async move |this, cx| {

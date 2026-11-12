@@ -624,3 +624,23 @@ fn a_replaced_link_check_leaves_no_request_and_no_answer_behind(cx: &mut TestApp
         assert!(demo.requests.get(checking).is_none());
     });
 }
+
+/// The form's Cancel goes back to the list with the save it sent: edit and
+/// delete wait for that answer. A failed save is not carried over.
+#[gpui_kit::test]
+fn cancelling_the_form_keeps_the_save_it_sent(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx);
+    app.update_in(&mut vcx, |_, window, cx| {
+        let mut form = FolderShareView::edit(
+            Some("https://t.me/addlist/a".into()),
+            LinkForm::new(window, cx, String::new(), Default::default()),
+        );
+        form.set_op(LinkOp::Saving(RequestId(4)));
+        let list = form.cancelled_form();
+        assert!(matches!(list, FolderShareView::List { .. }));
+        assert_eq!(list.op(), &LinkOp::Saving(RequestId(4)));
+        assert!(list.is_busy(), "edit and delete wait for the answer");
+        form.set_op(LinkOp::Failed("no".into()));
+        assert_eq!(form.cancelled_form().op(), &LinkOp::Idle);
+    });
+}

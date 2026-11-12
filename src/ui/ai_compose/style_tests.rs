@@ -261,8 +261,10 @@ fn deleting_a_style_without_a_connection_keeps_the_editor(cx: &mut gpui_kit::Tes
         app.demo_session = None;
         app.remove_ai_style("Shanty", true, false, window, cx);
         let open = app.ai_compose.open.as_ref();
-        assert_eq!(open.map(|o| o.view), Some(AiComposeView::StyleEditor));
-        assert!(open.is_some_and(|o| o.editor.is_some()), "the editor stays");
+        assert!(
+            matches!(open.map(|o| &o.view), Some(AiComposeView::StyleEditor(_))),
+            "the editor stays"
+        );
     });
 }
 
