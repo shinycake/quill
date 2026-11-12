@@ -32,14 +32,16 @@ fn a_second_press_during_creating_is_refused_and_keeps_the_first(cx: &mut TestAp
     app.update_in(&mut vcx, |app, window, cx| {
         let session = app.session_mut().expect("the demo session");
         let first = CreateSubmission {
-            generation: 3,
             name: "First".into(),
             username: "first_bot".into(),
             manager_id: 7,
             share: None,
         };
-        session.bots.owned.create.generation = 3;
-        session.bots.owned.create.stage = CreateStage::Creating(first.clone());
+        let stage = CreateStage::Creating {
+            request: quill::ids::RequestId(3),
+            submission: first,
+        };
+        session.bots.owned.create.stage = stage.clone();
         app.open_bot_create(
             7,
             "Second".into(),
@@ -55,6 +57,6 @@ fn a_second_press_during_creating_is_refused_and_keeps_the_first(cx: &mut TestAp
             quill::lang::tr(quill::lang::keys::Q_MEDIA_STILL_CREATING_A_BOT)
         );
         let create = app.session().map(|s| s.bots.owned.create.stage.clone());
-        assert_eq!(create, Some(CreateStage::Creating(first)), "first kept");
+        assert_eq!(create, Some(stage), "first kept");
     });
 }

@@ -115,7 +115,7 @@ impl Session {
                             self.payments
                                 .giveaway
                                 .launches
-                                .set(chat_id, GiveawayLaunch::Verifying);
+                                .set(chat_id, GiveawayLaunch::NeedsVerification);
                         }
                         self.payments.verification_url = Some(PaymentVerification {
                             url: result.verification_url,

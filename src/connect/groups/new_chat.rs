@@ -5,7 +5,7 @@
 use super::*;
 use crate::new_chat::{CreateFailure, CreationOutcome, NewChatKind, NewChatRequest};
 use crate::profile_photo_sources::ChatPhotoInput;
-use crate::state::{CreationStage, NewChatCreation, TypeSave};
+use crate::state::{CreationStage, NewChatCreation};
 use crate::telegram::envelope::{ChatsPayload, EnvelopePayload, GroupsPayload};
 use crate::telegram::requests::{
     create_new_basic_group_chat, create_new_supergroup_chat, set_chat_photo,
@@ -79,19 +79,14 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// The type step's Save went out as `sent`: any of them failing, or
     /// being lost, keeps the step from moving on.
     pub fn watch_new_chat_type_save(&mut self, sent: &[RequestId]) {
-        let saves = &mut self.session.groups.new_chats.type_saves;
-        saves.clear();
-        saves.extend(sent.iter().map(|id| (*id, TypeSave::Sent)));
+        self.session.groups.new_chats.watch_type_save(sent);
     }
 
     /// The dialog no longer waits for these type Saves (it was closed, or
     /// their answer moved the step on): their entries go, and an answer
     /// that still arrives finds none.
     pub fn forget_new_chat_type_save(&mut self, sent: &[RequestId]) {
-        let saves = &mut self.session.groups.new_chats.type_saves;
-        for id in sent {
-            saves.remove(id);
-        }
+        self.session.groups.new_chats.forget_type_save(sent);
     }
 
     /// The dialog no longer owns this create (it was closed, or its answer

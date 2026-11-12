@@ -63,7 +63,7 @@ fn opening_the_editor_asks_for_the_name_and_the_about_text() {
             .owned
             .edit
             .as_ref()
-            .map(|edit| edit.asked),
+            .and_then(|edit| edit.asked()),
         Some(asked)
     );
     assert_eq!(name["bot_user_id"], 21);
@@ -108,7 +108,7 @@ fn saving_sends_only_what_changed_and_keeps_the_texts_on_ok() {
     );
     let edit = driver.session.bots.owned.edit.clone().unwrap();
     assert_eq!(edit.name.text(), Some("New"));
-    assert_eq!((edit.saving(), edit.saved), (0, 1));
+    assert_eq!((edit.saving(), edit.has_saved()), (0, true));
 }
 
 #[test]
@@ -168,7 +168,7 @@ fn a_reopened_editor_takes_only_its_own_answers() {
         &answer(&extra_of(&old_load), stale),
     );
     let edit = driver.session.bots.owned.edit.clone().unwrap();
-    assert_eq!((edit.saving(), edit.saved), (1, 0));
+    assert_eq!((edit.saving(), edit.has_saved()), (1, false));
     assert!(matches!(
         &edit.name_save,
         crate::state::BotSave::Saving { text, .. } if text == "Newer"
@@ -179,7 +179,7 @@ fn a_reopened_editor_takes_only_its_own_answers() {
     feed(&mut driver, &seq, &sink, &answer(&extra_of(&save), ok));
     let edit = driver.session.bots.owned.edit.clone().unwrap();
     assert_eq!(edit.name.text(), Some("Newer"));
-    assert_eq!((edit.saving(), edit.saved), (0, 1));
+    assert_eq!((edit.saving(), edit.has_saved()), (0, true));
 }
 
 #[test]

@@ -10,8 +10,8 @@ impl Session {
         _seq: u64,
     ) {
         self.settle_own_reaction(extra, false);
-        if let Some(slot) = extra.and_then(|id| self.groups.new_chats.type_saves.get_mut(&id)) {
-            *slot = TypeSave::Done;
+        if let Some(id) = extra {
+            self.groups.new_chats.type_save_done(id);
         }
         self.settle_direct_messages_ok(pending);
         if let Some(pending) = pending

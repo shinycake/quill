@@ -23,7 +23,6 @@ bare:CodeLanguageStage::Opening 1
 bare:Decoding::Running 1
 bare:DeviceLink::Opening 1
 bare:DeviceRun::Opening 1
-bare:DownloadStatus::Downloading 1
 bare:Draft::Waiting 1
 bare:Echo::Waiting 1
 bare:EngineState::Loading 1
@@ -50,7 +49,6 @@ bare:PaneMode::Connecting 1
 bare:PasscodeJob::Running 1
 bare:Phase::Downloading 1
 bare:Phase::Loading 1
-bare:Phase::Requested 1
 bare:Phase::Waiting 1
 bare:PhoneFlow::Asking 1
 bare:Picture::Loading 1
@@ -62,7 +60,6 @@ bare:Refire::Running 1
 bare:ReplyState::Loading 1
 bare:Restore::Pending 1
 bare:Run::Running 1
-bare:SaveAnswer::Waiting 1
 bare:SearchStatus::Searching 1
 bare:SendState::Sending 1
 bare:SendState::Sent 1
@@ -86,7 +83,6 @@ bare:SuggestedPostState::Pending 1
 bare:ThreadStatus::Starting 1
 bare:ToldStage::Loading 1
 bare:TransportState::Connecting 1
-bare:TypeSave::Sent 1
 bare:Unavailable::Checking 1
 bare:VenueList::Loading 1
 bare:VideoFullscreen::Leaving 1
@@ -99,18 +95,15 @@ optional:Fetch::Loading 1
 optional:LiveJoin::Joining 1
 optional:SetStage::Resolving 1
 optional:TrendingSets::Loading 1
-rawid:BotUsernameCheck::Checking 1
 rawid:EditorStage::Encoding 1
 rawid:EditorStage::Reading 1
 rawid:LimitNotice::Box 1
 unkeyed:AccentRead::Reading 1
 unkeyed:AddressStage::Resolving 1
 unkeyed:Assembly::Reading 1
-unkeyed:BotUsernameCheck::Checking 1
 unkeyed:CallLinkStage::Leaving 1
 unkeyed:Cancellation::InFlight 1
 unkeyed:ChatSearchPaging::Loading 1
-unkeyed:CreateStage::Creating 1
 unkeyed:DebugConfirm::Asking 1
 unkeyed:DemandStage::Asked 1
 unkeyed:DeviceRun::Running 1

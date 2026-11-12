@@ -2,23 +2,43 @@
 //! `crate::owned_bots` for what tdesktop does).
 use crate::state::*;
 
-/// One of the bot's two texts as the server holds it.
+/// One of the bot's two texts as the server holds it. Each stage names the
+/// request it came from, so a dialog takes only the answers of its own
+/// loads and saves.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BotText {
     /// Its `get…` request is out as this request; an answer for another
     /// dialog drops.
     Loading(RequestId),
-    Ready(String),
-    /// The load failed; the dialog says so instead of waiting forever.
-    Failed,
+    /// What the load `request` read.
+    Loaded { text: String, request: RequestId },
+    /// What the save `request` confirmed: the server holds it now.
+    Saved { text: String, request: RequestId },
+    /// The load `request` failed; the dialog says so instead of waiting
+    /// forever.
+    Failed(RequestId),
 }
 
 impl BotText {
     pub fn text(&self) -> Option<&str> {
         match self {
-            Self::Ready(text) => Some(text),
-            Self::Loading(_) | Self::Failed => None,
+            Self::Loaded { text, .. } | Self::Saved { text, .. } => Some(text),
+            Self::Loading(_) | Self::Failed(_) => None,
         }
+    }
+
+    /// The load this text is about, while it is the load's (a save's
+    /// confirmation replaces it).
+    fn load(&self) -> Option<RequestId> {
+        match self {
+            Self::Loading(request) | Self::Failed(request) => Some(*request),
+            Self::Loaded { request, .. } => Some(*request),
+            Self::Saved { .. } => None,
+        }
+    }
+
+    fn is_failed(&self) -> bool {
+        matches!(self, Self::Failed(_))
     }
 }
 
@@ -48,17 +68,11 @@ impl BotSave {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BotEditTexts {
     pub bot_id: i64,
-    /// The `getBotName` and `getBotInfoShortDescription` requests that
-    /// asked for these texts, so a dialog fills its fields only from the
-    /// load it started.
-    pub asked: (RequestId, RequestId),
     pub name: BotText,
     pub about: BotText,
     pub name_save: BotSave,
     pub about_save: BotSave,
     pub photo_save: BotSave,
-    /// Confirmed saves since the dialog opened.
-    pub saved: u8,
 }
 
 /// Where the typed username's availability check stands. The answer does
@@ -67,8 +81,11 @@ pub struct BotEditTexts {
 pub enum BotUsernameCheck {
     #[default]
     Idle,
-    /// `checkBotUsername` for `username` is out as `generation`.
-    Checking { generation: u64, username: String },
+    /// `checkBotUsername` for `username` is out as `request`.
+    Checking {
+        request: RequestId,
+        username: String,
+    },
     /// The latest answered check.
     Known {
         username: String,
@@ -80,8 +97,6 @@ pub enum BotUsernameCheck {
 /// press, so a closed box still reports with its own name and manager.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreateSubmission {
-    /// Bumped per username check and per create, so late answers drop.
-    pub generation: u64,
     pub name: String,
     pub username: String,
     pub manager_id: i64,
@@ -103,7 +118,11 @@ pub struct ManagedBotShare {
 pub enum CreateStage {
     #[default]
     Editing,
-    Creating(CreateSubmission),
+    /// `createBot` is out as `request`; only its answer ends the stage.
+    Creating {
+        request: RequestId,
+        submission: CreateSubmission,
+    },
     /// The new bot exists; the UI reports it once.
     Created {
         submission: CreateSubmission,
@@ -116,15 +135,13 @@ pub enum CreateStage {
 /// The "Create Bot" dialog's server state.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct CreateBotState {
-    /// Bumped per username check and per create, so late answers drop.
-    pub generation: u64,
     pub check: BotUsernameCheck,
     pub stage: CreateStage,
 }
 
 impl CreateBotState {
     pub fn creating(&self) -> bool {
-        matches!(self.stage, CreateStage::Creating(_))
+        matches!(self.stage, CreateStage::Creating { .. })
     }
 
     pub fn error(&self) -> Option<&str> {
@@ -161,14 +178,24 @@ impl BotEditTexts {
     pub fn new(bot_id: i64, name: RequestId, about: RequestId) -> Self {
         Self {
             bot_id,
-            asked: (name, about),
             name: BotText::Loading(name),
             about: BotText::Loading(about),
             name_save: BotSave::Idle,
             about_save: BotSave::Idle,
             photo_save: BotSave::Idle,
-            saved: 0,
         }
+    }
+
+    /// The two loads this dialog started, while its texts still show them
+    /// (a save's confirmation replaces a text, and the dialog has moved on
+    /// by then).
+    pub fn asked(&self) -> Option<(RequestId, RequestId)> {
+        Some((self.name.load()?, self.about.load()?))
+    }
+
+    /// The server confirmed a save since the dialog opened.
+    pub fn has_saved(&self) -> bool {
+        matches!(self.name, BotText::Saved { .. }) || matches!(self.about, BotText::Saved { .. })
     }
 
     /// Saves sent and not yet answered.
@@ -181,7 +208,7 @@ impl BotEditTexts {
 
     /// A load failed.
     pub fn load_failed(&self) -> bool {
-        self.name == BotText::Failed || self.about == BotText::Failed
+        self.name.is_failed() || self.about.is_failed()
     }
 
     /// The reason of a failed save, if one stands.
@@ -245,7 +272,7 @@ impl Session {
                 &mut edit.name
             };
             if *slot == BotText::Loading(id) {
-                *slot = BotText::Ready(text);
+                *slot = BotText::Loaded { text, request: id };
             }
         }
     }
@@ -261,15 +288,14 @@ impl Session {
         let Some(save) = edit.save_of(purpose, pending) else {
             return;
         };
-        let BotSave::Saving { text, .. } = std::mem::take(save) else {
+        let BotSave::Saving { request, text } = std::mem::take(save) else {
             return;
         };
         match purpose {
-            BotsPurpose::SetBotName { .. } => edit.name = BotText::Ready(text),
-            BotsPurpose::SetBotAbout { .. } => edit.about = BotText::Ready(text),
+            BotsPurpose::SetBotName { .. } => edit.name = BotText::Saved { text, request },
+            BotsPurpose::SetBotAbout { .. } => edit.about = BotText::Saved { text, request },
             _ => {}
         }
-        edit.saved = edit.saved.saturating_add(1);
     }
 
     /// `checkChatUsernameResult*` answering `checkBotUsername`.
@@ -278,17 +304,15 @@ impl Session {
         result: UsernameCheckResult,
         pending: Option<&PendingRequest>,
     ) {
-        let Some(RequestPurpose::Bots(BotsPurpose::CheckBotUsername { generation })) =
-            pending.map(|p| p.purpose)
+        let Some(id) = pending
+            .filter(|p| p.purpose == RequestPurpose::Bots(BotsPurpose::CheckBotUsername))
+            .map(|p| p.id)
         else {
             return;
         };
         let create = &mut self.bots.owned.create;
-        if let BotUsernameCheck::Checking {
-            generation: asked,
-            username,
-        } = &create.check
-            && *asked == generation
+        if let BotUsernameCheck::Checking { request, username } = &create.check
+            && *request == id
         {
             create.check = BotUsernameCheck::Known {
                 username: username.clone(),
@@ -299,18 +323,23 @@ impl Session {
 
     /// The `user` answer of `createBot`.
     pub(crate) fn apply_created_bot(&mut self, user_id: i64, pending: Option<&PendingRequest>) {
-        if let Some(RequestPurpose::Bots(BotsPurpose::CreateBot { generation })) =
-            pending.map(|p| p.purpose)
+        let Some(id) = pending
+            .filter(|p| p.purpose == RequestPurpose::Bots(BotsPurpose::CreateBot))
+            .map(|p| p.id)
+        else {
+            return;
+        };
+        let create = &mut self.bots.owned.create;
+        if let CreateStage::Creating {
+            request,
+            submission,
+        } = &create.stage
+            && *request == id
         {
-            let create = &mut self.bots.owned.create;
-            if let CreateStage::Creating(submission) = &create.stage
-                && submission.generation == generation
-            {
-                create.stage = CreateStage::Created {
-                    submission: submission.clone(),
-                    user_id,
-                };
-            }
+            create.stage = CreateStage::Created {
+                submission: submission.clone(),
+                user_id,
+            };
         }
     }
 
@@ -334,7 +363,7 @@ impl Session {
                         &mut edit.name
                     };
                     if *slot == BotText::Loading(id) {
-                        *slot = BotText::Failed;
+                        *slot = BotText::Failed(id);
                     }
                 }
             }
@@ -352,13 +381,10 @@ impl Session {
                     *save = BotSave::Failed(format!("Could not save {what} (error {}).", err.code));
                 }
             }
-            BotsPurpose::CheckBotUsername { generation } => {
+            BotsPurpose::CheckBotUsername => {
                 let create = &mut self.bots.owned.create;
-                if let BotUsernameCheck::Checking {
-                    generation: asked,
-                    username,
-                } = &create.check
-                    && *asked == generation
+                if let BotUsernameCheck::Checking { request, username } = &create.check
+                    && Some(*request) == pending.map(|p| p.id)
                 {
                     // tdesktop treats a failed check as "taken".
                     create.check = BotUsernameCheck::Known {
@@ -367,10 +393,10 @@ impl Session {
                     };
                 }
             }
-            BotsPurpose::CreateBot { generation } => {
+            BotsPurpose::CreateBot => {
                 let create = &mut self.bots.owned.create;
-                if let CreateStage::Creating(submission) = &create.stage
-                    && submission.generation == generation
+                if let CreateStage::Creating { request, .. } = &create.stage
+                    && Some(*request) == pending.map(|p| p.id)
                 {
                     if err.premium_limit == Some(crate::premium_limits::PremiumLimitKind::OwnedBots)
                     {

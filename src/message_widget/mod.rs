@@ -239,10 +239,10 @@ pub enum QueryOutcome {
 /// takes them ([`crate::state::BotsState::widget_answers`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WidgetAnswer {
-    /// `getWidgetQueryAnswer` for the widget's request `token`.
+    /// `getWidgetQueryAnswer` for the widget's query sent as `request`.
     Query {
         key: WidgetKey,
-        token: u64,
+        request: crate::ids::RequestId,
         outcome: QueryOutcome,
     },
     /// `getWidgetPublicData` for the poll `request`: the shared data and

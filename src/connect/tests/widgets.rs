@@ -46,9 +46,9 @@ fn feed(
 }
 
 #[test]
-fn a_query_goes_out_as_plain_data_and_its_answer_comes_back_for_its_token() {
+fn a_query_goes_out_as_plain_data_and_its_answer_comes_back_for_its_request() {
     let (mut driver, recorder, sink, seq) = driver_parts();
-    driver.send_widget_query(KEY, 3, b"vote:1").unwrap();
+    let request = driver.send_widget_query(KEY, b"vote:1").unwrap();
     let sent = sent_request(&recorder, "getWidgetQueryAnswer");
     assert_eq!(sent["chat_id"], -100);
     assert_eq!(sent["message_id"], 7 << 20);
@@ -68,7 +68,7 @@ fn a_query_goes_out_as_plain_data_and_its_answer_comes_back_for_its_token() {
         driver.take_widget_answers(),
         vec![WidgetAnswer::Query {
             key: KEY,
-            token: 3,
+            request,
             outcome: QueryOutcome::Answered("{\"votes\":4}".into()),
         }]
     );
@@ -78,17 +78,16 @@ fn a_query_goes_out_as_plain_data_and_its_answer_comes_back_for_its_token() {
 #[test]
 fn a_late_bot_is_a_timeout_and_a_flood_wait_is_rate_limited() {
     let (mut driver, recorder, sink, seq) = driver_parts();
-    for (token, code, message, failure) in [
-        (1, 502, "Bot did not answer", QueryFailure::Timeout),
+    for (code, message, failure) in [
+        (502, "Bot did not answer", QueryFailure::Timeout),
         (
-            2,
             429,
             "Too Many Requests: retry after 8",
             QueryFailure::RateLimited,
         ),
-        (3, 400, "WIDGET_INVALID", QueryFailure::Failed),
+        (400, "WIDGET_INVALID", QueryFailure::Failed),
     ] {
-        driver.send_widget_query(KEY, token, b"x").unwrap();
+        let request = driver.send_widget_query(KEY, b"x").unwrap();
         let sent = sent_request(&recorder, "getWidgetQueryAnswer");
         feed(
             &mut driver,
@@ -100,7 +99,7 @@ fn a_late_bot_is_a_timeout_and_a_flood_wait_is_rate_limited() {
             driver.take_widget_answers(),
             vec![WidgetAnswer::Query {
                 key: KEY,
-                token,
+                request,
                 outcome: QueryOutcome::Failed(failure),
             }],
             "error {code}"
@@ -111,13 +110,13 @@ fn a_late_bot_is_a_timeout_and_a_flood_wait_is_rate_limited() {
 #[test]
 fn an_empty_or_oversized_query_is_refused_before_tdlib() {
     let (mut driver, recorder, _sink, _seq) = driver_parts();
-    assert!(driver.send_widget_query(KEY, 1, b"").is_err());
-    assert!(driver.send_widget_query(KEY, 1, &[b'x'; 65]).is_err());
+    assert!(driver.send_widget_query(KEY, b"").is_err());
+    assert!(driver.send_widget_query(KEY, &[b'x'; 65]).is_err());
     let pending = WidgetKey {
         message_id: MessageId(-5),
         ..KEY
     };
-    assert!(driver.send_widget_query(pending, 1, b"x").is_err());
+    assert!(driver.send_widget_query(pending, b"x").is_err());
     assert!(
         recorder
             .snapshot()

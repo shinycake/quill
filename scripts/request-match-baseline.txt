@@ -1,8 +1,5 @@
 # Answers not matched by RequestId (scripts/check-request-match.py).
 # <rule>:<Type::function> <count>. Only remove lines or lower counts.
-counter:BotsPurpose::CheckBotUsername 1
-counter:BotsPurpose::CreateBot 1
-counter:BotsPurpose::GetWidgetQueryAnswer 1
 counter:SearchPurpose::GetChatMessageCalendar 1
 counter:SettingsPurpose::GetBlockedSenders 1
 counter:SettingsPurpose::LookupBusinessBot 1
@@ -124,6 +121,5 @@ unsent:ConnectDriver::maybe_fetch_live_story_extras 1
 unsent:ConnectDriver::maybe_fetch_notification_exceptions 1
 unsent:ConnectDriver::probe_self_star_stats 1
 unsent:GifPanel::saved_asked 1
-unsent:GiveawayOptions::begin 2
 unsent:QuillApp::begin_screen_worker 1
 unsent:QuillApp::menu_focus_upkeep 1

@@ -250,7 +250,7 @@ fn a_giveaway_launch_in_flight_is_never_forgotten_by_a_form() {
 fn a_giveaway_waiting_on_verification_survives_the_form_closing() {
     use crate::state::{GiveawayLaunch, GiveawayLaunches};
     let mut launches = GiveawayLaunches::default();
-    launches.set(5, GiveawayLaunch::Verifying);
+    launches.set(5, GiveawayLaunch::NeedsVerification);
     launches.for_form(5);
     launches.for_form(5);
     assert!(launches.is_done_for(5) && launches.is_verifying_for(5));
