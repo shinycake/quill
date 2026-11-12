@@ -512,10 +512,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             chat_id,
             crate::search_filters::before_day_date(day_number),
         )) {
-            Ok(()) => Ok(Some(extra)),
+            Ok(()) => {
+                self.session.begin_date_ask(extra);
+                Ok(Some(extra))
+            }
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.fail_date_jump(false, None);
+                self.session.date_jump_refused();
                 Err(err)
             }
         }

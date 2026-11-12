@@ -16,6 +16,8 @@ pub struct SearchDomainState {
     /// not started yet (for the window and chat that asked), or the
     /// "nothing found" note the calendar box draws ([`DateJumpAnswer`]).
     pub(crate) date_jump: DateJumpAnswer,
+    /// The `getChatMessageByDate` each window waits for.
+    pub(crate) date_asks: crate::state::DateAsks,
 }
 
 /// The outcome of a date lookup. `Resolved` leaves when the driver starts
@@ -82,6 +84,7 @@ impl SearchDomainState {
             history_calendar: None,
             calendar_generation: 0,
             date_jump: DateJumpAnswer::Idle,
+            date_asks: Default::default(),
         }
     }
 }

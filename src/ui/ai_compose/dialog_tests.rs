@@ -454,3 +454,35 @@ fn the_language_picker_reopens_unfiltered(cx: &mut TestAppContext) {
     });
     assert_eq!(query, "");
 }
+
+/// 12-001: a second press of the shortcut while its rewrite is out sends
+/// nothing, and a rewrite whose request is lost does not block the next.
+#[gpui_kit::test]
+fn the_shortcut_waits_for_its_rewrite_in_flight(cx: &mut TestAppContext) {
+    use crate::ui::ai_compose_state::ApplyInPlace;
+    let (app, mut main) = open_main(cx);
+    close_box(&app, &mut main);
+    app.update(&mut main, |app, _| {
+        assert!(!app.ai_apply_in_flight(), "nothing asked yet");
+        let conversation = app.open_conversation().expect("a chat is open");
+        let request = app
+            .demo_session
+            .as_mut()
+            .map(|session| session.request(quill::state::RequestPurpose::GetTopChats, None))
+            .expect("the demo session");
+        app.ai_compose.apply_in_place = Some(ApplyInPlace {
+            request,
+            account: quill::ids::AccountKey::primary(),
+            field: String::new(),
+            conversation,
+            window: None,
+            selection: None,
+            cursor: 0,
+        });
+        assert!(app.ai_apply_in_flight(), "its request is out");
+        if let Some(session) = app.demo_session.as_mut() {
+            session.requests.take(request);
+        }
+        assert!(!app.ai_apply_in_flight(), "a lost request does not block");
+    });
+}

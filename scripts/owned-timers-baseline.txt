@@ -1,7 +1,5 @@
 # Timers no stage owns (scripts/check-owned-timers.py).
 # <rule>:<Type::function> <count>. Only remove lines or lower counts.
-detached:AgentBridge::new 1
-detached:QuillApp::agent_driver_start 1
 detached:QuillApp::bot_username_changed 1
 detached:QuillApp::new_chatbot_draft 1
 detached:QuillApp::show_notification_with_preview 1

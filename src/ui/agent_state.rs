@@ -147,6 +147,35 @@ pub(crate) struct AgentBridge {
     >,
     /// The input command that runs, and those waiting behind it.
     pub(super) driver: Driver,
+    /// The read commands (a tree, a screenshot) in flight.
+    pub(super) reads: Reads,
+    /// The task that wakes the UI for agent state; dropping the bridge
+    /// (the app going away) ends it.
+    _wake: gpui_kit::Task<()>,
+}
+
+/// The read commands in flight, each under its request id. A read holds no
+/// stage of its own, so its task lives here until it has answered (or the
+/// app goes away and drops them with their agents' tool calls).
+#[derive(Default)]
+pub(crate) struct Reads(std::collections::HashMap<u64, gpui_kit::Task<()>>);
+
+impl Reads {
+    /// The read `id` runs as `task`.
+    pub(super) fn hold(&mut self, id: u64, task: gpui_kit::Task<()>) {
+        self.0.insert(id, task);
+    }
+
+    /// The read `id` answered: its task goes.
+    pub(super) fn answered(&mut self, id: u64) {
+        self.0.remove(&id);
+    }
+
+    /// The reads in flight.
+    #[cfg(test)]
+    pub(super) fn len(&self) -> usize {
+        self.0.len()
+    }
 }
 
 impl AgentBridge {
@@ -154,7 +183,7 @@ impl AgentBridge {
     /// raises the window for a new request.
     pub(super) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
         // screen-scope: the task wakes the UI for agent requests, and agents drive whichever account is on screen.
-        QuillApp::spawn_app_in(window, cx, async move |app, cx| {
+        let wake = QuillApp::spawn_app_in(window, cx, async move |app, cx| {
             let mut announced = 0u64;
             let mut seen = quill::wake::AGENT.epoch();
             // Shorter while the UI driver forces the element tree, so it
@@ -198,11 +227,12 @@ impl AgentBridge {
                     break;
                 }
             }
-        })
-        .detach();
+        });
         Self {
             ui_send: None,
             driver: Driver::Idle,
+            reads: Reads::default(),
+            _wake: wake,
         }
     }
 }

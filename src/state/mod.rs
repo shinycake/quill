@@ -124,6 +124,7 @@ mod session_chatlist;
 mod session_composer_topic;
 mod session_connection;
 mod session_date_jump;
+pub use session_date_jump::DateAsks;
 mod session_direct_messages;
 mod session_drafts;
 mod session_files;

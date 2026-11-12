@@ -2,6 +2,44 @@
 use super::*;
 use crate::search_filters::SearchMediaKind;
 use crate::telegram::envelope::{CalendarDay, ParsedChatMember};
+use std::collections::HashMap;
+
+/// The `getChatMessageByDate` each window waits for, one per window (`None`
+/// is the main window's). A newer pick of a window replaces its earlier
+/// ask, so the earlier answer, arriving after, changes nothing. An answer,
+/// a refused send and the window's chat leaving each end its entry.
+#[derive(Debug, Default)]
+pub struct DateAsks(HashMap<Option<ChatId>, RequestId>);
+
+impl DateAsks {
+    fn begin(&mut self, window: Option<ChatId>, request: RequestId) {
+        self.0.insert(window, request);
+    }
+
+    /// `request` answered or failed: whether it is the ask of its window
+    /// (and so ends it).
+    fn settle(&mut self, pending: Option<&PendingRequest>) -> bool {
+        let Some(pending) = pending else {
+            return false;
+        };
+        let window = pending.asked_in.chat();
+        if self.0.get(&window) == Some(&pending.id) {
+            self.0.remove(&window);
+            true
+        } else {
+            false
+        }
+    }
+
+    fn forget_chat(&mut self, chat: Option<ChatId>) {
+        match chat {
+            Some(chat) => {
+                self.0.remove(&Some(chat));
+            }
+            None => self.0.clear(),
+        }
+    }
+}
 
 impl Session {
     /// Open the calendar box for the open chat. `None` when no chat is open.
@@ -25,6 +63,15 @@ impl Session {
         self.search.calendar_generation
     }
 
+    /// `getChatMessageByDate` went out as `request`: it is the ask of the
+    /// window that sent it.
+    pub fn begin_date_ask(&mut self, request: RequestId) {
+        if let Some(pending) = self.requests.get(request) {
+            let window = pending.asked_in.chat();
+            self.search.date_asks.begin(window, request);
+        }
+    }
+
     pub fn close_history_calendar(&mut self) {
         self.search.history_calendar = None;
     }
@@ -34,6 +81,7 @@ impl Session {
     /// "nothing found" note. `chat` limits it to that chat's pieces
     /// (`None`: all of them).
     pub fn clear_date_jump_ui(&mut self, chat: Option<ChatId>) {
+        self.search.date_asks.forget_chat(chat);
         let is_chat = |id: ChatId| chat.is_none_or(|chat| chat == id);
         if self
             .search
@@ -110,6 +158,9 @@ impl Session {
         message_id: MessageId,
         pending: Option<&PendingRequest>,
     ) {
+        if !self.search.date_asks.settle(pending) {
+            return;
+        }
         self.search.date_jump = ViewJump::for_request(pending, message_id, DateJumpMode::Next)
             .map_or(DateJumpAnswer::Idle, DateJumpAnswer::Resolved);
     }
@@ -117,6 +168,9 @@ impl Session {
     /// `getChatMessageByDate` failed: a 404 means nothing is that old, so
     /// the jump goes to the start of the chat.
     pub(crate) fn fail_date_jump(&mut self, not_found: bool, pending: Option<&PendingRequest>) {
+        if !self.search.date_asks.settle(pending) {
+            return;
+        }
         if not_found {
             self.search.date_jump =
                 ViewJump::for_request(pending, FIRST_MESSAGE_ID, DateJumpMode::Oldest)
@@ -124,6 +178,11 @@ impl Session {
         } else {
             self.search.date_jump = DateJumpAnswer::NotFound(DateJumpNote::Failed);
         }
+    }
+
+    /// The lookup could not be sent: the box says so.
+    pub fn date_jump_refused(&mut self) {
+        self.search.date_jump = DateJumpAnswer::NotFound(DateJumpNote::Failed);
     }
 
     /// Start a date jump: the same load-around pipeline as a search hit,
@@ -251,5 +310,62 @@ mod tests {
     #[test]
     fn first_message_id_is_server_id_one() {
         assert_eq!(super::FIRST_MESSAGE_ID.0, 1_048_576);
+    }
+
+    use crate::diagnostics::{DiagnosticSink, MemorySink};
+    use crate::ids::{AccountKey, ChatId, MessageId};
+    use crate::state::{DateJumpAnswer, RequestPurpose, Session};
+    use std::sync::Arc;
+
+    fn session() -> Session {
+        let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+        Session::new(AccountKey::primary(), sink)
+    }
+
+    fn ask(session: &mut Session) -> crate::ids::RequestId {
+        let id = session.request(RequestPurpose::GetChatMessageByDate, Some(ChatId(11)));
+        session.begin_date_ask(id);
+        id
+    }
+
+    /// 09-001: the newest pick of a window wins, whatever order the answers
+    /// arrive in.
+    #[test]
+    fn the_older_date_answer_never_wins_over_the_newer_pick() {
+        for newer_first in [true, false] {
+            let mut session = session();
+            let older = ask(&mut session);
+            let newer = ask(&mut session);
+            let (first, second) = if newer_first {
+                (newer, older)
+            } else {
+                (older, newer)
+            };
+            for (request, message) in [(first, 100), (second, 200)] {
+                let pending = session.requests.take(request);
+                session.accept_date_message(MessageId(message), pending.as_ref());
+            }
+            let DateJumpAnswer::Resolved(jump) = session.search.date_jump else {
+                panic!("the newer pick resolved");
+            };
+            let expected = if newer_first { 100 } else { 200 };
+            assert_eq!(jump.message_id, MessageId(expected));
+        }
+    }
+
+    /// An answer nobody asked for, or one of a window that left, changes
+    /// nothing.
+    #[test]
+    fn an_unasked_date_answer_is_dropped() {
+        let mut session = session();
+        let stray = session.request(RequestPurpose::GetChatMessageByDate, Some(ChatId(11)));
+        let pending = session.requests.take(stray);
+        session.accept_date_message(MessageId(5), pending.as_ref());
+        assert_eq!(session.search.date_jump, DateJumpAnswer::Idle);
+        let asked = ask(&mut session);
+        session.clear_date_jump_ui(None);
+        let pending = session.requests.take(asked);
+        session.accept_date_message(MessageId(5), pending.as_ref());
+        assert_eq!(session.search.date_jump, DateJumpAnswer::Idle);
     }
 }
