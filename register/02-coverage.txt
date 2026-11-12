@@ -106,3 +106,15 @@ src/composer/reply_item.rs 126 read
 src/composer/scan_work.rs 26 read
 src/composer/send.rs 321 read
 src/composer/shortcuts.rs 241 read
+src/composer_doc/mod.rs 679 read
+src/composer_doc/writer.rs 457 read
+src/connect/account_hygiene.rs 114 read
+src/connect/attach_bot_icons.rs 21 read
+src/connect/auth.rs 610 read
+src/connect/backgrounds.rs 443 read
+src/connect/bot_verification.rs 68 read
+src/connect/bots.rs 884 read
+src/connect/business_bot_bar.rs 79 read
+src/connect/business_extra.rs 309 read
+src/connect/business_settings.rs 130 read
+src/connect/call_audio.rs 528 read
