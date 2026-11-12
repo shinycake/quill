@@ -24,13 +24,17 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// so the interface matches TDLib's latest copy.
     pub(crate) fn send_language_options(&mut self) -> Result<(), ConnectSendError> {
         let root = crate::settings::app_root_of(&self.paths).map(std::path::Path::to_path_buf);
-        self.send_language_option("localization_target", LOCALIZATION_TARGET, None)?;
+        self.send_language_option(
+            "localization_target",
+            LOCALIZATION_TARGET,
+            LanguagePurpose::SetOption,
+        )?;
         if let Some(root) = &root {
             let path = database_path(root);
             self.send_language_option(
                 "language_pack_database_path",
                 &path.to_string_lossy(),
-                None,
+                LanguagePurpose::SetOption,
             )?;
         }
         let choice = root.as_deref().map(load_choice).unwrap_or_default();
@@ -44,13 +48,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         name: &str,
         value: &str,
-        generation: Option<u32>,
-    ) -> Result<(), ConnectSendError> {
-        let extra = self
-            .session
-            .request(purpose(LanguagePurpose::SetOption { generation }), None);
+        kind: LanguagePurpose,
+    ) -> Result<RequestId, ConnectSendError> {
+        let extra = self.session.request(purpose(kind), None);
         self.send_json_request(extra, &set_option_string(extra, name, value))
-            .map(|_| ())
     }
 
     /// `getLocalizationTargetInfo` for the Language box.
@@ -59,6 +60,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request(purpose(LanguagePurpose::TargetInfo), None);
         self.session.settings.language.packs.begin();
+        self.session.settings.language.packs.sent(extra);
         let result = self.send_json_request(extra, &get_localization_target_info(extra, false));
         // A send that failed is a failed list, drawn with Retry: back to
         // Idle would ask again at the next render.
@@ -76,8 +78,6 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// or an empty id) needs no strings: `ready` carries none.
     pub fn switch_language(&mut self, info: LanguagePackInfoData) -> Result<(), ConnectSendError> {
         let state = &mut self.session.settings.language;
-        state.generation = state.generation.wrapping_add(1);
-        let generation = state.generation;
         state.forget_failure();
         let builtin = info.id.is_empty() || info.id == "en";
         let id = if builtin {
@@ -93,16 +93,17 @@ impl<S: JsonSender> ConnectDriver<S> {
                 pack: Vec::new(),
                 base: Vec::new(),
             });
-            return self.send_language_option("language_pack_id", &id, None);
+            return self
+                .send_language_option("language_pack_id", &id, LanguagePurpose::SetOption)
+                .map(|_| ());
         }
         let base_id = info.base_language_pack_id.clone();
         let custom = !info.is_official && !info.is_installed;
         state.stage = crate::state::LanguageStage::Fetching(Box::new(LanguageSwitch::new(
             info,
-            generation,
             base_id.is_empty(),
         )));
-        let sent = self.send_language_switch(&id, &base_id, custom, generation);
+        let sent = self.send_language_switch(&id, &base_id, custom);
         if sent.is_err() {
             // A send that never left must not leave the switch pending, and
             // TDLib must not keep serving the pack the option already named:
@@ -113,34 +114,43 @@ impl<S: JsonSender> ConnectDriver<S> {
         sent
     }
 
+    /// Send the switch's requests; each one's id goes into the switch that
+    /// waits for it, so only its own answer or refusal acts.
     fn send_language_switch(
         &mut self,
         id: &str,
         base_id: &str,
         custom: bool,
-        generation: u32,
     ) -> Result<(), ConnectSendError> {
         if custom {
             let extra = self
                 .session
-                .request(purpose(LanguagePurpose::Synchronize { generation }), None);
+                .request(purpose(LanguagePurpose::Synchronize), None);
             self.send_json_request(extra, &add_custom_server_language_pack(extra, id))?;
+            self.note_switch(|switch| switch.guards.add = Some(extra));
         }
-        self.send_language_option("language_pack_id", id, Some(generation))?;
+        let option = self.send_language_option("language_pack_id", id, LanguagePurpose::SwitchOption)?;
+        self.note_switch(|switch| switch.guards.option = Some(option));
         for (pack, base) in [(id, false), (base_id, true)] {
             if pack.is_empty() {
                 continue;
             }
-            let extra = self
-                .session
-                .request(purpose(LanguagePurpose::Strings { generation, base }), None);
+            let extra = self.session.request(purpose(LanguagePurpose::Strings), None);
             self.send_json_request(extra, &get_language_pack_strings(extra, pack))?;
+            self.note_switch(|switch| switch.strings_sent(base, extra));
         }
         let extra = self
             .session
-            .request(purpose(LanguagePurpose::Synchronize { generation }), None);
-        self.send_json_request(extra, &synchronize_language_pack(extra, id))
-            .map(|_| ())
+            .request(purpose(LanguagePurpose::Synchronize), None);
+        self.send_json_request(extra, &synchronize_language_pack(extra, id))?;
+        self.note_switch(|switch| switch.guards.sync = Some(extra));
+        Ok(())
+    }
+
+    fn note_switch(&mut self, record: impl FnOnce(&mut LanguageSwitch)) {
+        if let Some(switch) = self.session.settings.language.switching_mut() {
+            record(switch);
+        }
     }
 }
 
@@ -175,7 +185,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             .current
             .as_ref()
             .map_or_else(|| "en".to_string(), |info| info.id.clone());
-        self.send_language_option("language_pack_id", &id, None)
+        self.send_language_option("language_pack_id", &id, LanguagePurpose::SetOption)
+            .map(|_| ())
     }
 }
 

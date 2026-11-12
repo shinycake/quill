@@ -70,6 +70,7 @@ mod shared_media;
 mod shared_media_profile;
 mod similar_strip;
 mod sponsored_placement;
+mod sweep_r3_04;
 mod status_badges;
 mod stickers;
 mod storage_save_failures;

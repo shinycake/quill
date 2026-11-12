@@ -1,0 +1,183 @@
+//! Sweep r3-04: answers settle only the request that asked.
+use super::common::*;
+use crate::state::fetch::Fetch;
+use super::*;
+
+#[test]
+fn the_accounts_own_full_info_turns_hidden_ads_back_on() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.my_user_id = Some(5);
+    session.accept_sponsored_hidden(ChatId(3));
+    assert!(session.messages.sponsored_hidden);
+    // Another user's full info says nothing about this account's ads.
+    let other = session.request_for_user(RequestPurpose::GetUserFullInfo, 31);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"userFullInfo","@extra":"{}","bio":null,"bot_info":null,"has_sponsored_messages_enabled":true}}"#,
+            other.0
+        ),
+    );
+    assert!(session.messages.sponsored_hidden);
+    let own = session.request_for_user(RequestPurpose::GetUserFullInfo, 5);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"userFullInfo","@extra":"{}","bio":null,"bot_info":null,"has_sponsored_messages_enabled":true}}"#,
+            own.0
+        ),
+    );
+    assert!(!session.messages.sponsored_hidden);
+}
+
+#[test]
+fn a_device_link_answer_after_its_screen_went_away_lands_nowhere() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let id = session.request(RequestPurpose::ConfirmDeviceLogin, None);
+    session.settings.device_login = DeviceLogin::Waiting { request: id };
+    session.settings.sessions_op.begin(id);
+    session.settings.device_login.discard();
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"session","@extra":"{}","id":11}}"#, id.0),
+    );
+    assert_eq!(session.settings.device_login, DeviceLogin::Idle);
+    assert!(!session.settings.sessions_op.is_mutating());
+
+    let id = session.request(RequestPurpose::ConfirmDeviceLogin, None);
+    session.settings.device_login = DeviceLogin::Waiting { request: id };
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"LOGIN_TOKEN_EXPIRED"}}"#,
+            id.0
+        ),
+    );
+    assert_eq!(
+        session.settings.device_login.take_result_for(id),
+        Some(crate::auth::DeviceLoginResult::Failed)
+    );
+}
+
+#[test]
+fn a_late_storage_clear_answer_does_not_settle_another_clear() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let first = session.request(RequestPurpose::OptimizeStorage, None);
+    session.settings.storage_clear = StorageClear::Clearing { request: first };
+    // The page was reopened and the clear failed; a second clear starts.
+    session.settings.storage_clear = StorageClear::Failed("x".into());
+    let second = session.request(RequestPurpose::OptimizeStorage, None);
+    session.settings.storage_clear = StorageClear::Clearing { request: second };
+    session.settings.storage_stats = Fetch::Ready(StorageStats {
+        total_size: 1,
+        by_file_type: Vec::new(),
+        by_chat: Vec::new(),
+    });
+    let stats = |extra: RequestId| {
+        format!(
+            r#"{{"@type":"storageStatistics","@extra":"{}","size":"4096","count":1,"by_chat":[]}}"#,
+            extra.0
+        )
+    };
+    apply_json(&mut session, &seq, &sink, &stats(first));
+    assert!(session.settings.storage_clear.is_clearing());
+    assert!(session.settings.storage_stats.data().is_some());
+    apply_json(&mut session, &seq, &sink, &stats(second));
+    assert_eq!(session.settings.storage_clear.freed(), Some(4096));
+    assert!(session.settings.storage_stats.data().is_none());
+}
+
+#[test]
+fn a_failed_gift_request_closes_only_its_own_sale_confirmation() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let error = |extra: RequestId| {
+        format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"NOPE"}}"#,
+            extra.0
+        )
+    };
+    let view = |session: &mut Session| {
+        session.payments.hub.received.view.select(Some("g1".into()));
+        session
+            .payments
+            .hub
+            .received
+            .view
+            .confirm_convert(Some("g1".into()));
+    };
+    session.payments.hub.received.open();
+    view(&mut session);
+    // A failed save toggle, and the failed sale of another gift.
+    let toggle = session.request(
+        RequestPurpose::Payments(PaymentsPurpose::ToggleGiftSaved { saved: true }),
+        None,
+    );
+    apply_json(&mut session, &seq, &sink, &error(toggle));
+    assert_eq!(session.payments.hub.received.view.confirming(), Some("g1"));
+    let other = session.request_for_subject(RequestPurpose::SellGift, "g2");
+    apply_json(&mut session, &seq, &sink, &error(other));
+    assert_eq!(session.payments.hub.received.view.confirming(), Some("g1"));
+    let own = session.request_for_subject(RequestPurpose::SellGift, "g1");
+    apply_json(&mut session, &seq, &sink, &error(own));
+    assert_eq!(session.payments.hub.received.view.confirming(), None);
+}
+
+#[test]
+fn an_older_star_pack_failure_leaves_the_newer_options() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let old = session.request(RequestPurpose::GetStarPackOptions, None);
+    let new = session.request(RequestPurpose::GetStarPackOptions, None);
+    session.payments.star_packs.options.begin();
+    session.payments.star_packs.options.sent(new);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":500,"message":"x"}}"#,
+            old.0
+        ),
+    );
+    assert!(session.payments.star_packs.options.waits_for(new));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"starPaymentOptions","@extra":"{}","options":[]}}"#,
+            new.0
+        ),
+    );
+    assert!(session.payments.star_packs.options.data().is_some());
+}
+
+#[test]
+fn a_gift_text_limit_failure_keeps_the_limit_an_update_set() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let asked = session.request(RequestPurpose::GetGiftTextLimit, None);
+    session.payments.gift_text_length_max = Some(255);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":500,"message":"x"}}"#,
+            asked.0
+        ),
+    );
+    assert_eq!(session.payments.gift_text_length_max, Some(255));
+}

@@ -199,7 +199,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             chat_ids,
             ..OptimizeStorage::everything(50)
         };
-        self.session.settings.storage_clear = StorageClear::Clearing;
+        self.session.settings.storage_clear = StorageClear::Clearing { request: extra };
         if let Err(err) = self.sender.send_json(&optimize_storage(extra, &params)) {
             self.session.requests.take(extra);
             self.session.settings.storage_clear =

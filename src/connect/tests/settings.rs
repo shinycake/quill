@@ -764,7 +764,7 @@ fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
     assert!(driver.session.settings.sessions_op.is_mutating());
     assert_eq!(
         driver.session.settings.device_login,
-        crate::state::DeviceLogin::Idle
+        crate::state::DeviceLogin::Waiting { request }
     );
     driver
         .ingest(response(

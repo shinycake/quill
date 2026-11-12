@@ -41,10 +41,10 @@ impl Session {
                 }
             }
             Some(RequestPurpose::OptimizeStorage) => {
-                self.settings.storage_clear = StorageClear::Failed(format!(
-                    "Couldn't clear the cache: {}",
-                    error_reason(err)
-                ));
+                self.settings.storage_clear.failed_by(
+                    extra,
+                    format!("Couldn't clear the cache: {}", error_reason(err)),
+                );
             }
             Some(RequestPurpose::SetStorageOption) => {
                 self.settings.data_storage_save.fail(
@@ -153,10 +153,9 @@ impl Session {
             // Refresh button. The old cache stays visible.
             Some(RequestPurpose::ConfirmDeviceLogin) => {
                 if let Some(asked) = pending {
-                    self.settings.device_login = DeviceLogin::Done {
-                        request: asked.id,
-                        result: crate::auth::DeviceLoginResult::Failed,
-                    };
+                    self.settings
+                        .device_login
+                        .settle(asked.id, crate::auth::DeviceLoginResult::Failed);
                 }
                 self.settings.sessions_op.failed(pending.map(|p| p.id));
                 self.settings
