@@ -200,6 +200,29 @@ impl DeviceLogin {
         waits
     }
 
+    /// A confirmation is out, or its result is waiting to be taken.
+    pub fn is_active(&self) -> bool {
+        !matches!(self, Self::Idle)
+    }
+
+    /// The confirmation is still out (its result has not landed).
+    pub fn is_waiting(&self) -> bool {
+        matches!(self, Self::Waiting { .. })
+    }
+
+    /// The result of the one confirmation this stage holds, once: the stage
+    /// returns to `Idle`. The stage is the only owner of the request, so the
+    /// screen holds no copy of its id.
+    pub fn take_result(&mut self) -> Option<crate::auth::DeviceLoginResult> {
+        match *self {
+            Self::Done { result, .. } => {
+                *self = Self::Idle;
+                Some(result)
+            }
+            _ => None,
+        }
+    }
+
     /// The result of the confirmation `asked` sent, once: the stage returns
     /// to `Idle`. A result for another request is not this asker's.
     pub fn take_result_for(&mut self, asked: RequestId) -> Option<crate::auth::DeviceLoginResult> {

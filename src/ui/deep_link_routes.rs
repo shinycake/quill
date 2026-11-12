@@ -8,6 +8,7 @@ use super::links_state::PendingOpen;
 use super::navigation::NavigationAction;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::playback_state::MediaSeek;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
@@ -17,7 +18,7 @@ use quill::deep_link_types::{DeepLinkUi, SettingsTarget};
 use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr};
 use quill::state::DeepLinkAction;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// How many chats the share chooser lists.
 const SHARE_CHOICES: usize = 14;
@@ -196,19 +197,43 @@ impl QuillApp {
         self.set_composer_markup(&value, window, cx);
     }
 
+    /// Wait for the linked message of `chat_id` to load, then seek `seconds`
+    /// into its media; give up after [`SEEK_WAIT`].
+    fn begin_media_seek(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        seconds: i32,
+        cx: &mut Context<Self>,
+    ) {
+        let give_up = self.spawn_scoped(cx, async move |this, cx| {
+            cx.background_executor().timer(SEEK_WAIT).await;
+            let _ = this.update(cx, |this, _| this.playback.media_seek = MediaSeek::Idle);
+        });
+        self.playback.media_seek = MediaSeek::Seeking {
+            target: quill::ids::ChatMessage::new(chat_id, message_id),
+            seconds,
+            _give_up: give_up,
+        };
+        quill::wake::UPDATES.poke();
+    }
+
     /// Seek a linked media timestamp once the message has loaded.
-    pub(super) fn tick_media_seek(&mut self, now: Instant, cx: &mut Context<Self>) {
-        let Some((chat_id, message_id, seconds, give_up_at)) = self.playback.pending_media_seek
+    pub(super) fn tick_media_seek(&mut self, cx: &mut Context<Self>) {
+        let MediaSeek::Seeking {
+            target, seconds, ..
+        } = &self.playback.media_seek
         else {
             return;
         };
+        let (chat_id, message_id, seconds) = (target.chat, target.message, *seconds);
         // The reader left the chat before the message loaded: nothing is
         // played or opened over the chat they moved to.
         if !self
             .session()
             .is_some_and(|session| session.chat_is_shown(chat_id))
         {
-            self.playback.pending_media_seek = None;
+            self.playback.media_seek = MediaSeek::Idle;
             return;
         }
         let loaded = self.session().is_some_and(|session| {
@@ -218,7 +243,7 @@ impl QuillApp {
                 .is_some_and(|history| history.messages.contains_key(&message_id.0))
         });
         if loaded {
-            self.playback.pending_media_seek = None;
+            self.playback.media_seek = MediaSeek::Idle;
             // The poll runs this: the seek is the window's that shows the
             // chat, with its state in place, and so is a link it opens.
             let window = self.window_showing(chat_id);
@@ -227,8 +252,6 @@ impl QuillApp {
                     this.seek_media_timestamp(chat_id, message_id, seconds, cx);
                 });
             });
-        } else if now >= give_up_at {
-            self.playback.pending_media_seek = None;
         }
     }
 
@@ -264,10 +287,7 @@ impl QuillApp {
                 if let Some(seconds) = media_timestamp
                     && *message_id > 0
                 {
-                    let give_up_at = Instant::now() + SEEK_WAIT;
-                    self.playback.pending_media_seek =
-                        Some((chat_id, MessageId(*message_id), *seconds, give_up_at));
-                    quill::wake::UPDATES.poke();
+                    self.begin_media_seek(chat_id, MessageId(*message_id), *seconds, cx);
                 }
                 if let Some(thread) = thread_id {
                     self.open_thread_view(chat_id, MessageId(*thread), window, cx);

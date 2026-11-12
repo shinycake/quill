@@ -135,7 +135,7 @@ impl FrameUi {
     /// handed to the old one went with it, so the next render hands it
     /// over again. Every per-native-window cache resets here.
     pub(super) fn forget_native_window(&mut self) {
-        self.window_title_shown.borrow_mut().clear();
+        self.window_title_shown.get_mut().clear();
         self.capture_blocked = false;
         // The timer ran in the window that is gone; the next move asks again.
         self.window_state_save = StateSaveTimer::Idle;

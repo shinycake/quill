@@ -90,6 +90,20 @@ pub(super) struct EditMode {
     pub(super) stashed_draft: String,
     /// Reply that belonged to the stashed draft, restored with it on leaving.
     pub(super) stashed_reply: Option<ComposerReplyTo>,
+    /// The "Edit Cover" file dialog, while it is up. It belongs to this edit:
+    /// ending the edit, or starting another, drops the wait with it.
+    pub(super) cover_pick: CoverPick,
+}
+
+/// The file dialog of "Edit Cover" (tdesktop `VideoCoverUploader::choose`):
+/// not up, or up with the task that waits for its answer.
+#[derive(Debug, Default)]
+pub(super) enum CoverPick {
+    #[default]
+    Idle,
+    Picking {
+        _task: Task<()>,
+    },
 }
 
 /// One edit, told apart from every other (an edit cancelled and one started
@@ -471,7 +485,27 @@ impl ChatUi {
             edit,
             stashed_draft,
             stashed_reply,
+            cover_pick: CoverPick::Idle,
         });
+    }
+
+    /// The edit in place waits for its cover dialog's answer in `task`.
+    pub(super) fn begin_cover_pick(&mut self, task: Task<()>) {
+        if let Some(mode) = self.edit_mode.as_mut() {
+            mode.cover_pick = CoverPick::Picking { _task: task };
+        }
+    }
+
+    /// The cover dialog of edit `asked_for` answered: whether that edit is
+    /// still the one in place (and the wait ends).
+    pub(super) fn end_cover_pick(&mut self, asked_for: EditId) -> bool {
+        match self.edit_mode.as_mut() {
+            Some(mode) if mode.id == asked_for => {
+                mode.cover_pick = CoverPick::Idle;
+                true
+            }
+            _ => false,
+        }
     }
 
     /// "Send as a document" ticked for the replacement of the edit in place

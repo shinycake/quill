@@ -12,7 +12,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with};
 use quill::state::{InfoPanelTarget, Session};
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 /// Slice G10: communities create + hub + info UI
 /// (`parity:communities-create/hub/info`). Backend landed earlier —
@@ -240,12 +240,9 @@ pub fn build_create_community_dialog(
             .content(crate::ui::shell::scrollable_dialog_content({
                 // `content` needs an `Fn` closure, but the body is built once
                 // per dialog render — hand it over through a one-shot cell.
-                let body = Rc::new(RefCell::new(Some(body)));
+                let body = Rc::new(Cell::new(Some(body)));
                 move |content, _, _| {
-                    let body = body
-                        .borrow_mut()
-                        .take()
-                        .unwrap_or_else(|| div().into_any_element());
+                    let body = body.take().unwrap_or_else(|| div().into_any_element());
                     content.child(body)
                 }
             }))
@@ -340,12 +337,9 @@ pub fn build_community_hub_dialog(
         dialog
             .title(crate::ui::shell::dialog_title(tr(keys::Q_OPS_COMMUNITIES)))
             .content(crate::ui::shell::scrollable_dialog_content({
-                let body = Rc::new(RefCell::new(Some(body)));
+                let body = Rc::new(Cell::new(Some(body)));
                 move |content, _, _| {
-                    let body = body
-                        .borrow_mut()
-                        .take()
-                        .unwrap_or_else(|| div().into_any_element());
+                    let body = body.take().unwrap_or_else(|| div().into_any_element());
                     content.child(body)
                 }
             }))

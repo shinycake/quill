@@ -316,98 +316,100 @@ impl QuillApp {
             return;
         }
         let fps = self.frame.animation_demand.get();
-        // window-scope: the clock ticks every window's layers by entity id.
-        // screen-scope: the frame clock is the app's; each tick draws
-        // whichever account is on screen.
-        let clock = cx.spawn(async move |this, cx| {
-            let mut run = ClockRun::new(fps);
-            loop {
-                let (wait, vsync) = this
-                    .update(cx, |this, _| run.plan(this.clock_display(), Instant::now()))
-                    .unwrap_or((tick_period(run.fps), None));
-                cx.background_executor().timer(wait).await;
-                let woke = this
-                    .update(cx, |this, cx| {
-                        if let Some(plan) = this.tick_after_draws(run.fps, vsync) {
-                            return Woke::Later(plan);
-                        }
-                        let demand = this.frame.animation_demand.replace(0);
-                        let targets = with_cell(&this.frame.animation_targets, std::mem::take)
-                            .unwrap_or_default();
-                        let window_views =
-                            with_cell(&this.frame.window_views, std::mem::take).unwrap_or_default();
-                        let sound = this.frame.animation_sound.replace(false);
-                        let own_window = this.frame.own_window_tick.replace(false);
-                        let app_ticks = tick_wanted(this.frame.window_active.get(), sound);
-                        if demand > 0 && (app_ticks || own_window) {
-                            note_clock_playing(
-                                this.frame.clock_timing.get(),
-                                Instant::now(),
-                                demand,
-                            );
-                            if app_ticks {
-                                if targets.contains(&None) {
-                                    for id in targets.iter().flatten() {
-                                        this.layer_ticked(*id);
-                                    }
-                                    this.tick_app(cx);
-                                } else {
-                                    let views: Vec<_> = targets
-                                        .into_iter()
-                                        .flatten()
-                                        .filter(|id| !this.tick_hidden(*id, cx))
-                                        .filter(|id| !this.windows.holds_view(*id, cx))
-                                        .collect();
-                                    let draw = this.tick_draw(vsync);
-                                    // Only the slices with animated content
-                                    // redraw.
-                                    for id in views {
-                                        if let Some(fps) = this.idle_layer_tick(id, draw) {
-                                            this.request_animation_tick_for(Some(id), fps, cx);
-                                            continue;
-                                        }
-                                        if this.still_tick(id, draw, cx) {
-                                            continue;
-                                        }
-                                        this.layer_ticked(id);
-                                        let app: &mut App = cx;
-                                        app.notify(id);
-                                    }
-                                }
-                            } else {
-                                // Only the window views' own window is
-                                // active: the rest holds still.
-                                for id in &window_views {
-                                    this.layer_ticked(*id);
-                                }
-                            }
-                            let app: &mut App = cx;
-                            for id in window_views {
-                                app.notify(id);
-                            }
-                        }
-                        Woke::Ticked(demand)
-                    })
-                    .unwrap_or(Woke::Ticked(0));
-                let runs = run.woke(vsync, woke);
-                let lattice = run.lattice();
-                let _ = this.update(cx, |this, _| {
-                    let display = this.frame.clock_timing.get().map(|timing| timing.display);
-                    CONTENT_LATTICE.with(|cell| cell.set(display.zip(lattice)));
-                });
-                if !runs {
-                    break;
-                }
-            }
-            // Nothing awaits below: dropping this task's own handle only
-            // ends the future once the clock reads as stopped.
-            let _ = this.update(cx, |this, _| {
-                this.frame.frame_clock.set(ClockLoop::Stopped);
-            });
-        });
+        let clock = Self::clock_task(ClockRun::new(fps), cx);
         self.frame
             .frame_clock
             .set(ClockLoop::Running { _task: clock });
+    }
+
+    /// One beat of the frame clock: wait out the planned gap, tick what asked,
+    /// and when the clock goes on, hand the next beat to the stage (which drops
+    /// this task with the stage it replaces). No loop: the stage owns the one
+    /// wait there is.
+    fn clock_task(mut run: ClockRun, cx: &mut Context<Self>) -> Task<()> {
+        // window-scope: the clock ticks every window's layers by entity id.
+        // screen-scope: the frame clock is the app's; each tick draws
+        // whichever account is on screen.
+        cx.spawn(async move |this, cx| {
+            let (wait, vsync) = this
+                .update(cx, |this, _| run.plan(this.clock_display(), Instant::now()))
+                .unwrap_or((tick_period(run.fps), None));
+            cx.background_executor().timer(wait).await;
+            let woke = this
+                .update(cx, |this, cx| {
+                    if let Some(plan) = this.tick_after_draws(run.fps, vsync) {
+                        return Woke::Later(plan);
+                    }
+                    let demand = this.frame.animation_demand.replace(0);
+                    let targets = with_cell(&this.frame.animation_targets, std::mem::take)
+                        .unwrap_or_default();
+                    let window_views =
+                        with_cell(&this.frame.window_views, std::mem::take).unwrap_or_default();
+                    let sound = this.frame.animation_sound.replace(false);
+                    let own_window = this.frame.own_window_tick.replace(false);
+                    let app_ticks = tick_wanted(this.frame.window_active.get(), sound);
+                    if demand > 0 && (app_ticks || own_window) {
+                        note_clock_playing(this.frame.clock_timing.get(), Instant::now(), demand);
+                        if app_ticks {
+                            if targets.contains(&None) {
+                                for id in targets.iter().flatten() {
+                                    this.layer_ticked(*id);
+                                }
+                                this.tick_app(cx);
+                            } else {
+                                let views: Vec<_> = targets
+                                    .into_iter()
+                                    .flatten()
+                                    .filter(|id| !this.tick_hidden(*id, cx))
+                                    .filter(|id| !this.windows.holds_view(*id, cx))
+                                    .collect();
+                                let draw = this.tick_draw(vsync);
+                                // Only the slices with animated content
+                                // redraw.
+                                for id in views {
+                                    if let Some(fps) = this.idle_layer_tick(id, draw) {
+                                        this.request_animation_tick_for(Some(id), fps, cx);
+                                        continue;
+                                    }
+                                    if this.still_tick(id, draw, cx) {
+                                        continue;
+                                    }
+                                    this.layer_ticked(id);
+                                    let app: &mut App = cx;
+                                    app.notify(id);
+                                }
+                            }
+                        } else {
+                            // Only the window views' own window is
+                            // active: the rest holds still.
+                            for id in &window_views {
+                                this.layer_ticked(*id);
+                            }
+                        }
+                        let app: &mut App = cx;
+                        for id in window_views {
+                            app.notify(id);
+                        }
+                    }
+                    Woke::Ticked(demand)
+                })
+                .unwrap_or(Woke::Ticked(0));
+            let runs = run.woke(vsync, woke);
+            let lattice = run.lattice();
+            let _ = this.update(cx, |this, cx| {
+                let display = this.frame.clock_timing.get().map(|timing| timing.display);
+                CONTENT_LATTICE.with(|cell| cell.set(display.zip(lattice)));
+                // Replacing the stage drops this task; nothing awaits below.
+                let next = if runs {
+                    ClockLoop::Running {
+                        _task: Self::clock_task(run, cx),
+                    }
+                } else {
+                    ClockLoop::Stopped
+                };
+                this.frame.frame_clock.set(next);
+            });
+        })
     }
 
     fn tick_hidden(&self, view: EntityId, cx: &App) -> bool {

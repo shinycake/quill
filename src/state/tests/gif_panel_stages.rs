@@ -146,3 +146,19 @@ fn a_saved_list_marked_out_of_date_drops_the_older_answer_and_is_asked_again() {
     panel.saved_asked();
     assert!(panel.loaded() && !panel.saved_is_outdated());
 }
+
+#[test]
+fn only_the_request_that_saved_ends_the_save() {
+    let mut panel = GifPanel::default();
+    panel.save_sent(RequestId(5));
+    panel.save_settled(Some(RequestId(4)));
+    panel.save_settled(None);
+    assert_eq!(
+        panel.save,
+        crate::state::GifSave::Saving {
+            request: RequestId(5)
+        }
+    );
+    panel.save_settled(Some(RequestId(5)));
+    assert_eq!(panel.save, crate::state::GifSave::Idle);
+}

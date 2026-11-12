@@ -3,7 +3,6 @@
 #![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
 use gpui_kit::*;
-use quill::ids::RequestId;
 use quill::lang::{keys, tr};
 use std::io::Read;
 use std::process::{Child, Command, Stdio};
@@ -69,11 +68,12 @@ impl Drop for DeviceQrScanner {
         let _ = self.0.wait();
     }
 }
-/// Where linking another device stands: one value, so a scanner, the link it
-/// read and the notice cannot disagree. Every stage has a way out: the
-/// camera's answer, the consent, the cancel, the account's answer, or the
-/// owner going away (`clear_device_qr`). Leaving the Devices page keeps a
-/// link that is out (`leave_device_link`): its answer is matched by request.
+/// Where linking another device stands on this screen: one value, so a
+/// scanner, the link it read and the notice cannot disagree. Every stage has
+/// a way out: the camera's answer, the consent, the cancel, or the owner
+/// going away (`clear_device_qr`). The link that went to Telegram is the
+/// session's `DeviceLogin` alone (its request, its result); this holds no
+/// copy of it, so a result the session drops cannot leave this stage busy.
 pub(super) enum DeviceLink {
     /// Nothing runs; the notice is the last attempt's outcome, if any.
     Idle { notice: Option<&'static str> },
@@ -81,8 +81,6 @@ pub(super) enum DeviceLink {
     Scanning(DeviceQrScanner),
     /// A scanned or pasted link waits for the user's explicit consent.
     Confirm(Zeroizing<String>),
-    /// The link went to Telegram as this request; its answer ends this stage.
-    Linking(RequestId),
 }
 
 impl Default for DeviceLink {
@@ -96,7 +94,6 @@ impl DeviceLink {
     pub(super) fn notice(&self) -> Option<&'static str> {
         match self {
             Self::Idle { notice } => *notice,
-            Self::Linking(_) => Some(tr(keys::Q_MISC_WAITING_FOR_TELEGRAM_TO_LINK)),
             Self::Scanning(_) | Self::Confirm(_) => None,
         }
     }
@@ -109,7 +106,8 @@ impl DeviceLink {
         matches!(self, Self::Scanning(_))
     }
 
-    /// A scan, a consent or the account's answer is pending: no new link may start.
+    /// A scan or a consent is pending (`QuillApp::device_link_busy` adds the
+    /// link that is out).
     pub(super) fn is_busy(&self) -> bool {
         !matches!(self, Self::Idle { .. })
     }
@@ -122,8 +120,28 @@ impl DeviceLink {
 }
 
 impl QuillApp {
+    /// No new link may start: a scan or a consent is pending, or a link is
+    /// out with Telegram (or its result is not taken yet).
+    pub(super) fn device_link_busy(&self) -> bool {
+        self.privacy.device_link.is_busy()
+            || self
+                .session()
+                .is_some_and(|session| session.settings.device_login.is_active())
+    }
+
+    /// The line the Devices page shows above the link controls.
+    pub(super) fn device_link_notice(&self) -> Option<&'static str> {
+        if self
+            .session()
+            .is_some_and(|session| session.settings.device_login.is_waiting())
+        {
+            return Some(tr(keys::Q_MISC_WAITING_FOR_TELEGRAM_TO_LINK));
+        }
+        self.privacy.device_link.notice()
+    }
+
     pub(super) fn scan_device_qr(&mut self, cx: &mut Context<Self>) {
-        if self.privacy.device_link.is_busy()
+        if self.device_link_busy()
             || !self.live.as_ref().is_some_and(|live| {
                 matches!(
                     live.driver.session.auth,
@@ -149,14 +167,10 @@ impl QuillApp {
             self.clear_device_qr();
             return;
         }
-        if let DeviceLink::Linking(asked) = self.privacy.device_link
-            && let Some(linked) = self.live.as_mut().and_then(|live| {
-                live.driver
-                    .session
-                    .settings
-                    .device_login
-                    .take_result_for(asked)
-            })
+        if let Some(linked) = self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.session.settings.device_login.take_result())
         {
             self.privacy.device_link = DeviceLink::failed(match linked {
                 quill::auth::DeviceLoginResult::Linked => tr(keys::Q_MISC_DEVICE_LINKED),
@@ -194,7 +208,7 @@ impl QuillApp {
     /// through the same validation and explicit consent step as a scan; it
     /// is never logged.
     pub(super) fn paste_device_login_link(&mut self, cx: &mut Context<Self>) {
-        if self.privacy.device_link.is_busy()
+        if self.device_link_busy()
             || !self.live.as_ref().is_some_and(|live| {
                 matches!(
                     live.driver.session.auth,
@@ -230,8 +244,8 @@ impl QuillApp {
             .live
             .as_mut()
             .map(|live| live.driver.confirm_device_login(&link));
-        self.privacy.device_link = if let Some(Ok(id)) = result {
-            DeviceLink::Linking(id)
+        self.privacy.device_link = if let Some(Ok(_)) = result {
+            DeviceLink::default()
         } else {
             DeviceLink::failed(tr(keys::Q_MISC_THE_DEVICE_COULDNT_BE_LINKED))
         };
@@ -248,11 +262,10 @@ impl QuillApp {
     }
 
     /// The Devices page was left, or the app locked: a scan or a consent
-    /// ends, a link that is out stays, so its answer still reaches the user.
+    /// ends, a link that is out stays in the session, so its answer still
+    /// reaches the user.
     pub(super) fn leave_device_link(&mut self) {
-        if !matches!(self.privacy.device_link, DeviceLink::Linking(_)) {
-            self.privacy.device_link = DeviceLink::default();
-        }
+        self.privacy.device_link = DeviceLink::default();
     }
 }
 
@@ -261,10 +274,9 @@ mod tests {
     use super::*;
 
     #[core::prelude::v1::test]
-    fn linking_is_busy_so_no_new_link_replaces_the_pending_answer() {
+    fn a_pending_consent_is_busy_so_no_new_link_replaces_it() {
         assert!(!DeviceLink::default().is_busy());
         assert!(!DeviceLink::failed("x").is_busy());
-        assert!(DeviceLink::Linking(RequestId(1)).is_busy());
         assert!(DeviceLink::Confirm(Zeroizing::new(String::new())).is_busy());
     }
 }

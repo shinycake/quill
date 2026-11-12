@@ -415,6 +415,20 @@ pub struct GifPanel {
     /// The searches answered lately, so a window's GIF tab shows its own
     /// search while another window's is the one the panel holds.
     pub searches_kept: GifSearches,
+    /// The one save or remove (`addSavedAnimation` / `removeSavedAnimation`)
+    /// that is out, if any.
+    pub save: GifSave,
+}
+
+/// A saved-GIF save or remove: none out, or the one request that is. Only the
+/// answer of that request ends it (`GifPanel::save_settled`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum GifSave {
+    #[default]
+    Idle,
+    Saving {
+        request: crate::ids::RequestId,
+    },
 }
 
 /// GIF searches answered lately, by query: each window's GIF tab asks for
@@ -565,6 +579,19 @@ impl GifPanel {
             error: GIF_FAILED.to_string(),
             stale: Some(()),
         };
+    }
+
+    /// The save or remove went out as `request`.
+    pub fn save_sent(&mut self, request: crate::ids::RequestId) {
+        self.save = GifSave::Saving { request };
+    }
+
+    /// `request` answered (or failed): the save it was ends. An answer of
+    /// another request leaves the stage as it is.
+    pub fn save_settled(&mut self, request: Option<crate::ids::RequestId>) {
+        if matches!(self.save, GifSave::Saving { request: out } if Some(out) == request) {
+            self.save = GifSave::Idle;
+        }
     }
 
     /// A save or remove failed, or a request could not be sent: the list

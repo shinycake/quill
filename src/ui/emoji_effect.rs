@@ -32,7 +32,7 @@ use quill::ids::{ChatId, FileId, MessageId};
 use quill::state::Session;
 use quill::sticker_playback::player::{PlayMode, Rest};
 use quill::telegram::envelope::{MessageContent, StickerFormat};
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -65,10 +65,32 @@ type Key = (i64, i64);
 thread_local! {
     /// Where each lone emoji was last painted (window coordinates), by chat
     /// and message id, as far as it shows in the history's clip.
-    static ANCHORS: RefCell<HashMap<Key, Bounds<Pixels>>> = RefCell::new(HashMap::new());
-    static ACTIVE: RefCell<Vec<Active>> = const { RefCell::new(Vec::new()) };
+    static ANCHORS: Cell<HashMap<Key, Bounds<Pixels>>> = Cell::new(HashMap::new());
+    static ACTIVE: Cell<Vec<Active>> = const { Cell::new(Vec::new()) };
     /// The next effect's play head.
     static NEXT_HEAD: Cell<u64> = const { Cell::new(0) };
+}
+
+/// Run `f` on the playing effects. The list is taken out of its cell for the
+/// call and put back after, so there is no guard to hold; a re-entrant call
+/// sees an empty list instead of panicking.
+fn with_active<R>(f: impl FnOnce(&mut Vec<Active>) -> R) -> R {
+    ACTIVE.with(|cell| {
+        let mut active = cell.take();
+        let result = f(&mut active);
+        cell.set(active);
+        result
+    })
+}
+
+/// Run `f` on the noted anchors, taken out of their cell like `with_active`.
+fn with_anchors<R>(f: impl FnOnce(&mut HashMap<Key, Bounds<Pixels>>) -> R) -> R {
+    ANCHORS.with(|cell| {
+        let mut anchors = cell.take();
+        let result = f(&mut anchors);
+        cell.set(anchors);
+        result
+    })
 }
 
 fn next_head() -> HeadId {
@@ -95,18 +117,13 @@ pub(super) fn effect_ask(
 struct Active {
     effect: EmojiEffect,
     outgoing: bool,
-    /// On the executor clock (`cx.background_executor().now()`), like
-    /// `missing`; a clip's `started` is on the real clock.
-    queued: Instant,
     /// Its play head.
     head: HeadId,
-    /// Waiting for its sticker, or the sticker playing and when it was
-    /// given (wall clock).
+    /// Waiting for its sticker (until when), or the sticker playing and when
+    /// it was given (wall clock).
     playback: Playback,
     seed: u64,
     kind: EffectKind,
-    /// How long a sticker that has not arrived is waited for.
-    wait: Duration,
 }
 
 /// What an effect is: an emoji's, a Premium sticker's
@@ -122,8 +139,15 @@ enum EffectKind {
 /// An effect leaves `Waiting` when its sticker arrives and the chat has room;
 /// it ends when the sticker has played or the wait ran out.
 enum Playback {
-    Waiting,
-    Playing { view: StickerView, given: Instant },
+    /// Until `until` (on the executor clock, `cx.background_executor().now()`,
+    /// like `missing`; a clip's `started` is on the real clock).
+    Waiting {
+        until: Instant,
+    },
+    Playing {
+        view: StickerView,
+        given: Instant,
+    },
 }
 
 impl Active {
@@ -146,7 +170,7 @@ impl Active {
     fn playing(&self) -> Option<(&StickerView, Instant)> {
         match &self.playback {
             Playback::Playing { view, given } => Some((view, *given)),
-            Playback::Waiting => None,
+            Playback::Waiting { .. } => None,
         }
     }
 }
@@ -233,16 +257,15 @@ fn badge_within_grace(now: Instant, at: Instant) -> bool {
     now.saturating_duration_since(at) < BADGE_GRACE
 }
 
-/// Whether an effect queued at `queued` has waited `wait` for its sticker by `now`.
-fn sticker_wait_over(now: Instant, queued: Instant, wait: Duration) -> bool {
-    now.saturating_duration_since(queued) >= wait
+/// Whether an effect that waits for its sticker until `until` has waited long enough by `now`.
+fn sticker_wait_over(now: Instant, until: Instant) -> bool {
+    now >= until
 }
 
 /// Whether the Premium sticker effect of message `key` is playing or waiting.
 pub(super) fn premium_playing(key: Key) -> bool {
-    ACTIVE.with(|active| {
+    with_active(|active| {
         active
-            .borrow()
             .iter()
             .any(|a| a.is_premium() && (a.effect.chat_id.0, a.effect.message_id.0) == key)
     })
@@ -253,9 +276,8 @@ pub(super) fn premium_playing(key: Key) -> bool {
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 pub(super) fn message_effect_playing(key: Key) -> bool {
-    ACTIVE.with(|active| {
+    with_active(|active| {
         active
-            .borrow()
             .iter()
             .any(|a| a.is_message() && (a.effect.chat_id.0, a.effect.message_id.0) == key)
     })
@@ -266,9 +288,8 @@ pub(super) fn message_effect_playing(key: Key) -> bool {
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 pub(crate) fn emoji_effects_on(key: Key) -> Vec<(EmojiEffect, bool)> {
-    ACTIVE.with(|active| {
+    with_active(|active| {
         active
-            .borrow()
             .iter()
             .filter(|a| a.is_emoji())
             .filter(|a| (a.effect.chat_id.0, a.effect.message_id.0) == key)
@@ -279,20 +300,19 @@ pub(crate) fn emoji_effects_on(key: Key) -> Vec<(EmojiEffect, bool)> {
 
 /// Queue the effect of a Premium sticker. Dropped when too many wait.
 pub(super) fn push_premium(effect: EmojiEffect, outgoing: bool, now: Instant) {
-    ACTIVE.with(|active| {
-        let mut active = active.borrow_mut();
-        if chat_is_full(&active, effect.chat_id) {
+    with_active(|active| {
+        if chat_is_full(active, effect.chat_id) {
             return;
         }
         active.push(Active {
             seed: 0,
             outgoing,
             effect,
-            queued: now,
             head: next_head(),
-            playback: Playback::Waiting,
+            playback: Playback::Waiting {
+                until: now + START_WAIT,
+            },
             kind: EffectKind::Premium,
-            wait: START_WAIT,
         });
     });
 }
@@ -306,24 +326,21 @@ pub(super) fn push_message(
     wait: Duration,
     now: Instant,
 ) {
-    ACTIVE.with(|active| {
-        let mut active = active.borrow_mut();
-        if chat_is_full(&active, effect.chat_id) {
+    with_active(|active| {
+        if chat_is_full(active, effect.chat_id) {
             return;
         }
         active.push(Active {
             seed: 0,
             outgoing,
             effect,
-            queued: now,
             head: next_head(),
-            playback: Playback::Waiting,
+            playback: Playback::Waiting { until: now + wait },
             kind: EffectKind::Message(MessageEffectPlay {
                 effect_id,
                 last: None,
                 missing: None,
             }),
-            wait,
         });
     });
 }
@@ -333,8 +350,8 @@ pub(super) fn push_message(
 /// badge is then found again by where it was. An effect whose badge is
 /// gone for good ends.
 fn follow_badges(chat: ChatId, now: Instant) {
-    ACTIVE.with(|active| {
-        for a in active.borrow_mut().iter_mut() {
+    with_active(|active| {
+        for a in active.iter_mut() {
             if a.effect.chat_id != chat {
                 continue;
             }
@@ -387,7 +404,7 @@ fn message_effect_origin(badge: (f32, f32, f32, f32), side: f32, outgoing: bool)
 /// badges were, except those of the chats `keep` names (shown by another
 /// window).
 fn begin_pass(keep: &dyn Fn(i64) -> bool) {
-    ANCHORS.with(|anchors| anchors.borrow_mut().retain(|key, _| keep(key.0)));
+    with_anchors(|anchors| anchors.retain(|key, _| keep(key.0)));
     super::message_effect_badge::begin_pass(keep);
 }
 
@@ -396,17 +413,17 @@ fn begin_pass(keep: &dyn Fn(i64) -> bool) {
 /// find them.
 pub(super) fn forget_account_notes() {
     begin_pass(&|_| false);
-    ACTIVE.with(|active| active.borrow_mut().clear());
+    with_active(|active| active.clear());
 }
 
 fn anchor(key: Key) -> Option<Bounds<Pixels>> {
-    ANCHORS.with(|anchors| anchors.borrow().get(&key).copied())
+    with_anchors(|anchors| anchors.get(&key).copied())
 }
 
 #[cfg(test)]
 pub(super) fn move_anchor(key: Key, by: Pixels) {
-    ANCHORS.with(|anchors| {
-        if let Some(anchor) = anchors.borrow_mut().get_mut(&key) {
+    with_anchors(|anchors| {
+        if let Some(anchor) = anchors.get_mut(&key) {
             anchor.origin.y += by;
         }
     });
@@ -432,8 +449,8 @@ fn anchor_tracker(key: Key, glyph: Option<f32>) -> impl IntoElement {
             };
             let visible = bounds.intersect(&window.content_mask().bounds);
             if visible.size.width > Pixels::ZERO && visible.size.height > Pixels::ZERO {
-                ANCHORS.with(|anchors| {
-                    anchors.borrow_mut().insert(key, bounds);
+                with_anchors(|anchors| {
+                    anchors.insert(key, bounds);
                 });
             }
         },
@@ -622,8 +639,7 @@ impl QuillApp {
                 .map(|session| session.stickers.interactions.take_fresh(now, START_WAIT))
                 .unwrap_or_default(),
         };
-        let none_here =
-            || ACTIVE.with(|active| active.borrow().iter().all(|a| a.effect.chat_id != open));
+        let none_here = || with_active(|active| active.iter().all(|a| a.effect.chat_id != open));
         if queued.is_empty() && none_here() {
             return None;
         }
@@ -637,13 +653,12 @@ impl QuillApp {
                     .map(|effect| session.and_then(|s| message_is_outgoing(s, effect)))
                     .collect()
             };
-            ACTIVE.with(|active| {
-                let mut active = active.borrow_mut();
+            with_active(|active| {
                 for (effect, outgoing) in queued.into_iter().zip(outgoing) {
                     // Only for a message on screen; a few play at once and
                     // the rest wait.
                     let key = (effect.chat_id.0, effect.message_id.0);
-                    if anchor(key).is_none() || chat_is_full(&active, effect.chat_id) {
+                    if anchor(key).is_none() || chat_is_full(active, effect.chat_id) {
                         continue;
                     }
                     active.push(Active {
@@ -651,11 +666,11 @@ impl QuillApp {
                             ^ (seed_clock.elapsed().as_nanos() as u64),
                         outgoing: outgoing.unwrap_or(false),
                         effect,
-                        queued: started,
                         head: next_head(),
-                        playback: Playback::Waiting,
+                        playback: Playback::Waiting {
+                            until: started + START_WAIT,
+                        },
                         kind: EffectKind::Emoji,
-                        wait: START_WAIT,
                     });
                 }
             });
@@ -663,9 +678,8 @@ impl QuillApp {
         follow_badges(open, now);
         let shown = self.chats_on_screen();
         self.advance_effects(open, &shown, now, cx);
-        let drawn: Vec<Drawn> = ACTIVE.with(|active| {
+        let drawn: Vec<Drawn> = with_active(|active| {
             active
-                .borrow()
                 .iter()
                 .filter(|a| a.effect.chat_id == open)
                 .filter_map(|a| {
@@ -691,9 +705,9 @@ impl QuillApp {
             .unwrap_or(0)
             .max(OPENING_FPS);
         let drawn = Rc::new(drawn);
-        let every_one_drawn = ACTIVE.with(|active| {
-            let here = active.borrow();
-            here.iter()
+        let every_one_drawn = with_active(|active| {
+            active
+                .iter()
                 .filter(|a| a.effect.chat_id == open)
                 .all(|a| a.started())
         });
@@ -739,9 +753,8 @@ impl QuillApp {
     ) {
         let mut watched: Vec<EmojiEffect> = Vec::new();
         let mut replays: Vec<(ChatId, MessageId)> = Vec::new();
-        let waiting: Vec<(usize, i32)> = ACTIVE.with(|active| {
+        let waiting: Vec<(usize, i32)> = with_active(|active| {
             active
-                .borrow()
                 .iter()
                 .enumerate()
                 .filter(|(_, a)| !a.started() && a.effect.chat_id == open)
@@ -750,8 +763,8 @@ impl QuillApp {
         });
         let mut views: Vec<(usize, Option<StickerView>)> = Vec::new();
         for (index, _) in &waiting {
-            let Some(ask) = ACTIVE.with(|active| {
-                active.borrow().get(*index).map(|a| {
+            let Some(ask) = with_active(|active| {
+                active.get(*index).map(|a| {
                     let sticker = &a.effect.sticker;
                     effect_ask(
                         sticker.file_id,
@@ -766,8 +779,7 @@ impl QuillApp {
             };
             views.push((*index, self.sticker_view(ask, cx)));
         }
-        ACTIVE.with(|active| {
-            let mut active = active.borrow_mut();
+        with_active(|active| {
             for (index, view) in views {
                 // tdesktop `checkDelayed` counts one history's effects.
                 let playing: Vec<(Duration, Duration)> = active
@@ -810,7 +822,7 @@ impl QuillApp {
                 badge_ok
                     && match &a.playback {
                         Playback::Playing { view, given } => still_playing(view, *given, now),
-                        Playback::Waiting => !sticker_wait_over(now, a.queued, a.wait),
+                        Playback::Waiting { until } => !sticker_wait_over(now, *until),
                     }
             });
         });
@@ -840,8 +852,8 @@ impl QuillApp {
 #[cfg(test)]
 mod tests {
     use super::{
-        ACTIVE, BADGE_GRACE, MAX_QUEUED, SHIFT_SHARE, START_WAIT, badge_within_grace,
-        effect_origin, forget_account_notes, may_start, push_premium, shift_for, sticker_wait_over,
+        BADGE_GRACE, MAX_QUEUED, SHIFT_SHARE, START_WAIT, badge_within_grace, effect_origin,
+        forget_account_notes, may_start, push_premium, shift_for, sticker_wait_over, with_active,
     };
     use std::time::{Duration, Instant};
 
@@ -859,10 +871,12 @@ mod tests {
     #[test]
     fn a_sticker_is_waited_for_until_the_wait_is_over() {
         let queued = Instant::now();
+        let until = queued + START_WAIT;
         let ms = Duration::from_millis;
-        assert!(!sticker_wait_over(queued + ms(1999), queued, START_WAIT));
-        assert!(sticker_wait_over(queued + START_WAIT, queued, START_WAIT));
-        assert!(!sticker_wait_over(queued, queued + ms(5), START_WAIT));
+        assert!(!sticker_wait_over(queued + ms(1999), until));
+        assert!(sticker_wait_over(until, until));
+        // A clock that reads earlier than the start never ends the wait.
+        assert!(!sticker_wait_over(queued, until + ms(5)));
     }
 
     #[test]
@@ -938,9 +952,9 @@ mod tests {
     #[test]
     fn leaving_the_account_drops_its_effects() {
         push_premium(effect_in(1), false, Instant::now());
-        assert!(ACTIVE.with(|active| !active.borrow().is_empty()));
+        assert!(with_active(|active| !active.is_empty()));
         forget_account_notes();
-        assert!(ACTIVE.with(|active| active.borrow().is_empty()));
+        assert!(with_active(|active| active.is_empty()));
     }
 
     /// Round 14 (area B, finding 11): the cap is per chat, so effects
@@ -953,13 +967,7 @@ mod tests {
         }
         push_premium(effect_in(2), false, now);
         let per_chat = |chat: i64| {
-            ACTIVE.with(|active| {
-                active
-                    .borrow()
-                    .iter()
-                    .filter(|a| a.effect.chat_id.0 == chat)
-                    .count()
-            })
+            with_active(|active| active.iter().filter(|a| a.effect.chat_id.0 == chat).count())
         };
         assert_eq!(per_chat(1), MAX_QUEUED);
         assert_eq!(per_chat(2), 1);

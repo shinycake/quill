@@ -15,6 +15,7 @@
 
 use super::super::app::QuillApp;
 use super::super::shell::{DialogKind, QuillShell};
+use super::super::status_note::StatusNote;
 use super::group_call_create::server_error_toast;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants};
@@ -399,8 +400,9 @@ impl QuillApp {
         let Some(chat_id) = chat_id else {
             return;
         };
+        // A create is already out: the box stays as it was, and a note says so.
         if self.video_chat_create_in_flight() {
-            self.group_call_boxes.rtmp_start = RtmpStartUi::default();
+            self.set_note(StatusNote::silent(tr(keys::Q_AV_STARTING_THE_VIDEO_CHAT)));
             cx.notify();
             return;
         }

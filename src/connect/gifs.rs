@@ -148,15 +148,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || file_id.0 <= 0 {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self
-            .session
-            .requests
-            .has_purpose(RequestPurpose::AddSavedAnimation)
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::RemoveSavedAnimation)
-        {
+        if self.session.gif_save_in_flight() {
             return Ok(None);
         }
         let purpose = if saved {
@@ -164,12 +156,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         } else {
             RequestPurpose::RemoveSavedAnimation
         };
-        self.gif_request(purpose, |id| {
+        let sent = self.gif_request(purpose, |id| {
             if saved {
                 add_saved_animation(id, file_id)
             } else {
                 remove_saved_animation(id, file_id)
             }
-        })
+        })?;
+        if let Some(request) = sent {
+            self.session.stickers.gifs.save_sent(request);
+        }
+        Ok(sent)
     }
 }

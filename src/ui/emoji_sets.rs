@@ -31,28 +31,37 @@ const COVER_SIZE: f32 = 28.;
 
 const TABS: [EmojiSetTab; 2] = [EmojiSetTab::Installed, EmojiSetTab::Trending];
 
-/// The emoji packs box's tab bar and its search pause: the tab the bar
-/// highlights (the one an emptied field goes back to, also while search
-/// results replace the list), and the typing pause being waited out. The
-/// pause's timer lives in the value, so opening, closing or choosing a tab
-/// drops a search that has not gone out.
+/// The emoji packs box's search pause and the tab an emptied field goes back
+/// to. The tab the bar highlights is the session's own (`EmojiPanel::tab`);
+/// only while search results replace the list (`Search`) it is `return_to`,
+/// noted when the search began. The pause's timer lives in the value, so
+/// opening, closing or choosing a tab drops a search that has not gone out.
 #[derive(Default)]
 pub(super) struct SetsView {
-    tab: EmojiSetTab,
+    return_to: EmojiSetTab,
     typing: Debounce,
 }
 
 impl SetsView {
-    /// The box showing `tab`, nothing waiting.
-    pub(super) fn on(tab: EmojiSetTab) -> Self {
-        Self {
-            tab,
-            typing: Debounce::Idle,
+    /// The tab the bar highlights, given the tab the list is on.
+    pub(super) fn shown(&self, panel_tab: EmojiSetTab) -> EmojiSetTab {
+        match panel_tab {
+            EmojiSetTab::Search => self.return_to,
+            other => other,
         }
     }
 
-    pub(super) fn tab(&self) -> EmojiSetTab {
-        self.tab
+    /// A search is about to replace the list that is on `panel_tab`: an
+    /// emptied field goes back to it. Searching over a search keeps the
+    /// first tab.
+    pub(super) fn note_return_to(&mut self, panel_tab: EmojiSetTab) {
+        if panel_tab != EmojiSetTab::Search {
+            self.return_to = panel_tab;
+        }
+    }
+
+    pub(super) fn return_to(&self) -> EmojiSetTab {
+        self.return_to
     }
 
     /// Typing that was waiting no longer searches.
@@ -108,7 +117,8 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.pickers.emoji_sets_view = SetsView::on(tab);
+        // A fresh view: a search waiting on its pause is dropped with it.
+        self.pickers.emoji_sets_view = SetsView::default();
         self.pickers
             .emoji_set_search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
@@ -135,7 +145,7 @@ impl QuillApp {
         // A search typed earlier is over with this keystroke: even when the
         // field is now empty, its timer must not fire over the restored list.
         self.pickers.emoji_sets_view.cancel_typing();
-        let tab = self.pickers.emoji_sets_view.tab();
+        let panel_tab = self.session().map(|s| s.stickers.emoji.tab);
         let query = self
             .pickers
             .emoji_set_search_input
@@ -144,13 +154,14 @@ impl QuillApp {
             .trim()
             .to_string();
         if query.is_empty() {
-            if self
-                .session()
-                .is_some_and(|s| s.stickers.emoji.tab == EmojiSetTab::Search)
-            {
-                self.show_emoji_sets_tab(tab, cx);
+            if panel_tab == Some(EmojiSetTab::Search) {
+                let back = self.pickers.emoji_sets_view.return_to();
+                self.show_emoji_sets_tab(back, cx);
             }
             return;
+        }
+        if let Some(panel_tab) = panel_tab {
+            self.pickers.emoji_sets_view.note_return_to(panel_tab);
         }
         let timer = self.spawn_scoped(cx, async move |this, cx| {
             cx.background_executor().timer(SEARCH_DELAY).await;
@@ -365,7 +376,7 @@ impl QuillApp {
             }))
             .selected_index(
                 TABS.iter()
-                    .position(|tab| *tab == self.pickers.emoji_sets_view.tab())
+                    .position(|tab| *tab == self.pickers.emoji_sets_view.shown(panel.tab))
                     .unwrap_or(0),
             )
             .on_click(move |ix, window, cx| {

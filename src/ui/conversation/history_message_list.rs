@@ -20,7 +20,7 @@ struct ThreadWindow {
 
 /// The reader's scroll goal in this render (`HistoryUi::aim`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum GoalNow {
+enum GoalCheckResult {
     /// None, or its rows are not in yet.
     Waiting,
     /// The rows reach it: it places the view instead of the view hold.
@@ -151,7 +151,7 @@ impl QuillApp {
         // A goal the reader asked for that these rows reach: it places the
         // view, so nothing is held.
         let goal = self.scroll_goal_now(thread_window.as_ref());
-        let goal_due = goal == GoalNow::Due;
+        let goal_due = goal == GoalCheckResult::Due;
         let hold = (same_window && !goal_due && (build.is_some() || splice.is_some()))
             .then(|| self.capture_view_hold(cx));
         if let Some(mut messages) = build {
@@ -337,11 +337,11 @@ impl QuillApp {
         // A jump to a message the kept rows already hold lands too.
         self.land_new_jump(jump, cx);
         match goal {
-            GoalNow::Due => self.reach_scroll_goal(cx),
-            GoalNow::Stale => {
+            GoalCheckResult::Due => self.reach_scroll_goal(cx),
+            GoalCheckResult::Stale => {
                 self.history.aim.take_goal();
             }
-            GoalNow::Waiting => {}
+            GoalCheckResult::Waiting => {}
         }
         // Read by the next render's view hold and by the landing.
         self.history.had_newer = has_newer;
@@ -853,17 +853,17 @@ impl QuillApp {
 
     /// Where the reader's scroll goal stands with the rows this render
     /// shows.
-    fn scroll_goal_now(&self, thread: Option<&ThreadWindow>) -> GoalNow {
+    fn scroll_goal_now(&self, thread: Option<&ThreadWindow>) -> GoalCheckResult {
         match (self.history.aim.goal(), thread) {
-            (None, _) => GoalNow::Waiting,
+            (None, _) => GoalCheckResult::Waiting,
             (Some(ScrollGoal::ThreadRoot), Some(thread))
                 if thread.older == quill::state::OlderEnd::Complete =>
             {
-                GoalNow::Due
+                GoalCheckResult::Due
             }
-            (Some(ScrollGoal::ThreadRoot), Some(_)) => GoalNow::Waiting,
+            (Some(ScrollGoal::ThreadRoot), Some(_)) => GoalCheckResult::Waiting,
             // The thread closed: the goal goes with it.
-            (Some(ScrollGoal::ThreadRoot), None) => GoalNow::Stale,
+            (Some(ScrollGoal::ThreadRoot), None) => GoalCheckResult::Stale,
         }
     }
 

@@ -406,7 +406,7 @@ fn the_first_submenu_row_is_the_first_live_one(cx: &mut TestAppContext) {
     let (_app, mut vcx) = new_app(cx);
     let items = ContextMenuItems::default();
     vcx.update(|_, cx| {
-        items.begin();
+        items.reset_claims();
         items.mark_submenu_parent(30, ChatMenuSubmenu::Mute);
         assert_eq!(items.first_submenu_key(row_key(30)), None, "no rows drawn");
         // Only rows 2 and 3 are drawn enabled; rows 0 and 1 claim nothing.

@@ -18,20 +18,20 @@ pub(crate) type ExitAfterStop = Box<dyn Fn(&mut Window, &mut App)>;
 pub(crate) enum QuitGate {
     #[default]
     Open,
-    Asking {
+    Held {
         exit: ExitAfterStop,
     },
 }
 
 impl QuitGate {
     pub(crate) fn is_asking(&self) -> bool {
-        matches!(self, Self::Asking { .. })
+        matches!(self, Self::Held { .. })
     }
 
     /// Leave the hold, giving back the exit it kept.
     fn take(&mut self) -> Option<ExitAfterStop> {
         match std::mem::take(self) {
-            Self::Asking { exit } => Some(exit),
+            Self::Held { exit } => Some(exit),
             Self::Open => None,
         }
     }
@@ -93,7 +93,7 @@ impl QuillApp {
         // A second Quit under the alert keeps the alert and takes over the
         // exit it will run.
         let asking = self.main_window.quit_gate.is_asking();
-        self.main_window.quit_gate = QuitGate::Asking {
+        self.main_window.quit_gate = QuitGate::Held {
             exit: Box::new(exit),
         };
         if asking {

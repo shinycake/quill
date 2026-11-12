@@ -482,3 +482,23 @@ fn a_premium_lapse_shows_ads_again() {
     apply_json(&mut session, &seq, &sink, &own_user_json(false));
     assert!(!session.sponsored_hidden());
 }
+
+/// Sweep r4-08 (15-005): the screen holds no copy of the device-link request;
+/// the one stage says if a link is out and gives its result once.
+#[test]
+fn the_device_login_stage_alone_says_busy_and_gives_its_result_once() {
+    let mut login = DeviceLogin::default();
+    assert!(!login.is_active());
+    let request = crate::ids::RequestId(7);
+    login = DeviceLogin::Waiting { request };
+    assert!(login.is_active() && login.is_waiting());
+    assert_eq!(login.take_result(), None, "not answered yet");
+    assert!(login.settle(request, crate::auth::DeviceLoginResult::Linked));
+    assert!(login.is_active() && !login.is_waiting());
+    assert_eq!(
+        login.take_result(),
+        Some(crate::auth::DeviceLoginResult::Linked)
+    );
+    assert!(!login.is_active());
+    assert_eq!(login.take_result(), None, "taken once");
+}

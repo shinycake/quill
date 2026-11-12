@@ -36,12 +36,16 @@ pub struct EditContactDialog {
     pub(crate) save: super::ContactSave,
 }
 
-/// The edit-contact box's private note, by whether it is known.
+/// The edit-contact box's private note field, by whether it was filled from
+/// the full user info. The box holds no request: the wait is the session's
+/// keyed `user_full_infos` fetch (the box may share it with another ask), so
+/// the upkeep reads that fetch to see the info land or fail.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ContactNote {
-    /// The full user info has not arrived: the field is empty and the
-    /// note is fetched (`fetch_user_full_info`, keyed by `user_id`).
-    Waiting,
+    /// The field is not filled yet: it is empty and the note is fetched
+    /// (`fetch_user_full_info`, keyed by `user_id`); the session's fetch
+    /// says whether it is still on its way or failed.
+    Unseeded,
     /// The fetch could not be sent or failed: the field is plain and Save
     /// keeps the stored note unless something was typed.
     Unavailable,
@@ -220,7 +224,7 @@ impl EditContactDialog {
             note_input: field(window, cx, placeholder, note.unwrap_or_default()),
             note: match note {
                 Some(_) => ContactNote::Seeded,
-                None => ContactNote::Waiting,
+                None => ContactNote::Unseeded,
             },
             share_phone: false,
             save: super::ContactSave::Idle,

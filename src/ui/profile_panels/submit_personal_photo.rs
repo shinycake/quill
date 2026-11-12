@@ -104,14 +104,14 @@ impl QuillApp {
             return;
         }
         let user_id = dialog.user_id;
-        let waiting = dialog.note == ContactNote::Waiting;
+        let unseeded = dialog.note == ContactNote::Unseeded;
         let Some(note) = self
             .session()
             .and_then(|s| s.user_full_info(user_id))
             .map(|i| i.extras.note.clone())
         else {
             // The fetch answered with an error: stop saying "Loading".
-            let failed = waiting
+            let failed = unseeded
                 && self
                     .session()
                     .is_some_and(|s| s.users_state.user_full_infos.failed(&user_id));

@@ -42,11 +42,8 @@ pub(crate) struct AdminUi {
     pub(super) group_confirm_dialog: Option<GroupConfirmDialog>,
     /// Slice G2: forum-topic management dialog.
     pub(super) forum_manage_dialog: Option<ForumManageDialog>,
-    /// The recent-actions list (oldest event first, newest at the bottom):
-    /// earlier events load when it is scrolled to its top.
-    pub(super) event_log_list: ListState,
-    /// The event ids the list was last built for (`event_log_list::plan_sync`).
-    pub(super) event_log_ids: std::cell::Cell<Vec<i64>>,
+    /// The recent-actions list with the event ids it shows.
+    pub(super) event_log_rows: super::event_log::EventLogRows,
     /// The recent-actions page last opened, with the timers that belong to
     /// it. Opening it for another chat replaces it, and its timers stop.
     pub(super) event_log_page: Option<EventLogPage>,
@@ -76,7 +73,18 @@ pub(super) struct EventLogPage {
     pub(super) typed: Option<gpui_kit::Task<()>>,
     /// The poll timer, which ends by itself when the page closes or the app
     /// goes inactive (`resume_event_log_poll` starts it again).
-    pub(super) poll: Option<gpui_kit::Task<()>>,
+    pub(super) poll: EventLogPoll,
+}
+
+/// Whether the page's poll runs. The loop's own exit sets `Stopped`, so a
+/// finished task is never read as a running one.
+#[derive(Default)]
+pub(super) enum EventLogPoll {
+    #[default]
+    Stopped,
+    Running {
+        _task: gpui_kit::Task<()>,
+    },
 }
 
 impl EventLogPage {
@@ -86,7 +94,7 @@ impl EventLogPage {
             search: None,
             autoload: std::cell::Cell::new(None),
             typed: None,
-            poll: None,
+            poll: EventLogPoll::Stopped,
         }
     }
 }
@@ -132,8 +140,7 @@ impl AdminUi {
             ownership_dialog: None,
             group_confirm_dialog: None,
             forum_manage_dialog: None,
-            event_log_list: super::event_log::new_event_log_list(),
-            event_log_ids: std::cell::Cell::new(Vec::new()),
+            event_log_rows: super::event_log::EventLogRows::new(),
             event_log_page: None,
             group_settings_dialog: None,
             join_requests_dialog: None,

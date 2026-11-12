@@ -871,3 +871,39 @@ fn typed_gif_text_keeps_its_pause_through_the_upkeep(cx: &mut TestAppContext) {
         });
     }
 }
+
+/// Sweep r4-08 (16-008): a window whose ask ended, but whose answer the
+/// session's one list no longer shows or keeps, asks again without a press.
+#[gpui_kit::test]
+fn an_asked_gif_tab_whose_answer_was_replaced_asks_again(cx: &mut TestAppContext) {
+    use crate::ui::gifs_ui::{GifTab, GifWanted};
+    use crate::ui::media_panel::PanelTab;
+    let h = new_app(cx);
+    let _chat_window = h.open_in_new_window(OTHER, cx);
+    h.app.update(cx, |app, cx| {
+        let searching = |app: &crate::ui::app::QuillApp| {
+            app.session().and_then(|s| {
+                let gifs = &s.stickers.gifs;
+                gifs.search_mode().then(|| gifs.search_query().to_string())
+            })
+        };
+        // The main window searched "dogs" and is in use.
+        app.note_window_press(None);
+        app.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
+        app.pickers.media_panel.tab = PanelTab::Gifs;
+        app.pickers.gif_tab = GifTab::Wants(GifWanted::Search("dogs".into()));
+        app.gif_tab_upkeep(cx);
+        assert_eq!(searching(app).as_deref(), Some("dogs"));
+        // The chat window asked for "cats" earlier; its answer is gone.
+        app.set_window_scope(Some(OTHER));
+        app.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
+        app.pickers.media_panel.tab = PanelTab::Gifs;
+        app.pickers.gif_tab = GifTab::Asked(GifWanted::Search("cats".into()));
+        app.gif_tab_upkeep(cx);
+        assert_eq!(
+            searching(app).as_deref(),
+            Some("cats"),
+            "it asks again without a press"
+        );
+    });
+}

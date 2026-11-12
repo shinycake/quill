@@ -14,6 +14,7 @@ use quill::data_settings::{AutoDownloadNetSettings, DataStoragePrefs};
 use quill::lang::{keys, tr, tr_with};
 use std::cell::Cell;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 /// Slice S4: bytes formatter that handles 0 and GB — the shared
 /// `format_bytes` returns "" for 0 and tops out at MB.
 pub(crate) fn format_storage_bytes(n: i64) -> String {
@@ -30,12 +31,19 @@ pub(crate) fn format_storage_bytes(n: i64) -> String {
     }
 }
 
+/// How long a scroll request waits for a frame of the settings window.
+const SCROLL_REQUEST_LIFE: Duration = Duration::from_secs(2);
+
 /// Where the scroll to the storage list stands. `placed` is the page's
 /// vertical offset the last scroll left (set a frame after it).
 enum StorageScrollStage {
     Idle,
-    /// A scroll to the list is due on the next frame.
-    Requested,
+    /// A scroll to the list is due on the next frame of the settings
+    /// window. A request no frame took by `until` (the executor clock) is
+    /// dropped, so settings opened much later do not scroll by themselves.
+    Requested {
+        until: Instant,
+    },
     /// The list was scrolled to.
     Placed {
         placed: Rc<Cell<Option<Pixels>>>,
@@ -66,7 +74,9 @@ impl QuillApp {
         if self.settings.open()
             && self.settings.page() == Some(quill::settings_catalog::Page::DataStorage)
         {
-            self.settings.storage_scroll.stage = StorageScrollStage::Requested;
+            self.settings.storage_scroll.stage = StorageScrollStage::Requested {
+                until: cx.background_executor().now() + SCROLL_REQUEST_LIFE,
+            };
         }
     }
 
@@ -81,12 +91,16 @@ impl QuillApp {
             StorageScrollStage::Placed { placed } => {
                 placed.get().is_some_and(|placed| placed != offset)
             }
-            StorageScrollStage::Idle | StorageScrollStage::Requested => false,
+            StorageScrollStage::Idle | StorageScrollStage::Requested { .. } => false,
         };
         if user_moved {
             scroll.stage = StorageScrollStage::Idle;
         }
-        if matches!(scroll.stage, StorageScrollStage::Requested) {
+        let now = cx.background_executor().now();
+        if matches!(scroll.stage, StorageScrollStage::Requested { until } if now >= until) {
+            scroll.stage = StorageScrollStage::Idle;
+        }
+        if matches!(scroll.stage, StorageScrollStage::Requested { .. }) {
             let placed: Rc<Cell<Option<Pixels>>> = Rc::default();
             scroll.stage = StorageScrollStage::Placed {
                 placed: placed.clone(),

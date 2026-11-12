@@ -20,7 +20,7 @@ use quill::gif_grid::{GIF_GRID_PADDING, layout_gifs};
 use quill::ids::{FileId, RequestId};
 use quill::inline_grid::{MEDIA_HEIGHT, Placed, SKIP, should_load_more};
 use quill::lang::{keys, tr, tr_with};
-use quill::state::{GifPanel, RequestPurpose};
+use quill::state::GifPanel;
 use quill::telegram::envelope::AnimationItem;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -101,7 +101,9 @@ pub(in crate::ui) enum GifTab {
         request: RequestId,
     },
     /// The ask ended (answered, refused or cancelled): upkeep does not ask
-    /// again.
+    /// again while the session still shows or keeps its answer. If another
+    /// window's list replaced the answer, upkeep asks once more
+    /// (`gif_tab_upkeep`).
     Asked(GifWanted),
     /// Typed text waits for the pause before it searches, while `wanted`
     /// stays shown. The timer is owned here: the next keystroke, a section
@@ -339,11 +341,13 @@ impl QuillApp {
             return;
         };
         let wanted = self.pickers.gif_tab.wanted().clone();
-        // `Wants` only: a section already asked for is not asked again, and
-        // typed text waiting for its pause keeps its timer (as above).
+        // `Wants` or `Asked`: an ask that ended and whose answer the session
+        // has since replaced with another window's list (and not kept) asks
+        // again, once; an answer that is shown is never asked for again. Typed
+        // text waiting for its pause keeps its timer (as above).
         if matches!(self.gif_shown(panel), GifShown::Missing)
             && !gifs_on_their_way(panel)
-            && matches!(self.pickers.gif_tab, GifTab::Wants(_))
+            && matches!(self.pickers.gif_tab, GifTab::Wants(_) | GifTab::Asked(_))
         {
             self.request_gifs(wanted, cx);
         }
@@ -511,14 +515,9 @@ impl QuillApp {
     ) -> AnyElement {
         let mosaic = layout_gifs(animations, GRID_WIDTH);
         let roots = self.media_display_roots();
-        let pending = self.session().is_some_and(|session| {
-            session
-                .requests
-                .has_purpose(RequestPurpose::AddSavedAnimation)
-                || session
-                    .requests
-                    .has_purpose(RequestPurpose::RemoveSavedAnimation)
-        });
+        let pending = self
+            .session()
+            .is_some_and(|session| session.gif_save_in_flight());
         let mut grid = div().flex().flex_col().pb(px(GIF_GRID_PADDING as f32));
         for row in &mosaic.rows {
             let mut line = div()

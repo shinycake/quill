@@ -13,7 +13,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr};
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 
 /// Telegram Desktop falls back to this when the server sends no
@@ -184,7 +184,7 @@ impl QuillApp {
                         ),
                 )
                 .into_any_element();
-            let body = Rc::new(RefCell::new(Some(body)));
+            let body = Rc::new(Cell::new(Some(body)));
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(if adding {
@@ -194,10 +194,7 @@ impl QuillApp {
                 }))
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     },
                 ))
