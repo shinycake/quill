@@ -142,7 +142,7 @@ impl QuillApp {
         // screen-scope: the window and its handle belong to the app, so the open must
         // finish after a switch; its handlers read the account on screen when they fire.
         let opening = Self::spawn_app(cx, async move |_app, cx| {
-            let _ = cx.update(|cx| {
+            cx.update(|cx| {
                 let weak = owner.downgrade();
                 let render_owner = owner.clone();
                 let bounds = Bounds::centered(None, window_size, cx);
