@@ -59,7 +59,6 @@ pub(crate) fn placeholder_chat(chat_id: ChatId) -> ChatSummary {
         sender_actions: Vec::new(),
         draft: None,
         my_member: Default::default(),
-        my_restriction: Default::default(),
         is_forum: None,
         photo_file_id: None,
         // Parity slice 4: lenient default true — the real `chat` object

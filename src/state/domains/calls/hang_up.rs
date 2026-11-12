@@ -10,12 +10,23 @@ use crate::state::{CallsState, PendingRequest, RequestPurpose, Session};
 pub struct HangUp {
     pub request: RequestId,
     pub call_id: i32,
-    /// TDLib answered `ok`: the call cannot come back, and the engine
-    /// has not been told yet (`ConnectDriver::pump_call_engine` tells it).
-    pub engine_hang_up_due: bool,
+    /// Where the hang-up is: in flight, or TDLib took it and the engine is
+    /// owed its hang-up (`ConnectDriver::pump_call_engine` settles that).
+    stage: HangUpStage,
     /// What the call was before the hang-up went out; a failed hang-up
     /// goes back to that.
     from: HangUpFrom,
+}
+
+/// The stages of a hang-up. `Discarding` leaves on TDLib's `ok`
+/// (`EngineOwed`) or on the request's error (the hang-up is dropped);
+/// `EngineOwed` leaves when the driver pump tells the engine
+/// (`EngineTold`), and the call's terminal update ends all three.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HangUpStage {
+    Discarding,
+    EngineOwed,
+    EngineTold,
 }
 
 /// The [`CallAction`] a hang-up replaced.
@@ -117,11 +128,29 @@ impl CallAction {
 }
 
 impl HangUp {
+    /// TDLib answered `ok`: the call cannot come back, and the engine is
+    /// owed its hang-up. Only a hang-up still in flight takes it.
+    fn accepted(&mut self) {
+        if self.stage == HangUpStage::Discarding {
+            self.stage = HangUpStage::EngineOwed;
+        }
+    }
+
+    /// The engine's hang-up, once: true the first time after TDLib took the
+    /// hang-up, false after that.
+    pub fn take_engine_hang_up(&mut self) -> bool {
+        if self.stage != HangUpStage::EngineOwed {
+            return false;
+        }
+        self.stage = HangUpStage::EngineTold;
+        true
+    }
+
     pub fn new(request: RequestId, call_id: i32) -> Self {
         Self {
             request,
             call_id,
-            engine_hang_up_due: false,
+            stage: HangUpStage::Discarding,
             from: HangUpFrom::Unanswered,
         }
     }
@@ -199,7 +228,7 @@ impl Session {
             .hang_up_mut()
             .filter(|hang_up| hang_up.request == pending.id)
         {
-            hang_up.engine_hang_up_due = true;
+            hang_up.accepted();
         }
     }
 }

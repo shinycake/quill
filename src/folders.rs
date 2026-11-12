@@ -380,7 +380,6 @@ mod tests {
             sender_actions: Vec::new(),
             draft: None,
             my_member: Default::default(),
-            my_restriction: Default::default(),
             is_forum: None,
             photo_file_id: None,
             permissions: None,

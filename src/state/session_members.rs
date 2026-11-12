@@ -196,8 +196,7 @@ impl Session {
                 restrict_members: member.admin_rights().map(|r| r.can_restrict_members),
                 pin_messages: member.admin_rights().map(|r| r.can_pin_messages),
             };
-            chat.my_member = OwnMember::of(Some(member.status()), rights);
-            chat.set_my_restriction(member.restriction());
+            chat.record_own_member(member.status(), rights, member.restriction());
         }
         self.drop_similar_strip_if_not_member(chat_id);
     }
