@@ -890,7 +890,7 @@ fn a_stale_proxy_list_whose_refetch_cannot_be_sent_is_asked_again_after_the_wait
     assert!(t.driver.refresh_proxies_if_stale_at(now).is_err());
     assert_eq!(
         t.driver.session.settings.proxy.ops.fetch(),
-        ProxyFetch::NotSentStale { at: now }
+        ProxyFetch::NotSentStale { at: now, tries: 0 }
     );
     assert!(
         t.driver.session.settings.proxy.busy(),

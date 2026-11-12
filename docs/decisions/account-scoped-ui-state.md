@@ -10290,13 +10290,35 @@ Tests: `location_picker::picker_tests` (typing before a place, a new place stops
 | `CollectionsFetch` | Holds the list (`Ready`, `Loading { held, request }`, `LoadingStale`, `Stale`, `Failed`); a failure is `Failed` with a Retry under the tabs (`retry_gift_collections`). |
 | `SendGiftState` | `gifts_fetch`, `premium_fetch` and `selected` live in `SendStage::Open`. |
 | `passcode::idle` sampler | `note_read` treats a finished `Running` thread as not running, so the next read starts a new one. |
-| `proxy_ops` | `ProxyFetch::{LoadingStale, Failed { at }, FailedStale { at }}`: a failed refetch keeps the stale mark (busy), and a failure is asked again after `FAILED_RETRY_AFTER`. A rotation round forgets only `Unavailable` verdicts. |
+| `proxy_ops` | `ProxyFetch::{LoadingStale, Failed, FailedStale}`: a failed refetch keeps the stale mark (busy). Replaced by fix round 4: each carries `tries` and the wait is `failed_retry_after(tries)`. A rotation round forgets only `Unavailable` verdicts. |
 | `net_watch` | The listener rereads the route once it is subscribed (on its own thread, never under `WATCHER`). Starts back off: `quick_ends` doubles the wait up to `WATCH_RESTART_MAX`; `Watcher::Refused` covers a thread that would not start. |
 | `GramsHub::revenue` | `Fetch<GramRevenue>` settled by `RequestId`; an error shows "Couldn't load the revenue". |
-| `paid_messages` trust file | Only `NotFound` means no file; other read errors are `TrustFile::LoadFailed { retry_at_ms }`, nothing is written over the file, and prices agreed to meanwhile join it on the next good read. |
+| `paid_messages` trust file | Only `NotFound` means no file; other read errors are `TrustFile::LoadFailed { retry_at_ms, tries }` (the wait is `trust_retry_after(tries)`, see fix round 4), nothing is written over the file, and prices agreed to meanwhile join it on the next good read. |
 | `undo_paid_reaction` | A refused undo send shows "Couldn't undo the Star reaction." |
 | `settle_new_chat_stage` | A settled type Save is let go (`forget_new_chat_type_save`). |
 | `Lifecycle::Due { streak }` | `Waiting`'s `since` is gone (it ordered nothing); the variant is renamed to what it is: due to start, no work in flight. |
 | `UnreadMemo`, `BadgeCache` | `Option<(SessionCountKey, value)>`: no value without its key. |
 | `link_handler::read_on_caller` | Goes through `Cell::answered`, which settles a read in flight and wakes its watcher. |
+
+#### Fix round 4 (r4-04)
+
+| Review item | Change |
+|---|---|
+| New chat release decision | `NewChatStage::released_by(now)` is the one decision of what a left stage lets go (the create request, the Save requests); `Release` lives beside it. Test: `a_left_stage_lets_go_of_its_create_or_save`. |
+| Resale notice push | Session-level tests in `src/state/tests/marketplace_notice.rs` drive the result and the error with the box closed (a notice) and open (none); the demo-session reopen mirrors the close. |
+| Location picker "search this area" | Asks the settled or typed query, not `""`. Test: `search_this_area_asks_the_settled_query_and_a_later_pan_sends_nothing`, and the exact-point assertion. |
+| Gift collection tabs | `GiftManageState::shows_collection_tabs` includes a failed first fetch, so the Retry row stays. |
+| Proxy and trust-load back-off | `ProxyFetch` states carry `tries`; the wait doubles up to `FAILED_RETRY_MAX`, and an answer resets it. `TrustFile::LoadFailed { retry_at_ms, tries }` uses `trust_retry_after(tries)`. These replace the matching round 3 rows. |
+| Trust file driver test | `an_unreadable_trust_file_is_not_written_over_and_is_read_after_the_wait`. |
+| Allow line | `WithdrawalState::Pending` restored byte for byte at its original place in `stage-enums-allow.txt`. |
+
+#### Fix round 5 (r4-04)
+
+| Review item | Change |
+|---|---|
+| Allow line | The reworded last line is deleted; the base line is back at its original position, so the diff to base has only removals. |
+| Decisions doc | This round 4 table, and the two stale round 3 rows updated. |
+| Driver test clock | The trust-file driver test passes a fixed time to `paid_trust_tick`; it reads no wall clock. |
+| Unsent proxy retry | `NotSent` and `NotSentStale` carry `tries`, so a retry that could not be sent keeps the failure count. Test: `an_unsent_retry_keeps_the_failure_count`. |
+| `set_new_chat_stage` | Calls `NewChatStage::released_by` like `settle_new_chat_stage`: one decision site. |
 

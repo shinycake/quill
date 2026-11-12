@@ -320,23 +320,17 @@ impl QuillApp {
     }
 
     fn set_new_chat_stage(&mut self, stage: NewChatStage, cx: &mut Context<Self>) {
-        let left = self.new_chat_dialog_mut().map(|dialog| {
+        let release = self.new_chat_dialog_mut().and_then(|dialog| {
             let left = std::mem::replace(&mut dialog.stage, stage);
             dialog.search_input.update(cx, |_, cx| cx.notify());
-            left
+            left.released_by(&dialog.stage)
         });
         // The answer of the create or Save the stage waited for is in the
         // next step.
-        if let Some(live) = self.live.as_mut() {
-            match left {
-                Some(NewChatStage::Creating { request, .. }) => {
-                    live.driver.abandon_new_chat(request)
-                }
-                Some(NewChatStage::Type {
-                    save: TypeSaveStage::Saving(sent),
-                    ..
-                }) => live.driver.forget_new_chat_type_save(&sent),
-                _ => {}
+        if let (Some(release), Some(live)) = (release, self.live.as_mut()) {
+            match release {
+                Release::Create(request) => live.driver.abandon_new_chat(request),
+                Release::Save(sent) => live.driver.forget_new_chat_type_save(&sent),
             }
         }
         cx.notify();

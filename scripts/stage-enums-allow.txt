@@ -35,7 +35,7 @@ unkeyed:LiveOverlay::Opening src/ui/video_player/controls/live_overlay.rs: the o
 bare:OutboxReceipt::Sent src/state/chat_types.rs: a mark derived at draw time from `last_read_outbox_message_id` (`ChatSummary::outbox_receipt`): the message reached the server and the peer has not read it. No request is involved and nothing is stored
 bare:RowStatus::Sending src/state/chat_types.rs: a mark derived at draw time from the last message's `MessageSendState::Pending` (`ChatSummary::row_status`); the send itself is tracked by its own request elsewhere
 bare:RowStatus::Sent src/state/chat_types.rs: a mark derived at draw time from the outbox receipt (`ChatSummary::row_status`); delivered, not yet read
+bare:WithdrawalState::Pending src/premium_hub/ton.rs: TDLib's `RevenueWithdrawalState` of a Fragment withdrawal mirrored as is (the server's own state of the payout); Quill started nothing
 bare:Delivery::Sending src/ui/message_text/mod.rs: a message's footer mark, computed at draw time from the message's own `pending` and receipt (`Delivery::of`); nothing is in flight in this value and nothing answers it. The send itself is the outbox's stage
 bare:Delivery::Sent src/ui/message_text/mod.rs: as `Delivery::Sending`: the receipt the server gave, mirrored for the footer
 bare:MenuFile::Downloading a fact about the row's file read while a menu is built (the download stage lives in the downloads table); nothing is held or waited for
-bare:WithdrawalState::Pending src/earn/revenue.rs: TDLib's `RevenueWithdrawalState` of a Fragment withdrawal mirrored as is (the server's own state of the payout); Quill started nothing

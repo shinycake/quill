@@ -54,11 +54,11 @@ pub enum ProxyFetch {
     /// error) at `at`: the next ingest after [`UNSENT_RETRY_AFTER`] sends
     /// it again, so a background account or a box nobody opens still
     /// settles.
-    NotSent { at: Instant },
+    NotSent { at: Instant, tries: u8 },
     /// The refetch of a stale list could not be sent at `at`. Retried like
     /// `NotSent`, but the held list is still out of date, so the state stays
     /// busy and nothing plans on it.
-    NotSentStale { at: Instant },
+    NotSentStale { at: Instant, tries: u8 },
 }
 
 impl ProxyFetch {
@@ -76,7 +76,7 @@ impl ProxyFetch {
     pub fn wanted(self, now: Instant) -> bool {
         match self {
             Self::NotAsked | Self::Stale => true,
-            Self::NotSent { at } | Self::NotSentStale { at } => {
+            Self::NotSent { at, .. } | Self::NotSentStale { at, .. } => {
                 now.saturating_duration_since(at) >= UNSENT_RETRY_AFTER
             }
             Self::Failed { at, tries } | Self::FailedStale { at, tries } => {
@@ -123,7 +123,9 @@ impl ProxyFetch {
             Self::Loading { tries, .. }
             | Self::LoadingStale { tries, .. }
             | Self::Failed { tries, .. }
-            | Self::FailedStale { tries, .. } => tries,
+            | Self::FailedStale { tries, .. }
+            | Self::NotSent { tries, .. }
+            | Self::NotSentStale { tries, .. } => tries,
             _ => 0,
         }
     }
@@ -207,9 +209,11 @@ impl ProxyListOps {
     /// retry wait sends it again. A list that was owed a refetch stays busy
     /// (`NotSentStale`).
     pub fn fetch_unsent(&mut self, now: Instant) {
-        self.fetch = match self.fetch {
-            fetch if fetch.owes_fresh_list() => ProxyFetch::NotSentStale { at: now },
-            _ => ProxyFetch::NotSent { at: now },
+        let tries = self.fetch.tries();
+        self.fetch = if self.fetch.owes_fresh_list() {
+            ProxyFetch::NotSentStale { at: now, tries }
+        } else {
+            ProxyFetch::NotSent { at: now, tries }
         };
     }
 
@@ -285,7 +289,7 @@ mod tests {
         // A refetch that cannot be sent keeps the list busy until it is
         // asked again after the wait.
         ops.fetch_unsent(now);
-        assert_eq!(ops.fetch(), ProxyFetch::NotSentStale { at: now });
+        assert_eq!(ops.fetch(), ProxyFetch::NotSentStale { at: now, tries: 0 });
         assert!(ops.busy() && !ops.wanted(now));
         assert!(!ops.refetch_due(now + UNSENT_RETRY_AFTER / 2));
         assert!(ops.refetch_due(now + UNSENT_RETRY_AFTER));
@@ -349,6 +353,26 @@ mod tests {
         ops.fetch_sent(RequestId(100));
         assert!(ops.fetch_failed(RequestId(100), now));
         assert_eq!(ops.fetch(), ProxyFetch::Failed { at: now, tries: 1 });
+    }
+
+    /// A retry that could not be sent keeps the failures counted so far.
+    #[test]
+    fn an_unsent_retry_keeps_the_failure_count() {
+        let now = Instant::now();
+        let mut ops = ProxyListOps::default();
+        for n in 0..3u64 {
+            ops.fetch_sent(RequestId(n));
+            assert!(ops.fetch_failed(RequestId(n), now));
+        }
+        ops.fetch_unsent(now);
+        assert_eq!(ops.fetch(), ProxyFetch::NotSent { at: now, tries: 3 });
+        ops.fetch_sent(RequestId(10));
+        assert!(ops.fetch_failed(RequestId(10), now));
+        assert_eq!(ops.fetch(), ProxyFetch::Failed { at: now, tries: 4 });
+        ops.fetch_sent(RequestId(11));
+        assert!(ops.fetch_answered(RequestId(11)));
+        ops.fetch_unsent(now);
+        assert_eq!(ops.fetch(), ProxyFetch::NotSent { at: now, tries: 0 });
     }
 
     #[test]
