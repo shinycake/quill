@@ -963,11 +963,13 @@ mod tests {
     /// the cover bubble it kept held go on.
     #[test]
     fn ending_a_drag_lets_the_strip_go() {
-        let mut motion = EditorMotion::default();
-        motion.drag = Drag::Strip {
-            grab: Grab::Head,
-            shift: 0.0,
-            seek: Seek::default(),
+        let mut motion = EditorMotion {
+            drag: Drag::Strip {
+                grab: Grab::Head,
+                shift: 0.0,
+                seek: Seek::default(),
+            },
+            ..EditorMotion::default()
         };
         assert!(motion.drag.strip_held());
         motion.end_drag();
