@@ -1462,3 +1462,26 @@ fn a_chat_window_the_platform_destroys_frees_its_chat(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert_eq!(h.other_windows(cx).len(), 1, "asking again opens a window");
 }
+
+#[gpui_kit::test]
+fn a_recording_steps_on_its_own_timer_while_no_window_draws(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    record_in_window(&h, None, CaptureFor::Message, cx);
+    let first = h.app.update(cx, |app, cx| {
+        app.begin_record_tick(cx);
+        app.recording.tick_due()
+    });
+    assert!(first.is_some(), "the step is armed in the recording");
+    // No frame is requested here: the timer alone advances the step.
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(350));
+    cx.run_until_parked();
+    let later = h.app.update(cx, |app, _| app.recording.tick_due());
+    assert!(later > first, "the step re-armed itself: {first:?} {later:?}");
+    // Cancelling the recording drops its step with it.
+    h.app.update(cx, |app, cx| app.cancel_recording(cx));
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(350));
+    cx.run_until_parked();
+    assert_eq!(h.app.update(cx, |app, _| app.recording.tick_due()), None);
+}

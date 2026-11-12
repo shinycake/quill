@@ -88,6 +88,12 @@ pub(crate) struct Capture {
     preview: Option<PlaybackClock>,
     /// The live camera image while a video message records.
     round: super::round_record::RoundPreview,
+    /// The step that moves the record bar and the preview and watches the
+    /// capture. It belongs to the recording, so whatever ends it ends the
+    /// step too, and it runs while no window draws (a background recording
+    /// keeps its chat action, reports a failed device and sends a round
+    /// video at its limit).
+    tick: RecordTick,
 }
 
 /// MED2: lock-to-record — a locked recording ignores Esc; only Send or
@@ -119,19 +125,17 @@ pub(crate) struct RecordingUi {
     pub(super) start: CaptureStart,
     next_start: u64,
     pub(super) open_voice: Arc<dyn Fn() -> Result<VoiceCapture, String> + Send + Sync>,
-    /// The step that moves the record bar and the preview and watches the
-    /// capture.
-    pub(super) tick: RecordTick,
 }
 
-/// The record bar's step runs from the frame clock (`recording_frame`), so
-/// it rests while no window draws the bar and ends with the recording.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum RecordTick {
-    /// Nothing records.
-    Idle,
-    /// A recording runs; its next step is due at this instant.
-    Next(std::time::Instant),
+/// The recording's step: not armed yet, or the task that runs the next one,
+/// with the instant it is due. The recording holds it, so it ends with the
+/// recording.
+enum RecordTick {
+    Stopped,
+    Running {
+        due: std::time::Instant,
+        _task: gpui_kit::Task<()>,
+    },
 }
 
 /// How often the record bar steps while it draws.
@@ -191,7 +195,6 @@ impl RecordingUi {
             start: CaptureStart::Idle,
             next_start: 0,
             open_voice: Arc::new(VoiceCapture::start),
-            tick: RecordTick::Idle,
         }
     }
 }
@@ -268,6 +271,32 @@ impl RecordingUi {
 
     pub(super) fn active(&self) -> bool {
         self.capture.is_some()
+    }
+
+    /// The recording's next step is the task `task`, due at `due`; the one
+    /// that ran before is dropped. `false` when nothing records.
+    pub(super) fn set_tick(&mut self, due: std::time::Instant, task: gpui_kit::Task<()>) -> bool {
+        let Some(capture) = self.capture.as_mut() else {
+            return false;
+        };
+        capture.tick = RecordTick::Running { due, _task: task };
+        true
+    }
+
+    /// The step ended: no next one is armed.
+    pub(super) fn stop_tick(&mut self) {
+        if let Some(capture) = self.capture.as_mut() {
+            capture.tick = RecordTick::Stopped;
+        }
+    }
+
+    /// When the next step is due, if one is armed.
+    #[cfg(test)]
+    pub(super) fn tick_due(&self) -> Option<std::time::Instant> {
+        match &self.capture.as_ref()?.tick {
+            RecordTick::Running { due, .. } => Some(*due),
+            RecordTick::Stopped => None,
+        }
     }
 
     /// A recording runs or is about to: another one must not start.
@@ -421,6 +450,7 @@ impl QuillApp {
             delivery: Delivery::Normal,
             preview: None,
             round: Default::default(),
+            tick: RecordTick::Stopped,
         });
     }
 }

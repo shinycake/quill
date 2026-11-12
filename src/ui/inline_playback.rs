@@ -10,7 +10,7 @@ use super::inline_video::InlineTile;
 use super::message_media::MediaFrameKind;
 use super::play_intent::{PlayKind, PlayTarget};
 use super::playback_state::{ChatMessage, GifPlayback, GifRun, PlayingGif};
-use super::recording_state::{RECORD_STEP, RecordTick};
+use super::recording_state::RECORD_STEP;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::ids::{ChatId, FileId, MessageId};
@@ -402,34 +402,34 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// A recording or its preview started: step it at once, then from the
-    /// frame clock.
+    /// A recording or its preview started: step it at once, then every
+    /// [`RECORD_STEP`] from a timer the recording holds (not from a
+    /// window's frame, which stops while Quill is behind another app).
     pub(super) fn begin_record_tick(&mut self, cx: &mut Context<Self>) {
-        self.recording.tick = RecordTick::Next(cx.background_executor().now());
-        self.request_animation_tick(RECORD_FPS, cx);
+        self.arm_record_tick(cx.background_executor().now(), cx);
     }
 
-    /// Called from each window's frame: the recording steps every
-    /// [`RECORD_STEP`] while a window draws, and the frame clock is asked for
-    /// the next frame. A step that finds nothing recording ends the stage.
-    pub(in crate::ui) fn recording_frame(&mut self, cx: &mut Context<Self>) {
-        let RecordTick::Next(due) = self.recording.tick else {
-            return;
-        };
-        let now = cx.background_executor().now();
-        if now >= due {
-            self.recording.tick = RecordTick::Next(now + RECORD_STEP);
-            if !self.recording_tick_in_window(cx) {
-                self.recording.tick = RecordTick::Idle;
-                return;
-            }
-        }
-        self.request_animation_tick(RECORD_FPS, cx);
+    /// One step at `due`; a step that finds the recording still running
+    /// arms the next, and one that finds nothing recording ends the chain.
+    /// Each step replaces the task that ran it.
+    fn arm_record_tick(&mut self, due: std::time::Instant, cx: &mut Context<Self>) {
+        // window-scope: the step runs as the window the recording was made in (`recording_tick_in_window`).
+        // screen-scope: the recording is the app's alone and ends with the account switch (its farewell cancels it).
+        let task = cx.spawn(async move |this, cx| {
+            let wait = due.saturating_duration_since(cx.background_executor().now());
+            cx.background_executor().timer(wait).await;
+            let _ = this.update(cx, |app, cx| {
+                if app.recording_tick_in_window(cx) {
+                    let next = cx.background_executor().now() + RECORD_STEP;
+                    app.arm_record_tick(next, cx);
+                } else {
+                    app.recording.stop_tick();
+                }
+            });
+        });
+        self.recording.set_tick(due, task);
     }
 }
-
-/// The frame rate that keeps the record bar stepping every [`RECORD_STEP`].
-const RECORD_FPS: u32 = 10;
 
 #[cfg(test)]
 mod tests {
