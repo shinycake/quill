@@ -267,8 +267,8 @@ pub use session_message_story::{
 pub use session_privacy_data::{PasswordCheck, PrivacyControl, PrivacyData};
 pub use session_reply::story_thumb_candidates;
 pub use session_reply::{
-    ForwardHeader, ForwardLink, MAX_REPLY_TARGETS_OUTSIDE_WINDOW, ReplyHeader, ReplyTargetView,
-    ReplyTarget, footer_tooltip, thumb_candidates,
+    ForwardHeader, ForwardLink, MAX_REPLY_TARGETS_OUTSIDE_WINDOW, ReplyHeader, ReplyTarget,
+    ReplyTargetView, footer_tooltip, thumb_candidates,
 };
 pub use session_reply_keyboard::*;
 pub use session_saved::{SAVED_PAGE, SAVED_TOPICS_PAGE};

@@ -160,7 +160,10 @@ fn a_saved_answer_nobody_waits_for_is_dropped() {
     panel.saved_asked(RequestId(1));
     panel.saved_asked(RequestId(2));
     panel.saved_answered(Some(RequestId(1)), Vec::new());
-    assert!(panel.loading() && !panel.loaded(), "the older ask is dropped");
+    assert!(
+        panel.loading() && !panel.loaded(),
+        "the older ask is dropped"
+    );
     panel.saved_answered(Some(RequestId(2)), Vec::new());
     assert!(panel.loaded() && !panel.loading());
 }

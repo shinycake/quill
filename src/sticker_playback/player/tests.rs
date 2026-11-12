@@ -546,10 +546,7 @@ fn the_workers_go_idle_with_frames_asked_of_a_failed_clip() {
     engine.wait_idle();
     engine.want(&key, &[0, 1]);
     engine.wait_idle();
-    assert_eq!(
-        engine.state(&key),
-        Some(ClipView::Failed("no".to_string()))
-    );
+    assert_eq!(engine.state(&key), Some(ClipView::Failed("no".to_string())));
 }
 
 /// An opener that panics fails the clip it held.

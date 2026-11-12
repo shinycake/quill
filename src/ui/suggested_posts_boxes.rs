@@ -102,12 +102,11 @@ impl QuillApp {
     pub(super) fn suggest_shortfall(&self, price: SuggestedPrice) -> Option<SuggestedPrice> {
         let session = self.session()?;
         let stars = session.payments.hub.balance.map(|balance| balance.stars);
-        let grams = session.payments.suggested_posts.gram_balance.or_else(|| {
-            session
-                .ton_wallet
-                .own()
-                .map(|wallet| wallet.gram_amount)
-        });
+        let grams = session
+            .payments
+            .suggested_posts
+            .gram_balance
+            .or_else(|| session.ton_wallet.own().map(|wallet| wallet.gram_amount));
         shortfall(price, stars, grams)
     }
 
@@ -455,12 +454,11 @@ impl QuillApp {
     fn suggest_balance(&self, ton: bool, cx: &App) -> Option<AnyElement> {
         let session = self.session()?;
         let price = if ton {
-            let nanos = session.payments.suggested_posts.gram_balance.or_else(|| {
-                session
-                    .ton_wallet
-                    .own()
-                    .map(|wallet| wallet.gram_amount)
-            })?;
+            let nanos = session
+                .payments
+                .suggested_posts
+                .gram_balance
+                .or_else(|| session.ton_wallet.own().map(|wallet| wallet.gram_amount))?;
             SuggestedPrice::TonCents(nanos.checked_div(10_000_000).unwrap_or(0))
         } else {
             SuggestedPrice::Stars(session.payments.hub.balance?.stars)

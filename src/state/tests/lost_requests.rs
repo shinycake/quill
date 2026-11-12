@@ -104,7 +104,8 @@ fn every_sweepable_purpose_leaves_the_registry_and_the_session_alive() {
 fn account_loss_resets_the_loading_flags_of_pending_lookups() {
     let mut session = ready_session();
     session.settings.privacy_data.network.begin();
-    session.request(RequestPurpose::GetNetworkStatistics, None);
+    let network = session.request(RequestPurpose::GetNetworkStatistics, None);
+    session.settings.privacy_data.network.sent(network);
     let subscriptions = session.request(
         RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions { append: false }),
         None,

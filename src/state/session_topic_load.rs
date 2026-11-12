@@ -27,9 +27,7 @@ impl Session {
         {
             None => true,
             Some(history) => {
-                history.messages.is_empty()
-                    && !history.loaded_complete()
-                    && history.asking_older()
+                history.messages.is_empty() && !history.loaded_complete() && history.asking_older()
             }
         }
     }

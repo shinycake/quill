@@ -627,10 +627,9 @@ impl GifPanel {
     pub fn saved_forgotten(&mut self) {
         self.saved = match std::mem::take(&mut self.saved) {
             Fetch::Idle | Fetch::Ready(()) | Fetch::Outdated(_) => Fetch::Idle,
-            Fetch::Loading { request, .. } => Fetch::Loading {
-                stale: None,
-                request,
-            },
+            // A fetch out asked before the change: its answer predates it, so
+            // it is dropped and the next ask goes out afresh.
+            Fetch::Loading { .. } => Fetch::Idle,
             Fetch::Failed { error, .. } => Fetch::Failed { error, stale: None },
         };
     }

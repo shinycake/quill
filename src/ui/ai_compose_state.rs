@@ -20,7 +20,9 @@ pub(crate) enum AiComposeView {
     /// The box's card. A style just created or edited is selected once the
     /// box's style list has it (tdesktop `selectToneById`): the name waits
     /// here, and leaving the card or closing the box drops it.
-    Card { select_on_arrival: Option<String> },
+    Card {
+        select_on_arrival: Option<String>,
+    },
     Languages,
     About,
     /// The New Style / Edit Style view with its editor. Leaving the view

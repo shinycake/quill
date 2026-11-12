@@ -94,14 +94,18 @@ pub(super) enum EventLogTyped {
     Idle,
     /// The pause after the last edit runs as this timer; it ends the stage
     /// when it fires, and the next edit replaces it.
-    Waiting { _timer: gpui_kit::Task<()> },
+    Waiting {
+        _timer: gpui_kit::Task<()>,
+    },
 }
 
 /// The poll of the page.
 pub(super) enum EventLogPoll {
     Stopped,
     /// The poll timer runs, owned here.
-    Running { _timer: gpui_kit::Task<()> },
+    Running {
+        _timer: gpui_kit::Task<()>,
+    },
 }
 
 impl EventLogPoll {

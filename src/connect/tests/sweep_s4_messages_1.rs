@@ -158,7 +158,10 @@ fn two_callback_answers_between_polls_both_reach_the_poll() {
 fn a_sticker_set_edit_answer_ends_only_its_own_edit_and_every_toast_shows() {
     let mut t = Flaky::new();
     let session = &mut t.driver.session;
-    session.stickers.sticker_set_view = Some(crate::state::StickerSetView::loading(77, crate::ids::RequestId(700)));
+    session.stickers.sticker_set_view = Some(crate::state::StickerSetView::loading(
+        77,
+        crate::ids::RequestId(700),
+    ));
     let rename = |session: &mut crate::state::Session| {
         let id = session.request(
             RequestPurpose::Stickers(StickersPurpose::Creator(

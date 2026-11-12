@@ -44,7 +44,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             }),
             None,
         );
-        self.session.stickers.sticker_set_view = Some(crate::state::StickerSetView::loading(0, extra));
+        self.session.stickers.sticker_set_view =
+            Some(crate::state::StickerSetView::loading(0, extra));
         self.session.stickers.stickers.attached = crate::state::AttachedSets::Asked(extra);
         match self
             .sender
@@ -73,7 +74,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             .as_ref()
             .is_some_and(|view| {
                 view.set_id == 0
-                    && matches!(view.stage, crate::state::StickerSetViewStage::Loading { .. })
+                    && matches!(
+                        view.stage,
+                        crate::state::StickerSetViewStage::Loading { .. }
+                    )
             });
         if !waiting {
             return Ok(());

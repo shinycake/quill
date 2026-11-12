@@ -410,8 +410,8 @@ impl Session {
                     .map(|chat| chat.title.clone())
             })
             .flatten();
-        let clickable =
-            state == ReplyTargetView::Ready && (!external || self.chats.contains_key(&target_chat.0));
+        let clickable = state == ReplyTargetView::Ready
+            && (!external || self.chats.contains_key(&target_chat.0));
         Some(ReplyHeader {
             target_chat,
             target_id: reply.message_id(),

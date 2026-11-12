@@ -11,7 +11,9 @@ use std::cell::Cell;
 pub(crate) enum DebugConfirm {
     Closed,
     /// The question is on screen; `logs_on` picks its wording.
-    Open { logs_on: bool },
+    Open {
+        logs_on: bool,
+    },
 }
 
 impl DebugConfirm {

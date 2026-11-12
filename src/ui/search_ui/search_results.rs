@@ -124,7 +124,9 @@ impl QuillApp {
                 tr_with(keys::Q_CHAT_SEARCHING_3, &[("query", &query.to_string())])
             }
             SearchStateView::Searching if has_results => String::new(),
-            SearchStateView::Searching if recents => tr(keys::Q_CHAT_LOADING_RECENT_CHATS).to_string(),
+            SearchStateView::Searching if recents => {
+                tr(keys::Q_CHAT_LOADING_RECENT_CHATS).to_string()
+            }
             SearchStateView::Searching if browsing_media => tr(keys::Q_CHAT_LOADING_2).to_string(),
             SearchStateView::Searching => {
                 tr_with(keys::Q_CHAT_SEARCHING_3, &[("query", &query.to_string())])

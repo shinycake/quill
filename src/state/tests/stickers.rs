@@ -308,14 +308,17 @@ fn gif_panel_downloads_stills_then_preview_loops_then_unpreviewed_clips() {
         thumb: crate::telegram::envelope::Thumb::of(thumb.map(FileId), 160, 90, still),
         minithumbnail: None,
     };
-    seed_saved(&mut session.stickers.gifs, vec![
-        // An MP4 preview loop: the loop plays, the GIF itself waits.
-        gif(1, Some(11), false),
-        // A still JPEG and no loop: the GIF itself plays.
-        gif(2, Some(12), true),
-        // Nothing but the GIF.
-        gif(3, None, true),
-    ]);
+    seed_saved(
+        &mut session.stickers.gifs,
+        vec![
+            // An MP4 preview loop: the loop plays, the GIF itself waits.
+            gif(1, Some(11), false),
+            // A still JPEG and no loop: the GIF itself plays.
+            gif(2, Some(12), true),
+            // Nothing but the GIF.
+            gif(3, None, true),
+        ],
+    );
     // A closed panel fetches nothing.
     assert!(session.gif_panel_file_ids_to_download().is_empty());
     session.stickers.gifs.open = true;
@@ -418,7 +421,10 @@ fn a_failed_refetch_keeps_the_shown_sticker_set() {
 }
 
 /// The saved list asked for and answered, as the driver would.
-fn seed_saved(gifs: &mut crate::state::GifPanel, animations: Vec<crate::telegram::envelope::AnimationItem>) {
+fn seed_saved(
+    gifs: &mut crate::state::GifPanel,
+    animations: Vec<crate::telegram::envelope::AnimationItem>,
+) {
     gifs.saved_asked(RequestId(900));
     gifs.saved_answered(Some(RequestId(900)), animations);
 }
@@ -468,7 +474,12 @@ fn a_new_gif_search_starts_with_no_results_or_paging() {
     gifs.search_begun("cats".into());
     gifs.search_page_asked(String::new());
     gifs.search_sent(crate::ids::RequestId(1));
-    gifs.search_page_answered(Some(crate::ids::RequestId(1)), vec![saved_gif(1)], "50".into(), true);
+    gifs.search_page_answered(
+        Some(crate::ids::RequestId(1)),
+        vec![saved_gif(1)],
+        "50".into(),
+        true,
+    );
     assert_eq!(gifs.search_results().len(), 1);
     assert_eq!(gifs.search_next_offset(), "50");
     // A different search replaces the results and the paging whole.

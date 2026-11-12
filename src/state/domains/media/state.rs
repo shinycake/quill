@@ -9,7 +9,9 @@ pub enum ProfileAudioMark {
     /// `isProfileAudio` went out as `request`; only its answer settles the
     /// song (a local save or remove replaces the mark, so a late answer
     /// finds nothing to change).
-    Checking { request: RequestId },
+    Checking {
+        request: RequestId,
+    },
     Saved,
     NotSaved,
 }

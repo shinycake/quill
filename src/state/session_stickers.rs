@@ -116,7 +116,9 @@ impl Session {
                 .stickers
                 .sets
                 .first()
-                .map_or_else(StickerSelection::default, |set| StickerSelection::of(set.id));
+                .map_or_else(StickerSelection::default, |set| {
+                    StickerSelection::of(set.id)
+                });
         }
     }
 

@@ -36,11 +36,7 @@ impl Session {
     }
 
     /// The chat page comes from the pending request the op tracks.
-    fn track_story_page_op(
-        &mut self,
-        kind: StoryPageOpKind,
-        state: StoryPageOpState,
-    ) {
+    fn track_story_page_op(&mut self, kind: StoryPageOpKind, state: StoryPageOpState) {
         let chat_id = self
             .requests
             .get(state.request())

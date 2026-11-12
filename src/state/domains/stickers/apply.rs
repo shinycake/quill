@@ -286,9 +286,10 @@ impl Session {
                     self.chats_state.enter_deep_link_stage(DeepLinkState::Ui(
                         crate::deep_link_types::DeepLinkUi::StickerSet { set_id: id },
                     ));
-                } else if let Some((request, RequestPurpose::Stickers(StickersPurpose::ViewStickerSet {
-                    set_id,
-                }))) = pending.map(|p| (p.id, p.purpose))
+                } else if let Some((
+                    request,
+                    RequestPurpose::Stickers(StickersPurpose::ViewStickerSet { set_id }),
+                )) = pending.map(|p| (p.id, p.purpose))
                 {
                     self.remember_files(&files);
                     self.accept_sticker_set_view(

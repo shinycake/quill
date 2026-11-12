@@ -604,7 +604,10 @@ fn chat_search_happy_empty_stale_and_jump() {
             stale_extra.0
         ),
     );
-    assert_eq!(session.search.chat_search.status(), SearchStateView::Searching);
+    assert_eq!(
+        session.search.chat_search.status(),
+        SearchStateView::Searching
+    );
     assert!(session.search.chat_search.hits().is_empty());
     apply_json(
         &mut session,

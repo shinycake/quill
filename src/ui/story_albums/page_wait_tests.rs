@@ -115,10 +115,9 @@ fn the_album_view_leaves_only_on_a_deleted_answer(cx: &mut TestAppContext) {
         let mut page = StoryPage::new(CHAT, window, cx);
         page.view = AlbumView::album(3);
         app.stories.page = Some(page);
-        for (request, answered, leaves) in [
-            (RequestId(710), false, false),
-            (RequestId(711), true, true),
-        ] {
+        for (request, answered, leaves) in
+            [(RequestId(710), false, false), (RequestId(711), true, true)]
+        {
             if let Some(page) = app.stories.page.as_mut() {
                 page.view = AlbumView::album(3);
                 page.view.delete_sent(request);
@@ -190,7 +189,12 @@ fn a_second_mutation_waits_for_the_first(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     app.update_in(&mut vcx, |app, window, cx| {
         app.stories.page = Some(StoryPage::new(CHAT, window, cx));
-        set_op(app, StoryPageOpState::Sending { request: RequestId(720) });
+        set_op(
+            app,
+            StoryPageOpState::Sending {
+                request: RequestId(720),
+            },
+        );
         let mut called = false;
         let sent = app.story_page_mutate(
             "pin",
@@ -218,7 +222,12 @@ fn a_deleted_answer_leaves_another_album_in_view(cx: &mut TestAppContext) {
         // delete's stage goes with the view it was part of.
         page.view = AlbumView::album(4);
         app.stories.page = Some(page);
-        set_op(app, StoryPageOpState::Succeeded { request: RequestId(730) });
+        set_op(
+            app,
+            StoryPageOpState::Succeeded {
+                request: RequestId(730),
+            },
+        );
         app.story_page_upkeep(window, cx);
         let page = app.stories.page.as_ref().expect("the page");
         assert_eq!(page.wait, PageWait::Idle);
@@ -237,7 +246,12 @@ fn a_created_answer_keeps_another_picker_open(cx: &mut TestAppContext) {
         if let Some(page) = app.stories.page.as_mut() {
             page.wait = PageWait::Creating(RequestId(740));
         }
-        set_op(app, StoryPageOpState::Succeeded { request: RequestId(740) });
+        set_op(
+            app,
+            StoryPageOpState::Succeeded {
+                request: RequestId(740),
+            },
+        );
         app.story_page_upkeep(window, cx);
         let page = app.stories.page.as_ref().expect("the page");
         assert!(page.picker.is_some());
@@ -261,7 +275,12 @@ fn a_partly_sent_save_keeps_the_picker_and_drops_the_sent_adds(cx: &mut TestAppC
                 added: vec![11],
             };
         }
-        set_op(app, StoryPageOpState::Succeeded { request: RequestId(750) });
+        set_op(
+            app,
+            StoryPageOpState::Succeeded {
+                request: RequestId(750),
+            },
+        );
         app.story_page_upkeep(window, cx);
         let page = app.stories.page.as_ref().expect("the page");
         assert_eq!(page.wait, PageWait::Idle);

@@ -70,7 +70,10 @@ fn sticker_panel_loads_installed_set_and_send_uses_input_file_id() {
                 .unwrap(),
             )
             .unwrap();
-    assert_eq!(driver.session.stickers.stickers.selection.set_id(), Some(77));
+    assert_eq!(
+        driver.session.stickers.stickers.selection.set_id(),
+        Some(77)
+    );
     let set_req = recorder
         .snapshot()
         .into_iter()

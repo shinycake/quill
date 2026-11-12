@@ -112,7 +112,10 @@ fn driver_search_happy_empty_error_and_select() {
                 .unwrap(),
             )
             .unwrap();
-    assert_eq!(driver.session.search.search.status(), SearchStateView::Ready);
+    assert_eq!(
+        driver.session.search.search.status(),
+        SearchStateView::Ready
+    );
     assert_eq!(driver.session.search.search.chat_ids, vec![ChatId(7)]);
     driver
         .select_search_message(
@@ -123,7 +126,10 @@ fn driver_search_happy_empty_error_and_select() {
             0,
         )
         .unwrap();
-    assert_eq!(driver.session.search.search.status(), SearchStateView::Closed);
+    assert_eq!(
+        driver.session.search.search.status(),
+        SearchStateView::Closed
+    );
     assert_eq!(driver.session.open_chat_id(), Some(ChatId(7)));
     // The hit opens in context: a window loads around it (highlighted)
     // instead of the lone hit being spliced into the history.
@@ -176,7 +182,10 @@ fn driver_search_happy_empty_error_and_select() {
             .unwrap(),
         )
         .unwrap();
-    assert_eq!(driver.session.search.search.status(), SearchStateView::Ready);
+    assert_eq!(
+        driver.session.search.search.status(),
+        SearchStateView::Ready
+    );
     assert!(driver.session.search.search.is_recents());
 
     let empty = commit_typed_search(&mut driver, "zzz");
@@ -227,7 +236,10 @@ fn driver_search_happy_empty_error_and_select() {
             .unwrap(),
         )
         .unwrap();
-    assert_eq!(driver.session.search.search.status(), SearchStateView::Empty);
+    assert_eq!(
+        driver.session.search.search.status(),
+        SearchStateView::Empty
+    );
 
     let fail = commit_typed_search(&mut driver, "nope");
     let SearchFlight::Query(fail_chats, fail_messages, fail_public) = fail else {
@@ -277,9 +289,15 @@ fn driver_search_happy_empty_error_and_select() {
             .unwrap(),
         )
         .unwrap();
-    assert_eq!(driver.session.search.search.status(), SearchStateView::Failed);
+    assert_eq!(
+        driver.session.search.search.status(),
+        SearchStateView::Failed
+    );
     driver.close_search();
-    assert_eq!(driver.session.search.search.status(), SearchStateView::Closed);
+    assert_eq!(
+        driver.session.search.search.status(),
+        SearchStateView::Closed
+    );
     assert!(!sink.rendered().contains("CANARY_DRV"));
     let _ = std::fs::remove_dir_all(&dir);
 }

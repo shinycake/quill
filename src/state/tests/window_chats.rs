@@ -145,7 +145,10 @@ fn a_search_answer_for_a_closed_window_lands_in_no_view() {
         session.search.chat_search.hits().is_empty(),
         "the closed window's hits did not land in the main window's search"
     );
-    assert_eq!(session.search.chat_search.status(), SearchStateView::Searching);
+    assert_eq!(
+        session.search.chat_search.status(),
+        SearchStateView::Searching
+    );
 }
 
 #[test]
@@ -211,7 +214,10 @@ fn an_answer_for_one_window_lands_there_while_another_window_is_in_place() {
         "Carol's view stayed in place"
     );
     assert_eq!(session.open_chat_id(), Some(ChatId(9)));
-    assert_eq!(session.search.chat_search.status(), SearchStateView::Searching);
+    assert_eq!(
+        session.search.chat_search.status(),
+        SearchStateView::Searching
+    );
     assert!(
         session.search.chat_search.hits().is_empty(),
         "Carol's search kept its own state"

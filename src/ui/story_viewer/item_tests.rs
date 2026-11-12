@@ -173,13 +173,10 @@ fn a_finished_page_op_goes_with_the_story(cx: &mut TestAppContext) {
     frames(&mut vcx);
     app.update(&mut vcx, |app, cx| {
         if let Some(session) = app.demo_session.as_deref_mut() {
-            session
-                .stories
-                .page_ops
-                .begin(op(StoryPageOpState::Failed {
-                    request: quill::ids::RequestId(1),
-                    reason: "no".into(),
-                }));
+            session.stories.page_ops.begin(op(StoryPageOpState::Failed {
+                request: quill::ids::RequestId(1),
+                reason: "no".into(),
+            }));
         }
         app.close_story_viewer(cx);
         let kept = app

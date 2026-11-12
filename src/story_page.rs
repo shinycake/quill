@@ -175,9 +175,7 @@ impl StoryPageOps {
     }
 
     pub(crate) fn get_mut(&mut self, request: RequestId) -> Option<&mut StoryPageOp> {
-        self.ops
-            .iter_mut()
-            .find(|op| op.state.request() == request)
+        self.ops.iter_mut().find(|op| op.state.request() == request)
     }
 
     pub(crate) fn remove(&mut self, request: RequestId) -> bool {
@@ -217,11 +215,9 @@ impl StoryPageOps {
 
     /// A mutation for `chat_id` is in flight.
     pub fn mutating(&self, chat_id: ChatId) -> bool {
-        self.ops
-            .iter()
-            .any(|op| {
-                op.chat_id == Some(chat_id) && matches!(op.state, StoryPageOpState::Sending { .. })
-            })
+        self.ops.iter().any(|op| {
+            op.chat_id == Some(chat_id) && matches!(op.state, StoryPageOpState::Sending { .. })
+        })
     }
 
     /// The one line a page shows: a failure first, then a mutation in
@@ -340,12 +336,24 @@ mod tests {
         // A call still in flight is not dropped for the cap: the first one
         // of a full list keeps its place and its answer finds it.
         for request in 100..100 + STORY_PAGE_OPS_CAP as u64 {
-            ops.begin(op(kind, StoryPageOpState::Sending { request: id(request) }, 12));
+            ops.begin(op(
+                kind,
+                StoryPageOpState::Sending {
+                    request: id(request),
+                },
+                12,
+            ));
         }
         assert!(ops.get(id(100)).is_some(), "an op in flight is kept");
         // Calls that never answer still cannot grow the list without end.
         for request in 1000..1300 {
-            ops.begin(op(kind, StoryPageOpState::Sending { request: id(request) }, 12));
+            ops.begin(op(
+                kind,
+                StoryPageOpState::Sending {
+                    request: id(request),
+                },
+                12,
+            ));
         }
         assert!(ops.ops.len() <= 2 * STORY_PAGE_OPS_CAP);
         assert!(ops.get(id(1299)).is_some(), "the newest is kept");

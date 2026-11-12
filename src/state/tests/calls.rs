@@ -490,7 +490,8 @@ fn muting_someone_else_does_not_hold_back_your_own_row() {
     assert!(!call.is_muted_self, "your own row settles");
     // Your own toggle in flight holds the row back.
     session.requests.take(other);
-    session.request(mute(MessageSender::User { user_id: 1 }), None);
+    let own = session.request(mute(MessageSender::User { user_id: 1 }), None);
+    session.begin_participant_mute_toggle(555, MessageSender::User { user_id: 1 }, own);
     apply_json(&mut session, &seq, &sink, &own_row(true));
     let call = session.calls.active_group_call.as_ref().unwrap();
     assert!(!call.is_muted_self, "held while your own toggle is out");

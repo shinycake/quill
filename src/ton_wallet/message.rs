@@ -76,7 +76,9 @@ impl TonWalletTransfer {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TonConnectRequestState {
     /// Nobody answered it yet, and it expires at `expiration_date`.
-    Unanswered { expiration_date: i32 },
+    Unanswered {
+        expiration_date: i32,
+    },
     Accepted,
     Rejected,
 }
