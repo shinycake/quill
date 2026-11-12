@@ -34,7 +34,7 @@ pub(in crate::ui) enum AccountDeletion {
     /// Deleting now: the task owns the deletion (it waits for the clients
     /// to close, deletes on a worker, finishes), and the entry leaves with
     /// its end.
-    Running(std::rc::Rc<Task<()>>),
+    Running { _task: std::rc::Rc<Task<()>> },
     /// A client's close could not be confirmed: the folder stays recorded
     /// and the next start deletes it. No task is left to hold.
     Deferred,
@@ -375,7 +375,9 @@ impl QuillApp {
         for key in &keys {
             self.background
                 .deleting
-                .insert(key.clone(), AccountDeletion::Running(task.clone()));
+                .insert(key.clone(), AccountDeletion::Running {
+                    _task: task.clone(),
+                });
         }
         let waiting = keys.clone();
         self.after_closing(

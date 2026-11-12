@@ -444,7 +444,7 @@ fn an_unconfirmed_close_defers_the_deletion_with_no_task(cx: &mut TestAppContext
         app.remove_account_in(root.clone(), &account(1), cx);
         assert!(matches!(
             app.background.deleting.get(&account(1)),
-            Some(AccountDeletion::Running(_))
+            Some(AccountDeletion::Running { .. })
         ));
         app.close_all_for_quit(started + Duration::from_millis(100));
     });

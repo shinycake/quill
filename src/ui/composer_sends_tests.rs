@@ -1191,16 +1191,20 @@ fn an_armed_clear_whose_answer_is_queued_is_not_pruned() {
         std::sync::Arc::new(quill::diagnostics::MemorySink::new()),
     );
     // The answer was ingested: the request left the table, the answer waits.
-    session.messages.sent_answers.push(quill::state::SendAnswered {
-        request,
-        chat_id: chat,
-        message_id: MessageId(-5),
-    });
-    let prune = |sends: &mut crate::ui::composer_sends::ComposerSends, session: &quill::state::Session| {
+    session
+        .messages
+        .sent_answers
+        .push(quill::state::SendAnswered {
+            request,
+            chat_id: chat,
+            message_id: MessageId(-5),
+        });
+    let prune = |sends: &mut crate::ui::composer_sends::ComposerSends,
+                 session: &quill::state::Session| {
         sends.forget_lost_clears(
             &account,
             |_, _| true,
-            |request| crate::ui::composer::request_waits(session, request),
+            |request| crate::ui::composer::sent_text::request_waits(session, request),
         )
     };
     prune(&mut sends, &session);
