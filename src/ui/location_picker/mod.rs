@@ -343,6 +343,13 @@ impl QuillApp {
         self.sync_location_picker(cx);
     }
 
+    pub(in crate::ui) fn location_retry_venues(&mut self, cx: &mut Context<Self>) {
+        if let Some(sharing) = self.location_sharing_mut() {
+            sharing.retry_venues();
+        }
+        self.sync_location_picker(cx);
+    }
+
     pub(in crate::ui) fn location_search_changed(
         &mut self,
         query: Option<String>,

@@ -182,13 +182,10 @@ impl Session {
         if !newer {
             self.clear_topic_load_failed(chat_id, topic);
         }
-        if self.history_pruning.gone_topic_pages.remove(&pending.id.0) {
-            return;
-        }
         let entry = self.topic_history_entry(chat_id, topic);
         // A newer page for a window that already reaches the latest was
         // asked for from one that has gone.
-        if entry.stale_pages.remove(&pending.id.0) || newer && !entry.has_newer() {
+        if newer && !entry.has_newer() {
             return;
         }
         let before = entry.newest_loaded_id().map_or(0, |id| id.0);
@@ -224,14 +221,6 @@ impl Session {
         let (Some(chat_id), Some(topic)) = (pending.chat_id, pending.forum_topic_id) else {
             return;
         };
-        if self.history_pruning.gone_topic_pages.remove(&pending.id.0) {
-            return;
-        }
-        if let Some(history) = self.threads.topic_histories.get_mut(&(chat_id.0, topic))
-            && history.stale_pages.remove(&pending.id.0)
-        {
-            return;
-        }
         match pending.purpose {
             RequestPurpose::GetTopicHistory => {
                 self.topic_history_entry(chat_id, topic).fail_older();
@@ -247,14 +236,7 @@ impl Session {
     /// A page for `end` of the topic's current window is in flight (pages
     /// asked for before that end moved do not count).
     pub fn topic_page_in_flight(&self, chat_id: ChatId, topic: i32, end: WindowEnd) -> bool {
-        let stale = self
-            .threads
-            .topic_histories
-            .get(&(chat_id.0, topic))
-            .map(|history| &history.stale_pages);
-        self.topic_page_ids(chat_id, topic, &[end])
-            .into_iter()
-            .any(|id| stale.is_none_or(|stale| !stale.contains(&id)))
+        !self.topic_page_ids(chat_id, topic, &[end]).is_empty()
     }
 
     fn topic_page_ids(&self, chat_id: ChatId, topic: i32, ends: &[WindowEnd]) -> Vec<u64> {
@@ -312,25 +294,29 @@ impl Session {
         }
     }
 
-    /// The topic's entry is going, and its stale pages with it: a page that
-    /// lands later must not start a new entry as if it were the latest.
+    /// The topic's entry is going, and its pages in flight with it: the
+    /// requests are forgotten, so a page that lands later is ignored and
+    /// does not start a new entry as if it were the latest.
     pub(super) fn drop_topic_pages_in_flight(&mut self, key: (i64, i32)) {
         let ends = [WindowEnd::Oldest, WindowEnd::Newest];
-        let in_flight = self.topic_page_ids(ChatId(key.0), key.1, &ends);
-        self.history_pruning.gone_topic_pages.extend(in_flight);
+        self.forget_topic_pages(ChatId(key.0), key.1, &ends);
     }
 
-    /// Mark the topic's page requests in flight for `ends` stale: they were
-    /// asked for from an end that has moved since.
+    /// Forget the topic's page requests in flight for `ends`: they were
+    /// asked for from an end that has moved since, so their answers (which
+    /// would land across a gap) find no request and are ignored.
     pub(crate) fn drop_topic_pages_past(
         &mut self,
         chat_id: ChatId,
         topic: i32,
         ends: &[WindowEnd],
     ) {
-        let stale = self.topic_page_ids(chat_id, topic, ends);
-        if let Some(history) = self.threads.topic_histories.get_mut(&(chat_id.0, topic)) {
-            history.stale_pages.extend(stale);
+        self.forget_topic_pages(chat_id, topic, ends);
+    }
+
+    fn forget_topic_pages(&mut self, chat_id: ChatId, topic: i32, ends: &[WindowEnd]) {
+        for id in self.topic_page_ids(chat_id, topic, ends) {
+            drop(self.requests.take(RequestId(id)));
         }
     }
 }

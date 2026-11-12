@@ -107,11 +107,11 @@ fn the_box_copies_the_speaker_or_listener_link(cx: &mut TestAppContext) {
         vcx.read_from_clipboard().and_then(|item| item.text()),
         Some(SPEAKER.to_string())
     );
-    app.read_with(vcx, |app, _| assert!(app.group_call_boxes.share_copied()));
+    app.read_with(vcx, |app, _| assert!(app.share_copied()));
 
     // Unticked: the listener link; the box stays open.
     app.update_in(vcx, |app, _, cx| {
-        app.group_call_boxes.set_share_speaker(false);
+        app.set_share_speaker(false);
         app.copy_group_call_share_link(cx);
     });
     assert_eq!(
@@ -163,7 +163,7 @@ fn a_chat_gets_the_link_in_its_message_box(cx: &mut TestAppContext) {
                 }
             ))
         );
-        assert!(!app.group_call_boxes.share_open());
+        assert!(!app.share_open());
     });
 }
 
@@ -184,8 +184,8 @@ fn the_invite_row_shares_the_link_in_a_public_channel(cx: &mut TestAppContext) {
             Some(InviteRowAction::ShareLink)
         );
         app.group_call_invite_row_clicked(cx);
-        assert!(app.group_call_boxes.share_open());
-        assert!(!app.group_call_boxes.invite_open());
+        assert!(app.share_open());
+        assert!(!app.invite_open());
     });
 }
 
@@ -217,13 +217,10 @@ fn the_call_boxes_close_with_their_call(cx: &mut TestAppContext) {
     app.update_in(vcx, |app, _, cx| {
         app.sync_group_call_boxes();
         app.open_group_call_share_links(cx);
-        app.group_call_screen.settings_open = true;
         app.sync_group_call_boxes();
     });
-    let open = app.read_with(vcx, |app, _| {
-        app.group_call_boxes.share_open() && app.group_call_screen.settings_open
-    });
-    assert!(open, "the same call keeps them");
+    let open = app.read_with(vcx, |app, _| app.share_open());
+    assert!(open, "the same call keeps it");
 
     app.update_in(vcx, |app, _, _| {
         if let Some(session) = app.demo_session.as_mut() {
@@ -232,22 +229,102 @@ fn the_call_boxes_close_with_their_call(cx: &mut TestAppContext) {
         app.sync_group_call_boxes();
     });
     app.read_with(vcx, |app, _| {
-        assert!(!app.group_call_boxes.share_open());
-        assert!(!app.group_call_screen.settings_open);
+        assert!(!app.share_open());
     });
 
     app.update_in(vcx, |app, _, _| {
-        let call = app
-            .session()
-            .and_then(|s| s.calls.active_group_call.as_ref())
-            .map(|call| call.id);
-        app.group_call_boxes.call_box = crate::ui::group_call_state::CallBox::Share {
-            call,
+        app.open_call_box(crate::ui::group_call_state::CallBox::Share {
             speaker: true,
             copied: false,
-        };
+        });
         app.sync_group_call_boxes();
     });
-    let open = app.read_with(vcx, |app, _| app.group_call_boxes.share_open());
+    let open = app.read_with(vcx, |app, _| app.share_open());
     assert!(!open, "no links and none on the way: the box closes");
+}
+
+/// A call change drops everything the window kept of the last call (the
+/// box, the pin, the in-call chat), not only the box.
+#[gpui_kit::test]
+fn the_call_view_goes_with_its_call(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    video_chat(&app, vcx, SPEAKER);
+    app.update_in(vcx, |app, _, _| {
+        app.sync_group_call_boxes();
+        if let Some(view) = app.call_view_mut() {
+            view.chat_shown = true;
+        }
+    });
+    app.read_with(vcx, |app, _| {
+        assert!(app.call_view().is_some_and(|view| view.chat_shown));
+    });
+    app.update_in(vcx, |app, _, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.calls.active_group_call = Some(ActiveGroupCall::fresh(78));
+        }
+        app.sync_group_call_boxes();
+    });
+    app.read_with(vcx, |app, _| {
+        assert!(app.group_call_screen.view.is_none(), "the old call's view");
+        assert!(!app.call_view().is_some_and(|view| view.chat_shown));
+    });
+}
+
+/// A box needs a call to act on: with none tracked nothing opens.
+#[gpui_kit::test]
+fn a_box_needs_a_tracked_call(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, _, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.calls.active_group_call = None;
+        }
+        let opened = app.open_call_box(crate::ui::group_call_state::CallBox::Share {
+            speaker: true,
+            copied: false,
+        });
+        assert!(!opened && !app.share_open());
+    });
+}
+
+/// A join sent for the call in the window keeps the wish for a stream asked
+/// for before it, and the wish keeps the join (both orders).
+#[gpui_kit::test]
+fn a_join_and_a_wish_keep_each_other(cx: &mut TestAppContext) {
+    use crate::ui::group_call_state::StreamJoining;
+    use crate::ui::group_call_stream_layout::StreamJoinIntent;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, _, _| {
+        let screen = &mut app.group_call_screen;
+        screen.want_stream(StreamJoinIntent::Call(5), None);
+        screen.start_join(StreamJoining::new(77, gpui_kit::Task::ready(())));
+        assert!(screen.stream_wish().is_some(), "the wish for call 5 stays");
+        assert_eq!(screen.joining_call(), Some(77));
+        screen.want_stream(StreamJoinIntent::Call(6), None);
+        assert_eq!(screen.joining_call(), Some(77), "the join stays under it");
+        screen.clear_stream_wish();
+        assert_eq!(screen.joining_call(), Some(77));
+    });
+}
+
+/// The fetch of the call a wish asked for failed while another call is
+/// tracked: the wish ends instead of joining the call whenever it shows.
+#[gpui_kit::test]
+fn a_failed_fetch_ends_the_wish_while_another_call_is_tracked(cx: &mut TestAppContext) {
+    use crate::ui::group_call_stream_layout::StreamJoinIntent;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    video_chat(&app, vcx, SPEAKER);
+    app.update_in(vcx, |app, _, cx| {
+        app.note_stream_join_intent(StreamJoinIntent::Call(5));
+        app.consume_stream_join_intent(cx);
+        assert!(app.group_call_screen.stream_wish().is_some(), "waits");
+        if let Some(session) = app.demo_session.as_mut() {
+            session.calls.note_group_call_fetch_failed(5);
+        }
+        app.consume_stream_join_intent(cx);
+        assert!(app.group_call_screen.stream_wish().is_none(), "dropped");
+    });
 }

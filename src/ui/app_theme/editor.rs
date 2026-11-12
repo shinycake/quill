@@ -20,8 +20,6 @@ use quill::app_theme::{
     KeyGroup, Palette, PaletteKey, ThemeFile, ThemeId, custom_palette, hex_string, store,
 };
 use quill::lang::{keys, tr, tr_with};
-use std::cell::RefCell;
-use std::rc::Rc;
 
 /// A row of the editor.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -486,8 +484,7 @@ impl QuillApp {
             QuillShell::on_close_kind(app, shell, DialogKind::ThemeEditor, |this, _, cx| {
                 this.close_theme_editor(cx)
             });
-        app.update(cx, |this, cx| {
-            let body = this.theme_editor_body(cx);
+        app.update(cx, |_, cx| {
             let footer = div()
                 .flex()
                 .items_center()
@@ -525,18 +522,15 @@ impl QuillApp {
                             }
                         })),
                 );
-            let body = Rc::new(RefCell::new(Some(body)));
+            let app = cx.entity();
             dialog
                 // No dim: the app behind shows the changes live.
                 .overlay(false)
                 .width(px(460.))
                 .title(crate::ui::shell::dialog_title(tr(keys::THEME_EDITOR_TITLE)))
                 .content(crate::ui::shell::scrollable_dialog_content(
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                    move |content, _, cx| {
+                        let body = app.update(cx, |this, cx| this.theme_editor_body(cx));
                         content.child(body)
                     },
                 ))

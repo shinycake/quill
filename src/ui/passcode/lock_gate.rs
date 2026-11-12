@@ -149,6 +149,11 @@ impl QuillApp {
         // parked for its download plays on, as tdesktop's player does.
         self.drop_play_intents_for_lock();
         self.release_story_viewer(cx);
+        // The main window draws only the lock screen: its cover player and
+        // userpic clips stop with it.
+        self.main_window_media_left();
+        // The stealth box and its once-a-second redraw tick end with it.
+        self.close_stealth_box();
         // The mini app is a helper window the lock screen does not cover;
         // tdesktop closes such windows on lock (`closeAdditionalWindows`).
         self.close_mini_app_window(cx);
@@ -166,8 +171,11 @@ impl QuillApp {
         if self.first_run.intro_player().is_some() || self.first_run.awaits_intro() {
             self.first_run.finish();
         }
-        // The device-linking scanner is a helper window with the camera on.
-        self.clear_device_qr();
+        // The device-linking scanner is a helper window with the camera on,
+        // and a scanned link waiting for consent is not kept under the lock.
+        // A link already sent stays (it holds only its request), so its
+        // answer still reaches the user and no second link is sent beside it.
+        self.leave_device_link();
         // A passkey ceremony box closes and its key is told to stop; its
         // PIN sheet would take focus from the passcode field.
         self.close_passkey_ceremony_for_lock();
@@ -177,7 +185,6 @@ impl QuillApp {
         // A key capture would take the first key of the passcode as a
         // binding: Settings > Shortcuts and the push-to-talk key.
         self.preferences.keybinding.end();
-        self.group_call.ptt_capture = false;
         // Now Playing names the sender or the song: the OS controls go off.
         self.publish_now_playing();
         // A locked window is not looked at: every chat window's chat

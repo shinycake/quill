@@ -34,7 +34,7 @@ impl Session {
     /// "You: hi"), as Telegram Desktop shows them. `None` for private
     /// chats and channels, which show the text alone.
     pub fn chat_preview_sender(&self, chat: &ChatSummary) -> Option<String> {
-        if chat.last_preview_style.service {
+        if chat.last_preview_style().service {
             return None;
         }
         let group = matches!(
@@ -45,7 +45,7 @@ impl Session {
                     ..
                 }
         );
-        let last = chat.last_message.filter(|_| group)?;
+        let last = chat.last_message().copied().filter(|_| group)?;
         if last.is_outgoing {
             return Some("You".to_string());
         }

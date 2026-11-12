@@ -176,7 +176,26 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// the story cache + in-flight per-story requests, and held back while
     /// a failed ask waits out its retry clock; the `story` response is
     /// authoritative on `(poster_chat_id, id)`.
+    ///
+    /// A send that is refused counts as a failed ask: its retry clock runs,
+    /// so an open waiting for the story is dropped with the failure note
+    /// instead of waiting for an answer that cannot come.
     pub fn get_story(
+        &mut self,
+        chat_id: ChatId,
+        story_id: i32,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        let sent = self.send_get_story(chat_id, story_id);
+        if sent.is_err() {
+            self.session
+                .stories
+                .story_fetch
+                .failed((chat_id.0, story_id), std::time::Instant::now());
+        }
+        sent
+    }
+
+    fn send_get_story(
         &mut self,
         chat_id: ChatId,
         story_id: i32,
@@ -275,7 +294,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.stories.available_reactions.is_some()
+        if !self.session.stories.available_reactions.can_ask()
             || self
                 .session
                 .requests
@@ -286,6 +305,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetStoryAvailableReactions, None);
+        self.session.stories.available_reactions.begin();
+        self.session.stories.available_reactions.sent(extra);
         match self
             .sender
             .send_json(&get_story_available_reactions(extra, 10))
@@ -293,6 +314,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
+                self.session.stories.available_reactions.cancel();
                 Err(err)
             }
         }

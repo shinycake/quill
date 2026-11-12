@@ -35,7 +35,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let Some(chat_id) = self.session.media.shared_media.chat_id else {
+        let Some(chat_id) = self.session.media.shared_media.chat_id() else {
             return Err(ConnectSendError::InvalidRequest);
         };
         self.fetch_gallery_counts(chat_id)?;
@@ -95,7 +95,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || tab.lists_messages() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let Some(chat_id) = self.session.media.shared_media.chat_id else {
+        let Some(chat_id) = self.session.media.shared_media.chat_id() else {
             return Err(ConnectSendError::InvalidRequest);
         };
         let Some(owner) = self.profile_owner(chat_id) else {
@@ -266,7 +266,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             None,
         );
         let json = remove_profile_audio(extra, file_id.0);
-        self.send_profile_request(extra, &json)
+        let sent = self.send_profile_request(extra, &json);
+        if sent.is_err() {
+            self.session.playlist_change_unsent(file_id.0);
+        }
+        sent
     }
 
     /// Move the track at `from` to `to` in your own playlist
@@ -288,7 +292,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             None,
         );
         let json = set_profile_audio_position(extra, file_id, after);
-        self.send_profile_request(extra, &json)
+        let sent = self.send_profile_request(extra, &json);
+        if sent.is_err() {
+            self.session.playlist_change_unsent(file_id);
+        }
+        sent
     }
 
     /// "Save to... Saved Messages" for a track on someone's Playlist page:
@@ -377,7 +385,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .media
             .shared_media
-            .chat_id
+            .chat_id()
             .and_then(|id| self.session.media.chat_media_counts.get(&id.0))
             .cloned();
         let moved = self

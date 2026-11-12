@@ -27,16 +27,22 @@ impl QuillApp {
     ) -> AnyElement {
         let dark = cx.theme().is_dark();
         let session = self.session();
-        let list = session.and_then(|s| s.chats_state.installed_backgrounds.data().cloned());
+        let list = session.and_then(|s| {
+            s.chats_state
+                .installed_backgrounds
+                .theme(dark)
+                .data()
+                .cloned()
+        });
         let in_use = session
             .and_then(|s| s.chats_state.default_backgrounds.get(&dark))
             .map(|b| b.id)
-            .filter(|_| self.appearance.telegram_wallpaper);
+            .filter(|_| self.appearance.wallpaper.is_telegram());
         let error = session.and_then(|s| s.chats_state.background_error.clone());
         let muted = cx.theme().muted_foreground;
         let mut grid = div().flex().flex_wrap().gap_2();
         let list_error = session
-            .and_then(|s| s.chats_state.installed_backgrounds.error())
+            .and_then(|s| s.chats_state.installed_backgrounds.theme(dark).error())
             .map(str::to_owned);
         match &list {
             None if list_error.is_some() => {
@@ -102,7 +108,13 @@ impl QuillApp {
             }
         }
         let mut body = div().flex().flex_col().gap_2().child(grid);
-        if let Some(id) = self.dialogs.wallpaper_remove {
+        // The confirm names a wallpaper that is still listed and removable:
+        // one now in use (applied from its preview) or gone draws nothing.
+        let confirming = self.dialogs.wallpaper_remove.filter(|&id| {
+            list.as_ref()
+                .is_some_and(|list| list.iter().any(|b| b.id == id && removable(b, in_use)))
+        });
+        if let Some(id) = confirming {
             body = body.child(self.wallpaper_remove_confirm(id, cx));
         }
         body = body.child(
@@ -115,7 +127,7 @@ impl QuillApp {
             ),
         );
         // tdesktop shows "Tile background" only for photo wallpapers.
-        let tile_shown = self.appearance.telegram_wallpaper
+        let tile_shown = self.appearance.wallpaper.is_telegram()
             && matches!(
                 self.account_telegram_wallpaper(dark),
                 Some(Wallpaper::Image { .. })
@@ -193,10 +205,29 @@ impl QuillApp {
                     .small()
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.dialogs.wallpaper_remove = None;
-                        this.remove_telegram_wallpaper(id, cx);
+                        // Checked again now: the list may have changed since
+                        // the box opened.
+                        if this.wallpaper_removable(id, cx) {
+                            this.remove_telegram_wallpaper(id, cx);
+                        }
+                        cx.notify();
                     })),
             )
             .into_any_element()
+    }
+
+    /// Whether the gallery of the account on screen offers removing `id`
+    /// right now (listed, not in use, not a Telegram default).
+    fn wallpaper_removable(&self, id: i64, cx: &mut Context<Self>) -> bool {
+        let dark = cx.theme().is_dark();
+        let session = self.session();
+        let in_use = session
+            .and_then(|s| s.chats_state.default_backgrounds.get(&dark))
+            .map(|b| b.id)
+            .filter(|_| self.appearance.wallpaper.is_telegram());
+        session
+            .and_then(|s| s.chats_state.installed_backgrounds.theme(dark).data())
+            .is_some_and(|list| list.iter().any(|b| b.id == id && removable(b, in_use)))
     }
 
     pub(super) fn remove_telegram_wallpaper(&mut self, background_id: i64, cx: &mut Context<Self>) {
@@ -210,10 +241,11 @@ impl QuillApp {
                 }
             }
             None => {
-                if let Some(session) = self.demo_session.as_mut()
-                    && let Some(list) = session.chats_state.installed_backgrounds.data_mut()
-                {
-                    list.retain(|b| b.id != background_id);
+                if let Some(session) = self.demo_session.as_mut() {
+                    session
+                        .chats_state
+                        .installed_backgrounds
+                        .forget(background_id);
                 }
             }
         }
@@ -221,23 +253,49 @@ impl QuillApp {
     }
 
     /// Appearance (or the look box) opened: a failed gallery request may be
-    /// asked once more by the next `ensure_wallpapers_loaded`.
+    /// asked once more by the arrival that follows.
     pub(in crate::ui) fn retry_failed_wallpapers(&mut self) {
         if let Some(live) = self.live.as_mut() {
             live.driver
                 .session
                 .chats_state
                 .installed_backgrounds
-                .clear_error();
+                .clear_errors();
         }
     }
 
-    /// Fetch the installed wallpapers when Appearance opens, and start the
-    /// photo and pattern downloads.
-    pub(in crate::ui) fn ensure_wallpapers_loaded(&mut self, cx: &mut Context<Self>) {
+    /// The gallery is left (the page closes, the account changes): a delete
+    /// confirm for one of its wallpapers goes.
+    pub(in crate::ui) fn leave_wallpaper_gallery(&mut self) {
+        self.dialogs.wallpaper_remove = None;
+    }
+
+    /// Ask for the installed wallpapers: once when Appearance (or the look
+    /// box) opens, never from a draw. A request that cannot leave lands as
+    /// a failed list, drawn with its Retry.
+    pub(in crate::ui) fn ask_for_wallpapers(&mut self, cx: &mut Context<Self>) {
         let dark = cx.theme().is_dark();
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.fetch_installed_backgrounds(dark);
+        }
+    }
+
+    /// The account on screen changed while Appearance is open: its list is
+    /// asked for as the page's arrival does.
+    pub(in crate::ui) fn reload_account_wallpapers(&mut self, cx: &mut Context<Self>) {
+        self.leave_wallpaper_gallery();
+        if self.settings.open()
+            && self.settings.page() == Some(quill::settings_catalog::Page::Appearance)
+        {
+            self.retry_failed_wallpapers();
+            self.ask_for_wallpapers(cx);
+        }
+    }
+
+    /// Start the photo and pattern downloads the gallery shows (each draw
+    /// picks up what a new list needs; files done or in flight are skipped).
+    pub(in crate::ui) fn download_wallpaper_files(&mut self) {
+        if let Some(live) = self.live.as_mut() {
             live.driver.download_background_files();
         }
     }

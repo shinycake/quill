@@ -12,6 +12,14 @@ use smallvec::SmallVec;
 use std::sync::Arc;
 use zeroize::Zeroize;
 impl QuillApp {
+    /// A sign-in submit is out: Enter in a field must not send a second one
+    /// (the buttons are disabled by the same answer).
+    fn auth_submit_busy(&self) -> bool {
+        self.live
+            .as_ref()
+            .is_some_and(|live| live.driver.session.requests.has_auth_submit())
+    }
+
     pub(super) fn cycle_auth(&mut self, cx: &mut Context<Self>) {
         if self.live.is_some() {
             return;
@@ -37,6 +45,9 @@ impl QuillApp {
     }
 
     pub(super) fn submit_email(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.auth_submit_busy() {
+            return;
+        }
         let Some(live) = self.live.as_mut() else {
             return;
         };
@@ -86,6 +97,9 @@ impl QuillApp {
     }
 
     pub(super) fn submit_phone(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.auth_submit_busy() {
+            return;
+        }
         let Some(live) = self.live.as_ref() else {
             return;
         };
@@ -97,7 +111,7 @@ impl QuillApp {
             }
             _ => false,
         };
-        if !allowed {
+        if !allowed || matches!(self.auth_ui.signin.phone_step, PhoneStep::Sending { .. }) {
             return;
         }
         let Some((number, shown)) = self.signin_checked_phone(cx) else {
@@ -108,13 +122,14 @@ impl QuillApp {
         };
         match live.driver.submit_phone(&number) {
             Ok(request) => {
+                live.driver.session.acks.expect(request);
                 // The field keeps the number so "Wrong number?" can edit it.
                 // The code step names it only once TDLib accepted it.
                 let back = std::mem::take(&mut self.auth_ui.signin.phone_step);
                 self.auth_ui.signin.phone_step = PhoneStep::Sending {
-                    request,
                     phone: shown,
                     back: Box::new(back),
+                    request,
                 };
                 self.auth_ui.signin.step_clock.restart_code();
                 self.auth_ui.signin.error_clock.clear();
@@ -131,6 +146,9 @@ impl QuillApp {
     }
 
     pub(super) fn submit_code(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.auth_submit_busy() {
+            return;
+        }
         let Some(live) = self.live.as_mut() else {
             return;
         };
@@ -158,6 +176,9 @@ impl QuillApp {
     }
 
     pub(super) fn submit_password(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.auth_submit_busy() {
+            return;
+        }
         let Some(live) = self.live.as_mut() else {
             return;
         };
@@ -196,6 +217,9 @@ impl QuillApp {
     /// enabled once the server-specified timeout (shown as a countdown)
     /// has passed; a too-early call still surfaces via `last_auth_error`.
     pub(super) fn resend_code(&mut self, cx: &mut Context<Self>) {
+        if self.auth_submit_busy() {
+            return;
+        }
         let Some(live) = self.live.as_mut() else {
             return;
         };
@@ -220,6 +244,9 @@ impl QuillApp {
     /// Slice A1: start QR-code login. TDLib moves auth to
     /// `WaitOtherDeviceConfirmation` carrying the QR link.
     pub(super) fn request_qr_login(&mut self, cx: &mut Context<Self>) {
+        if self.auth_submit_busy() {
+            return;
+        }
         let Some(live) = self.live.as_mut() else {
             return;
         };

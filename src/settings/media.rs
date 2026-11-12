@@ -24,10 +24,9 @@ pub const AUTO_DOWNLOAD_MAX_BYTES: i64 = 50 * 1024 * 1024;
 
 /// MED1: local-only media preferences, persisted as JSON next to the
 /// account root (`media_prefs.json`). Client-side only (no TDLib setting):
-/// - `remember_media_grouping`: when true, the composer's "group media"
-///   choice is remembered between sends (TGX `RememberAlbumSetting`);
-/// - `group_media`: the last-used grouping choice (only honored when
-///   `remember_media_grouping` is on).
+/// - `media_grouping`: whether the composer's "group media" choice is
+///   remembered between sends (TGX `RememberAlbumSetting`), and the last
+///   choice then. Saved as `remember_media_grouping` and `group_media`.
 /// - `hq_round_videos`: MED2 — "Record HQ Round Videos" (TGX
 ///   `UseHqRoundVideos`): capture round video notes at 480px instead of 280px;
 /// - `prefer_video_mode`: MED2 — the record button's mode (TGX
@@ -77,8 +76,8 @@ pub struct MediaPrefs {
     pub quick_action: crate::quick_action::QuickAction,
     #[serde(default)]
     pub recent_emoji: Vec<String>,
-    pub remember_media_grouping: bool,
-    pub group_media: bool,
+    #[serde(flatten, default)]
+    pub media_grouping: MediaGrouping,
     pub hq_round_videos: bool,
     pub prefer_video_mode: bool,
     #[serde(default)]
@@ -145,8 +144,7 @@ impl Default for MediaPrefs {
             pull_to_next_channel: true,
             quick_action: crate::quick_action::QuickAction::default(),
             recent_emoji: Vec::new(),
-            remember_media_grouping: false,
-            group_media: false,
+            media_grouping: MediaGrouping::AlwaysGrouped,
             hq_round_videos: false,
             prefer_video_mode: false,
             data_saver: false,
@@ -161,15 +159,85 @@ impl Default for MediaPrefs {
     }
 }
 
-impl MediaPrefs {
-    /// Effective grouping for a fresh composer: the remembered choice when
-    /// remembering is on, grouped (the historical behavior) otherwise.
-    pub fn default_grouping(&self) -> bool {
-        if self.remember_media_grouping {
-            self.group_media
+/// The composer's "group media" default: always grouped, or the last
+/// choice. There is no remembered choice while remembering is off.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(from = "MediaGroupingFile", into = "MediaGroupingFile")]
+pub enum MediaGrouping {
+    /// Remembering is off: every fresh composer groups (the historical
+    /// behavior).
+    #[default]
+    AlwaysGrouped,
+    /// Remembering is on: the last choice is the default.
+    Remembered { grouped: bool },
+}
+
+/// The two keys of `media_prefs.json` a [`MediaGrouping`] is saved as.
+#[derive(Serialize, Deserialize)]
+struct MediaGroupingFile {
+    #[serde(default)]
+    remember_media_grouping: bool,
+    #[serde(default)]
+    group_media: bool,
+}
+
+impl From<MediaGroupingFile> for MediaGrouping {
+    fn from(file: MediaGroupingFile) -> Self {
+        if file.remember_media_grouping {
+            Self::Remembered {
+                grouped: file.group_media,
+            }
         } else {
-            true
+            Self::AlwaysGrouped
         }
+    }
+}
+
+impl From<MediaGrouping> for MediaGroupingFile {
+    fn from(grouping: MediaGrouping) -> Self {
+        Self {
+            remember_media_grouping: grouping.is_remembered(),
+            group_media: grouping.grouped(),
+        }
+    }
+}
+
+impl MediaGrouping {
+    pub fn is_remembered(self) -> bool {
+        matches!(self, Self::Remembered { .. })
+    }
+
+    /// Effective grouping for a fresh composer: the remembered choice when
+    /// remembering is on, grouped otherwise.
+    pub fn grouped(self) -> bool {
+        match self {
+            Self::AlwaysGrouped => true,
+            Self::Remembered { grouped } => grouped,
+        }
+    }
+
+    /// The composer's choice was flipped: kept only while remembering.
+    pub fn choose(&mut self, grouped: bool) {
+        if let Self::Remembered { grouped: last } = self {
+            *last = grouped;
+        }
+    }
+
+    /// "Remember media grouping" was switched; turning it on keeps the
+    /// current choice.
+    pub fn remember(&mut self, on: bool, current: bool) {
+        *self = if on {
+            Self::Remembered { grouped: current }
+        } else {
+            Self::AlwaysGrouped
+        };
+    }
+}
+
+impl MediaPrefs {
+    /// Effective grouping for a fresh composer.
+    pub fn default_grouping(&self) -> bool {
+        self.media_grouping.grouped()
     }
 }
 
@@ -204,8 +272,7 @@ mod tests {
             autoplay_videos: false,
             dynamic_emoji_pack_order: false,
             recent_emoji_packs: vec![2, 1],
-            remember_media_grouping: true,
-            group_media: false,
+            media_grouping: MediaGrouping::Remembered { grouped: false },
             hq_round_videos: true,
             prefer_video_mode: true,
             quick_action: crate::quick_action::QuickAction::React,
@@ -216,8 +283,7 @@ mod tests {
         assert!(!prefs.default_grouping());
         // Remember off → grouped regardless of the stored choice.
         let prefs = MediaPrefs {
-            remember_media_grouping: false,
-            group_media: false,
+            media_grouping: MediaGrouping::AlwaysGrouped,
             ..Default::default()
         };
         assert!(prefs.default_grouping());
@@ -283,7 +349,13 @@ mod tests {
         assert!(loaded.autoplay_gifs);
         assert!(loaded.dynamic_emoji_pack_order);
         assert!(loaded.recent_emoji_packs.is_empty());
-        assert!(loaded.remember_media_grouping);
+        assert_eq!(
+            loaded.media_grouping,
+            MediaGrouping::Remembered { grouped: true }
+        );
+        let json = serde_json::to_value(&loaded).unwrap();
+        assert_eq!(json["remember_media_grouping"], true);
+        assert_eq!(json["group_media"], true);
         assert!(loaded.hq_round_videos);
         assert!(!loaded.data_saver);
         assert_eq!(loaded.auto_download_private, AUTO_DOWNLOAD_DEFAULT);

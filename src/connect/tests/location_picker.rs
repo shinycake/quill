@@ -174,7 +174,7 @@ fn a_resting_map_asks_for_its_tile_once_and_downloads_it() {
 }
 
 #[test]
-fn without_a_venue_bot_the_list_says_nothing_was_found() {
+fn a_failed_venue_bot_lookup_shows_the_failed_list() {
     let mut f = Fixture::new();
     f.driver.open_location_picker(ChatId(7), None).unwrap();
     f.driver
@@ -192,7 +192,7 @@ fn without_a_venue_bot_the_list_says_nothing_was_found() {
             .location
             .picker()
             .map(|p| p.venues().clone()),
-        Some(VenueList::NothingFound { .. })
+        Some(VenueList::Failed)
     ));
 }
 

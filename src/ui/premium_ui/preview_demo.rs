@@ -38,15 +38,16 @@ impl QuillApp {
                     ],
                     "limits": [],
                 })));
-            hub.premium_state = Some(parse_premium_state(&serde_json::json!({
-                "state": {"text": "", "entities": []},
-                "payment_options": [
-                    {"payment_option": {"currency": "USD", "amount": 499,
-                        "discount_percentage": 0, "month_count": 1}},
-                    {"payment_option": {"currency": "USD", "amount": 2999,
-                        "discount_percentage": 50, "month_count": 12}},
-                ],
-            })));
+            hub.premium_state =
+                quill::state::fetch::Fetch::Ready(parse_premium_state(&serde_json::json!({
+                    "state": {"text": "", "entities": []},
+                    "payment_options": [
+                        {"payment_option": {"currency": "USD", "amount": 499,
+                            "discount_percentage": 0, "month_count": 1}},
+                        {"payment_option": {"currency": "USD", "amount": 2999,
+                            "discount_percentage": 50, "month_count": 12}},
+                    ],
+                })));
         }
         match std::env::var("QUILL_DEMO_PREMIUM").as_deref() {
             Ok("to-buy") => self.open_premium_to_buy(BusinessFeature::AccountLinks, cx),

@@ -75,15 +75,17 @@ fn a_change_during_a_first_ask_outdates_it_and_drops_the_old_answer() {
 fn hiding_ads_keeps_a_report_in_flight() {
     use crate::state::{SponsoredReportFlow, SponsoredReportTarget};
     let (mut session, _sink) = session();
-    session.messages.sponsored_report = SponsoredReportFlow::Asking(SponsoredReportTarget {
-        chat_id: ChatId(3),
-        message_id: 7,
-        request: Some(RequestId(11)),
-    });
+    session.messages.sponsored_report = SponsoredReportFlow::Asking {
+        target: SponsoredReportTarget {
+            chat_id: ChatId(3),
+            message_id: 7,
+        },
+        request: RequestId(11),
+    };
     session.accept_sponsored_hidden(ChatId(3));
     assert!(matches!(
         session.messages.sponsored_report,
-        SponsoredReportFlow::Asking(_)
+        SponsoredReportFlow::Asking { .. }
     ));
     assert!(session.messages.sponsored_hidden);
 }

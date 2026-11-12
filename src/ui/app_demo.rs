@@ -46,11 +46,7 @@ impl QuillApp {
                 }
                 (None, note, stage)
             }
-            None => (
-                None,
-                "Connecting to Telegram…".into(),
-                ConnectStage::Connecting,
-            ),
+            None => (None, "Connecting to Telegram…".into(), ConnectStage::Idle),
         };
         let screen = super::on_screen::OnScreen::new(
             Default::default(),
@@ -167,7 +163,7 @@ impl QuillApp {
         let ptt_app = cx.weak_entity();
         super::passcode::intercept_keys_unlocked(cx, move |event, _window, cx| {
             let armed = ptt_app
-                .update(cx, |this, _| this.group_call.ptt_capture)
+                .update(cx, |this, _| this.preferences.keybinding.ptt_armed())
                 .unwrap_or(false);
             if !armed || event.keystroke.is_modifier_key() {
                 return;
@@ -265,7 +261,10 @@ impl QuillApp {
             // The gate counts the chat windows too: one may be in front.
             this.frame.main_active.set(active);
             this.preferences.advanced.forget_import_offer();
-            this.follow_windows(cx);
+            let any_active = this.follow_windows(cx);
+            // A hidden or backgrounded main window draws no frame to pause
+            // the profile cover's clip, so the change pauses it here.
+            this.hold_video_avatar(any_active);
             super::glyph_sweep::window_activation(window.window_handle().window_id(), active);
             this.viewer_window_activation(window, cx);
             // The system accent may have changed while another app was in

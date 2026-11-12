@@ -6,38 +6,88 @@
 
 use super::video_editor::{VideoEditorDialog, next_editor_serial};
 use super::video_player::VideoPlayer;
+use gpui_kit::Task;
 use quill::lang::{keys, tr};
-use quill::video_edit::VideoSource;
+use quill::video_edit::{Crop, VideoEdits, VideoSource};
 use quill::video_timeline::Timeline;
 
 pub(super) enum EditorStage {
-    /// The probe with this serial is reading the file.
-    Reading { serial: u64 },
+    /// The probe with this serial is reading the file; its task is held
+    /// here, so closing the editor stops waiting for it.
+    Reading { serial: u64, probe: Task<()> },
     /// The probe found no video.
     Unreadable,
-    /// Read: the strip's selection, the looping player (when it plays) and
-    /// the last failure's line.
+    /// Read: the picture edits, the strip's selection (the one place the
+    /// kept range and the cover live), the looping player and its pause,
+    /// and the last failure's line.
     Ready {
         info: VideoSource,
+        look: Look,
         timeline: Timeline,
-        player: Option<VideoPlayer>,
+        looping: Looping,
         note: Option<String>,
     },
-    /// The edited copy is being encoded; the encode with this serial may
-    /// answer. A failure goes back to `Ready` with its line.
+    /// The edited copy is being encoded with these edits; the encode with
+    /// this serial may answer. Nothing edits meanwhile. A failure goes back
+    /// to `Ready` with its line.
     Encoding {
         info: VideoSource,
+        look: Look,
         timeline: Timeline,
         serial: u64,
     },
 }
 
-impl EditorStage {
-    /// A probe starts: the stage and the serial its answer must carry.
-    pub(super) fn reading() -> (Self, u64) {
-        let serial = next_editor_serial();
-        (Self::Reading { serial }, serial)
+/// The edits that are not the kept range: quality, GIF, turns, flip and
+/// crop. The range and the cover are the timeline's, so they are not here.
+#[derive(Clone, Copy)]
+pub(super) struct Look {
+    pub quality: u32,
+    pub gif: bool,
+    pub turns: u8,
+    pub flipped: bool,
+    pub crop: Option<Crop>,
+}
+
+impl Look {
+    fn of(edits: VideoEdits) -> Self {
+        Self {
+            quality: edits.quality,
+            gif: edits.gif,
+            turns: edits.turns,
+            flipped: edits.flipped,
+            crop: edits.crop,
+        }
     }
+
+    fn with_range(self, timeline: &Timeline) -> VideoEdits {
+        VideoEdits {
+            from_ms: timeline.from,
+            till_ms: timeline.till,
+            cover_ms: timeline.cover,
+            quality: self.quality,
+            gif: self.gif,
+            turns: self.turns,
+            flipped: self.flipped,
+            crop: self.crop,
+        }
+    }
+}
+
+/// The muted loop of the kept range: not playing here, playing, or held by
+/// a click on the picture (tdesktop `_userPaused`). The playhead's
+/// position is the player's.
+pub(super) enum Looping {
+    /// No player: it could not open or it failed (the still shows).
+    Off,
+    Playing {
+        player: VideoPlayer,
+        at_ms: Option<i64>,
+    },
+    PausedByUser {
+        player: VideoPlayer,
+        at_ms: Option<i64>,
+    },
 }
 
 impl VideoEditorDialog {
@@ -46,13 +96,13 @@ impl VideoEditorDialog {
     #[cfg(feature = "demo-capture")]
     pub(super) fn serial(&self) -> u64 {
         match self.stage {
-            EditorStage::Reading { serial } | EditorStage::Encoding { serial, .. } => serial,
+            EditorStage::Reading { serial, .. } | EditorStage::Encoding { serial, .. } => serial,
             EditorStage::Unreadable | EditorStage::Ready { .. } => 0,
         }
     }
 
     pub(super) fn is_reading(&self, serial: u64) -> bool {
-        matches!(self.stage, EditorStage::Reading { serial: now } if now == serial)
+        matches!(self.stage, EditorStage::Reading { serial: now, .. } if now == serial)
     }
 
     pub(super) fn is_encoding(&self, serial: u64) -> bool {
@@ -77,13 +127,38 @@ impl VideoEditorDialog {
         }
     }
 
+    /// A new selection; only while the editor is ready (nothing edits
+    /// while the encode runs).
     pub(super) fn set_timeline(&mut self, to: Timeline) {
-        match &mut self.stage {
-            EditorStage::Ready { timeline, .. } | EditorStage::Encoding { timeline, .. } => {
-                *timeline = to;
-            }
-            EditorStage::Reading { .. } | EditorStage::Unreadable => {}
+        if let EditorStage::Ready { timeline, .. } = &mut self.stage {
+            *timeline = to;
         }
+    }
+
+    /// The edits as they stand: the picture edits with the kept range and
+    /// the cover taken from the strip's selection. Before the video is
+    /// read, the whole of nothing.
+    pub(super) fn edits(&self) -> VideoEdits {
+        match &self.stage {
+            EditorStage::Ready { look, timeline, .. }
+            | EditorStage::Encoding { look, timeline, .. } => look.with_range(timeline),
+            EditorStage::Reading { .. } | EditorStage::Unreadable => VideoEdits::full(0),
+        }
+    }
+
+    /// The picture edits to change (turns, flip, crop, quality, GIF);
+    /// `None` unless the editor is ready (nothing edits while it encodes).
+    pub(super) fn edits_mut(&mut self) -> Option<&mut Look> {
+        match &mut self.stage {
+            EditorStage::Ready { look, .. } => Some(look),
+            _ => None,
+        }
+    }
+
+    /// The kept range in ms of the source.
+    pub(super) fn range(&self) -> (i64, i64) {
+        let edits = self.edits();
+        (edits.from_ms, edits.till_ms)
     }
 
     /// The edited copy is being encoded.
@@ -93,14 +168,72 @@ impl VideoEditorDialog {
 
     pub(super) fn player(&self) -> Option<&VideoPlayer> {
         match &self.stage {
-            EditorStage::Ready { player, .. } => player.as_ref(),
+            EditorStage::Ready {
+                looping: Looping::Playing { player, .. } | Looping::PausedByUser { player, .. },
+                ..
+            } => Some(player),
             _ => None,
         }
     }
 
-    pub(super) fn set_player(&mut self, to: Option<VideoPlayer>) {
-        if let EditorStage::Ready { player, .. } = &mut self.stage {
-            *player = to;
+    /// The player to loop with, from `at_ms`; `None` drops it (it could not
+    /// open or it failed).
+    pub(super) fn set_player(&mut self, to: Option<(VideoPlayer, i64)>) {
+        if let EditorStage::Ready { looping, .. } = &mut self.stage {
+            *looping = match to {
+                Some((player, at)) => Looping::Playing {
+                    player,
+                    at_ms: Some(at),
+                },
+                None => Looping::Off,
+            };
+        }
+    }
+
+    /// Paused by a click on the picture.
+    pub(super) fn user_paused(&self) -> bool {
+        matches!(
+            self.stage,
+            EditorStage::Ready {
+                looping: Looping::PausedByUser { .. },
+                ..
+            }
+        )
+    }
+
+    /// A click on the picture: pause the loop, or resume it. `None` with
+    /// no player.
+    pub(super) fn toggle_user_pause(&mut self) -> Option<bool> {
+        let EditorStage::Ready { looping, .. } = &mut self.stage else {
+            return None;
+        };
+        let (next, paused) = match std::mem::replace(looping, Looping::Off) {
+            Looping::Playing { player, at_ms } => (Looping::PausedByUser { player, at_ms }, true),
+            Looping::PausedByUser { player, at_ms } => (Looping::Playing { player, at_ms }, false),
+            Looping::Off => return None,
+        };
+        *looping = next;
+        Some(paused)
+    }
+
+    /// Where the player is, for the playhead.
+    pub(super) fn playback_ms(&self) -> Option<i64> {
+        match &self.stage {
+            EditorStage::Ready {
+                looping: Looping::Playing { at_ms, .. } | Looping::PausedByUser { at_ms, .. },
+                ..
+            } => *at_ms,
+            _ => None,
+        }
+    }
+
+    pub(super) fn set_playback_ms(&mut self, to: i64) {
+        if let EditorStage::Ready {
+            looping: Looping::Playing { at_ms, .. } | Looping::PausedByUser { at_ms, .. },
+            ..
+        } = &mut self.stage
+        {
+            *at_ms = Some(to);
         }
     }
 
@@ -121,12 +254,31 @@ impl VideoEditorDialog {
         }
     }
 
+    /// The probe answered: its task is the one running this, so it is let
+    /// go, not cancelled from inside itself, and the editor is `Unreadable`
+    /// until `become_ready` says otherwise.
+    pub(super) fn end_reading(&mut self) {
+        if let EditorStage::Reading { probe, .. } =
+            std::mem::replace(&mut self.stage, EditorStage::Unreadable)
+        {
+            // Detach, not drop: dropping would cancel the task that is
+            // running this very call.
+            probe.detach();
+        }
+    }
+
     /// The probe read `info`: the editor is ready.
-    pub(super) fn become_ready(&mut self, info: VideoSource, timeline: Timeline) {
+    pub(super) fn become_ready(
+        &mut self,
+        info: VideoSource,
+        edits: VideoEdits,
+        timeline: Timeline,
+    ) {
         self.stage = EditorStage::Ready {
             info,
+            look: Look::of(edits),
             timeline,
-            player: None,
+            looping: Looping::Off,
             note: None,
         };
     }
@@ -134,25 +286,40 @@ impl VideoEditorDialog {
     /// Start encoding: drops the player and returns the info and the new
     /// serial that the answer must carry. `None` unless ready.
     pub(super) fn begin_encode(&mut self) -> Option<(VideoSource, u64)> {
-        let EditorStage::Ready { info, timeline, .. } = self.stage else {
+        let EditorStage::Ready {
+            info,
+            look,
+            timeline,
+            ..
+        } = self.stage
+        else {
             return None;
         };
         let serial = next_editor_serial();
         self.stage = EditorStage::Encoding {
             info,
+            look,
             timeline,
             serial,
         };
         Some((info, serial))
     }
 
-    /// The encode failed: back to ready, with its line.
+    /// The encode failed: back to ready with the edits it tried, and its
+    /// line.
     pub(super) fn encode_failed(&mut self, line: String) {
-        if let EditorStage::Encoding { info, timeline, .. } = self.stage {
+        if let EditorStage::Encoding {
+            info,
+            look,
+            timeline,
+            ..
+        } = self.stage
+        {
             self.stage = EditorStage::Ready {
                 info,
+                look,
                 timeline,
-                player: None,
+                looping: Looping::Off,
                 note: Some(line),
             };
         }
@@ -162,8 +329,49 @@ impl VideoEditorDialog {
     #[cfg(test)]
     #[cfg(feature = "demo-capture")]
     pub(super) fn make_probe_stale(&mut self) {
-        if let EditorStage::Reading { serial } = &mut self.stage {
+        if let EditorStage::Reading { serial, .. } = &mut self.stage {
             *serial = next_editor_serial();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The range and the cover come from the timeline alone; the picture
+    /// edits survive the round trip through `Look`.
+    #[test]
+    fn the_range_is_the_timelines_and_the_rest_is_the_looks() {
+        let edits = VideoEdits {
+            quality: 480,
+            gif: true,
+            turns: 3,
+            flipped: true,
+            crop: Some(Crop::FULL),
+            ..VideoEdits::full(10_000)
+        };
+        let timeline = Timeline::new(10_000, 10_000, 0, &edits);
+        let moved = Timeline {
+            from: 1_000,
+            till: 4_000,
+            cover: 2_000,
+            ..timeline
+        };
+        let whole = Look::of(edits).with_range(&moved);
+        assert_eq!(
+            (whole.from_ms, whole.till_ms, whole.cover_ms),
+            (1_000, 4_000, 2_000)
+        );
+        assert_eq!(
+            (
+                whole.quality,
+                whole.gif,
+                whole.turns,
+                whole.flipped,
+                whole.crop
+            ),
+            (480, true, 3, true, Some(Crop::FULL))
+        );
     }
 }

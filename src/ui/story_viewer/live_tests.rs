@@ -318,7 +318,7 @@ fn an_ended_stream_closes_the_viewer(cx: &mut TestAppContext) {
             .as_mut()
             .and_then(|s| s.calls.story_stream.as_mut())
         {
-            call.stream = StreamState::Ended;
+            call.media.set_stream_state(StreamState::Ended);
         }
         app.sync_live_story(cx);
     });
@@ -395,7 +395,7 @@ fn stars_past_the_balance_open_the_stars_top_up(cx: &mut TestAppContext) {
     frames(vcx);
     app.read_with(vcx, |app, _| {
         let session = app.session().expect("the demo session");
-        assert!(session.payments.hub.stars_open, "the Stars box opens");
+        assert!(session.payments.hub.stars.is_open(), "the Stars box opens");
         assert!(session.payments.star_packs.open, "with its packs");
         assert!(
             session
@@ -490,8 +490,11 @@ fn a_story_that_ends_before_its_call_closes_the_viewer(cx: &mut TestAppContext) 
     let (app, mut vcx) = open_live(cx, "ready-live-story");
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
-        app.stories.live.forget_call_seen();
+        // The join is out again and its call was not seen yet.
         let watched = app.stories.live.watching();
+        if let Some(target) = watched {
+            app.stories.live.start_watching(target, None);
+        }
         if let Some(session) = app.demo_session.as_mut() {
             session.calls.story_stream = None;
             if let Some((chat_id, story_id)) = watched
@@ -693,6 +696,45 @@ fn an_account_switch_closes_a_story_pip(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn a_pip_opened_over_one_still_opening_ends_with_one_window(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_live(cx, "ready-live-story");
+    let vcx = &mut vcx;
+    let before = vcx.update(|_, cx| cx.windows().len());
+    app.update_in(vcx, |app, _, cx| {
+        let (Some((chat_id, story_id)), Some(player)) =
+            (app.stories.live.watching(), app.stories.live.player.clone())
+        else {
+            return;
+        };
+        let source = crate::ui::calls::live_pip::LivePipSource::Story { chat_id, story_id };
+        // The second opens before the first one's deferred open landed.
+        app.open_live_pip(player.clone(), source, None, cx);
+        app.open_live_pip(player, source, None, cx);
+        assert!(
+            app.group_call
+                .live_pip
+                .as_ref()
+                .is_some_and(|link| link.window.window().is_none()),
+            "the newer link still waits for its own open"
+        );
+        // As the story header's PiP button leaves the viewer.
+        app.close_story_viewer(cx);
+    });
+    frames(vcx);
+    let after = vcx.update(|_, cx| cx.windows().len());
+    assert_eq!(after, before + 1, "one PiP window, not two");
+    app.read_with(vcx, |app, _| {
+        assert!(
+            app.group_call
+                .live_pip
+                .as_ref()
+                .is_some_and(|link| link.window.window().is_some()),
+            "its own open landed"
+        );
+    });
+}
+
+#[gpui_kit::test]
 fn a_stream_in_pip_leaves_the_header_of_another_story_alone(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_live(cx, "ready-live-story");
     let vcx = &mut vcx;
@@ -840,6 +882,27 @@ fn burst_sticker(file: FileId) -> StickerItem {
     }
 }
 
+/// A join waits on its `getGroupCall` request; refusing or seeing the call
+/// ends that wait (r2-05, 13-043).
+#[gpui_kit::test]
+fn a_join_waits_on_its_request_until_refused_or_seen(cx: &mut TestAppContext) {
+    use quill::ids::RequestId;
+    let (app, mut vcx) = open_live(cx, "ready-live-story");
+    let vcx = &mut vcx;
+    app.update(vcx, |app, _| {
+        let live = &mut app.stories.live;
+        live.start_watching((ChatId(5), 8), Some(RequestId(41)));
+        assert_eq!(live.joining(), Some(((ChatId(5), 8), RequestId(41))));
+        live.refuse((ChatId(5), 8));
+        assert_eq!(live.joining(), None, "refused: nothing waits");
+        live.start_watching((ChatId(5), 8), Some(RequestId(42)));
+        live.mark_call_seen();
+        assert_eq!(live.joining(), None, "the call came: nothing waits");
+        live.start_watching((ChatId(5), 8), None);
+        assert_eq!(live.joining(), None, "no driver: no request to lose");
+    });
+}
+
 /// A refused live join is one stage with the join itself: it stays for the
 /// story that was refused (the "Join live" button starts it again) and is
 /// gone once another story, or none, is shown (sweep 13-089).
@@ -857,7 +920,7 @@ fn a_refused_join_is_a_stage_that_another_story_clears(cx: &mut TestAppContext) 
         assert_eq!(live.refused(), Some((ChatId(5), 7)), "same story: stays");
         live.drop_stale_refusal(Some((ChatId(5), 8)));
         assert_eq!(live.join, LiveJoin::Idle, "another story clears it");
-        live.start_watching((ChatId(5), 8));
+        live.start_watching((ChatId(5), 8), None);
         live.mark_call_seen();
         assert!(live.seen_call());
         live.refuse((ChatId(5), 8));

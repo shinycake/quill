@@ -9,8 +9,9 @@ use crate::telegram::envelope::UsernameCheckResult;
 /// The Type box's requests; wrapped as `GroupsPurpose::GroupType`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GroupTypePurpose {
-    /// `checkChatUsername`; only the newest generation counts.
-    CheckChatUsername { generation: u64 },
+    /// `checkChatUsername`; only the request `UsernameCheck::Checking` names
+    /// counts.
+    CheckChatUsername,
     /// `checkCreatedPublicChatsLimit`: an error means the limit is reached.
     CheckPublicChatsLimit,
     /// `getCreatedPublicChats` for the limit box's list.
@@ -34,8 +35,13 @@ pub struct UsernameVerdict {
 pub enum UsernameCheck {
     #[default]
     Idle,
-    /// The chat and text of the check in flight.
-    Checking { chat_id: ChatId, username: String },
+    /// The check in flight: its request, chat and text. Only its own answer
+    /// ends it.
+    Checking {
+        request: RequestId,
+        chat_id: ChatId,
+        username: String,
+    },
     /// The newest answer.
     Verdict(UsernameVerdict),
     /// The chat and text whose newest check failed (FLOOD_WAIT, a server
@@ -49,7 +55,8 @@ pub enum UsernameCheck {
 pub enum PublicChatsFetch {
     #[default]
     None,
-    Loading,
+    /// Asked as this request: only its answer or error acts on the list.
+    Loading(RequestId),
     Loaded(Vec<ChatId>),
     Failed,
 }
@@ -131,8 +138,6 @@ pub struct EditAfterUpgrade {
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct GroupTypeState {
-    /// Counts checks; an answer for an older one is dropped.
-    pub check_generation: u64,
     pub check: UsernameCheck,
     /// `checkCreatedPublicChatsLimit`: `Some(true)` at the limit.
     pub public_limit_reached: Option<bool>,
@@ -241,6 +246,17 @@ impl Session {
         }
     }
 
+    /// The count of active invite links was asked for and is not in yet:
+    /// Save of a changed join approval waits for it. A count that failed
+    /// reads as none, as in tdesktop (`requestInviteLinksCount`'s `fail`
+    /// is `done(0)`).
+    pub fn chat_invite_link_count_loading(&self, chat_id: ChatId) -> bool {
+        matches!(
+            self.groups.invite_link_counts.get(&chat_id.0),
+            Some(InviteLinkCountsFetch::Loading(_))
+        )
+    }
+
     /// A `checkChatUsernameResult*` answering the Type box's check. At
     /// the limit, the public links box opens (tdesktop
     /// `askUsernameRevoke`).
@@ -249,15 +265,23 @@ impl Session {
         result: UsernameCheckResult,
         pending: Option<&PendingRequest>,
     ) {
-        let Some(GroupTypePurpose::CheckChatUsername { generation }) = group_type_purpose(pending)
-        else {
+        let Some(pending) = pending else {
             return;
         };
-        let state = &mut self.groups.group_type;
-        if generation != state.check_generation {
+        if group_type_purpose(Some(pending)) != Some(GroupTypePurpose::CheckChatUsername) {
             return;
         }
-        let UsernameCheck::Checking { chat_id, username } = std::mem::take(&mut state.check) else {
+        let state = &mut self.groups.group_type;
+        // Only the check in flight is answered: an answer to an older one
+        // leaves the stage (a newer check, its verdict or failure) alone.
+        if !matches!(&state.check, UsernameCheck::Checking { request, .. } if *request == pending.id)
+        {
+            return;
+        }
+        let UsernameCheck::Checking {
+            chat_id, username, ..
+        } = std::mem::take(&mut state.check)
+        else {
             return;
         };
         match result {
@@ -295,7 +319,13 @@ impl Session {
                     .is_some_and(|name| !name.is_empty())
             })
             .collect();
-        self.groups.group_type.public_chats = PublicChatsFetch::Loaded(public);
+        // Only the request the box waits for lands: an older list, answered
+        // after the box asked again, would show chats a revoke just freed.
+        if let Some(pending) = pending
+            && self.groups.group_type.public_chats == PublicChatsFetch::Loading(pending.id)
+        {
+            self.groups.group_type.public_chats = PublicChatsFetch::Loaded(public);
+        }
         true
     }
 
@@ -314,22 +344,28 @@ impl Session {
         pending: Option<&PendingRequest>,
     ) {
         match group_type_purpose(pending) {
-            Some(GroupTypePurpose::CheckChatUsername { generation })
-                if generation == self.groups.group_type.check_generation =>
-            {
+            Some(GroupTypePurpose::CheckChatUsername) => {
                 let state = &mut self.groups.group_type;
-                if let UsernameCheck::Checking { chat_id, username } =
-                    std::mem::take(&mut state.check)
-                {
-                    state.check = UsernameCheck::Failed { chat_id, username };
-                }
+                let asked = pending.map(|p| p.id);
+                state.check = match std::mem::take(&mut state.check) {
+                    UsernameCheck::Checking {
+                        request,
+                        chat_id,
+                        username,
+                    } if Some(request) == asked => UsernameCheck::Failed { chat_id, username },
+                    other => other,
+                };
             }
             Some(GroupTypePurpose::CheckPublicChatsLimit) => {
                 self.groups.group_type.public_limit_reached =
                     Some(err.premium_limit == Some(PremiumLimitKind::PublicLinks));
             }
             Some(GroupTypePurpose::GetCreatedPublicChats) => {
-                self.groups.group_type.public_chats = PublicChatsFetch::Failed;
+                if let Some(pending) = pending
+                    && self.groups.group_type.public_chats == PublicChatsFetch::Loading(pending.id)
+                {
+                    self.groups.group_type.public_chats = PublicChatsFetch::Failed;
+                }
             }
             _ => {}
         }

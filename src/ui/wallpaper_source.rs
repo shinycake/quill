@@ -15,13 +15,37 @@ use std::sync::Arc;
 
 /// A rendered background and where its top-left corner sits in the area
 /// (a covering photo may overhang by a pixel).
-pub(super) struct Rendered {
+pub(super) struct Picture {
     pub raster: Raster,
     pub x: i32,
     pub y: i32,
-    /// `false` for the fill shown alone because the pattern file could not
-    /// be read: good enough to paint, but the cache asks again later.
-    pub complete: bool,
+}
+
+/// What a render made: the whole wallpaper, or only its fill because the
+/// pattern file could not be read (good enough to paint, but the cache
+/// asks again later).
+pub(super) enum Rendered {
+    Whole(Picture),
+    FillOnly(Picture),
+}
+
+impl Rendered {
+    pub(super) fn is_whole(&self) -> bool {
+        matches!(self, Self::Whole(_))
+    }
+
+    #[cfg(test)]
+    fn picture(&self) -> &Picture {
+        match self {
+            Self::Whole(picture) | Self::FillOnly(picture) => picture,
+        }
+    }
+
+    pub(super) fn into_picture(self) -> Picture {
+        match self {
+            Self::Whole(picture) | Self::FillOnly(picture) => picture,
+        }
+    }
 }
 
 /// A decoded pattern file.
@@ -189,12 +213,7 @@ impl Sources {
         if width == 0 || height == 0 {
             return None;
         }
-        let whole = |raster| Rendered {
-            raster,
-            x: 0,
-            y: 0,
-            complete: true,
-        };
+        let whole = |raster| Rendered::Whole(Picture { raster, x: 0, y: 0 });
         match wallpaper {
             Wallpaper::Solid(color) => Some(whole(compose_fill(
                 &FillSampler::new(&quill::telegram::envelope::BackgroundFill::Solid(*color)),
@@ -220,10 +239,11 @@ impl Sources {
                 // Until the pattern reads, the fill shows alone (tdesktop
                 // paints the gradient while the pattern loads).
                 let Some(pattern) = pattern else {
-                    return Some(Rendered {
-                        complete: false,
-                        ..whole(compose_fill(&sampler, width, height))
-                    });
+                    return Some(Rendered::FillOnly(Picture {
+                        raster: compose_fill(&sampler, width, height),
+                        x: 0,
+                        y: 0,
+                    }));
                 };
                 let (pw, ph) = pattern.size();
                 let (tw, th) = pattern_tile_size(pw, ph, height);
@@ -249,12 +269,11 @@ impl Sources {
                 }
                 let (from, to) = cover_rects(width, height, photo.width, photo.height);
                 let raster = crop_scale(&photo, from, to.width, to.height)?;
-                Some(Rendered {
+                Some(Rendered::Whole(Picture {
                     raster,
                     x: to.x,
                     y: to.y,
-                    complete: true,
-                })
+                }))
             }
         }
     }
@@ -320,9 +339,13 @@ mod tests {
             rotation: 0,
         };
         let out = sources.render(&pattern, 60, 40).unwrap();
-        assert_eq!((out.raster.width, out.raster.height), (60, 40));
+        assert_eq!(
+            (out.picture().raster.width, out.picture().raster.height),
+            (60, 40)
+        );
         // The pattern darkens somewhere and leaves the fill elsewhere.
         let reds: std::collections::HashSet<u8> = out
+            .picture()
             .raster
             .bgra
             .as_chunks::<4>()
@@ -346,15 +369,25 @@ mod tests {
             tiled: false,
         };
         let out = sources.render(&cover, 20, 20).unwrap();
-        assert_eq!((out.raster.width, out.raster.height), (20, 20));
+        assert_eq!(
+            (out.picture().raster.width, out.picture().raster.height),
+            (20, 20)
+        );
         let tiled = Wallpaper::Image {
             path: photo_path.clone(),
             blurred: false,
             tiled: true,
         };
         let out = sources.render(&tiled, 70, 25).unwrap();
-        assert_eq!((out.raster.width, out.raster.height), (70, 25));
-        assert_eq!(out.raster.pixel(0, 0), out.raster.pixel(30, 10), "repeats");
+        assert_eq!(
+            (out.picture().raster.width, out.picture().raster.height),
+            (70, 25)
+        );
+        assert_eq!(
+            out.picture().raster.pixel(0, 0),
+            out.picture().raster.pixel(30, 10),
+            "repeats"
+        );
         let blurred = Wallpaper::Image {
             path: photo_path,
             blurred: true,
@@ -409,8 +442,8 @@ mod tests {
             rotation: 0,
         };
         let out = sources.render(&pattern, 8, 8).unwrap();
-        assert!(!out.complete);
+        assert!(!out.is_whole());
         let solid = sources.render(&Wallpaper::Solid(0x336699), 8, 8).unwrap();
-        assert!(solid.complete);
+        assert!(solid.is_whole());
     }
 }

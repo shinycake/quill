@@ -74,7 +74,7 @@ impl QuillApp {
         if !signed_in && (self.live.is_some() || self.auth_demo.demo_inputs) {
             return Some(CodeScreen::SignIn);
         }
-        (signed_in && self.settings.open && self.settings.sub.is_none())
+        (signed_in && self.settings.open() && self.settings.sub().is_none())
             .then_some(CodeScreen::Settings)
     }
 

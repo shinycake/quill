@@ -30,6 +30,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
+        self.send_chat_invite_links(chat_id)
+    }
+
+    /// The `getChatInviteLinks` request itself, under a new id: the list
+    /// waits for this request's answer alone.
+    fn send_chat_invite_links(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
         let extra = self
             .session
             .request(RequestPurpose::GetChatInviteLinks, Some(chat_id));
@@ -53,14 +62,22 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(Some(extra))
     }
 
-    /// Phase D3a: explicit refresh of `getChatInviteLinks` — clears the
-    /// cached result and re-sends (the plain fetch keeps `Loaded`).
+    /// Phase D3a: explicit refresh of `getChatInviteLinks` — re-sends under
+    /// a new request id (the plain fetch keeps `Loaded`). A request still
+    /// in flight asked before whatever made the person refresh, so its
+    /// answer is dropped for this one's, not waited on.
     pub fn refresh_chat_invite_links(
         &mut self,
         chat_id: ChatId,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        self.session.groups.invite_links.remove(&chat_id.0);
-        self.fetch_chat_invite_links(chat_id)
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !self.session.chat_can_invite_users(chat_id) {
+            self.session.groups.invite_links.remove(&chat_id.0);
+            return Ok(None);
+        }
+        self.send_chat_invite_links(chat_id)
     }
 
     /// Phase D3a: `createChatInviteLink` (TDLib 1.8.67,

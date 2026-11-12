@@ -81,10 +81,20 @@ pub(super) struct Preview {
     /// The chosen cell's centre: the card centres on it.
     pub(super) center: Point<Pixels>,
     pub(super) shown: Instant,
-    /// Hiding since, fading out.
-    pub(super) hiding: Option<Instant>,
-    /// When the effect began playing (the card waits for its files).
-    pub(super) playing: Cell<Option<Instant>>,
+    /// Where the card is: on show before its effect plays, playing, or
+    /// fading out. Paint moves it on from `Shown` once.
+    pub(super) stage: Cell<PreviewStage>,
+}
+
+/// The stages of a card.
+#[derive(Clone, Copy)]
+pub(super) enum PreviewStage {
+    /// On show, the effect not yet restarted (its files may be missing).
+    Shown,
+    /// The effect plays over the card.
+    Playing,
+    /// Fading out since.
+    Hiding(Instant),
 }
 
 impl Preview {
@@ -94,8 +104,34 @@ impl Preview {
             effect_id,
             center,
             shown: now,
-            hiding: None,
-            playing: Cell::new(None),
+            stage: Cell::new(PreviewStage::Shown),
+        }
+    }
+
+    /// Fading out since, once hidden.
+    pub(super) fn hiding(&self) -> Option<Instant> {
+        match self.stage.get() {
+            PreviewStage::Hiding(since) => Some(since),
+            PreviewStage::Shown | PreviewStage::Playing => None,
+        }
+    }
+
+    /// Start fading out; a card already fading keeps its start.
+    pub(super) fn hide(&self, now: Instant) {
+        if self.hiding().is_none() {
+            self.stage.set(PreviewStage::Hiding(now));
+        }
+    }
+
+    /// The effect is ready: whether this is the first time (it then plays
+    /// from its first frame).
+    pub(super) fn begin_playing(&self) -> bool {
+        match self.stage.get() {
+            PreviewStage::Shown => {
+                self.stage.set(PreviewStage::Playing);
+                true
+            }
+            PreviewStage::Playing | PreviewStage::Hiding(_) => false,
         }
     }
 }
@@ -340,18 +376,20 @@ impl QuillApp {
         let Some(open) = self.composer_ui.send_menu.open.as_mut() else {
             return;
         };
+        // The areas are measured at paint; one being written right now is
+        // skipped, and the card then opens at the menu's own position.
         let center = open
             .areas
             .cells
-            .borrow()
-            .get(&effect_id)
-            .map(|bounds| bounds.center())
+            .try_borrow()
+            .ok()
+            .and_then(|cells| cells.get(&effect_id).map(|bounds| bounds.center()))
             .unwrap_or(open.position);
         let now = cx.background_executor().now();
         let next = Preview::new(effect_id, center, now);
         open.card = match std::mem::replace(&mut open.card, Card::None) {
-            Card::Shown { mut preview, .. } => {
-                preview.hiding.get_or_insert(now);
+            Card::Shown { preview, .. } => {
+                preview.hide(now);
                 Card::Shown {
                     preview: next,
                     leaving: Some(preview),
@@ -374,7 +412,7 @@ impl QuillApp {
         };
         let now = cx.background_executor().now();
         if let Card::Shown { preview, menu, .. } = &mut open.card {
-            preview.hiding.get_or_insert(now);
+            preview.hide(now);
             *menu = None;
         }
         cx.notify();
@@ -405,11 +443,11 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.close_send_menu(cx);
-        self.open_schedule_picker(super::scheduled::ScheduleTarget::Composer, window, cx);
-        if let Some(picker) = self.chat_ui.schedule_picker.as_mut() {
-            picker.send_after = true;
-            picker.send_effect = effect_id;
-        }
+        self.open_schedule_picker(
+            super::scheduled::ScheduleTarget::ComposerThenSend { effect: effect_id },
+            window,
+            cx,
+        );
     }
 
     /// Right-click on the card's button: send silently or on a schedule

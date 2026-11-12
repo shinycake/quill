@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::ui::status_note::StatusNote;
+use quill::connect::ConnectSendError;
 use quill::lang::{keys, tr};
 
 impl QuillApp {
@@ -295,8 +296,9 @@ impl QuillApp {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                            this.message_ui.swipe_reply_start =
-                                Some((row_chat, row_msg, event.position.x));
+                            this.chat_ui
+                                .swipe_reply
+                                .press(row_chat, row_msg, event.position.x);
                             // A press that starts on text selects text; any
                             // other press may become a message drag
                             // (`selection_drag`). In selection mode the
@@ -310,13 +312,12 @@ impl QuillApp {
                     .on_mouse_up(
                         MouseButton::Left,
                         cx.listener(move |this, event: &MouseUpEvent, window, cx| {
-                            if let Some((chat_id, message_id, start_x)) =
-                                this.message_ui.swipe_reply_start.take()
-                                && chat_id == row_chat
-                                && message_id == row_msg
-                                && start_x - event.position.x > px(24.)
-                            {
-                                this.begin_reply_from_message(chat_id, message_id, window, cx);
+                            if this.chat_ui.swipe_reply.release_on(
+                                row_chat,
+                                row_msg,
+                                event.position.x,
+                            ) {
+                                this.begin_reply_from_message(row_chat, row_msg, window, cx);
                             }
                             // Double-click runs the quick action setting
                             // (tdesktop `chatQuickAction`); on selected
@@ -560,7 +561,7 @@ impl QuillApp {
     pub(in crate::ui) fn maybe_auto_load_older(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             // Phase 5.1: a topic view pages its own history.
-            let sent = if live.driver.session.threads.saved.tag_search.is_some() {
+            let result = if live.driver.session.threads.saved.tag_search.is_some() {
                 live.driver.fetch_saved_tag_page()
             } else if live.driver.session.threads.saved.sublist.is_some() {
                 live.driver.fetch_saved_sublist_history()
@@ -570,11 +571,10 @@ impl QuillApp {
                 live.driver.fetch_topic_history()
             } else {
                 live.driver.fetch_history()
-            }
-            .ok()
-            .flatten()
-            .is_some();
-            if sent {
+            };
+            // A first page that could not be sent ends in the Failed row
+            // (`ConnectDriver::fetch_history_for`).
+            if matches!(result, Ok(Some(_)) | Err(ConnectSendError::Native)) {
                 cx.notify();
             }
         }

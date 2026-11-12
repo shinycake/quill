@@ -76,6 +76,13 @@ pub(super) enum EditorPurpose {
     Profile(super::profile_photo_sources::PhotoTarget),
 }
 
+/// The two ways the picture turns.
+#[derive(Clone, Copy)]
+enum Turn {
+    Quarter,
+    Flip,
+}
+
 #[derive(Clone, Copy)]
 pub(super) enum CropDrag {
     /// Corner 0..4: top-left, top-right, bottom-right, bottom-left.
@@ -94,20 +101,25 @@ pub(super) enum Gesture {
     /// Drawing the stroke that is not on `strokes` yet.
     Stroke(Stroke),
     Crop(CropDrag),
-    Item(ItemDrag),
+    /// Dragging `placed[index]`: the gesture names its item, so a delete or
+    /// a turn that changes the list ends it (`delete_selected`, `turn`).
+    Item {
+        index: usize,
+        drag: ItemDrag,
+    },
 }
 
 impl Gesture {
     fn stroke(&self) -> Option<&Stroke> {
         match self {
             Self::Stroke(stroke) => Some(stroke),
-            Self::None | Self::Crop(_) | Self::Item(_) => None,
+            Self::None | Self::Crop(_) | Self::Item { .. } => None,
         }
     }
 
-    pub(super) fn item(&self) -> Option<ItemDrag> {
+    pub(super) fn item(&self) -> Option<(usize, ItemDrag)> {
         match self {
-            Self::Item(drag) => Some(*drag),
+            Self::Item { index, drag } => Some((*index, *drag)),
             Self::None | Self::Stroke(_) | Self::Crop(_) => None,
         }
     }
@@ -253,36 +265,45 @@ impl PhotoEditor {
     }
 
     pub(super) fn rotate(&mut self) {
+        self.turn(Turn::Quarter);
+    }
+
+    pub(super) fn flip(&mut self) {
+        self.turn(Turn::Flip);
+    }
+
+    /// Turn the whole edit one way: the items, the orientation, the preview,
+    /// the crop and the strokes are rebuilt from the same turn in one place,
+    /// and a gesture in progress (made on the old picture) ends.
+    fn turn(&mut self, turn: Turn) {
         let (width, height) = self.dimensions();
         self.placed = self
             .placed
             .iter()
             .map(|(item, _)| {
-                let item = item.rotated_ccw(width, height);
+                let item = match turn {
+                    Turn::Quarter => item.rotated_ccw(width, height),
+                    Turn::Flip => item.flipped(),
+                };
                 let preview = preview_of(&item.image).into();
                 (item, preview)
             })
             .collect();
-        self.orientation = self.orientation.rotated_ccw();
-        self.turn_preview(rotate_ccw);
-        self.crop = self.crop.rotated_ccw();
-        self.strokes = self.strokes.iter().map(Stroke::rotated_ccw).collect();
-    }
-
-    pub(super) fn flip(&mut self) {
-        self.placed = self
-            .placed
-            .iter()
-            .map(|(item, _)| {
-                let item = item.flipped();
-                let preview = preview_of(&item.image).into();
-                (item, preview)
-            })
-            .collect();
-        self.orientation = self.orientation.flipped();
-        self.turn_preview(flip);
-        self.crop = self.crop.flipped();
-        self.strokes = self.strokes.iter().map(Stroke::flipped).collect();
+        match turn {
+            Turn::Quarter => {
+                self.orientation = self.orientation.rotated_ccw();
+                self.turn_preview(rotate_ccw);
+                self.crop = self.crop.rotated_ccw();
+                self.strokes = self.strokes.iter().map(Stroke::rotated_ccw).collect();
+            }
+            Turn::Flip => {
+                self.orientation = self.orientation.flipped();
+                self.turn_preview(flip);
+                self.crop = self.crop.flipped();
+                self.strokes = self.strokes.iter().map(Stroke::flipped).collect();
+            }
+        }
+        self.gesture = Gesture::None;
     }
 
     /// The pointer in normalized image coordinates (may fall outside 0..1).
@@ -358,7 +379,7 @@ impl PhotoEditor {
         let (x, y) = (x.clamp(0.0, 1.0), y.clamp(0.0, 1.0));
         let drag = match self.gesture {
             Gesture::Crop(drag) => Some(drag),
-            Gesture::None | Gesture::Stroke(_) | Gesture::Item(_) => None,
+            Gesture::None | Gesture::Stroke(_) | Gesture::Item { .. } => None,
         };
         match drag {
             Some(CropDrag::Move { from, start }) => {

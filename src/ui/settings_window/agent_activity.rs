@@ -20,7 +20,7 @@ use gpui_kit::component::tag::Tag;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::agent::activity::{self, Action};
+use quill::agent::activity::{self, Action, Outcome};
 use quill::ids::AccountKey;
 use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr, tr_with};
@@ -54,6 +54,26 @@ fn passes(filter: &super::agent_page::ActivityFilter, action: &Action) -> bool {
         && filter.tool.as_ref().is_none_or(|tool| tool == &action.tool)
 }
 
+/// The filter as far as the log still has what it names: a chat, agent or
+/// tool whose entries are gone (their messages were deleted) filters
+/// nothing, and its button reads "All", as the rows do.
+fn effective(
+    filter: &super::agent_page::ActivityFilter,
+    log: &[Action],
+) -> super::agent_page::ActivityFilter {
+    let mut filter = filter.clone();
+    filter.agent = filter
+        .agent
+        .filter(|agent| log.iter().any(|a| &a.agent == agent));
+    filter.chat = filter
+        .chat
+        .filter(|chat| log.iter().any(|a| a.chat_id == *chat));
+    filter.tool = filter
+        .tool
+        .filter(|tool| log.iter().any(|a| &a.tool == tool));
+    filter
+}
+
 /// The distinct values of one field, in log order.
 fn distinct<T: PartialEq + Clone>(log: &[Action], field: impl Fn(&Action) -> T) -> Vec<T> {
     let mut seen: Vec<T> = Vec::new();
@@ -71,8 +91,7 @@ impl QuillApp {
     /// messages still exist, or the reaction is still the user's. Only for
     /// the open account: Undo acts through its session.
     fn agent_undo_for(&self, action: &Action) -> Option<Undo> {
-        if !action.ok || action.declined || action.undone || !self.agent_settings_on_open_account()
-        {
+        if action.outcome != Outcome::Done || !self.agent_settings_on_open_account() {
             return None;
         }
         let session = self.session()?;
@@ -131,7 +150,7 @@ impl QuillApp {
             )
             .into_any_element();
         }
-        let filter = self.agent_ui.page.filter.clone();
+        let filter = effective(&self.agent_ui.page.filter, &log);
         let shown_log: Vec<&Action> = log
             .iter()
             .filter(|action| passes(&filter, action))
@@ -190,14 +209,18 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_3()
-            .child(self.agent_activity_filters(&log, cx))
+            .child(self.agent_activity_filters(&log, &filter, cx))
             .child(group(None, rows))
             .into_any_element()
     }
 
     /// Three menu buttons: agent, chat and action, each with "All".
-    fn agent_activity_filters(&self, log: &[Action], cx: &mut Context<Self>) -> AnyElement {
-        let filter = &self.agent_ui.page.filter;
+    fn agent_activity_filters(
+        &self,
+        log: &[Action],
+        filter: &super::agent_page::ActivityFilter,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let owner = cx.entity().downgrade();
         let agents = distinct(log, |a| a.agent.clone());
         let chats = distinct(log, |a| (a.chat_id, a.chat_title.clone()));
@@ -325,7 +348,7 @@ impl QuillApp {
         let muted = cx.theme().muted_foreground;
         let danger = cx.theme().danger;
         let stamp = chat_list_stamp(&civil_local(action.time), now);
-        let what = if action.declined {
+        let what = if action.outcome == Outcome::Declined {
             tr(keys::Q_AGENT_ACTIVITY_DECLINED).to_string()
         } else {
             action.summary.clone()
@@ -374,7 +397,7 @@ impl QuillApp {
                                     .text_color(muted)
                                     .child(action.chat_title.clone()),
                             )
-                            .when(!action.ok && !action.declined, |this| {
+                            .when(action.outcome == Outcome::Failed, |this| {
                                 this.child(
                                     div()
                                         .id(SharedString::from(format!(
@@ -404,7 +427,7 @@ impl QuillApp {
                             .child(div().flex_none().child(stamp)),
                     ),
             )
-            .when(action.undone, |this| {
+            .when(action.outcome == Outcome::Undone, |this| {
                 this.child(
                     div().flex_none().child(
                         Tag::secondary()

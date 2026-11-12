@@ -12,6 +12,7 @@ impl Session {
         _extra: Option<RequestId>,
         _seq: u64,
     ) {
+        let pending_id = pending.map(|p| p.id);
         // Pins over the limit open the Premium limit box (tdesktop `PinsLimitBox`).
         let pins_box = matches!(
             pending.map(|p| p.purpose),
@@ -57,7 +58,7 @@ impl Session {
                     .folder_chats_to_leave
                     .entry(folder_id)
                     .or_default()
-                    .fail(error_reason(err));
+                    .failed(pending_id, error_reason(err), false);
             }
             Some((RequestPurpose::GetChatsForFolderInviteLink, Some(folder_id))) => {
                 self.chat_list
@@ -65,7 +66,7 @@ impl Session {
                     .entry(folder_id)
                     .or_default()
                     .chats
-                    .fail(error_reason(err));
+                    .failed(pending_id, error_reason(err), false);
             }
             Some((RequestPurpose::DeleteChatFolderInviteLink, Some(folder_id))) => {
                 // The link left the list at send time: what the box holds is
@@ -215,7 +216,9 @@ impl Session {
                     format!("error {}", err.code),
                     false,
                 );
-                self.chat_list.archive_mute.note_reload_failed();
+                self.chat_list
+                    .archive_mute
+                    .note_reload_failed(pending.map(|p| p.id));
                 self.chats_state.chat_action_error.push(format!(
                     "could not load archive settings (error {})",
                     err.code
@@ -257,7 +260,11 @@ impl Session {
                 .chat_preview_fetch
                 .entry(chat_id)
                 .or_default()
-                .fail_dropping_data(call_request_error_line(err, "Could not load preview"));
+                .failed(
+                    pending_id,
+                    call_request_error_line(err, "Could not load preview"),
+                    true,
+                );
         }
     }
 }

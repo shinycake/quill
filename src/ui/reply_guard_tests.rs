@@ -159,8 +159,9 @@ fn a_poll_drops_a_reply_to_a_deleted_message(cx: &mut TestAppContext) {
                 dialog
                     .question_input
                     .update(cx, |input, cx| input.set_value("Lunch?", window, cx));
-                for (input, text) in dialog.option_inputs.iter().zip(["Tacos", "Soup"]) {
-                    input.update(cx, |input, cx| input.set_value(text, window, cx));
+                for (row, text) in dialog.options.iter().zip(["Tacos", "Soup"]) {
+                    row.input
+                        .update(cx, |input, cx| input.set_value(text, window, cx));
                 }
             }
             app.submit_poll_dialog(window, cx);

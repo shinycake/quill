@@ -16,8 +16,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         let now = crate::local_time::now_unix();
         SearchMessagesFilters {
             community_id: search.community_filter,
-            chat_type: search.filters.chat_type,
-            media: search.filters.media,
+            chat_type: search.filters.chat_type(),
+            media: search.filters.media(),
             min_date: search.filters.date.min_date(now),
             max_date: search.filters.date.max_date(now),
             archived: search.filters.archived,
@@ -100,7 +100,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         let search_gen = self.session.search.search.generation;
         let query = self.session.search.search.query.trim().to_string();
-        let scope = self.session.search.search.filters.scope;
+        let scope = self.session.search.search.filters.scope();
         let tag = crate::search_filters::tag_query(&query).map(str::to_owned);
         let purpose = match (scope, &tag) {
             (SearchScope::PublicPosts, None) => RequestPurpose::SearchPublicPostsMore,
@@ -149,7 +149,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // What the user confirmed: this query at this price. A query typed
         // or a price TDLib reported since is another purchase.
         let reported = search.tabs.limits.map_or(0, |limits| limits.star_count);
-        if search.filters.scope != SearchScope::PublicPosts
+        if search.filters.scope() != SearchScope::PublicPosts
             || !search.public_limits_exceeded()
             || price <= 0
             || price != reported

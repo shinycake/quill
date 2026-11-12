@@ -208,6 +208,9 @@ pub fn render(
 ) -> RgbaImage {
     let mut canvas = image.clone();
     let (width, height) = canvas.dimensions();
+    if width == 0 || height == 0 {
+        return canvas;
+    }
     let side = width.min(height) as f32;
     for stroke in strokes {
         let radius = (stroke.width * side / 2.0).max(0.5);
@@ -317,6 +320,15 @@ fn stamp(image: &mut RgbaImage, (cx, cy): (f32, f32), radius: f32, color: [u8; 4
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_zero_size_picture_renders_unchanged() {
+        for (w, h) in [(0, 0), (0, 5), (5, 0)] {
+            let empty = RgbaImage::new(w, h);
+            let out = render(&empty, CropRect::FULL, &[], &[]);
+            assert_eq!(out.dimensions(), (w, h));
+        }
+    }
 
     #[test]
     fn crop_follows_rotation_and_flip() {

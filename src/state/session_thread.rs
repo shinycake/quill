@@ -6,7 +6,13 @@ impl Session {
     /// Start resolving a thread (`getMessageThread`) for `message_id` of
     /// `chat_id`. Replaces any open thread.
     pub fn begin_thread(&mut self, chat_id: ChatId, message_id: MessageId) {
+        self.begin_thread_for(chat_id, message_id, ThreadAsker::Nobody);
+    }
+
+    /// Open the thread view for the window that asked.
+    pub fn begin_thread_for(&mut self, chat_id: ChatId, message_id: MessageId, asker: ThreadAsker) {
         let mut view = ThreadView::resolving(chat_id, message_id);
+        view.asker = asker;
         // A thread opened from inside a forum topic keeps that topic.
         if self.open_chat_id() == Some(chat_id) && self.chat_has_topics(chat_id) {
             view.forum_topic_id = self.open_forum_topic();
@@ -143,10 +149,7 @@ impl Session {
         let Some(thread) = self.threads.thread.as_mut() else {
             return;
         };
-        if Some(thread.origin_chat_id) != origin_chat
-            || thread.origin_message_id.0 != message_id
-            || thread.history.stale_pages.remove(&pending.id.0)
-        {
+        if Some(thread.origin_chat_id) != origin_chat || thread.origin_message_id.0 != message_id {
             return;
         }
         let empty = messages.is_empty();
@@ -219,10 +222,7 @@ impl Session {
         let Some(thread) = self.threads.thread.as_mut() else {
             return;
         };
-        if Some(thread.origin_chat_id) != origin_chat
-            || thread.origin_message_id.0 != message_id
-            || thread.history.stale_pages.remove(&pending.id.0)
-        {
+        if Some(thread.origin_chat_id) != origin_chat || thread.origin_message_id.0 != message_id {
             return;
         }
         if newer {
@@ -235,8 +235,8 @@ impl Session {
     }
 
     /// Replace the open thread's window (jump to the latest replies): the
-    /// pages still in flight are marked stale. Returns whether a thread
-    /// was open.
+    /// pages still in flight are forgotten, so their answers are ignored.
+    /// Returns whether a thread was open.
     pub(crate) fn reset_thread_window(&mut self) -> bool {
         let Some(thread) = self.threads.thread.as_ref() else {
             return false;
@@ -247,13 +247,12 @@ impl Session {
             RequestPurpose::Threads(ThreadsPurpose::GetMessageThreadHistoryNewer { message_id }),
         ];
         let stale = self.requests.ids_for_chat(&purposes, thread.origin_chat_id);
+        for id in stale {
+            drop(self.requests.take(id));
+        }
         let Some(thread) = self.threads.thread.as_mut() else {
             return false;
         };
-        thread
-            .history
-            .stale_pages
-            .extend(stale.into_iter().map(|id| id.0));
         thread.reset_window();
         true
     }
@@ -355,11 +354,8 @@ impl Session {
             })
             .collect();
         let stale = self.requests.ids_for_chat(&purposes, thread.origin_chat_id);
-        if let Some(thread) = self.threads.thread.as_mut() {
-            thread
-                .history
-                .stale_pages
-                .extend(stale.into_iter().map(|id| id.0));
+        for id in stale {
+            drop(self.requests.take(id));
         }
     }
 

@@ -74,13 +74,10 @@ fn a_typed_search_also_asks_the_server_for_chats() {
 fn archived_and_older_filters_reach_search_messages() {
     let mut fx = Fixture::new();
     commit_typed_search(&mut fx.driver, "dune");
-    fx.driver
-        .set_search_filters(GlobalSearchFilters {
-            archived: true,
-            date: SearchDateRange::Older,
-            ..GlobalSearchFilters::default()
-        })
-        .unwrap();
+    let mut filters = GlobalSearchFilters::default();
+    filters.archived = true;
+    filters.date = SearchDateRange::Older;
+    fx.driver.set_search_filters(filters).unwrap();
     let search = fx.requests("searchMessages").pop().unwrap();
     assert_eq!(search["chat_list"]["@type"], "chatListArchive");
     assert_eq!(search["min_date"], 0);
@@ -101,10 +98,7 @@ fn public_posts_scope_sends_only_the_posts_request() {
         .unwrap();
     let before = fx.recorder.snapshot().len();
     fx.driver
-        .set_search_filters(GlobalSearchFilters {
-            scope: SearchScope::PublicPosts,
-            ..GlobalSearchFilters::default()
-        })
+        .set_search_filters(GlobalSearchFilters::default().in_scope(SearchScope::PublicPosts))
         .unwrap();
     let sent = fx.recorder.snapshot();
     // The quota check is free and rides along; the search itself is one

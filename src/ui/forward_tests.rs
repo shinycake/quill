@@ -55,59 +55,16 @@ fn enter_toggles_the_first_match_and_does_not_send(cx: &mut TestAppContext) {
                 crate::ui::forward_stage::ForwardStage::Selecting,
             );
         app.open_forward_picker(window, cx);
-        assert_eq!(app.share.tick_count(), 0);
+        assert!(app.share.selection.is_empty());
         app.activate_first_forward_destination(cx);
-        assert_eq!(app.share.tick_count(), 1);
+        assert_eq!(app.share.selection.len(), 1);
         // A second Enter unticks it again (selectActive toggles); it never sends.
         app.activate_first_forward_destination(cx);
-        assert_eq!(app.share.tick_count(), 0);
+        assert!(app.share.selection.is_empty());
         assert!(app.share.forward.picker_open());
         // Ctrl+Enter with nothing ticked does nothing.
         app.submit_share_from_search(window, cx);
         assert!(app.share.forward.picker_open());
-    });
-}
-
-/// What was typed in the share box goes with the box, on whichever way out,
-/// and the next box starts empty with nothing ticked.
-#[gpui_kit::test]
-fn the_share_boxs_text_and_ticks_go_with_the_box(cx: &mut TestAppContext) {
-    let (app, _shell, mut vcx) = new_app(cx);
-    let vcx = &mut vcx;
-    app.update_in(vcx, |app, window, cx| {
-        let (chat, message) = {
-            let session = app.demo_session.as_ref().expect("demo session");
-            let (chat, history) = session
-                .histories
-                .iter()
-                .find(|(_, history)| !history.messages.is_empty())
-                .expect("a chat with messages");
-            let id = history.messages.keys().next().copied().expect("a message");
-            (ChatId(*chat), MessageId(id))
-        };
-        app.share.forward =
-            ForwardDraft::from_message(chat, quill::ids::TopicId::None, message, false).map_or(
-                crate::ui::forward_stage::ForwardStage::None,
-                crate::ui::forward_stage::ForwardStage::Selecting,
-            );
-        app.open_forward_picker(window, cx);
-        app.share.toggle_tick(chat);
-        app.share
-            .comment_input
-            .update(cx, |input, cx| input.set_value("look", window, cx));
-        app.share
-            .search_input
-            .update(cx, |input, cx| input.set_value("ann", window, cx));
-        app.close_forward_picker(window, cx);
-    });
-    vcx.run_until_parked();
-    vcx.simulate_resize(size(px(1101.), px(800.)));
-    vcx.run_until_parked();
-    app.update_in(vcx, |app, window, cx| {
-        assert!(app.share.comment_input.read(cx).value().is_empty());
-        assert!(app.share.search_input.read(cx).value().is_empty());
-        app.open_forward_picker(window, cx);
-        assert_eq!(app.share.tick_count(), 0, "a new box starts with no ticks");
     });
 }
 

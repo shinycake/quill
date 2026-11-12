@@ -90,7 +90,7 @@ fn contacts_over_the_rows_end_a_pinned_drag_unsaved(cx: &mut TestAppContext) {
     assert!(app.read_with(&vcx, |app, _| app.chat_list.pin.drag().is_some()));
     // Cmd+J while the button is held: the rows give way to Contacts.
     app.update(&mut vcx, |app, cx| {
-        app.chat_list.tab = SidebarTab::Contacts;
+        app.chat_list.show_tab(SidebarTab::Contacts);
         cx.notify();
     });
     frames(&mut vcx);
@@ -219,7 +219,16 @@ fn a_press_during_the_release_slide_starts_its_drag_under_the_pointer(cx: &mut T
     let (first, second) = (pinned[0], pinned[1]);
     drag(&app, &mut vcx, first, 10.0);
     drag(&app, &mut vcx, first, 20.0);
-    app.update(&mut vcx, |app, cx| app.finish_pin_drag(cx));
+    // One release reaches the list twice (the row's drop, the list's
+    // mouse-up): the second finds no held row and leaves the slide.
+    app.update(&mut vcx, |app, cx| {
+        app.finish_pin_drag(cx);
+        app.finish_pin_drag(cx);
+    });
+    assert!(
+        app.read_with(&vcx, |app, _| app.chat_list.pin.drag().is_some()),
+        "the release slide runs"
+    );
     // The slide is running; the next row goes down at y = 120.
     app.update(&mut vcx, |app, _| app.chat_list.pin.press(second, 120.0));
     assert!(
@@ -228,9 +237,9 @@ fn a_press_during_the_release_slide_starts_its_drag_under_the_pointer(cx: &mut T
     );
     drag(&app, &mut vcx, second, 110.0);
     let offset = app.read_with(&vcx, |app, _| {
-        app.chat_list.pin.drag().map(|drag| {
-            assert_eq!(drag.reorder.dragging(), Some(second));
-            drag.reorder.offset(second, std::time::Instant::now())
+        app.chat_list.pin.held().map(|drag| {
+            assert_eq!(drag.reorder.dragged(), second);
+            drag.reorder.offset(second, std::time::Instant::now(), true)
         })
     });
     assert!(

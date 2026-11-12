@@ -44,9 +44,11 @@ impl StepSlider {
     }
 }
 
-/// The two storage limit sliders between a drag step and the release that
-/// sends them: if the release never arrives (the pointer was lost), the
-/// page's leave sends what the sliders were left on.
+/// The two storage limit sliders between a drag step and the answer to the
+/// limits their release sent: if the release never arrives (the pointer
+/// was lost), the page's leave sends what the sliders were left on; if the
+/// send fails or TDLib refuses, the sliders go back to the limits TDLib
+/// holds (`settle_storage_sliders`).
 #[derive(Default)]
 pub(crate) enum StorageDrag {
     #[default]
@@ -55,6 +57,13 @@ pub(crate) enum StorageDrag {
         account: quill::ids::AccountKey,
         size: Option<i64>,
         keep: Option<i64>,
+    },
+    /// The release sent its limits: the requests it waits for. The stage
+    /// ends when all are answered (`settle_storage_sliders`), on the limits
+    /// TDLib holds if one failed.
+    Sent {
+        account: quill::ids::AccountKey,
+        requests: Vec<quill::ids::RequestId>,
     },
 }
 

@@ -117,3 +117,67 @@ fn a_note_typed_while_waiting_is_kept(cx: &mut TestAppContext) {
         Some((ContactNote::Seeded, "typed".to_string()))
     );
 }
+
+#[gpui_kit::test]
+fn a_failed_full_info_ends_the_loading_wait(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, window, cx| {
+        if let Some(session) = app.session_mut() {
+            session.users_state.user_full_infos.remove(&USER);
+        }
+        app.open_edit_contact_dialog(USER, window, cx);
+    });
+    frame(vcx);
+    assert_eq!(
+        note_state(&app, vcx).map(|(note, _)| note),
+        Some(ContactNote::Waiting)
+    );
+    app.update_in(vcx, |app, _, _| {
+        if let Some(session) = app.session_mut() {
+            session
+                .users_state
+                .user_full_infos
+                .fail(USER, "unreachable".into());
+        }
+    });
+    frame(vcx);
+    assert_eq!(
+        note_state(&app, vcx).map(|(note, _)| note),
+        Some(ContactNote::Unavailable),
+        "the field stops saying Loading"
+    );
+    // The box can still save: the stored note is kept, not cleared.
+    let saved = app.update_in(vcx, |app, _, cx| app.submit_edit_contact(cx));
+    assert!(saved);
+}
+
+#[gpui_kit::test]
+fn a_birthday_refusal_goes_when_a_field_is_corrected(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, window, cx| {
+        app.show_birthday_dialog(None, window, cx);
+        let Some(ProfileDialog::Birthday(dialog)) = &app.dialogs.profile_dialog else {
+            panic!("the birthday form is open");
+        };
+        dialog
+            .day_input
+            .update(cx, |input, cx| input.set_value("99", window, cx));
+        dialog
+            .month_input
+            .update(cx, |input, cx| input.set_value("1", window, cx));
+        assert!(
+            !app.submit_birthday(false, cx),
+            "an impossible day is refused"
+        );
+        let Some(ProfileDialog::Birthday(dialog)) = &app.dialogs.profile_dialog else {
+            panic!("still open");
+        };
+        assert!(dialog.shown_error(cx).is_some(), "the reason shows");
+        dialog
+            .day_input
+            .update(cx, |input, cx| input.set_value("9", window, cx));
+        assert!(dialog.shown_error(cx).is_none(), "corrected: it goes");
+    });
+}

@@ -15,6 +15,16 @@ impl Session {
             return;
         }
         match pending.map(|p| p.purpose) {
+            // The lookup of a group bot failed: the next time the group's
+            // commands arrive it is asked again.
+            Some(RequestPurpose::Bots(BotsPurpose::GroupBotUser)) => {
+                if let Some(pending) = pending
+                    && let Some(bot) = pending.user_id
+                    && let Some(fetch) = self.bots.bot_users.get_mut(&bot)
+                {
+                    fetch.failed(Some(pending.id), "could not load the bot", true);
+                }
+            }
             // Slice B2: refused `sendBotStartMessage` / `getBotSimilarBots` —
             // a refusal is never shown as success.
             Some(RequestPurpose::SendBotStartMessage) => {
@@ -22,16 +32,27 @@ impl Session {
                     .chat_action_error
                     .push(format!("could not start the bot (error {})", err.code));
             }
+            // The list of recent inline bots goes back to being askable
+            // (the next "@" asks again), instead of staying in flight.
+            Some(RequestPurpose::GetRecentInlineBots) => {
+                self.bots.reply_keyboards.recent_inline_bots.failed(
+                    pending.map(|p| p.id),
+                    format!("could not load recent inline bots (error {})", err.code),
+                    false,
+                );
+            }
             Some(RequestPurpose::GetBotSimilarBots) => {
-                // The section goes back to its button, so it can ask again
-                // (a `Loading` left behind refused every later press).
-                if let Some(bot) = pending.and_then(|p| p.user_id)
-                    && matches!(
-                        self.bots.similar_bots.get(&bot),
-                        Some(SimilarBotsFetch::Loading)
-                    )
+                // The section shows the reason beside its button, so it can
+                // ask again; only the request it waits for fails it.
+                if let Some(pending) = pending
+                    && let Some(bot) = pending.user_id
+                    && let Some(fetch) = self.bots.similar_bots.get_mut(&bot)
                 {
-                    self.bots.similar_bots.remove(&bot);
+                    fetch.failed(
+                        Some(pending.id),
+                        crate::state::call_request_error_line(err, "Could not load similar bots"),
+                        false,
+                    );
                 }
                 self.chats_state
                     .chat_action_error
@@ -66,51 +87,38 @@ impl Session {
             // Bots slice: a failed first page lands in the slot so
             // the picker shows an honest error; a failed "load
             // more" keeps the loaded page retryable.
-            Some(RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
-                chat_id,
-                bot_user_id,
-                first_page,
-            })) => {
-                let failed_first_page = first_page
-                    && matches!(
-                        &self.bots.inline_query,
-                        Some(slot)
-                            if slot.chat_id == chat_id
-                                && slot.bot_user_id == bot_user_id
-                    );
-                if !first_page
-                    && let Some(slot) = self.bots.inline_query.as_mut()
-                    && slot.chat_id == chat_id
-                    && slot.bot_user_id == bot_user_id
-                    && let InlineQueryFetch::Loaded { next_offset, .. } = &slot.fetch
-                {
-                    slot.more_failed = Some(next_offset.clone());
-                }
-                if failed_first_page && let Some(slot) = self.bots.inline_query.as_mut() {
-                    slot.fetch = InlineQueryFetch::Failed(call_request_error_line(
-                        err,
-                        "Could not load inline results",
-                    ));
+            Some(RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults { .. })) => {
+                let asked = pending.map(|p| p.id);
+                if let Some(slot) = self.bots.inline_query.as_mut() {
+                    match &mut slot.fetch {
+                        InlineQueryFetch::Loading { request } if Some(*request) == asked => {
+                            slot.fetch = InlineQueryFetch::Failed(call_request_error_line(
+                                err,
+                                "Could not load inline results",
+                            ));
+                        }
+                        InlineQueryFetch::Loaded {
+                            next_offset, more, ..
+                        } => {
+                            if matches!(more, InlineMore::Asking { request } if Some(*request) == asked)
+                            {
+                                *more = InlineMore::Failed {
+                                    offset: next_offset.clone(),
+                                };
+                            }
+                        }
+                        _ => {}
+                    }
                 }
             }
-            // Bots slice: a failed `@botname` lookup lands in the
-            // resolve slot so the composer shows an honest hint;
-            // stale failures (a newer username is already being
-            // resolved) are ignored via the generation guard.
-            Some(RequestPurpose::Bots(BotsPurpose::ResolveInlineBot { generation })) => {
-                let stale = !matches!(
-                    &self.bots.inline_bot_resolve,
-                    Some(InlineBotResolve::Resolving {
-                        generation: slot_generation,
-                        ..
-                    }) if *slot_generation == generation
-                );
-                if !stale {
-                    let username = match &self.bots.inline_bot_resolve {
-                        Some(InlineBotResolve::Resolving { username, .. }) => username.clone(),
-                        _ => String::new(),
-                    };
-                    self.bots.inline_bot_resolve = Some(InlineBotResolve::Failed {
+            // Bots slice: a failed `@botname` lookup lands on the entry
+            // that waits for this request, so the composer shows an honest
+            // hint; an entry replaced since (a newer lookup) is untouched.
+            Some(RequestPurpose::Bots(BotsPurpose::ResolveInlineBot)) => {
+                if let Some(asked) = pending
+                    && let Some(username) = self.bots.inline_bot_asked(asked.id).map(str::to_string)
+                {
+                    self.bots.set_inline_bot(InlineBotResolve::Failed {
                         reason: format!("could not find @{username} (error {})", err.code),
                         username,
                     });
@@ -151,7 +159,11 @@ impl Session {
                     (pending.chat_id, pending.around_message_id)
                 && let Some(scores) = self.bots.game_scores.get_mut(&(chat_id.0, message_id.0))
             {
-                scores.fail("couldn't load the scores");
+                scores.failed(
+                    Some(pending.id),
+                    crate::lang::tr(crate::lang::keys::Q_MISC_COULDNT_LOAD_THE_SCORES),
+                    false,
+                );
             }
             self.note_callback_answer(
                 pending.and_then(|p| p.chat_id),
@@ -205,13 +217,7 @@ impl Session {
             pending.map(|p| p.purpose),
             Some(RequestPurpose::GetLoginUrlInfo) | Some(RequestPurpose::GetLoginUrl)
         ) {
-            let fallback_url = self
-                .bots
-                .login_url_request
-                .take()
-                .map(|request| request.raw_url)
-                .unwrap_or_default();
-            self.bots.last_login_url_info = Some(LoginUrlInfo::Failed { fallback_url });
+            self.bots.login_url.fail(pending.map(|p| p.id));
         }
         self.apply_web_app_error(pending, err);
     }

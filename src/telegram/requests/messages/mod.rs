@@ -182,6 +182,12 @@ pub fn format_entity_json(entity: &ComposerEntity) -> Value {
     })
 }
 
+/// A scheduled send's date as TDLib's `int32`: one past 2038 keeps the far
+/// future (TDLib refuses it) instead of wrapping to a past date.
+fn send_date(date: i64) -> i32 {
+    i32::try_from(date).unwrap_or(if date < 0 { 0 } else { i32::MAX })
+}
+
 /// M1: `messageSendOptions` JSON (TDLib 1.8.67, `schema/td_api.tl:5934`).
 /// `scheduling_state` is `messageSchedulingStateSendAtDate` (`:5902`) or
 /// `messageSchedulingStateSendWhenOnline` (`:5905`); null otherwise.
@@ -193,7 +199,7 @@ pub fn message_send_options(options: &SendOptions) -> Value {
             repeat_period,
         } => json!({
             "@type": "messageSchedulingStateSendAtDate",
-            "send_date": date as i32,
+            "send_date": send_date(date),
             "repeat_period": repeat_period.max(0),
         }),
         ComposerScheduling::SendWhenOnline => {
@@ -873,7 +879,7 @@ pub fn edit_message_scheduling_state(
         ComposerScheduling::None => Value::Null,
         ComposerScheduling::SendAtDate { date, .. } => json!({
             "@type": "messageSchedulingStateSendAtDate",
-            "send_date": date as i32,
+            "send_date": send_date(date),
             "repeat_period": 0,
         }),
         ComposerScheduling::SendWhenOnline => {

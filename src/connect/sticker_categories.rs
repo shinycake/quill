@@ -23,10 +23,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             get_sticker_categories(id)
         });
         match sent {
-            Ok(_) => {
-                self.session.stickers.emoji.sticker_categories.begin();
+            Ok(Some(request)) => {
+                let categories = &mut self.session.stickers.emoji.sticker_categories;
+                categories.begin();
+                categories.sent(request);
                 Ok(())
             }
+            Ok(None) => Ok(()),
             Err(err) => Err(err),
         }
     }

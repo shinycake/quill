@@ -288,6 +288,32 @@ fn failed_strings_end_the_switch_with_an_error() {
 }
 
 #[test]
+fn a_refused_option_or_synchronize_ends_the_switch_and_late_strings_install_nothing() {
+    for refused in ["setOption", "synchronizeLanguagePack"] {
+        let mut f = Fixture::new();
+        f.driver.switch_language(pack("pt-br", "")).unwrap();
+        let strings_extra = f.strings_extra("pt-br");
+        let extra = f
+            .sent()
+            .into_iter()
+            .rev()
+            .find(|v| {
+                v["@type"] == refused && (refused != "setOption" || v["name"] == "language_pack_id")
+            })
+            .map(|v| v["@extra"].clone())
+            .unwrap();
+        f.feed(json!({"@type":"error","@extra":extra,"code":400,"message":"NOPE"}));
+        let state = &f.driver.session.settings.language;
+        assert!(state.switching().is_none(), "{refused}");
+        assert!(state.failure().is_some(), "{refused}");
+        // The strings that were already on their way land nowhere.
+        f.feed(strings(&strings_extra, "k", "text"));
+        let state = &f.driver.session.settings.language;
+        assert!(!state.install_queued(), "{refused}");
+    }
+}
+
+#[test]
 fn startup_points_tdlib_at_tdesktop_strings_and_restores_the_saved_pack() {
     let mut f = Fixture::new();
     f.driver.send_language_options().unwrap();
@@ -451,7 +477,7 @@ fn announcement_labels_are_fetched_once_and_hide_deletes_the_history() {
 fn the_about_box_waits_for_the_saved_flags_and_saves_without_overwriting() {
     use crate::psa_about::{load_seen_from, merge_save};
     use std::collections::BTreeSet;
-    use std::time::{Duration, Instant};
+    use std::time::Instant;
 
     let dir = std::env::temp_dir().join(format!("quill-psa-driver-{}", std::process::id()));
     let file = dir.join("psa_about_seen.json");
@@ -481,23 +507,15 @@ fn the_about_box_waits_for_the_saved_flags_and_saves_without_overwriting() {
     };
     assert!(!shown(&f), "the saved flags are not in yet");
 
-    let mut tries = 0;
-    while !shown(&f) && tries < 200 {
-        f.driver.sync_psa_about();
-        std::thread::sleep(Duration::from_millis(10));
-        tries += 1;
-    }
+    f.driver.sync_psa_about();
+    f.driver.session.finish_psa_background(Instant::now());
     assert!(
         shown(&f),
         "unseen chat: the box shows once the flags are in"
     );
 
-    let mut tries = 0;
-    while !load_seen_from(&file).contains(&7) && tries < 200 {
-        f.driver.sync_psa_about();
-        std::thread::sleep(Duration::from_millis(10));
-        tries += 1;
-    }
+    f.driver.sync_psa_about();
+    f.driver.session.finish_psa_background(Instant::now());
     assert_eq!(
         load_seen_from(&file),
         BTreeSet::from([7, 9]),

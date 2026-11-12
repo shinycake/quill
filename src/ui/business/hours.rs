@@ -406,13 +406,37 @@ impl QuillApp {
             .overflow_y_scroll()
             .max_h(px(360.));
         if zones.is_empty() {
-            list = list.child(
-                div()
+            let failed = self
+                .session()
+                .and_then(|s| s.settings.business.time_zones.error())
+                .map(str::to_string);
+            list = list.child(match failed {
+                // The request failed: say so, with a Retry, instead of
+                // "Loading…" with nothing on its way.
+                Some(error) => div()
+                    .py_2()
+                    .flex()
+                    .flex_col()
+                    .items_start()
+                    .gap_2()
+                    .child(div().text_sm().text_color(muted).child(error))
+                    .child(
+                        Button::new("business-zones-retry")
+                            .label(tr(keys::Q_CHAT_RETRY))
+                            .small()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                if let Some(live) = this.live.as_mut() {
+                                    let _ = live.driver.ensure_time_zones();
+                                }
+                                cx.notify();
+                            })),
+                    ),
+                None => div()
                     .py_2()
                     .text_sm()
                     .text_color(muted)
                     .child(tr(keys::Q_OPS_LOADING)),
-            );
+            });
         }
         for (index, zone) in zones
             .into_iter()

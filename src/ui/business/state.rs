@@ -34,6 +34,31 @@ pub(crate) enum View {
 }
 
 impl View {
+    /// Whether this screen draws a refusal of `area` (the hub draws all of
+    /// them: a save refused after the screen was left shows there).
+    pub(crate) fn shows(self, area: quill::state::BusinessArea) -> bool {
+        use quill::business_settings::BusinessSettingKind as Kind;
+        use quill::state::BusinessArea as Area;
+        matches!(
+            (self, area),
+            (View::Hub, _)
+                | (View::Greeting, Area::Save(Kind::Greeting))
+                | (View::Away, Area::Save(Kind::Away))
+                | (
+                    View::Hours | View::Day(_) | View::TimeZone,
+                    Area::Save(Kind::OpeningHours)
+                )
+                | (View::Location, Area::Save(Kind::Location))
+                | (
+                    View::StartPage | View::StickerPick,
+                    Area::Save(Kind::StartPage)
+                )
+                | (View::ChatLinks | View::LinkEdit, Area::ChatLinks)
+                | (View::Chatbots, Area::Chatbot)
+                | (View::Picker, Area::Save(Kind::Greeting | Kind::Away))
+        )
+    }
+
     /// Screens that save when they are left (tdesktop saves a section in
     /// its destructor).
     pub(super) fn saves_on_leave(self) -> bool {
@@ -158,9 +183,18 @@ pub(crate) struct StartPageDraft {
     pub(super) sticker: Option<StickerItem>,
 }
 
+/// The link box's save: being edited, or sent and waiting for the answer
+/// to exactly that request (it leaves with the box).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LinkSave {
+    Editing,
+    Saving(quill::ids::RequestId),
+}
+
 pub(crate) struct LinkEditDraft {
     /// `None` for a new link.
     pub(super) link: Option<String>,
+    pub(super) save: LinkSave,
     pub(super) text: Entity<TextareaState>,
     pub(super) name: Entity<InputState>,
 }
@@ -199,8 +233,17 @@ pub(crate) enum BotNotice {
     ConfirmLeave,
 }
 
+/// The username lookup's debounce: idle, or a timer waiting to look the
+/// typed name up. The timer is owned here: the next keystroke replaces it
+/// and the screen going away drops it.
+pub(crate) enum LookupDebounce {
+    Idle,
+    Waiting { _timer: Task<()> },
+}
+
 pub(crate) struct ChatbotDraft {
     pub(super) username: Entity<InputState>,
+    pub(super) debounce: LookupDebounce,
     pub(super) bot: BotLink,
     pub(super) recipients: BusinessRecipients,
     pub(super) rights: BotRights,

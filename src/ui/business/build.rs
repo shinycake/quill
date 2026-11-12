@@ -194,7 +194,7 @@ impl QuillApp {
         }
         let saving = self
             .session()
-            .is_some_and(|s| !s.settings.business.saving.is_empty());
+            .is_some_and(|s| s.settings.business.is_saving());
         body.when(saving, |this| {
             this.child(
                 div()
@@ -329,9 +329,12 @@ impl QuillApp {
                         .child(note),
                 );
             }
-            let server_error = this
-                .session()
-                .and_then(|s| s.settings.business.refusal().map(str::to_string));
+            let server_error = this.session().and_then(|s| {
+                s.settings
+                    .business
+                    .refusal(|area| view.shows(area))
+                    .map(str::to_string)
+            });
             // The screen's own line and TDLib's refusal both show: a local
             // "still loading" must not hide why the load failed.
             let server_error = server_error.filter(|line| local_error.as_ref() != Some(line));

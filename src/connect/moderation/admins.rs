@@ -22,7 +22,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if matches!(
             self.session.groups.admin_lists.get(&chat_id.0),
-            Some(AdminListFetch::Loading | AdminListFetch::Loaded(_))
+            Some(AdminListFetch::Loading(_) | AdminListFetch::Loaded(_))
         ) || self
             .session
             .requests
@@ -30,13 +30,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        self.session
-            .groups
-            .admin_lists
-            .insert(chat_id.0, AdminListFetch::Loading);
+        self.send_chat_administrators(chat_id)
+    }
+
+    fn send_chat_administrators(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
         let extra = self
             .session
             .request(RequestPurpose::GetChatAdministrators, Some(chat_id));
+        self.session
+            .groups
+            .admin_lists
+            .insert(chat_id.0, AdminListFetch::Loading(extra));
         if let Err(err) = self
             .sender
             .send_json(&get_chat_administrators(extra, chat_id.0))
@@ -57,8 +64,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         chat_id: ChatId,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        self.session.groups.admin_lists.remove(&chat_id.0);
-        self.fetch_chat_administrators(chat_id)
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !self.session.chat_can_manage_admins(chat_id) {
+            self.session.groups.admin_lists.remove(&chat_id.0);
+            return Ok(None);
+        }
+        // A request still in flight asked before the refresh: this one
+        // replaces it rather than leaving the list unasked.
+        self.send_chat_administrators(chat_id)
     }
 
     /// Phase D3c: `getChatEventLog` first page (TDLib 1.8.67,
@@ -151,7 +166,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         let from_event_id = match self.session.groups.event_log_fetch(chat_id.0) {
-            Some(ChatEventLogFetch::Loaded(page)) if page.has_more => {
+            Some(ChatEventLogFetch::Loaded(page)) if page.has_more() => {
                 page.events.last().map(|event| event.id).unwrap_or(0)
             }
             _ => return Ok(None),
@@ -201,7 +216,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         purpose: GroupsPurpose,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         let polling = purpose == GroupsPurpose::PollChatEventLog;
+        let first_page = from_event_id == 0 && !polling;
         if !self.chats_path_active() {
+            self.fail_event_log_send(chat_id, first_page, polling);
             return Err(ConnectSendError::InvalidRequest);
         }
         if !self.session.chat_can_view_event_log(chat_id) {
@@ -218,6 +235,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if !polling && self.event_log_wait(chat_id).page.is_some() {
             return Ok(None);
+        }
+        if !polling && !first_page {
+            self.session.begin_older_events(chat_id.0);
         }
         if from_event_id == 0 && !polling {
             self.session
@@ -244,9 +264,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             &user_ids,
         )) {
             self.session.requests.take(extra);
-            if from_event_id == 0 && !polling {
-                self.session.groups.reset_event_log_fetch(chat_id.0);
-            }
+            self.fail_event_log_send(chat_id, first_page, polling);
             return Err(err);
         }
         let wait = &mut self
@@ -262,6 +280,25 @@ impl<S: JsonSender> ConnectDriver<S> {
             wait.page = Some(extra);
         }
         Ok(Some(extra))
+    }
+
+    /// A first page that could not be sent ends in the failed stage, so the
+    /// page draws its Retry instead of a spinner nothing will end.
+    /// An older page that could not be sent keeps the loaded log and draws
+    /// its own Retry. A poll that could not be sent changes nothing shown.
+    fn fail_event_log_send(&mut self, chat_id: ChatId, first_page: bool, polling: bool) {
+        if first_page {
+            self.session.groups.reset_event_log_fetch(chat_id.0);
+            self.session.groups.set_event_log_fetch(
+                chat_id.0,
+                ChatEventLogFetch::Failed(send_failed_line("Could not load recent actions")),
+            );
+        } else if !polling {
+            self.session.fail_older_events(
+                chat_id.0,
+                send_failed_line("Could not load earlier actions"),
+            );
+        }
     }
 
     /// The requests `chat_id`'s event log waits for.
@@ -371,7 +408,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if matches!(
             self.session.groups.admin_rights.get(&(chat_id.0, user_id)),
-            Some(AdminRightsFetch::Loading | AdminRightsFetch::Loaded(_))
+            Some(AdminRightsFetch::Loading(_) | AdminRightsFetch::Loaded(_))
         ) {
             return Ok(None);
         }
@@ -379,11 +416,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
             return Ok(None);
         }
+        let extra = self.session.request(purpose, Some(chat_id));
         self.session
             .groups
             .admin_rights
-            .insert((chat_id.0, user_id), AdminRightsFetch::Loading);
-        let extra = self.session.request(purpose, Some(chat_id));
+            .insert((chat_id.0, user_id), AdminRightsFetch::Loading(extra));
         if let Err(err) = self
             .sender
             .send_json(&get_chat_member(extra, chat_id, user_id))
@@ -410,7 +447,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let key = (chat_id.0, user_id);
         if !matches!(
             self.session.groups.admin_rights.get(&key),
-            Some(AdminRightsFetch::Loading)
+            Some(AdminRightsFetch::Loading(_))
         ) {
             self.session.groups.admin_rights.remove(&key);
         }

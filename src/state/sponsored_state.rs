@@ -121,17 +121,6 @@ impl SponsoredReport {
     }
 }
 
-/// Slice B2: fetch state of `getBotSimilarBots` for a bot profile. The
-/// `users` payload carries only ids (names resolve through
-/// `Session::users`); presence records "fetched" so the driver never
-/// retries, and `Loading` dedupes the request.
-#[derive(Debug, Clone, Default)]
-pub enum SimilarBotsFetch {
-    #[default]
-    Loading,
-    Loaded(Vec<i64>),
-}
-
 impl SponsoredReportOutcome {
     pub fn user_message(&self) -> &'static str {
         self.result.user_message()

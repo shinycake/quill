@@ -378,10 +378,11 @@ fn a_failed_later_page_keeps_the_loaded_photos() {
             extra.0
         ),
     );
+    // The failed page is not asked again on its own; the photos stay.
     assert!(matches!(
         session.users_state.chat_photo_history.get(&GROUP),
         Some(ChatPhotosFetch::Loaded {
-            next_page: PhotoPage::Idle,
+            next_page: PhotoPage::Failed(_),
             ..
         })
     ));

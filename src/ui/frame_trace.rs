@@ -23,7 +23,9 @@ pub(in crate::ui) fn trace_slice_render(kind: &'static str) {
         return;
     }
     COUNTS.with(|counts| {
-        let mut counts = counts.borrow_mut();
+        let Ok(mut counts) = counts.try_borrow_mut() else {
+            return;
+        };
         *counts.1.entry(kind).or_default() += 1;
         let since = *counts.0.get_or_insert_with(Instant::now);
         if since.elapsed() >= Duration::from_secs(1) {
@@ -112,7 +114,9 @@ fn trace_count_by(what: &'static str, key: String, amount: usize) {
         static COUNTS: RefCell<Counts> = const { RefCell::new(BTreeMap::new()) };
     }
     COUNTS.with(|counts| {
-        let mut counts = counts.borrow_mut();
+        let Ok(mut counts) = counts.try_borrow_mut() else {
+            return;
+        };
         let (since, keys) = counts
             .entry(what)
             .or_insert_with(|| (Instant::now(), BTreeMap::new()));
@@ -147,7 +151,9 @@ pub(super) fn trace_caller(
         static LAST: RefCell<HashMap<(&'static str, u32), Instant>> = RefCell::new(HashMap::new());
     }
     LAST.with(|last| {
-        let mut last = last.borrow_mut();
+        let Ok(mut last) = last.try_borrow_mut() else {
+            return;
+        };
         let key = (caller.file(), caller.line());
         if last
             .get(&key)

@@ -133,20 +133,20 @@ fn a_key_capture_does_not_take_the_passcodes_first_key(cx: &mut TestAppContext) 
     };
     let before = app.read_with(&vcx, |app, _| ptt_key(app));
     app.update(&mut vcx, |app, _| {
-        app.group_call.ptt_capture = true;
-        app.preferences.keybinding.capture =
-            crate::ui::keybindings::Capture::Waiting("toggle_sidebar".into());
+        app.preferences.keybinding.toggle_ptt_capture();
     });
     lock(&app, &mut vcx);
     app.read_with(&vcx, |app, _| {
-        assert!(!app.group_call.ptt_capture, "the PTT capture is off");
         assert!(
-            app.preferences.keybinding.capture.waiting().is_none(),
-            "no binding is armed"
+            !app.preferences.keybinding.ptt_armed()
+                && app.preferences.keybinding.waiting().is_none(),
+            "no key capture is armed"
         );
     });
     // Armed again under the lock, a key still goes to the lock screen only.
-    app.update(&mut vcx, |app, _| app.group_call.ptt_capture = true);
+    app.update(&mut vcx, |app, _| {
+        app.preferences.keybinding.toggle_ptt_capture();
+    });
     vcx.simulate_keystrokes("q");
     frame(&mut vcx);
     app.read_with(&vcx, |app, _| {

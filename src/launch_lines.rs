@@ -94,8 +94,11 @@ impl LinesFile {
     }
 }
 
-/// The file this process writes its layouts to: the one of the account whose
-/// connection opened last, until that account logs out.
+/// The file this process writes its layouts to. The text system keeps one
+/// set of layouts for the whole process, loaded from the first account that
+/// opened, so only that account's file can take them: a second account's
+/// text would land under the wrong key, and a logged-out account's would
+/// outlive it.
 #[cfg_attr(
     not(all(target_os = "macos", feature = "ui")),
     allow(dead_code, reason = "only the macOS line cache saves layouts")
@@ -103,8 +106,11 @@ impl LinesFile {
 enum Slot {
     /// Nothing opened yet, or no key (a locked launch).
     Empty,
-    /// Layouts are written to this file at quit.
+    /// Layouts are written to this file when the chat list has been drawn.
     Open(LinesFile),
+    /// A second account opened before the layouts were saved: they hold
+    /// both accounts' chat names, so none are written.
+    Mixed,
     /// The opened account logged out or was removed: its layouts hold its
     /// chat names, so none are written.
     Forgotten,
@@ -115,10 +121,16 @@ enum Slot {
     allow(dead_code, reason = "only the macOS line cache saves layouts")
 )]
 impl Slot {
-    /// An account's connection opened: its file is the one to write, whatever
-    /// the slot held (a switch from account A to B moves it to B's).
+    /// An account's connection opened. The first one's file is the one to
+    /// write; the same account opening again keeps it, another account ends
+    /// the writing for this launch (`Mixed`), and a forgotten one stays so.
     fn opened(&mut self, file: LinesFile) {
-        *self = Slot::Open(file);
+        *self = match std::mem::replace(self, Slot::Empty) {
+            Slot::Empty => Slot::Open(file),
+            Slot::Open(open) if open.path == file.path => Slot::Open(file),
+            Slot::Open(_) | Slot::Mixed => Slot::Mixed,
+            Slot::Forgotten => Slot::Forgotten,
+        };
     }
 
     /// The account whose layouts sit in `path` logged out.
@@ -131,7 +143,7 @@ impl Slot {
     fn file(&self) -> Option<&LinesFile> {
         match self {
             Slot::Open(file) => Some(file),
-            Slot::Empty | Slot::Forgotten => None,
+            Slot::Empty | Slot::Mixed | Slot::Forgotten => None,
         }
     }
 }
@@ -230,29 +242,54 @@ mod tests {
     }
 
     #[test]
-    fn the_file_written_is_the_one_of_the_account_opened_last() {
+    fn only_the_first_account_opened_is_written_and_a_second_ends_the_writing() {
         let dir = temp("slot");
         let first = file(&dir, 1);
+        let again = file(&dir, 1);
         let second = LinesFile::new(
             &AccountPaths::for_root(&dir, &crate::ids::AccountKey("b".into())),
             &DatabaseKey::from_bytes(vec![2; 32]).expect("key"),
         );
-        let (first_path, second_path) = (first.path.clone(), second.path.clone());
+        let first_path = first.path.clone();
         let mut slot = Slot::Empty;
         assert!(slot.file().is_none());
         slot.opened(first);
-        slot.opened(second);
+        slot.opened(again);
         assert_eq!(
             slot.file().map(|f| f.path.clone()),
-            Some(second_path.clone())
+            Some(first_path),
+            "the same account opening again keeps it"
         );
-        slot.forget(&first_path);
+        slot.opened(second);
+        assert!(
+            slot.file().is_none(),
+            "two accounts' text is in the layouts: none is written"
+        );
+        slot.opened(file(&dir, 1));
+        assert!(slot.file().is_none(), "it stays that way");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_logged_out_account_is_never_replaced_by_the_next_one() {
+        let dir = temp("forgotten");
+        let first = file(&dir, 1);
+        let first_path = first.path.clone();
+        let second = LinesFile::new(
+            &AccountPaths::for_root(&dir, &crate::ids::AccountKey("b".into())),
+            &DatabaseKey::from_bytes(vec![2; 32]).expect("key"),
+        );
+        let mut slot = Slot::Empty;
+        slot.opened(first);
+        slot.forget(&dir.join("elsewhere"));
         assert!(slot.file().is_some(), "another account's logout leaves it");
-        slot.forget(&second_path);
+        slot.forget(&first_path);
         assert!(slot.file().is_none(), "its own logout stops the write");
-        let reopened = file(&dir, 1);
-        slot.opened(reopened);
-        assert!(slot.file().is_some(), "a later open writes again");
+        slot.opened(second);
+        assert!(
+            slot.file().is_none(),
+            "the layouts still hold the logged-out account's text"
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 }

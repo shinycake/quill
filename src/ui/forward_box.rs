@@ -250,7 +250,7 @@ impl QuillApp {
                     .chat_photo_path(chat.id)
                     .and_then(|path| quill::local_path::sandboxed_display_path(path, &roots)),
                 status: session.share_row_status(chat),
-                checked: self.share.is_ticked(chat.id),
+                checked: self.share.selection.contains(chat.id),
             })
             .collect()
     }
@@ -306,7 +306,7 @@ impl QuillApp {
             .gap_3()
             .child(search)
             .child(list)
-            .when(self.share.tick_count() > 0, |this| {
+            .when(!self.share.selection.is_empty(), |this| {
                 this.child(
                     Textarea::new(&self.share.comment_input)
                         .aria_label(tr(keys::Q_OPS_COMMENT))
@@ -318,7 +318,7 @@ impl QuillApp {
 
     /// Who is chosen, the send menu, Cancel and Send.
     fn forward_box_footer(&self, owner: WeakEntity<Self>, cx: &mut Context<Self>) -> AnyElement {
-        let selected = self.share.tick_count();
+        let selected = self.share.selection.len();
         let summary = match selected {
             0 => tr(keys::Q_OPS_CHOOSE_ONE_OR_MORE_CHATS).to_string(),
             1 => tr(keys::Q_OPS_1_CHAT_SELECTED).to_string(),
@@ -369,10 +369,11 @@ impl QuillApp {
         let multiple = draft.as_ref().is_some_and(|d| d.count() > 1);
         let send_copy = self.share.forward.draft().is_some_and(|d| d.send_copy);
         let remove_caption = self.share.forward.draft().is_some_and(|d| d.remove_caption);
-        let selected = self.share.tick_count();
+        let selected = self.share.selection.len();
         let single_saved = self
             .share
-            .single_tick()
+            .selection
+            .single()
             .and_then(|id| self.session().map(|s| s.is_saved_messages(id)))
             .unwrap_or(false);
         let schedule_label = match ScheduleKind::for_saved_messages(single_saved) {

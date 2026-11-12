@@ -33,15 +33,34 @@ fn options(timeout_ms: u32) -> CreationOptions {
     }
 }
 
-/// The next event, waiting up to five seconds.
+/// The next event: blocks on the worker's channel, no clock.
 fn next(ceremony: &mut Ceremony) -> CeremonyEvent {
-    let until = Instant::now() + Duration::from_secs(5);
-    loop {
-        if let Some(event) = ceremony.poll().into_iter().next() {
-            return event;
-        }
-        assert!(Instant::now() < until, "no event");
-        std::thread::sleep(Duration::from_millis(5));
+    match ceremony.wait().into_iter().next() {
+        Some(event) => event,
+        None => panic!("the worker said nothing"),
+    }
+}
+
+/// Give the worker the processor until the key waits for a touch.
+fn until_held(script: &Mutex<Script>) {
+    while !script.lock().is_ok_and(|script| script.held) {
+        std::thread::yield_now();
+    }
+}
+
+/// A clock the test steps: a pause moves it, nothing sleeps.
+struct ManualPace {
+    start: Instant,
+    spent: std::cell::Cell<Duration>,
+}
+
+impl Pace for ManualPace {
+    fn now(&self) -> Instant {
+        self.start + self.spent.get()
+    }
+
+    fn pause(&self, span: Duration) {
+        self.spent.set(self.spent.get() + span);
     }
 }
 
@@ -130,14 +149,26 @@ fn a_blocked_pin_ends_the_ceremony() {
 
 #[test]
 fn no_key_until_the_timeout() {
-    let (source, _, looks) = fake_source(Script::default(), usize::MAX);
-    let mut ceremony = Ceremony::register(options(1_200), source);
+    let (mut source, _, looks) = fake_source(Script::default(), usize::MAX);
+    let (events, _event_rx) = channel();
+    let (_pins, pin_rx) = channel();
+    let (_commands, command_rx) = channel();
+    let link = Link {
+        pace: Box::new(ManualPace {
+            start: Instant::now(),
+            spent: Default::default(),
+        }),
+        events,
+        pins: pin_rx,
+        commands: command_rx,
+        cancel: Arc::new(AtomicBool::new(false)),
+    };
     assert_eq!(
-        next(&mut ceremony),
-        CeremonyEvent::Failed(CeremonyError::NoDevice)
+        run_register(&options(1_200), source.as_mut(), &link).err(),
+        Some(CeremonyError::NoDevice)
     );
-    // Looked every half second.
-    assert!((3..=4).contains(&*looks.lock().unwrap()));
+    // Looked every half second, and once more at the deadline.
+    assert_eq!(*looks.lock().unwrap(), 4);
 }
 
 #[test]
@@ -171,7 +202,7 @@ fn cancel_while_waiting_for_a_touch() {
         0,
     );
     let mut ceremony = Ceremony::register(options(5_000), source);
-    std::thread::sleep(Duration::from_millis(100));
+    until_held(&script);
     ceremony.cancel();
     assert_eq!(
         next(&mut ceremony),
@@ -262,12 +293,10 @@ fn dropping_the_handle_cancels() {
         0,
     );
     let ceremony = Ceremony::register(options(5_000), source);
-    std::thread::sleep(Duration::from_millis(100));
+    until_held(&script);
     drop(ceremony);
-    let until = Instant::now() + Duration::from_secs(3);
-    while script.lock().unwrap().cancels == 0 {
-        assert!(Instant::now() < until, "the key was not cancelled");
-        std::thread::sleep(Duration::from_millis(10));
+    while script.lock().is_ok_and(|script| script.cancels == 0) {
+        std::thread::yield_now();
     }
 }
 
@@ -278,7 +307,7 @@ fn a_system_ceremony_is_cancelled_through_its_hook() {
     let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
     let stop_tx = Mutex::new(stop_tx);
     let mut ceremony = Ceremony::spawn_system(
-        move || match stop_rx.recv_timeout(Duration::from_secs(5)) {
+        move || match stop_rx.recv() {
             Ok(()) => CeremonyEvent::Failed(CeremonyError::Cancelled),
             Err(_) => CeremonyEvent::Failed(CeremonyError::Other("never cancelled".into())),
         },
@@ -312,6 +341,32 @@ fn a_system_ceremony_reports_its_result() {
     // Nothing more once it finished, and a late cancel is harmless.
     ceremony.cancel();
     assert!(ceremony.poll().is_empty());
+}
+
+#[test]
+fn a_pin_sent_while_none_was_asked_does_not_answer_the_next_ask() {
+    let (event_tx, events) = channel();
+    let (pins, pin_rx) = channel();
+    let (_commands, command_rx) = channel();
+    let link = Link {
+        pace: Box::new(SystemPace),
+        events: event_tx,
+        pins: pin_rx,
+        commands: command_rx,
+        cancel: Arc::new(AtomicBool::new(false)),
+    };
+    assert!(pins.send(Zeroizing::new("stale".into())).is_ok());
+    drop(pins);
+    // The sender is gone after the stale PIN: a stale one would be returned.
+    assert_eq!(
+        link.ask_pin(false).err(),
+        Some(CeremonyError::Cancelled),
+        "the stale PIN is dropped, then no one is left to answer"
+    );
+    assert_eq!(
+        events.try_recv().ok(),
+        Some(CeremonyEvent::NeedPin { invalid: false })
+    );
 }
 
 #[test]

@@ -52,7 +52,7 @@ impl BarsStyle {
 /// The signal bars to show for `call`: tgcalls' count once the call is
 /// established (connected, or reconnecting after it was), nothing before.
 pub(super) fn shown_signal_bars(call: &ActiveCall) -> Option<u8> {
-    let established = matches!(call.state, CallState::Ready)
+    let established = matches!(call.phase(), CallState::Ready(_))
         && matches!(
             call.transport.state(),
             Some(TransportState::Connected | TransportState::Reconnecting)
@@ -210,9 +210,9 @@ mod tests {
             user_id: 11,
             is_outgoing: true,
             is_video: false,
-            state,
+            progress: quill::state::CallProgress::first(state, std::time::Instant::now()),
             started_at: std::time::Instant::now(),
-            ready: None,
+            action: quill::state::CallAction::Idle,
             transport: transport.map_or_else(Default::default, |state| {
                 CallTransport::reported(state, Default::default()).unwrap_or(
                     CallTransport::Failed {
@@ -230,13 +230,16 @@ mod tests {
             remote_audio_muted: false,
             remote_battery_low: false,
             signal_bars: bars,
+            media_note: None,
         }
     }
 
     #[test]
     fn bars_show_only_once_the_call_is_established() {
         use TransportState::*;
-        let ready = |transport, bars| shown_signal_bars(&call(CallState::Ready, transport, bars));
+        let ready = |transport, bars| {
+            shown_signal_bars(&call(CallState::Ready(Default::default()), transport, bars))
+        };
         assert_eq!(ready(Some(Connected), Some(3)), Some(3));
         assert_eq!(ready(Some(Reconnecting), Some(0)), Some(0));
         assert_eq!(ready(Some(Connecting), Some(2)), None);

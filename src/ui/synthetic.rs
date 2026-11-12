@@ -10,7 +10,9 @@ pub enum SyntheticKind {
     Text,
     Rtl,
     Emoji,
-    ImageLoading,
+    /// A photo still "loading": the row owns the timer that ends it, so
+    /// dropping the row cancels it.
+    ImageLoading(std::rc::Rc<Task<()>>),
     ImageLoaded,
 }
 
@@ -32,6 +34,12 @@ pub struct SyntheticChat {
 
 impl SyntheticChat {
     pub fn new(cx: &mut Context<Self>) -> Self {
+        let loading = cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(900))
+                .await;
+            this.update(cx, |this, cx| this.finish_image(cx)).ok();
+        });
         let rows = vec![
             row(
                 quill::ids::ChatId(0),
@@ -70,7 +78,7 @@ impl SyntheticChat {
                 5,
                 tr(keys::Q_MISC_ADA),
                 tr(keys::Q_MISC_PHOTO_PENDING),
-                SyntheticKind::ImageLoading,
+                SyntheticKind::ImageLoading(std::rc::Rc::new(loading)),
                 false,
             ),
         ];
@@ -79,13 +87,6 @@ impl SyntheticChat {
             state.scroll_to_item(0, cx);
             state
         });
-        cx.spawn(async move |this, cx| {
-            cx.background_executor()
-                .timer(Duration::from_millis(900))
-                .await;
-            this.update(cx, |this, cx| this.finish_image(cx)).ok();
-        })
-        .detach();
         Self {
             next_id: 6,
             rows,
@@ -134,9 +135,16 @@ impl SyntheticChat {
         if let Some(row) = self
             .rows
             .iter_mut()
-            .find(|row| matches!(row.kind, SyntheticKind::ImageLoading))
+            .find(|row| matches!(row.kind, SyntheticKind::ImageLoading(_)))
         {
-            row.kind = SyntheticKind::ImageLoaded;
+            // The timer is the task running this: it is let go, not
+            // cancelled from inside itself.
+            if let SyntheticKind::ImageLoading(timer) =
+                std::mem::replace(&mut row.kind, SyntheticKind::ImageLoaded)
+                && let Ok(timer) = std::rc::Rc::try_unwrap(timer)
+            {
+                timer.detach();
+            }
             row.body = tr(keys::Q_MISC_PHOTO_LOADED_HEIGHT_CHANGED).into();
         }
         let len = self.rows.len();
@@ -441,7 +449,7 @@ fn message_bubble_with_quote(
     look: BubbleLook,
 ) -> AnyElement {
     let image_h = match row.kind {
-        SyntheticKind::ImageLoading => px(40.),
+        SyntheticKind::ImageLoading(_) => px(40.),
         SyntheticKind::ImageLoaded => px(96.),
         _ => px(0.),
     };

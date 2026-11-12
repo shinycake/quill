@@ -206,7 +206,9 @@ pub fn poll_answer_for_tap(poll: &Poll, index: usize) -> Option<Vec<i32>> {
     if poll.is_closed || poll.vote_restriction_reason.is_some() || index >= poll.options.len() {
         return None;
     }
-    let index = index as i32;
+    let Ok(index) = i32::try_from(index) else {
+        return None;
+    };
     let chosen = poll.chosen_indexes();
     if !poll.allows_revoting && !chosen.is_empty() {
         // Matches TDLib: any `setPollAnswer` after a vote exists is
@@ -525,10 +527,10 @@ impl PollDraft {
         let close_max = poll_close_max((self.close_max > 0).then_some(self.close_max));
         match self.deadline {
             Some(PollClose::Date(date)) if date > 0 => {
-                if date < now + POLL_DEADLINE_MIN_SECS {
+                if date < now.saturating_add(POLL_DEADLINE_MIN_SECS) {
                     return Some("the deadline must be in the future");
                 }
-                if date > now + close_max {
+                if date > now.saturating_add(close_max) {
                     return Some("the deadline is too far ahead");
                 }
             }
@@ -1086,6 +1088,21 @@ mod tests {
         poll.close_date = 5000;
         poll.is_closed = true;
         assert_eq!(poll_ends_in_label(&poll, 1000), None);
+    }
+
+    #[test]
+    fn deadline_validation_does_not_overflow_on_huge_limits() {
+        let mut draft = quiz_draft();
+        draft.is_quiz = false;
+        draft.options[0].correct = false;
+        draft.close_max = i64::MAX;
+        draft.deadline = Some(PollClose::Date(1_000));
+        assert_eq!(
+            draft.validate_at(i64::MAX - 5),
+            Some("the deadline must be in the future")
+        );
+        draft.deadline = Some(PollClose::Date(i64::MAX));
+        assert_eq!(draft.validate_at(1_000_000), None);
     }
 
     #[test]

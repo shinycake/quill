@@ -98,12 +98,11 @@ impl QuillApp {
     /// staged; a failed probe drops the replacement with the reason, so
     /// Save never waits for good.
     pub(in crate::ui) fn probe_edit_replacement(&mut self, cx: &mut Context<Self>) {
-        let Some(path) = self
+        let Some((path, job)) = self
             .chat_ui
             .pending_edit()
             .and_then(|edit| edit.media_edit.replacement.as_ref())
-            .filter(|rep| rep.probe == quill::composer::ReplacementProbe::Probing)
-            .map(|rep| rep.path.clone())
+            .and_then(|rep| Some((rep.path.clone(), rep.probe.probing()?)))
         else {
             return;
         };
@@ -114,7 +113,7 @@ impl QuillApp {
         self.spawn_scoped(cx, async move |this, cx| {
             let result = probe.await;
             let _ = this.update(cx, |this, cx| {
-                this.finish_edit_replacement_probe(&path, result, cx)
+                this.finish_edit_replacement_probe(&path, job, result, cx)
             });
         })
         .detach();
@@ -123,15 +122,19 @@ impl QuillApp {
     pub(in crate::ui) fn finish_edit_replacement_probe(
         &mut self,
         path: &std::path::Path,
+        job: quill::composer::ProbeJob,
         result: Result<quill::video::VideoProbe, String>,
         cx: &mut Context<Self>,
     ) {
         let Some(edit) = self.chat_ui.pending_edit_mut() else {
             return;
         };
-        let Some(replacement) = edit.media_edit.replacement.as_mut().filter(|rep| {
-            rep.path == path && rep.probe == quill::composer::ReplacementProbe::Probing
-        }) else {
+        let Some(replacement) = edit
+            .media_edit
+            .replacement
+            .as_mut()
+            .filter(|rep| rep.path == path && rep.probe.probing() == Some(job))
+        else {
             return;
         };
         match result {
@@ -342,7 +345,7 @@ impl QuillApp {
             .media_edit
             .replacement
             .as_ref()
-            .is_some_and(|rep| rep.probe == quill::composer::ReplacementProbe::Probing)
+            .is_some_and(|rep| rep.probe.probing().is_some())
         {
             self.set_note(StatusNote::silent(tr(keys::Q_CHAT_PREPARING_THE_VIDEO)));
             cx.notify();
@@ -451,6 +454,8 @@ impl QuillApp {
             .unwrap_or(4096)
     }
 
+    /// The delete the user confirmed in the box: `confirm` is what the box
+    /// showed, not whatever is selected now.
     pub(in crate::ui) fn confirm_delete(
         &mut self,
         confirm: quill::composer::DeleteConfirm,
@@ -481,7 +486,6 @@ impl QuillApp {
         // tdesktop FieldHeader Escape / replyCancelled: header only — keep typed text.
         let kept = cancel_reply_draft(self.chat_ui.take_reply(), String::new()).0;
         self.chat_ui.set_reply(kept);
-        self.share.forward.close_reply_chooser();
         self.note_open_draft(true, cx);
         self.set_note(StatusNote::silent(tr(keys::Q_CHAT_REPLY_CANCELLED)));
         cx.notify();

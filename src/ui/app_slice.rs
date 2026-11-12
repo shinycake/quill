@@ -322,51 +322,62 @@ impl QuillApp {
     /// Once nothing new has been shown for `image_budget::IDLE_AFTER`,
     /// trim the image cache to its idle budget, drop the wallpaper
     /// pictures no area shows and sweep the emoji glyphs off screen
-    /// (`glyph_sweep`). One waiting task at most; it sleeps past
-    /// every newer activity.
+    /// (`glyph_sweep`). One waiting task at most, held in `idle_trim`: it
+    /// sleeps once to the due time, and newer activity re-arms it from its
+    /// wake-up rather than going round a loop.
     pub(super) fn schedule_idle_image_trim(&mut self, cx: &mut Context<Self>) {
-        if self.slices.idle_trim.is_some() || super::image_budget::idle_trim_due().is_none() {
+        if self.slices.idle_trim.is_some() {
             return;
         }
+        let Some(due) = super::image_budget::idle_trim_due() else {
+            return;
+        };
         let Some(cache) = self.slices.image_cache.clone() else {
             return;
         };
         // screen-scope: the trim sweeps the caches of whichever windows are open when it runs.
         self.slices.idle_trim = Some(cx.spawn(async move |this, cx| {
-            while let Some(due) = super::image_budget::idle_trim_due() {
-                let now = std::time::Instant::now();
-                if due <= now {
-                    let (main, background, windows, sweeping) = this
-                        .read_with(cx, |this, _| {
-                            (
-                                this.main_window.handle,
-                                !this.frame.window_active.get(),
-                                this.windows.image_caches(),
-                                this.main_window
-                                    .handle
-                                    .into_iter()
-                                    .chain(this.windows.open_windows().map(|(_, handle)| handle))
-                                    .collect::<Vec<_>>(),
-                            )
-                        })
-                        .unwrap_or_default();
-                    cache.update(cx, |cache, cx| {
-                        cache.idle_trim(background, cx);
-                        super::spoiler_fx::release_media_tile(None, cx);
-                        if let Some(main) = main {
-                            super::wallpaper_cache::release_unshown(main.window_id(), cx);
-                        }
-                    });
-                    for (images, active) in windows {
-                        images.update(cx, |images, cx| images.idle_trim(!active, cx));
-                    }
-                    cx.update(|cx| super::glyph_sweep::begin_for(&sweeping, cx));
-                    break;
-                }
-                cx.background_executor().timer(due - now).await;
+            let wait = due.saturating_duration_since(std::time::Instant::now());
+            if !wait.is_zero() {
+                cx.background_executor().timer(wait).await;
             }
-            let _ = this.update(cx, |this, _| this.slices.idle_trim = None);
+            let _ = this.update(cx, |this, cx| {
+                this.slices.idle_trim = None;
+                match super::image_budget::idle_trim_due() {
+                    Some(due) if due > std::time::Instant::now() => {
+                        this.schedule_idle_image_trim(cx);
+                    }
+                    Some(_) => this.run_idle_image_trim(&cache, cx),
+                    None => {}
+                }
+            });
         }));
+    }
+
+    /// The idle trim itself, over the caches of every open window.
+    fn run_idle_image_trim(
+        &mut self,
+        cache: &Entity<super::image_budget::BoundedImageCache>,
+        cx: &mut Context<Self>,
+    ) {
+        let main = self.main_window.handle;
+        let background = !self.frame.window_active.get();
+        let windows = self.windows.image_caches();
+        let sweeping: Vec<_> = main
+            .into_iter()
+            .chain(self.windows.open_windows().map(|(_, handle)| handle))
+            .collect();
+        cache.update(cx, |cache, cx| {
+            cache.idle_trim(background, cx);
+            super::spoiler_fx::release_media_tile(None, cx);
+            if let Some(main) = main {
+                super::wallpaper_cache::release_unshown(main.window_id(), cx);
+            }
+        });
+        for (images, active) in windows {
+            images.update(cx, |images, cx| images.idle_trim(!active, cx));
+        }
+        super::glyph_sweep::begin_for(&sweeping, cx);
     }
 
     /// Redraw only the chat list (pinned drag follows the pointer).
@@ -626,7 +637,7 @@ impl QuillApp {
         let (Some(parts), Some(composer)) = (&slices.conversation, &slices.composer) else {
             return column;
         };
-        slices.conversation_shown.set(true);
+        slices.mark_conversation_shown();
         let window = self.windows.scope;
         super::image_budget::slice_shown(parts.slice.entity_id(), window);
         super::image_budget::slice_shown(composer.entity_id(), window);
@@ -786,14 +797,18 @@ impl QuillApp {
                 self.sidebar(&auth, false, false, false, false, window, cx)
             }
             SliceKind::Conversation => {
-                self.slices.window.conversation_rendered.set(true);
+                self.slices.window.mark_conversation_rendered();
                 // Position ticks notify only the slices, so the knob and the
                 // a11y value follow playback from here, not the root render.
                 self.sync_seek_slider(window, cx);
+                // With the topic column on screen the pane only asks for a
+                // topic.
+                let forum_on_screen =
+                    self.forum_column_layout(window) != quill::state::ForumColumn::Hidden;
                 div()
                     .size_full()
                     .flex()
-                    .child(self.conversation(ConversationPart::Top, cx))
+                    .child(self.conversation(ConversationPart::Top, forum_on_screen, cx))
                     .into_any_element()
             }
             SliceKind::Composer => {
@@ -813,7 +828,7 @@ impl QuillApp {
                             .flex_none()
                             .flex()
                             .flex_col()
-                            .child(self.conversation(ConversationPart::Bottom, cx))
+                            .child(self.conversation(ConversationPart::Bottom, false, cx))
                             .into_any_element(),
                     })
                     .into_any_element()

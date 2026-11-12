@@ -42,7 +42,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             sender,
             batch: Default::default(),
             call_engine: None,
-            close_held_until: None,
             signaling_outbox: Arc::new(Mutex::new(VecDeque::new())),
             transport_outbox: Arc::new(Mutex::new(VecDeque::new())),
             video_state_outbox: Arc::new(Mutex::new(VecDeque::new())),
@@ -69,7 +68,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             call_sound_watch: None,
             credentials,
             paths: prepared.paths,
-            claimed_owner: None,
+            owner_claim: OwnerClaim::Unclaimed,
             database_key: prepared.database_key,
             outgoing_typing: None,
             outgoing_voice: None,
@@ -78,7 +77,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             flood_attempts: HashMap::new(),
             custom_emoji_hold: None,
             last_request_sweep: None,
-            system_proxy_asked: None,
+            system_proxy: Default::default(),
             network_seen: None,
             carrier_host: None,
         }
@@ -129,8 +128,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     pub(crate) fn chats_path_active(&self) -> bool {
-        matches!(self.session.auth, AuthorizationState::Ready)
-            && matches!(self.session.shutdown, ShutdownPhase::Running)
+        matches!(self.session.auth, AuthorizationState::Ready) && self.session.shutdown.is_running()
     }
 
     /// First page on Ready; further pages only when a `loadChats` request returns ok.
@@ -205,15 +203,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         ) {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let before = self.session.shutdown;
-        let logout = self.session.auth_state.logout_request;
+        let before = self.session.shutdown.clone();
         self.session.begin_close();
         let extra = self.session.request(RequestPurpose::Close, None);
         if let Err(err) = self.sender.send_json(&close_request(extra)) {
             // Nothing went out: the session keeps running.
             self.session.requests.take(extra);
             self.session.shutdown = before;
-            self.session.auth_state.logout_request = logout;
             return Err(err);
         }
         Ok(extra)

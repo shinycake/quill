@@ -292,7 +292,10 @@ fn an_input_brings_back_a_screenshot_of_the_frame_after(cx: &mut TestAppContext)
         ["ui_screenshot", "ui_click", "ui_screenshot"],
         "{log:?}"
     );
-    assert!(log.iter().all(|a| a.chat_id == 11 && a.ok));
+    assert!(
+        log.iter()
+            .all(|a| a.chat_id == 11 && a.outcome == activity::Outcome::Done)
+    );
 }
 
 #[gpui_kit::test]
@@ -521,8 +524,8 @@ fn a_chat_menu_is_cut_with_its_row(cx: &mut TestAppContext) {
         let anchor = row_anchor(vcx, chat as u64);
         app.update(vcx, |app, cx| {
             app.chat_list
-                .overlay
-                .open_menu(ChatMenuState::at(ChatId(chat), anchor));
+                .menu
+                .open_row(ChatMenuState::at(ChatId(chat), anchor));
             cx.notify();
         });
         settle(vcx);
@@ -540,7 +543,7 @@ fn a_chat_menu_is_cut_with_its_row(cx: &mut TestAppContext) {
             "chat {chat}'s menu in the picture"
         );
         app.update(vcx, |app, cx| {
-            app.chat_list.overlay.close_menu();
+            app.chat_list.menu.close();
             cx.notify();
         });
         settle(vcx);
@@ -566,7 +569,7 @@ fn a_secret_chat_peek_is_cut_with_all_chats_on(cx: &mut TestAppContext) {
     settle(vcx);
     for (chat, shown) in [(SECRET, false), (12, true)] {
         app.update(vcx, |app, cx| {
-            app.chat_list.overlay.open_peek(ChatPreviewState {
+            app.chat_list.peek = crate::ui::chat_list_state::PeekPreview::Open(ChatPreviewState {
                 chat_id: ChatId(chat),
                 anchor: gpui_kit::point(gpui_kit::px(40.), gpui_kit::px(200.)),
             });
@@ -613,7 +616,7 @@ fn a_secret_chat_peek_is_cut_with_all_chats_on(cx: &mut TestAppContext) {
             "chat {chat}'s peek in the picture"
         );
         app.update(vcx, |app, cx| {
-            app.chat_list.overlay.close_peek();
+            app.chat_list.peek = crate::ui::chat_list_state::PeekPreview::Idle;
             cx.notify();
         });
         settle(vcx);

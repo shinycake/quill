@@ -4,7 +4,7 @@
 
 use super::tests::new_app;
 use crate::ui::bots_box_send::{BoxKind, BoxSend};
-use crate::ui::dialogs::ProfileDialog;
+use crate::ui::dialogs::{AddBotStep, ChatStep, ProfileDialog};
 use gpui_kit::TestAppContext;
 use quill::bot_invite::Invite;
 use quill::ids::{ChatId, RequestId};
@@ -14,8 +14,10 @@ fn add_bot_box(target: i64) -> ProfileDialog {
     ProfileDialog::AddBot {
         bot_id: 7,
         invite: Invite::default(),
-        target: Some(target),
-        rights: ChatAdminRights::default(),
+        step: AddBotStep::Confirm {
+            target,
+            rights: ChatAdminRights::default(),
+        },
     }
 }
 
@@ -40,7 +42,7 @@ fn the_open_box_waits_only_for_its_own_send(cx: &mut TestAppContext) {
         app.dialogs.profile_dialog = Some(ProfileDialog::ShareGame {
             bot_id: 7,
             game_short_name: "g".into(),
-            target: Some(11),
+            step: ChatStep::Confirm(11),
         });
         assert!(!app.box_sending(), "another kind of box is not held");
     });

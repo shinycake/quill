@@ -175,7 +175,7 @@ impl QuillApp {
                 let subscribers = session
                     .group_member_counts(chat)
                     .map_or(0, |(members, _)| members);
-                quill::personal_channel::card(&chat.title, subscribers, &chat.last_preview)
+                quill::personal_channel::card(&chat.title, subscribers, chat.last_preview())
             });
         match personal_card {
             Some(card) => rows.push(DetailRow {

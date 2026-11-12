@@ -77,13 +77,10 @@ async fn answer_wakes(
             return;
         }
         // Asleep until a link, activation or quit request arrives (the OS
-        // callback and the single-instance listener poke `signal`); links
-        // waiting behind another flow are retried at the old cadence.
-        let wait = if quill::deep_link_inbox::has_pending_links() {
-            std::time::Duration::from_millis(250)
-        } else {
-            std::time::Duration::from_secs(60)
-        };
+        // callback and the single-instance listener poke `signal`). A link
+        // waiting behind another flow is not polled for: the deep-link pump
+        // pokes `signal` when it frees its slot (`QuillApp::pump_deep_link`).
+        let wait = std::time::Duration::from_secs(60);
         super::wake_wait::sleep_or_wake(cx.background_executor(), signal, seen, wait).await;
         seen = signal.epoch();
     }
@@ -104,7 +101,6 @@ pub fn raise_main_window(window: &mut gpui_kit::Window, cx: &mut gpui_kit::App) 
 
 /// The main window, for bringing it back on macOS ([`reopen_main_window`],
 /// [`main_window_on_activation`]).
-#[derive(Clone, Copy)]
 struct MainWindow {
     handle: gpui_kit::AnyWindowHandle,
     state: MainWindowState,
@@ -113,13 +109,21 @@ struct MainWindow {
 /// Where the main window stands since the user last closed it. Raising it
 /// (a tray click, the Dock, Cmd-Tab, a link) makes it `Open` again, so a
 /// later minimize is not taken for a close.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum MainWindowState {
     Open,
-    /// Closed in full screen: it hides once it has left full screen.
-    LeavingFullScreen,
+    /// Closed in full screen: it hides once it has left full screen. The
+    /// task polls for that; leaving this stage (a raise) drops it.
+    LeavingFullScreen {
+        _poll: gpui_kit::Task<()>,
+    },
     /// Closed (hidden or minimized by the close button).
     Closed,
+}
+
+impl MainWindowState {
+    fn leaving_full_screen(&self) -> bool {
+        matches!(self, MainWindowState::LeavingFullScreen { .. })
+    }
 }
 
 impl gpui_kit::Global for MainWindow {}
@@ -181,8 +185,9 @@ fn take_hide_after_full_screen(cx: &mut gpui_kit::App) -> bool {
         return false;
     }
     let main = cx.global_mut::<MainWindow>();
-    let leaving = main.state == MainWindowState::LeavingFullScreen;
+    let leaving = main.state.leaving_full_screen();
     if leaving {
+        // The poll that asks is the stage's own task: it ends right after.
         main.state = MainWindowState::Closed;
     }
     leaving
@@ -196,9 +201,11 @@ pub fn reopen_main_window(cx: &mut gpui_kit::App) {
 }
 
 fn raise_main_window_if(hidden: impl FnOnce(&gpui_kit::Window) -> bool, cx: &mut gpui_kit::App) {
-    if let Some(main) = cx.try_global::<MainWindow>().copied() {
-        let _ = main.handle.update(cx, |_, window, cx| {
-            if main.state == MainWindowState::LeavingFullScreen || hidden(window) {
+    if let Some(main) = cx.try_global::<MainWindow>() {
+        let handle = main.handle;
+        let leaving = main.state.leaving_full_screen();
+        let _ = handle.update(cx, |_, window, cx| {
+            if leaving || hidden(window) {
                 raise_main_window(window, cx);
             }
         });
@@ -214,14 +221,14 @@ fn main_window_on_activation(
     hidden: impl FnOnce(&gpui_kit::Window) -> bool,
     cx: &mut gpui_kit::App,
 ) {
-    let Some(main) = cx.try_global::<MainWindow>().copied() else {
+    let Some(main) = cx.try_global::<MainWindow>() else {
         return;
     };
-    let closed = match main.state {
+    let handle = main.handle;
+    let closed = match &main.state {
         MainWindowState::Open => false,
-        MainWindowState::LeavingFullScreen => true,
-        MainWindowState::Closed => main
-            .handle
+        MainWindowState::LeavingFullScreen { .. } => true,
+        MainWindowState::Closed => handle
             .update(cx, |_, window, _| hidden(window))
             .unwrap_or(false),
     };
@@ -239,9 +246,7 @@ fn main_window_on_activation(
     if let Some(call) = call {
         let _ = call.update(cx, |_, window, _| window.activate_window());
     } else if !chat_window {
-        let _ = main
-            .handle
-            .update(cx, |_, window, cx| raise_main_window(window, cx));
+        let _ = handle.update(cx, |_, window, cx| raise_main_window(window, cx));
     }
 }
 
@@ -257,25 +262,21 @@ const LEFT_FULLSCREEN_POLLS: u32 = 30;
 pub(super) fn hide_main_window(window: &mut gpui_kit::Window, cx: &mut gpui_kit::App) {
     let waiting = cx
         .try_global::<MainWindow>()
-        .is_some_and(|main| main.state == MainWindowState::LeavingFullScreen);
+        .is_some_and(|main| main.state.leaving_full_screen());
     if waiting {
         return;
     }
     let leave_full_screen = cfg!(target_os = "macos") && window.is_fullscreen();
-    if cx.has_global::<MainWindow>() {
-        cx.global_mut::<MainWindow>().state = if leave_full_screen {
-            MainWindowState::LeavingFullScreen
-        } else {
-            MainWindowState::Closed
-        };
-    }
     if !leave_full_screen {
+        if cx.has_global::<MainWindow>() {
+            cx.global_mut::<MainWindow>().state = MainWindowState::Closed;
+        }
         hide_or_minimize(window);
         return;
     }
     window.toggle_fullscreen();
     let main = window.window_handle();
-    cx.spawn(async move |cx| {
+    let poll = cx.spawn(async move |cx| {
         for _ in 0..LEFT_FULLSCREEN_POLLS {
             cx.background_executor().timer(LEFT_FULLSCREEN_POLL).await;
             let left = main.update(cx, |_, window, _| {
@@ -285,13 +286,18 @@ pub(super) fn hide_main_window(window: &mut gpui_kit::Window, cx: &mut gpui_kit:
                 break;
             }
         }
-        let _ = main.update(cx, |_, window, cx| {
+        // The stage ends here whether or not the window is still there.
+        cx.update(|cx| {
             if take_hide_after_full_screen(cx) {
-                hide_or_minimize(window);
+                let _ = main.update(cx, |_, window, _| hide_or_minimize(window));
             }
         });
-    })
-    .detach();
+    });
+    if cx.has_global::<MainWindow>() {
+        cx.global_mut::<MainWindow>().state = MainWindowState::LeavingFullScreen { _poll: poll };
+    } else {
+        poll.detach();
+    }
 }
 
 fn hide_or_minimize(window: &mut gpui_kit::Window) {
@@ -327,10 +333,12 @@ impl super::QuillApp {
             }
             CloseOutcome::Hide => {
                 hide_main_window(window, cx);
+                self.main_window_media_left();
                 false
             }
             CloseOutcome::Minimize => {
                 window.minimize_window();
+                self.main_window_media_left();
                 false
             }
         }

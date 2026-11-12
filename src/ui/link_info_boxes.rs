@@ -22,7 +22,7 @@ use quill::deep_link_types::{gift_duration, gift_reason, language_progress};
 use quill::lang::{keys, tr, tr_with};
 use quill::state::{GiftCodeLookup, LanguageLinkLookup, Session};
 use quill::telegram::envelope::MessageSender;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 
 fn sender_name(session: Option<&Session>, sender: MessageSender) -> String {
@@ -70,18 +70,14 @@ pub(super) fn finish_tracked(
     footer: AnyElement,
     on_close: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Dialog {
-    let body = Rc::new(RefCell::new(Some(body)));
+    let body = Rc::new(Cell::new(Some(body)));
     dialog
         .overlay(true)
         .title(crate::ui::shell::dialog_title(title))
         .content(crate::ui::shell::scrollable_dialog_content_tracked(
             scroll,
             move |content, _, _| {
-                content.child(
-                    body.borrow_mut()
-                        .take()
-                        .unwrap_or_else(|| div().into_any_element()),
-                )
+                content.child(body.take().unwrap_or_else(|| div().into_any_element()))
             },
         ))
         .footer(footer)
@@ -125,7 +121,15 @@ impl QuillApp {
     pub(super) fn open_gift_code_link(&mut self, code: String, cx: &mut Context<Self>) {
         match self.live.as_mut() {
             Some(live) => {
-                if live.driver.request_gift_code_info(&code).is_err() {
+                // A code being applied keeps its box; the new link waits.
+                let applying = live
+                    .driver
+                    .session
+                    .payments
+                    .gift_code
+                    .as_ref()
+                    .is_some_and(|lookup| lookup.applying());
+                if !applying && live.driver.request_gift_code_info(&code).is_err() {
                     self.set_note(StatusNote::error(tr(keys::Q_REST_COULD_NOT_CHECK_THE_GIFT)));
                 }
             }

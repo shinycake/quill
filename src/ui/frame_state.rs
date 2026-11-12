@@ -39,8 +39,10 @@ pub(crate) struct FrameUi {
     /// Whether a Quill window is active, the main one or a chat window
     /// (`QuillApp::follow_windows`): like tdesktop (`isGifPausedAtLeastFor`
     /// → `!widget()->isActive()`), animated stickers and emoji hold still
-    /// while none is.
-    pub(super) window_active: std::cell::Cell<bool>,
+    /// while none is. One cell: `frame_clock::AppGate` holds this same
+    /// cell for the readers that only have a window (the clips' frame
+    /// requests), so the two cannot differ.
+    pub(super) window_active: std::rc::Rc<std::cell::Cell<bool>>,
     /// Whether the main window itself is active, as of its last activation
     /// change or render.
     pub(super) main_active: std::cell::Cell<bool>,
@@ -56,7 +58,7 @@ pub(crate) struct FrameUi {
     pub(super) title_badge: std::cell::RefCell<quill::tray::badge_cache::BadgeCache>,
     /// `media_display_roots`, computed once per frame (rows ask for it
     /// one by one, and it touches the file system).
-    pub(super) media_roots_frame: std::cell::RefCell<Option<std::rc::Rc<[PathBuf]>>>,
+    pub(super) media_roots_frame: std::cell::Cell<Option<std::rc::Rc<[PathBuf]>>>,
     /// The main window's last frame `QuillApp::main_frame_starts` ran for.
     pub(super) frame_started: std::cell::Cell<u64>,
     /// The chat or call window's view being drawn: animated content asks
@@ -148,7 +150,7 @@ impl FrameUi {
             window_views: Default::default(),
             animation_sound: Default::default(),
             own_window_tick: Default::default(),
-            window_active: std::cell::Cell::new(true),
+            window_active: std::rc::Rc::new(std::cell::Cell::new(true)),
             main_active: std::cell::Cell::new(true),
             main_covered: Default::default(),
             viewer_cover: Default::default(),

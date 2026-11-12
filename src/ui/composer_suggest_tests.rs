@@ -76,11 +76,11 @@ fn shown(
 ) -> Option<(SuggestKind, Vec<String>, Option<usize>)> {
     app.read_with(vcx, |app, _| {
         let ui = &app.composer_ui.suggest;
-        ui.active.as_ref().map(|a| {
+        ui.active().map(|a| {
             (
                 a.query.kind,
                 a.items.iter().map(|i| i.glyph.clone()).collect(),
-                ui.selected,
+                a.selected,
             )
         })
     })

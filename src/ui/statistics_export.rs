@@ -117,7 +117,7 @@ fn page_sheets(
             let is_poll = match session.stats_post(chat_id, message_id) {
                 PostLookup::Ready(post) => post.is_poll,
                 PostLookup::Missing => false,
-                PostLookup::Unknown => {
+                PostLookup::Loading(_) | PostLookup::Unknown => {
                     unsettled.set(true);
                     false
                 }
@@ -125,7 +125,7 @@ fn page_sheets(
             let poll = match session.messages.poll_stats.get(&(chat_id, message_id)) {
                 Some(PollStatsFetch::Loaded(graph)) => resolve(session, chat_id, graph, unsettled),
                 Some(PollStatsFetch::Failed(_)) => None,
-                None | Some(PollStatsFetch::Loading) => {
+                None | Some(PollStatsFetch::Loading(_)) => {
                     unsettled.set(is_poll || unsettled.get());
                     None
                 }

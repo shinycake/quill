@@ -284,10 +284,15 @@ impl QuillApp {
         let p2p = who_of(PrivacySettingKey::PeerToPeer);
         let privacy_loading = [PrivacySettingKey::AllowCalls, PrivacySettingKey::PeerToPeer]
             .into_iter()
-            .any(|key| matches!(rule_state(key), None | Some(PrivacyKeyState::Loading(_))));
+            .any(|key| {
+                matches!(
+                    rule_state(key),
+                    None | Some(PrivacyKeyState::Loading { .. })
+                )
+            });
         let privacy_failed = [PrivacySettingKey::AllowCalls, PrivacySettingKey::PeerToPeer]
             .into_iter()
-            .any(|key| matches!(rule_state(key), Some(PrivacyKeyState::Failed)));
+            .any(|key| matches!(rule_state(key), Some(PrivacyKeyState::Failed { .. })));
         let ptt_section = self.push_to_talk_settings(&prefs.push_to_talk, cx);
         let mic_test_section = self.mic_test_section(cx);
         let device_prefs_section = self.call_device_prefs_section(cx);
@@ -445,7 +450,7 @@ impl QuillApp {
                                             .use_less_data_for_calls = on;
                                     }
                                     demo.settings.data_storage.seeded =
-                                        quill::data_settings::Seed::Seeded;
+                                        quill::data_settings::PresetsSeed::Seeded;
                                 }
                                 cx.notify();
                             })),

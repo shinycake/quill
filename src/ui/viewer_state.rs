@@ -31,13 +31,16 @@ pub(crate) struct ViewerUi {
     /// The viewer's media frame for the current window size (zoom/pan
     /// math works in it).
     pub(super) frame: (f32, f32),
-    /// Parity slice 5: drag-pan anchor — last mouse position in px while the
-    /// left button is held over the zoomed visual.
-    pub(super) drag: Option<(f32, f32)>,
+    /// The pointer over the viewer: panning the zoomed picture (the anchor
+    /// is the last mouse position), resting on a control (they must not
+    /// auto-hide), or elsewhere.
+    pub(super) pointer: super::viewer_parts::Pointer,
     /// Wheel and trackpad scrolling toward the next item.
     pub(super) wheel: WheelNav,
     /// A horizontal trackpad swipe pulling the next or previous arrow in.
     pub(super) swipe: SwipeNav,
+    /// The wait that ends a swipe the platform sends no end phase for.
+    pub(super) swipe_timer: super::viewer_parts::SwipeTimer,
     /// Parity slice 5: the clip of the shown item, playing (sound playing)
     /// or paused (clock frozen, sound paused), a GIF animating as an image,
     /// or the line saying why it could not play. The controls read the
@@ -49,13 +52,11 @@ pub(crate) struct ViewerUi {
     /// Draws the viewer's picture above the cached viewer slice, so a new
     /// video frame redraws only the picture (`media_viewer::layer`).
     pub(super) video_layer: Option<Entity<super::media_viewer::ViewerVideoLayer>>,
-    /// MED1: photo rotation and mirror flips (photos only; reset on
-    /// open/step). Rendered from `viewer_rotated`.
-    pub(super) orientation: quill::media_viewer::ViewerOrientation,
-    /// MED1: re-oriented render of the viewer photo, keyed
-    /// `(path, orientation code)`; decoded eagerly by Rotate/Flip so the
-    /// overlay render stays allocation-free. A decode of a new orientation
-    /// replaces `orientation` when it lands; a late one is dropped.
+    /// MED1: photo rotation and mirror flips (reset on open/step) with the
+    /// re-oriented render of the viewer photo; decoded eagerly by
+    /// Rotate/Flip so the overlay render stays allocation-free. A decode of
+    /// a new orientation replaces the one shown when it lands; a late one
+    /// is dropped.
     pub(super) reorient: super::viewer_parts::Reorient,
     /// HDR rendition of the current picture file (macOS).
     pub(super) hdr: super::hdr_image::HdrViewer,
@@ -72,8 +73,6 @@ pub(crate) struct ViewerUi {
     pub(super) last_activity: std::time::Instant,
     /// Toolbar, arrows and caption: up, or faded out after the idle wait.
     pub(super) visibility: super::viewer_parts::ControlsVisibility,
-    /// The pointer rests on a control, so they must not auto-hide.
-    pub(super) over_controls: bool,
     /// The video controller's sliders, drag previews, scrubber hover and
     /// the Space-hold boost (`video_player::controls`).
     pub(super) controls: super::video_player::controls::VideoControlsState,
@@ -100,6 +99,42 @@ impl super::on_screen::Farewell for ViewerUi {
 }
 
 impl ViewerUi {
+    /// Another item is on screen: what belongs to the item before it goes,
+    /// and `orientation` is the turn the new one starts with. Open, step
+    /// and "the current item was deleted" all come here; what outlives the
+    /// item (the open's own state) is [`Self::closed`]'s.
+    pub(super) fn new_item(&mut self, orientation: quill::media_viewer::ViewerOrientation) {
+        self.zoom.reset();
+        self.pointer.end_pan();
+        self.wheel.new_item();
+        self.swipe.new_item();
+        self.hdr.reset();
+        self.clip.clear_error();
+        self.reorient.reset(orientation);
+        self.extra.loop_pause = super::media_viewer::LoopPause::Free;
+    }
+
+    /// The viewer closed: everything that belongs to this open goes (the
+    /// per-item state is reset by the next open's [`Self::new_item`]).
+    pub(super) fn closed(&mut self) {
+        // A timestamp link's start belongs to this open: a clip that never
+        // played here must not start there the next time it opens.
+        self.pending_seek = None;
+        self.extra.saved_toast = Default::default();
+        // Reopening the same item starts with its caption collapsed.
+        self.extra.caption = Default::default();
+        self.state.close();
+        // A turned photo is a full-size picture of its own (up to about
+        // 20 MB, and as much again on the GPU); opening the next item
+        // replaced it, but nothing did until then.
+        self.reorient.reset(Default::default());
+        self.hdr.reset();
+        // A pan held or a control rested on when the viewer closed ends
+        // with it, and so does the wait for a swipe's end.
+        self.pointer = Default::default();
+        self.swipe_timer = Default::default();
+    }
+
     pub(super) fn new() -> Self {
         Self {
             state: MediaViewer::closed(),
@@ -107,20 +142,19 @@ impl ViewerUi {
             photo_editor: Default::default(),
             zoom: ViewerZoom::new(),
             frame: (720.0, 480.0),
-            drag: None,
+            pointer: Default::default(),
             wheel: WheelNav::default(),
             swipe: SwipeNav::default(),
+            swipe_timer: Default::default(),
             clip: Default::default(),
             pip: None,
             video_layer: None,
-            orientation: Default::default(),
             reorient: Default::default(),
             hdr: Default::default(),
             open_gen: 0,
             pending_seek: None,
             last_activity: std::time::Instant::now(),
             visibility: Default::default(),
-            over_controls: false,
             album_pin: Default::default(),
             controls: Default::default(),
         }

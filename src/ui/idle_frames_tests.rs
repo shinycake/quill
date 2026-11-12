@@ -93,7 +93,7 @@ fn a_dialog_draws_nothing_behind_another_app(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     activate(vcx);
     app.update(vcx, |app, cx| {
-        app.settings.open = true;
+        app.settings.nav = crate::ui::settings_window::SettingsNav::List;
         cx.notify();
     });
     let _ = frames(vcx, 5);

@@ -42,7 +42,7 @@ fn a_send_error_later_in_the_ingest_keeps_the_captured_answer() {
 fn a_grams_peer_request_that_never_left_is_asked_again() {
     use crate::premium_hub::ton::{TonTx, TonTxKind};
     let (_dir, mut driver, sender, _sink, _seq) = toggle_driver();
-    driver.session.payments.hub.grams.entries.push(TonTx {
+    driver.session.payments.hub.grams.rows.push(TonTx {
         id: "t1".into(),
         key: "t1".into(),
         gram_nano: 1,
@@ -52,7 +52,7 @@ fn a_grams_peer_request_that_never_left_is_asked_again() {
     });
     sender.refuse(true);
     assert!(!driver.grams_tick(false), "nothing left");
-    assert!(driver.session.payments.hub.grams.asked_chats.is_empty());
+    assert!(driver.session.payments.hub.grams.peers.is_empty());
     sender.refuse(false);
     assert!(driver.grams_tick(false), "asked on the next tick");
     assert!(
@@ -142,7 +142,7 @@ fn a_deletion_in_another_chat_leaves_the_search_jump_alone() {
     use crate::state::ChatSearchJump;
     let (_dir, mut driver, _sender, _sink, _seq) = toggle_driver();
     let search = &mut driver.session.search.chat_search;
-    search.chat_id = Some(ChatId(1));
+    search.open_for(ChatId(1));
     search.jump = ChatSearchJump::Ready {
         message_id: MessageId(77),
     };

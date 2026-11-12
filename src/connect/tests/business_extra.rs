@@ -6,7 +6,7 @@ use crate::business_bots::{BotRights, ConnectedBot};
 use crate::business_settings::BusinessRecipients;
 use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::platform::MemorySecretStore;
-use crate::state::ChatLinkSave;
+use crate::state::ChatLinkAnswer;
 use crate::state::fetch::Fetch;
 use crate::telegram::client::copy_and_parse;
 use std::sync::Arc;
@@ -103,10 +103,10 @@ fn chat_links_load_create_edit_and_delete() {
         .cloned()
         .unwrap();
     assert_eq!(links[0].link, "https://t.me/m/New");
-    assert_eq!(
-        driver.session.settings.business_extra.chat_link_save,
-        ChatLinkSave::Saved
-    );
+    assert!(matches!(
+        driver.session.settings.business_extra.chat_link_answer,
+        ChatLinkAnswer::Saved(_)
+    ));
 
     driver
         .edit_chat_link("https://t.me/m/Ab", "Hey", "Promo 2")
@@ -380,10 +380,23 @@ fn the_bot_lookup_collects_three_answers() {
     );
     let lookup = &driver.session.settings.business_extra.lookup;
     assert!(lookup.done());
-    assert_eq!(lookup.exact, Some(Some(42)));
-    assert_eq!(lookup.mine.as_deref(), Some(&[42][..]));
-    assert_eq!(lookup.global.as_deref(), Some(&[][..]));
-    assert!(driver.session.settings.business.error.is_none());
+    assert_eq!(lookup.exact.data(), Some(&Some(42)));
+    assert_eq!(lookup.mine.items(), &[42][..]);
+    // A refused search is a failure the screen can show, not "no match".
+    assert!(lookup.global.error().is_some());
+    assert!(lookup.error().is_some());
+    // The same query after a failure asks again (Retry).
+    driver.lookup_business_bot("shop_bot").unwrap();
+    assert_eq!(count_sent(&recorder, "searchPublicChat"), 2);
+    assert!(
+        driver
+            .session
+            .settings
+            .business_extra
+            .lookup
+            .exact
+            .is_loading()
+    );
     // An invalid query clears it without sending.
     driver.lookup_business_bot("@").unwrap();
     assert!(
@@ -395,7 +408,7 @@ fn the_bot_lookup_collects_three_answers() {
             .query
             .is_empty()
     );
-    assert_eq!(count_sent(&recorder, "searchPublicChat"), 1);
+    assert_eq!(count_sent(&recorder, "searchPublicChat"), 2);
 }
 
 #[test]
@@ -428,15 +441,17 @@ fn start_page_and_ads_requests() {
 }
 
 #[test]
-fn a_refused_link_save_goes_back_to_idle_and_only_its_own_answer_counts() {
+fn a_link_save_answer_names_the_request_it_answers() {
     let (mut driver, recorder, sink, seq) = driver_parts();
-    let save = |driver: &ConnectDriver<_>| driver.session.settings.business_extra.chat_link_save;
-    driver.create_chat_link("Hello", "").unwrap();
-    assert!(matches!(save(&driver), ChatLinkSave::Saving(_)));
+    let answer =
+        |driver: &ConnectDriver<_>| driver.session.settings.business_extra.chat_link_answer;
+    let first_id = driver.create_chat_link("Hello", "").unwrap();
+    assert_eq!(
+        answer(&driver),
+        ChatLinkAnswer::None,
+        "nothing answered yet"
+    );
     let first = extra_of(&recorder, "createBusinessChatLink");
-    // The box was closed and a new one opened: the old save no longer drives it.
-    driver.session.settings.business_extra.chat_link_save = ChatLinkSave::Idle;
-    assert_eq!(save(&driver), ChatLinkSave::Idle);
     feed(
         &mut driver,
         &seq,
@@ -445,9 +460,10 @@ fn a_refused_link_save_goes_back_to_idle_and_only_its_own_answer_counts() {
             r#"{{"@type":"businessChatLink","@extra":"{first}","link":"https://t.me/m/Old","text":{{"@type":"formattedText","text":"Hello","entities":[]}},"title":"","view_count":0}}"#
         ),
     );
-    assert_eq!(save(&driver), ChatLinkSave::Idle);
+    assert_eq!(answer(&driver), ChatLinkAnswer::Saved(first_id));
 
-    driver.create_chat_link("Again", "").unwrap();
+    let second_id = driver.create_chat_link("Again", "").unwrap();
+    assert_ne!(first_id, second_id);
     let second = recorder
         .snapshot()
         .iter()
@@ -462,7 +478,7 @@ fn a_refused_link_save_goes_back_to_idle_and_only_its_own_answer_counts() {
         &sink,
         &format!(r#"{{"@type":"error","@extra":"{second}","code":400,"message":"X"}}"#),
     );
-    assert_eq!(save(&driver), ChatLinkSave::Idle);
+    assert_eq!(answer(&driver), ChatLinkAnswer::Refused(second_id));
     assert!(driver.session.settings.business.error.is_some());
 }
 

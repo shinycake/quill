@@ -186,7 +186,7 @@ impl QuillApp {
         let Some(chat) = session.chats.get(&chat_id.0) else {
             return false;
         };
-        if !(chat.can_post() && chat.can_send_basic_messages) {
+        if !(chat.can_post() && chat.can_send_basic_messages()) {
             return false;
         }
         if self
@@ -234,7 +234,7 @@ impl QuillApp {
             session
                 .open_chat_id()
                 .and_then(|chat| session.chats.get(&chat.0))
-                .is_some_and(|chat| chat.can_post() && chat.can_send_basic_messages)
+                .is_some_and(|chat| chat.can_post() && chat.can_send_basic_messages())
         });
         if !can_attach {
             return false;
@@ -532,7 +532,8 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return false;
         };
-        let pinned = session.pinned_chat_ids(self.chat_list.filter == ChatListFilter::Archived);
+        let pinned =
+            session.pinned_chat_ids(self.chat_list.view.filter() == ChatListFilter::Archived);
         let chats = visible_pinned(&self.listed_chat_ids(), &pinned);
         let Some(&chat_id) = chats.get(index) else {
             return false;
@@ -625,7 +626,7 @@ impl QuillApp {
             .into_iter()
             .map(quill::folder_order::FolderTab::folder_id)
             .collect();
-        let Some(target) = near_folder(&tabs, self.folders.tab, forward) else {
+        let Some(target) = near_folder(&tabs, self.chat_list.view.folder(), forward) else {
             return false;
         };
         self.open_folder_tab(target, cx);
@@ -661,7 +662,8 @@ impl QuillApp {
             return false;
         };
         let size = window.viewport_size();
-        self.chat_list.overlay.open_menu(ChatMenuState::at(
+        self.chat_list.peek = crate::ui::chat_list_state::PeekPreview::Idle;
+        self.chat_list.menu.open_row(ChatMenuState::at(
             chat_id,
             point(size.width - px(220.), px(64.)),
         ));

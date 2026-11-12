@@ -453,7 +453,7 @@ impl QuillApp {
                     Some(tr(keys::Q_CHAT_COULDNT_LOAD_LINK_PREVIEW).to_string())
                 }
                 // Request in flight.
-                quill::state::LinkPreviewFetch::Asked => {
+                quill::state::LinkPreviewFetch::Asked(_) => {
                     Some(tr(keys::Q_CHAT_GETTING_LINK_INFO).to_string())
                 }
             },

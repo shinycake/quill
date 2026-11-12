@@ -95,6 +95,18 @@ pub fn set_palette(account: &crate::ids::AccountKey, colors: &[NameAccentColor])
     }
 }
 
+/// `account` logged out or was removed: its palette goes, and the screen no
+/// longer reads it, so a later sign-in under the same key starts empty.
+pub fn forget_account(account: &crate::ids::AccountKey) {
+    if let Ok(mut palettes) = PALETTES.write() {
+        palettes.remove(&account.0);
+    }
+    let mut active = ACTIVE.write_or_recover();
+    if active.as_deref() == Some(account.0.as_str()) {
+        *active = None;
+    }
+}
+
 /// `account` takes the screen: its palette is the one names are painted
 /// with from the next frame.
 pub fn set_active_account(account: &crate::ids::AccountKey) {
@@ -232,5 +244,15 @@ mod tests {
         let unknown = super::name_color_rgb_of("palette-none", 9001, false);
         assert_ne!(unknown, 0x111111);
         assert_ne!(unknown, 0x333333);
+    }
+
+    #[test]
+    fn a_removed_account_loses_its_palette() {
+        use crate::ids::AccountKey;
+        let a = AccountKey::new("palette-gone").unwrap();
+        super::set_palette(&a, &[entry(9002, -1, &[0x555555], &[0x666666])]);
+        assert_eq!(super::name_color_rgb_of(&a.0, 9002, false), 0x555555);
+        super::forget_account(&a);
+        assert_ne!(super::name_color_rgb_of(&a.0, 9002, false), 0x555555);
     }
 }

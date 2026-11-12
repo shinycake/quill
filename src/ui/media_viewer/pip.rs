@@ -79,11 +79,7 @@ impl QuillApp {
         // One sound at a time: a live PiP goes too.
         self.close_live_pip(cx);
         self.close_media_viewer(cx);
-        let last_volume = if self.players.volume > 0.0 {
-            self.players.volume
-        } else {
-            self.players.unmuted_volume
-        };
+        let last_volume = self.players.volume.last_audible();
         let account = self.session().map(|session| session.account.clone());
         let weak = cx.entity().downgrade();
         // The link belongs to the viewer of the window that opened it.
@@ -341,11 +337,8 @@ impl QuillApp {
     /// The window's volume changed: it is the app's video volume too, and
     /// the player bar's speaker shows it.
     fn pip_volume(&mut self, volume: f32, cx: &mut Context<Self>) {
-        if volume > 0.0 {
-            self.players.unmuted_volume = volume;
-        }
-        self.players.volume = volume;
-        self.players.audio.set_volume(volume);
+        self.players.volume = self.players.volume.set(volume);
+        self.players.audio.set_volume(self.players.volume());
         cx.notify();
     }
 }

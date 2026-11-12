@@ -18,21 +18,54 @@ use gpui_kit::*;
 use quill::bot_verification::{
     DESCRIPTION_LIMIT_DEFAULT, VerifyTarget, description_to_send, verified_by_bot,
 };
+use quill::ids::RequestId;
 use quill::lang::{keys, tr, tr_with};
 use quill::state::ChatSummary;
 use quill::telegram::envelope::ChatKind;
 use quill::telegram::requests::MessageSenderRef;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 
 /// Chats the list shows at most (the list is the loaded chat list).
 const LIST_LIMIT: usize = 80;
 
+/// What a confirm step does for its chat.
 #[derive(Clone, Copy, PartialEq, Eq)]
+enum Act {
+    Verify,
+    Remove,
+}
+
+/// Where the box is. Every stage has a way out: the answer, a refusal, Back
+/// or Close, the account going away (`DialogUi` is replaced whole).
+#[derive(Clone, PartialEq, Eq)]
 enum Step {
     Pick,
     Add(i64),
     Remove(i64),
+    /// The request is out as `request`; its answer (taken from the
+    /// session's acks) returns to the list, its refusal to `Refused`.
+    Sending {
+        request: RequestId,
+        chat: i64,
+        act: Act,
+    },
+    /// TDLib refused: the confirm step again, with the reason.
+    Refused {
+        chat: i64,
+        act: Act,
+        reason: String,
+    },
+}
+
+impl Step {
+    /// The step after the answer to what `Sending` sent for `chat`.
+    fn answered(chat: i64, act: Act, answer: quill::state::Answer) -> Self {
+        match answer {
+            quill::state::Answer::Done => Self::Pick,
+            quill::state::Answer::Failed(reason) => Self::Refused { chat, act, reason },
+        }
+    }
 }
 
 pub(super) struct BotVerifyDialog {
@@ -112,7 +145,52 @@ impl QuillApp {
     }
 
     fn close_bot_verify(&mut self, cx: &mut Context<Self>) {
+        self.forget_bot_verify_request();
         self.dialogs.bot_verify_dialog = None;
+        cx.notify();
+    }
+
+    /// Nothing waits for the box's request any more (Back, Close): its
+    /// answer is dropped.
+    fn forget_bot_verify_request(&mut self) {
+        let Some(BotVerifyDialog {
+            step: Step::Sending { request, .. },
+            ..
+        }) = self.dialogs.bot_verify_dialog.as_ref()
+        else {
+            return;
+        };
+        let request = *request;
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.acks.forget(request);
+        }
+    }
+
+    /// Each frame of the window hosting the box: the answer of its request
+    /// returns the box to the list, a refusal puts the reason on the
+    /// confirm step.
+    pub(super) fn pump_bot_verify(&mut self, cx: &mut Context<Self>) {
+        let Some(BotVerifyDialog {
+            step: Step::Sending { request, chat, act },
+            ..
+        }) = self.dialogs.bot_verify_dialog.as_ref()
+        else {
+            return;
+        };
+        let (request, chat, act) = (*request, *chat, *act);
+        let answer = self
+            .live
+            .as_mut()
+            .map(|live| live.driver.session.acks.take(request));
+        let next = match answer {
+            // The client went away: nothing can answer.
+            None => Step::Pick,
+            Some(None) => return,
+            Some(Some(answer)) => Step::answered(chat, act, answer),
+        };
+        if let Some(dialog) = self.dialogs.bot_verify_dialog.as_mut() {
+            dialog.step = next;
+        }
         cx.notify();
     }
 
@@ -123,6 +201,7 @@ impl QuillApp {
         let Some(bot_id) = self.dialogs.bot_verify_dialog.as_ref().map(|d| d.bot_id) else {
             return;
         };
+        self.forget_bot_verify_request();
         let default = self.bot_verify_default_description(bot_id);
         if let Some(dialog) = self.dialogs.bot_verify_dialog.as_mut() {
             if matches!(step, Step::Add(_)) {
@@ -174,12 +253,16 @@ impl QuillApp {
             .collect()
     }
 
-    /// Send the verification (or its removal) for the picked chat.
+    /// Send the verification (or its removal) for the picked chat. `true`:
+    /// the box goes back to the list; `false`: it stays (the description is
+    /// not sendable, or the request is out and the box waits for it).
     fn submit_bot_verify(&mut self, remove: bool, cx: &mut Context<Self>) -> bool {
         let Some(dialog) = self.dialogs.bot_verify_dialog.as_ref() else {
             return true;
         };
-        let (Step::Add(chat_id) | Step::Remove(chat_id)) = dialog.step else {
+        let (Step::Add(chat_id) | Step::Remove(chat_id) | Step::Refused { chat: chat_id, .. }) =
+            dialog.step
+        else {
             return false;
         };
         let bot_id = dialog.bot_id;
@@ -220,6 +303,17 @@ impl QuillApp {
             live.driver
                 .set_bot_verification(bot_id, sender, &description)
         };
+        let request = sent.as_ref().ok().copied();
+        if let Some(request) = request {
+            live.driver.session.acks.expect(request);
+            if let Some(dialog) = self.dialogs.bot_verify_dialog.as_mut() {
+                dialog.step = Step::Sending {
+                    request,
+                    chat: chat_id,
+                    act: if remove { Act::Remove } else { Act::Verify },
+                };
+            }
+        }
         self.set_note(match (sent, remove) {
             (Ok(_), false) => StatusNote::silent(tr_with(
                 keys::Q_MEDIA_VERIFYING_AS_A,
@@ -232,7 +326,7 @@ impl QuillApp {
             (Err(_), _) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_SEND_THE_VERIFICATION)),
         });
         cx.notify();
-        true
+        request.is_none()
     }
 
     pub(super) fn build_bot_verify_dialog(
@@ -249,7 +343,7 @@ impl QuillApp {
             let Some(state) = this.dialogs.bot_verify_dialog.as_ref() else {
                 return dialog.on_close(on_close);
             };
-            let (bot_id, step, input) = (state.bot_id, state.step, state.input.clone());
+            let (bot_id, step, input) = (state.bot_id, state.step.clone(), state.input.clone());
             let muted = cx.theme().muted_foreground;
             let (title, body, footer) = match step {
                 Step::Pick => {
@@ -314,8 +408,22 @@ impl QuillApp {
                         footer,
                     )
                 }
-                Step::Add(chat_id) | Step::Remove(chat_id) => {
-                    let remove = matches!(step, Step::Remove(_));
+                Step::Add(chat_id)
+                | Step::Remove(chat_id)
+                | Step::Sending { chat: chat_id, .. }
+                | Step::Refused { chat: chat_id, .. } => {
+                    let remove = match &step {
+                        Step::Remove(_) => true,
+                        Step::Sending { act, .. } | Step::Refused { act, .. } => {
+                            *act == Act::Remove
+                        }
+                        _ => false,
+                    };
+                    let sending = matches!(step, Step::Sending { .. });
+                    let refusal = match &step {
+                        Step::Refused { reason, .. } => Some(reason.clone()),
+                        _ => None,
+                    };
                     let chat = this.session().and_then(|s| s.chats.get(&chat_id));
                     let name = chat.map(|c| c.title.clone()).unwrap_or_default();
                     let target = chat
@@ -352,7 +460,7 @@ impl QuillApp {
                         .flex_col()
                         .gap_3()
                         .child(div().text_sm().child(text));
-                    if custom && !remove {
+                    if custom && !remove && !sending {
                         body = body
                             .child(
                                 Textarea::new(&input)
@@ -367,6 +475,23 @@ impl QuillApp {
                                          profile of {name}."
                                     )),
                             );
+                    }
+                    if sending {
+                        body = body.child(div().text_xs().text_color(muted).child(if remove {
+                            tr_with(
+                                keys::Q_MEDIA_REMOVING_THE_VERIFICATION_FROM,
+                                &[("name", &name.to_string())],
+                            )
+                        } else {
+                            tr_with(
+                                keys::Q_MEDIA_VERIFYING_AS_A,
+                                &[("name", &name.to_string()), ("noun", target.noun())],
+                            )
+                        }));
+                    }
+                    if let Some(reason) = refusal {
+                        body =
+                            body.child(div().text_xs().text_color(cx.theme().danger).child(reason));
                     }
                     let footer = div()
                         .flex()
@@ -388,13 +513,21 @@ impl QuillApp {
                                 } else {
                                     target.title()
                                 })
-                                .disabled(too_long);
+                                .disabled(too_long || sending);
                             let button = if remove {
                                 button.danger()
                             } else {
                                 button.primary()
                             };
                             button.on_click(cx.listener(move |this, _, window, cx| {
+                                if this
+                                    .dialogs
+                                    .bot_verify_dialog
+                                    .as_ref()
+                                    .is_some_and(|d| matches!(d.step, Step::Sending { .. }))
+                                {
+                                    return;
+                                }
                                 if this.submit_bot_verify(remove, cx) {
                                     this.set_bot_verify_step(Step::Pick, window, cx);
                                     window.refresh();
@@ -419,16 +552,13 @@ impl QuillApp {
                 .child(body)
                 .child(footer)
                 .into_any_element();
-            let content = Rc::new(RefCell::new(Some(content)));
+            let content = Rc::new(Cell::new(Some(content)));
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(title))
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |slot, _, _| {
-                        let body = content
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = content.take().unwrap_or_else(|| div().into_any_element());
                         slot.child(body)
                     },
                 ))

@@ -77,3 +77,50 @@ fn whats_new_opens_once_from_settings_and_esc_closes_it(cx: &mut TestAppContext)
     assert_eq!(app.read_with(vcx, |app, _| app.whats_new_window()), None);
     assert_eq!(vcx.update(|_, cx| cx.windows().len()), 1);
 }
+
+fn loaded_versions(app: &QuillApp) -> Option<Vec<String>> {
+    match &app.preferences.whats_new.notes {
+        crate::ui::whats_new::Notes::Loaded(notes) => {
+            Some(notes.iter().map(|n| n.version.clone()).collect())
+        }
+        _ => None,
+    }
+}
+
+#[gpui_kit::test]
+fn a_refresh_replaces_the_notes_and_a_failed_one_keeps_them(cx: &mut TestAppContext) {
+    use crate::ui::whats_new::Notes;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.demo_release_notes();
+        let Notes::Loaded(shown) = std::mem::take(&mut app.preferences.whats_new.notes) else {
+            panic!("the demo notes are loaded");
+        };
+        let before = shown.len();
+        // A refresh that fails goes back to what was shown.
+        app.preferences.whats_new.notes = Notes::Loading {
+            stale: Some(shown.clone()),
+            _fetch: gpui_kit::Task::ready(()),
+        };
+        app.finish_release_notes(None, cx);
+        assert_eq!(loaded_versions(app).map(|v| v.len()), Some(before));
+        // One that lands replaces them.
+        app.preferences.whats_new.notes = Notes::Loading {
+            stale: Some(shown),
+            _fetch: gpui_kit::Task::ready(()),
+        };
+        app.finish_release_notes(Some(Vec::new()), cx);
+        assert_eq!(loaded_versions(app), Some(Vec::new()));
+        // A first load that fails is a failure with Retry.
+        app.preferences.whats_new.notes = Notes::Loading {
+            stale: None,
+            _fetch: gpui_kit::Task::ready(()),
+        };
+        app.finish_release_notes(None, cx);
+        assert!(matches!(app.preferences.whats_new.notes, Notes::Failed));
+        // An answer with nothing loading is dropped.
+        app.finish_release_notes(Some(Vec::new()), cx);
+        assert!(matches!(app.preferences.whats_new.notes, Notes::Failed));
+    });
+}

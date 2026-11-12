@@ -26,7 +26,6 @@ use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with, trn_with};
 use quill::state::{DiscussionControl, ProfileChatsFetch, ProfileChatsKind, Session, SubmitView};
 use quill::telegram::envelope::{ChatAvailableReactions, ChatKind, ReactionType};
-use std::cell::RefCell;
 use std::rc::Rc;
 
 impl QuillApp {
@@ -109,16 +108,19 @@ impl QuillApp {
             self.start_event_log_poll(chat_id, cx);
             self.hook_event_log_scroll(cx);
         }
-        if let Some(live) = self.live.as_mut() {
+        let refused = self.live.as_mut().is_some_and(|live| {
             let driver = &mut live.driver;
-            let _ = match view {
+            match view {
                 GroupSettingsView::Discussion if channel => {
                     driver.fetch_suitable_discussion_chats().map(|_| ())
                 }
-                GroupSettingsView::InviteLinks => driver
-                    .fetch_chat_invite_links(chat_id)
-                    .and_then(|_| driver.fetch_chat_invite_link_counts(chat_id))
-                    .map(|_| ()),
+                GroupSettingsView::InviteLinks => {
+                    // Two independent asks: a refused list does not skip the
+                    // counts, and the counts' own refusal is not the list's.
+                    let list = driver.fetch_chat_invite_links(chat_id).map(|_| ());
+                    let counts = driver.fetch_chat_invite_link_counts(chat_id).map(|_| ());
+                    list.and(counts)
+                }
                 GroupSettingsView::JoinRequests => {
                     driver.ask_join_requests(chat_id, "", true);
                     Ok(())
@@ -130,7 +132,13 @@ impl QuillApp {
                     driver.fetch_chat_event_log(chat_id).map(|_| ())
                 }
                 _ => Ok(()),
-            };
+            }
+            .is_err()
+        });
+        // A page whose ask was refused would wait for an answer that never
+        // comes: say so, and reopening the page asks again.
+        if refused {
+            self.set_note(StatusNote::error(tr(keys::Q_PEOPLE_COULDNT_LOAD_RETRY)));
         }
         cx.notify();
     }
@@ -497,16 +505,12 @@ impl QuillApp {
         if is_channel
             && let Some(custom) = custom_reactions_over_level(
                 current.as_ref(),
-                session
-                    .groups
-                    .chat_boost_status
-                    .get(&chat_id.0)
-                    .and_then(|(level, _)| {
-                        custom_reactions_allowed(
-                            session.groups.chat_boost_features.get(&chat_id.0),
-                            *level,
-                        )
-                    }),
+                session.groups.boost_level(chat_id.0).and_then(|level| {
+                    custom_reactions_allowed(
+                        session.groups.chat_boost_features.get(&chat_id.0),
+                        level,
+                    )
+                }),
             )
         {
             let count = custom.to_string();
@@ -884,12 +888,8 @@ impl QuillApp {
                 .is_some_and(|dialog| dialog.view == GroupSettingsView::RecentActions);
             // `content` needs an `Fn` closure, but the body is built once
             // per dialog render — hand it over through a one-shot cell.
-            let body = Rc::new(RefCell::new(Some(body)));
-            let take = move || {
-                body.borrow_mut()
-                    .take()
-                    .unwrap_or_else(|| div().into_any_element())
-            };
+            let body = Rc::new(std::cell::Cell::new(Some(body)));
+            let take = move || body.take().unwrap_or_else(|| div().into_any_element());
             let content: Box<dyn Fn(DialogContent, &mut Window, &mut App) -> DialogContent> =
                 if fixed {
                     Box::new(move |content, window, _| {

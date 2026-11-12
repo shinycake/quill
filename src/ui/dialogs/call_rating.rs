@@ -1,19 +1,9 @@
 use quill::lang::{Key, keys};
-/// Phase C2i: rating-detail draft for the call-end card. `problems` is
-/// indexed by `CALL_PROBLEMS` (schema 1.8.67, `:7253`-`:7277`). It is
-/// the draft of one call's rating: the summary of another call never shows
-/// it or submits it.
-pub struct RatingDetail {
-    /// The call whose summary the stars were tapped on.
-    pub(crate) call_id: i32,
-    pub(crate) stars: i32,
-    pub(crate) problems: [bool; CALL_PROBLEMS.len()],
-}
-
 /// Phase C2i: the nine `CallProblem` constructors (TDLib 1.8.67,
 /// `schema/td_api.tl:7253`-`:7277`) with their schema descriptions,
-/// in schema order. Index-aligned with `RatingDetail::problems`.
-pub const CALL_PROBLEMS: [(&str, Key); 9] = [
+/// in schema order. Index-aligned with `RatingDraft::problems`, which lives
+/// in the call's rating stage.
+pub const CALL_PROBLEMS: [(&str, Key); quill::state::CALL_PROBLEM_COUNT] = [
     ("callProblemEcho", keys::Q_LEFTOVERS_CALL_PROBLEM_ECHO),
     ("callProblemNoise", keys::Q_LEFTOVERS_CALL_PROBLEM_NOISE),
     (

@@ -187,7 +187,7 @@ impl Session {
     }
 
     pub fn open_chat(&mut self, chat_id: ChatId) {
-        if self.search.chat_search.chat_id != Some(chat_id) {
+        if self.search.chat_search.chat_id() != Some(chat_id) {
             self.search.chat_search.close();
         }
         // Slice media-shared-gallery: switching chats closes the gallery so
@@ -323,7 +323,7 @@ impl Session {
         let last = self
             .chats
             .get(&chat_id.0)
-            .and_then(|chat| chat.last_message.as_ref())
+            .and_then(|chat| chat.last_message())
             .map(|last| last.id.0);
         let loaded = self
             .histories
@@ -432,7 +432,7 @@ impl Session {
             .into_iter()
             .map(|chat| crate::chatlist_archive::ArchivedChat {
                 title: chat.title.clone(),
-                date: chat.last_message.as_ref().map_or(0, |m| m.date),
+                date: chat.last_message().map_or(0, |m| m.date),
                 unread: chat.is_unread(),
             })
             .collect();

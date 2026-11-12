@@ -116,7 +116,11 @@ fn a_video_carries_its_cover_and_start_frame_where_covers_are_allowed() {
     let cover = rig.file("cover.png", &[1, 2, 3]);
     let mut att = ComposerAttachment::pick(&demo_clip(), AttachmentKind::Video).unwrap();
     att.extras.cover = Some(cover.clone());
-    att.extras.start_timestamp = 2;
+    att.extras.video = crate::composer::VideoPrep::Edited(crate::composer::VideoEdit {
+        edits: crate::video_edit::VideoEdits::full(10_000),
+        start_timestamp: 2,
+        source: None,
+    });
     // A channel takes covers.
     let snap = rig.snapshot(13, "", att.clone());
     rig.driver.send_snapshot(&snap).unwrap();
@@ -217,7 +221,11 @@ fn paid_media_is_one_message_with_every_item_and_the_price() {
     let photo = rig.file("a.png", &[1]);
     let photo_att = ComposerAttachment::pick(&photo, AttachmentKind::Photo).unwrap();
     let mut video_att = ComposerAttachment::pick(&demo_clip(), AttachmentKind::Video).unwrap();
-    video_att.extras.start_timestamp = 1;
+    video_att.extras.video = crate::composer::VideoPrep::Edited(crate::composer::VideoEdit {
+        edits: crate::video_edit::VideoEdits::full(10_000),
+        start_timestamp: 1,
+        source: None,
+    });
     let snap = ComposerSnapshot::capture_album(
         ChatId(13),
         rig.driver.session.view_generation,

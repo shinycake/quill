@@ -11,12 +11,25 @@ use gpui_kit::prelude::FluentBuilder;
 
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
-use quill::chat_bottom_bar::{BarFacts, BottomBar, ChannelFacts, bottom_bar};
-use quill::ids::ChatId;
+use quill::chat_bottom_bar::{BarFacts, BottomBar, ChannelFacts, StartState, bottom_bar};
+use quill::ids::{ChatId, RequestId};
 use quill::lang::{keys, tr};
 use quill::paid_messages::SendGate;
-use quill::state::{ChatSummary, Session};
+use quill::state::{ChatSummary, RequestPurpose, Session};
 use quill::telegram::envelope::ChatKind;
+
+/// A bot's Restart in this chat: the unblock is out, and the /start goes
+/// when it is answered. The chat's value owns it, so another chat never
+/// starts a bot on this one's answer.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(super) enum BotRestart {
+    #[default]
+    Idle,
+    Unblocking {
+        request: RequestId,
+        chat: ChatId,
+    },
+}
 
 impl QuillApp {
     /// What the bar decision reads from the open chat.
@@ -33,13 +46,23 @@ impl QuillApp {
         let history = session.histories.get(&chat.id.0);
         let empty_history = history
             .is_some_and(|history| history.loaded_complete() && history.messages.is_empty())
-            && chat.last_message.is_none();
+            && chat.last_message().is_none();
         BarFacts {
             blocked: peer.is_some() && chat.blocked,
             is_bot: bot.is_some(),
             can_send: chat.can_post(),
-            bot_start_pending: bot.is_some()
-                && (session.bots.bot_start_params.contains_key(&chat.id.0) || empty_history),
+            start: match bot {
+                Some(_)
+                    if session.bots.bot_start_params.contains_key(&chat.id.0) || empty_history =>
+                {
+                    session
+                        .requests
+                        .ids_for_chat(&[RequestPurpose::SendBotStartMessage], chat.id)
+                        .first()
+                        .map_or(StartState::Offered, |id| StartState::Starting(*id))
+                }
+                _ => StartState::NotStartable,
+            },
             channel: matches!(chat.kind, ChatKind::Supergroup { .. }).then(|| ChannelFacts {
                 broadcast: chat.is_channel(),
                 membership: chat.member_status(),
@@ -62,6 +85,7 @@ impl QuillApp {
         match bottom_bar(&self.bottom_bar_facts(session, chat))? {
             bar @ (BottomBar::Unblock { .. }
             | BottomBar::Start
+            | BottomBar::Starting
             | BottomBar::PremiumRequired
             | BottomBar::JoinGroup
             | BottomBar::ApplyToJoin) => Some(bar),
@@ -103,6 +127,7 @@ impl QuillApp {
                     Button::new("bottom-action")
                         .label(bar.label())
                         .primary()
+                        .disabled(bar == BottomBar::Starting)
                         .w_full()
                         .max_w(px(360.))
                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -117,6 +142,7 @@ impl QuillApp {
         match bar {
             BottomBar::Unblock { restart } => self.unblock_peer(chat_id, restart, cx),
             BottomBar::Start => self.start_bot_from_bar(chat_id, cx),
+            BottomBar::Starting => {}
             BottomBar::PremiumRequired => self.open_premium_from("require_premium", cx),
             BottomBar::JoinGroup | BottomBar::ApplyToJoin => {
                 // Only a send that went out gets its own wording: a failed
@@ -135,7 +161,7 @@ impl QuillApp {
     }
 
     /// Unblock without a confirmation, as Telegram Desktop does; a bot is
-    /// restarted right after.
+    /// restarted once the unblock is answered.
     pub(in crate::ui) fn unblock_peer(
         &mut self,
         chat_id: ChatId,
@@ -144,11 +170,26 @@ impl QuillApp {
     ) {
         let mut restart_now = false;
         if let Some(live) = self.live.as_mut() {
-            let note = match live.driver.set_chat_user_blocked(chat_id, false) {
-                Ok(Some(_)) => {
-                    restart_now = restart;
-                    StatusNote::silent(tr(keys::Q_MEDIA_UNBLOCKING_USER))
+            let sent = live.driver.set_chat_user_blocked(chat_id, false);
+            if let Ok(Some(request)) = sent
+                && restart
+            {
+                live.driver.session.acks.expect(request);
+                let old = std::mem::replace(
+                    &mut self.chat_ui.restart,
+                    BotRestart::Unblocking {
+                        request,
+                        chat: chat_id,
+                    },
+                );
+                if let BotRestart::Unblocking { request: old, .. } = old
+                    && let Some(live) = self.live.as_mut()
+                {
+                    live.driver.session.acks.forget(old);
                 }
+            }
+            let note = match sent {
+                Ok(Some(_)) => StatusNote::silent(tr(keys::Q_MEDIA_UNBLOCKING_USER)),
                 Ok(None) => StatusNote::silent(tr(keys::Q_MEDIA_REQUEST_ALREADY_IN_FLIGHT)),
                 Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN)),
             };
@@ -160,10 +201,30 @@ impl QuillApp {
             self.set_note(StatusNote::silent(tr(keys::Q_MEDIA_UNBLOCKED_DEMO)));
             restart_now = restart;
         }
-        // A refused or deduped unblock leaves the bot blocked: /start would
-        // go nowhere and bury the error note.
+        // The /start of a live bot goes with the unblock's answer
+        // (`pump_bot_restart`): behind its request it would reach a bot
+        // still blocked on the server.
         if restart_now {
             self.start_bot_from_bar(chat_id, cx);
+        }
+    }
+
+    /// Each window's frame: the answer to the unblock of a Restart sends
+    /// the /start; a refusal sends nothing (its error note stands).
+    pub(in crate::ui) fn pump_bot_restart(&mut self, cx: &mut Context<Self>) {
+        let BotRestart::Unblocking { request, chat } = self.chat_ui.restart else {
+            return;
+        };
+        let Some(live) = self.live.as_mut() else {
+            self.chat_ui.restart = BotRestart::Idle;
+            return;
+        };
+        let Some(answer) = live.driver.session.acks.take(request) else {
+            return;
+        };
+        self.chat_ui.restart = BotRestart::Idle;
+        if answer == quill::state::Answer::Done {
+            self.start_bot_from_bar(chat, cx);
         }
     }
 

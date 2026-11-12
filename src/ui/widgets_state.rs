@@ -10,7 +10,7 @@ use gpui_kit::{EntityId, Task};
 use quill::ids::ChatId;
 use quill::message_widget::storage::{Area, Stored};
 use quill::message_widget::{Lifecycle, WidgetKey};
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
@@ -30,8 +30,8 @@ pub(super) enum Poll {
     Off,
     /// A poll is due at this time (on screen) or when it comes back.
     Due(Instant),
-    /// A poll is with TDLib.
-    Asking,
+    /// The poll with this request is with TDLib; only its answer ends it.
+    Asking(quill::ids::RequestId),
 }
 
 /// One window's card of a widget: the width it gives it (CSS px) and the
@@ -193,20 +193,28 @@ impl Presence {
 /// runtime stopped or restarted) would never see its release or leave.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct Pointer {
-    /// The widget claims long presses of the current press (a context menu of its own).
+    /// The widget claims long presses (a context menu of its own): its own
+    /// say (`Gesture`), apart from where the mouse is.
     pub hold: bool,
-    /// The button of the press the widget took (0 primary, 2 secondary)
-    /// until its release.
-    pub pressed: Option<i32>,
+    pub contact: Contact,
+}
+
+/// Where the mouse is on a widget, as the widget was told.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) enum Contact {
+    #[default]
+    Away,
     /// The mouse is over it (it was told so).
-    pub hovered: bool,
+    Over,
+    /// The widget took a press of this button (0 primary, 2 secondary)
+    /// and has not seen its release.
+    Pressed(i32),
 }
 
 impl Pointer {
     /// A later move is a hover again, not a drag.
     pub(super) fn release(&mut self) {
-        self.pressed = None;
-        self.hovered = false;
+        self.contact = Contact::Away;
         self.hold = false;
     }
 }
@@ -381,12 +389,13 @@ pub(crate) struct WidgetsUi {
     /// Counts going off screen, for the oldest-hidden release order.
     pub(super) clock: u64,
     /// Rows note themselves here while they render (`&self`).
-    pub(super) passes: RefCell<Passes>,
+    pub(super) passes: Cell<Passes>,
     /// `sessionStorage`: lives while the app runs, never written.
     pub(super) session: HashMap<WidgetKey, Area>,
     /// The loop taking the runtimes' frames and events, from the first
-    /// start on. It is this screen's and ends with it (an account switch).
-    pub(super) lander: Option<Task<()>>,
+    /// start on. It is this screen's and ends with it (an account switch);
+    /// the next runtime start runs it again if it ended before.
+    pub(super) lander: Lander,
     /// The next public data poll's timer.
     pub(super) poll_timer: Option<(Instant, Task<()>)>,
     /// The next storage write's timer.
@@ -396,6 +405,22 @@ pub(crate) struct WidgetsUi {
     pub(super) scales: HashMap<Option<ChatId>, f32>,
     /// Whether this screen's account still has a widget folder.
     pub(super) storage: WidgetStorage,
+}
+
+/// The loop that lands the runtimes' frames: not started, or its task.
+#[derive(Default)]
+pub(super) enum Lander {
+    #[default]
+    NotStarted,
+    Running(Task<()>),
+}
+
+impl Lander {
+    /// The loop is alive: a finished one (its screen's updates stopped)
+    /// is as good as none.
+    pub(super) fn running(&self) -> bool {
+        matches!(self, Self::Running(task) if !task.is_ready())
+    }
 }
 
 /// Whether the account on this screen keeps its widgets' storage.

@@ -211,17 +211,12 @@ pub fn window_shows_everything() -> bool {
 
 /// The grants of `account` (the defaults until the user changes them).
 pub fn for_account(account: &AccountKey) -> AccountGrants {
-    if let Ok(guard) = CACHE.read()
-        && let Some(all) = guard.as_ref()
-    {
+    if let Some(all) = crate::locks::read_or_recover(&CACHE).as_ref() {
         return all.get(&account.0).cloned().unwrap_or_default();
     }
-    let all = load();
-    let grants = all.get(&account.0).cloned().unwrap_or_default();
-    if let Ok(mut guard) = CACHE.write() {
-        guard.get_or_insert(all);
-    }
-    grants
+    let mut guard = crate::locks::write_or_recover(&CACHE);
+    let all = guard.get_or_insert_with(load);
+    all.get(&account.0).cloned().unwrap_or_default()
 }
 
 /// Counts every change to any account's grants, so a check made before a

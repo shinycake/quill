@@ -5,9 +5,9 @@ use crate::business_bots::{self as bots, ConnectedBot};
 use crate::business_chat_links as links;
 use crate::business_settings::BusinessSettingKind;
 use crate::ids::RequestId;
+use crate::state::fetch::Fetch;
 use crate::state::{
-    BotLookup, BotLookupPart, ChatLinkOp, ChatLinkSave, RequestPurpose, RequestRollback,
-    SettingsPurpose,
+    BotLookup, BotLookupPart, ChatLinkOp, RequestPurpose, RequestRollback, SettingsPurpose,
 };
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -41,15 +41,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let kind = BusinessSettingKind::StartPage;
         self.session.settings.business.error = None;
-        self.send_business_extra(SettingsPurpose::SaveBusinessSetting { kind }, |extra| {
-            crate::business_start_page::set_start_page_request(
-                extra,
-                title,
-                message,
-                sticker_file_id,
-            )
-        })?;
-        self.session.settings.business.saving.push(kind);
+        let extra =
+            self.send_business_extra(SettingsPurpose::SaveBusinessSetting { kind }, |extra| {
+                crate::business_start_page::set_start_page_request(
+                    extra,
+                    title,
+                    message,
+                    sticker_file_id,
+                )
+            })?;
+        self.session.settings.business.saving.push((extra, kind));
         Ok(())
     }
 
@@ -74,6 +75,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.settings.business_extra.chat_links.begin();
         let sent =
             self.send_business_extra(SettingsPurpose::GetChatLinks, links::get_links_request);
+        if let Ok(extra) = sent {
+            self.session.settings.business_extra.chat_links.sent(extra);
+        }
         // A send that never left lands in `Failed` (drawn with Retry), not
         // back in `Idle`, which a page draws as a spinner and asks again.
         if sent.is_err() {
@@ -86,7 +90,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         sent.map(|_| ())
     }
 
-    pub fn create_chat_link(&mut self, markup: &str, title: &str) -> Result<(), ConnectSendError> {
+    /// Create a link; the request whose answer the link box waits for.
+    pub fn create_chat_link(
+        &mut self,
+        markup: &str,
+        title: &str,
+    ) -> Result<RequestId, ConnectSendError> {
         let count = self
             .session
             .settings
@@ -98,14 +107,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.settings.business.error = None;
-        let extra = self.send_business_extra(
+        self.send_business_extra(
             SettingsPurpose::MutateChatLink {
                 op: ChatLinkOp::Create,
             },
             |extra| links::create_link_request(extra, markup, title),
-        )?;
-        self.session.settings.business_extra.chat_link_save = ChatLinkSave::Saving(extra);
-        Ok(())
+        )
     }
 
     pub fn edit_chat_link(
@@ -113,16 +120,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         link: &str,
         markup: &str,
         title: &str,
-    ) -> Result<(), ConnectSendError> {
+    ) -> Result<RequestId, ConnectSendError> {
         self.session.settings.business.error = None;
-        let extra = self.send_business_extra(
+        self.send_business_extra(
             SettingsPurpose::MutateChatLink {
                 op: ChatLinkOp::Edit,
             },
             |extra| links::edit_link_request(extra, link, markup, title),
-        )?;
-        self.session.settings.business_extra.chat_link_save = ChatLinkSave::Saving(extra);
-        Ok(())
+        )
     }
 
     /// Deletes a link and drops its row at once; a refused delete puts the
@@ -183,6 +188,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             SettingsPurpose::GetConnectedBot,
             bots::get_connected_bot_request,
         );
+        if let Ok(extra) = sent {
+            self.session
+                .settings
+                .business_extra
+                .connected_bot
+                .sent(extra);
+        }
         if sent.is_err() {
             self.session
                 .settings
@@ -200,19 +212,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         previous: Option<i64>,
     ) -> Result<(), ConnectSendError> {
         self.session.settings.business.error = None;
-        match (bot, previous) {
+        let sent = match (bot, previous) {
             (Some(bot), _) => self
                 .send_business_extra(SettingsPurpose::SaveConnectedBot, |extra| {
                     bots::set_connected_bot_request(extra, bot)
-                })
-                .map(|_| ())?,
+                })?,
             (None, Some(previous)) => self
                 .send_business_extra(SettingsPurpose::SaveConnectedBot, |extra| {
                     bots::delete_connected_bot_request(extra, previous)
-                })
-                .map(|_| ())?,
+                })?,
             (None, None) => return Ok(()),
-        }
+        };
+        self.session.settings.business_extra.bot_save =
+            crate::state::ConnectedBotSave::Saving(sent);
         self.session
             .settings
             .business_extra
@@ -239,36 +251,51 @@ impl<S: JsonSender> ConnectDriver<S> {
             };
             return Ok(());
         };
-        if self.session.settings.business_extra.lookup.query == query {
+        let lookup = &self.session.settings.business_extra.lookup;
+        if lookup.query == query && lookup.error().is_none() {
             return Ok(());
         }
         self.session.settings.business_extra.lookup = BotLookup {
             generation,
             query: query.clone(),
-            ..BotLookup::default()
+            exact: Fetch::Loading {
+                stale: None,
+                request: None,
+            },
+            mine: Fetch::Loading {
+                stale: None,
+                request: None,
+            },
+            global: Fetch::Loading {
+                stale: None,
+                request: None,
+            },
         };
         let part = |part| SettingsPurpose::LookupBusinessBot { generation, part };
         let sent = self
             .send_business_extra(part(BotLookupPart::Exact), |extra| {
                 bots::search_public_chat_request(extra, &query)
             })
-            .and_then(|_| {
+            .and_then(|id| {
+                self.session.settings.business_extra.lookup.exact.sent(id);
                 self.send_business_extra(part(BotLookupPart::Mine), |extra| {
                     bots::search_bots_on_server_request(extra, &query)
                 })
             })
-            .and_then(|_| {
+            .and_then(|id| {
+                self.session.settings.business_extra.lookup.mine.sent(id);
                 self.send_business_extra(part(BotLookupPart::Global), |extra| {
                     bots::search_public_bots_request(extra, &query)
                 })
-            });
+            })
+            .map(|id| self.session.settings.business_extra.lookup.global.sent(id));
         if sent.is_err() {
             self.session.settings.business_extra.lookup = BotLookup {
                 generation: generation.wrapping_add(1),
                 ..BotLookup::default()
             };
         }
-        sent.map(|_| ())
+        sent
     }
 
     /// `toggleHasSponsoredMessagesEnabled` ("Do Not Hide Ads").

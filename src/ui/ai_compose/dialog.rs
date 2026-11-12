@@ -16,7 +16,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ai_compose::FooterAction;
 use quill::lang::{keys, tr};
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 
 /// The Increase Limit badge (tdesktop `CustomEmojiTextBadge(u"x50"_q)`).
@@ -40,7 +40,7 @@ impl QuillApp {
                 .ai_compose
                 .open
                 .as_ref()
-                .map_or(AiComposeView::Card, |open| open.view);
+                .map_or(AiComposeView::Card, |open| open.view.clone());
             let (title, body, footer) = match view {
                 AiComposeView::Card => (
                     Some(this.ai_compose_title(cx)),
@@ -57,12 +57,12 @@ impl QuillApp {
                     this.ai_compose_about_view(cx),
                     this.ai_compose_about_footer(cx),
                 ),
-                AiComposeView::StyleEditor => (
+                AiComposeView::StyleEditor(_) => (
                     Some(dialog_title(this.ai_style_editor_title()).into_any_element()),
                     this.ai_style_editor_view(cx),
                     this.ai_style_editor_footer(cx),
                 ),
-                AiComposeView::StyleIcon => (
+                AiComposeView::StyleIcon(_) => (
                     Some(dialog_title(tr(keys::AI_COMPOSE_TONE_ICON_TITLE)).into_any_element()),
                     this.ai_style_icons_view(cx),
                     this.ai_style_icons_footer(cx),
@@ -75,13 +75,9 @@ impl QuillApp {
             dialog
                 .overlay(true)
                 .content(scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body)));
+                    let body = Rc::new(Cell::new(Some(body)));
                     move |content, _, _| {
-                        content.child(
-                            body.borrow_mut()
-                                .take()
-                                .unwrap_or_else(|| div().into_any_element()),
-                        )
+                        content.child(body.take().unwrap_or_else(|| div().into_any_element()))
                     }
                 }))
                 .footer(footer)
@@ -94,18 +90,14 @@ impl QuillApp {
     /// picker to the editor, as closing tdesktop's boxes on top of the AI
     /// box does; the card closes the box.
     fn ai_compose_dismissed(&mut self, cx: &mut Context<Self>) {
-        match self.ai_compose.open.as_ref().map(|open| open.view) {
-            Some(AiComposeView::Languages | AiComposeView::About) => {
+        match self.ai_compose.open.as_ref().map(|open| &open.view) {
+            Some(
+                AiComposeView::Languages | AiComposeView::About | AiComposeView::StyleEditor(_),
+            ) => {
                 self.set_ai_compose_view(AiComposeView::Card, cx);
             }
-            Some(AiComposeView::StyleEditor) => {
-                if let Some(open) = self.ai_compose.open.as_mut() {
-                    open.editor = None;
-                }
-                self.set_ai_compose_view(AiComposeView::Card, cx);
-            }
-            Some(AiComposeView::StyleIcon) => {
-                self.set_ai_compose_view(AiComposeView::StyleEditor, cx);
+            Some(AiComposeView::StyleIcon(_)) => {
+                self.show_ai_style_editor(cx);
             }
             _ => self.close_ai_compose(cx),
         }

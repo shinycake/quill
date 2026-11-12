@@ -401,7 +401,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .auth_state
             .password_state
             .as_ref()
-            .is_some_and(|s| s.pending_email_pattern.is_some())
+            .is_some_and(|s| s.pending_email.is_some())
         {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -417,7 +417,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .auth_state
             .password_state
             .as_ref()
-            .is_some_and(|s| s.pending_email_pattern.is_some())
+            .is_some_and(|s| s.pending_email.is_some())
         {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -443,7 +443,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .auth_state
                 .password_state
                 .as_ref()
-                .is_some_and(|s| s.pending_email_pattern.is_some())
+                .is_some_and(|s| s.pending_email.is_some())
         {
             return Err(ConnectSendError::InvalidRequest);
         }

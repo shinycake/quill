@@ -409,7 +409,7 @@ fn a_secret_chat_ignores_the_quick_reaction(cx: &mut TestAppContext) {
             }
             app.quick_react(CHAT, OUTGOING, cx);
             assert_eq!(chips(app), before);
-            assert!(app.history.reaction_fly.is_none());
+            assert!(app.history.reaction_fly.take().is_none());
         });
     });
 }

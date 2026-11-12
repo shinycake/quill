@@ -225,7 +225,7 @@ impl QuillApp {
         self.screen
             .stories
             .live
-            .start_watching((ChatId(CHANNEL), STORY));
+            .start_watching((ChatId(CHANNEL), STORY), None);
         cx.notify();
     }
 }
@@ -281,8 +281,10 @@ fn seed_live_story(session: &mut Session, sink: &Arc<dyn DiagnosticSink>, seq: &
         can_send_messages: true,
         are_messages_allowed: true,
         paid_message_star_count: 5,
-        stream_mode: GroupCallMode::Stream,
-        stream: StreamState::Live,
+        media: quill::state::GroupMedia::Stream {
+            mode: GroupCallMode::Stream,
+            state: StreamState::Live,
+        },
         viewer_count: 2_318,
         messages: vec![
             comment(1, 802, "The light over the harbour is unreal", 0, false),

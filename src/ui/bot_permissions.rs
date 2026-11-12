@@ -79,37 +79,52 @@ impl QuillApp {
         )
     }
 
-    /// The switch: remember the section is on screen, then ask TDLib.
+    /// The switch: ask TDLib. Turning it off that was sent keeps the section
+    /// on this profile, so the access can be given again; the next profile,
+    /// or closing the panel, drops it (`forget_emoji_access_shown`).
     pub(super) fn set_bot_emoji_status_access(
         &mut self,
         user_id: i64,
         allowed: bool,
         cx: &mut Context<Self>,
     ) {
-        if let Some(account) = self.current_account() {
-            self.mini_apps
-                .emoji_access_shown
-                .insert(OfAccount::new(account, user_id));
-        }
-        if let Some(live) = self.live.as_mut() {
-            if live
+        let sent = if let Some(live) = self.live.as_mut() {
+            let sent = live
                 .driver
                 .set_bot_emoji_status_access(user_id, allowed)
-                .is_err()
-            {
+                .is_ok();
+            if !sent {
                 self.set_status_note(
                     StatusNote::error(tr(keys::Q_MEDIA_COULDNT_CHANGE_THE_EMOJI_STATUS)),
                     cx,
                 );
             }
+            sent
         } else if let Some(Some(info)) = self
             .demo_session
             .as_mut()
             .and_then(|session| session.bots.bot_info.get_mut(&user_id))
         {
             info.can_manage_emoji_status = allowed;
+            true
+        } else {
+            false
+        };
+        if sent && let Some(account) = self.current_account() {
+            let key = OfAccount::new(account, user_id);
+            if allowed {
+                self.mini_apps.emoji_access_shown.remove(&key);
+            } else {
+                self.mini_apps.emoji_access_shown.insert(key);
+            }
         }
         cx.notify();
+    }
+
+    /// The profile panel changed or closed: a switch kept after it was
+    /// turned off goes with it.
+    pub(super) fn forget_emoji_access_shown(&mut self) {
+        self.mini_apps.emoji_access_shown.clear();
     }
 }
 

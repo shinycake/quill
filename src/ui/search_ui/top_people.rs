@@ -106,7 +106,7 @@ impl QuillApp {
         } else {
             Badge::new().count(count.max(0) as usize).max(99)
         };
-        let color = if person.muted {
+        let color = if person.muted() {
             cx.theme().muted_foreground
         } else {
             accent_strong().into()
@@ -123,14 +123,14 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let id = person.chat_id;
-        let avatar = if person.saved_messages {
+        let avatar = if person.is_saved_messages() {
             super::super::chat_row::saved_messages_avatar(model::PHOTO)
         } else {
             let photo = self.chat_photo_for_row(id);
             super::super::chat_row::chat_avatar(title, photo.as_deref(), model::PHOTO)
                 .into_any_element()
         };
-        let avatar = super::super::chat_row::with_presence_dot(avatar, person.online, DOT, cx)
+        let avatar = super::super::chat_row::with_presence_dot(avatar, person.online(), DOT, cx)
             .into_any_element();
         let avatar = Self::top_tile_badge(avatar, person, cx);
         let tile = div()
@@ -182,8 +182,8 @@ impl QuillApp {
                 MouseButton::Right,
                 cx.listener(move |this, event: &MouseDownEvent, _, cx| {
                     this.chat_list
-                        .overlay
-                        .open_menu(ChatMenuState::top_person(id, event.position));
+                        .menu
+                        .open_row(ChatMenuState::top_person(id, event.position));
                     cx.notify();
                 }),
             )
@@ -199,11 +199,11 @@ impl QuillApp {
             )
             .on_mouse_up(
                 MouseButton::Left,
-                cx.listener(|this, _, _, _| this.chat_list.overlay.cancel_press()),
+                cx.listener(|this, _, _, _| this.chat_list.peek.cancel_press()),
             )
             .on_mouse_up_out(
                 MouseButton::Left,
-                cx.listener(|this, _, _, _| this.chat_list.overlay.cancel_press()),
+                cx.listener(|this, _, _, _| this.chat_list.peek.cancel_press()),
             )
             .child(avatar)
             .child(
@@ -236,8 +236,8 @@ impl QuillApp {
         let single = model::TILE_WIDTH + (width / columns as f32 - model::TILE_WIDTH) * progress;
         let menu_target = self
             .chat_list
-            .overlay
-            .menu()
+            .menu
+            .row_copy()
             .filter(|menu| menu.top_person)
             .map(|menu| menu.chat_id);
         let tiles: Vec<Stateful<Div>> = people
@@ -307,7 +307,7 @@ impl QuillApp {
                         drag.moved = true;
                     }
                     if drag.moved {
-                        this.chat_list.overlay.cancel_press();
+                        this.chat_list.peek.cancel_press();
                         let scroll = &this.search_ui.top_scroll;
                         let floor = -scroll.max_offset().x;
                         let x = (drag.start_scroll + delta).clamp(floor, px(0.));

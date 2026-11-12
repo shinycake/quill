@@ -94,31 +94,137 @@ pub(crate) struct CustomBidUi {
     pub(super) error: Option<String>,
 }
 
-/// Where "open this auction" stands. It leaves `Waiting` when the state
-/// arrives, when the request failed, when the box it came from closed, or
-/// when the market box stack empties.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AuctionOpen {
-    Idle,
-    Waiting {
+/// What the open boxes share: who a bid or a purchase is for, "Hide My
+/// Name", and whether an auction's state is being asked for to open its
+/// box. One value for the whole stack, so it goes with the stack
+/// (`GiftMarketUi::drop_orphans`): the last box leaving, however it left,
+/// ends a pending open and forgets the recipient.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum MarketFlow {
+    Boxes {
+        /// The send-gift box's recipient, or a raised bid's owner; none:
+        /// the user.
+        recipient: Option<GiftRecipient>,
+        hide_name: bool,
+    },
+    /// Like `Boxes`, and the auction state asked as `request` opens its
+    /// box when it arrives. An answer to any other request is not this
+    /// one's.
+    Opening {
+        request: quill::ids::RequestId,
         /// Asked from the send-gift box, whose recipient the bid uses: the
         /// answer is dropped once that box is gone.
         from_send_box: bool,
+        recipient: Option<GiftRecipient>,
+        hide_name: bool,
     },
+}
+
+impl Default for MarketFlow {
+    fn default() -> Self {
+        Self::Boxes {
+            recipient: None,
+            hide_name: false,
+        }
+    }
+}
+
+impl MarketFlow {
+    fn names(&mut self) -> (&mut Option<GiftRecipient>, &mut bool) {
+        match self {
+            Self::Boxes {
+                recipient,
+                hide_name,
+            }
+            | Self::Opening {
+                recipient,
+                hide_name,
+                ..
+            } => (recipient, hide_name),
+        }
+    }
+
+    pub(super) fn recipient(&self) -> Option<&GiftRecipient> {
+        match self {
+            Self::Boxes { recipient, .. } | Self::Opening { recipient, .. } => recipient.as_ref(),
+        }
+    }
+
+    pub(super) fn hide_name(&self) -> bool {
+        match self {
+            Self::Boxes { hide_name, .. } | Self::Opening { hide_name, .. } => *hide_name,
+        }
+    }
+
+    pub(super) fn set_recipient(&mut self, next: Option<GiftRecipient>) {
+        *self.names().0 = next;
+    }
+
+    pub(super) fn set_hide_name(&mut self, on: bool) {
+        *self.names().1 = on;
+    }
+
+    /// The auction state was asked as `request`: its box opens on the
+    /// answer. A new ask replaces the one before (the session keeps only
+    /// the newest fetch).
+    pub(super) fn begin_opening(&mut self, request: quill::ids::RequestId) {
+        let (recipient, hide_name) = {
+            let (recipient, hide_name) = self.names();
+            (recipient.take(), *hide_name)
+        };
+        *self = Self::Opening {
+            request,
+            from_send_box: recipient.is_some(),
+            recipient,
+            hide_name,
+        };
+    }
+
+    /// The pending open ended (its box opened, or it failed or was
+    /// replaced).
+    pub(super) fn end_opening(&mut self) {
+        if let Self::Opening {
+            recipient,
+            hide_name,
+            ..
+        } = self
+        {
+            *self = Self::Boxes {
+                recipient: recipient.take(),
+                hide_name: *hide_name,
+            };
+        }
+    }
+
+    /// The request of the pending open and whether the send-gift box asked.
+    pub(super) fn opening(&self) -> Option<(quill::ids::RequestId, bool)> {
+        match self {
+            Self::Opening {
+                request,
+                from_send_box,
+                ..
+            } => Some((*request, *from_send_box)),
+            Self::Boxes { .. } => None,
+        }
+    }
+}
+
+/// How the market's ask for a sticker file ended: the request went out,
+/// or the send was refused (not asked again until the set of
+/// files changes or the boxes are reopened).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FileAskOutcome {
+    Sent,
+    Refused,
 }
 
 pub(crate) struct GiftMarketUi {
     pub(super) stack: Vec<MarketBox>,
-    /// Who an auction bid is for: the send-gift box's recipient, or the
-    /// user.
-    pub(super) recipient: Option<GiftRecipient>,
-    pub(super) hide_name: bool,
-    /// A tile or link asked for an auction; its box opens when the state
-    /// arrives.
-    pub(super) auction_open: AuctionOpen,
-    /// The sticker files last asked for; downloads go out only when the
-    /// set changes, not every frame.
-    pub(super) requested_files: Vec<quill::ids::FileId>,
+    /// Who a bid is for, "Hide My Name", and an auction waiting to open.
+    pub(super) flow: MarketFlow,
+    /// The sticker files asked for, each sent or refused; downloads go out
+    /// once per file, not every frame.
+    pub(super) requested_files: Vec<(quill::ids::FileId, FileAskOutcome)>,
     /// How often the chat-list bar opened its box (one tap, one open).
     #[cfg(test)]
     pub(super) bar_opens: usize,
@@ -207,9 +313,7 @@ impl GiftMarketUi {
     pub(super) fn new() -> Self {
         Self {
             stack: Vec::new(),
-            recipient: None,
-            hide_name: false,
-            auction_open: AuctionOpen::Idle,
+            flow: MarketFlow::default(),
             requested_files: Vec::new(),
             #[cfg(test)]
             bar_opens: 0,
@@ -236,10 +340,16 @@ impl GiftMarketUi {
         self.drop_orphans();
     }
 
-    /// "Hide My Name" belongs to the send, change and bid boxes of one bid:
-    /// when the last box that owns it leaves the stack, however it left
-    /// (back, replace, clear), it goes, so the next auction starts clean.
+    /// What only the open boxes owned goes with the last of them, however
+    /// it left (back, replace, clear): the recipient, a pending open and
+    /// the file asks. "Hide My Name" belongs to the send, change and bid
+    /// boxes of one bid: when the last of those leaves, it goes, so the
+    /// next auction starts clean.
     fn drop_orphans(&mut self) {
+        if self.stack.is_empty() {
+            self.flow = MarketFlow::default();
+            self.requested_files.clear();
+        }
         let naming = self.stack.iter().any(|entry| {
             matches!(
                 entry,
@@ -249,21 +359,27 @@ impl GiftMarketUi {
             )
         });
         if !naming {
-            self.hide_name = false;
+            self.flow.set_hide_name(false);
         }
     }
 
-    /// The slider (and custom field) of the open bid box.
-    pub(super) fn bid(&self) -> Option<&BidSliderUi> {
+    /// The slider (and custom field) of the open bid box for `gift_id`.
+    pub(super) fn bid(&self, gift_id: i64) -> Option<&BidSliderUi> {
         self.stack.iter().rev().find_map(|entry| match entry {
-            MarketBox::AuctionBid { slider, .. } => slider.as_ref(),
+            MarketBox::AuctionBid {
+                gift_id: id,
+                slider,
+            } if *id == gift_id => slider.as_ref(),
             _ => None,
         })
     }
 
-    pub(super) fn bid_mut(&mut self) -> Option<&mut BidSliderUi> {
+    pub(super) fn bid_mut(&mut self, gift_id: i64) -> Option<&mut BidSliderUi> {
         self.stack.iter_mut().rev().find_map(|entry| match entry {
-            MarketBox::AuctionBid { slider, .. } => slider.as_mut(),
+            MarketBox::AuctionBid {
+                gift_id: id,
+                slider,
+            } if *id == gift_id => slider.as_mut(),
             _ => None,
         })
     }

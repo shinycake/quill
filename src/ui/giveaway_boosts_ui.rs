@@ -13,6 +13,14 @@ use quill::lang::{keys, tr, tr_with};
 use quill::telegram::envelope::ChatKind;
 
 impl QuillApp {
+    /// Retry on a boost status that did not arrive.
+    fn retry_boost_status(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.fetch_chat_boost_status(chat_id);
+        }
+        cx.notify();
+    }
+
     /// The button that opens the giveaway form, then the giveaways already
     /// paid for. Channels and groups only.
     pub(super) fn giveaway_boosts_section(
@@ -35,12 +43,17 @@ impl QuillApp {
         } else {
             ("group", "members")
         };
-        let prepaid = session
-            .groups
-            .chat_boost_details
-            .get(&chat_id.0)
+        let status = session.groups.boost_status(chat_id.0);
+        let prepaid = status
             .map(|status| status.prepaid_giveaways.clone())
             .unwrap_or_default();
+        // The prepaid list is not "none" while the status is missing: its
+        // request is out, or it failed and Retry asks.
+        let status_missing = status.is_none();
+        let status_in_flight = session
+            .groups
+            .boost_status_fetch(chat_id.0)
+            .is_some_and(|fetch| fetch.shows_loading());
         let multiplier = quill::giveaway::BOOSTS_PER_PREMIUM;
         let mut section = div().flex().flex_col().gap_1().pt_2().child(
             Button::new("boosts-get-via-gifts")
@@ -54,6 +67,39 @@ impl QuillApp {
             keys::Q_MONEY_GET_MORE_BOOSTS_FOR_YOUR,
             &[("0", place.0), ("1", place.1)],
         )));
+        if status_missing {
+            section = if status_in_flight {
+                section.child(
+                    div()
+                        .text_xs()
+                        .text_color(muted)
+                        .child(tr(keys::Q_MONEY_LOADING_BOOST_STATUS)),
+                )
+            } else {
+                section.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(
+                            div()
+                                .flex_1()
+                                .text_xs()
+                                .text_color(muted)
+                                .child(tr(keys::Q_MONEY_BOOST_STATUS_UNAVAILABLE)),
+                        )
+                        .child(
+                            Button::new("boosts-status-retry")
+                                .label(tr(keys::Q_MONEY_RETRY))
+                                .ghost()
+                                .small()
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.retry_boost_status(chat_id, cx);
+                                })),
+                        ),
+                )
+            };
+        }
         if !prepaid.is_empty() {
             section = section
                 .child(

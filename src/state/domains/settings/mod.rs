@@ -9,7 +9,9 @@ mod language_link;
 mod passkeys;
 mod purpose;
 mod quick_replies;
+mod scope_settings;
 mod state;
+mod storage_save;
 mod tone_upload;
 
 pub use business::*;
@@ -19,5 +21,7 @@ pub use language::*;
 pub use language_link::*;
 pub use purpose::*;
 pub use quick_replies::*;
+pub use scope_settings::ScopeSettings;
 
 pub use state::*;
+pub use storage_save::*;

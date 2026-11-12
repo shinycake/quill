@@ -23,11 +23,6 @@ use quill::ids::FileId;
 use quill::lang::{keys, tr};
 
 impl QuillApp {
-    /// The main window's part: the composer button's blink.
-    pub(in crate::ui) fn ai_compose_frame_upkeep(&mut self, cx: &mut Context<Self>) {
-        self.sync_ai_compose_button(cx);
-    }
-
     /// The window in place's own part: the box opened over its composer
     /// and the shortcut it asked for. The box goes when its window shows
     /// another conversation, another topic of the same forum included
@@ -161,7 +156,7 @@ impl QuillApp {
             .flat_map(|_| session.messages.ai_compose.styles.styles())
             .map(|style| style.custom_emoji_id);
         let editor = open
-            .and_then(|open| open.editor.as_ref())
+            .and_then(|open| open.view.editor())
             .map(|editor| editor.emoji_id);
         let previewed = self
             .ai_compose

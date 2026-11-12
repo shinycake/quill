@@ -306,7 +306,7 @@ fn a_profile_box_saves_on_the_answer_not_on_the_request_leaving_flight() {
     use crate::state::SaveOutcome;
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    let saves = |s: &mut Session, id| s.users_state.saves.take_outcome(id, false);
+    let saves = |s: &mut Session, id| s.users_state.saves.take_outcome(id, &s.requests);
     let answered = session.request(RequestPurpose::Other, None);
     session.users_state.saves.watch(answered);
     apply_json(

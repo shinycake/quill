@@ -345,9 +345,13 @@ fn nv12_frame(pixel: &CVPixelBuffer) -> Option<VideoFrame> {
 /// Watches a shared window: `Paused` while it is off screen (minimised,
 /// hidden, on another space), `Resumed` when it is back, `Ended` once it
 /// is closed.
+///
+/// Dropping it tells the thread to stop and returns at once: the thread
+/// may be inside a ScreenCaptureKit wait of up to [`REPLY_TIMEOUT`], and
+/// ending a share must not block on that. It checks the stop right after
+/// the wait, so it never reports anything for a share that ended.
 struct WindowMonitor {
-    stop: mpsc::Sender<()>,
-    worker: Option<std::thread::JoinHandle<Option<()>>>,
+    _stop: mpsc::Sender<()>,
 }
 
 impl WindowMonitor {
@@ -357,13 +361,17 @@ impl WindowMonitor {
         shared: Arc<StreamShared>,
     ) -> std::io::Result<Self> {
         let (stop, stopped) = mpsc::channel::<()>();
-        let worker = crate::thread_guard::spawn_guarded("quill-screen-pause", move || {
+        crate::thread_guard::spawn_guarded("quill-screen-pause", move || {
             let mut visibility = ShareVisibility::default();
             while let Err(mpsc::RecvTimeoutError::Timeout) = stopped.recv_timeout(PAUSE_POLL) {
                 if shared.stopped.load(Ordering::Acquire) {
                     return;
                 }
-                match window_state(window) {
+                let state = window_state(window);
+                if !matches!(stopped.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+                    return;
+                }
+                match state {
                     state @ (WindowState::OnScreen | WindowState::OffScreen) => {
                         let visible = matches!(state, WindowState::OnScreen);
                         if let Some(event) = visibility.seen(visible) {
@@ -378,19 +386,7 @@ impl WindowMonitor {
                 }
             }
         })?;
-        Ok(Self {
-            stop,
-            worker: Some(worker),
-        })
-    }
-}
-
-impl Drop for WindowMonitor {
-    fn drop(&mut self) {
-        let _ = self.stop.send(());
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
-        }
+        Ok(Self { _stop: stop })
     }
 }
 

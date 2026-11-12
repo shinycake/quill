@@ -94,7 +94,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<RequestId, ConnectSendError> {
         let upgrade = match &self.session.calls.active_call {
             Some(call)
-                if matches!(call.state, CallState::Ready)
+                if matches!(call.state(), CallState::Ready(_))
                     && call
                         .ready_params()
                         .is_some_and(|ready| ready.is_group_call_supported) =>
@@ -165,7 +165,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         let in_call = self.session.calls.active_call.as_ref().is_some_and(|call| {
             !matches!(
-                call.state,
+                call.state(),
                 CallState::HangingUp | CallState::Discarded { .. } | CallState::Error { .. }
             )
         });

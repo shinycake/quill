@@ -257,9 +257,12 @@ fn creating_while_a_one_to_one_call_hangs_up_is_allowed() {
         user_id: 11,
         is_outgoing: true,
         is_video: false,
-        state: CallState::Ready,
+        progress: crate::state::CallProgress::first(
+            CallState::Ready(Default::default()),
+            std::time::Instant::now(),
+        ),
+        action: crate::state::CallAction::Idle,
         started_at: std::time::Instant::now(),
-        ready: None,
         transport: Default::default(),
         signaling_queue: Vec::new(),
         signaling_dropped: 0,
@@ -270,13 +273,15 @@ fn creating_while_a_one_to_one_call_hangs_up_is_allowed() {
         remote_audio_muted: false,
         remote_battery_low: false,
         signal_bars: None,
+        media_note: None,
     });
     assert!(
         driver.start_video_chat(CHAT, String::new(), 0).is_err(),
         "not while the call is on"
     );
     if let Some(call) = driver.session.calls.active_call.as_mut() {
-        call.state = CallState::HangingUp;
+        call.progress
+            .update(CallState::HangingUp, std::time::Instant::now());
     }
     driver
         .start_video_chat(CHAT, String::new(), 0)
@@ -352,9 +357,9 @@ fn the_join_as_list_is_asked_for_before_creating() {
         }),
     );
     let join_as = driver.session.calls.create_join_as.as_ref().expect("kept");
-    assert_eq!(join_as.request, sent);
+    assert_eq!(join_as.request(), sent);
     assert_eq!(
-        join_as.answer,
+        join_as.answer(),
         Some(Ok(vec![
             MessageSender::User { user_id: 1 },
             MessageSender::Chat { chat_id: CHAT },
@@ -365,5 +370,5 @@ fn the_join_as_list_is_asked_for_before_creating() {
     let request = last(&recorder);
     reply(&mut driver, error_answer(&request));
     let join_as = driver.session.calls.create_join_as.as_ref().expect("kept");
-    assert_eq!(join_as.answer, Some(Err(())));
+    assert_eq!(join_as.answer(), Some(Err(())));
 }

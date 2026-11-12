@@ -59,10 +59,11 @@ impl Session {
                 self.finish_scheduling_edit(pending.and_then(|p| p.chat_id), message_id, scheduling)
             }
             Some(RequestPurpose::DeleteAllCallMessages) => {
-                self.calls.recent_calls.clear();
-                self.calls.recent_calls_offset.clear();
-                // A page in flight still lists the calls just deleted.
-                self.calls.recent_calls_stage = RecentCalls::Idle;
+                // The list starts over, a page in flight with it: it still
+                // lists the calls just deleted.
+                if let Some(pending) = pending {
+                    self.calls.recent_calls.clear_done(pending.id);
+                }
             }
             Some(RequestPurpose::DeleteChatMessagesBySender) => {
                 self.messages
@@ -107,6 +108,7 @@ impl Session {
             }
             Some(RequestPurpose::Groups(GroupsPurpose::TransferChatOwnership { user_id })) => {
                 self.finish_ownership_transfer(
+                    pending.map(|p| p.id),
                     user_id,
                     pending.and_then(|p| p.chat_id).map(|c| c.0),
                 );
@@ -147,7 +149,9 @@ impl Session {
         if let Some(RequestPurpose::Settings(SettingsPurpose::SetDefaultAutoDelete { seconds })) =
             pending.map(|p| p.purpose)
         {
-            self.settings.default_auto_delete.succeed(seconds);
+            self.settings
+                .default_auto_delete
+                .answered(pending.map(|p| p.id), seconds);
         }
         // Slice A7: a `setAccountTtl` succeeded — the server
         // confirmed the write of exactly the sent value, so it
@@ -160,7 +164,9 @@ impl Session {
         if let Some(RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { days })) =
             pending.map(|p| p.purpose)
         {
-            self.settings.account_ttl.succeed(days);
+            self.settings
+                .account_ttl
+                .answered(pending.map(|p| p.id), days);
         }
         if matches!(
             pending.map(|p| p.purpose),
@@ -201,17 +207,20 @@ impl Session {
         // Slice S4: a `setAutoDownloadSettings` succeeded — apply
         // the confirmed sent settings (the `ok` carries none, so
         // they ride the purpose); the error clears and the driver
-        // persists on this ingest via `data_storage_dirty`.
+        // persists on this ingest (`data_storage_dirty`).
         if let Some(RequestPurpose::Settings(SettingsPurpose::SetAutoDownloadSettings {
             network,
             settings,
         })) = pending.map(|p| p.purpose)
         {
             *self.settings.data_storage.for_network_mut(network) = settings;
-            self.settings.data_storage.seeded = crate::data_settings::Seed::Seeded;
-            self.settings.data_storage_save.succeed(());
+            self.settings.data_storage.seeded = crate::data_settings::PresetsSeed::Seeded;
             self.settings.data_storage_dirty = true;
-            self.settings.auto_download_answer = extra.map(AutoDownloadAnswer::Saved);
+            if let Some(request) = extra {
+                self.settings
+                    .auto_download_answers
+                    .push(AutoDownloadAnswer::Saved(request));
+            }
         }
         // Batch 4: a `confirmSession` / `terminateSession` for the
         // new-login alert succeeded.
@@ -238,14 +247,6 @@ impl Session {
             pending.map(|p| p.purpose)
         {
             self.apply_password_op_ok(op, pending.map(|p| p.id));
-        }
-        // Batch 6: a storage limit option was accepted; TDLib echoes the
-        // value as `updateOption`.
-        if matches!(
-            pending.map(|p| p.purpose),
-            Some(RequestPurpose::SetStorageOption)
-        ) {
-            self.settings.data_storage_save.succeed(());
         }
         // Slice A4: a `disconnectWebsite` /
         // `disconnectAllWebsites` succeeded — same stale pattern
@@ -275,17 +276,17 @@ impl Session {
         // after a conversion, the Stars balance.
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::Payments(PaymentsPurpose::ToggleGiftSaved { .. })) => {
-                self.payments.hub.gifts_op.changed(pending.map(|p| p.id));
-                self.payments.hub.gift_notice = None;
+                self.payments.hub.received.op.changed(pending.map(|p| p.id));
+                self.payments.hub.received.notice = None;
             }
             Some(RequestPurpose::SellGift) => {
-                self.payments.hub.gifts_op.changed(pending.map(|p| p.id));
-                self.payments.hub.gift_notice = None;
+                self.payments.hub.received.op.changed(pending.map(|p| p.id));
+                self.payments.hub.received.notice = None;
                 // The panel and the box close only when they are still the
                 // sold gift's: the user may have opened another meanwhile.
                 let sold = pending.and_then(|p| p.subject_id.as_deref());
-                self.payments.hub.gift_view.close_if_selected(sold);
-                self.payments.hub.tx.invalidate();
+                self.payments.hub.received.view.close_if_selected(sold);
+                self.payments.hub.stars.page.invalidate();
             }
             _ => {}
         }
@@ -316,7 +317,9 @@ impl Session {
             archived,
         })) = pending.map(|p| p.purpose)
         {
-            self.finish_sticker_batch_item(set_id, true);
+            if let Some(request) = pending.map(|p| p.id) {
+                self.finish_sticker_batch_item(request, true);
+            }
             self.finish_set_change(set_id, SetChange::of(installed, archived), true);
             for sets in [
                 &mut self.stickers.stickers.trending,
@@ -411,7 +414,7 @@ impl Session {
             // name itself arrives via `updateCommunity`.
             Some(RequestPurpose::SetCommunityName) => {
                 if let Some(community_id) = pending.and_then(|p| p.community_id) {
-                    self.groups.community_full_infos.remove(&community_id);
+                    self.groups.community_full_infos.outdate(community_id);
                 }
             }
             // TDLib 1.8.68: a deleted community is gone for everyone —
@@ -530,7 +533,7 @@ impl Session {
         if let Some(RequestPurpose::SendCallRating) = pending.map(|p| p.purpose)
             && let Some(summary) = self.calls.summary.as_mut()
             && let Some(pending) = pending
-            && summary.rating == CallRating::Sending(pending.id)
+            && summary.rating.sends(pending.id)
         {
             summary.rating = CallRating::Sent;
         }
@@ -759,13 +762,13 @@ impl Session {
                 self.groups.invite_link_counts.remove(&chat_id.0);
             }
             Some((RequestPurpose::DeleteAllRevokedChatInviteLinks, _, Some(chat_id))) => {
-                self.groups.revoked_invite_links.insert(
-                    chat_id.0,
-                    InviteLinkFetch::Loaded(InviteLinkList {
+                // Only a list that is shown empties; a closed one stays closed.
+                if let Some(slot) = self.groups.revoked_invite_links.get_mut(&chat_id.0) {
+                    *slot = InviteLinkFetch::Loaded(InviteLinkList {
                         total_count: 0,
                         links: Vec::new(),
-                    }),
-                );
+                    });
+                }
             }
             _ => {}
         }
@@ -781,14 +784,14 @@ impl Session {
             // Phase 6: the new contact arrives via `updateUser`
             // (`is_contact` flips); invalidate the list so the
             // contacts tab refetches it.
-            self.users_state.contacts = crate::state::fetch::Fetch::Idle;
+            self.users_state.contacts.outdate();
         }
         // Slice A6: a contacts mutation landed — never optimistic:
         // the new list arrives via the `getContacts` refetch the
         // tab triggers.
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::RemoveContact) => {
-                self.users_state.contacts = crate::state::fetch::Fetch::Idle;
+                self.users_state.contacts.outdate();
                 // The delete-synced-contacts batch remove shares
                 // this purpose but carries no user_id — its notice
                 // must not read as a single delete (or overwrite
@@ -822,11 +825,11 @@ impl Session {
                 }
             }
             Some(RequestPurpose::ImportContacts) => {
-                self.users_state.contacts = crate::state::fetch::Fetch::Idle;
+                self.users_state.contacts.outdate();
                 self.users_state.contacts_notice = Some("Contacts imported.".to_string());
             }
             Some(RequestPurpose::ClearImportedContacts) => {
-                self.users_state.contacts = crate::state::fetch::Fetch::Idle;
+                self.users_state.contacts.outdate();
                 self.users_state.contacts_notice =
                     Some("Synced contacts deleted from the servers.".to_string());
             }
@@ -877,14 +880,8 @@ impl Session {
         for later in self.requests.pending.values_mut().filter(|p| {
             p.purpose == RequestPurpose::SetChatPermissions && p.chat_id == Some(chat_id)
         }) {
-            if let Some(RequestRollback::ChatPermissions {
-                previous,
-                previous_can_send,
-                ..
-            }) = &mut later.rollback
-            {
+            if let Some(RequestRollback::ChatPermissions { previous, .. }) = &mut later.rollback {
                 *previous = Some(sent);
-                *previous_can_send = sent.can_send_basic_messages;
             }
         }
     }

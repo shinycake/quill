@@ -165,9 +165,10 @@ impl CommunitiesUi {
 #[derive(Default)]
 pub(crate) struct CommunitiesUi {
     pub(crate) open: Option<CommunityBox>,
-    /// A ban waiting for the member's chats, with no box of its own
-    /// (`drain_pending_ban`). A newer ban replaces it.
-    pub(crate) ban_wait: Option<PendingBan>,
+    /// The bans waiting for their member's chats, oldest first, with no box
+    /// of their own (`drain_pending_ban` settles the first). A newer ban
+    /// queues behind it: a confirmed ban is never replaced.
+    pub(crate) ban_waits: std::collections::VecDeque<PendingBan>,
     /// "Create a New Chat" from this community's chooser: the new chat goes
     /// to the visibility box once made (`drain_new_community_chat`). Its own
     /// slot: starting it never drops a ban still waiting for its answer.
@@ -478,12 +479,20 @@ impl QuillApp {
         let asking = ban::answer_coming(&live.driver.session, community_id, member);
         match ban::ban_start(sent, asking) {
             ban::BanStart::Wait => {
-                self.admin.community.flow.ban_wait = Some(PendingBan {
-                    community_id,
-                    member,
-                    name,
-                    over,
-                });
+                let waits = &mut self.admin.community.flow.ban_waits;
+                // Pressing Ban again on the member already waiting adds
+                // nothing.
+                if !waits
+                    .iter()
+                    .any(|wait| wait.community_id == community_id && wait.member == member)
+                {
+                    waits.push_back(PendingBan {
+                        community_id,
+                        member,
+                        name,
+                        over,
+                    });
+                }
             }
             ban::BanStart::Refused => {
                 self.set_note(StatusNote::error(tr(keys::Q_COMMUNITY_BAN_UNAVAILABLE)))

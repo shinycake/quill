@@ -106,6 +106,9 @@ fn a_switch_closes_the_checkout(cx: &mut TestAppContext) {
         if let Some(session) = app.demo_session.as_mut() {
             session.payments.checkout = quill::state::CheckoutForm::Loading {
                 request: quill::ids::RequestId(1),
+                invoice: quill::state::PaymentRequest {
+                    invoice: quill::payment_invoice::InputInvoice::Name("demo".into()),
+                },
             };
         }
         app.open_payment_dialog(window, cx);
@@ -337,7 +340,8 @@ fn a_switch_closes_reply_in_another_chat(cx: &mut TestAppContext) {
             .expect("a message");
         app.chat_ui
             .set_reply(Some(ComposerReplyTo::new(CHAT, MessageId(message))));
-        app.share.forward.open_reply_chooser();
+        app.chat_ui
+            .show_reply_panel(crate::ui::reply_options_ui::ReplyPanel::chooser());
         cx.notify();
     });
     frames(&mut vcx);
@@ -346,7 +350,7 @@ fn a_switch_closes_reply_in_another_chat(cx: &mut TestAppContext) {
     });
     switch(&app, &mut vcx);
     app.read_with(&vcx, |app, _| {
-        assert!(!app.share.forward.reply_chooser_open());
+        assert!(!app.reply_chooser_open());
         assert!(!app.reply_quote_open());
     });
 }
@@ -363,6 +367,9 @@ fn a_switch_closes_a_dialog_hidden_behind_another(cx: &mut TestAppContext) {
         if let Some(session) = app.demo_session.as_mut() {
             session.payments.checkout = quill::state::CheckoutForm::Loading {
                 request: quill::ids::RequestId(1),
+                invoice: quill::state::PaymentRequest {
+                    invoice: quill::payment_invoice::InputInvoice::Name("demo".into()),
+                },
             };
         }
         app.open_payment_dialog(window, cx);
@@ -493,7 +500,7 @@ fn the_story_viewer_blocks_shortcuts_in_the_main_window_only(cx: &mut TestAppCon
         areas: Vec::new(),
     };
     app.update_in(&mut vcx, |app, window, cx| {
-        app.stories.viewer = StoryViewer::open(vec![item], 0);
+        app.stories.viewer.show(StoryViewer::open(vec![item], 0));
         assert!(app.shortcut_blocked(window, cx), "main window");
         app.windows.scope = Some(CHAT);
         assert!(!app.shortcut_blocked(window, cx), "a chat window");

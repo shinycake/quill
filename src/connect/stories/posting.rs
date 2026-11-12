@@ -228,7 +228,9 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Phase 9.5: `activateStoryStealthMode` — hides the current user's
     /// story views (Premium only; the server decides). The state arrives
-    /// as `updateStoryStealthMode`. Deduped while in flight.
+    /// as `updateStoryStealthMode`. Not deduped here: the box holds its
+    /// press while its own request is out (`StealthPress::Wait`), and a box
+    /// opened after a closed one asks for an answer of its own.
     pub fn activate_story_stealth_mode(&mut self) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
@@ -367,6 +369,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             Ok(()) => {
                 self.session.stories.post_as.begin();
+                self.session.stories.post_as.sent(extra);
                 Ok(Some(extra))
             }
             Err(err) => {

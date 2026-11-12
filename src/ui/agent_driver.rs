@@ -177,14 +177,8 @@ impl QuillApp {
             .command
             .is_input()
             .then_some(pending.request.id);
-        if let Some(id) = input_id {
-            self.agent_bridge.driver = Driver::Running {
-                id,
-                waiting: std::collections::VecDeque::new(),
-            };
-        }
         // screen-scope: an agent's command drives whichever account is on screen when it runs.
-        QuillApp::spawn_app_in(window, cx, async move |app, cx| {
+        let task = QuillApp::spawn_app_in(window, cx, async move |app, cx| {
             // Held until the task ends: deferred refusals until then are
             // this command's (`guard::with_injecting`).
             let _open = open;
@@ -379,12 +373,48 @@ impl QuillApp {
             };
             body.await;
             if let Some(id) = input_id {
-                let _ = app.update_in(cx, |app, window, cx| {
+                let finished = app.update_in(cx, |app, window, cx| {
                     app.agent_command_finished(id, window, cx)
                 });
+                if finished.is_err() {
+                    // The window is gone: nothing can start the next command,
+                    // so the ones in line are answered and the stage ends.
+                    let _ = app.update(cx, |app, _| app.agent_command_abandoned(id));
+                }
             }
-        })
-        .detach();
+        });
+        // The running input command is the stage; its task lives in it. A
+        // read holds nothing, so its task runs on its own.
+        match input_id {
+            Some(id) => {
+                self.agent_bridge.driver = Driver::Running {
+                    id,
+                    _task: task,
+                    waiting: std::collections::VecDeque::new(),
+                };
+            }
+            None => task.detach(),
+        }
+    }
+
+    /// The input command `id` ended without a window to start the next one
+    /// in: the commands waiting behind it are refused (their tool calls end
+    /// with the reason) and the driver is idle again.
+    fn agent_command_abandoned(&mut self, id: u64) {
+        let Driver::Running { id: running, .. } = &self.agent_bridge.driver else {
+            return;
+        };
+        if *running != id {
+            return;
+        }
+        let Driver::Running { waiting, .. } =
+            std::mem::replace(&mut self.agent_bridge.driver, Driver::Idle)
+        else {
+            return;
+        };
+        for pending in waiting {
+            pending.answer(UiReply::Refused(policy::no_frame(WindowState::NotOpen)));
+        }
     }
 
     /// The input command `id` answered (or its task ended): the next waiting
@@ -441,11 +471,9 @@ impl QuillApp {
             chat_id,
             chat_title,
             summary: command_summary(command, tree),
-            ok,
-            declined: false,
+            outcome: activity::Outcome::of(ok, false),
             id: 0,
             message_ids: Vec::new(),
-            undone: false,
         });
     }
 }
@@ -544,14 +572,14 @@ fn perform_step(
     let before = app
         .update(cx, |app, _| super::agent_driver_surface::hard_open(app))
         .unwrap_or_default();
-    guard::set_injecting(true);
+    let scope = guard::Injecting::begin();
     let result = perform_step_injecting(app, cx, step, tree, send_key_mode);
     // A dialog or layer agents never use that the step opened through an
     // opener with no guard of its own: refused, and closed before it shows.
     let _ = app.update(cx, |app, _| {
         super::agent_driver_surface::block_opened_by_agent(app, &before);
     });
-    guard::set_injecting(false);
+    drop(scope);
     result
 }
 

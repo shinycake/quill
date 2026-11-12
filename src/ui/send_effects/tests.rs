@@ -255,7 +255,7 @@ fn a_click_on_the_card_hides_it_and_one_outside_closes_the_menu(cx: &mut TestApp
     frames(vcx);
     app.update(vcx, |app, _| {
         let open = app.composer_ui.send_menu.open.as_ref().expect("still open");
-        assert!(open.preview().is_some_and(|p| p.hiding.is_some()));
+        assert!(open.preview().is_some_and(|p| p.hiding().is_some()));
     });
     // A hiding card takes no presses.
     assert!(!shown(vcx, card));
@@ -415,8 +415,10 @@ fn the_cards_schedule_sends_with_the_effect_after_the_time_is_picked(cx: &mut Te
     app.update_in(vcx, |app, window, cx| {
         app.schedule_with_effect(fire, window, cx);
         let picker = app.chat_ui.schedule_picker.as_ref().expect("picker");
-        assert!(picker.send_after);
-        assert_eq!(picker.send_effect, fire);
+        assert_eq!(
+            picker.target,
+            crate::ui::scheduled::ScheduleTarget::ComposerThenSend { effect: fire }
+        );
         assert!(app.composer_ui.send_menu.open.is_none());
     });
 }

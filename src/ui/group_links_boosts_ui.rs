@@ -11,6 +11,7 @@ use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with, trn};
 use quill::local_time::{civil_local, day_label, now_unix};
+use quill::state::{BoostsListState, PageStage};
 use quill::telegram::envelope::{ParsedBoostSource, ParsedChatBoost};
 
 /// "boost expires on October 6" (tdesktop `lng_boosts_list_status`).
@@ -52,6 +53,24 @@ pub(crate) fn more_boosts_label(left: i32) -> String {
     }
 }
 
+/// What the boosts page draws for a list: a first page that has not
+/// arrived yet, one that failed (with Retry), or the rows (and, when there
+/// are none, "No boosts yet" only for a page that really came back empty).
+#[derive(Debug, PartialEq, Eq)]
+enum BoostsView<'a> {
+    Loading,
+    Failed(&'a str),
+    List,
+}
+
+fn boosts_view(state: &BoostsListState) -> BoostsView<'_> {
+    match &state.stage {
+        PageStage::Loading(_) if state.boosts.is_empty() => BoostsView::Loading,
+        PageStage::Failed(error) if state.boosts.is_empty() => BoostsView::Failed(error),
+        _ => BoostsView::List,
+    }
+}
+
 impl QuillApp {
     fn is_channel_for_boosts(&self, chat_id: ChatId) -> bool {
         self.session()
@@ -84,21 +103,9 @@ impl QuillApp {
             .and_then(|s| s.groups.chat_boost_lists.get(&chat_id.0))
             .cloned();
         let only_gifts = list.as_ref().is_some_and(|l| l.only_gifts);
-        let level = session.and_then(|s| s.groups.chat_boost_status.get(&chat_id.0).copied());
         let mut body = div().flex().flex_col().gap_1().px_2();
         body = body.child(self.boosts_overview(chat_id, cx));
         body = body.child(self.giveaway_boosts_section(chat_id, cx));
-        if let Some((level, count)) = level.filter(|_| {
-            session.is_some_and(|s| !s.groups.chat_boost_details.contains_key(&chat_id.0))
-        }) {
-            body = body.child(div().text_sm().child(tr_with(
-                keys::Q_PEOPLE_LEVEL,
-                &[
-                    ("level", &level.to_string()),
-                    ("boost_count_title", &(boost_count_title(count)).to_string()),
-                ],
-            )));
-        }
         body = body.child(
             div()
                 .flex()
@@ -133,27 +140,53 @@ impl QuillApp {
                 );
             }
             Some(state) => {
-                if !state.loading() || !state.boosts.is_empty() {
-                    body = body.child(
-                        div()
-                            .text_xs()
-                            .font_semibold()
-                            .text_color(muted)
-                            .child(boost_count_title(state.total_count)),
-                    );
-                    if state.boosts.is_empty() {
+                let no_rows = state.boosts.is_empty();
+                match boosts_view(state) {
+                    BoostsView::Loading => {
                         body = body.child(
                             div()
                                 .text_xs()
                                 .text_color(muted)
-                                .child(tr(keys::Q_PEOPLE_NO_BOOSTS_YET)),
+                                .child(tr(keys::Q_PEOPLE_LOADING)),
                         );
-                    } else {
-                        body = body.child(div().text_xs().text_color(muted).child(if channel {
-                            tr(keys::BOOSTS_LIST_SUBTEXT)
+                    }
+                    BoostsView::Failed(error) => {
+                        let only_gifts = state.only_gifts;
+                        body = body
+                            .child(div().text_xs().text_color(muted).child(error.to_string()))
+                            .child(
+                                Button::new("boosts-retry")
+                                    .label(tr(keys::Q_PEOPLE_RETRY))
+                                    .ghost()
+                                    .small()
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.switch_boosts_tab(chat_id, only_gifts, cx);
+                                    })),
+                            );
+                    }
+                    BoostsView::List => {
+                        body = body.child(
+                            div()
+                                .text_xs()
+                                .font_semibold()
+                                .text_color(muted)
+                                .child(boost_count_title(state.total_count)),
+                        );
+                        if no_rows {
+                            body = body.child(
+                                div()
+                                    .text_xs()
+                                    .text_color(muted)
+                                    .child(tr(keys::Q_PEOPLE_NO_BOOSTS_YET)),
+                            );
                         } else {
-                            tr(keys::BOOSTS_LIST_SUBTEXT_GROUP)
-                        }));
+                            body =
+                                body.child(div().text_xs().text_color(muted).child(if channel {
+                                    tr(keys::BOOSTS_LIST_SUBTEXT)
+                                } else {
+                                    tr(keys::BOOSTS_LIST_SUBTEXT_GROUP)
+                                }));
+                        }
                     }
                 }
                 let now = now_unix();
@@ -203,7 +236,7 @@ impl QuillApp {
                     }
                     body = body.child(row);
                 }
-                if let Some(error) = state.error().map(str::to_string) {
+                if let Some(error) = state.error().map(str::to_string).filter(|_| !no_rows) {
                     body = body.child(div().text_xs().text_color(muted).child(error));
                 }
                 if state.loading() && !state.boosts.is_empty() {
@@ -319,6 +352,30 @@ mod tests {
             ),
             "To be distributed"
         );
+    }
+
+    #[test]
+    fn a_failed_first_page_is_an_error_with_retry_not_an_empty_list() {
+        use super::{BoostsView, boosts_view};
+        use quill::ids::RequestId;
+        use quill::state::{BoostsListState, PageStage};
+        let mut state = BoostsListState {
+            only_gifts: false,
+            total_count: 0,
+            boosts: Vec::new(),
+            next_offset: String::new(),
+            stage: PageStage::Loading(RequestId(1)),
+        };
+        assert_eq!(boosts_view(&state), BoostsView::Loading);
+        state.stage = PageStage::Failed("no network".into());
+        assert_eq!(boosts_view(&state), BoostsView::Failed("no network"));
+        state.stage = PageStage::Ready;
+        assert_eq!(boosts_view(&state), BoostsView::List, "empty is real");
+        state
+            .boosts
+            .push(boost(ParsedBoostSource::Premium { user_id: 1 }));
+        state.stage = PageStage::Failed("next page".into());
+        assert_eq!(boosts_view(&state), BoostsView::List, "rows stay");
     }
 
     #[test]

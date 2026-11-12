@@ -7,7 +7,7 @@ use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
 use quill::story_composer::StoryComposer;
-use quill::story_viewer::{StoryPlayback, StoryViewer};
+use quill::story_viewer::StoryPlayback;
 
 /// The facts the custom-emoji warm-up of the story viewer depends on.
 pub(super) type EmojiWarm = (Option<(quill::ids::ChatId, i32)>, Vec<i64>, usize, u32);
@@ -92,13 +92,6 @@ impl ViewerPanel {
 pub(crate) struct StoryViewerUi {
     /// The one panel open over the story.
     pub(super) panel: ViewerPanel,
-    /// The `editStoryCover` call on its way; its answer closes the picker.
-    /// Its own value, not the panel's: a call the picker sent stays tracked
-    /// after another panel replaced it, so its answer still settles.
-    pub(super) cover_request: Option<quill::ids::RequestId>,
-    /// The `setStoryPrivacySettings` call on its way; its answer closes
-    /// the editor (kept apart from the panel like `cover_request`).
-    pub(super) privacy_request: Option<quill::ids::RequestId>,
     /// B14: the press-and-hold / Space pause.
     pub(super) pause: quill::story_extras::StoryUserPause,
     /// The story-page call sent from here (Hide, the profile toggle, the
@@ -121,9 +114,23 @@ static NO_CLOSE_FRIENDS: quill::story_extras::CloseFriendsStage =
 
 impl StoryViewerUi {
     /// `panel` opens and replaces the one before. A call a replaced editor
-    /// already sent (`cover_request`, `privacy_request`) stays tracked.
+    /// already sent stays tracked in `StoryUi::manage_calls`.
     pub(super) fn show(&mut self, panel: ViewerPanel) {
         self.panel = panel;
+    }
+
+    /// The call's editor closes when it is still open on the call's story.
+    pub(super) fn close_manage(&mut self, call: ManageCall) {
+        let (kind, open) = match call.kind {
+            ManageKind::Cover => (PanelKind::Cover, self.cover().map(|c| c.story())),
+            ManageKind::Privacy => (
+                PanelKind::Privacy,
+                self.privacy_edit().map(|e| (e.chat_id, e.story_id)),
+            ),
+        };
+        if open == Some(call.story) {
+            self.close(kind);
+        }
     }
 
     /// The panel of `kind` closes; another panel stays.
@@ -239,11 +246,35 @@ impl StoryViewerUi {
 /// (`StoryUi::media_saves`, one per story item). `Saving` ends with the
 /// copy's result, which waits in `Done` for the story it was for, so
 /// stepping away and back still shows it. Saving again is allowed once it
-/// is `Done`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// is `Done`. `Saving` holds the continuation's task: dropping the entry
+/// (a new account, the app going away) cancels it.
 pub(super) enum MediaSave {
-    Saving,
+    Saving(Task<()>),
     Done(String),
+}
+
+impl MediaSave {
+    pub(super) fn is_saving(&self) -> bool {
+        matches!(self, Self::Saving(_))
+    }
+}
+
+/// Which story editor sent a management call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ManageKind {
+    Cover,
+    Privacy,
+}
+
+/// An `editStoryCover` or `setStoryPrivacySettings` call on its way, for
+/// the story it was sent for. It outlives the panel that sent it and a
+/// step to another story, and ends with its own answer (matched by
+/// `request`) in `story_frame_upkeep`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ManageCall {
+    pub kind: ManageKind,
+    pub story: (i64, i32),
+    pub request: quill::ids::RequestId,
 }
 
 /// The viewer's 100 ms tick. The task is owned here, so dropping the
@@ -265,6 +296,7 @@ impl StoryTick {
     /// itself from inside.
     pub(super) fn finish(&mut self) {
         if let Self::Running(task) = std::mem::replace(self, Self::Off) {
+            // This task is the one running this call: detach lets it end, dropping would cancel it.
             task.detach();
         }
     }
@@ -274,7 +306,7 @@ pub(crate) struct StoryUi {
     /// Stories strip tiles and sideways scroll (`quill::stories_strip`).
     pub(super) strip: super::stories_strip_ui::StoryStripState,
     /// Phase 9.1: fullscreen story viewer (active-story tray → overlay).
-    pub(super) viewer: StoryViewer,
+    pub(super) viewer: super::story_viewer::StoryOpen,
     /// Phase 9.6: playback clock + segmented progress bar for the viewer;
     /// `tick` is the at-most-one 100ms tick task.
     pub(super) playback: StoryPlayback,
@@ -330,6 +362,10 @@ pub(crate) struct StoryUi {
     /// step to another story (a second press for the same story waits for
     /// the first), and the results are dropped with the viewer.
     pub(super) media_saves: std::collections::HashMap<(quill::ids::ChatId, i32), MediaSave>,
+    /// The cover and privacy calls on their way, by story. Opening an
+    /// editor or stepping to another story never drops one; each ends with
+    /// its own answer.
+    pub(super) manage_calls: Vec<ManageCall>,
     /// What reads see while the viewer is closed: always empty, since only
     /// `viewer_ui` (shared) hands it out.
     closed: StoryViewerUi,
@@ -374,8 +410,7 @@ impl StoryUi {
         self.open = None;
         // Finished results go with the viewer; a copy still running stays
         // so a reopened viewer does not start a second one.
-        self.media_saves
-            .retain(|_, save| matches!(save, MediaSave::Saving));
+        self.media_saves.retain(|_, save| save.is_saving());
     }
 
     /// The viewer moved on from the story it showed: what was open over
@@ -395,12 +430,45 @@ impl StoryUi {
             } else {
                 ViewerPanel::None
             };
+            // A cover or privacy call already sent stays tracked in
+            // `manage_calls`: its answer settles the story it was sent for,
+            // not the one shown now.
             self.open = Some(StoryViewerUi {
                 panel,
                 page_op: open.page_op.filter(|_| close_friends),
                 ..StoryViewerUi::default()
             });
         }
+    }
+
+    /// A copy ended: its entry becomes the result for its story (`None`
+    /// when the viewer closed meanwhile). The task of the finished entry
+    /// is let go, not cancelled from inside itself.
+    pub(super) fn finish_media_save(
+        &mut self,
+        key: (quill::ids::ChatId, i32),
+        result: Option<String>,
+    ) {
+        let old = match result {
+            Some(notice) => self.media_saves.insert(key, MediaSave::Done(notice)),
+            None => self.media_saves.remove(&key),
+        };
+        if let Some(MediaSave::Saving(task)) = old {
+            // This task is the one running this call: detach lets it end, dropping would cancel it.
+            task.detach();
+        }
+    }
+
+    /// A call of `kind` for `story` is out.
+    pub(super) fn manage_call_busy(&self, kind: ManageKind, story: (i64, i32)) -> bool {
+        self.manage_calls
+            .iter()
+            .any(|call| call.kind == kind && call.story == story)
+    }
+
+    /// The call is answered (or lost): it is no longer tracked.
+    pub(super) fn end_manage_call(&mut self, request: quill::ids::RequestId) {
+        self.manage_calls.retain(|call| call.request != request);
     }
 
     pub(super) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
@@ -481,12 +549,13 @@ impl StoryUi {
             muted: false,
             more_search: story_more_search,
             stealth_box: None,
-            viewer: StoryViewer::closed(),
+            viewer: super::story_viewer::StoryOpen::closed(),
             playback: StoryPlayback::default(),
             tick: StoryTick::Off,
             emoji_warm: None,
             open: None,
             media_saves: std::collections::HashMap::new(),
+            manage_calls: Vec::new(),
             closed: StoryViewerUi::default(),
         }
     }
@@ -494,7 +563,10 @@ impl StoryUi {
 
 #[cfg(test)]
 mod reply_tests {
-    use super::{StoryViewerUi, ViewerPanel};
+    use super::{ManageCall, ManageKind, PanelKind, StoryViewerUi, ViewerPanel};
+    use crate::ui::story_albums::StoryPrivacyEdit;
+    use quill::ids::RequestId;
+    use quill::story_composer::StoryPrivacy;
 
     #[test]
     fn the_panel_belongs_to_an_open_row_and_goes_with_it() {
@@ -512,5 +584,34 @@ mod reply_tests {
         // Reopening starts without the old panel.
         ui.open_reply();
         assert!(!ui.reply_panel());
+    }
+
+    fn editing(chat_id: i64, story_id: i32) -> ViewerPanel {
+        ViewerPanel::Privacy(StoryPrivacyEdit {
+            chat_id,
+            story_id,
+            privacy: StoryPrivacy::Everyone,
+            selected_user_ids: Vec::new(),
+        })
+    }
+
+    /// A save's answer closes the editor of the story it was sent for, and
+    /// leaves a fresh editor of another story (or none) alone.
+    #[test]
+    fn a_saved_privacy_answer_closes_only_its_own_story_editor() {
+        let call = |story_id, request| ManageCall {
+            kind: ManageKind::Privacy,
+            story: (5, story_id),
+            request: RequestId(request),
+        };
+        let mut ui = StoryViewerUi::default();
+        ui.show(editing(5, 4));
+        ui.close_manage(call(3, 1));
+        assert!(
+            ui.is_open(PanelKind::Privacy),
+            "another story's editor stays"
+        );
+        ui.close_manage(call(4, 2));
+        assert!(!ui.is_open(PanelKind::Privacy), "its own editor closes");
     }
 }

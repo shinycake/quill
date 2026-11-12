@@ -155,9 +155,21 @@ fn a_refused_approve_keeps_the_list() {
     };
     refuse(&mut session, 1, "HIDE_REQUESTER_MISSING");
     assert_eq!(listed(&session, 13), Some((2, vec![2, 3])));
-    assert!(session.groups.invite_link_error.is_some());
-    session.groups.invite_link_error = None;
+    assert!(session.groups.invite_link_error.last().is_some());
+    session.groups.invite_link_error.clear();
     refuse(&mut session, 2, "CHANNELS_TOO_MUCH");
     assert_eq!(listed(&session, 13), Some((2, vec![2, 3])));
-    assert!(session.groups.invite_link_error.is_some());
+    assert!(session.groups.invite_link_error.last().is_some());
+}
+
+#[test]
+fn r2_two_invite_link_failures_before_a_drain_are_both_kept() {
+    // Sweep r2-19 (05-029): the errors of two mutations are a queue.
+    let (mut session, _sink) = session();
+    session.groups.invite_link_error.push("first".into());
+    session.groups.invite_link_error.push("second".into());
+    assert_eq!(
+        session.groups.invite_link_error.take_all(),
+        ["first", "second"]
+    );
 }

@@ -182,26 +182,46 @@ struct Publisher {
     stopped: Arc<AtomicBool>,
 }
 
+/// Sets the flag when dropped.
+struct StopsOnDrop(Arc<AtomicBool>);
+
+impl Drop for StopsOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Release);
+    }
+}
+
+/// What the update thread owns. Fields drop in order, so the flag is set
+/// before `apply` (and anything it holds) is dropped.
+struct Worker<A> {
+    _stops: StopsOnDrop,
+    apply: A,
+}
+
 impl Publisher {
     /// `apply` answers false once the tray service is gone; it and an
     /// `apply` still waiting after `limit` stop the worker.
-    fn spawn<F>(limit: Duration, mut apply: impl FnMut(Shown) -> F + Send + 'static) -> Self
+    fn spawn<F>(limit: Duration, apply: impl FnMut(Shown) -> F + Send + 'static) -> Self
     where
         F: Future<Output = bool>,
     {
         let slot = Arc::new(LatestSlot::new());
         let stopped = Arc::new(AtomicBool::new(false));
-        let worker = slot.clone();
-        let done = stopped.clone();
-        // A worker that cannot spawn leaves the slot undrained, so the icon
-        // keeps its old count until the next registration.
+        let taking = slot.clone();
+        // `stopped` is set when the worker is dropped however it ends: the
+        // loop finishing, a panic in `apply`, or the thread never starting
+        // (the closure is dropped unrun), so `poll` always restarts the item.
+        let mut worker = Worker {
+            _stops: StopsOnDrop(stopped.clone()),
+            apply,
+        };
         let _ = crate::thread_guard::spawn_guarded("quill-tray-update", move || {
-            while let Some(shown) = worker.take() {
-                if within(limit, apply(shown)) != Some(true) {
+            let worker = &mut worker;
+            while let Some(shown) = taking.take() {
+                if within(limit, (worker.apply)(shown)) != Some(true) {
                     break;
                 }
             }
-            done.store(true, Ordering::Release);
         });
         Self { slot, stopped }
     }
@@ -402,6 +422,22 @@ mod tests {
             seen_rx.recv().is_err(),
             "the worker stops with its publisher"
         );
+    }
+
+    /// A worker that panics still reads as stopped, so `poll` restarts the
+    /// item instead of leaving the tray frozen.
+    #[test]
+    fn a_panicking_update_marks_the_publisher_stopped() {
+        let (seen_tx, seen_rx) = channel();
+        let publisher = Publisher::spawn(Duration::MAX, move |shown| -> std::future::Ready<bool> {
+            seen_tx.send(shown).unwrap();
+            std::panic::resume_unwind(Box::new("tray service"))
+        });
+        publisher.publish((1, SHOWN));
+        assert_eq!(seen_rx.recv().unwrap(), (1, SHOWN));
+        // `apply` is dropped after the flag is set.
+        assert!(seen_rx.recv().is_err());
+        assert!(publisher.stopped());
     }
 
     /// A service that takes the update and never answers (a wedged bus)

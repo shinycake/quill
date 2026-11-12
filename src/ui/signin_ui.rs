@@ -18,7 +18,7 @@ use quill::ids::RequestId;
 use quill::lang::{keys, tr};
 use quill::phone::{self, Country};
 use quill::signin;
-use quill::state::AuthRequestError;
+use quill::state::{Answer, AuthRequestError};
 use quill::telegram::envelope::{AuthorizationState, EmailResetState};
 use std::time::Duration;
 
@@ -39,13 +39,13 @@ pub(super) enum PhoneStep {
     /// "Wrong number?": the phone form over the code step. The code stays
     /// requested for `sent_to` until a new number is accepted.
     Editing { sent_to: String },
-    /// The number is sent as `request`. Its answer (the request is gone)
-    /// moves to `CodeSentTo(phone)`; a rejection returns to `back`, which
-    /// still holds the old number.
+    /// The number is sent as `request`. Its answer moves to
+    /// `CodeSentTo(phone)`; its refusal (or its loss) returns to `back`,
+    /// which still holds the old number.
     Sending {
-        request: RequestId,
         phone: String,
         back: Box<PhoneStep>,
+        request: RequestId,
     },
 }
 
@@ -56,6 +56,16 @@ impl PhoneStep {
             Self::Editing { .. } => true,
             Self::Sending { back, .. } => back.is_editing(),
             Self::Entering | Self::CodeSentTo(_) => false,
+        }
+    }
+
+    /// The step after its `Sending` request ended: accepted names the
+    /// number, refused returns to what was before. Other steps stay.
+    fn settled(self, accepted: bool) -> Self {
+        match self {
+            Self::Sending { back, .. } if !accepted => *back,
+            Self::Sending { phone, .. } => Self::CodeSentTo(phone),
+            other => other,
         }
     }
 
@@ -364,32 +374,30 @@ impl QuillApp {
         }
     }
 
-    /// Advance `phone_step` by what happened to its request: the answer
-    /// (no auth request left) accepts the number or, with an auth error,
-    /// returns to what was before; leaving the code step ends "Wrong
-    /// number?".
+    /// Advance `phone_step` by the answer to its own request: accepted
+    /// moves to the code step, a refusal or a request that is gone with no
+    /// answer returns to what was before; leaving the code step ends
+    /// "Wrong number?".
     fn sync_phone_step(&mut self, auth: &AuthorizationState) {
-        if matches!(self.auth_ui.signin.phone_step, PhoneStep::Sending { .. }) {
-            let sent = match &self.auth_ui.signin.phone_step {
-                PhoneStep::Sending { request, .. } => Some(*request),
-                _ => None,
+        if let PhoneStep::Sending { request, .. } = &self.auth_ui.signin.phone_step {
+            let request = *request;
+            let accepted = match self.live.as_mut() {
+                Some(live) => {
+                    let session = &mut live.driver.session;
+                    match session.acks.take(request) {
+                        Some(Answer::Done) => Some(true),
+                        Some(Answer::Failed(_)) => Some(false),
+                        None if session.requests.get(request).is_some() => None,
+                        None => Some(false),
+                    }
+                }
+                None => Some(false),
             };
-            let (waiting, rejected) = match (self.live.as_ref(), sent) {
-                (Some(live), Some(request)) => (
-                    live.driver.session.requests.get(request).is_some(),
-                    live.driver.session.auth_state.last_auth_error.is_some(),
-                ),
-                _ => (false, true),
-            };
-            if waiting {
+            let Some(accepted) = accepted else {
                 return;
-            }
-            let step = &mut self.auth_ui.signin.phone_step;
-            *step = match std::mem::take(step) {
-                PhoneStep::Sending { back, .. } if rejected => *back,
-                PhoneStep::Sending { phone, .. } => PhoneStep::CodeSentTo(phone),
-                other => other,
             };
+            let step = &mut self.auth_ui.signin.phone_step;
+            *step = std::mem::take(step).settled(accepted);
         }
         let step = &mut self.auth_ui.signin.phone_step;
         if !matches!(auth, AuthorizationState::WaitCode { .. })
@@ -875,6 +883,26 @@ mod phone_step_tests {
         };
         assert_eq!(*back, editing);
         assert_eq!(back.code_phone(), "+1 555 0100");
+    }
+
+    /// The answer to the request decides: accepted names the number, a
+    /// refusal or a lost request returns to the old step.
+    #[test]
+    fn the_answer_to_the_sent_number_moves_the_step() {
+        let sending = || PhoneStep::Sending {
+            phone: "+1 555 0199".into(),
+            back: Box::new(PhoneStep::CodeSentTo("+1 555 0100".into())),
+            request: RequestId(3),
+        };
+        assert_eq!(
+            sending().settled(true),
+            PhoneStep::CodeSentTo("+1 555 0199".into())
+        );
+        assert_eq!(
+            sending().settled(false),
+            PhoneStep::CodeSentTo("+1 555 0100".into())
+        );
+        assert_eq!(PhoneStep::Entering.settled(true), PhoneStep::Entering);
     }
 
     /// From the phone form the code step names the number as it is sent.

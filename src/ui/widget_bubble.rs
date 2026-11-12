@@ -16,6 +16,7 @@
 use super::app::QuillApp;
 use super::message_media::MediaCorners;
 use super::widget_runtime::Input;
+use super::widgets_state::Contact;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -177,7 +178,7 @@ impl QuillApp {
             MouseButton::Right if live.pointer.hold => 2,
             _ => return false,
         };
-        live.pointer.pressed = Some(button);
+        live.pointer.contact = Contact::Pressed(button);
         // What this press opens (a link, a copy) shows in this window.
         entry.input_window = window;
         live.runtime.input(Input::Pointer {
@@ -197,7 +198,7 @@ impl QuillApp {
         let Some(live) = entry.lifecycle.runtime_mut() else {
             return;
         };
-        if let Some(button) = live.pointer.pressed {
+        if let Contact::Pressed(button) = live.pointer.contact {
             live.runtime.input(Input::Pointer {
                 action: 1,
                 x,
@@ -206,14 +207,15 @@ impl QuillApp {
                 button,
             });
         } else if over {
-            live.pointer.hovered = true;
+            live.pointer.contact = Contact::Over;
             live.runtime.input(Input::Hover {
                 action: 0,
                 x,
                 y,
                 modifiers,
             });
-        } else if std::mem::take(&mut live.pointer.hovered) {
+        } else if live.pointer.contact == Contact::Over {
+            live.pointer.contact = Contact::Away;
             live.runtime.input(Input::Hover {
                 action: 1,
                 x,
@@ -243,10 +245,10 @@ impl QuillApp {
             MouseButton::Right => 2,
             _ => return,
         };
-        if live.pointer.pressed != Some(released) {
+        if live.pointer.contact != Contact::Pressed(released) {
             return;
         }
-        live.pointer.pressed = None;
+        live.pointer.contact = Contact::Over;
         live.runtime.input(Input::Pointer {
             action: 2,
             x,

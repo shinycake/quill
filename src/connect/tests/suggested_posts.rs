@@ -155,10 +155,12 @@ fn decline_sends_the_reason_and_an_error_becomes_a_note() {
     f.ingest(&format!(
         r#"{{"@type":"error","@extra":"{extra}","code":400,"message":"SUGGESTED_POST_WRONG"}}"#
     ));
-    let notes = f.driver.session.take_suggested_post_notes();
+    let failures = f.driver.session.take_suggested_post_failures();
     assert_eq!(
-        notes,
-        vec!["Couldn't decline the post: invalid request.".to_string()]
+        failures,
+        vec![crate::suggested_posts::SuggestedPostFailure::Note(
+            "Couldn't decline the post: invalid request.".to_string()
+        )]
     );
     assert!(!f.driver.session.suggested_post_busy(CHAT.0, 6 << 20));
 }
@@ -177,14 +179,15 @@ fn a_low_balance_asks_for_a_top_up_instead_of_a_toast() {
     f.ingest(&format!(
         r#"{{"@type":"error","@extra":"{extra}","code":400,"message":"BALANCE_TOO_LOW"}}"#
     ));
-    assert!(f.driver.session.take_suggested_post_notes().is_empty());
     assert_eq!(
-        f.driver.session.take_suggested_post_balance_low(),
-        vec![crate::suggested_posts::SuggestedPostPurpose::AddOffer {
-            chat_id: CHAT.0,
-            message_id: 3 << 20,
-            price: Some(SuggestedPrice::Stars(900)),
-        }]
+        f.driver.session.take_suggested_post_failures(),
+        vec![crate::suggested_posts::SuggestedPostFailure::BalanceLow(
+            crate::suggested_posts::SuggestedPostPurpose::AddOffer {
+                chat_id: CHAT.0,
+                message_id: 3 << 20,
+                price: Some(SuggestedPrice::Stars(900)),
+            }
+        )]
     );
 }
 
@@ -206,12 +209,28 @@ fn two_low_balance_refusals_between_frames_are_both_kept() {
             r#"{{"@type":"error","@extra":"{extra}","code":400,"message":"BALANCE_TOO_LOW"}}"#
         ));
     }
-    assert_eq!(f.driver.session.take_suggested_post_balance_low().len(), 2);
-    assert!(
-        f.driver
-            .session
-            .take_suggested_post_balance_low()
-            .is_empty()
+    assert_eq!(f.driver.session.take_suggested_post_failures().len(), 2);
+    assert!(f.driver.session.take_suggested_post_failures().is_empty());
+}
+
+/// Failures nobody shows (a locked app) are capped, the oldest dropped.
+#[test]
+fn unshown_failures_are_capped_and_keep_the_newest() {
+    use crate::suggested_posts::{MAX_FAILURES, SuggestedPostFailure};
+    let mut f = Fixture::new();
+    let posts = &mut f.driver.session.payments.suggested_posts;
+    for n in 0..(MAX_FAILURES + 5) {
+        posts.push_failure(SuggestedPostFailure::Note(n.to_string()));
+    }
+    let kept = f.driver.session.take_suggested_post_failures();
+    assert_eq!(kept.len(), MAX_FAILURES);
+    assert_eq!(
+        kept.last(),
+        Some(&SuggestedPostFailure::Note((MAX_FAILURES + 4).to_string()))
+    );
+    assert_eq!(
+        kept.first(),
+        Some(&SuggestedPostFailure::Note("5".to_string()))
     );
 }
 

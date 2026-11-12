@@ -70,7 +70,7 @@ fn each_blocker_shows_its_reason_and_retry_and_never_the_phone_form(cx: &mut Tes
         (ConnectBlocker::ReceiveThread, StartupFailure::NoThread),
     ] {
         app.update(&mut vcx, |app, cx| {
-            app.auth_demo.stage = ConnectStage::Connecting;
+            app.auth_demo.stage = ConnectStage::Idle;
             app.open_client(Err(blocker), cx);
         });
         assert!(reads(&mut vcx, failure.reason()), "{failure:?}");

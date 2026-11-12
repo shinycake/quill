@@ -98,15 +98,20 @@ impl QuillApp {
         let cached = self
             .session()
             .and_then(|s| s.chat_list.fresh_spec(folder_id).cloned());
-        let mut dialog = FolderEditorDialog::new(window, cx, Some(folder_id));
+        let load = if cached.is_some() {
+            FolderLoad::ready()
+        } else {
+            match self.ask_chat_folder(folder_id) {
+                Ok(request) => FolderLoad::Loading(request),
+                Err(line) => {
+                    self.set_note(StatusNote::error(line.clone()));
+                    FolderLoad::Failed(line)
+                }
+            }
+        };
+        let mut dialog = FolderEditorDialog::new(window, cx, Some(folder_id), load);
         if let Some(spec) = cached {
             dialog.prefill_from_spec(&spec, window, cx);
-        } else if let Some(live) = self.live.as_mut()
-            && let Err(err) = live.driver.fetch_chat_folder(folder_id)
-        {
-            let line = user_error_for(keys::Q_NOTES_FAILED_FOLDER, &err);
-            dialog.load = FolderLoad::Failed(line.clone());
-            self.set_note(StatusNote::error(line));
         }
         self.folders.editor = Some(dialog);
         self.open_box(DialogKind::FolderEditor);
@@ -129,19 +134,21 @@ impl QuillApp {
             .folders
             .editor
             .as_ref()
-            .is_some_and(|d| d.load == FolderLoad::Merging)
+            .is_some_and(|d| matches!(d.load, FolderLoad::Merging))
         {
             self.settle_folder_editor_merge(cx);
             return;
         }
-        let folder_id = match self.folders.editor.as_ref() {
-            Some(dialog) if dialog.load == FolderLoad::Loading => dialog.folder_id,
+        let (folder_id, request) = match self.folders.editor.as_ref() {
+            Some(FolderEditorDialog {
+                folder_id: Some(folder_id),
+                load: FolderLoad::Loading(request),
+                ..
+            }) => (*folder_id, *request),
             _ => return,
         };
-        let Some(folder_id) = folder_id else {
-            return;
-        };
         let session = self.session();
+        let waiting = session.is_some_and(|s| s.requests.get(request).is_some());
         let spec = session.and_then(|s| s.chat_list.fresh_spec(folder_id).cloned());
         let error = session.and_then(|s| {
             s.chat_list
@@ -156,10 +163,36 @@ impl QuillApp {
             dialog.prefill_from_spec(&spec, window, cx);
         } else if let Some(error) = error {
             dialog.load = FolderLoad::Failed(error);
+        } else if !waiting {
+            // The request ended and left neither the folder nor an error
+            // (swept, or the session went): the form ends in the error
+            // with Retry rather than loading for good.
+            dialog.load = FolderLoad::Failed(tr(keys::Q_NOTES_FAILED_FOLDER).to_string());
         } else {
             return;
         }
         cx.notify();
+    }
+
+    /// Ask for the full folder; the request now out for it. A fetch already
+    /// out for this folder is the one to wait for. Without a connection or
+    /// when the send fails, the line the form shows.
+    fn ask_chat_folder(&mut self, folder_id: i32) -> Result<quill::ids::RequestId, String> {
+        let line = |err| user_error_for(keys::Q_NOTES_FAILED_FOLDER, &err);
+        let live = self
+            .live
+            .as_mut()
+            .ok_or_else(|| line(quill::connect::ConnectSendError::Native))?;
+        let sent = live.driver.fetch_chat_folder(folder_id).map_err(line)?;
+        sent.or_else(|| {
+            self.session().and_then(|s| {
+                s.requests.pending_extra_for_folder(
+                    quill::state::RequestPurpose::GetChatFolder,
+                    folder_id,
+                )
+            })
+        })
+        .ok_or_else(|| line(quill::connect::ConnectSendError::InvalidRequest))
     }
 
     /// Save found no fresh copy of the folder and asked for it
@@ -183,7 +216,7 @@ impl QuillApp {
                 .and_then(|d| d.editor.spec_onto_current(&d.base, fresh.as_ref()));
             let Some(spec) = merged else { return };
             if let Some(dialog) = self.folders.editor.as_mut() {
-                dialog.load = FolderLoad::Ready;
+                dialog.load = FolderLoad::ready();
             }
             self.send_folder_editor_spec(Some(folder_id), spec, cx);
             return;
@@ -214,8 +247,7 @@ impl QuillApp {
             }
         };
         if let Some(dialog) = self.folders.editor.as_mut() {
-            dialog.load = FolderLoad::Ready;
-            dialog.error = Some(error);
+            dialog.load = FolderLoad::refused(error);
         }
         cx.notify();
     }
@@ -236,15 +268,13 @@ impl QuillApp {
             None => return,
             Some(DialogAnswer::Failed(line)) => {
                 if let Some(dialog) = self.folders.editor.as_mut() {
-                    dialog.load = FolderLoad::Ready;
-                    dialog.error = Some(line);
+                    dialog.load = FolderLoad::refused(line);
                 }
             }
             // The limit box is up; the form stays as it was, with no line.
             Some(DialogAnswer::LimitHit) => {
                 if let Some(dialog) = self.folders.editor.as_mut() {
-                    dialog.load = FolderLoad::Ready;
-                    dialog.error = None;
+                    dialog.load = FolderLoad::ready();
                 }
             }
             Some(DialogAnswer::Done | DialogAnswer::Checked(_)) => {
@@ -265,18 +295,12 @@ impl QuillApp {
         let Some(folder_id) = self.folders.editor.as_ref().and_then(|d| d.folder_id) else {
             return;
         };
-        let sent = match self.live.as_mut() {
-            Some(live) => live.driver.fetch_chat_folder(folder_id).map(|_| ()),
-            None => Ok(()),
+        let load = match self.ask_chat_folder(folder_id) {
+            Ok(request) => FolderLoad::Loading(request),
+            Err(line) => FolderLoad::Failed(line),
         };
-        let failed = sent
-            .err()
-            .map(|err| user_error_for(keys::Q_NOTES_FAILED_FOLDER, &err));
         if let Some(dialog) = self.folders.editor.as_mut() {
-            dialog.load = match failed {
-                Some(line) => FolderLoad::Failed(line),
-                None => FolderLoad::Loading,
-            };
+            dialog.load = load;
         }
         cx.notify();
     }

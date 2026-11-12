@@ -131,7 +131,7 @@ impl QuillApp {
     /// when it searches.
     fn shared_media_search_key(&self) -> Option<SearchKey> {
         let gallery = &self.session()?.media.shared_media;
-        let chat_id = gallery.chat_id?;
+        let chat_id = gallery.chat_id()?;
         (gallery.open() && gallery.active_tab.searchable()).then_some((chat_id, gallery.active_tab))
     }
 

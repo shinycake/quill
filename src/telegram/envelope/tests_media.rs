@@ -340,13 +340,13 @@ fn s9_gif_search_page_parses_animation_items_1_8_67() {
     };
     assert_eq!(page.next_offset, "50");
     assert_eq!(page.results.len(), 2);
-    assert_eq!(page.results[0].kind, "animation");
+    assert_eq!(page.results[0].kind.name(), "animation");
     assert_eq!(page.results[0].title, "cat gif");
     // Only the animation entry yields an AnimationItem (Loop 3's
     // summary shape is untouched).
     assert_eq!(page.animations.len(), 1);
     assert_eq!(page.animations[0].file_id, FileId(41));
-    assert_eq!(page.animations[0].thumb_file_id, Some(FileId(42)));
+    assert_eq!(page.animations[0].thumb_file_id(), Some(FileId(42)));
     assert_eq!(page.animations[0].mime_type, "image/gif");
     assert_eq!(page.files.len(), 2);
 
@@ -391,8 +391,7 @@ fn message_video_parses_1_8_67_fields() {
     assert_eq!(video.file_id, FileId(33));
     assert_eq!(video.play_file_id(), Some(FileId(33)));
     assert_eq!(video.thumb_file_id(), Some(FileId(42)));
-    assert_eq!(video.thumb_width, 120);
-    assert_eq!(video.thumb_height, 68);
+    assert_eq!(video.thumb.size(), (120, 68));
     assert_eq!(video.caption, "see this");
     assert_eq!(message.content.preview(), "see this");
     assert!(message.files.iter().any(|file| file.id == FileId(33)));
@@ -456,7 +455,7 @@ fn message_animation_and_saved_list_parse_1_8_67() {
         EnvelopePayload::Stickers(StickersPayload::Animations { animations, .. }) => {
             assert_eq!(animations.len(), 1);
             assert_eq!(animations[0].file_id, FileId(33));
-            assert!(animations[0].thumb_file_id.is_none());
+            assert!(animations[0].thumb_file_id().is_none());
         }
         other => panic!("{other:?}"),
     }
@@ -755,4 +754,18 @@ fn a_file_being_sent_keeps_the_local_state_it_was_in() {
         done,
         "sending twice is sending"
     );
+}
+
+#[test]
+fn a_thumbnail_is_a_still_a_clip_or_nothing() {
+    use super::message_audio_video::Thumb;
+    assert_eq!(Thumb::of(None, 9, 9, true), Thumb::None);
+    assert_eq!(Thumb::of(Some(FileId(0)), 9, 9, true), Thumb::None);
+    let still = Thumb::of(Some(FileId(5)), 90, 60, true);
+    assert_eq!((still.still(), still.clip()), (Some(FileId(5)), None));
+    assert_eq!(still.size(), (90, 60));
+    let clip = Thumb::of(Some(FileId(6)), 90, 60, false);
+    assert_eq!((clip.still(), clip.clip()), (None, Some(FileId(6))));
+    assert_eq!(clip.file_id(), Some(FileId(6)));
+    assert_eq!(Thumb::None.size(), (0, 0));
 }

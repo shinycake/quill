@@ -160,7 +160,10 @@ impl QuillApp {
         key: &AccountKey,
         cx: &mut Context<Self>,
     ) {
-        self.account.accounts.row_edit = crate::ui::accounts::AccountRowEdit::None;
+        self.account
+            .accounts
+            .dialog
+            .ask(crate::ui::accounts::AccountRowEdit::None);
         // A second click on Remove while the first is still closing.
         if self.background.deleting.contains(key)
             || self
@@ -172,13 +175,13 @@ impl QuillApp {
             return;
         }
         match begin_remove_account(&root, key) {
-            Ok(true) => self.account.accounts.error = None,
+            Ok(true) => {}
             Ok(false) => {
                 cx.notify();
                 return;
             }
             Err(e) => {
-                self.account.accounts.error = Some(tr_with(
+                self.fail_accounts_dialog(tr_with(
                     keys::Q_OPS_COULD_NOT_REMOVE_THE_ACCOUNT,
                     &[("e", &e.to_string())],
                 ));
@@ -194,7 +197,7 @@ impl QuillApp {
             vec![key.clone()],
             |this, deletion, _| {
                 if let Deletion::Done { error: Some(e) } = deletion {
-                    this.account.accounts.error = Some(tr_with(
+                    this.fail_accounts_dialog(tr_with(
                         keys::Q_OPS_COULD_NOT_REMOVE_THE_ACCOUNT,
                         &[("e", &e)],
                     ));
@@ -232,6 +235,7 @@ impl QuillApp {
         self.background.local = LocalData::Wiping;
         // A connection being prepared must not open now.
         self.connect.generation += 1;
+        self.auth_demo.stage.cancel_connecting();
         self.close_screen_client(cx);
         self.stop_background_accounts(cx);
         self.delete_after_close(
@@ -308,6 +312,8 @@ impl QuillApp {
                         for key in &keys {
                             this.background.deleting.remove(key);
                         }
+                        // Work waiting to open these folders may go now.
+                        this.settle_close_waiters(cx);
                         done(this, Deletion::Done { error }, cx);
                         cx.notify();
                     });
@@ -335,7 +341,7 @@ impl QuillApp {
                     .as_ref()
                     .is_some_and(|live| &live.driver.session.account == key)
         };
-        if background.screen_preparing > 0 || keys.iter().any(open) {
+        if background.screen_workers.running() || keys.iter().any(open) {
             CloseWait::Wait
         } else {
             CloseWait::Go

@@ -77,22 +77,6 @@ impl QuillApp {
         })
     }
 
-    /// Forget the one-time notice and any half-finished recovery step.
-    pub(super) fn clear_twofa_flow(&mut self) {
-        let flow = if let Some(live) = self.live.as_mut() {
-            Some(&mut live.driver.session.auth_state.twofa_flow)
-        } else {
-            self.demo_session
-                .as_mut()
-                .map(|s| &mut s.auth_state.twofa_flow)
-        };
-        if let Some(flow) = flow {
-            flow.notice = None;
-            flow.code_wait = quill::state::CodeWait::None;
-        }
-        self.twofa.set_confirm(None);
-    }
-
     /// The pending recovery email: code entry, resend, abort.
     pub(super) fn twofa_pending_email_block(
         &self,
@@ -714,7 +698,7 @@ impl QuillApp {
         {
             return false;
         }
-        self.twofa.goto(TwofaView::Status);
+        self.twofa_step_done();
         true
     }
 }

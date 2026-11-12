@@ -116,6 +116,19 @@ pub struct KeyboardButton {
     pub kind: KeyboardButtonType,
 }
 
+/// What a request-poll button lets the user make. TDLib has two flags;
+/// both set (a malformed payload) is read as a quiz, as tdesktop does.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PollRequest {
+    /// Either type.
+    #[default]
+    Any,
+    /// `force_regular`.
+    RegularOnly,
+    /// `force_quiz`.
+    QuizOnly,
+}
+
 /// B1: `keyboardButtonType*` (TDLib 1.8.67, `schema/td_api.tl:3714-3760`).
 /// Only `Text` (tap → send the text) and `WebApp` (browser fallback) act;
 /// the request variants stay disabled with honest tooltips.
@@ -126,10 +139,7 @@ pub enum KeyboardButtonType {
     RequestLocation,
     /// `keyboardButtonTypeRequestPoll`: the poll box, with the type forced
     /// to a quiz or a regular poll when the bot asks.
-    RequestPoll {
-        force_regular: bool,
-        force_quiz: bool,
-    },
+    RequestPoll(PollRequest),
     /// `keyboardButtonTypeRequestUsers` (schema 1.8.67, line 3735).
     RequestUsers(RequestUsersSpec),
     /// `keyboardButtonTypeRequestChat` (schema 1.8.67, line 3751).
@@ -300,18 +310,22 @@ pub(crate) fn parse_keyboard_button(value: &Value) -> KeyboardButton {
         "keyboardButtonTypeText" => KeyboardButtonType::Text,
         "keyboardButtonTypeRequestPhoneNumber" => KeyboardButtonType::RequestPhoneNumber,
         "keyboardButtonTypeRequestLocation" => KeyboardButtonType::RequestLocation,
-        "keyboardButtonTypeRequestPoll" => KeyboardButtonType::RequestPoll {
-            force_regular: value
-                .get("type")
-                .and_then(|t| t.get("force_regular"))
-                .and_then(Value::as_bool)
-                .unwrap_or(false),
-            force_quiz: value
-                .get("type")
-                .and_then(|t| t.get("force_quiz"))
-                .and_then(Value::as_bool)
-                .unwrap_or(false),
-        },
+        "keyboardButtonTypeRequestPoll" => {
+            let forced = |name: &str| {
+                value
+                    .get("type")
+                    .and_then(|t| t.get(name))
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+            };
+            KeyboardButtonType::RequestPoll(if forced("force_quiz") {
+                PollRequest::QuizOnly
+            } else if forced("force_regular") {
+                PollRequest::RegularOnly
+            } else {
+                PollRequest::Any
+            })
+        }
         "keyboardButtonTypeRequestUsers" => {
             let t = value.get("type");
             let flag = |name: &str| t.and_then(|t| t.get(name)).and_then(Value::as_bool);

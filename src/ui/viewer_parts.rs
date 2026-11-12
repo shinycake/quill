@@ -10,8 +10,6 @@ use gpui_kit::*;
 use quill::ids::MessageId;
 use quill::media_viewer::ViewerOrientation;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Instant;
 
 /// The clip of the item the viewer shows.
 #[derive(Default)]
@@ -129,95 +127,165 @@ impl ViewerClip {
     }
 }
 
-/// A rotated or flipped decode of the viewer photo: its path, the
-/// orientation code it was made for and the pixels.
-pub(super) type Rotated = (PathBuf, u8, super::owned_image::OwnedImage);
+/// A rotated or flipped decode of the viewer photo: its path and the
+/// pixels, made for the orientation of the stage that holds it.
+pub(super) type Rotated = (PathBuf, super::owned_image::OwnedImage);
 
-/// The next rotate/flip decode token.
-fn next_token() -> u64 {
-    static TOKENS: AtomicU64 = AtomicU64::new(0);
-    TOKENS.fetch_add(1, Ordering::Relaxed) + 1
+/// The turn and flips of the viewer item, and the decode of the next one:
+/// the orientation shown (with nothing decoded, as a video's turn is), a
+/// decode of `target` running (the previous picture stays until it
+/// lands), or the decoded picture. The shown orientation lives in every
+/// stage, so it and its pixels are never compared by hand. Replaced whole
+/// when the viewer moves on: the stage owns the decode's task, so a newer
+/// turn, a step or a close drops it and the replaced decode stops.
+pub(super) enum Reorient {
+    Idle(ViewerOrientation),
+    Decoding {
+        orientation: ViewerOrientation,
+        target: ViewerOrientation,
+        shown: Option<Rotated>,
+        _task: Task<()>,
+    },
+    Ready {
+        orientation: ViewerOrientation,
+        rotated: Rotated,
+    },
 }
 
-/// The photo turn: nothing, a decode of `target` running (the previous
-/// picture stays until it lands), or the decoded picture. Replaced whole
-/// when the viewer moves on, so a late decode finds no matching token.
-#[derive(Default)]
-pub(super) enum Reorient {
-    #[default]
-    Idle,
-    Decoding {
-        target: ViewerOrientation,
-        token: u64,
-        shown: Option<Rotated>,
-    },
-    Ready(Rotated),
+impl Default for Reorient {
+    fn default() -> Self {
+        Self::Idle(ViewerOrientation::default())
+    }
 }
 
 impl Reorient {
+    /// The orientation on screen.
+    pub(super) fn orientation(&self) -> ViewerOrientation {
+        match self {
+            Self::Idle(orientation)
+            | Self::Decoding { orientation, .. }
+            | Self::Ready { orientation, .. } => *orientation,
+        }
+    }
+
     /// The picture to draw: the decoded one (or the one before it while a
-    /// new turn decodes).
+    /// new turn decodes), made for `orientation()`.
     pub(super) fn shown(&self) -> Option<&Rotated> {
         match self {
-            Self::Idle => None,
+            Self::Idle(_) => None,
             Self::Decoding { shown, .. } => shown.as_ref(),
-            Self::Ready(rotated) => Some(rotated),
+            Self::Ready { rotated, .. } => Some(rotated),
         }
     }
 
-    /// The orientation a running decode is producing.
-    pub(super) fn pending(&self) -> Option<ViewerOrientation> {
+    /// What queued presses build on: the running decode's target, else the
+    /// orientation on screen.
+    pub(super) fn target(&self) -> ViewerOrientation {
         match self {
-            Self::Decoding { target, .. } => Some(*target),
-            Self::Idle | Self::Ready(_) => None,
+            Self::Decoding { target, .. } => *target,
+            Self::Idle(orientation) | Self::Ready { orientation, .. } => *orientation,
         }
     }
 
-    /// Start decoding `target`; returns the token its answer must carry.
-    pub(super) fn begin(&mut self, target: ViewerOrientation) -> u64 {
-        let token = next_token();
+    /// Start decoding `target` in `task`, which the stage now owns.
+    pub(super) fn begin(&mut self, target: ViewerOrientation, task: Task<()>) {
+        let orientation = self.orientation();
         let shown = std::mem::take(self).into_shown();
         *self = Self::Decoding {
+            orientation,
             target,
-            token,
             shown,
+            _task: task,
         };
-        token
     }
 
-    pub(super) fn is_decoding(&self, token: u64) -> bool {
-        matches!(self, Self::Decoding { token: now, .. } if *now == token)
+    pub(super) fn is_decoding(&self) -> bool {
+        matches!(self, Self::Decoding { .. })
     }
 
     /// Drop a running decode, keeping the picture it would replace.
     pub(super) fn cancel(&mut self) {
+        let orientation = self.orientation();
         *self = match std::mem::take(self).into_shown() {
-            Some(rotated) => Self::Ready(rotated),
-            None => Self::Idle,
+            Some(rotated) => Self::Ready {
+                orientation,
+                rotated,
+            },
+            None => Self::Idle(orientation),
         };
     }
 
-    pub(super) fn finish(&mut self, rotated: Rotated) {
-        *self = Self::Ready(rotated);
+    /// The decode landed: `orientation` and its picture show together.
+    pub(super) fn finish(&mut self, orientation: ViewerOrientation, rotated: Rotated) {
+        *self = Self::Ready {
+            orientation,
+            rotated,
+        };
     }
 
-    /// Nothing is turned and nothing decodes.
-    pub(super) fn reset(&mut self) {
-        *self = Self::Idle;
+    /// Show `orientation` with nothing decoded and nothing decoding.
+    pub(super) fn reset(&mut self, orientation: ViewerOrientation) {
+        *self = Self::Idle(orientation);
     }
 
     fn into_shown(self) -> Option<Rotated> {
         match self {
-            Self::Idle => None,
+            Self::Idle(_) => None,
             Self::Decoding { shown, .. } => shown,
-            Self::Ready(rotated) => Some(rotated),
+            Self::Ready { rotated, .. } => Some(rotated),
+        }
+    }
+}
+
+/// Where the pointer is in the viewer: nowhere that matters, on a control
+/// (they stay up), or holding the zoomed picture to pan it. One value, so
+/// a step, a zoom reset or a close ends a pan without a hand reset of the
+/// controls flag.
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub(super) enum Pointer {
+    #[default]
+    Away,
+    OverControls,
+    /// The last mouse position in px while the left button is held.
+    Panning((f32, f32)),
+}
+
+impl Pointer {
+    pub(super) fn anchor(self) -> Option<(f32, f32)> {
+        match self {
+            Self::Panning(at) => Some(at),
+            Self::Away | Self::OverControls => None,
+        }
+    }
+
+    pub(super) fn over_controls(self) -> bool {
+        matches!(self, Self::OverControls)
+    }
+
+    /// The pointer moved onto a control or off them; a pan goes on (it
+    /// ends with the button).
+    pub(super) fn moved(&mut self, over_controls: bool) {
+        if !matches!(self, Self::Panning(_)) {
+            *self = if over_controls {
+                Self::OverControls
+            } else {
+                Self::Away
+            };
+        }
+    }
+
+    /// The button went up, or the item changed: a pan ends, a pointer on a
+    /// control stays there.
+    pub(super) fn end_pan(&mut self) {
+        if matches!(self, Self::Panning(_)) {
+            *self = Self::Away;
         }
     }
 }
 
 /// The toolbar, arrows and caption: up (maybe with the idle timer
 /// waiting), or faded out. `flips` counts the shows and hides and keys the
-/// 150 ms fade.
+/// fade.
 pub(super) enum ControlsVisibility {
     Shown {
         flips: u64,
@@ -225,8 +293,15 @@ pub(super) enum ControlsVisibility {
     },
     Hidden {
         flips: u64,
-        at: Instant,
+        fade: FadeOut,
     },
+}
+
+/// A hide's fade: the timer that ends it (showing the controls drops it),
+/// then gone, when the controls take no pointer input.
+pub(super) enum FadeOut {
+    Fading { _end: Task<()> },
+    Gone,
 }
 
 impl Default for ControlsVisibility {
@@ -249,11 +324,21 @@ impl ControlsVisibility {
         }
     }
 
-    /// When they faded out, if they are hidden.
-    pub(super) fn hidden_at(&self) -> Option<Instant> {
-        match self {
-            Self::Hidden { at, .. } => Some(*at),
-            Self::Shown { .. } => None,
+    /// They are hidden and the fade-out has ended.
+    pub(super) fn is_gone(&self) -> bool {
+        matches!(
+            self,
+            Self::Hidden {
+                fade: FadeOut::Gone,
+                ..
+            }
+        )
+    }
+
+    /// The fade-out timer ran out.
+    pub(super) fn fade_ended(&mut self) {
+        if let Self::Hidden { fade, .. } = self {
+            *fade = FadeOut::Gone;
         }
     }
 
@@ -271,10 +356,14 @@ impl ControlsVisibility {
         }
     }
 
-    /// Fade them out (this drops the idle timer).
-    pub(super) fn hide(&mut self, now: Instant) {
+    /// Fade them out; `end` runs [`Self::fade_ended`] when the fade is
+    /// over (this drops the idle timer).
+    pub(super) fn hide(&mut self, end: Task<()>) {
         let flips = self.flips().wrapping_add(1);
-        *self = Self::Hidden { flips, at: now };
+        *self = Self::Hidden {
+            flips,
+            fade: FadeOut::Fading { _end: end },
+        };
     }
 
     pub(super) fn has_timer(&self) -> bool {
@@ -298,6 +387,23 @@ impl ControlsVisibility {
         if let Self::Shown { idle_task, .. } = self {
             *idle_task = None;
         }
+    }
+}
+
+/// The wait that ends a phaseless trackpad swipe: none running, or the
+/// timer, held here so a close or a new timer drops it.
+#[derive(Default)]
+pub(super) enum SwipeTimer {
+    #[default]
+    Idle,
+    Armed {
+        _task: Task<()>,
+    },
+}
+
+impl SwipeTimer {
+    pub(super) fn is_armed(&self) -> bool {
+        matches!(self, Self::Armed { .. })
     }
 }
 
@@ -389,5 +495,28 @@ impl PhotoEditorSlot {
             }
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod controls_tests {
+    use super::ControlsVisibility;
+    use gpui_kit::Task;
+
+    #[test]
+    fn a_fade_ends_in_gone_and_showing_the_controls_undoes_it() {
+        let mut controls = ControlsVisibility::default();
+        assert!(!controls.is_hidden() && !controls.is_gone());
+        controls.hide(Task::ready(()));
+        assert!(controls.is_hidden());
+        assert!(!controls.is_gone(), "still fading");
+        controls.fade_ended();
+        assert!(controls.is_gone());
+        assert!(controls.show());
+        assert!(!controls.is_hidden() && !controls.is_gone());
+        let flips = controls.flips();
+        controls.fade_ended();
+        assert_eq!(controls.flips(), flips, "a late fade end does nothing");
+        assert!(!controls.is_gone());
     }
 }

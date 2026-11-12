@@ -55,7 +55,7 @@ fn tab_reaches_the_archive_menu_items(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     app.update_in(vcx, |app, _, cx| {
-        app.chat_list.archive_menu = Some(point(px(40.), px(80.)));
+        app.chat_list.menu.open_archive(point(px(40.), px(80.)));
         cx.notify();
     });
     tab_lands_on_an_item(&app, vcx);
@@ -106,7 +106,7 @@ fn archive_items(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> usize {
 
 fn open_archive_menu(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
     app.update_in(vcx, |app, _, cx| {
-        app.chat_list.archive_menu = Some(point(px(40.), px(80.)));
+        app.chat_list.menu.open_archive(point(px(40.), px(80.)));
         cx.notify();
     });
     vcx.run_until_parked();
@@ -194,8 +194,8 @@ fn arrows_enter_the_menu_instead_of_reaching_the_chat_list(cx: &mut TestAppConte
 pub(super) fn open_chat_menu(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
     app.update_in(vcx, |app, _, cx| {
         app.chat_list
-            .overlay
-            .open_menu(crate::ui::menu_states::ChatMenuState::at(
+            .menu
+            .open_row(crate::ui::menu_states::ChatMenuState::at(
                 quill::ids::ChatId(11),
                 point(px(40.), px(80.)),
             ));
@@ -462,8 +462,8 @@ fn a_menu_whose_target_is_gone_closes_instead_of_swallowing_the_arrows(cx: &mut 
                     });
             } else {
                 app.chat_list
-                    .overlay
-                    .open_menu(crate::ui::menu_states::ChatMenuState::at(
+                    .menu
+                    .open_row(crate::ui::menu_states::ChatMenuState::at(
                         quill::ids::ChatId(987_654),
                         point(px(40.), px(80.)),
                     ));
@@ -617,7 +617,7 @@ fn escape_closes_the_menu_and_restores_focus(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     let before = focused(vcx).expect("the app has focus");
     app.update_in(vcx, |app, _, cx| {
-        app.chat_list.archive_menu = Some(point(px(40.), px(80.)));
+        app.chat_list.menu.open_archive(point(px(40.), px(80.)));
         cx.notify();
     });
     vcx.run_until_parked();
@@ -626,7 +626,7 @@ fn escape_closes_the_menu_and_restores_focus(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     app.read_with(vcx, |app, _| {
         assert!(
-            app.chat_list.archive_menu.is_none(),
+            app.chat_list.menu.archive().is_none(),
             "Escape closed the menu"
         );
     });

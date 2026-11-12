@@ -59,7 +59,7 @@ fn the_probe_fills_the_balance_once_and_the_screen_pages() {
     let grams = &driver.session.payments.hub.grams;
     assert_eq!(grams.balance_nano, Some(750_000_000));
     // The probe never fills the list.
-    assert!(grams.entries.is_empty() && !grams.load.answered());
+    assert!(grams.rows.is_empty() && !grams.load.answered());
 
     driver.open_grams(false).unwrap();
     let first = sent_request(&recorder, "getTonTransactions");
@@ -87,7 +87,7 @@ fn the_probe_fills_the_balance_once_and_the_screen_pages() {
     );
     let grams = &driver.session.payments.hub.grams;
     assert!(grams.open && grams.load == crate::gift_market::PageLoad::Ready);
-    assert_eq!(grams.entries.len(), 11);
+    assert_eq!(grams.rows.len(), 11);
     assert_eq!(grams.balance_nano, Some(12_750_000_000));
     assert_eq!(
         grams.withdrawable().map(|r| r.available_nano),
@@ -135,8 +135,7 @@ fn the_probe_fills_the_balance_once_and_the_screen_pages() {
             .payments
             .hub
             .grams
-            .missing_chats
-            .contains(&13)
+            .peer_missing(crate::premium_hub::ton::PeerKey::Chat(13))
     );
 
     // The next page carries the offset and appends.
@@ -157,7 +156,7 @@ fn the_probe_fills_the_balance_once_and_the_screen_pages() {
             json!({"@type": "tonTransactions", "gram_amount": 1, "transactions": [], "next_offset": ""}),
         ),
     );
-    assert!(driver.session.payments.hub.grams.entries.is_empty());
+    assert!(driver.session.payments.hub.grams.rows.is_empty());
     assert!(driver.session.payments.hub.grams.load.is_loading());
     // Another switch: an error for the older tab leaves the live one
     // loading.
@@ -195,9 +194,10 @@ fn the_probe_fills_the_balance_once_and_the_screen_pages() {
 }
 
 /// Sweep is-17 (12-024): a probe that failed is one stage, not a flag left
-/// set: the row stays hidden and the tick does not ask again.
+/// set: the row stays hidden and the tick does not ask again while Settings
+/// stays open; r2-17 (04-031): closing and opening Settings asks again.
 #[test]
-fn a_failed_probe_is_a_stage_and_is_not_asked_again() {
+fn a_failed_probe_is_a_stage_and_is_asked_again_on_the_next_open() {
     let store = MemorySecretStore::new();
     let (_dir, prepared) = prepared_tmp(&store);
     let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
@@ -222,4 +222,25 @@ fn a_failed_probe_is_a_stage_and_is_not_asked_again() {
         "a failed probe is not asked again"
     );
     assert_eq!(sent_of(&recorder, "getTonTransactions").len(), 1);
+    // Settings closes, then opens: the retry goes out, and only its own
+    // answer lands.
+    assert!(!driver.grams_tick(false));
+    assert!(driver.session.payments.hub.grams.probe.is_idle());
+    assert!(driver.grams_tick(true));
+    assert!(driver.session.payments.hub.grams.probe.is_loading());
+    let retries = sent_of(&recorder, "getTonTransactions");
+    assert_eq!(retries.len(), 2);
+    let stale = answer(
+        &probe["@extra"],
+        json!({"@type": "tonTransactions", "gram_amount": 5, "transactions": []}),
+    );
+    driver
+        .ingest(copy_and_parse(&stale, &seq, &sink).unwrap())
+        .unwrap();
+    let grams = &driver.session.payments.hub.grams;
+    assert!(
+        grams.probe.is_loading(),
+        "the first try's answer is dropped"
+    );
+    assert_eq!(grams.balance_nano, None);
 }
