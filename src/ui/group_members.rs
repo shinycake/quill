@@ -95,10 +95,27 @@ impl QuillApp {
     /// shows. Basic groups read `getBasicGroupFullInfo`; supergroups
     /// read the matching `getSupergroupMembers` filter.
     pub(super) fn refresh_member_dialog(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = self.admin.member_dialog.as_mut() else {
+        let Some(dialog) = self.admin.member_dialog.as_ref() else {
             return;
         };
         let query = dialog.search_input.read(cx).value().trim().to_string();
+        self.refresh_member_dialog_list(query, cx);
+    }
+
+    /// Ask again for the list the dialog shows (its `searched` query), not
+    /// for the text typed since: the poll uses this for a `Stale` list.
+    pub(super) fn refresh_shown_member_dialog(&mut self, cx: &mut Context<Self>) {
+        let Some(dialog) = self.admin.member_dialog.as_ref() else {
+            return;
+        };
+        let query = dialog.searched.clone();
+        self.refresh_member_dialog_list(query, cx);
+    }
+
+    fn refresh_member_dialog_list(&mut self, query: String, cx: &mut Context<Self>) {
+        let Some(dialog) = self.admin.member_dialog.as_ref() else {
+            return;
+        };
         let (chat_id, is_basic_group, tab) = (dialog.chat_id, dialog.is_basic_group, dialog.tab);
         let Some(live) = self.live.as_mut() else {
             if let Some(dialog) = self.admin.member_dialog.as_mut() {

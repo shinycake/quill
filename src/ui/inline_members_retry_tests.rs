@@ -137,11 +137,7 @@ fn the_administrators_fallback_is_asked_once_until_retry(cx: &mut TestAppContext
         app.inline_members_refresh_stale(cx);
     });
     assert!(held(&app, cx), "a failed list keeps its Retry");
-    app.update(cx, |app, _| {
-        if let Some(session) = app.session_mut() {
-            session.groups.forget_failed_member_lists(chat);
-        }
-    });
+    app.update(cx, |app, cx| app.inline_members_retry(cx));
     assert!(!held(&app, cx), "Retry drops the failed list to ask again");
 }
 
@@ -261,4 +257,34 @@ fn a_locally_refused_send_keeps_the_recent_list(cx: &mut TestAppContext) {
         ),
         MemberListFilter::Administrators
     );
+}
+
+/// The poll asks again for the list that went stale, not for the text
+/// typed in the search box since: nothing was searched for.
+#[gpui_kit::test]
+fn the_poll_refreshes_the_shown_list_not_the_typed_text(cx: &mut TestAppContext) {
+    let (app, window) = demo_window(cx);
+    let chat = open_group_panel(&app, cx);
+    window
+        .update(cx, |_, window, cx| {
+            app.update(cx, |app, cx| {
+                app.open_member_dialog_on(
+                    quill::ids::ChatId(chat),
+                    crate::ui::dialogs::member::MemberTab::All,
+                    window,
+                    cx,
+                );
+                if let Some(dialog) = app.admin.member_dialog.as_ref() {
+                    dialog
+                        .search_input
+                        .update(cx, |input, cx| input.set_value("abc", window, cx));
+                }
+                app.refresh_shown_member_dialog(cx);
+            })
+        })
+        .expect("the window is open");
+    app.read_with(cx, |app, _| {
+        let dialog = app.admin.member_dialog.as_ref().expect("the dialog");
+        assert_eq!(dialog.searched, "", "the poll did not search for the text");
+    });
 }

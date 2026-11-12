@@ -200,7 +200,7 @@ impl QuillApp {
         // they show the new membership instead of sticking on "Loading
         // members…". A list nobody shows stays `Stale` until it is shown.
         if self.member_dialog_is_stale() {
-            self.refresh_member_dialog(cx);
+            self.refresh_shown_member_dialog(cx);
             progressed = true;
         }
         self.inline_members_refresh_stale(cx);
