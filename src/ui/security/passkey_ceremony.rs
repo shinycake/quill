@@ -28,28 +28,22 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::lang::{Key, keys, tr};
 use quill::webauthn::{self, Ceremony, CeremonyError, CeremonyEvent, ParentWindow};
-use std::time::Duration;
 use zeroize::Zeroizing;
 
-/// The longest the ticker rests without news: it covers a lock or an
-/// account change that pokes neither signal.
-const REST: Duration = Duration::from_secs(2);
-
 /// Rest until the server's answer is applied (`APPLIED`: the registration
-/// options, the added passkey), the worker has an event (`PASSKEY`), or
-/// [`REST`] passes. `seen` holds the epochs taken before the last pass.
-async fn rest_until_passkey_news(executor: &gpui_kit::BackgroundExecutor, seen: (u64, u64)) {
+/// options, the added passkey) or the worker has an event (`PASSKEY`: every
+/// way a worker ends pokes it, a panic and a failed spawn included). A lock
+/// and an account switch end the ceremony directly. `seen` holds the epochs
+/// taken before the last pass.
+async fn rest_until_passkey_news(seen: (u64, u64)) {
     use std::future::Future;
-    use std::pin::Pin;
     use std::task::Poll;
-    let mut timer = executor.timer(REST);
     let mut applied = std::pin::pin!(quill::wake::APPLIED.wait_since(seen.0));
     let mut worker = std::pin::pin!(quill::wake::PASSKEY.wait_since(seen.1));
     std::future::poll_fn(|cx| {
-        let timed_out = Pin::new(&mut timer).poll(cx).is_ready();
         let applied = applied.as_mut().poll(cx).is_ready();
         let worker = worker.as_mut().poll(cx).is_ready();
-        if timed_out || applied || worker {
+        if applied || worker {
             Poll::Ready(())
         } else {
             Poll::Pending
@@ -376,7 +370,7 @@ impl QuillApp {
                 if !keep {
                     break;
                 }
-                rest_until_passkey_news(cx.background_executor(), seen).await;
+                rest_until_passkey_news(seen).await;
             }
             let _ = this.update(cx, |this, _| this.privacy.passkeys.stop_ticker());
         });

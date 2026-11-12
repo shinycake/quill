@@ -464,7 +464,8 @@ impl QuillApp {
             self.quick_replies_error(tr(keys::Q_OPS_COULD_NOT_SEND_THE_MESSAGE_2), cx);
             return;
         };
-        // The same change is already on its way: it answers for this one.
+        // The same change already on its way is the request returned: this
+        // screen waits for its answer.
         let Some(request) = request else {
             return;
         };
@@ -598,7 +599,6 @@ impl QuillApp {
                     dialog.pane.error = None;
                 }
             }
-            // The same delete is already on its way: it answers for this one.
             Some(Ok(None)) | None => {}
             Some(Err(_)) => {
                 self.quick_replies_error(tr(keys::Q_OPS_COULD_NOT_DELETE_THE_SHORTCUT), cx);

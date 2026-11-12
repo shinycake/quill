@@ -325,6 +325,19 @@ fn a_system_ceremony_is_cancelled_through_its_hook() {
     );
 }
 
+/// Sweep r4-10: a worker that panics still ends with a failure the dialog
+/// is poked about, so the dialog needs no timer to find out.
+#[test]
+fn a_panicking_worker_ends_with_a_failure_and_a_poke() {
+    let seen = crate::wake::PASSKEY.epoch();
+    let mut ceremony = Ceremony::spawn(|_| panic!("the worker broke"));
+    assert_eq!(
+        next(&mut ceremony),
+        CeremonyEvent::Failed(CeremonyError::Other("the worker stopped".into()))
+    );
+    assert!(crate::wake::PASSKEY.epoch() > seen, "the dialog was poked");
+}
+
 #[test]
 fn a_system_ceremony_reports_its_result() {
     let mut ceremony = Ceremony::spawn_system(

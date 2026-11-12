@@ -214,7 +214,7 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn close_proxy_editor(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::ui) fn close_proxy_editor(&mut self, cx: &mut Context<Self>) {
         self.forget_proxy_saving();
         self.settings.proxy.editor = None;
         cx.notify();

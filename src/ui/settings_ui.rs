@@ -284,9 +284,15 @@ impl QuillApp {
                     None | Some(PrivacyKeyState::Loading { .. })
                 )
             });
-        let privacy_failed = [PrivacySettingKey::AllowCalls, PrivacySettingKey::PeerToPeer]
-            .into_iter()
-            .any(|key| matches!(rule_state(key), Some(PrivacyKeyState::Failed { .. })));
+        let failed = |key: PrivacySettingKey| {
+            matches!(rule_state(key), Some(PrivacyKeyState::Failed { .. }))
+        };
+        let allow_failed = failed(PrivacySettingKey::AllowCalls).then(|| {
+            self.call_privacy_failed("call-privacy-allow", PrivacySettingKey::AllowCalls, cx)
+        });
+        let p2p_failed = failed(PrivacySettingKey::PeerToPeer).then(|| {
+            self.call_privacy_failed("call-privacy-p2p", PrivacySettingKey::PeerToPeer, cx)
+        });
         let ptt_section = self.push_to_talk_settings(&prefs.push_to_talk, cx);
         let mic_test_section = self.mic_test_section(cx);
         let device_prefs_section = self.call_device_prefs_section(cx);
@@ -478,13 +484,8 @@ impl QuillApp {
                     .pt_1()
                     .child(tr(keys::EDIT_PRIVACY_CALLS_HEADER)),
             )
-            .child(if privacy_failed {
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .px_2()
-                    .child(tr(keys::Q_PREFS_COULDN_T_LOAD_PRIVACY_SETTINGS))
-                    .into_any_element()
+            .child(if let Some(row) = allow_failed {
+                row
             } else if privacy_loading && allow_calls.is_none() {
                 div()
                     .text_xs()
@@ -508,13 +509,8 @@ impl QuillApp {
                     .pt_1()
                     .child(tr(keys::Q_PREFS_PEER_TO_PEER_CALLS)),
             )
-            .child(if privacy_failed {
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .px_2()
-                    .child(tr(keys::Q_PREFS_COULDN_T_LOAD_PRIVACY_SETTINGS))
-                    .into_any_element()
+            .child(if let Some(row) = p2p_failed {
+                row
             } else if privacy_loading && p2p.is_none() {
                 div()
                     .text_xs()
@@ -526,6 +522,39 @@ impl QuillApp {
                 privacy_group("call-privacy-p2p", p2p, PrivacySettingKey::PeerToPeer)
                     .into_any_element()
             })
+    }
+
+    /// One Calls privacy rule that did not load: its own line and a Retry
+    /// that asks for that rule again.
+    fn call_privacy_failed(
+        &self,
+        id: &'static str,
+        key: PrivacySettingKey,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .px_2()
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(tr(keys::Q_PREFS_COULDN_T_LOAD_PRIVACY_SETTINGS)),
+            )
+            .child(
+                Button::new(format!("{id}-retry"))
+                    .label(tr(keys::Q_PREFS_RETRY))
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if let Some(live) = this.live.as_mut() {
+                            let _ = live.driver.fetch_privacy_rules(key);
+                        }
+                        cx.notify();
+                    })),
+            )
+            .into_any_element()
     }
 
     /// MED2: media settings section — the HQ round-video toggle (TGX

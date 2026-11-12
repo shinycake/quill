@@ -10238,7 +10238,7 @@ orders), `deep_link_routes_tests` (seek stays with its account).
 | 21-002 | `MenuActions` records an ask in flight (`Know::Asked(RequestId)`), and a gallery hover asks only when no ask is out and none failed. Tests in `menu_actions`. |
 | g-327 | `Lookup::Waiting` is gone: a waiting draw gets `Lookup::Now(None)`. |
 | g-288, g-289 | `CeremonyRun::{Probing, Connecting}` hold the worker; `CeremonySheet` is only the sheets that draw, and `CeremonyView` is the derived view. |
-| g-299 | The passkey ticker rests on `wake::APPLIED` and the new `wake::PASSKEY` (poked by the ceremony worker's `Link::emit`), with a 2 s fallback, instead of a 100 ms timer. |
+| g-299 | The passkey ticker rests on `wake::APPLIED` and the new `wake::PASSKEY` (poked by the ceremony worker's `Link::emit`, a panicked worker included), with no timer (fix round 3), instead of a 100 ms timer. |
 | g-323 | `pump_saved_messages` no longer asks the request table by purpose; the tags fetch (`Fetch`) is the gate. |
 | g-286 | The demo storage stats are set as `Fetch::Ready` instead of `Fetch::succeed`. |
 | g-300 | Not in the baseline: `selection_drag_loop` is in `owned-timers-allow.txt` with a reason (a held pointer beyond the list's edge sends no event; the drag stage owns the task). |
@@ -10252,3 +10252,16 @@ orders), `deep_link_routes_tests` (seek stays with its account).
 | Fix round 2 (21-007) | `tray_index_of` gives up when the tile's index no longer holds its file. |
 | 20-002 | Skipped: `op` (username or photo) and `save` (name and bio) are two independent operations, each settled on its own request and shown in its own place; they can overlap. |
 | 20-005 | Skipped: lock, discard row and "Play once" are user toggles of one recording, dropped with the `Capture`; none waits for an answer. |
+| Fix round 3 (recording regression) | `with_device_access` shows the OS prompt only while `recording.busy()` is false, so no prompt is up with nobody waiting for its answer. `DeviceOs` is the seam a test sets. |
+| Fix round 3 (21-007) | `ComposerAttachment` has an `AttachmentId` assigned when it joins a tray; `TrayItem` holds it and `tray_index_of` finds the entry by it. The same photo attached twice is two entries. |
+| Fix round 3 (selection) | `Session::shown_history` is the open topic's page or the chat's history; `loaded_selectable_ids`, `message_still_sending` and the selection's text, media, report and delete readers use it. |
+| Fix round 3 (link tooltip) | A history scroll, a mouse exit and a paint that finds the text no longer hovered end the link tooltip. |
+| Fix round 3 (polls) | `updatePoll` marks voters entries `PollVotersFetch::Stale`; `poll_voters_upkeep` asks the shown one again; a refused ask ends `Failed`. The stats Retry only resends the graph (`retry_poll_stats`). |
+| Fix round 3 (Grams) | `GramsView::{Closed, List, Receipt(key)}` replaces `open` and `selected`. A failed page is drawn with a Retry. |
+| Fix round 3 (Premium /start) | `ChatReady` carries the flow's request; `PremiumAutoStart::is_for` takes the start only for that flow. |
+| Fix round 3 (profile) | `open_edit_profile_dialog` ends an open box through `close_edit_profile_dialog`, which also resets the username check. |
+| Fix round 3 (show-or-premium) | Reopening the box while its change is out keeps `Saving(request)` for the same kind. |
+| Fix round 3 (IS) | `DragSelect.mode` is `Press::{PickUp, Range { drag: RangePress }}`. |
+| Fix round 3 (calls privacy) | Each key draws its own stage with a Retry; a refused ask records `Failed` (`refuse_privacy_load`). |
+| Fix round 3 (saved topics) | `saved_asked` resets where the list starts over. |
+| Fix round 3 (farewell) | `SettingsUi::farewell` closes the proxy editor and `DialogUi::farewell` the quick replies box; a second identical change returns the request in flight. |

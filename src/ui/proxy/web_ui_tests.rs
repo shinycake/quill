@@ -89,3 +89,18 @@ fn the_form_offers_web_and_rejects_a_bad_address_or_secret(cx: &mut TestAppConte
         assert!(app.settings.proxy.editor.is_none());
     });
 }
+
+/// Sweep r4-10: an account switch ends the proxy editor, so its wait for
+/// the save does not outlive the account it was asked in.
+#[gpui_kit::test]
+fn an_account_switch_closes_the_proxy_editor(cx: &mut TestAppContext) {
+    use crate::ui::on_screen::Farewell;
+    let (app, _shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, window, cx| {
+        app.open_proxy_editor(None, false, window, cx);
+        assert!(app.settings.proxy.editor.is_some());
+        crate::ui::settings_state::SettingsUi::farewell(app, window, cx);
+        assert!(app.settings.proxy.editor.is_none());
+    });
+}

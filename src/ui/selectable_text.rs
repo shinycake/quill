@@ -736,6 +736,14 @@ impl Element for SelectableRichText {
             let move_hitbox = hitbox.clone();
             let layout = layout.clone();
             let over: Rc<Cell<Option<usize>>> = retained_cell(global_id, window);
+            // The pointer left the text without a move over it (a wheel
+            // scrolled the text away, the list changed under it): the hover
+            // ends here, as a move off it would end it.
+            if over.get().is_some() && !hitbox.is_hovered(window) {
+                over.set(None);
+                let ended = handler.clone();
+                window.defer(cx, move |window, cx| ended(None, window, cx));
+            }
             if let Some(ix) = over.get()
                 && self.underline_on_hover.get(ix).copied().unwrap_or(false)
                 && let Some(range) = self.click_ranges.get(ix)
@@ -752,6 +760,15 @@ impl Element for SelectableRichText {
             }
             let hover_cell = over.clone();
             let view = window.current_view();
+            // The pointer left the window: no move arrives to end the hover.
+            let exit_cell = over.clone();
+            let exit_handler = handler.clone();
+            window.on_mouse_event(move |_: &MouseExitEvent, phase, window, cx| {
+                if phase == DispatchPhase::Bubble && exit_cell.take().is_some() {
+                    exit_handler(None, window, cx);
+                    cx.notify(view);
+                }
+            });
             window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
                 let over = &hover_cell;
                 if phase != DispatchPhase::Bubble {

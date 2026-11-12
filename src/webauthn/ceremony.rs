@@ -177,7 +177,11 @@ impl Ceremony {
             cancel: cancel.clone(),
         };
         let spawned = crate::thread_guard::spawn_guarded("quill-passkey", move || {
-            let last = work(&link);
+            // A worker that panics still tells the dialog (it reads events
+            // when `wake::PASSKEY` pokes, never on a timer).
+            let last = crate::thread_guard::run_guarded(|| work(&link)).unwrap_or_else(|| {
+                CeremonyEvent::Failed(CeremonyError::Other("the worker stopped".into()))
+            });
             link.emit(last);
         });
         if spawned.is_err() {

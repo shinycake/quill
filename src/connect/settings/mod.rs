@@ -42,6 +42,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// (`getUserPrivacySettingRules`, schema 1.8.67, :15620).
     pub fn fetch_privacy_rules(&mut self, key: PrivacySettingKey) -> Result<(), ConnectSendError> {
         if !self.chats_path_active() {
+            self.session.settings.refuse_privacy_load(key);
             return Err(ConnectSendError::InvalidRequest);
         }
         let busy = self

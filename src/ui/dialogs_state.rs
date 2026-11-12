@@ -93,6 +93,9 @@ impl crate::ui::on_screen::Farewell for DialogUi {
     ) {
         let _ = app.close_business_saving(false, window, cx);
         app.dismiss_profile_modal();
+        // A shortcut change in flight is nobody's answer once the account
+        // goes.
+        app.close_quick_replies(cx);
         // The New Contact box's import opens no chat once the box is gone.
         if let Some(live) = app.live.as_mut() {
             live.driver.forget_new_contact();

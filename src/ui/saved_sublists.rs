@@ -270,6 +270,8 @@ impl QuillApp {
                 )));
             } else if view_as_topics && live.driver.session.is_saved_messages(chat_id) {
                 let _ = live.driver.load_saved_topics();
+                // The list starts over: its first length asks again.
+                self.dialogs.saved_asked.reset();
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.set_chat_view_as_topics(chat_id.0, view_as_topics);
@@ -376,6 +378,9 @@ impl QuillApp {
             && session.threads.saved.topics_load == quill::state::SavedTopicsLoad::Idle
         {
             let _ = live.driver.load_saved_topics();
+            // The list starts over (first look, or after a reconnect): a
+            // page that comes back at the length it had asks again.
+            self.dialogs.saved_asked.reset();
         }
     }
 

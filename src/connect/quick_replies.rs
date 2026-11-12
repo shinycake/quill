@@ -29,14 +29,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         let subject = if is_change { Some(build("")) } else { subject };
         // The request registry is the one record of what is on its way: the
         // request carries what it is for, so nothing here outlives it.
+        // The caller gets that request back, so its screen waits for the
+        // one answer instead of entering no stage at all.
         if let Some(subject) = &subject
-            && self.session.requests.pending.values().any(|p| {
+            && let Some(flying) = self.session.requests.pending.values().find(|p| {
                 p.purpose == purpose
                     && p.chat_id == chat_id
                     && p.subject_id() == Some(subject.as_str())
             })
         {
-            return Ok(None);
+            return Ok(Some(flying.id));
         }
         let extra = match &subject {
             Some(subject) => self
@@ -101,7 +103,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Add a text message; the shortcut `name` is created when new.
-    /// The request, or `None` when the same change is already on its way.
+    /// The request; the same change already on its way answers for this one.
     pub fn add_quick_reply_text(
         &mut self,
         name: &str,
@@ -171,7 +173,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         .map(|_| ())
     }
 
-    /// The request, or `None` when the same delete is already on its way.
+    /// The request; the same delete already on its way answers for this one.
     pub fn delete_quick_reply_shortcut(
         &mut self,
         shortcut_id: i32,
