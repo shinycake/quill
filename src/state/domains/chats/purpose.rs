@@ -17,12 +17,12 @@ pub enum ChatsPurpose {
     /// chat (`searchPublicChat` / `createPrivateChat` / `getChat`). The
     /// `chat` answer is picked up in `apply_update_new_chat` and opens
     /// via `ChatReady`.
-    DeepLinkResolve { generation: u64 },
+    DeepLinkResolve,
     /// Check an invite without joining; answer becomes a guarded preview.
-    DeepLinkCheckInvite { generation: u64 },
+    DeepLinkCheckInvite,
     /// `parity:platform-deep-links`: explicitly confirmed `joinChatByInviteLink`
     /// (schema 1.8.67, line 14166); answer is a `chatJoinResult`.
-    DeepLinkJoin { generation: u64 },
+    DeepLinkJoin,
     /// Slice CL3: `reportChat` (schema 1.8.67, line 15693). Response is
     /// `ReportChatResult`; `Ok` reports the chat, any other variant
     /// surfaces as "more info required" (never success).

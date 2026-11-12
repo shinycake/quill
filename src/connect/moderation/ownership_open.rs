@@ -33,8 +33,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             {
                 self.session
                     .groups
-                    .supergroup_members
-                    .insert((chat_id.0, filter), failed());
+                    .set_member_fetch((chat_id.0, filter), failed());
             }
         }
         if self.fetch_basic_group_members(chat_id).is_err() {

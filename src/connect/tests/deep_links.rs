@@ -48,6 +48,11 @@ fn invite_check_confirm_cancel_and_stale_answers() {
         ref title, member_count: 1248, creates_join_request: true, is_channel: true, ..
     }) if title == "Rust Community")
     );
+    let Some(DeepLinkState::InvitePreview { generation, .. }) =
+        driver.session.chats_state.deep_link_stage().cloned()
+    else {
+        panic!("the preview is up");
+    };
     assert_eq!(
         driver.confirm_deep_link_invite(generation + 1).unwrap(),
         None

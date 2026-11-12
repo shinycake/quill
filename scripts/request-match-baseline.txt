@@ -14,7 +14,6 @@ purpose:ConnectDriver::custom_emoji_lookup_idle 1
 purpose:ConnectDriver::delete_saved_topic_history 1
 purpose:ConnectDriver::earn_in_flight 1
 purpose:ConnectDriver::emoji_set_request 1
-purpose:ConnectDriver::enable_private_sharing 1
 purpose:ConnectDriver::fetch_archived_stickers 1
 purpose:ConnectDriver::fetch_marketplace_gift 2
 purpose:ConnectDriver::fetch_message_statistics 1

@@ -134,18 +134,17 @@ impl crate::state::GroupsState {
     }
 
     /// The `getChatAdministrators` answer of `request`, taken only while
-    /// the list waits for it.
+    /// the list is `Loading` as that request.
     pub(crate) fn answer_administrators(
         &mut self,
         chat: i64,
         request: crate::ids::RequestId,
         administrators: Vec<crate::state::ChatAdministratorEntry>,
     ) {
-        let waiting = match self.admin_lists.get(&chat) {
-            None => true,
-            Some(crate::state::AdminListFetch::Loading(waiting)) => *waiting == request,
-            Some(_) => false,
-        };
+        let waiting = matches!(
+            self.admin_lists.get(&chat),
+            Some(crate::state::AdminListFetch::Loading(waiting)) if *waiting == request
+        );
         if waiting {
             self.admin_lists
                 .insert(chat, crate::state::AdminListFetch::Loaded(administrators));
@@ -174,11 +173,9 @@ impl crate::state::GroupsState {
 
     /// The basic group's member list of `chat` is out as `request`.
     pub(crate) fn basic_members_wait_for(&self, chat: i64, request: crate::ids::RequestId) -> bool {
-        matches!(
-            self.basic_group_members.get(&chat),
-            Some(crate::state::SupergroupMembersFetch::Loading { request: Some(asked), .. })
-                if *asked == request
-        )
+        self.basic_group_members
+            .get(&chat)
+            .is_some_and(|fetch| fetch.waits_for(request))
     }
 
     /// The `getChatAdministrators` error of `request`: an older request's
@@ -189,11 +186,10 @@ impl crate::state::GroupsState {
         request: crate::ids::RequestId,
         line: String,
     ) {
-        let waiting = match self.admin_lists.get(&chat) {
-            None => true,
-            Some(crate::state::AdminListFetch::Loading(waiting)) => *waiting == request,
-            Some(_) => false,
-        };
+        let waiting = matches!(
+            self.admin_lists.get(&chat),
+            Some(crate::state::AdminListFetch::Loading(waiting)) if *waiting == request
+        );
         if waiting {
             self.admin_lists
                 .insert(chat, crate::state::AdminListFetch::Failed(line));
@@ -201,17 +197,14 @@ impl crate::state::GroupsState {
     }
 }
 
-/// Whether a link list waits for `request`'s answer: it was never asked
-/// (nothing to protect) or it is `Loading` as this very request.
+/// Whether a link list waits for `request`'s answer: it is `Loading` as
+/// this very request. A missing entry waits for nothing (a membership
+/// change or a closed box dropped it), so an answer asked before is dropped.
 pub(super) fn waits_for(
     slot: Option<&crate::state::InviteLinkFetch>,
     request: crate::ids::RequestId,
 ) -> bool {
-    match slot {
-        None => true,
-        Some(crate::state::InviteLinkFetch::Loading(waiting)) => *waiting == request,
-        Some(_) => false,
-    }
+    matches!(slot, Some(crate::state::InviteLinkFetch::Loading(waiting)) if *waiting == request)
 }
 
 #[cfg(test)]

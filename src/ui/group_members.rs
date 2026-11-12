@@ -346,7 +346,10 @@ impl QuillApp {
                 .track_scroll(&dialog_state.scroll)
                 .on_scroll(cx.listener(|this, _, _, _| this.member_dialog_load_more()));
             match fetch {
-                None | Some(SupergroupMembersFetch::Loading { .. }) => {
+                None
+                | Some(
+                    SupergroupMembersFetch::Loading { .. } | SupergroupMembersFetch::Stale { .. },
+                ) => {
                     list = list.child(
                         div()
                             .text_sm()
@@ -613,8 +616,7 @@ impl QuillApp {
         let filter = self.member_dialog_filter()?;
         session
             .groups
-            .supergroup_members
-            .get(&(dialog.chat_id.0, filter))
+            .member_fetch((dialog.chat_id.0, filter))
             .cloned()
     }
 
@@ -669,7 +671,7 @@ impl QuillApp {
             return;
         }
         let loaded = self.session().and_then(|session| {
-            match session.groups.supergroup_members.get(&(chat_id.0, filter)) {
+            match session.groups.member_fetch((chat_id.0, filter)) {
                 Some(SupergroupMembersFetch::Loaded {
                     members,
                     total_count,

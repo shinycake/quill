@@ -158,15 +158,15 @@ impl Session {
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
                 {
                     self.accept_owner_after_leaving(chat_id.0, pending.map(|p| p.id), user_id);
-                } else if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve {
-                    generation,
-                })) = pending.map(|p| p.purpose)
-                    && let Some(DeepLinkState::ResolvingChat {
-                        action: DeepLinkAction::UserPhone { draft, .. },
-                        generation: slot,
-                    }) = self.chats_state.deep_link_stage().cloned()
-                    && slot == generation
+                } else if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve)
+                    && let Some(DeepLinkAction::UserPhone { draft, .. }) = self
+                        .chats_state
+                        .deep_link_stage()
+                        .and_then(|stage| stage.resolving_action(pending.id))
+                        .cloned()
                 {
+                    let generation = self.chats_state.next_deep_link_generation();
                     // `searchUserByPhoneNumber` answer: open the private chat.
                     self.chats_state.enter_deep_link_stage(DeepLinkState::Info {
                         text: String::new(),

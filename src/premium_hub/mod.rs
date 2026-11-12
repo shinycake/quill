@@ -755,8 +755,9 @@ pub struct PremiumAutoStart {
     /// Lowercase username of the bot.
     pub username: String,
     pub start_ref: String,
-    /// The deep-link flow (`ChatsState::deep_link_seq`) resolving the bot.
-    pub generation: u64,
+    /// The deep-link follow-up request resolving the bot: its error drops
+    /// the `/start`.
+    pub request: crate::ids::RequestId,
 }
 
 /// Per-surface state of the hub dialogs. Lives in `Session` so the poll loop

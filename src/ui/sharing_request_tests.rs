@@ -125,8 +125,7 @@ fn the_request_box_opens_from_state_and_cancel_closes_it(cx: &mut TestAppContext
     let ask = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
         app.update_in(vcx, |app, _, cx| {
             if let Some(session) = app.demo_session.as_mut() {
-                session.groups.private_sharing.enable =
-                    Some(EnableSharing::AskToRequest(ChatId(CHAT)));
+                session.groups.private_sharing.enable = EnableSharing::AskToRequest(ChatId(CHAT));
             }
             cx.notify();
         });

@@ -107,13 +107,16 @@ impl Session {
         {
             self.fail_message_reaction_options(chat_id, MessageId(message_id));
         }
-        if let Some(RequestPurpose::Messages(MessagesPurpose::GetSharingProtection { chat_id })) =
-            pending.map(|p| p.purpose)
+        if let Some(pending) = pending
+            && matches!(
+                pending.purpose,
+                RequestPurpose::Messages(MessagesPurpose::GetSharingProtection { .. })
+            )
         {
             // Who protects the chat is unknown: turning protection off could
             // send the other person a request nobody confirmed, so the
             // "Send Request?" box asks first.
-            self.groups.private_sharing.enable = Some(EnableSharing::AskToRequest(chat_id));
+            self.groups.private_sharing.lookup_failed(pending.id);
         }
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::Messages(MessagesPurpose::AiCompose(purpose))) => {

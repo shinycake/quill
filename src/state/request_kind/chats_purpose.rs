@@ -8,12 +8,12 @@ impl ChatsPurpose {
         match self {
             Self::DeepLinkInfo { .. }
             | Self::DeepLinkInternalType { .. }
-            | Self::DeepLinkResolve { .. }
-            | Self::DeepLinkCheckInvite { .. }
+            | Self::DeepLinkResolve
+            | Self::DeepLinkCheckInvite
             | Self::GetInstalledBackgrounds { .. }
             | Self::SearchBackground
             | Self::GetBackgroundUrl => RequestKind::Lookup,
-            Self::DeepLinkJoin { .. }
+            Self::DeepLinkJoin
             | Self::ReportChat
             | Self::RemoveChatActionBar
             | Self::ToggleBusinessBotPaused

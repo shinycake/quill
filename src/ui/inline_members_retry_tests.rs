@@ -5,7 +5,7 @@ use crate::ui::app::QuillApp;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use gpui_kit::component::Root;
 use gpui_kit::{AppContext, Entity, TestAppContext, px, size};
-use quill::state::{InfoPanelTarget, MemberListFilter, MoreMembers};
+use quill::state::{InfoPanelTarget, MemberList, MemberListFilter, MoreMembers};
 use quill::telegram::envelope::ChatKind;
 
 fn demo(cx: &mut TestAppContext) -> Entity<QuillApp> {
@@ -54,7 +54,20 @@ fn a_failed_page_is_asked_for_again_at_the_next_scroll(cx: &mut TestAppContext) 
     let set = |app: &Entity<QuillApp>, cx: &mut TestAppContext, more: MoreMembers| {
         app.update(cx, |app, _| {
             if let Some(session) = app.session_mut() {
-                session.groups.member_asks.entry(key).or_default().more = more;
+                session
+                    .groups
+                    .supergroup_members
+                    .entry(key)
+                    .or_insert_with(|| {
+                        MemberList::of(
+                            "",
+                            quill::state::SupergroupMembersFetch::Loaded {
+                                members: Vec::new(),
+                                total_count: 0,
+                            },
+                        )
+                    })
+                    .more = more;
             }
         })
     };
@@ -94,7 +107,7 @@ fn the_administrators_fallback_is_asked_once_until_retry(cx: &mut TestAppContext
     };
     app.update(cx, |app, cx| {
         if let Some(session) = app.session_mut() {
-            session.groups.supergroup_members.insert(
+            session.groups.set_member_fetch(
                 (chat, MemberListFilter::Recent),
                 quill::state::SupergroupMembersFetch::Failed("CHANNEL_PRIVATE".into()),
             );
@@ -105,7 +118,7 @@ fn the_administrators_fallback_is_asked_once_until_retry(cx: &mut TestAppContext
     assert!(!held(&app, cx), "nothing was sent, so nothing is held");
     app.update(cx, |app, cx| {
         if let Some(session) = app.session_mut() {
-            session.groups.supergroup_members.insert(
+            session.groups.set_member_fetch(
                 admins,
                 quill::state::SupergroupMembersFetch::Failed("CHANNEL_PRIVATE".into()),
             );
@@ -118,9 +131,9 @@ fn the_administrators_fallback_is_asked_once_until_retry(cx: &mut TestAppContext
     );
     app.update(cx, |app, cx| {
         if let Some(session) = app.session_mut() {
-            session.groups.members_added(chat);
+            session.groups.members_changed(chat);
         }
-        app.inline_members_stale(&[chat], cx);
+        app.inline_members_refresh_stale(cx);
     });
     assert!(!held(&app, cx), "Retry drops the failed list to ask again");
 }
@@ -152,9 +165,21 @@ fn the_block_starts_over_each_time_the_panel_opens(cx: &mut TestAppContext) {
     let stale = |app: &Entity<QuillApp>, cx: &mut TestAppContext| {
         app.update(cx, |app, _| {
             if let Some(session) = app.session_mut() {
-                session.groups.member_asks.entry(key).or_default().more =
-                    MoreMembers::Failed { offset: 40 };
-                session.groups.supergroup_members.insert(
+                session
+                    .groups
+                    .supergroup_members
+                    .entry(key)
+                    .or_insert_with(|| {
+                        MemberList::of(
+                            "",
+                            quill::state::SupergroupMembersFetch::Loaded {
+                                members: Vec::new(),
+                                total_count: 0,
+                            },
+                        )
+                    })
+                    .more = MoreMembers::Failed { offset: 40 };
+                session.groups.set_member_fetch(
                     (chat, MemberListFilter::Administrators),
                     quill::state::SupergroupMembersFetch::Failed("gone".into()),
                 );
@@ -208,8 +233,7 @@ fn a_locally_refused_send_keeps_the_recent_list(cx: &mut TestAppContext) {
             if let Some(session) = app.session_mut() {
                 session
                     .groups
-                    .supergroup_members
-                    .insert((chat, MemberListFilter::Recent), fetch);
+                    .set_member_fetch((chat, MemberListFilter::Recent), fetch);
             }
             app.inline_members_filter(shape)
         })

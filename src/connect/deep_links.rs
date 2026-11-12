@@ -374,15 +374,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let from_agent = crate::agent::ui_driver::guard::injecting();
-        let extra = self.session.request(
-            RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin { generation }),
-            None,
-        );
+        let extra = self
+            .session
+            .request(RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin), None);
         let json = join_chat_by_invite_link(extra, &format!("https://t.me/+{hash}"));
         self.session.chats_state.start_deep_link(
             DeepLinkState::ResolvingChat {
                 action: DeepLinkAction::JoinInvite { hash },
-                generation,
+                request: extra,
             },
             from_agent,
         );
@@ -426,12 +425,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || matches!(action, DeepLinkAction::ShareDraft { .. }) {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let generation = self.session.chats_state.next_deep_link_generation();
         let purpose = match &action {
             DeepLinkAction::JoinInvite { .. } => {
-                RequestPurpose::Chats(ChatsPurpose::DeepLinkCheckInvite { generation })
+                RequestPurpose::Chats(ChatsPurpose::DeepLinkCheckInvite)
             }
-            _ => RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve { generation }),
+            _ => RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve),
         };
         let extra = self.session.request(purpose, None);
         let json = match &action {
@@ -466,7 +464,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
         };
         self.session.chats_state.start_deep_link(
-            DeepLinkState::ResolvingChat { action, generation },
+            DeepLinkState::ResolvingChat {
+                action,
+                request: extra,
+            },
             from_agent,
         );
         match self.sender.send_json(&json) {

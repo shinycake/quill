@@ -48,17 +48,21 @@ impl QuillApp {
                     post: None,
                     story_id: None,
                 });
-                if sent != Some(false) {
-                    // Offline (demos) nothing is sent and nothing answers.
-                    // Tied to the resolve just sent: its error drops it.
-                    let generation = self.session().map_or(0, |s| s.chats_state.deep_link_seq);
-                    if let Some(hub) = self.hub_mut() {
-                        hub.auto_start = Some(PremiumAutoStart {
-                            username: auto_start.0,
-                            start_ref: auto_start.1,
-                            generation,
-                        });
-                    }
+                // Offline (demos) nothing is sent and nothing answers. Tied to
+                // the resolve just sent (the request the flow waits for):
+                // its error drops it.
+                let request = self
+                    .session()
+                    .and_then(|s| s.chats_state.deep_link_request());
+                if sent != Some(false)
+                    && let Some(request) = request
+                    && let Some(hub) = self.hub_mut()
+                {
+                    hub.auto_start = Some(PremiumAutoStart {
+                        username: auto_start.0,
+                        start_ref: auto_start.1,
+                        request,
+                    });
                 }
                 if sent == Some(false) {
                     self.set_status_note(

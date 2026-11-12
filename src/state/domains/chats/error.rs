@@ -107,21 +107,36 @@ impl Session {
             // surfaces TDLib's error as a dialog; stale failures (a newer
             // flow is already in flight) are ignored via the generation
             // guard.
-            Some(
-                RequestPurpose::Chats(ChatsPurpose::DeepLinkInfo { generation })
-                | RequestPurpose::Chats(ChatsPurpose::DeepLinkInternalType { generation })
-                | RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve { generation })
-                | RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin { generation })
-                | RequestPurpose::Chats(ChatsPurpose::DeepLinkCheckInvite { generation }),
-            ) => {
-                // The flow this request belongs to is the one in whatever
-                // stage carries its generation (a preview or an info that
-                // the user already acted on is still that flow).
-                let stale = self
-                    .chats_state
-                    .deep_link_stage()
-                    .and_then(DeepLinkState::generation)
-                    != Some(generation);
+            Some(RequestPurpose::Chats(
+                ChatsPurpose::DeepLinkInfo { .. }
+                | ChatsPurpose::DeepLinkInternalType { .. }
+                | ChatsPurpose::DeepLinkResolve
+                | ChatsPurpose::DeepLinkJoin
+                | ChatsPurpose::DeepLinkCheckInvite,
+            )) => {
+                // The flow this request belongs to is the one whose stage
+                // waits for exactly this request (a lookup's stage carries
+                // its generation, a follow-up's stage the request itself).
+                let lookup_generation = match pending.map(|p| p.purpose) {
+                    Some(
+                        RequestPurpose::Chats(ChatsPurpose::DeepLinkInfo { generation })
+                        | RequestPurpose::Chats(ChatsPurpose::DeepLinkInternalType { generation }),
+                    ) => Some(generation),
+                    _ => None,
+                };
+                let stale = match lookup_generation {
+                    Some(generation) => {
+                        self.chats_state
+                            .deep_link_stage()
+                            .and_then(DeepLinkState::generation)
+                            != Some(generation)
+                    }
+                    None => !pending.is_some_and(|p| {
+                        self.chats_state
+                            .deep_link_stage()
+                            .is_some_and(|stage| stage.resolving_action(p.id).is_some())
+                    }),
+                };
                 // `joinChatByInviteLink` over the community limit opens the
                 // limit box (tdesktop `ChannelsLimitBox`) instead of a dialog.
                 // A stale answer (the flow ended, as an account switch
@@ -151,7 +166,7 @@ impl Session {
                     .hub
                     .auto_start
                     .as_ref()
-                    .is_some_and(|auto| auto.generation == generation)
+                    .is_some_and(|auto| Some(auto.request) == pending.map(|p| p.id))
                 {
                     self.payments.hub.auto_start = None;
                 }

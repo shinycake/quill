@@ -527,16 +527,12 @@ impl Session {
                 })) = pending.map(|p| p.purpose)
                     && let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
-                    && self
-                        .groups
-                        .is_latest_member_request((chat_id.0, filter), pending)
                 {
-                    self.groups.supergroup_members.insert(
+                    self.groups.answer_member_first(
                         (chat_id.0, filter),
-                        SupergroupMembersFetch::Loaded {
-                            members,
-                            total_count,
-                        },
+                        pending,
+                        members,
+                        total_count,
                     );
                 } else if let Some(RequestPurpose::Groups(
                     GroupsPurpose::GetSupergroupMembersMore { filter, .. },
@@ -551,7 +547,11 @@ impl Session {
                     if let Some(SupergroupMembersFetch::Loaded {
                         members: loaded,
                         total_count: total,
-                    }) = self.groups.supergroup_members.get_mut(&(chat_id.0, filter))
+                    }) = self
+                        .groups
+                        .supergroup_members
+                        .get_mut(&(chat_id.0, filter))
+                        .map(|list| &mut list.fetch)
                     {
                         crate::inline_members::merge_page(loaded, members, |m| m.member_id);
                         *total = total_count.max(loaded.len() as i32);
@@ -624,7 +624,7 @@ impl Session {
                         pending.map(|p| p.purpose),
                         Some(RequestPurpose::AddChatMembers | RequestPurpose::AddChatMember)
                     ) {
-                        self.groups.members_added(chat_id.0);
+                        self.groups.members_changed(chat_id.0);
                     }
                     match pending.map(|p| p.purpose) {
                         // Slice G1: the bulk `addChatMembers` answer is a
@@ -869,12 +869,10 @@ impl Session {
                 // list — drop the cached list so the info panel refetches
                 // instead of showing stale data. `accept_own_chat_member`
                 // also refreshes the viewer's own rights below.
-                self.groups.admin_lists.remove(&chat_id.0);
                 // A list asked before this change would put the old
-                // administrators back when it answers: forget the request
-                // (its answer is then ignored) so the next open asks again.
-                self.requests
-                    .take_purpose_for_chat(RequestPurpose::GetChatAdministrators, chat_id);
+                // administrators back when it answers: the list goes
+                // `Stale`, so that request's answer finds nothing waiting
+                // for it, and the next show asks again.
                 // Phase D3b: per-admin rights for the changed member are
                 // stale too (e.g. after an edit-rights save) — drop them
                 // so the editor refetches instead of showing old rights.
@@ -892,28 +890,23 @@ impl Session {
                     }
                 }
                 // Slice G1 fix-up: membership changes also stale the
-                // member-list caches (e.g. our own add, or someone else
-                // joining). Drop both so the dialog refetches instead of
-                // showing the pre-change list; `member_list_stale` tells
-                // the UI an open dialog needs a refetch.
-                self.groups.basic_group_members.remove(&chat_id.0);
-                self.groups
-                    .supergroup_members
-                    .retain(|(id, _), _| *id != chat_id.0);
-                self.groups.mark_member_list_stale(chat_id.0);
+                // member lists and the administrators (e.g. our own add,
+                // or someone else joining): they go `Stale`, so what is
+                // shown asks again instead of drawing the pre-change list.
+                self.groups.members_changed(chat_id.0);
                 self.accept_own_chat_member(chat_id, member);
             }
             GroupsPayload::JoinChatResult(result) => {
                 // `parity:platform-deep-links`: `joinChatByInviteLink`
                 // answer for a deep-link invite. Success opens the chat;
                 // the other variants surface as an honest note.
-                if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin { generation })) =
-                    pending.map(|p| p.purpose)
-                    && let Some(DeepLinkState::ResolvingChat {
-                        action,
-                        generation: slot,
-                    }) = self.chats_state.deep_link_stage().cloned()
-                    && slot == generation
+                if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin)
+                    && let Some(action) = self
+                        .chats_state
+                        .deep_link_stage()
+                        .and_then(|stage| stage.resolving_action(pending.id))
+                        .cloned()
                 {
                     self.chats_state.enter_deep_link_stage(match result {
                         ChatJoinResult::Success { chat_id } => {
@@ -943,14 +936,17 @@ impl Session {
                 creates_join_request,
                 is_channel,
             } => {
-                if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkCheckInvite { generation })) =
-                    pending.map(|p| p.purpose)
-                    && let Some(DeepLinkState::ResolvingChat {
-                        action: DeepLinkAction::JoinInvite { hash },
-                        generation: slot,
-                    }) = self.chats_state.deep_link_stage().cloned()
-                    && slot == generation
+                if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::Chats(ChatsPurpose::DeepLinkCheckInvite)
+                    && let Some(DeepLinkAction::JoinInvite { hash }) = self
+                        .chats_state
+                        .deep_link_stage()
+                        .and_then(|stage| stage.resolving_action(pending.id))
+                        .cloned()
                 {
+                    // The box is identified by a fresh generation: its Join
+                    // is a new request, not this check.
+                    let generation = self.chats_state.next_deep_link_generation();
                     self.chats_state
                         .enter_deep_link_stage(DeepLinkState::InvitePreview {
                             hash,

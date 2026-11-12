@@ -648,14 +648,13 @@ impl Session {
                     self.messages.menu_actions.set(chat_id, message_id, actions);
                 }
                 Some(RequestPurpose::Messages(MessagesPurpose::GetSharingProtection {
-                    chat_id,
+                    ..
                 })) => {
-                    self.groups.private_sharing.enable =
-                        Some(if actions.has_protected_content_by_other_user {
-                            EnableSharing::AskToRequest(chat_id)
-                        } else {
-                            EnableSharing::TurnOff(chat_id)
-                        });
+                    if let Some(pending) = pending {
+                        self.groups
+                            .private_sharing
+                            .answered(pending.id, actions.has_protected_content_by_other_user);
+                    }
                 }
                 _ => {}
             },

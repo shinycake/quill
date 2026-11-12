@@ -496,6 +496,10 @@ pub enum AdminListFetch {
     Loading(RequestId),
     Loaded(Vec<ChatAdministratorEntry>),
     Failed(String),
+    /// A membership change made the list out of date and nobody asked
+    /// again yet; no request is out. Whoever shows the list (or the poll,
+    /// for the one on screen) asks, which moves it to `Loading`.
+    Stale,
 }
 
 /// B4: one `getPollVoters` page (schema 1.8.67, line 12941) backing the
@@ -903,9 +907,10 @@ pub enum DeepLinkState {
     },
     /// Follow-up request (`searchPublicChat` / `createPrivateChat` /
     /// `checkChatInviteLink` / confirmed `joinChatByInviteLink` / `getChat`) in flight.
+    /// Only the answer or error of `request` leaves this stage.
     ResolvingChat {
         action: DeepLinkAction,
-        generation: u64,
+        request: RequestId,
     },
     /// Follow-up resolved to a chat; the UI consumes this once to open
     /// the chat (and jump / prefill / open the story per `action`).
@@ -943,9 +948,24 @@ impl DeepLinkState {
         match self {
             Self::InvitePreview { generation, .. }
             | Self::ResolvingInfo { generation, .. }
-            | Self::Info { generation, .. }
-            | Self::ResolvingChat { generation, .. } => Some(*generation),
-            Self::ChatReady { .. } | Self::ShowText(_) | Self::Ui(_) | Self::Unknown { .. } => None,
+            | Self::Info { generation, .. } => Some(*generation),
+            Self::ResolvingChat { .. }
+            | Self::ChatReady { .. }
+            | Self::ShowText(_)
+            | Self::Ui(_)
+            | Self::Unknown { .. } => None,
+        }
+    }
+
+    /// The action of the follow-up request `request`, while the stage
+    /// waits for exactly that request.
+    pub fn resolving_action(&self, request: RequestId) -> Option<&DeepLinkAction> {
+        match self {
+            Self::ResolvingChat {
+                action,
+                request: asked,
+            } if *asked == request => Some(action),
+            _ => None,
         }
     }
 }

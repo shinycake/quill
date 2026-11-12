@@ -334,16 +334,9 @@ impl Session {
                     "Could not replace primary invite link",
                 ));
             }
-            // Slice G1: roll back the optimistic broadcast-group
-            // upgrade so the panel doesn't lie.
-            Some(RequestPurpose::ToggleBroadcastGroup) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id)
-                    && let Some(chat) = self.chats.get(&chat_id.0)
-                    && let ChatKind::Supergroup { supergroup_id, .. } = chat.kind
-                {
-                    self.groups.supergroup_is_broadcast.remove(&supergroup_id);
-                }
-            }
+            // Slice G1: the optimistic broadcast-group upgrade is rolled
+            // back by its `RequestRollback::BroadcastGroup` (the previous
+            // flag, not a removed entry).
             // Only the request the list waits for fails it, and it is
             // settled: an older search's error must not cover a newer
             // list, and a stale `latest` would drop every later answer.
@@ -593,16 +586,11 @@ impl Session {
             Some(RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembers { filter })) => {
                 if let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
-                    && self
-                        .groups
-                        .is_latest_member_request((chat_id.0, filter), pending)
                 {
-                    self.groups.supergroup_members.insert(
+                    self.groups.fail_member_first(
                         (chat_id.0, filter),
-                        SupergroupMembersFetch::Failed(call_request_error_line(
-                            err,
-                            "Could not load members",
-                        )),
+                        pending,
+                        call_request_error_line(err, "Could not load members"),
                     );
                 }
             }

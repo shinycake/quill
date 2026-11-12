@@ -15,19 +15,25 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
+            if self.session.groups.admin_list_is_stale(chat_id.0) {
+                self.session.groups.admin_lists.insert(
+                    chat_id.0,
+                    AdminListFetch::Failed(send_failed_line("Could not load administrators")),
+                );
+            }
             return Err(ConnectSendError::InvalidRequest);
         }
         if !self.session.chat_can_manage_admins(chat_id) {
+            self.session.groups.drop_stale_admin_list(chat_id.0);
             return Ok(None);
         }
+        // The list says whether a request is out for it: a `Stale` list is
+        // asked even while an older request (dropped by the change) is on
+        // its way, whose answer finds nothing waiting for it.
         if matches!(
             self.session.groups.admin_lists.get(&chat_id.0),
             Some(AdminListFetch::Loading(_) | AdminListFetch::Loaded(_))
-        ) || self
-            .session
-            .requests
-            .has_purpose_for_chat(RequestPurpose::GetChatAdministrators, chat_id)
-        {
+        ) {
             return Ok(None);
         }
         self.send_chat_administrators(chat_id)

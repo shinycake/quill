@@ -247,15 +247,13 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::EmojiAnimations) {
                     self.remember_files(&files);
                     self.accept_emoji_animations(&stickers, &emojis);
-                } else if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve {
-                    generation,
-                })) = pending.map(|p| p.purpose)
+                } else if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve)
                     && matches!(
-                        self.chats_state.deep_link_stage(),
-                        Some(DeepLinkState::ResolvingChat {
-                            action: DeepLinkAction::StickerSet { .. },
-                            generation: slot,
-                        }) if *slot == generation
+                        self.chats_state
+                            .deep_link_stage()
+                            .and_then(|stage| stage.resolving_action(pending.id)),
+                        Some(DeepLinkAction::StickerSet { .. })
                     )
                 {
                     // `addstickers` / `addemoji` link: hand the set id to the

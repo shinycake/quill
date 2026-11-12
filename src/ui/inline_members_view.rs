@@ -149,7 +149,7 @@ impl QuillApp {
                 "inline-members-retry",
                 tr(keys::Q_MEDIA_RETRY),
                 cx.listener(move |this, _, _, cx| {
-                    this.inline_members_stale(&[chat_id.0], cx);
+                    this.inline_members_retry(cx);
                 }),
             ));
         } else if view.rows.is_empty() {
@@ -194,10 +194,7 @@ impl QuillApp {
         let fetch = if shape.is_basic {
             session.groups.basic_group_members.get(&shape.chat.0)
         } else {
-            session
-                .groups
-                .supergroup_members
-                .get(&(shape.chat.0, filter))
+            session.groups.member_fetch((shape.chat.0, filter))
         };
         let (members, total, stage) = match fetch {
             Some(SupergroupMembersFetch::Loaded {
@@ -215,10 +212,24 @@ impl QuillApp {
             }) if !admins_only => (
                 last.members.clone(),
                 last.total_count,
-                MembersStage::Loading { request: *request },
+                MembersStage::Loading {
+                    request: Some(*request),
+                },
             ),
-            Some(SupergroupMembersFetch::Loading { request, .. }) => {
-                (Vec::new(), 0, MembersStage::Loading { request: *request })
+            Some(SupergroupMembersFetch::Stale { last }) if !admins_only => (
+                last.members.clone(),
+                last.total_count,
+                MembersStage::Loading { request: None },
+            ),
+            Some(SupergroupMembersFetch::Loading { request, .. }) => (
+                Vec::new(),
+                0,
+                MembersStage::Loading {
+                    request: Some(*request),
+                },
+            ),
+            Some(SupergroupMembersFetch::Stale { .. }) => {
+                (Vec::new(), 0, MembersStage::Loading { request: None })
             }
             None => (Vec::new(), 0, MembersStage::Loading { request: None }),
         };

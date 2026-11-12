@@ -269,11 +269,7 @@ fn replay_supergroup_members_picker_cache() {
             members_extra.0
         )],
     );
-    let page = match session
-        .groups
-        .supergroup_members
-        .get(&(13, MemberListFilter::Recent))
-    {
+    let page = match session.groups.member_fetch((13, MemberListFilter::Recent)) {
         Some(SupergroupMembersFetch::Loaded { members, .. }) => members,
         other => panic!("expected loaded members, got {other:?}"),
     };
@@ -306,10 +302,7 @@ fn replay_supergroup_members_picker_cache() {
         )],
     );
     assert!(matches!(
-        session
-            .groups
-            .supergroup_members
-            .get(&(13, MemberListFilter::Recent)),
+        session.groups.member_fetch((13, MemberListFilter::Recent)),
         Some(SupergroupMembersFetch::Failed(_))
     ));
 }

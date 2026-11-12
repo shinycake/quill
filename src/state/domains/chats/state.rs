@@ -117,7 +117,9 @@ pub struct ChatsState {
     /// (`setDefaultBackground`, `getBackgroundUrl`), each under the
     /// request that asked. The preview takes its own and drops the rest.
     pub background_answers: Answers<BackgroundOutcome>,
-    /// One-shot: a wallpaper request failed; shown in Appearance.
+    /// The last wallpaper request that failed, drawn on the Appearance
+    /// page until a wallpaper change succeeds, the list is asked again, a
+    /// preview opens or the gallery is left (`clear_background_error`).
     pub background_error: Option<String>,
     /// `updateChatOnlineMemberCount`, keyed by chat id.
     pub chat_online_counts: HashMap<i64, i32>,
@@ -233,6 +235,14 @@ impl ChatsState {
     pub fn next_deep_link_generation(&mut self) -> u64 {
         self.deep_link_seq = self.deep_link_seq.wrapping_add(1);
         self.deep_link_seq
+    }
+
+    /// The follow-up request the flow waits for, while it is in flight.
+    pub fn deep_link_request(&self) -> Option<RequestId> {
+        match self.deep_link_stage() {
+            Some(DeepLinkState::ResolvingChat { request, .. }) => Some(*request),
+            _ => None,
+        }
     }
 
     /// The flow's step the UI acts on now. A request in flight is left in

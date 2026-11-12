@@ -23,8 +23,7 @@ fn loaded_ids(session: &Session) -> (Vec<i64>, i32) {
         total_count,
     } = session
         .groups
-        .supergroup_members
-        .get(&(13, MemberListFilter::Recent))
+        .member_fetch((13, MemberListFilter::Recent))
         .unwrap()
     else {
         panic!("members were not loaded");
@@ -99,7 +98,10 @@ fn a_next_page_of_an_older_query_does_not_join_the_new_list() {
     apply_json(&mut session, &seq, &sink, &page(&[8, 9], 2, second.0));
     apply_json(&mut session, &seq, &sink, &page(&[3, 4, 5], 7, more.0));
     assert_eq!(loaded_ids(&session), (vec![8, 9], 2));
-    assert_eq!(session.groups.member_asks[&key].more, MoreMembers::Idle);
+    assert_eq!(
+        session.groups.supergroup_members[&key].more,
+        MoreMembers::Idle
+    );
 }
 
 #[test]
@@ -149,7 +151,7 @@ fn a_failed_next_page_can_be_asked_for_again() {
     session.groups.note_member_more(key, more, 3);
     apply_json(&mut session, &seq, &sink, &failed(more.0));
     assert_eq!(
-        session.groups.member_asks[&key].more,
+        session.groups.supergroup_members[&key].more,
         MoreMembers::Failed { offset: 3 }
     );
     assert_eq!(session.groups.member_more_blocked(key), Some(3));
@@ -163,7 +165,7 @@ fn a_failed_next_page_can_be_asked_for_again() {
     session.groups.note_member_first(key, second, "bob");
     apply_json(&mut session, &seq, &sink, &failed(stale.0));
     assert!(
-        session.groups.member_asks[&key].more == MoreMembers::Idle,
+        session.groups.supergroup_members[&key].more == MoreMembers::Idle,
         "another query's page says nothing about the list shown"
     );
 }
@@ -182,18 +184,21 @@ fn a_membership_change_keeps_the_last_page_until_the_refetch_answers() {
     let first = session.request(purpose, Some(ChatId(13)));
     session.groups.note_member_first(key, first, "");
     apply_json(&mut session, &seq, &sink, &page(&[1, 2], 2, first.0));
-    session.groups.supergroup_members.insert(
-        (13, MemberListFilter::Search),
-        SupergroupMembersFetch::Loading {
-            request: None,
-            last: None,
-        },
-    );
-    session.groups.members_added(13);
+    let search = session.request(purpose, Some(ChatId(13)));
+    session
+        .groups
+        .note_member_first((13, MemberListFilter::Search), search, "x");
+    session.groups.members_changed(13);
     assert!(matches!(
-        session.groups.supergroup_members.get(&key),
-        Some(SupergroupMembersFetch::Loading { request: None, last: Some(last) }) if last.members.len() == 2 && last.total_count == 2
+        session.groups.member_fetch(key),
+        Some(SupergroupMembersFetch::Stale { last }) if last.members.len() == 2 && last.total_count == 2
     ));
+    assert!(
+        !session
+            .groups
+            .member_fetch(key)
+            .is_some_and(SupergroupMembersFetch::in_flight)
+    );
     assert!(
         !session
             .groups
@@ -202,11 +207,8 @@ fn a_membership_change_keeps_the_last_page_until_the_refetch_answers() {
         "a list that was not loaded goes"
     );
     // Dropped again before the refetch: still the same page.
-    session.groups.members_added(13);
-    assert!(matches!(
-        session.groups.supergroup_members.get(&key),
-        Some(SupergroupMembersFetch::Loading { last: Some(_), .. })
-    ));
+    session.groups.members_changed(13);
+    assert!(session.groups.member_list_is_stale(key));
     let second = session.request(purpose, Some(ChatId(13)));
     session.groups.note_member_first(key, second, "");
     apply_json(&mut session, &seq, &sink, &page(&[1, 2, 3], 3, second.0));
@@ -226,12 +228,12 @@ fn a_failed_refetch_replaces_the_kept_page() {
     let first = session.request(purpose, Some(ChatId(13)));
     session.groups.note_member_first(key, first, "");
     apply_json(&mut session, &seq, &sink, &page(&[1, 2], 2, first.0));
-    session.groups.members_added(13);
+    session.groups.members_changed(13);
     let second = session.request(purpose, Some(ChatId(13)));
     session.groups.note_member_first(key, second, "");
     apply_json(&mut session, &seq, &sink, &failed(second.0));
     assert!(matches!(
-        session.groups.supergroup_members.get(&key),
+        session.groups.member_fetch(key),
         Some(SupergroupMembersFetch::Failed(_))
     ));
 }

@@ -10,9 +10,11 @@ impl Session {
         match pending.purpose {
             RequestPurpose::Chats(ChatsPurpose::DeleteDefaultBackground { for_dark_theme }) => {
                 self.chats_state.default_backgrounds.remove(&for_dark_theme);
+                self.chats_state.background_error = None;
             }
             RequestPurpose::Chats(ChatsPurpose::RemoveInstalledBackground { background_id }) => {
                 self.chats_state.installed_backgrounds.forget(background_id);
+                self.chats_state.background_error = None;
             }
             RequestPurpose::DeleteChatBackground => {
                 if let Some(chat_id) = pending.chat_id {
@@ -586,16 +588,16 @@ impl Session {
                 media_timestamp,
                 thread_id,
             } => {
-                if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve { generation })) =
-                    pending.map(|p| p.purpose)
+                if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve)
                     && matches!(
-                        self.chats_state.deep_link_stage(),
-                        Some(DeepLinkState::ResolvingChat {
-                            action: DeepLinkAction::MessageLink { .. },
-                            generation: slot,
-                        }) if *slot == generation
+                        self.chats_state
+                            .deep_link_stage()
+                            .and_then(|stage| stage.resolving_action(pending.id)),
+                        Some(DeepLinkAction::MessageLink { .. })
                     )
                 {
+                    let generation = self.chats_state.next_deep_link_generation();
                     self.chats_state.enter_deep_link_stage(if chat_id == 0 {
                         DeepLinkState::ShowText(
                             "This message is in a chat you can't see. Join it first.".into(),
@@ -616,16 +618,16 @@ impl Session {
                 }
             }
             ChatsPayload::ChatBoostLinkInfo { chat_id } => {
-                if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve { generation })) =
-                    pending.map(|p| p.purpose)
+                if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve)
                     && matches!(
-                        self.chats_state.deep_link_stage(),
-                        Some(DeepLinkState::ResolvingChat {
-                            action: DeepLinkAction::BoostLink { .. },
-                            generation: slot,
-                        }) if *slot == generation
+                        self.chats_state
+                            .deep_link_stage()
+                            .and_then(|stage| stage.resolving_action(pending.id)),
+                        Some(DeepLinkAction::BoostLink { .. })
                     )
                 {
+                    let generation = self.chats_state.next_deep_link_generation();
                     self.chats_state.enter_deep_link_stage(if chat_id == 0 {
                         DeepLinkState::ShowText("This boost link is broken.".into())
                     } else {

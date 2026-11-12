@@ -612,33 +612,14 @@ impl Session {
         // Phase D3b: `setChatMemberStatus` confirmed. TDLib sends
         // `updateChatMember` to bots only (td_api.tl), so the change
         // is ours to apply: the cached admin list and the member's
-        // rights are dropped and the chat is marked stale, which the
-        // poll turns into a refetch of what is on screen. Without the
-        // mark the lists drew "Loading…" with nothing in flight.
+        // rights are dropped and the lists go `Stale`, which the poll turns
+        // into a refetch of what is on screen.
         if let Some(RequestPurpose::Groups(GroupsPurpose::SetChatMemberStatus { user_id, .. })) =
             pending.map(|p| p.purpose)
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
         {
-            self.groups.admin_lists.remove(&chat_id.0);
             self.groups.admin_rights.remove(&(chat_id.0, user_id));
-            self.groups.mark_member_list_stale(chat_id.0);
-            // Slice G1: restrict/ban/unban change the member
-            // lists too — drop all cached pages for this chat.
-            if matches!(
-                pending.map(|p| p.purpose),
-                Some(RequestPurpose::Groups(GroupsPurpose::SetChatMemberStatus {
-                    kind: MemberStatusChange::Restrict
-                        | MemberStatusChange::Ban
-                        | MemberStatusChange::Unban
-                        | MemberStatusChange::Remove,
-                    ..
-                }))
-            ) {
-                self.groups
-                    .supergroup_members
-                    .retain(|(id, _), _| *id != chat_id.0);
-                self.groups.basic_group_members.remove(&chat_id.0);
-            }
+            self.groups.members_changed(chat_id.0);
         }
         // Slice G1: `setChatMemberTag` confirmed — the custom
         // title itself arrives via `updateChatMember`; drop
@@ -651,11 +632,7 @@ impl Session {
             ))
         ) && let Some(chat_id) = pending.and_then(|p| p.chat_id)
         {
-            self.groups
-                .supergroup_members
-                .retain(|(id, _), _| *id != chat_id.0);
-            self.groups.basic_group_members.remove(&chat_id.0);
-            self.groups.mark_member_list_stale(chat_id.0);
+            self.groups.members_changed(chat_id.0);
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::LeaveBeforeDelete)
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
@@ -698,7 +675,7 @@ impl Session {
             pending.map(|p| p.purpose)
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
         {
-            self.groups.members_added(chat_id.0);
+            self.groups.members_changed(chat_id.0);
             self.forget_join_request(chat_id, user_id);
         }
         // B8: bulk join-request processing and revoked-link deletion.

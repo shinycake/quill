@@ -631,7 +631,7 @@ fn fill_side_tables(session: &mut Session, seq: &AtomicU64, sink: &Arc<MemorySin
         session
             .groups
             .supergroup_members
-            .insert((chat, filter), loaded());
+            .insert((chat, filter), crate::state::MemberList::of("", loaded()));
     }
     session.groups.basic_group_members.insert(chat, loaded());
 }
@@ -694,11 +694,6 @@ fn side_tables_of_dropped_chats_go_back_to_empty() {
     for (table, chats) in side_table_chats(&session).iter().enumerate() {
         assert!(chats.is_empty(), "table {table} still holds {chats:?}");
     }
-    let stale = &session.groups.member_list_stale;
-    assert!(
-        (1..=visited).all(|chat| stale.contains(&chat)),
-        "an open member dialog of a dropped chat asks again"
-    );
 }
 
 /// The UI holds the group the info panel shows (`ui::history_holds`): a
@@ -782,7 +777,6 @@ fn a_chat_an_open_box_holds_keeps_its_member_lists() {
         held.iter().all(|chats| chats.contains(&1)),
         "the box's lists stay: {held:?}"
     );
-    assert!(!session.groups.member_list_stale.contains(&1));
     // The box closes: the chat is an ordinary closed tail from then on.
     session.set_history_holds([]);
     churn(&mut session, 100);
@@ -804,10 +798,13 @@ fn a_forum_forgets_its_side_tables_with_its_last_topic() {
         .insert(70, HashMap::from([(0, 3)]));
     session.groups.supergroup_members.insert(
         (70, MemberListFilter::Recent),
-        SupergroupMembersFetch::Loaded {
-            members: Vec::new(),
-            total_count: 200,
-        },
+        crate::state::MemberList::of(
+            "",
+            SupergroupMembersFetch::Loaded {
+                members: Vec::new(),
+                total_count: 200,
+            },
+        ),
     );
     assert!(side_table_chats(&session)[0].contains(&70));
     for topic in 1..=CLOSED_TOPICS_MAX as i32 {
