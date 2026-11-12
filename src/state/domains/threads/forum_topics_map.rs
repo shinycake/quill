@@ -128,7 +128,7 @@ impl ForumTopicsMap {
     }
 
     /// `chat_id`'s first page of topics, held as they are (a fixture).
-    #[cfg(test)]
+    #[cfg(any(test, feature = "demo-capture"))]
     pub fn insert(&mut self, chat_id: i64, topics: Vec<ForumTopic>) {
         self.unread.insert(chat_id, counted_unread(&topics));
         self.lists.entry(chat_id).or_default().pushed(topics);

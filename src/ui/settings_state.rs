@@ -84,6 +84,8 @@ pub(crate) enum SettingsBox {
     LogOut,
     /// Chats > "Manage sticker sets".
     Stickers,
+    /// The archive auto-settings box (chat list menu).
+    ArchiveSettings,
 }
 
 impl SettingsBox {
@@ -164,13 +166,13 @@ impl super::on_screen::Farewell for SettingsUi {
         app.close_proxy_link(cx);
         // These boxes keep their open flags in the session, which goes to
         // the background with the account.
-        let (masks, emoji, archive) = app.session().map_or((false, false, false), |session| {
+        let (masks, emoji) = app.session().map_or((false, false), |session| {
             (
                 session.stickers.masks.dialog_open(),
                 session.stickers.emoji.open,
-                session.chat_list.archive_settings_open,
             )
         });
+        let archive = app.settings.box_open(SettingsBox::ArchiveSettings);
         if masks {
             app.close_mask_sets(cx);
         }

@@ -611,6 +611,19 @@ impl QuillApp {
             RuntimeEvent::Request { token, data } => {
                 // A runtime that is gone (stopped or failed earlier in this
                 // batch) has nobody to answer: nothing goes to TDLib.
+                let runtime_is_up = self
+                    .widgets
+                    .entries
+                    .get_mut(&key)
+                    .and_then(|entry| entry.live_mut())
+                    .is_some();
+                if !runtime_is_up {
+                    return;
+                }
+                let sent = self
+                    .live
+                    .as_mut()
+                    .and_then(|live| live.driver.send_widget_query(key, data.as_bytes()).ok());
                 let Some(live) = self
                     .widgets
                     .entries
@@ -619,10 +632,6 @@ impl QuillApp {
                 else {
                     return;
                 };
-                let sent = self
-                    .live
-                    .as_mut()
-                    .and_then(|live| live.driver.send_widget_query(key, data.as_bytes()).ok());
                 match sent {
                     Some(request) => {
                         live.queries.insert(request, token);

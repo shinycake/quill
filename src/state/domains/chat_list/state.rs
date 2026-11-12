@@ -107,8 +107,6 @@ pub struct ChatListState {
     /// stays readable (`Fetch::data`) while it reloads or after a reload
     /// fails.
     pub archive_settings: crate::state::fetch::Fetch<ArchiveChatListSettings>,
-    /// Slice CL2: the archive-settings panel is open.
-    pub archive_settings_open: bool,
     /// Whether "Archive and mute" is offered (server option, seen on).
     pub archive_mute: crate::archive_mute::ArchiveMute,
     /// Slice CL: chat-list peek preview — the latest `getChatHistory`
@@ -294,7 +292,6 @@ impl ChatListState {
             main_paging: ListPaging::More,
             archive_paging: ListPaging::More,
             archive_settings: Default::default(),
-            archive_settings_open: false,
             archive_mute: Default::default(),
             chat_preview_fetch: HashMap::new(),
             promoted_chats: HashMap::new(),
