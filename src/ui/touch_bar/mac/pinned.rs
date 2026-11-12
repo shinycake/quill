@@ -293,7 +293,7 @@ impl PinnedPanel {
         let Order::Reordering(dropped) = &*order else {
             return None;
         };
-        if model::reorder_echo(dropped, &keys) != Echo::Waiting {
+        if model::reorder_echo(dropped, &keys) != Echo::OldOrder {
             *order = Order::Model;
             return None;
         }

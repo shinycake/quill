@@ -293,8 +293,8 @@ enum PickerFill {
     Unfilled,
     /// Filled; no newer lists wait.
     Shown,
-    /// Newer lists wait for the next tap.
-    Waiting(PickerContents),
+    /// Newer lists are held back until the next tap.
+    Held(PickerContents),
 }
 
 /// Everything built once per window. Cloning shares the same objects.
@@ -659,8 +659,8 @@ impl Host {
         }
         let first = self.state.try_borrow_mut().is_ok_and(|mut state| {
             let first = matches!(state.fill, PickerFill::Unfilled);
-            if !matches!(&state.fill, PickerFill::Waiting(waiting) if waiting == picker) {
-                state.fill = PickerFill::Waiting(picker.clone());
+            if !matches!(&state.fill, PickerFill::Held(waiting) if waiting == picker) {
+                state.fill = PickerFill::Held(picker.clone());
             }
             first
         });
@@ -674,7 +674,7 @@ impl Host {
         let pending =
             self.state.try_borrow_mut().ok().and_then(|mut state| {
                 match std::mem::replace(&mut state.fill, PickerFill::Shown) {
-                    PickerFill::Waiting(picker) => Some(picker),
+                    PickerFill::Held(picker) => Some(picker),
                     PickerFill::Unfilled | PickerFill::Shown => None,
                 }
             });

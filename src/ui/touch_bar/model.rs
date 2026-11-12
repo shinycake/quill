@@ -142,8 +142,9 @@ impl Pin {
 pub(crate) enum Echo {
     /// The model shows the dropped order: the server answered.
     Caught,
-    /// The same pins in the old order: the request is still out.
-    Waiting,
+    /// The same pins in the old order: the model has not caught up with
+    /// the drop (or the server put them back).
+    OldOrder,
     /// Other pins: the list changed, the dropped order means nothing.
     Gone,
 }
@@ -153,7 +154,7 @@ pub(crate) fn reorder_echo(dropped: &[PinKey], shown: &[PinKey]) -> Echo {
         return Echo::Caught;
     }
     let same_pins = dropped.len() == shown.len() && dropped.iter().all(|key| shown.contains(key));
-    if same_pins { Echo::Waiting } else { Echo::Gone }
+    if same_pins { Echo::OldOrder } else { Echo::Gone }
 }
 
 /// The pinned chats panel, left to right.
