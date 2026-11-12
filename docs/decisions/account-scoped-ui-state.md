@@ -10312,7 +10312,7 @@ launch_flow}`, `widgets_lock_tests`, `wallpaper_preview_tests`, `voice`,
 | tests | No wall-clock deadline in the new tests: `Player::wait_open_settled` and `wait_frame_settled` wait on the decode thread's condvar with no deadline; the update test advances the manual clock. |
 | video editor | `release_tests.rs` drives `release_lost_video_drag` (the blur hook) and `video_timeline_moved` (the button-up move hook) with a held quality line and a held picture: the drag is idle and the crop grid goes. |
 | translate Hide | The `TranslateScreen` farewell calls `forget_hide`, so an account switch with a Hide out leaves nothing in the old client's acks. Test: farewell, settle the request, nothing to take. |
-| recheck timer | Supersedes round 3's row: from `DownloadFailed` the timer runs a fresh check (`Checking`), not only a retry of the kept release. A newer release that fixes a bad download is found; the kept one, when still the latest, downloads again from the check's answer. A check that fails offline leaves `Failed`, and the next timer checks again. `updater::force_latest_release` is the test seam; test on the manual clock. |
+| recheck timer | Supersedes round 3's row: from `DownloadFailed` the timer runs a fresh check (`Checking`), not only a retry of the kept release. A newer release that fixes a bad download is found; the kept one, when still the latest, downloads again from the check's answer. A check that fails offline leaves `Failed`, and the next timer checks again. `updater::force_latest_release` is the test seam; test on the manual clock. Superseded by the round 5 table: a failed check keeps the release (`DownloadFailed`). |
 | docs | The 14-002 and translate Hide rows of earlier rounds say they are superseded. |
 | suggested posts | The old test's doc comment is back above its test. |
 
@@ -10323,3 +10323,11 @@ launch_flow}`, `widgets_lock_tests`, `wallpaper_preview_tests`, `voice`,
 | recheck timer | Supersedes round 4's row: from `DownloadFailed(release, _)` the timer's check keeps the release. `check_for_updates_keeping` maps a `Failed(message)` answer to `DownloadFailed(release, message)`, so an offline recheck leaves the release notes, the Update button and the pill. `Available`, `UpToDate` and `NoRelease` apply as before. Tests on the manual clock force the check failure (`updater::force_check_failure`) and the self-update answer, so none depends on the real process. |
 | FFmpeg reopen | Supersedes round 4's row for the refused branch: after the wake is put back, `set_volume` calls `on_open` again, which runs at once for a player that settled while the slot was empty, else queues a forwarder that finds the slot empty after the first. The test seam `reopen_with` is a closure that may refuse; the test refuses after the first open settled and the wake fires once. |
 | decisions | The five round 2 to 4 rows that stated the old behaviour say they are superseded. |
+
+#### Fix round 6 (r4-12)
+
+| Ids | What changed |
+| --- | --- |
+| FFmpeg reopen tests | The refused-reopen test asserts with `try_recv`: the wake runs on the test thread inside `set_volume`, so a missing re-registration fails the assertion instead of hanging. A second test covers the other order: the reopen is refused while the old player still opens, then the open settles, and the wake fires exactly once (one `Ok`, then `Empty`). A probe registered after both forwarders marks the settle without a wait. Checked by reverting: without the re-registration only the first test fails; without the put-back both fail. |
+| decisions | The round 4 "recheck timer" row is marked superseded by round 5. |
+| open_wake doc | The field comment describes the current design: the wake waits in the slot, a reopen moves it to a fresh slot, a refused reopen puts it back and registers again. |

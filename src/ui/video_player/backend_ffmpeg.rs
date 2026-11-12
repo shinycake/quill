@@ -117,9 +117,9 @@ pub(super) struct FfmpegBackend {
     nv12_paused_until: Option<Instant>,
     /// A picture stepped to while paused, shown on the next pull.
     pending_step: Option<VideoFrame>,
-    /// The wake the player asked for (`on_open`), until the open it waits
-    /// for settles: every player the backend opens forwards to it, so a
-    /// volume reopen neither fires it early nor loses it.
+    /// The wake the player asked for (`on_open`), waiting here until the
+    /// open it waits for settles. A reopen moves it to a fresh slot; a
+    /// refused reopen puts it back and registers with the old player again.
     open_wake: OpenWake,
     /// What the next reopen runs over instead of the file (tests).
     #[cfg(test)]
@@ -713,7 +713,46 @@ mod tests {
         }));
         backend.set_volume(0.5);
         assert!(!backend.options.want_audio, "the reopen was refused");
-        assert!(heard.recv().is_ok(), "the wake fires");
+        assert!(
+            heard.try_recv().is_ok(),
+            "the wake fires inside set_volume"
+        );
+        assert!(heard.try_recv().is_err(), "once");
+    }
+
+    /// A reopen refused while the first player is still opening: the open
+    /// settles afterwards, and the two forwarders on it wake once.
+    #[test]
+    fn a_refused_reopen_while_the_old_player_opens_fires_the_wake_once() {
+        let options = OpenOptions {
+            want_audio: false,
+            ..OpenOptions::viewer()
+        };
+        let (release_first, first_gate) = mpsc::channel();
+        let first = Player::with_demuxer(
+            Box::new(Gated {
+                opening: first_gate,
+            }),
+            options.clone(),
+        )
+        .unwrap();
+        let mut backend = FfmpegBackend::with_player(Path::new("gated"), options, first);
+        let (woken, heard) = mpsc::channel();
+        assert!(backend.on_open(Box::new(move || {
+            let _ = woken.send(());
+        })));
+        backend.reopen_with = Some(Box::new(|| Err("refused".into())));
+        backend.set_volume(0.5);
+        assert!(!backend.options.want_audio, "the reopen was refused");
+        assert!(heard.try_recv().is_err(), "the open has not settled");
+        // Runs after both forwarders on the first player's open.
+        let (probed, probe_done) = mpsc::channel();
+        backend.player.on_open(move || {
+            let _ = probed.send(());
+        });
+        let _ = release_first.send(());
+        assert!(probe_done.recv().is_ok(), "the open settled");
+        assert!(heard.try_recv().is_ok(), "the wake fires");
         assert!(heard.try_recv().is_err(), "once");
     }
 
