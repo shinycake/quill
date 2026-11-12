@@ -48,20 +48,36 @@ pub(crate) enum Peek {
     },
 }
 
+/// [`Peek`] with the redraw task of the leave grace inside `Leaving`, so
+/// the task is dropped with the stage.
+#[derive(Debug)]
+enum Pointer {
+    Off,
+    Hovering,
+    Leaving { since: Instant, wake: Wake },
+}
+
+impl Pointer {
+    fn view(&self) -> Peek {
+        match self {
+            Pointer::Off => Peek::Off,
+            Pointer::Hovering => Peek::Hovering,
+            Pointer::Leaving { since, .. } => Peek::Leaving { since: *since },
+        }
+    }
+}
+
 /// The column's preference. The pointer only peeks at a hidden column, so
 /// the peek lives in the hidden variant: showing the column ends it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Debug)]
 enum Mode {
     Docked,
-    Hidden(Peek),
+    Hidden(Pointer),
 }
 
 #[derive(Debug)]
 pub(crate) struct SidebarReveal {
     mode: Mode,
-    /// The redraw after the leave grace. It lives only in `Leaving`: every
-    /// change of mode drops it.
-    wake: Wake,
     docked: Glide,
     peek: Glide,
 }
@@ -87,9 +103,8 @@ impl std::fmt::Debug for Wake {
 impl SidebarReveal {
     pub(crate) fn new(hidden: bool, now: Instant) -> Self {
         Self {
-            wake: Wake::Idle,
             mode: if hidden {
-                Mode::Hidden(Peek::Off)
+                Mode::Hidden(Pointer::Off)
             } else {
                 Mode::Docked
             },
@@ -98,19 +113,12 @@ impl SidebarReveal {
         }
     }
 
-    /// The one place the mode changes: the grace wake belongs to the
-    /// `Leaving` it was made for, so it goes with any change.
-    fn set_mode(&mut self, mode: Mode) {
-        self.mode = mode;
-        self.wake = Wake::Idle;
-    }
-
     /// Keep the redraw after the leave grace: it runs while the pointer is
     /// away and is dropped with it (a pointer back, Escape, or the grace
     /// over). A wake for a mode that is no longer `Leaving` is dropped.
     pub(crate) fn hold_wake(&mut self, task: Task<()>) {
-        if matches!(self.mode, Mode::Hidden(Peek::Leaving { .. })) {
-            self.wake = Wake::Waiting { _task: task };
+        if let Mode::Hidden(Pointer::Leaving { wake, .. }) = &mut self.mode {
+            *wake = Wake::Waiting { _task: task };
         }
     }
 
@@ -125,11 +133,11 @@ impl SidebarReveal {
         if self.hidden() == hidden {
             return;
         }
-        self.set_mode(if hidden {
-            Mode::Hidden(Peek::Off)
+        self.mode = if hidden {
+            Mode::Hidden(Pointer::Off)
         } else {
             Mode::Docked
-        });
+        };
         if !hidden {
             let peeked = self.peek.value(now);
             if peeked > self.docked.value(now) {
@@ -144,17 +152,16 @@ impl SidebarReveal {
     /// The pointer reached the reveal edge or moved over the peeking
     /// column. Returns whether anything changed.
     pub(crate) fn pointer_entered(&mut self, animate: bool, now: Instant) -> bool {
-        let Mode::Hidden(pointer) = self.mode else {
+        let Mode::Hidden(pointer) = &self.mode else {
             return false;
         };
-        if pointer == Peek::Hovering {
-            return false;
-        }
-        if pointer == Peek::Off && self.docked.value(now) > 0. {
+        match pointer {
+            Pointer::Hovering => return false,
             // Still sliding out after Hide: no peek on top of it.
-            return false;
+            Pointer::Off if self.docked.value(now) > 0. => return false,
+            Pointer::Off | Pointer::Leaving { .. } => {}
         }
-        self.set_mode(Mode::Hidden(Peek::Hovering));
+        self.mode = Mode::Hidden(Pointer::Hovering);
         self.peek.go(1., SLIDE_DURATION, animate, now);
         true
     }
@@ -162,20 +169,23 @@ impl SidebarReveal {
     /// The pointer moved off the peeking column. Returns whether the grace
     /// period started (the caller redraws once it is over).
     pub(crate) fn pointer_left(&mut self, now: Instant) -> bool {
-        if self.mode != Mode::Hidden(Peek::Hovering) {
+        if !matches!(self.mode, Mode::Hidden(Pointer::Hovering)) {
             return false;
         }
-        self.set_mode(Mode::Hidden(Peek::Leaving { since: now }));
+        self.mode = Mode::Hidden(Pointer::Leaving {
+            since: now,
+            wake: Wake::Idle,
+        });
         true
     }
 
     /// Escape: slide the peeking column out now. Returns whether it peeked.
     pub(crate) fn dismiss(&mut self, animate: bool, now: Instant) -> bool {
         match self.mode {
-            Mode::Hidden(Peek::Hovering | Peek::Leaving { .. }) => {}
-            Mode::Hidden(Peek::Off) | Mode::Docked => return false,
+            Mode::Hidden(Pointer::Hovering | Pointer::Leaving { .. }) => {}
+            Mode::Hidden(Pointer::Off) | Mode::Docked => return false,
         }
-        self.set_mode(Mode::Hidden(Peek::Off));
+        self.mode = Mode::Hidden(Pointer::Off);
         self.peek.go(0., SLIDE_DURATION, animate, now);
         true
     }
@@ -184,18 +194,18 @@ impl SidebarReveal {
     /// out, unless something opened from it still needs it (`held`: its
     /// context menu, or its search field has the keyboard).
     pub(crate) fn settle(&mut self, held: bool, animate: bool, now: Instant) {
-        if let Mode::Hidden(Peek::Leaving { since }) = self.mode
+        if let Mode::Hidden(Pointer::Leaving { since, .. }) = &self.mode
             && !held
-            && now.saturating_duration_since(since) >= LEAVE_GRACE
+            && now.saturating_duration_since(*since) >= LEAVE_GRACE
         {
-            self.set_mode(Mode::Hidden(Peek::Off));
+            self.mode = Mode::Hidden(Pointer::Off);
             self.peek.go(0., SLIDE_DURATION, animate, now);
         }
     }
 
     pub(crate) fn pointer(&self) -> Peek {
-        match self.mode {
-            Mode::Hidden(pointer) => pointer,
+        match &self.mode {
+            Mode::Hidden(pointer) => pointer.view(),
             Mode::Docked => Peek::Off,
         }
     }

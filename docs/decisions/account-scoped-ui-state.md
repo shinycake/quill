@@ -10220,3 +10220,29 @@ add and closed link save), `composer_sends_tests` (an ack never takes a
 neighbour's clear), `chat_window::asker_tests` (gif ask settles; two
 windows keep their own link text), `forum_extras::tests` (both answer
 orders), `deep_link_routes_tests` (seek stays with its account).
+
+### Sweep fixes (r4-11)
+
+| Ids | What changed |
+| --- | --- |
+| 22-004 | `SidebarReveal::wake` is gone. The grace redraw task lives in `Pointer::Leaving { since, wake }`, so every change of the pointer stage drops it; `Peek` stays a `Copy` view of the stage (`pointer()`). |
+| 22-007 | `spell_catalog::install` writes `.{code}.{ext}.{call}.part` with a per-call number, so a cancelled worker still inside `install` cannot clash with the next download of the same code. Test `two_installs_of_one_code_at_once_both_succeed`. |
+| g-301 | The dictionary download no longer polls every 120 ms. `Progress` carries a `wake::Signal` poked by every chunk and by the stage change (`finish`); the progress task waits on it and notifies only when the percent changed. The allow line in `owned-timers-allow.txt` is gone. |
+| 22-001 | `SpellUi::engine_task: Option<Task>` is `EngineBuild::{Idle, Building { _task }}`; a newer build replaces the stage whole, the install ends it. |
+| 22-002 | A panic in the media tile build is caught in the background closure and answers `None`; `TileState::Failed` is the way out (specks off, cover stays) and the idle trim (`release_media_tile`) returns it to `Idle` so the next window asks again. Test `a_failed_media_tile_build_is_a_way_out_the_idle_trim_clears`. |
+| g-312..g-321 | Every `RefCell` in `spoiler_fx.rs` and `stat_chart/mod.rs` (`parsed_chart`) and `sticker_player/display.rs` goes through `try_borrow*` (`with_cell`); a re-entrant call skips its bookkeeping instead of panicking. |
+| g-306, g-307, g-304, g-305 | The dialog body handed to `scrollable_dialog_content` is an `Rc<Cell<Option<_>>>` taken once, not a `RefCell` borrow. |
+| g-308 | `report_visible_sponsored` takes the painted ads with `try_borrow_mut`. |
+| g-295, g-296 | The GPU-loss reopen task is `Watch::Recovered { reopen: Reopen::Running { _task } }`, built by `reopen_task` and held by the watcher, so it is no longer detached; the window-closed subscription holds no timer of its own. |
+| 22-005 | `ChartState::key_point` and `pie` are `ChartFocus::{Plot, Point(usize), Pie(PieZoom)}`; entering the pie replaces a picked point, `step` does nothing in a pie, a slider move or a new chart returns to `Plot`. |
+| 22-008 | `StatsExport::{Idle, Choosing { _task }}` in the account's `DialogUi`: a second press while the save dialog is open does nothing; the picker's cancel, the write's end and the account leaving all end the stage. Test `a_second_export_press_waits_for_the_first_save_dialog`. |
+| g-297 | The sticker closer is one wait per task: after the frame-or-due wait the task ends its stage and `ensure_sticker_closer` starts the next look, so no task loops on a timer. |
+| g-291, g-292 | `Opening::Pending { since }` and `ViewState::Opening { since }` carry when the clip's open was asked. An open the engine never answers is failed after `OPEN_GIVE_UP` (30 s) in `frame`, and views stop asking for ticks for it. Test `an_open_nobody_answers_stops_asking_for_ticks_after_the_give_up`. |
+| 22-003, g-294 | `PickWait::Downloading(PendingVideo, since)` is given up after `DOWNLOAD_GIVE_UP` (3 min) by the host window's upkeep with the same note as a failed download. The wait still ends in the host window's frame on purpose: the editor opens in that window, so a minimised window opens it when it draws again. Test `a_pick_download_is_given_up_after_its_deadline`. |
+| g-290 | The manager's per-frame `ListStatus` is `ListView`: a view derived from the session's fetches that holds no request. The masks tab reads `Fetch::is_loading` of both lists instead of asking the request table for three purposes. |
+| g-280, g-281..283, g-285 | A set's change in flight is `StickerPanel::changing: HashMap<set_id, RequestId>`, filled by `manage_sticker_set` and cleared by the answer (`finish_set_change`); `Session::sticker_set_change_pending` asks the stored request, and the manager rows and the picker's Install button use it instead of `has_purpose`. (`connect/stickers.rs`: one line in `manage_sticker_set`.) |
+| g-284 | `Session::cancel_sticker_suggestions` drops the request held by `SuggestFor::Asked` and clears the row; changing the suggestion mode uses it instead of `take_purpose`. |
+| g-287 | `page_wait::answer` returns `Option<Answer>`: `None` while a call is out, so `Answer` has only the two outcomes. |
+| g-293 | `LiveJoin::Joining` always holds its `RequestId`. A watch with no driver (the demo) is `LiveJoin::Offline(target)`; `mark_call_seen` moves either to `Joined`. |
+| g-302 | The stealth box's redraw is one wait per task held in `StealthBox::_tick`: each wake notifies and replaces the task with the next second's. |
+| 22-006, g-298 | The story tick is one wait per task (`story_tick_task`): a wake that finds the viewer open replaces `StoryTick::Running` with the next; a closed viewer ends it. A paused viewer (Space, a panel, the window behind another app) with no live story no longer redraws the overlay on each wake; what pauses or resumes it redraws itself. |

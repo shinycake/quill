@@ -235,21 +235,28 @@ impl QuillApp {
         }
     }
 
+    /// The redraw at the next whole second (the box counts seconds). It is
+    /// one wait: it redraws and hands the box the task for the next second,
+    /// so the box owns exactly one wait and closing it drops that wait.
     fn stealth_box_tick(&mut self, cx: &mut Context<Self>) -> Task<()> {
         self.spawn_screen(cx, async move |this, cx| {
-            loop {
-                let into_second = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.subsec_millis())
-                    .unwrap_or(0);
-                let wait = 1000u64.saturating_sub(u64::from(into_second)).max(50);
-                cx.background_executor()
-                    .timer(Duration::from_millis(wait))
-                    .await;
-                if this.update(cx, |_, cx| cx.notify()).is_err() {
-                    break;
+            let into_second = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.subsec_millis())
+                .unwrap_or(0);
+            let wait = 1000u64.saturating_sub(u64::from(into_second)).max(50);
+            cx.background_executor()
+                .timer(Duration::from_millis(wait))
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.stories.stealth_box.is_some() {
+                    let next = this.stealth_box_tick(cx);
+                    if let Some(stealth_box) = this.stories.stealth_box.as_mut() {
+                        stealth_box._tick = next;
+                    }
                 }
-            }
+                cx.notify();
+            });
         })
     }
 

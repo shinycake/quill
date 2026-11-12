@@ -7,6 +7,8 @@ use gpui_kit::*;
 use quill::lang::{keys, tr};
 
 pub(crate) struct DialogUi {
+    /// The statistics page's "Export to File…" (`ui/statistics_export.rs`).
+    pub(super) statistics_export: super::statistics_export::StatsExport,
     /// Profile layer opened from a sender avatar (tdesktop's
     /// `Info::LayerWidget`); presents `session.users_state.open_info_panel`.
     pub(super) profile_modal: Option<super::profile_modal::ProfileModal>,
@@ -119,6 +121,7 @@ impl DialogUi {
                 .submit_on_enter(false)
         });
         Self {
+            statistics_export: Default::default(),
             profile_modal: None,
             profile_dialog: None,
             bot_verify_dialog: None,

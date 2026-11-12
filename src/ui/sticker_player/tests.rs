@@ -7,7 +7,10 @@ use super::super::image_budget::{
     take_unshowable,
 };
 use super::display::{WindowDisplay, display_of, set_display};
-use super::{CLOSE_AFTER, ClipSpec, HEAD_TTL, HeadId, Leaving, Part, Place, Player, ViewAsk};
+use super::{
+    CLOSE_AFTER, ClipSpec, HEAD_TTL, HeadId, Leaving, OPEN_GIVE_UP, OPENING_FPS, Part, Place,
+    Player, ViewAsk,
+};
 use gpui_kit::EntityId;
 use quill::ids::{ChatId, FileId};
 use quill::sticker_playback::FitzType;
@@ -639,4 +642,46 @@ fn a_view_with_no_frame_up_never_lets_a_tick_pass() {
     view.player
         .prepare(&other, EDGE, Place::of(view.head, None));
     assert!(!view.plays_on(draw), "open, or opening, with no frame up");
+}
+
+/// An open the engine never answers is not a view that ticks for good: it
+/// ticks at the opening rate until the give-up, then rests like a failed one.
+#[test]
+fn an_open_nobody_answers_stops_asking_for_ticks_after_the_give_up() {
+    let (player, spec) = player(8);
+    let other = ClipSpec {
+        file: FileId(8),
+        ..spec
+    };
+    player.set_fixture(
+        8,
+        Arc::new(|edge| DecodedFrames {
+            frames: vec![vec![1; (edge as usize).pow(2) * 4]],
+            fps: FPS,
+        }),
+    );
+    let view = super::StickerView {
+        player: std::rc::Rc::new(player),
+        spec: std::rc::Rc::new(other.clone()),
+        head: head("never-answered"),
+        mode: PlayMode::Loop,
+        edge: EDGE,
+        max_fps: 120,
+        active: false,
+        window: None,
+    };
+    let draw = TickDraw::Within(ms(8));
+    view.player
+        .prepare(&other, EDGE, Place::of(view.head, None));
+    assert_eq!(
+        view.fps(),
+        OPENING_FPS,
+        "opening: ticks at the opening rate"
+    );
+    assert!(view.changes_in(draw));
+    view.player.skip(OPEN_GIVE_UP - ms(1));
+    assert_eq!(view.fps(), OPENING_FPS, "still inside the give-up");
+    view.player.skip(ms(1));
+    assert_eq!(view.fps(), 0, "given up: it rests");
+    assert!(!view.changes_in(draw));
 }

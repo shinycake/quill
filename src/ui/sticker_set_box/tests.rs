@@ -617,7 +617,7 @@ fn a_still_decoding_behind_a_later_animated_pick_opens_no_editor(cx: &mut TestAp
     // A video still downloading gives way to a later pick in the same way.
     app.update(vcx, |app, _| {
         app.sticker_box.editing = crate::ui::sticker_set_box::state::SetEditing::Waiting(
-            crate::ui::sticker_set_box::state::PickWait::Downloading(PendingVideo {
+            crate::ui::sticker_set_box::state::PickWait::downloading_now(PendingVideo {
                 pick,
                 file_id: still.file_id,
                 file: PickedFile::Video,
@@ -679,7 +679,7 @@ fn a_chosen_video_still_downloading_opens_the_editor_when_it_arrives(cx: &mut Te
         .expect("a demo sticker");
     app.update(vcx, |app, cx| {
         app.sticker_box.editing = crate::ui::sticker_set_box::state::SetEditing::Waiting(
-            crate::ui::sticker_set_box::state::PickWait::Downloading(PendingVideo {
+            crate::ui::sticker_set_box::state::PickWait::downloading_now(PendingVideo {
                 pick,
                 file_id,
                 file: PickedFile::Video,

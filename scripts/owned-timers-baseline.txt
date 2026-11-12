@@ -11,7 +11,6 @@ detached:QuillApp::start_update_checks 1
 detached:hide_main_window 1
 detached:run_screenshot_demo 2
 detached:spawn_menu_sync 1
-detached:watch_closed_windows 2
 detached:watch_saver 1
 poll:QuillApp::arm_stream_hide_timer 1
 poll:QuillApp::autoscroll_press 1
@@ -19,8 +18,6 @@ poll:QuillApp::download_update 1
 poll:QuillApp::ensure_live_location_tick 1
 poll:QuillApp::ensure_notify_clock 1
 poll:QuillApp::ensure_slow_mode_tick 1
-poll:QuillApp::ensure_sticker_closer 1
-poll:QuillApp::ensure_story_tick 1
 poll:QuillApp::pull_jump_when_ready 1
 poll:QuillApp::refresh_system_accent 1
 poll:QuillApp::request_tick 1
@@ -32,7 +29,6 @@ poll:QuillApp::spawn_system_unlock_wait 1
 poll:QuillApp::spawn_voice_tick 1
 poll:QuillApp::start_mic_test 1
 poll:QuillApp::start_update_checks 1
-poll:QuillApp::stealth_box_tick 1
 poll:QuillApp::sync_qr_clock 1
 poll:QuillApp::with_device_access 1
 poll:VideoPlayer::spawn_open_poll 1

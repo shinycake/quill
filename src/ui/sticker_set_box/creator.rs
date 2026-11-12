@@ -438,7 +438,7 @@ impl QuillApp {
                         return;
                     }
                     self.sticker_box.editing = super::state::SetEditing::Waiting(
-                        super::state::PickWait::Downloading(super::state::PendingVideo {
+                        super::state::PickWait::downloading_now(super::state::PendingVideo {
                             pick,
                             file_id,
                             file: super::state::PickedFile::Still(item.format),

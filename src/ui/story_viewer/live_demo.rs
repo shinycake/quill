@@ -225,7 +225,7 @@ impl QuillApp {
         self.screen
             .stories
             .live
-            .start_watching((ChatId(CHANNEL), STORY), None);
+            .watch_offline((ChatId(CHANNEL), STORY));
         cx.notify();
     }
 }

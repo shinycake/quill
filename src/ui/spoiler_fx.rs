@@ -191,7 +191,10 @@ struct MediaTile {
 
 /// Where the media tile stands. `Building` holds the build's task, so
 /// leaving the stage (the tile arrives, or the state is dropped) cancels
-/// it; it ends in `Ready` when the build answers. The build is claimed by
+/// it; it ends in `Ready` when the build answers, or in `Failed` when the
+/// build produced nothing (it panicked): the specks stay off, the cover
+/// still shows, and the idle trim (`release_media_tile`) lets the next
+/// window ask again. The build is claimed by
 /// the frame callback itself (`start_build`), not by the ask: a window
 /// that closes before its next frame leaves the tile `Idle`, and the next
 /// window to paint asks again.
@@ -199,6 +202,51 @@ enum TileState {
     Idle,
     Building { _build: gpui_kit::Task<()> },
     Ready(MediaTile),
+    Failed,
+}
+
+impl TileState {
+    /// The build answered: `Ready` with the tile, or `Failed` without one.
+    fn built(&mut self, image: Option<Arc<RenderImage>>) {
+        *self = match image {
+            Some(image) => TileState::Ready(MediaTile {
+                image,
+                painted: Instant::now(),
+                stamp: super::image_budget::paint_stamp(),
+            }),
+            None => TileState::Failed,
+        };
+    }
+
+    /// The idle trim: a failed build is forgotten so the next ask builds
+    /// again; a tile unused for a while is handed back to be dropped.
+    fn trim(&mut self) -> Option<MediaTile> {
+        match self {
+            TileState::Failed => {
+                *self = TileState::Idle;
+                None
+            }
+            TileState::Ready(tile)
+                if tile.painted.elapsed() >= TILE_UNUSED
+                    && !super::image_budget::may_still_show(tile.stamp) =>
+            {
+                match std::mem::replace(self, TileState::Idle) {
+                    TileState::Ready(tile) => Some(tile),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+}
+
+/// Run `f` on a thread-local cell, or not at all when something holds it
+/// (a re-entrant call): a borrow here never panics.
+fn with_cell<T, R>(
+    cell: &'static std::thread::LocalKey<std::cell::RefCell<T>>,
+    f: impl FnOnce(&mut T) -> R,
+) -> Option<R> {
+    cell.with(|cell| cell.try_borrow_mut().ok().map(|mut value| f(&mut value)))
 }
 
 thread_local! {
@@ -211,15 +259,15 @@ const TILE_UNUSED: std::time::Duration = std::time::Duration::from_secs(3);
 /// the ask schedules the build for the window's next frame and the specks
 /// wait (the spoiler's cover is already drawn under them).
 fn image_tile(window: &mut Window) -> Option<Arc<RenderImage>> {
-    let ready = TILE.with(|tile| match &mut *tile.borrow_mut() {
+    let ready = with_cell(&TILE, |tile| match tile {
         TileState::Ready(ready) => {
             ready.painted = Instant::now();
             ready.stamp = super::image_budget::paint_stamp();
             Some(Some(ready.image.clone()))
         }
-        TileState::Building { .. } => Some(None),
+        TileState::Building { .. } | TileState::Failed => Some(None),
         TileState::Idle => None,
-    });
+    })?;
     ready.unwrap_or_else(|| {
         window.on_next_frame(|_, cx| start_build(cx));
         None
@@ -229,55 +277,30 @@ fn image_tile(window: &mut Window) -> Option<Arc<RenderImage>> {
 /// Idle to `Building`, for the one frame callback that finds it idle: the
 /// tile is built on the background executor and installed when it answers.
 fn start_build(cx: &mut App) {
-    if !TILE.with(|tile| {
-        tile.try_borrow()
-            .is_ok_and(|tile| matches!(&*tile, TileState::Idle))
-    }) {
+    if !with_cell(&TILE, |tile| matches!(tile, TileState::Idle)).unwrap_or(false) {
         return;
     }
-    let image = cx.background_spawn(async move { build_image_tile() });
+    // A panic in the build is an answer too: `Failed`, not a stage that
+    // never ends.
+    let image = cx.background_spawn(async move { std::panic::catch_unwind(build_image_tile).ok() });
     // window-scope: the tile is shared by every window; its arrival
     // redraws them all.
     // screen-scope: the tile belongs to no account.
     let build = cx.spawn(async move |cx| {
         let image = image.await;
         cx.update(|cx| {
-            TILE.with(|tile| {
-                if let Ok(mut tile) = tile.try_borrow_mut() {
-                    *tile = TileState::Ready(MediaTile {
-                        image,
-                        painted: Instant::now(),
-                        stamp: super::image_budget::paint_stamp(),
-                    });
-                }
-            });
+            with_cell(&TILE, |tile| tile.built(image));
             cx.refresh_windows();
         });
     });
-    TILE.with(|tile| {
-        if let Ok(mut tile) = tile.try_borrow_mut() {
-            *tile = TileState::Building { _build: build };
-        }
-    });
+    with_cell(&TILE, |tile| *tile = TileState::Building { _build: build });
 }
 
 /// Drop the media tile (and its atlas copy) once media spoilers have been
 /// off screen for a while: the app's idle trim asks, not every frame.
 /// `window`: the window being drawn, if any.
 pub(super) fn release_media_tile(window: Option<&mut Window>, cx: &mut App) {
-    let unused = TILE.with(|tile| {
-        let mut tile = tile.borrow_mut();
-        let idle = matches!(&*tile, TileState::Ready(tile) if tile.painted.elapsed() >= TILE_UNUSED
-                && !super::image_budget::may_still_show(tile.stamp));
-        if !idle {
-            return None;
-        }
-        match std::mem::replace(&mut *tile, TileState::Idle) {
-            TileState::Ready(tile) => Some(tile),
-            _ => None,
-        }
-    });
-    if let Some(tile) = unused {
+    if let Some(tile) = with_cell(&TILE, TileState::trim).flatten() {
         cx.drop_image(tile.image, window);
     }
 }
@@ -361,7 +384,7 @@ thread_local! {
 /// so a chat window's specks move while the main window is not drawn.
 pub(super) fn take_text_painted(window: &Window) -> bool {
     let id = window.window_handle().window_id();
-    TEXT_PAINTED.with(|painted| painted.borrow_mut().remove(&id))
+    with_cell(&TEXT_PAINTED, |painted| painted.remove(&id)).unwrap_or(false)
 }
 
 /// Paint text-spoiler specks of `color` inside `rect` (window points).
@@ -375,8 +398,7 @@ pub(super) fn paint_text_specks(
 ) {
     if !still() {
         let id = window.window_handle().window_id();
-        TEXT_PAINTED.with(|painted| {
-            let mut painted = painted.borrow_mut();
+        with_cell(&TEXT_PAINTED, |painted| {
             // Closed windows never ask again; a handful at most stay.
             if painted.len() > 16 {
                 painted.clear();
@@ -516,8 +538,7 @@ thread_local! {
 
 /// Start the reveal fade of `key`.
 pub(super) fn mark_revealed(key: RevealKey) {
-    REVEALS.with(|reveals| {
-        let mut reveals = reveals.borrow_mut();
+    with_cell(&REVEALS, |reveals| {
         reveals.retain(|_, at| at.elapsed().as_secs_f32() < REVEAL_FADE);
         reveals.insert(key, Instant::now());
     });
@@ -526,16 +547,14 @@ pub(super) fn mark_revealed(key: RevealKey) {
 /// A switch of account ends every fade: a key names a chat and message of
 /// the account on screen, and the same chat can be open in the next one.
 pub(super) fn forget_reveals() {
-    REVEALS.with(|reveals| reveals.borrow_mut().clear());
+    with_cell(&REVEALS, |reveals| reveals.clear());
 }
 
 /// The cover's remaining opacity while `key` fades out after a reveal.
 pub(super) fn reveal_fade(key: RevealKey) -> Option<f32> {
-    REVEALS.with(|reveals| {
-        let at = *reveals.borrow().get(&key)?;
-        let t = at.elapsed().as_secs_f32() / REVEAL_FADE;
-        (t < 1.).then_some(1. - t)
-    })
+    let at = with_cell(&REVEALS, |reveals| reveals.get(&key).copied()).flatten()?;
+    let t = at.elapsed().as_secs_f32() / REVEAL_FADE;
+    (t < 1.).then_some(1. - t)
 }
 
 /// The reveal key of a message's media spoiler (photo, video or GIF).
@@ -573,12 +592,12 @@ pub(super) fn media_cover(
 
 /// Whether any reveal is still fading (the frame clock keeps going).
 pub(super) fn revealing() -> bool {
-    REVEALS.with(|reveals| {
+    with_cell(&REVEALS, |reveals| {
         reveals
-            .borrow()
             .values()
             .any(|at| at.elapsed().as_secs_f32() < REVEAL_FADE)
     })
+    .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -589,6 +608,20 @@ mod tests {
     };
     use gpui_kit::{Bounds, Pixels, point, px, size};
     use std::collections::HashSet;
+
+    #[test]
+    fn a_failed_media_tile_build_is_a_way_out_the_idle_trim_clears() {
+        let mut tile = super::TileState::Idle;
+        tile.built(None);
+        assert!(matches!(tile, super::TileState::Failed));
+        assert!(tile.trim().is_none());
+        assert!(matches!(tile, super::TileState::Idle), "asks again");
+        tile.built(Some(std::sync::Arc::new(gpui_kit::RenderImage::new(
+            smallvec::SmallVec::new(),
+        ))));
+        assert!(matches!(tile, super::TileState::Ready(_)));
+        assert!(tile.trim().is_none(), "just painted: kept");
+    }
 
     #[test]
     fn a_switch_of_account_ends_the_reveal_fades() {

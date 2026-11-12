@@ -19,6 +19,7 @@
 
 mod app;
 mod display;
+mod opening;
 mod spec;
 mod view;
 
@@ -27,6 +28,8 @@ pub(super) use app::sidebar_emoji_head;
 pub(super) use app::{EmojiSide, PreviewEmoji, ViewAsk, mirrors, panel_sticker_head};
 pub(super) use display::note_display;
 use display::{display_of, forget_display};
+pub(super) use opening::Leaving;
+use opening::{OPEN_GIVE_UP, Opening, open_gave_up};
 pub(super) use spec::{ClipSpec, HeadId, Part};
 pub(super) use view::StickerView;
 
@@ -103,17 +106,6 @@ impl Upkeep {
     }
 }
 
-/// Whether a clip opened.
-#[derive(Clone, Copy, Default)]
-enum Opening {
-    /// Not answered yet.
-    #[default]
-    Pending,
-    Ready(Timeline),
-    Failed,
-}
-
-#[derive(Default)]
 struct UiClip {
     opening: Opening,
     /// Frames drawn and not shown yet, by grid index.
@@ -134,14 +126,33 @@ struct UiClip {
 }
 
 impl UiClip {
-    fn failed(&self) -> bool {
-        matches!(self.opening, Opening::Failed)
+    /// A clip whose open was just asked of the engine.
+    fn opening_at(now: Instant) -> Self {
+        Self {
+            opening: Opening::Pending { since: now },
+            ready: BTreeMap::new(),
+            shown: None,
+            used: None,
+            drawn: SmallVec::new(),
+            seen: None,
+            wants: Vec::new(),
+            ready_at: None,
+            places: Places::default(),
+        }
+    }
+
+    /// When the open was asked, while it is unanswered.
+    fn pending_since(&self) -> Option<Instant> {
+        match self.opening {
+            Opening::Pending { since } => Some(since),
+            Opening::Ready(_) | Opening::Failed => None,
+        }
     }
 
     fn timeline(&self) -> Option<Timeline> {
         match self.opening {
             Opening::Ready(timeline) => Some(timeline),
-            Opening::Pending | Opening::Failed => None,
+            Opening::Pending { .. } | Opening::Failed => None,
         }
     }
 }
@@ -192,23 +203,6 @@ type Places = SmallVec<[Place; 2]>;
 fn note_place(places: &mut Places, place: Place) {
     if !places.contains(&place) {
         places.push(place);
-    }
-}
-
-/// What a window lets go of ([`Player::leave`]).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Leaving {
-    /// Its chat: another chat opens there, or the chat moves to a window
-    /// of its own. The rest of the window stays as it is.
-    Chat,
-    /// All of it: the window closes.
-    Window,
-}
-
-impl Leaving {
-    /// Whether `window` letting go of this loses what views at `place` use.
-    fn loses(self, window: Option<ChatId>, place: Place) -> bool {
-        place.window == window && (self == Leaving::Window || place.part == Part::Chat)
     }
 }
 
@@ -472,7 +466,7 @@ impl Player {
         let now = self.now();
         let clip = inner.clips.entry(key).or_insert_with(|| {
             self.engine.open(key, self.origin(spec, edge));
-            UiClip::default()
+            UiClip::opening_at(now)
         });
         clip.used = Some(now);
         note_place(&mut clip.places, place);
@@ -512,15 +506,18 @@ impl Player {
             let drawn = super::image_budget::paint_stamp_in(window);
             let clip = inner.clips.entry(key).or_insert_with(|| {
                 self.engine.open(key, self.origin(spec, edge));
-                UiClip::default()
+                UiClip::opening_at(now)
             });
             clip.used = Some(now);
             note_drawn(&mut clip.drawn, drawn);
             note_place(&mut clip.places, place);
-            if matches!(clip.opening, Opening::Pending) {
+            if let Opening::Pending { since } = clip.opening {
                 match self.engine.state(&key) {
                     Some(ClipState::Ready(info)) => clip.opening = Opening::Ready(info.timeline),
                     Some(ClipState::Failed(_)) | None => clip.opening = Opening::Failed,
+                    Some(ClipState::Opening) if open_gave_up(since, now) => {
+                        clip.opening = Opening::Failed;
+                    }
                     Some(ClipState::Opening) => {}
                 }
             }

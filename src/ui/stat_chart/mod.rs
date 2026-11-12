@@ -250,11 +250,11 @@ impl StatChartView {
                 s.enabled.clone(),
                 s.visible(cx),
                 s.pie_days(cx),
-                s.key_point,
+                s.key_point(),
                 s.hovered.clone(),
                 s.focus.clone(),
                 s.range.as_ref().map(|r| r.slider.clone()),
-                s.pie.as_ref().map(|p| p.slider.clone()),
+                s.pie().map(|p| p.slider.clone()),
                 s.zooms_locally(),
             )
         };
@@ -420,7 +420,7 @@ impl StatChartView {
                 move |_: &CancelSearch, _, cx| {
                     if pie {
                         state.update(cx, |s, cx| s.exit_pie(cx));
-                    } else if state.read(cx).key_point.is_some() {
+                    } else if state.read(cx).key_point().is_some() {
                         state.update(cx, |s, cx| s.clear_key_point(cx));
                     } else {
                         cx.propagate();
@@ -434,7 +434,7 @@ impl StatChartView {
                         "left" if !pie => state.update(cx, |s, cx| s.step(-1, cx)),
                         "right" if !pie => state.update(cx, |s, cx| s.step(1, cx)),
                         "enter" if !pie && zoomable => {
-                            let Some(index) = state.read(cx).key_point else {
+                            let Some(index) = state.read(cx).key_point() else {
                                 return;
                             };
                             zoom_into(&state, &chart, kind, index, on_zoom.as_ref(), window, cx);
@@ -564,7 +564,10 @@ mod cache {
     pub(in crate::ui) fn parsed_chart(json: &str) -> Option<Rc<StatChart>> {
         let key = (json.as_ptr() as usize, json.len());
         CHARTS.with(|charts| {
-            let mut charts = charts.borrow_mut();
+            // Re-entered while borrowed: parse without caching.
+            let Ok(mut charts) = charts.try_borrow_mut() else {
+                return parse_chart(json).ok().map(Rc::new);
+            };
             if let Some(entry) = charts.get(&key)
                 && entry.json == json
             {

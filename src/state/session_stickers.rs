@@ -40,6 +40,29 @@ impl Session {
         self.stickers.stickers.batch.finish_item(request, success);
     }
 
+    /// A change of set `set_id` went out as `request`.
+    pub fn begin_sticker_set_change(&mut self, set_id: i64, request: RequestId) {
+        self.stickers.stickers.changing.insert(set_id, request);
+    }
+
+    /// A change of the set is in flight: its request is still pending.
+    pub fn sticker_set_change_pending(&self, set_id: i64) -> bool {
+        self.stickers
+            .stickers
+            .changing
+            .get(&set_id)
+            .is_some_and(|request| self.requests.get(*request).is_some())
+    }
+
+    /// The composer's suggestions are dropped, and the search that was out
+    /// for them with the stage that waited for it.
+    pub fn cancel_sticker_suggestions(&mut self) {
+        if let SuggestFor::Asked { request, .. } = &self.stickers.stickers.suggest_for {
+            drop(self.requests.take(*request));
+        }
+        self.clear_sticker_suggestions();
+    }
+
     /// The box's change of the viewed set went out as `request`.
     pub fn begin_set_change(&mut self, set_id: i64, change: SetChange, request: RequestId) {
         if let Some(view) = self.stickers.sticker_set_view.as_mut()
@@ -53,6 +76,9 @@ impl Session {
     /// the request the box waits on counts, not another request's that names
     /// the same kind of change.
     pub(crate) fn finish_set_change(&mut self, request: RequestId, set_id: i64, success: bool) {
+        if self.stickers.stickers.changing.get(&set_id) == Some(&request) {
+            self.stickers.stickers.changing.remove(&set_id);
+        }
         if let Some(view) = self.stickers.sticker_set_view.as_mut()
             && view.set_id == set_id
             && let SetChangeStage::Working {

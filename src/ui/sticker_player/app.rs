@@ -339,34 +339,42 @@ impl QuillApp {
         }
         // screen-scope: the sticker player is the app's; the closer
         // drops clips no window draws, whatever is on screen.
+        // One look per task: after the wait the task ends the stage and the
+        // next look starts a task of its own, so no task loops on a timer.
         let task = cx.spawn(async move |this, cx| {
-            loop {
-                let wait = this.update(cx, |this, cx| {
-                    let player = this.players.stickers.clone();
-                    let closed = player.close_stale(player.now());
-                    drop_frames(closed.frames, cx);
-                    player.trace_closed(closed.clips);
-                    if !closed.open {
-                        if let Ok(mut upkeep) = player.closer.try_borrow_mut() {
-                            *upkeep = Upkeep::Idle;
-                        }
-                        return None;
+            let wait = this.update(cx, |this, cx| {
+                let player = this.players.stickers.clone();
+                let closed = player.close_stale(player.now());
+                drop_frames(closed.frames, cx);
+                player.trace_closed(closed.clips);
+                if !closed.open {
+                    if let Ok(mut upkeep) = player.closer.try_borrow_mut() {
+                        *upkeep = Upkeep::Idle;
                     }
-                    Some((closed.next, player.next_frame()))
-                });
-                let Ok(Some((due, next_frame))) = wait else {
-                    break;
-                };
-                let executor = cx.background_executor().clone();
-                let after_frame = async {
-                    let _ = next_frame.await;
-                    executor.timer(CLOSE_SLACK).await;
-                };
-                match due {
-                    Some(due) => first_of(after_frame, executor.timer(due + CLOSE_SLACK)).await,
-                    None => after_frame.await,
+                    return None;
                 }
+                Some((closed.next, player.next_frame()))
+            });
+            let Ok(Some((due, next_frame))) = wait else {
+                return;
+            };
+            let executor = cx.background_executor().clone();
+            let after_frame = async {
+                let _ = next_frame.await;
+                executor.timer(CLOSE_SLACK).await;
+            };
+            match due {
+                Some(due) => first_of(after_frame, executor.timer(due + CLOSE_SLACK)).await,
+                None => after_frame.await,
             }
+            let _ = this.update(cx, |this, cx| {
+                // This task is the running stage's: it ends it, and the next
+                // look starts its own.
+                if let Ok(mut upkeep) = this.players.stickers.closer.try_borrow_mut() {
+                    *upkeep = Upkeep::Idle;
+                }
+                this.ensure_sticker_closer(cx);
+            });
         });
         if let Ok(mut upkeep) = player.closer.try_borrow_mut() {
             *upkeep = Upkeep::Running { _task: task };

@@ -2,7 +2,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::super::frame_clock::TickDraw;
-use super::{ClipSpec, HeadId, OPENING_FPS, Player, display_of, high_rate};
+use super::{ClipSpec, HeadId, OPENING_FPS, Player, display_of, high_rate, open_gave_up};
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::sticker_playback::player::{PlayMode, edge_for};
@@ -14,7 +14,10 @@ use std::time::{Duration, Instant};
 enum ViewState {
     /// Its clip failed, or none is open.
     Gone,
-    Opening,
+    /// Its clip's open was asked at `since`.
+    Opening {
+        since: Instant,
+    },
     Open(Open),
 }
 
@@ -107,10 +110,9 @@ impl StickerView {
             .max_by_key(|(_, clip)| clip.used)
             .map(|(_, clip)| clip);
         let Some(timeline) = clip.and_then(|clip| clip.timeline()) else {
-            return if clip.is_none_or(|clip| clip.failed()) {
-                ViewState::Gone
-            } else {
-                ViewState::Opening
+            return match clip.and_then(|clip| clip.pending_since()) {
+                Some(since) => ViewState::Opening { since },
+                None => ViewState::Gone,
             };
         };
         let head = inner.heads.get(&(self.head, key.file));
@@ -133,7 +135,9 @@ impl StickerView {
         };
         let open = match self.state(&inner) {
             ViewState::Gone => return 0,
-            ViewState::Opening => return OPENING_FPS.min(self.max_fps),
+            // An open that outlived its give-up is a failed one: no ticks.
+            ViewState::Opening { since } if open_gave_up(since, self.player.now()) => return 0,
+            ViewState::Opening { .. } => return OPENING_FPS.min(self.max_fps),
             ViewState::Open(open) => open,
         };
         let timeline = open.timeline;
@@ -167,7 +171,7 @@ impl StickerView {
         };
         match self.state(&inner) {
             ViewState::Gone => false,
-            ViewState::Opening => true,
+            ViewState::Opening { since } => !open_gave_up(since, self.player.now()),
             ViewState::Open(open) => self.open_changes(&open, draw),
         }
     }

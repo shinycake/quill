@@ -207,7 +207,7 @@ fn a_closed_boxs_video_pick_opens_no_editor(cx: &mut TestAppContext) {
     in_window(&h, h.main, None, cx, |app, window, cx| {
         app.sticker_box.host = crate::ui::sticker_set_box::state::SetBoxHost::Closed;
         app.sticker_box.editing = crate::ui::sticker_set_box::state::SetEditing::Waiting(
-            crate::ui::sticker_set_box::state::PickWait::Downloading(PendingVideo {
+            crate::ui::sticker_set_box::state::PickWait::downloading_now(PendingVideo {
                 pick: PickExisting {
                     set_id: 78,
                     kind: SetKind::Stickers,

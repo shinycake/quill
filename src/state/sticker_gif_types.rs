@@ -359,6 +359,10 @@ pub struct StickerPanel {
     pub lists: StickerLists,
     /// The batch of set changes (install / archive many) and how far it got.
     pub batch: StickerBatch,
+    /// The change in flight for each set, by set id (`changeStickerSet` sent
+    /// by `manage_sticker_set`): the set's row is busy while its request is
+    /// pending, and its answer is the one that frees it.
+    pub changing: std::collections::HashMap<i64, RequestId>,
     /// Slice S8: trending sets (`getTrendingStickerSets`) + premium-row flag.
     pub trending: Vec<StickerSetInfo>,
     pub trending_total: usize,

@@ -9,6 +9,7 @@ use quill::telegram::envelope::{StickerFormat, StickerItem};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 /// A new sticker on its way into an owned set: the editor's output and the
 /// emoji chosen for it (tdesktop `CreateMediaBox`).
@@ -273,11 +274,16 @@ impl SetEditing {
         }
     }
 
+    /// The wait is a download that has run past [`DOWNLOAD_GIVE_UP`].
+    pub(crate) fn download_gave_up(&self, now: Instant) -> bool {
+        matches!(self, Self::Waiting(wait) if wait.gave_up(now))
+    }
+
     /// Stop waiting for the download, handing back what waited.
     pub(crate) fn take_downloading(&mut self) -> Option<PendingVideo> {
         self.downloading()?;
         match std::mem::take(self) {
-            Self::Waiting(PickWait::Downloading(pending)) => Some(pending),
+            Self::Waiting(PickWait::Downloading(pending, _)) => Some(pending),
             _ => None,
         }
     }
@@ -374,8 +380,9 @@ impl SetConfirm {
 /// Where a chosen existing sticker is on its way to the editor: one pick
 /// at a time, so a new pick replaces whatever waited before it.
 pub(crate) enum PickWait {
-    /// The file is downloading.
-    Downloading(PendingVideo),
+    /// The file is downloading since the instant; a download that has not
+    /// ended by [`DOWNLOAD_GIVE_UP`] is given up like one that failed.
+    Downloading(PendingVideo, Instant),
     /// A still sticker is being decoded for the photo editor; the stage
     /// holds the job, so leaving it cancels the decode.
     Decoding {
@@ -385,11 +392,29 @@ pub(crate) enum PickWait {
     },
 }
 
+/// How long a chosen sticker's download may take before the pick is given up.
+pub(crate) const DOWNLOAD_GIVE_UP: Duration = Duration::from_secs(180);
+
 impl PickWait {
+    /// A pick whose file was just asked for.
+    pub(crate) fn downloading_now(pending: PendingVideo) -> Self {
+        Self::Downloading(pending, Instant::now())
+    }
+
     pub(crate) fn downloading(&self) -> Option<&PendingVideo> {
         match self {
-            Self::Downloading(pending) => Some(pending),
+            Self::Downloading(pending, _) => Some(pending),
             Self::Decoding { .. } => None,
+        }
+    }
+
+    /// The download has run past [`DOWNLOAD_GIVE_UP`] at `now`.
+    pub(crate) fn gave_up(&self, now: Instant) -> bool {
+        match self {
+            Self::Downloading(_, since) => {
+                now.saturating_duration_since(*since) >= DOWNLOAD_GIVE_UP
+            }
+            Self::Decoding { .. } => false,
         }
     }
 }
@@ -559,6 +584,29 @@ mod confirm_tests {
             kind: SetKind::Stickers,
             adapt: false,
         }
+    }
+
+    /// A download that never ends is given up after the deadline, not
+    /// held for good; before it, the wait stays.
+    #[test]
+    fn a_pick_download_is_given_up_after_its_deadline() {
+        use super::{DOWNLOAD_GIVE_UP, PendingVideo, PickedFile};
+        let t0 = std::time::Instant::now();
+        let wait = PickWait::Downloading(
+            PendingVideo {
+                pick: pick(),
+                file_id: FileId(3),
+                file: PickedFile::Video,
+                emoji: None,
+                window: None,
+            },
+            t0,
+        );
+        let editing = SetEditing::Waiting(wait);
+        let early = t0 + DOWNLOAD_GIVE_UP - std::time::Duration::from_secs(1);
+        assert!(!editing.download_gave_up(early));
+        assert!(editing.download_gave_up(t0 + DOWNLOAD_GIVE_UP));
+        assert!(!SetEditing::Idle.download_gave_up(t0 + DOWNLOAD_GIVE_UP));
     }
 
     #[test]

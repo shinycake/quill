@@ -20,7 +20,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
-use quill::state::{MasksTab, StickerTab, StickersPurpose};
+use quill::state::{MasksTab, StickerTab};
 use quill::stickers_manager::ManagerEdits;
 use quill::telegram::envelope::StickerSetInfo;
 use rows::RowState;
@@ -57,13 +57,14 @@ struct ManagerView {
     installed: Vec<StickerSetInfo>,
     trending: Vec<StickerSetInfo>,
     archived: Vec<StickerSetInfo>,
-    status: ListStatus,
+    status: ListView,
     unread: usize,
 }
 
-/// Where the list on screen is: fetching, failed, or what it holds.
+/// What the list on screen shows, derived each frame from the session's
+/// fetches (it holds no request of its own): fetching, failed, or its sets.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum ListStatus {
+enum ListView {
     Loading,
     Failed,
     Shown,
@@ -86,7 +87,7 @@ impl QuillApp {
                 installed: Vec::new(),
                 trending: Vec::new(),
                 archived: Vec::new(),
-                status: ListStatus::Shown,
+                status: ListView::Shown,
                 unread: 0,
             };
         };
@@ -120,15 +121,10 @@ impl QuillApp {
                     MasksTab::Installed => ManagerTab::Installed,
                     MasksTab::Archived => ManagerTab::Archived,
                 };
-                let loading = session
-                    .requests
-                    .has_purpose(StickersPurpose::GetInstalledMaskSets.into())
-                    || session.requests.has_purpose(
-                        StickersPurpose::GetArchivedMaskSets { first_page: true }.into(),
-                    )
-                    || session.requests.has_purpose(
-                        StickersPurpose::GetArchivedMaskSets { first_page: false }.into(),
-                    )
+                // The lists hold their own requests: a list is loading while
+                // the fetch that asked for it is out.
+                let loading = masks.installed.is_loading()
+                    || masks.archived.is_loading()
                     || match tab {
                         ManagerTab::Installed => masks.installed.is_idle(),
                         _ => masks.archived.is_idle(),
@@ -160,11 +156,11 @@ impl QuillApp {
             trending,
             archived,
             status: if failed {
-                ListStatus::Failed
+                ListView::Failed
             } else if loading {
-                ListStatus::Loading
+                ListView::Loading
             } else {
-                ListStatus::Shown
+                ListView::Shown
             },
             unread,
         }
@@ -470,9 +466,9 @@ impl QuillApp {
                 cx,
             ))
         });
-        let status = if view.status == ListStatus::Failed {
+        let status = if view.status == ListView::Failed {
             Some(tr(keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN))
-        } else if view.status == ListStatus::Loading && sets.is_empty() {
+        } else if view.status == ListView::Loading && sets.is_empty() {
             Some(tr(keys::CONTACTS_LOADING))
         } else if sets.is_empty() {
             Some(match (view.tab, kind) {

@@ -399,14 +399,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        self.sticker_request(
+        let sent = self.sticker_request(
             RequestPurpose::Stickers(StickersPurpose::ManageStickerSet {
                 set_id,
                 installed,
                 archived,
             }),
             |id| change_sticker_set(id, set_id, installed, archived),
-        )
+        );
+        if let Ok(Some(request)) = &sent {
+            self.session.begin_sticker_set_change(set_id, *request);
+        }
+        sent
     }
 
     pub(crate) fn refresh_installed_sticker_sets(

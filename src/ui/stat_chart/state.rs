@@ -49,6 +49,16 @@ pub(super) struct PieZoom {
     _changes: Subscription,
 }
 
+/// What the plot shows besides the lines: nothing picked, a point picked
+/// with the arrow keys, or the pie a percentage chart zoomed into. One
+/// value, so a point readout can never sit over a pie.
+pub(super) enum ChartFocus {
+    Plot,
+    /// The point picked with the arrow keys.
+    Point(usize),
+    Pie(PieZoom),
+}
+
 /// The range slider with its subscription, so they drop together.
 pub(super) struct RangeSelector {
     pub slider: Entity<SliderState>,
@@ -65,9 +75,7 @@ pub(super) struct ChartState {
     /// The point the kit tooltip shows, set while the tooltip draws;
     /// a click on the plot zooms into it.
     pub(super) hovered: Rc<Cell<Option<usize>>>,
-    /// The point picked with the arrow keys.
-    pub(super) key_point: Option<usize>,
-    pub(super) pie: Option<PieZoom>,
+    pub(super) picked: ChartFocus,
     pub(super) focus: FocusHandle,
     /// The visible points and the whole period's, built once per change
     /// of lines or range rather than on every hover frame.
@@ -117,8 +125,7 @@ impl ChartState {
             enabled: chart.lines.iter().map(|l| !l.hidden_on_start).collect(),
             range: None,
             hovered: Rc::new(Cell::new(None)),
-            key_point: None,
-            pie: None,
+            picked: ChartFocus::Plot,
             focus: cx.focus_handle(),
             shown_points: PointsCache::default(),
             all_points: PointsCache::default(),
@@ -138,7 +145,7 @@ impl ChartState {
         let (first, last) = (first.min(back), last.min(back));
         let slider = index_slider(0, back, (first.min(last), first.max(last)), cx);
         let changes = cx.subscribe(&slider, |state, _, _: &SliderEvent, cx| {
-            state.key_point = None;
+            state.clear_key_point(cx);
             cx.notify();
         });
         self.range = Some(RangeSelector {
@@ -158,8 +165,7 @@ impl ChartState {
         if !same {
             self.kind = kind;
             self.enabled = chart.lines.iter().map(|l| !l.hidden_on_start).collect();
-            self.key_point = None;
-            self.pie = None;
+            self.picked = ChartFocus::Plot;
             self.reset_range(cx);
         }
         self.shown_points = PointsCache::default();
@@ -208,17 +214,35 @@ impl ChartState {
     /// Move the keyboard's point by `delta` within the visible range.
     pub(super) fn step(&mut self, delta: isize, cx: &mut Context<Self>) {
         let (first, last) = self.visible(cx);
-        let next = match self.key_point {
-            Some(at) => at.saturating_add_signed(delta).clamp(first, last),
-            None if delta < 0 => last,
-            None => first,
+        let next = match self.picked {
+            ChartFocus::Pie(_) => return,
+            ChartFocus::Point(at) => at.saturating_add_signed(delta).clamp(first, last),
+            ChartFocus::Plot if delta < 0 => last,
+            ChartFocus::Plot => first,
         };
-        self.key_point = Some(next);
+        self.picked = ChartFocus::Point(next);
         cx.notify();
     }
 
+    /// The point picked with the arrow keys, if any.
+    pub(super) fn key_point(&self) -> Option<usize> {
+        match self.picked {
+            ChartFocus::Point(at) => Some(at),
+            ChartFocus::Plot | ChartFocus::Pie(_) => None,
+        }
+    }
+
+    /// The pie the chart zoomed into, if any.
+    pub(super) fn pie(&self) -> Option<&PieZoom> {
+        match &self.picked {
+            ChartFocus::Pie(pie) => Some(pie),
+            ChartFocus::Plot | ChartFocus::Point(_) => None,
+        }
+    }
+
     pub(super) fn clear_key_point(&mut self, cx: &mut Context<Self>) {
-        if self.key_point.take().is_some() {
+        if matches!(self.picked, ChartFocus::Point(_)) {
+            self.picked = ChartFocus::Plot;
             cx.notify();
         }
     }
@@ -236,24 +260,24 @@ impl ChartState {
         let at = index.clamp(window.0, window.1);
         let slider = index_slider(window.0, window.1, (at, at), cx);
         let changes = cx.subscribe(&slider, |_, _, _: &SliderEvent, cx| cx.notify());
-        self.pie = Some(PieZoom {
+        self.picked = ChartFocus::Pie(PieZoom {
             window,
             slider,
             _changes: changes,
         });
-        self.key_point = None;
         cx.notify();
     }
 
     pub(super) fn exit_pie(&mut self, cx: &mut Context<Self>) {
-        if self.pie.take().is_some() {
+        if matches!(self.picked, ChartFocus::Pie(_)) {
+            self.picked = ChartFocus::Plot;
             cx.notify();
         }
     }
 
     /// The days the pie sums.
     pub(super) fn pie_days(&self, cx: &App) -> Option<(usize, usize)> {
-        let pie = self.pie.as_ref()?;
+        let pie = self.pie()?;
         Some(slider_indices(
             pie.slider.read(cx),
             pie.window.0,

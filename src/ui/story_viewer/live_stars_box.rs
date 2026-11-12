@@ -23,7 +23,7 @@ use quill::lang::trn;
 use quill::live_story::level_for_stars;
 use quill::premium_hub::group_digits;
 use quill::telegram::envelope::GroupCallMessageLevel;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 
 /// `lng_group_invite_subscription_about_url`, the Stars terms.
@@ -247,12 +247,9 @@ impl QuillApp {
             dialog
                 .overlay(true)
                 .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    let body = Rc::new(Cell::new(Some(body.into_any_element())));
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
                 }))
@@ -349,12 +346,9 @@ impl QuillApp {
             dialog
                 .overlay(true)
                 .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    let body = Rc::new(Cell::new(Some(body.into_any_element())));
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
                 }))

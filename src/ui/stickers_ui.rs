@@ -14,8 +14,7 @@ use gpui_kit::*;
 use quill::ids::FileId;
 use quill::lang::{keys, tr, tr_with, trn};
 use quill::local_path::sandboxed_display_path;
-use quill::state::StickersPurpose;
-use quill::state::{RequestPurpose, StickerTab};
+use quill::state::StickerTab;
 use quill::sticker_suggest::suggest_emoji_for;
 
 #[cfg(test)]
@@ -133,13 +132,7 @@ impl QuillApp {
     ) {
         self.set_media_pref(|prefs| prefs.sticker_suggest_mode = mode, cx);
         if let Some(live) = self.live.as_mut() {
-            drop(
-                live.driver
-                    .session
-                    .requests
-                    .take_purpose(RequestPurpose::SuggestStickers),
-            );
-            live.driver.session.clear_sticker_suggestions();
+            live.driver.session.cancel_sticker_suggestions();
         } else if let Some(session) = self.demo_session.as_mut() {
             session.clear_sticker_suggestions();
         }
@@ -525,19 +518,9 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Button {
         let set_id = set.id;
-        let pending = self.session().is_some_and(|session| {
-            [(true, false), (false, true), (false, false)]
-                .into_iter()
-                .any(|(installed, archived)| {
-                    session.requests.has_purpose(RequestPurpose::Stickers(
-                        StickersPurpose::ManageStickerSet {
-                            set_id,
-                            installed,
-                            archived,
-                        },
-                    ))
-                })
-        });
+        let pending = self
+            .session()
+            .is_some_and(|session| session.sticker_set_change_pending(set_id));
         let button = Button::new(format!("sticker-{prefix}-action-{set_id}"))
             .disabled(pending)
             .ghost();

@@ -112,7 +112,11 @@ impl QuillApp {
                     .downloads
                     .ended_without_file(ended.0, &session.media.files)
             });
-            if failed {
+            let gave_up = self
+                .sticker_box
+                .editing
+                .download_gave_up(std::time::Instant::now());
+            if failed || gave_up {
                 self.sticker_box.editing.end_wait();
                 self.set_note(StatusNote::error(tr(
                     keys::Q_OPS_COULD_NOT_DOWNLOAD_PLEASE_TRY,

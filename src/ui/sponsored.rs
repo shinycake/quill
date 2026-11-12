@@ -435,7 +435,12 @@ impl QuillApp {
     /// last frame painted are on screen, so tell TDLib. The session counts
     /// each ad once, so this is cheap to call every frame.
     pub(super) fn report_visible_sponsored(&mut self, window_active: bool) {
-        let shown = std::mem::take(&mut *self.message_ui.rendered_sponsored.borrow_mut());
+        let shown = self
+            .message_ui
+            .rendered_sponsored
+            .try_borrow_mut()
+            .map(|mut shown| std::mem::take(&mut *shown))
+            .unwrap_or_default();
         if !window_active || shown.is_empty() {
             return;
         }

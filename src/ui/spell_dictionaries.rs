@@ -12,7 +12,6 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
 use super::app::QuillApp;
 use crate::ui::status_note::StatusNote;
@@ -201,18 +200,22 @@ impl QuillApp {
         // screen-scope: the spell checker and its dictionaries belong to the
         // app, not to an account; the download finishes on whichever screen
         let task = Self::spawn_app(cx, async move |this, cx| {
+            // Woken by the worker's chunks and its end, not by a timer.
+            let mut seen = progress.changed.epoch();
             while !progress.is_finished() {
-                cx.background_executor()
-                    .timer(Duration::from_millis(120))
-                    .await;
+                progress.changed.wait_since(seen).await;
+                seen = progress.changed.epoch();
                 let received = progress.received();
                 let _ = this.update(cx, |this, cx| {
                     if let DictDownload::Running { download, .. } =
                         &mut this.spell.dict_manager.download
                     {
-                        download.percent = percent(received, download.total);
+                        let now = percent(received, download.total);
+                        if now != download.percent {
+                            download.percent = now;
+                            cx.notify();
+                        }
                     }
-                    cx.notify();
                 });
             }
             let result = worker.await;

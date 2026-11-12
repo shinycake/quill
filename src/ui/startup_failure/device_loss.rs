@@ -73,8 +73,20 @@ enum Recovery {
 /// it was kept in. Recovering takes the window and moves to `Recovered`
 /// in the one call, so the two cannot disagree.
 enum Watch {
-    Healthy { kept: Option<KeptWindow> },
-    Recovered { kept: Option<KeptWindow> },
+    Healthy {
+        kept: Option<KeptWindow>,
+    },
+    Recovered {
+        kept: Option<KeptWindow>,
+        reopen: Reopen,
+    },
+}
+
+/// The task that attaches a new device and opens the window again. The
+/// watcher holds it, so it ends with the app and is never detached.
+enum Reopen {
+    NotStarted,
+    Running { _task: gpui_kit::Task<()> },
 }
 
 impl Watch {
@@ -87,7 +99,7 @@ impl Watch {
 
     fn kept_mut(&mut self) -> &mut Option<KeptWindow> {
         match self {
-            Self::Healthy { kept } | Self::Recovered { kept } => kept,
+            Self::Healthy { kept } | Self::Recovered { kept, .. } => kept,
         }
     }
 
@@ -95,8 +107,18 @@ impl Watch {
     /// loss gives up.
     fn recover(&mut self) -> Option<KeptWindow> {
         let kept = self.kept_mut().take();
-        *self = Self::Recovered { kept: None };
+        *self = Self::Recovered {
+            kept: None,
+            reopen: Reopen::NotStarted,
+        };
         kept
+    }
+
+    /// Keep the reopening task running while the watcher lives.
+    fn hold_reopen(&mut self, task: gpui_kit::Task<()>) {
+        if let Self::Recovered { reopen, .. } = self {
+            *reopen = Reopen::Running { _task: task };
+        }
     }
 }
 
@@ -232,31 +254,39 @@ fn watch_closed_windows(
                     give_up(tr(keys::Q_MISC_GPU_STOPPED_WORKING_AGAIN), cx);
                     return;
                 };
-                let reopen = reopen.clone();
-                cx.spawn(async move |cx| {
-                    let attached = if step == Step::Recover {
-                        let request = cx.update(|cx| {
-                            cx.request_windowing(WindowingRequest::Windowed(
-                                GraphicalEnvironment::detect(),
-                            ))
-                        });
-                        let deadline = cx.background_executor().timer(ATTACH_DEADLINE);
-                        attach_in_time(request, deadline).await
-                    } else {
-                        Ok(())
-                    };
-                    let reopened = attached.and_then(|()| reopen(cx, left));
-                    if let Err(error) = reopened {
-                        log::error!("could not draw again after the GPU was lost: {error:#}");
-                        cx.update(|cx| give_up(&format!("{error:#}"), cx));
-                    }
-                })
-                .detach();
+                let task = reopen_task(step == Step::Recover, left, reopen.clone(), cx);
+                watch.hold_reopen(task);
             }
             Step::GiveUp => give_up(tr(keys::Q_MISC_GPU_STOPPED_WORKING_AGAIN), cx),
         }
     })
     .detach();
+}
+
+/// Attach a new device when `attach`, then open the main window again
+/// around `left`; give up when either fails.
+fn reopen_task(
+    attach: bool,
+    left: KeptWindow,
+    reopen: Rc<impl Fn(&mut AsyncApp, KeptWindow) -> gpui_kit::Result<()> + 'static>,
+    cx: &mut App,
+) -> gpui_kit::Task<()> {
+    cx.spawn(async move |cx| {
+        let attached = if attach {
+            let request = cx.update(|cx| {
+                cx.request_windowing(WindowingRequest::Windowed(GraphicalEnvironment::detect()))
+            });
+            let deadline = cx.background_executor().timer(ATTACH_DEADLINE);
+            attach_in_time(request, deadline).await
+        } else {
+            Ok(())
+        };
+        let reopened = attached.and_then(|()| reopen(cx, left));
+        if let Err(error) = reopened {
+            log::error!("could not draw again after the GPU was lost: {error:#}");
+            cx.update(|cx| give_up(&format!("{error:#}"), cx));
+        }
+    })
 }
 
 /// Quit the normal way; the alert follows once the quit has finished.

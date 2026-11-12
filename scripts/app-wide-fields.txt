@@ -149,7 +149,8 @@ spell.info * | the engine kind and dictionaries: languages, not accounts
 spell.dict_manager * | the dictionary manager box and its download
 spell.dict_filter_input | that box's filter field
 spell.engine_builder | builds the engine
-spell.engine_task | the engine build
+spell.engine_build | the engine build stage: which build is out
+spell.engine_build.Building._task | the engine build, owned by the stage: a newer build or the install drops it
 slices.sidebar * | cached child views of the sidebar: entities that render from the app, holding no state of their own
 slices.window * | the same for the conversation, composer and panel, with measured heights
 slices.viewer | the same for the media viewer

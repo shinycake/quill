@@ -496,7 +496,7 @@ fn a_story_that_ends_before_its_call_closes_the_viewer(cx: &mut TestAppContext) 
         // The join is out again and its call was not seen yet.
         let watched = app.stories.live.watching();
         if let Some(target) = watched {
-            app.stories.live.start_watching(target, None);
+            app.stories.live.watch_offline(target);
         }
         if let Some(session) = app.demo_session.as_mut() {
             session.calls.story_stream = None;
@@ -894,14 +894,14 @@ fn a_join_waits_on_its_request_until_refused_or_seen(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     app.update(vcx, |app, _| {
         let live = &mut app.stories.live;
-        live.start_watching((ChatId(5), 8), Some(RequestId(41)));
+        live.start_watching((ChatId(5), 8), RequestId(41));
         assert_eq!(live.joining(), Some(((ChatId(5), 8), RequestId(41))));
         live.refuse((ChatId(5), 8));
         assert_eq!(live.joining(), None, "refused: nothing waits");
-        live.start_watching((ChatId(5), 8), Some(RequestId(42)));
+        live.start_watching((ChatId(5), 8), RequestId(42));
         live.mark_call_seen();
         assert_eq!(live.joining(), None, "the call came: nothing waits");
-        live.start_watching((ChatId(5), 8), None);
+        live.watch_offline((ChatId(5), 8));
         assert_eq!(live.joining(), None, "no driver: no request to lose");
     });
 }
@@ -923,7 +923,7 @@ fn a_refused_join_is_a_stage_that_another_story_clears(cx: &mut TestAppContext) 
         assert_eq!(live.refused(), Some((ChatId(5), 7)), "same story: stays");
         live.drop_stale_refusal(Some((ChatId(5), 8)));
         assert_eq!(live.join, LiveJoin::Idle, "another story clears it");
-        live.start_watching((ChatId(5), 8), None);
+        live.watch_offline((ChatId(5), 8));
         live.mark_call_seen();
         assert!(live.seen_call());
         live.refuse((ChatId(5), 8));

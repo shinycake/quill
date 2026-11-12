@@ -93,12 +93,12 @@ impl QuillApp {
     fn join_watched_live_story(&mut self, target: (ChatId, i32), cx: &mut Context<Self>) {
         let (chat_id, story_id) = target;
         let Some(live) = self.live.as_mut() else {
-            self.stories.live.start_watching(target, None);
+            self.stories.live.watch_offline(target);
             cx.notify();
             return;
         };
         match live.driver.join_live_story(chat_id, story_id) {
-            Ok(request) => self.stories.live.start_watching(target, Some(request)),
+            Ok(request) => self.stories.live.start_watching(target, request),
             Err(err) => {
                 // Not watching: the viewer shows its "Join live" button
                 // instead of an opening spinner nothing will end.
