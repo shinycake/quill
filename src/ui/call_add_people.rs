@@ -82,7 +82,7 @@ impl QuillApp {
         let established = self
             .session()
             .and_then(|session| session.calls.active_call.as_ref())
-            .filter(|call| matches!(call.state, CallState::Ready(_)))
+            .filter(|call| matches!(call.phase(), CallState::Ready(_)))
             .map(|call| call.id);
         let Some(call_id) = established else {
             self.set_note(StatusNote::info(tr(keys::CALL_ERROR_ADD_NOT_STARTED)));

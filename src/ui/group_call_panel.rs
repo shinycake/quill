@@ -406,11 +406,10 @@ impl QuillApp {
         // Streaming with an external app: the server URL and key.
         // The stream key is a secret: not drawn under the lock.
         let stream = call
-            .rtmp_url
+            .rtmp
             .clone()
             .filter(|_| !self.refused_while_locked())
-            .map(|url| {
-                let key = call.rtmp_stream_key.clone().unwrap_or_default();
+            .map(|quill::calls::rtmp_start::RtmpInfo { url, key }| {
                 let copy = |id: &'static str, label: &'static str, value: String| {
                     Button::new(id)
                         .label(label)
@@ -588,7 +587,7 @@ impl QuillApp {
                 )
                 .child(div().text_size(px(11.)).child(label))
         };
-        let video_on = call.is_my_video_enabled;
+        let video_on = call.my_video.is_enabled();
         let left = (joined && call.can_enable_video).then(|| {
             side(
                 "group-call-video",

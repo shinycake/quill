@@ -285,10 +285,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.session.payments.hub.premium_stickers.can_ask() {
             return Ok(None);
         }
-        self.session.payments.hub.premium_stickers.begin();
         let extra = self
             .session
             .request(RequestPurpose::GetPremiumStickerExamples, None);
+        self.session.payments.hub.premium_stickers.begin();
+        self.session.payments.hub.premium_stickers.sent(extra);
         if let Err(err) = self.send_json_request(extra, &get_premium_sticker_examples(extra)) {
             // The next look at the preview asks again.
             self.session.payments.hub.premium_stickers.cancel();

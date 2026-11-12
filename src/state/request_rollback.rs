@@ -6,14 +6,12 @@ use super::*;
 /// the error arm below restores it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RequestRollback {
-    /// `setChatPermissions`: the permission block and
-    /// `can_send_basic_messages` a refusal puts back (what the server has
-    /// once the saves ahead of this one are settled), and the block this
-    /// save sent, which a later save's rollback takes over when this one
-    /// succeeds.
+    /// `setChatPermissions`: the permission block a refusal puts back (what
+    /// the server has once the saves ahead of this one are settled), and the
+    /// block this save sent, which a later save's rollback takes over when
+    /// this one succeeds.
     ChatPermissions {
         previous: Option<ChatPermissions>,
-        previous_can_send: bool,
         sent: ChatPermissions,
     },
     /// `toggleSupergroupJoinByRequest`: the previous join-by-request flag
@@ -178,11 +176,7 @@ impl Session {
         chat_id: Option<ChatId>,
     ) {
         match rollback {
-            RequestRollback::ChatPermissions {
-                previous,
-                previous_can_send,
-                ..
-            } => {
+            RequestRollback::ChatPermissions { previous, .. } => {
                 // A save still out after this one decides what the box
                 // shows (its rollback holds the same values, or this
                 // chain's last confirmed ones).
@@ -194,7 +188,6 @@ impl Session {
                     && let Some(chat) = self.chats.get_mut(&chat_id.0)
                 {
                     chat.permissions = previous;
-                    chat.can_send_basic_messages = previous_can_send;
                 }
             }
             // Restore the pre-reorder `order` values the server refused,

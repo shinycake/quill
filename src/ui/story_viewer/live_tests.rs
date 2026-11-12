@@ -318,7 +318,7 @@ fn an_ended_stream_closes_the_viewer(cx: &mut TestAppContext) {
             .as_mut()
             .and_then(|s| s.calls.story_stream.as_mut())
         {
-            call.stream = StreamState::Ended;
+            call.media.set_stream_state(StreamState::Ended);
         }
         app.sync_live_story(cx);
     });

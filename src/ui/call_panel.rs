@@ -171,7 +171,7 @@ impl QuillApp {
         });
         let Some(call) = call else {
             let summary = summary?;
-            let busy = summary.busy;
+            let busy = summary.busy();
             return Some(CallSnap {
                 user_id,
                 is_video,
@@ -206,18 +206,18 @@ impl QuillApp {
             });
         };
         let status = call_status(
-            &call.state,
+            &call.phase(),
             call.is_outgoing,
             call.transport.state(),
             call.connected_secs(),
         );
-        let ready = matches!(call.state, CallState::Ready(_));
+        let ready = matches!(call.phase(), CallState::Ready(_));
         Some(CallSnap {
             user_id,
             is_video,
             name,
             photo,
-            phase: if matches!(call.state, CallState::Pending { .. }) && !call.is_outgoing {
+            phase: if matches!(call.phase(), CallState::Pending { .. }) && !call.is_outgoing {
                 CallPhase::Incoming
             } else {
                 CallPhase::Active
@@ -258,7 +258,7 @@ impl QuillApp {
             .map(|u| u.display_name())
             .unwrap_or_else(|| tr(keys::Q_OPS_TELEGRAM_USER).into());
         let status = call_status(
-            &call.state,
+            &call.phase(),
             call.is_outgoing,
             call.transport.state(),
             call.connected_secs(),

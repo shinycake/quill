@@ -65,6 +65,65 @@ pub fn clamp_interface_scale(pct: u16) -> u16 {
     ((clamped + 2) / 5 * 5).clamp(INTERFACE_SCALE_MIN, INTERFACE_SCALE_MAX)
 }
 
+/// Where the chat wallpaper comes from: one choice, not a colour beside a
+/// "use Telegram's" flag. The prefs file keeps its two keys
+/// (`wallpaper_rgb`, `telegram_wallpaper`); [`WallpaperFile`] maps them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(from = "WallpaperFile", into = "WallpaperFile")]
+pub enum WallpaperSource {
+    /// The app theme's own background.
+    #[default]
+    Theme,
+    /// A preset colour, 0xRRGGBB.
+    Color(u32),
+    /// The account's Telegram wallpaper (`updateDefaultBackground`) behind
+    /// the messages.
+    Telegram,
+}
+
+impl WallpaperSource {
+    /// The preset colour, when that is the choice.
+    pub fn color(self) -> Option<u32> {
+        match self {
+            Self::Color(rgb) => Some(rgb),
+            Self::Theme | Self::Telegram => None,
+        }
+    }
+
+    pub fn is_telegram(self) -> bool {
+        self == Self::Telegram
+    }
+}
+
+/// The two keys of `appearance_prefs.json` a [`WallpaperSource`] is stored
+/// as. Telegram's wallpaper wins when both are set, as it always did.
+#[derive(Serialize, Deserialize)]
+struct WallpaperFile {
+    #[serde(default)]
+    wallpaper_rgb: Option<u32>,
+    #[serde(default)]
+    telegram_wallpaper: bool,
+}
+
+impl From<WallpaperFile> for WallpaperSource {
+    fn from(file: WallpaperFile) -> Self {
+        match (file.telegram_wallpaper, file.wallpaper_rgb) {
+            (true, _) => Self::Telegram,
+            (false, Some(rgb)) => Self::Color(rgb),
+            (false, None) => Self::Theme,
+        }
+    }
+}
+
+impl From<WallpaperSource> for WallpaperFile {
+    fn from(source: WallpaperSource) -> Self {
+        Self {
+            wallpaper_rgb: source.color(),
+            telegram_wallpaper: source.is_telegram(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AppearancePrefs {
     /// Manual theme choice; auto-night overrides it while active.
@@ -109,13 +168,10 @@ pub struct AppearancePrefs {
     /// even while the system battery saver is on.
     #[serde(default)]
     pub ignore_battery_saving: bool,
-    /// Chat wallpaper as 0xRRGGBB; None = the theme background.
-    #[serde(default)]
-    pub wallpaper_rgb: Option<u32>,
-    /// Show the account's Telegram wallpaper (`updateDefaultBackground`)
-    /// behind the messages instead of the preset color.
-    #[serde(default)]
-    pub telegram_wallpaper: bool,
+    /// Chat wallpaper: the theme background, a preset colour or the
+    /// account's Telegram wallpaper.
+    #[serde(flatten, default)]
+    pub wallpaper: WallpaperSource,
     /// tdesktop "Tile background" for photo wallpapers, kept per theme
     /// (`tileDay` / `tileNight`): the photo repeats at its own size
     /// instead of covering the area.
@@ -175,6 +231,7 @@ pub struct AppearancePrefs {
     /// tdesktop `chatFiltersTabsMode`: text, icons, or both on the tabs.
     #[serde(default)]
     pub folder_tabs_mode: crate::folder_icons::FolderTabsMode,
+    /// tdesktop `startMinimized`: open hidden in the tray.
     #[serde(default)]
     pub start_in_tray: bool,
     /// tdesktop `CloseBehavior::RunInBackground`: closing the window keeps
@@ -232,8 +289,7 @@ impl Default for AppearancePrefs {
             font_family: String::new(),
             power_saving: 0,
             ignore_battery_saving: false,
-            wallpaper_rgb: None,
-            telegram_wallpaper: false,
+            wallpaper: WallpaperSource::Theme,
             wallpaper_tile_day: false,
             wallpaper_tile_night: false,
             adaptive_for_wide: false,
@@ -281,6 +337,24 @@ impl AppearancePrefs {
             return (self.accent_rgb != 0).then_some(self.accent_rgb);
         }
         self.theme_accents.get(theme.id()).copied()
+    }
+
+    /// tdesktop `SetupDefaultThemes` `apply`: `id` becomes the day or night
+    /// theme and night mode follows, in one write. Omarchy following ends,
+    /// and auto-night goes off when it would switch straight back
+    /// (`auto_off`, tdesktop's "Disable" answer to its warning).
+    pub fn choose_theme(&mut self, id: crate::app_theme::ThemeId, night: bool, auto_off: bool) {
+        self.follow_omarchy = false;
+        if night {
+            self.night_theme = id;
+            self.theme = ThemeChoice::Dark;
+        } else {
+            self.day_theme = id;
+            self.theme = ThemeChoice::Light;
+        }
+        if auto_off {
+            self.auto_night = AutoNight::Off;
+        }
     }
 
     /// Whether photo wallpapers tile in the light or dark theme.
@@ -387,8 +461,7 @@ mod tests {
             font_family: "Avenir".into(),
             power_saving: crate::power_saving::Flag::StickersChat.bit(),
             ignore_battery_saving: true,
-            wallpaper_rgb: Some(0x0e1621),
-            telegram_wallpaper: true,
+            wallpaper: WallpaperSource::Telegram,
             wallpaper_tile_day: true,
             wallpaper_tile_night: false,
             adaptive_for_wide: true,
@@ -574,10 +647,53 @@ mod theme_choice_tests {
             AppearancePrefs::default().accent_for(BuiltinTheme::Day),
             None
         );
+        // Choosing a theme writes its slot, the manual night choice and
+        // the Omarchy / auto-night switches together.
+        let mut chosen = AppearancePrefs {
+            auto_night: AutoNight::System,
+            ..AppearancePrefs::default()
+        };
+        chosen.choose_theme(ThemeId::Builtin(BuiltinTheme::Night), true, true);
+        assert!(!chosen.follow_omarchy);
+        assert_eq!(chosen.theme, ThemeChoice::Dark);
+        assert_eq!(chosen.auto_night, AutoNight::Off);
+        assert_eq!(
+            chosen.theme_for(true),
+            &ThemeId::Builtin(BuiltinTheme::Night)
+        );
+        chosen.auto_night = AutoNight::Scheduled;
+        chosen.choose_theme(ThemeId::Builtin(BuiltinTheme::Day), false, false);
+        assert_eq!(chosen.theme, ThemeChoice::Light);
+        assert_eq!(chosen.auto_night, AutoNight::Scheduled);
         // A custom theme slot survives a round trip.
         prefs.night_theme = ThemeId::Custom("Ocean".into());
         let json = serde_json::to_string(&prefs).unwrap();
         let back: AppearancePrefs = serde_json::from_str(&json).unwrap();
         assert_eq!(back.night_theme, ThemeId::Custom("Ocean".into()));
+    }
+
+    #[test]
+    fn wallpaper_and_work_mode_keep_their_file_keys() {
+        use crate::tray::work_mode::WorkMode;
+        let old: AppearancePrefs = serde_json::from_str(
+            r#"{"wallpaper_rgb":14,"telegram_wallpaper":true,"show_tray_icon":false,"show_taskbar_icon":false}"#,
+        )
+        .unwrap();
+        // Telegram's wallpaper wins over the colour; both switches off
+        // reads as window only.
+        assert_eq!(old.wallpaper, WallpaperSource::Telegram);
+        assert_eq!(old.work_mode, WorkMode::WindowOnly);
+        let color: AppearancePrefs =
+            serde_json::from_str(r#"{"wallpaper_rgb":14,"show_taskbar_icon":false}"#).unwrap();
+        assert_eq!(color.wallpaper, WallpaperSource::Color(14));
+        assert_eq!(color.work_mode, WorkMode::TrayOnly);
+        let json = serde_json::to_value(&color).unwrap();
+        assert_eq!(json["wallpaper_rgb"], 14);
+        assert_eq!(json["telegram_wallpaper"], false);
+        assert_eq!(json["show_tray_icon"], true);
+        assert_eq!(json["show_taskbar_icon"], false);
+        let bare: AppearancePrefs = serde_json::from_str("{}").unwrap();
+        assert_eq!(bare.wallpaper, WallpaperSource::Theme);
+        assert_eq!(bare.work_mode, WorkMode::WindowAndTray);
     }
 }

@@ -31,8 +31,7 @@ impl ChatSummary {
         (self.unread_count > 0
             && last_read.0 > 0
             && self
-                .last_message
-                .as_ref()
+                .last_message()
                 .is_none_or(|last| last.id.0 > last_read.0))
         .then_some(last_read)
     }
@@ -253,7 +252,7 @@ impl Session {
         }
         self.chats
             .get(&chat_id.0)
-            .and_then(|chat| chat.last_message.as_ref())
+            .and_then(|chat| chat.last_message())
             .map_or(0, |last| last.id.0)
     }
 

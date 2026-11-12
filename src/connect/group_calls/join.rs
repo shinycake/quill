@@ -77,7 +77,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         use crate::telegram::envelope::CallState;
         let in_call = self.session.calls.active_call.as_ref().is_some_and(|call| {
             !matches!(
-                call.state,
+                call.state(),
                 CallState::HangingUp | CallState::Discarded { .. } | CallState::Error { .. }
             )
         });
@@ -251,6 +251,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // picker is optional, so a failure just leaves it out).
         if let Some(call) = self.session.calls.active_group_call.as_mut() {
             call.join_as_options.begin();
+            call.join_as_options.sent(extra);
         }
         Ok(())
     }

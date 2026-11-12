@@ -335,7 +335,8 @@ pub enum ChatStatisticsFetch {
     WaitingForInfo {
         is_dark: bool,
     },
-    /// Asked for graphs in this theme.
+    /// Asked for graphs in this theme, as this request: only its answer or
+    /// error counts.
     Loading {
         request: RequestId,
         is_dark: bool,
@@ -438,7 +439,8 @@ pub struct JoinRequestList {
 /// B8: `getChatInviteLinkCounts` fetch state (owner only), keyed by chat.
 #[derive(Debug, Clone, PartialEq)]
 pub enum InviteLinkCountsFetch {
-    Loading,
+    /// In flight as this request: only its answer or error counts.
+    Loading(RequestId),
     Loaded(Vec<crate::telegram::envelope::ParsedChatInviteLinkCount>),
     Failed(String),
 }

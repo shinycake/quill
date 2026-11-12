@@ -285,21 +285,44 @@ pub struct HintState {
     pub release: f32,
 }
 
+/// How far a pull has got (`_reached`). The dwell timer lives and dies
+/// with the stretching stage; the peak with the ready one.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Reach {
+    /// Not ready. `dwell_due` (ms): armed when the threshold was crossed
+    /// with the finger down; at that time the pull becomes ready.
+    Stretching { dwell_due: Option<u64> },
+    /// The pull is ready; `peak` is the largest stretch since.
+    Ready { peak: f32 },
+}
+
+impl Default for Reach {
+    fn default() -> Self {
+        Self::Stretching { dwell_due: None }
+    }
+}
+
 /// The pull in progress (`PullToNextChannel`'s `_pull`, `_reached`, ...).
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 struct Pull {
     /// How far the edge is stretched.
     amount: f32,
-    /// The pointer was down at the last overscroll (`_holding`).
-    holding: bool,
-    /// The release was decided (`_committed`).
-    committed: bool,
-    /// The pull is ready (`_reached`).
-    reached: bool,
-    /// The largest stretch since it was reached.
-    peak: f32,
+    reach: Reach,
     /// The UI found a next channel or topic.
     has_next: bool,
+}
+
+impl Pull {
+    fn reached(&self) -> bool {
+        matches!(self.reach, Reach::Ready { .. })
+    }
+
+    fn dwell_due(&self) -> Option<u64> {
+        match self.reach {
+            Reach::Stretching { dwell_due } => dwell_due,
+            Reach::Ready { .. } => None,
+        }
+    }
 }
 
 /// Where the controller is. The pull's data lives in the stages that have
@@ -310,6 +333,9 @@ enum Stage {
     #[default]
     Idle,
     Pulling(Pull),
+    /// The finger let go and the release was decided (`_committed`): the
+    /// edge springs back; the decision is not taken twice.
+    Released(Pull),
     /// The release opens the next chat: the indicator holds at its full
     /// height until the chat changes, or `until` (ms) passes, so a jump
     /// that never lands cannot hold it for good.
@@ -319,34 +345,53 @@ enum Stage {
     },
 }
 
-/// Whether the expand animation still owes the indicator a frame (its
-/// last one included).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-enum ExpandRun {
-    #[default]
-    Settled,
-    Running,
+/// The card the indicator grows to: at rest at a value, or a tween that
+/// owes the indicator frames (the one that settles it included).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Expand {
+    Settled(f32),
+    Running(Tween),
+}
+
+impl Expand {
+    fn value(&self, now: u64) -> f32 {
+        match self {
+            Self::Settled(value) => *value,
+            Self::Running(tween) => tween.value(now),
+        }
+    }
 }
 
 /// The longest a jump holds the indicator without the chat changing.
 const JUMP_HOLD_MS: u64 = JUMP_MAX_WAIT_MS + JUMP_PINNED_MAX_WAIT_MS + 1000;
+
+/// Where the edge is in its gesture (`Ui::ElasticScrollMovement` with the
+/// spring's data): at rest, held by a finger, or springing back from the
+/// stretch it was let go at. A finger down stops the spring where it is.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Edge {
+    Rest,
+    Held,
+    /// Let go at `from` px of stretch at `since` ms.
+    Returning {
+        from: f32,
+        since: u64,
+    },
+}
 
 /// The edge and the controller (`ElasticScroll` bottom edge +
 /// `PullToNextChannel`).
 #[derive(Debug, Clone)]
 pub struct PullMachine {
     // ElasticScroll's bottom edge.
-    finger_down: bool,
+    edge: Edge,
     last_event: u64,
     accumulated: f32,
     overscroll: f32,
-    spring: Option<(f32, u64)>,
     // PullToNextChannel.
     stage: Stage,
     effective: f32,
-    expand: Tween,
-    expand_run: ExpandRun,
-    dwell_due: Option<u64>,
+    expand: Expand,
     // Indicator: shown while `effective > 0`; ready while `release` heads
     // to 1.
     release: Tween,
@@ -360,16 +405,13 @@ pub struct PullMachine {
 impl Default for PullMachine {
     fn default() -> Self {
         Self {
-            finger_down: false,
+            edge: Edge::Rest,
             last_event: 0,
             accumulated: 0.,
             overscroll: 0.,
-            spring: None,
             stage: Stage::Idle,
             effective: 0.,
-            expand: Tween::still(0.),
-            expand_run: ExpandRun::Settled,
-            dwell_due: None,
+            expand: Expand::Settled(0.),
             release: Tween::still(0.),
             bounce: Tween::still(1.),
             panel: Tween::still(0.),
@@ -384,12 +426,10 @@ impl PullMachine {
     }
 
     fn movement(&self) -> Movement {
-        if self.finger_down {
-            Movement::Progress
-        } else if self.spring.is_some() {
-            Movement::Returning
-        } else {
-            Movement::None
+        match self.edge {
+            Edge::Held => Movement::Progress,
+            Edge::Returning { .. } => Movement::Returning,
+            Edge::Rest => Movement::None,
         }
     }
 
@@ -399,7 +439,7 @@ impl PullMachine {
     }
 
     pub fn pulling(&self) -> bool {
-        matches!(self.stage, Stage::Pulling(_))
+        matches!(self.stage, Stage::Pulling(_) | Stage::Released(_))
     }
 
     pub fn jumping(&self) -> bool {
@@ -407,21 +447,23 @@ impl PullMachine {
     }
 
     pub fn reached(&self) -> bool {
-        self.pull().reached
+        self.pull().reached()
     }
 
-    /// The pull of a pulling or jumping stage; nothing (all zero) when idle.
+    /// The pull of a stage that has one; nothing (all zero) when idle.
     fn pull(&self) -> Pull {
         match self.stage {
             Stage::Idle => Pull::default(),
-            Stage::Pulling(pull) | Stage::Jumping { pull, .. } => pull,
+            Stage::Pulling(pull) | Stage::Released(pull) | Stage::Jumping { pull, .. } => pull,
         }
     }
 
     fn pull_mut(&mut self) -> Option<&mut Pull> {
         match &mut self.stage {
             Stage::Idle => None,
-            Stage::Pulling(pull) | Stage::Jumping { pull, .. } => Some(pull),
+            Stage::Pulling(pull) | Stage::Released(pull) | Stage::Jumping { pull, .. } => {
+                Some(pull)
+            }
         }
     }
 
@@ -465,24 +507,22 @@ impl PullMachine {
         let mut step = Step::default();
         match phase {
             Phase::Started => {
-                self.finger_down = true;
                 // A new gesture during the bounce stops it where it is.
-                if self.spring.take().is_some() {
+                let was_returning = matches!(self.edge, Edge::Returning { .. });
+                self.edge = Edge::Held;
+                if was_returning {
                     self.accumulated = accumulated_from_overscroll(self.overscroll, PULL_THRESHOLD);
                 }
             }
             Phase::Ended | Phase::Cancelled => {
-                self.finger_down = false;
-                if self.overscroll > 0. {
-                    self.spring = Some((self.overscroll, now));
-                }
+                self.let_go(now);
                 step.consumed = self.overscroll > 0.;
                 step.merge(self.handle(active, now));
                 return step;
             }
             Phase::Moved => {}
         }
-        if !self.finger_down {
+        if self.edge != Edge::Held {
             // Momentum after the finger lifted never moves the edge, and
             // the list holds still while the edge springs back.
             step.consumed = self.overscroll > 0.;
@@ -511,34 +551,35 @@ impl PullMachine {
     /// Call on every frame while [`Self::animating`].
     pub fn frame(&mut self, active: bool, now: u64) -> Step {
         let mut step = Step::default();
-        if self.finger_down && now.saturating_sub(self.last_event) > STALE_GESTURE_MS {
-            self.finger_down = false;
-            if self.overscroll > 0. {
-                self.spring = Some((self.overscroll, now));
-            }
+        if self.edge == Edge::Held && now.saturating_sub(self.last_event) > STALE_GESTURE_MS {
+            self.let_go(now);
             step.merge(self.handle(active, now));
         }
-        if let Some(due) = self.dwell_due
+        if let Some(due) = self.pull().dwell_due()
             && now >= due
         {
-            self.dwell_due = None;
-            if let Stage::Pulling(pull) = &mut self.stage
-                && pull.amount >= PULL_THRESHOLD
-            {
-                pull.reached = true;
-                pull.peak = pull.amount;
+            let mut fired = false;
+            if let Stage::Pulling(pull) | Stage::Released(pull) = &mut self.stage {
+                if pull.amount >= PULL_THRESHOLD {
+                    pull.reach = Reach::Ready { peak: pull.amount };
+                    fired = true;
+                } else {
+                    pull.reach = Reach::default();
+                }
+            }
+            if fired {
                 step.haptic = true;
                 self.start_expand(true, now);
                 self.push_indicator(now);
                 step.redraw = true;
             }
         }
-        if let Some((from, start)) = self.spring {
-            let t_ms = now.saturating_sub(start);
+        if let Edge::Returning { from, since } = self.edge {
+            let t_ms = now.saturating_sub(since);
             let t = t_ms as f32 / 1000.;
             let value = from * (-RUBBER_BAND_STIFFNESS * t / RUBBER_BAND_PERIOD).exp();
             if value < 0.5 || t_ms >= RUBBER_BAND_MAX_RETURN_MS {
-                self.spring = None;
+                self.edge = Edge::Rest;
                 self.overscroll = 0.;
                 self.accumulated = 0.;
             } else {
@@ -548,13 +589,11 @@ impl PullMachine {
             step.merge(self.handle(active, now));
             step.redraw = true;
         }
-        if self.expand_run == ExpandRun::Running {
+        if let Expand::Running(tween) = self.expand {
             // `_expand.start([=] { pushIndicator(); }, …)`.
-            self.expand_run = if self.expand.animating(now) {
-                ExpandRun::Running
-            } else {
-                ExpandRun::Settled
-            };
+            if !tween.animating(now) {
+                self.expand = Expand::Settled(tween.to);
+            }
             if self.stage != Stage::Idle {
                 self.push_indicator(now);
             }
@@ -572,10 +611,9 @@ impl PullMachine {
 
     /// Whether frames are still needed.
     pub fn animating(&self, now: u64) -> bool {
-        self.finger_down
-            || self.spring.is_some()
-            || self.dwell_due.is_some()
-            || self.expand_run == ExpandRun::Running
+        self.edge != Edge::Rest
+            || self.pull().dwell_due().is_some()
+            || matches!(self.expand, Expand::Running(_))
             || self.jumping()
             || self.release.animating(now)
             || self.bounce.animating(now)
@@ -615,53 +653,65 @@ impl PullMachine {
         };
         let movement = self.movement();
         let amount = self.overscroll.max(0.);
-        let mut pull = match self.stage {
+        let (mut pull, released) = match self.stage {
             Stage::Jumping { .. } => return step,
-            Stage::Pulling(pull) => pull,
+            Stage::Pulling(pull) => (pull, false),
+            Stage::Released(pull) => (pull, true),
             Stage::Idle => {
                 if movement != Movement::Progress || amount <= 0. || !active {
                     return step;
                 }
                 step.started = true;
-                Pull::default()
+                (Pull::default(), false)
             }
         };
         pull.amount = amount;
-        pull.holding = movement == Movement::Progress;
-        let reached = amount >= PULL_THRESHOLD;
-        if pull.reached {
-            // Collapse on a peak-relative reverse, not down to the
-            // threshold.
-            pull.peak = pull.peak.max(amount);
-            let floor = PULL_THRESHOLD * RESET_REACHED_ON;
-            let reset_at = pull.peak - (pull.peak - floor) / REVERSE_EASE;
-            if amount < reset_at {
-                pull.reached = false;
-                pull.peak = 0.;
-                self.start_expand(false, now);
+        let past = amount >= PULL_THRESHOLD;
+        match pull.reach {
+            Reach::Ready { peak } => {
+                // Collapse on a peak-relative reverse, not down to the
+                // threshold.
+                let peak = peak.max(amount);
+                let floor = PULL_THRESHOLD * RESET_REACHED_ON;
+                let reset_at = peak - (peak - floor) / REVERSE_EASE;
+                if amount < reset_at {
+                    pull.reach = Reach::default();
+                    self.start_expand(false, now);
+                } else {
+                    pull.reach = Reach::Ready { peak };
+                }
             }
-        } else if reached {
-            // Arm the dwell on finger-down; a flick releases before it
-            // fires.
-            if self.dwell_due.is_none() && movement == Movement::Progress {
-                self.dwell_due = Some(now + ready_dwell_ms());
+            Reach::Stretching { dwell_due } => {
+                if past {
+                    // Arm the dwell on finger-down; a flick releases before
+                    // it fires.
+                    if dwell_due.is_none() && movement == Movement::Progress {
+                        pull.reach = Reach::Stretching {
+                            dwell_due: Some(now + ready_dwell_ms()),
+                        };
+                    }
+                } else if amount < PULL_THRESHOLD * RESET_REACHED_ON {
+                    pull.reach = Reach::default();
+                }
             }
-        } else if amount < PULL_THRESHOLD * RESET_REACHED_ON {
-            self.dwell_due = None;
         }
-        self.stage = Stage::Pulling(pull);
+        let letting_go = movement != Movement::Progress;
+        if letting_go && let Reach::Stretching { .. } = pull.reach {
+            pull.reach = Reach::default();
+        }
+        let decide_release = letting_go && !released;
+        self.stage = if released || decide_release {
+            Stage::Released(pull)
+        } else {
+            Stage::Pulling(pull)
+        };
         self.push_indicator(now);
-        if movement == Movement::Progress {
+        if !letting_go {
             return step;
         }
-        self.dwell_due = None;
-        if !pull.committed {
-            pull.committed = true;
-            self.stage = Stage::Pulling(pull);
-            if pull.reached && active {
-                step.release_ready = true;
-                return step;
-            }
+        if decide_release && pull.reached() && active {
+            step.release_ready = true;
+            return step;
         }
         if amount <= 0. {
             self.reset(true, now);
@@ -672,9 +722,7 @@ impl PullMachine {
     /// `PullToNextChannel::reset`: drop the pull; the hint fades when
     /// `animated`.
     pub fn reset(&mut self, animated: bool, now: u64) {
-        self.expand = Tween::still(0.);
-        self.expand_run = ExpandRun::Settled;
-        self.dwell_due = None;
+        self.expand = Expand::Settled(0.);
         self.stage = Stage::Idle;
         self.effective = 0.;
         // Indicator::hideNow.
@@ -691,15 +739,28 @@ impl PullMachine {
     /// The chat or topic changed: forget everything, the edge included.
     pub fn reset_all(&mut self, now: u64) {
         self.reset(false, now);
-        self.finger_down = false;
-        self.spring = None;
+        self.edge = Edge::Rest;
         self.overscroll = 0.;
         self.accumulated = 0.;
     }
 
+    /// The finger lifted (or its end never came): a stretched edge springs
+    /// back from where it is, a plain one is at rest; a spring already
+    /// running goes on.
+    fn let_go(&mut self, now: u64) {
+        if self.overscroll > 0. {
+            self.edge = Edge::Returning {
+                from: self.overscroll,
+                since: now,
+            };
+        } else if self.edge == Edge::Held {
+            self.edge = Edge::Rest;
+        }
+    }
+
     fn start_expand(&mut self, ready: bool, now: u64) {
         let from = self.expand.value(now);
-        self.expand = Tween::start(
+        self.expand = Expand::Running(Tween::start(
             from,
             if ready { 1. } else { 0. },
             now,
@@ -709,8 +770,7 @@ impl PullMachine {
             } else {
                 Ease::SineInOut
             },
-        );
-        self.expand_run = ExpandRun::Running;
+        ));
     }
 
     /// `PullToNextChannel::pushIndicator`.
@@ -719,7 +779,7 @@ impl PullMachine {
         let pull = self.pull();
         self.effective = MAX_HEIGHT.min(pull.amount + expand * (EXPAND - PULL_THRESHOLD));
         // Indicator::setProgress.
-        let ready = pull.reached;
+        let ready = pull.reached();
         if self.indicator_ready() != ready {
             let from = self.release.value(now);
             self.release = Tween::start(
@@ -742,7 +802,7 @@ impl PullMachine {
             }
         }
         // HintOverlay::setData.
-        let visible = pull.holding && pull.amount > 0.;
+        let visible = self.edge == Edge::Held && pull.amount > 0.;
         self.toggle_hint(visible && pull.has_next, now);
         if self.hint_ready() != ready {
             let from = self.hint_release.value(now);

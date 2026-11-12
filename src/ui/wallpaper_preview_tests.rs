@@ -7,6 +7,7 @@ use crate::ui::wallpaper_preview::{PreviewSource, PreviewStage};
 use gpui_kit::component::Root;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
 use quill::ids::RequestId;
+use quill::settings::WallpaperSource;
 use quill::state::BackgroundOutcome;
 
 fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
@@ -51,18 +52,18 @@ fn an_apply_answer_flips_the_appearance_after_the_box_closed(cx: &mut TestAppCon
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     app.update_in(vcx, |app, _, cx| {
-        app.set_appearance(cx, |a| a.telegram_wallpaper = false);
+        app.set_appearance(cx, |a| a.wallpaper = WallpaperSource::Theme);
         app.open_wallpaper_preview(PreviewSource::File("/tmp/a.jpg".into()), cx);
         app.dialogs.wallpaper_applies.push(RequestId(7));
         app.close_wallpaper_preview(cx);
     });
     app.read_with(vcx, |app, _| {
         assert!(app.dialogs.wallpaper_preview.is_none());
-        assert!(!app.appearance.telegram_wallpaper);
+        assert!(!app.appearance.wallpaper.is_telegram());
     });
     answer_apply(&app, vcx, RequestId(7), true);
     app.read_with(vcx, |app, _| {
-        assert!(app.appearance.telegram_wallpaper, "answer after close");
+        assert!(app.appearance.wallpaper.is_telegram(), "answer after close");
         assert!(app.dialogs.wallpaper_applies.is_empty());
     });
 }
@@ -72,11 +73,11 @@ fn a_refused_apply_leaves_the_appearance_and_is_forgotten(cx: &mut TestAppContex
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     app.update_in(vcx, |app, _, cx| {
-        app.set_appearance(cx, |a| a.telegram_wallpaper = false);
+        app.set_appearance(cx, |a| a.wallpaper = WallpaperSource::Theme);
     });
     answer_apply(&app, vcx, RequestId(9), false);
     app.read_with(vcx, |app, _| {
-        assert!(!app.appearance.telegram_wallpaper);
+        assert!(!app.appearance.wallpaper.is_telegram());
         assert!(app.dialogs.wallpaper_applies.is_empty());
     });
 }

@@ -49,6 +49,9 @@ fn next_page_joins_the_cached_one_without_repeats() {
         }),
         Some(ChatId(13)),
     );
+    session
+        .groups
+        .note_member_first((13, MemberListFilter::Recent), first, "");
     apply_json(&mut session, &seq, &sink, &page(&[1, 2, 3], 6, first.0));
     assert_eq!(loaded_ids(&session), (vec![1, 2, 3], 6));
 

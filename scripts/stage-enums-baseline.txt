@@ -42,7 +42,6 @@ bare:EditStage::Loading 1
 bare:EngineState::Loading 1
 bare:Entry::Pending 1
 bare:Entry::Probing 1
-bare:ExpandRun::Running 1
 bare:ExtractionStage::Starting 1
 bare:FeederState::Syncing 1
 bare:FieldStage::Waiting 1
@@ -50,12 +49,10 @@ bare:GiftsLayout::Loading 1
 bare:GoalNow::Waiting 1
 bare:GraphFetch::Loading 1
 bare:Health::Running 1
-bare:InviteLinkCountsFetch::Loading 1
 bare:Kind::Applying 1
 bare:Leg::Pending 1
 bare:LimitFocus::Requested 1
 bare:LinkHandlerState::Checking 1
-bare:LinkPreviewFetch::Asked 1
 bare:LinkStatus::Pending 1
 bare:ListStatus::Loading 1
 bare:Lookup::Pending 1
@@ -66,9 +63,7 @@ bare:MessageStatsFetch::Loading 1
 bare:MuteState::Connecting 1
 bare:NextPage::Loading 1
 bare:Opening::Pending 1
-bare:OutboxReceipt::Sent 1
 bare:OwnLinkState::Waiting 1
-bare:OwnerLookup::Loading 1
 bare:PaidStage::Waiting 1
 bare:PaneMode::Connecting 1
 bare:PasscodeJob::Running 1
@@ -88,8 +83,6 @@ bare:Refire::Running 1
 bare:ReplyState::Loading 1
 bare:Restore::Pending 1
 bare:RichHtmlStage::Running 1
-bare:RowStatus::Sending 1
-bare:RowStatus::Sent 1
 bare:Run::Running 1
 bare:SaveAnswer::Waiting 1
 bare:SearchPaging::Loading 1
@@ -132,7 +125,6 @@ bare:ViewState::Opening 1
 bare:ViewState::Waiting 1
 bare:Waker::Pending 1
 bare:WebRowState::Connecting 1
-bare:WithdrawalState::Pending 2
 bare:WorkerLife::Running 1
 bare:WriteAccess::Asking 1
 unkeyed:AccentRead::Reading 1
@@ -146,7 +138,6 @@ unkeyed:CameraStage::Saving 1
 unkeyed:Cancellation::InFlight 1
 unkeyed:CardState::Loading 1
 unkeyed:ChatSearchPaging::Loading 1
-unkeyed:ComposerReplyFetch::Loading 1
 unkeyed:ConferenceStage::Upgrading 1
 unkeyed:CreateStage::Creating 1
 unkeyed:DebugConfirm::Asking 1
@@ -162,7 +153,6 @@ unkeyed:FreeUi::Requesting 1
 unkeyed:GiftPurchaseStage::Sent 1
 unkeyed:GiftValueStage::Loading 1
 unkeyed:GiftsRest::Waiting 1
-unkeyed:GroupScreenShare::Starting 1
 unkeyed:IconState::Requested 1
 unkeyed:IdLookup::Asking 1
 unkeyed:LanguageStage::Fetching 1
@@ -193,7 +183,6 @@ unkeyed:StoryFetch::Asked 1
 unkeyed:TileState::Requested 1
 unkeyed:TitleCheck::Sent 1
 unkeyed:TonConnectRequestState::Pending 1
-unkeyed:TransferStage::Sending 1
 unkeyed:Translation::Pending 1
 unkeyed:UpdateControl::Downloading 1
 unkeyed:VcardImport::Reading 1

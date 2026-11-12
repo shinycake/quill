@@ -172,7 +172,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let tracked = calls.group_call(id);
         let is_story = calls.story_stream.as_ref().is_some_and(|c| c.id == id);
         let tracked_muted = tracked.is_some_and(|call| call.is_muted_self);
-        let tracked_video = tracked.is_some_and(|call| call.is_my_video_enabled);
+        let tracked_video = tracked.is_some_and(|call| call.my_video.is_enabled());
         (params.is_muted, params.is_my_video_enabled) = match send {
             OfferSend::Join if is_story => (true, tracked_video),
             OfferSend::Join

@@ -70,14 +70,18 @@ impl Session {
                 }
             }
             Some(RequestPurpose::GetProfilePhotoEmojiIcons) => {
-                self.users_state
-                    .profile_photo_emoji_icons
-                    .fail(error_reason(err));
+                self.users_state.profile_photo_emoji_icons.failed(
+                    pending.map(|p| p.id),
+                    error_reason(err),
+                    false,
+                );
             }
             Some(RequestPurpose::GetChatPhotoEmojiIcons) => {
-                self.users_state
-                    .chat_photo_emoji_icons
-                    .fail(error_reason(err));
+                self.users_state.chat_photo_emoji_icons.failed(
+                    pending.map(|p| p.id),
+                    error_reason(err),
+                    false,
+                );
             }
             Some(RequestPurpose::GetProfileShareThemeBackdrops) => {
                 if let Some(pending) = pending {
@@ -101,9 +105,11 @@ impl Session {
                 self.users_state.peer_qr.fail_link(free, error_reason(err));
             }
             Some(RequestPurpose::GetBackgroundEmojiIcons) => {
-                self.users_state
-                    .background_emoji_icons
-                    .fail(error_reason(err));
+                self.users_state.background_emoji_icons.failed(
+                    pending.map(|p| p.id),
+                    error_reason(err),
+                    false,
+                );
             }
             // B10: profile panel fetches keep the reason for a Retry row;
             // refused edits surface as a toast.

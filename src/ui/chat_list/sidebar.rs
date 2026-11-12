@@ -270,7 +270,7 @@ impl QuillApp {
                 .map(|chat| ListedChat {
                     chat_id: chat.id.0,
                     pinned: chat.is_pinned,
-                    date: chat.last_message.as_ref().map_or(0, |m| m.date),
+                    date: chat.last_message().as_ref().map_or(0, |m| m.date),
                 })
                 .collect();
             for entry in group_main_list(&listed, &communities) {

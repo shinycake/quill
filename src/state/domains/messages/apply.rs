@@ -38,7 +38,7 @@ impl Session {
                     LiveStoryPurpose::GetMessageSenders { group_call_id },
                 ))) = pending.map(|p| p.purpose)
                 {
-                    self.set_live_story_senders(group_call_id, senders);
+                    self.set_live_story_senders(group_call_id, pending.map(|p| p.id), senders);
                 } else if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
                     self.accept_message_senders(chat_id, pending.map(|p| p.id), senders);
                 }
@@ -66,10 +66,13 @@ impl Session {
             } => self.sync.mark_live_viewed(chat_id, message_id),
             // B15: `getPollVoteStatistics` answer — cached per message.
             MessagesPayload::PollVoteStatistics { graph } => {
-                if let Some(RequestPurpose::Messages(MessagesPurpose::GetPollVoteStatistics {
-                    chat_id,
-                    message_id,
-                })) = pending.map(|p| p.purpose)
+                if let Some(p) = pending
+                    && let RequestPurpose::Messages(MessagesPurpose::GetPollVoteStatistics {
+                        chat_id,
+                        message_id,
+                    }) = p.purpose
+                    && let Some(slot) = self.messages.poll_stats.get_mut(&(chat_id.0, message_id.0))
+                    && matches!(slot, PollStatsFetch::Loading(asked) if *asked == p.id)
                 {
                     // Only the request the dialog waits for lands.
                     if let Some(pending) = pending
@@ -506,12 +509,13 @@ impl Session {
                     self.accept_replied_message(chat_id, message_id, message);
                     return;
                 }
-                if let Some(RequestPurpose::Messages(MessagesPurpose::GetComposerReplyTarget {
-                    chat_id,
-                    message_id,
-                })) = pending.map(|p| p.purpose)
+                if let Some(p) = pending
+                    && let RequestPurpose::Messages(MessagesPurpose::GetComposerReplyTarget {
+                        chat_id,
+                        message_id,
+                    }) = p.purpose
                 {
-                    self.accept_composer_reply_target(chat_id, message_id, message);
+                    self.accept_composer_reply_target(chat_id, message_id, p.id, message);
                     return;
                 }
                 // M1 fix-up: editing a scheduled send returns the edited

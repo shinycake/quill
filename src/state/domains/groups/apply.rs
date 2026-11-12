@@ -317,27 +317,7 @@ impl Session {
             // no chat id, so it is correlated via the pending request's
             // `chat_id`.
             GroupsPayload::ChatStatistics { statistics } => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatStatistics)
-                    && let Some(pending) = pending
-                    && let Some(chat_id) = pending.chat_id
-                {
-                    // Only the request the panel waits for lands, with the
-                    // theme it asked for: an older one, answered after a
-                    // theme change asked again, is dropped.
-                    if let Some(ChatStatisticsFetch::Loading { request, is_dark }) =
-                        self.groups.chat_statistics.get(&chat_id.0)
-                        && *request == pending.id
-                    {
-                        let is_dark = *is_dark;
-                        self.groups.chat_statistics.insert(
-                            chat_id.0,
-                            ChatStatisticsFetch::Loaded {
-                                stats: std::sync::Arc::new(statistics),
-                                is_dark,
-                            },
-                        );
-                    }
-                }
+                self.accept_chat_statistics(statistics, pending)
             }
             GroupsPayload::MessageStatistics { statistics } => {
                 if let Some(RequestPurpose::Groups(GroupsPurpose::GetMessageStatistics {
@@ -440,13 +420,7 @@ impl Session {
             }
             // B8: `getChatInviteLinkCounts` answer.
             GroupsPayload::ChatInviteLinkCounts { counts } => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatInviteLinkCounts)
-                    && let Some(chat_id) = pending.and_then(|p| p.chat_id)
-                {
-                    self.groups
-                        .invite_link_counts
-                        .insert(chat_id.0, InviteLinkCountsFetch::Loaded(counts));
-                }
+                self.accept_invite_link_counts(counts, pending)
             }
             // B8: `getChatInviteLinkMembers` answer; stale replies (the
             // details were opened for another link meanwhile) are dropped.
@@ -865,7 +839,7 @@ impl Session {
             }
             GroupsPayload::CanTransferOwnershipResult { result } => {
                 if pending.is_some_and(|p| p.purpose == RequestPurpose::CanTransferOwnership) {
-                    self.accept_can_transfer_ownership(result);
+                    self.accept_can_transfer_ownership(pending.map(|p| p.id), result);
                 }
             }
             GroupsPayload::ChatMember { member } => {

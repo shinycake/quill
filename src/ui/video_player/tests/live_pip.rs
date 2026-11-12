@@ -41,8 +41,10 @@ pub(super) fn seed_stream(app: &mut QuillApp) {
         session.calls.active_group_call = Some(ActiveGroupCall {
             is_rtmp_stream: true,
             is_joined: true,
-            stream_mode: GroupCallMode::Rtmp,
-            stream: StreamState::Live,
+            media: quill::state::GroupMedia::Stream {
+                mode: GroupCallMode::Rtmp,
+                state: StreamState::Live,
+            },
             viewer_count: 12_480,
             ..ActiveGroupCall::fresh(CALL)
         });

@@ -47,7 +47,7 @@ pub(crate) fn live_frame_hook(feeds: LiveFeeds) -> LiveFrameCallback {
 pub(crate) fn call_has_video(call: &ActiveGroupCall, key: LiveKey) -> bool {
     match key {
         LiveKey::Stream { .. } | LiveKey::Call { .. } => false,
-        LiveKey::Local { call_id } => call.id == call_id && call.is_my_video_enabled,
+        LiveKey::Local { call_id } => call.id == call_id && call.my_video.is_enabled(),
         LiveKey::Video {
             call_id,
             user_id,
@@ -84,7 +84,7 @@ struct CallTracks {
 fn tracks_on(call: &ActiveGroupCall) -> CallTracks {
     let mut on = HashSet::new();
     let mut others_video = Vec::new();
-    if call.is_my_video_enabled {
+    if call.my_video.is_enabled() {
         on.insert(LiveKey::Local { call_id: call.id });
     }
     for participant in call.participants.iter() {
@@ -119,7 +119,7 @@ impl FeedInputs {
     fn of(call: &ActiveGroupCall) -> Self {
         Self {
             participants: call.participants.revision(),
-            my_video: call.is_my_video_enabled,
+            my_video: call.my_video.is_enabled(),
             sharing: call.screen_share.is_on(),
         }
     }

@@ -95,9 +95,6 @@ pub struct MessagesState {
     /// MED4b: composer `getLinkPreview` prefetch state, by URL: each
     /// window's chip reads the preview of its own composer's URL.
     pub composer_previews: crate::state::ComposerLinkPreviews,
-    /// MED4b: pending `getLinkPreview` URLs by `RequestId` (same
-    /// `Copy`-purpose pattern as `instant_view_requests`).
-    pub composer_preview_urls: HashMap<RequestId, String>,
     /// MED2 fix-up: one-shot; set when TDLib refuses a `recognizeSpeech`
     /// request. The UI drains it into the status note — previously the
     /// error fell into the `_ => {}` swallower and the user saw
@@ -228,7 +225,6 @@ impl MessagesState {
             instant_view_fallbacks: Vec::new(),
             instant_view_requests: HashMap::new(),
             composer_previews: Default::default(),
-            composer_preview_urls: HashMap::new(),
             recognize_speech_error: Notes::default(),
             full_rich_loads: HashMap::new(),
             resend_error: Notes::default(),

@@ -157,7 +157,10 @@ fn the_admin_sees_the_server_hint_and_an_ended_stream_closes(cx: &mut TestAppCon
     app.update(&mut call, |app, cx| {
         let session = app.demo_session.as_mut().expect("demo");
         if let Some(active) = session.calls.active_group_call.as_mut() {
-            active.rtmp_url = Some("rtmps://dc4-1.rtmp.t.me/s/".into());
+            active.rtmp = Some(quill::calls::rtmp_start::RtmpInfo {
+                url: "rtmps://dc4-1.rtmp.t.me/s/".into(),
+                key: String::new(),
+            });
         }
         cx.notify();
     });
@@ -168,7 +171,7 @@ fn the_admin_sees_the_server_hint_and_an_ended_stream_closes(cx: &mut TestAppCon
     app.update(&mut main, |app, cx| {
         let session = app.demo_session.as_mut().expect("demo");
         if let Some(active) = session.calls.active_group_call.as_mut() {
-            active.stream = StreamState::Ended;
+            active.media.set_stream_state(StreamState::Ended);
         }
         // Outside a draw: the test platform draws every dirty window in
         // one pass and cannot lose one in the middle of it.
@@ -191,7 +194,10 @@ fn track_unjoined(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
         let session = app.demo_session.as_mut().expect("demo");
         session.calls.active_group_call = Some(ActiveGroupCall {
             is_rtmp_stream: true,
-            stream: StreamState::Connecting,
+            media: quill::state::GroupMedia::Stream {
+                mode: quill::calls::engine::GroupCallMode::Rtmp,
+                state: StreamState::Connecting,
+            },
             ..ActiveGroupCall::fresh(CALL)
         });
         // Outside a draw, as the poll loop runs it.
@@ -915,7 +921,10 @@ fn a_switch_to_another_stream_closes_the_boxes(cx: &mut TestAppContext) {
         let session = app.demo_session.as_mut().expect("demo");
         session.calls.active_group_call = Some(ActiveGroupCall {
             is_rtmp_stream: true,
-            stream: StreamState::Live,
+            media: quill::state::GroupMedia::Stream {
+                mode: quill::calls::engine::GroupCallMode::Rtmp,
+                state: StreamState::Live,
+            },
             ..ActiveGroupCall::fresh(CALL + 1)
         });
         app.sync_group_call_window(cx);

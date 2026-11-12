@@ -141,10 +141,11 @@ impl Session {
             // silently showing only "Myself"; it is not the eligibility
             // check's error.
             Some(RequestPurpose::GetChatsToPostStories) => {
-                self.stories.post_as.fail(format!(
-                    "Could not load \"Post as\" chats: {}",
-                    error_reason(err)
-                ));
+                self.stories.post_as.failed(
+                    pending.map(|p| p.id),
+                    format!("Could not load \"Post as\" chats: {}", error_reason(err)),
+                    false,
+                );
             }
             // Phase 9.7: a story-page mutation error — the page's
             // status line shows it instead of spinning forever.

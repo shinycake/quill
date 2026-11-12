@@ -27,7 +27,7 @@ fn joined_stream() -> GroupCallDriverHarness {
 
 fn set_stream_state(driver: &mut ConnectDriver<Arc<RecordingSender>>, state: StreamState) {
     if let Some(call) = driver.session.calls.active_group_call.as_mut() {
-        call.stream = state;
+        call.media.set_stream_state(state);
     }
 }
 

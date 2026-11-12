@@ -486,9 +486,9 @@ impl QuillApp {
         self.set_composer_group_media(Some(next));
         if self
             .session()
-            .is_some_and(|s| s.settings.media_prefs.remember_media_grouping)
+            .is_some_and(|s| s.settings.media_prefs.media_grouping.is_remembered())
         {
-            self.set_media_pref(|prefs| prefs.group_media = next, cx);
+            self.set_media_pref(|prefs| prefs.media_grouping.choose(next), cx);
         } else {
             cx.notify();
         }
@@ -503,19 +503,11 @@ impl QuillApp {
     pub(in crate::ui) fn toggle_remember_media_grouping(&mut self, cx: &mut Context<Self>) {
         let next = !self
             .session()
-            .map(|s| s.settings.media_prefs.remember_media_grouping)
+            .map(|s| s.settings.media_prefs.media_grouping.is_remembered())
             .unwrap_or(false);
         // Turning it on snapshots the current grouping choice.
         let current = self.composer_group_media_effective();
-        self.set_media_pref(
-            |prefs| {
-                prefs.remember_media_grouping = next;
-                if next {
-                    prefs.group_media = current;
-                }
-            },
-            cx,
-        );
+        self.set_media_pref(|prefs| prefs.media_grouping.remember(next, current), cx);
     }
 
     /// While a viewer clip is open: media keys and the OS Now Playing
