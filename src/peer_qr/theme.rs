@@ -364,9 +364,9 @@ pub enum GiftsRest {
     /// A request is on its way as `ask` (the next page from `offset`, or a
     /// refresh that shows the list meanwhile).
     Loading { ask: GiftsAsk, offset: String },
-    /// The next page failed: the panel stops asking for more until `at`
-    /// (unix seconds).
-    Waiting { at: i64, offset: String },
+    /// The next page failed: the panel stops asking for more until
+    /// `retry_at_secs` (unix seconds).
+    Waiting { retry_at_secs: i64, offset: String },
 }
 
 impl GiftsRest {
@@ -387,7 +387,7 @@ impl GiftsRest {
         match self.offset() {
             "" => Self::Complete,
             offset => Self::Waiting {
-                at: since.saturating_add(GIFTS_RETRY_SECS),
+                retry_at_secs: since.saturating_add(GIFTS_RETRY_SECS),
                 offset: offset.to_string(),
             },
         }
@@ -473,7 +473,7 @@ impl ThemeGifts {
     pub fn wants_more(&self, now: i64) -> bool {
         match &self.stage {
             GiftsStage::Listed(GiftsRest::More { .. }) => true,
-            GiftsStage::Listed(GiftsRest::Waiting { at, .. }) => now >= *at,
+            GiftsStage::Listed(GiftsRest::Waiting { retry_at_secs, .. }) => now >= *retry_at_secs,
             _ => false,
         }
     }

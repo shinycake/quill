@@ -331,6 +331,17 @@ class Enums(unittest.TestCase):
         }
         self.assertEqual(keys(enums, files), ["bare:Load::Loading", "unkeyed:Gate::Asking"])
 
+    def test_a_deadline_or_an_owned_generic_handle_is_what_ends_the_stage(self):
+        files = {
+            "src/state/a.rs": (
+                "pub enum Held { Idle, Waiting { commit_at_ms: u64 }, Retrying { retry_at_secs: i64 } }\n"
+                "pub enum Owned<R = ()> { Idle, Loading { runtime: R }, Running(R) }\n"
+                "pub enum Vague { Idle, Waiting { at: u64 } }\n"
+                "pub enum Plain<R> { Idle, Loading { count: u8 }, Running(R) }\n"
+            ),
+        }
+        self.assertEqual(keys(enums, files), ["unkeyed:Plain::Loading", "unkeyed:Vague::Waiting"])
+
     def test_a_u64_standing_in_for_a_request_id_fails(self):
         files = {
             "src/state/a.rs": (
