@@ -145,7 +145,6 @@ impl QuillApp {
             self.request_edit_image_download(cx);
             return;
         };
-        let asked_for = (edit.chat_id, edit.message_id);
         let Some(edit_id) = self.chat_ui.edit_id() else {
             return;
         };
@@ -159,11 +158,9 @@ impl QuillApp {
                 match result {
                     Ok(pixels) => {
                         if this.viewer.photo_editor.is_none() {
-                            this.viewer.photo_editor.open(PhotoEditor::for_message_edit(
-                                asked_for.0,
-                                asked_for.1,
-                                pixels,
-                            ));
+                            this.viewer
+                                .photo_editor
+                                .open(PhotoEditor::for_message_edit(edit_id, pixels));
                         }
                     }
                     Err(_) => this.set_note(StatusNote::error(tr(

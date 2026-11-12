@@ -856,14 +856,19 @@ impl QuillApp {
     fn scroll_goal_now(&self, thread: Option<&ThreadWindow>) -> GoalCheckResult {
         match (self.history.aim.goal(), thread) {
             (None, _) => GoalCheckResult::Waiting,
-            (Some(ScrollGoal::ThreadRoot), Some(thread))
-                if thread.older == quill::state::OlderEnd::Complete =>
+            (Some(ScrollGoal::ThreadRoot { thread_id }), Some(thread))
+                if thread.thread_id == thread_id
+                    && thread.older == quill::state::OlderEnd::Complete =>
             {
                 GoalCheckResult::Due
             }
-            (Some(ScrollGoal::ThreadRoot), Some(_)) => GoalCheckResult::Waiting,
-            // The thread closed: the goal goes with it.
-            (Some(ScrollGoal::ThreadRoot), None) => GoalCheckResult::Stale,
+            (Some(ScrollGoal::ThreadRoot { thread_id }), Some(thread))
+                if thread.thread_id == thread_id =>
+            {
+                GoalCheckResult::Waiting
+            }
+            // The thread closed, or another one opened: the goal goes.
+            (Some(ScrollGoal::ThreadRoot { .. }), _) => GoalCheckResult::Stale,
         }
     }
 
@@ -877,7 +882,7 @@ impl QuillApp {
         };
         self.end_landing();
         match goal {
-            ScrollGoal::ThreadRoot => self.history.scroller.update(cx, |state, cx| {
+            ScrollGoal::ThreadRoot { .. } => self.history.scroller.update(cx, |state, cx| {
                 state.scroll_to_item(0, cx);
             }),
         }

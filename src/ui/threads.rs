@@ -229,7 +229,10 @@ impl QuillApp {
         }
         // "Jump to root" pages older replies until the root is in; the
         // history list scrolls there (`ScrollGoal::ThreadRoot`).
-        if self.screen.history.aim.goal() == Some(ScrollGoal::ThreadRoot) {
+        if matches!(
+            self.screen.history.aim.goal(),
+            Some(ScrollGoal::ThreadRoot { .. })
+        ) {
             let complete = live
                 .driver
                 .session
@@ -331,7 +334,13 @@ impl QuillApp {
     /// Scroll to the thread's root post, loading older replies first when
     /// they are not all loaded yet.
     pub(super) fn jump_to_thread_root(&mut self, cx: &mut Context<Self>) {
-        self.history.aim = ScrollAim::Goal(ScrollGoal::ThreadRoot);
+        let thread_id = self
+            .viewed_chat()
+            .and_then(|chat| self.session()?.thread_for_chat(chat))
+            .map(|thread| thread.thread_id);
+        if let Some(thread_id) = thread_id {
+            self.history.aim = ScrollAim::Goal(ScrollGoal::ThreadRoot { thread_id });
+        }
         cx.notify();
     }
 

@@ -127,7 +127,7 @@ pub(super) enum CoverPick {
 pub(crate) struct EditId(u64);
 
 impl EditId {
-    fn next() -> Self {
+    pub(crate) fn next() -> Self {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         Self(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
     }

@@ -176,12 +176,10 @@ impl QuillApp {
         // Your own microphone: the ring follows the level while live.
         let (self_level, _) = self.group_call_self_level();
         let level_reach = (state == MuteButtonView::Live).then(|| {
-            if (self_level - self.group_call.level_seen).abs() > f32::EPSILON {
-                self.group_call.level_seen = self_level;
-                self.group_call
-                    .level_anim
-                    .retarget(self_level.clamp(0.0, 1.0), now);
-            }
+            // An unchanged target is no restart (`LevelAnimation::retarget`).
+            self.group_call
+                .level_anim
+                .retarget(self_level.clamp(0.0, 1.0), now);
             quill::calls::audio_level::halo_reach(self.group_call.level_anim.value(now))
         });
         let title = if call.title.is_empty() {

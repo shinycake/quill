@@ -120,7 +120,7 @@ struct Active {
     /// Its play head.
     head: HeadId,
     /// Waiting for its sticker (until when), or the sticker playing and when
-    /// it was given (wall clock).
+    /// it was given (the executor clock).
     playback: Playback,
     seed: u64,
     kind: EffectKind,
@@ -582,7 +582,7 @@ fn progress(view: &StickerView) -> (Duration, Duration) {
 
 /// Whether an effect given its view at `given` still plays at `now`: until
 /// its head played it through, or (a view no longer drawn) its length plus
-/// the start wait on the wall clock.
+/// the start wait on the executor clock.
 fn still_playing(view: &StickerView, given: Instant, now: Instant) -> bool {
     match view.progress() {
         Some((pos, total)) => {

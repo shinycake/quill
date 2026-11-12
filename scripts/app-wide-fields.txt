@@ -163,7 +163,6 @@ group_call.ptt | push-to-talk key settings
 group_call.ptt_clock | the push-to-talk clock
 group_call.global_ptt * | the OS-wide push-to-talk hook with its listener and permission re-check tasks
 group_call.level_anim | the own voice level animation
-group_call.level_seen | the level last drawn
 group_call.panel_scroll | the window's participant list scroll
 group_call.rows_place * | where the participant rows sit in the window
 group_call.players | tile players by `LiveKey`; the sync drops every one whose call is not the call shown
