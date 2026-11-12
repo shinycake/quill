@@ -77,11 +77,10 @@ impl QuillApp {
         match self
             .session()
             .and_then(|session| session.settings.privacy_data.new_chat.as_ref())
+            .and_then(NewChatPrivacyState::value)
         {
-            Some(NewChatPrivacyState::Ready(privacy)) => {
-                privacy.incoming_paid_message_star_count.max(0)
-            }
-            _ => 0,
+            Some(privacy) => privacy.incoming_paid_message_star_count.max(0),
+            None => 0,
         }
     }
 

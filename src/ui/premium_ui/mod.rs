@@ -96,7 +96,7 @@ fn fact_row(label: &str, value: String, cx: &App) -> Div {
 }
 
 impl QuillApp {
-    fn hub_mut(&mut self) -> Option<&mut PremiumHub> {
+    pub(in crate::ui) fn hub_mut(&mut self) -> Option<&mut PremiumHub> {
         if let Some(live) = self.live.as_mut() {
             Some(&mut live.driver.session.payments.hub)
         } else {
@@ -299,18 +299,8 @@ impl QuillApp {
     }
 
     pub(in crate::ui) fn select_gift(&mut self, id: Option<String>, cx: &mut Context<Self>) {
-        // An Upgrade or resale price confirmation left open on another
-        // gift belongs to that gift: it goes, or this gift's buttons would
-        // stay hidden behind it.
-        if let Some(manage) = self.gift_manage_mut() {
-            manage.flow.take_if(|flow| match flow {
-                quill::gift_manage::GiftFlow::Upgrade { id: open, .. }
-                | quill::gift_manage::GiftFlow::Resale { id: open, .. } => {
-                    id.as_deref() != Some(open.as_str())
-                }
-                _ => false,
-            });
-        }
+        // The panel's convert confirmation and Upgrade or resale form are
+        // part of the view: another gift's go with the selection.
         if let Some(hub) = self.hub_mut() {
             hub.received.view.select(id);
             hub.received.view.confirm_convert(None);

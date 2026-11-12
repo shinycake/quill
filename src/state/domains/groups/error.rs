@@ -230,6 +230,7 @@ impl Session {
             })) => self.groups.stats.fail_message_statistics(
                 chat_id,
                 message_id,
+                pending.map(|p| p.id),
                 call_request_error_line(err, "Could not load statistics"),
             ),
             Some(RequestPurpose::Groups(GroupsPurpose::GetMessagePublicForwards {
@@ -249,10 +250,15 @@ impl Session {
                 chat_id,
                 message_id,
             })) => {
+                // Gone for good (not found) skips the row; any other
+                // failure is asked again when the panel opens.
                 if let Some(pending) = pending {
-                    self.groups
-                        .stats
-                        .post_missing(chat_id, message_id, pending.id);
+                    let stats = &mut self.groups.stats;
+                    if err.class == ErrorClass::NotFound {
+                        stats.post_missing(chat_id, message_id, pending.id);
+                    } else {
+                        stats.post_unsent(chat_id, message_id, pending.id);
+                    }
                 }
             }
             // Phase D3a: failed invite-link / join-request requests

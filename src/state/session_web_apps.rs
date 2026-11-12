@@ -134,9 +134,13 @@ impl Session {
     /// The context of the open call that `request` answers.
     fn take_web_app_pending(&mut self, request: Option<&PendingRequest>) -> Option<WebAppPending> {
         let id = request?.id;
-        let pending = &mut self.bots.web_apps.pending;
-        let index = pending.iter().position(|p| p.request == id)?;
-        Some(pending.remove(index))
+        match self.bots.web_apps.opening.take() {
+            Some(opening) if opening.request == id => Some(opening),
+            other => {
+                self.bots.web_apps.opening = other;
+                None
+            }
+        }
     }
 
     /// `getGrossingWebAppBots` returns `foundUsers`, which the envelope
@@ -169,11 +173,11 @@ impl Session {
                 self.bots.web_apps.write_access = pending
                     .map(|p| WriteAnswer::new(p.id, bot_user_id, WriteAccessResult::Granted));
             }
-            Some(RequestPurpose::Bots(BotsPurpose::ToggleBotEmojiStatusAccess {
-                bot_user_id,
-                ..
-            })) => {
-                self.bots.web_apps.emoji_access = Some((bot_user_id, true));
+            Some(RequestPurpose::Bots(BotsPurpose::ToggleBotEmojiStatusAccess { .. })) => {
+                self.bots.web_apps.emoji_access = pending.map(|p| EmojiAccessAnswer {
+                    request: p.id,
+                    result: EmojiAccessResult::Granted,
+                });
             }
             Some(RequestPurpose::Bots(BotsPurpose::ToggleBotInAttachmentMenu {
                 bot_user_id,
@@ -191,7 +195,12 @@ impl Session {
                 }
             }
             Some(RequestPurpose::SendWebAppData) => {
-                self.bots.web_apps.data_sent = Some(Ok(()));
+                if let Some(pending) = pending {
+                    self.bots.web_apps.data_sent.push(DataSent {
+                        request: pending.id,
+                        result: Ok(()),
+                    });
+                }
             }
             _ => {}
         }
@@ -252,7 +261,10 @@ impl Session {
                 if let Some(Some(info)) = self.bots.bot_info.get_mut(&bot_user_id) {
                     info.can_manage_emoji_status = !allowed;
                 }
-                self.bots.web_apps.emoji_access = Some((bot_user_id, false));
+                self.bots.web_apps.emoji_access = Some(EmojiAccessAnswer {
+                    request: p.id,
+                    result: EmojiAccessResult::Refused,
+                });
             }
             RequestPurpose::Bots(BotsPurpose::GetAttachmentMenuBot { .. }) => {
                 self.bots
@@ -295,7 +307,10 @@ impl Session {
                 }
             }
             RequestPurpose::SendWebAppData => {
-                self.bots.web_apps.data_sent = Some(Err(web_app_error_text(err)));
+                self.bots.web_apps.data_sent.push(DataSent {
+                    request: p.id,
+                    result: Err(web_app_error_text(err)),
+                });
             }
             _ => {}
         }

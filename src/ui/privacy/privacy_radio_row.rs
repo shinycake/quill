@@ -577,7 +577,7 @@ impl QuillApp {
         key: PrivacySettingKey,
         edit: impl FnOnce(&mut PrivacyRuleDetail),
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         let current = self.session().and_then(|s| {
             s.settings
                 .privacy
@@ -585,10 +585,11 @@ impl QuillApp {
                 .and_then(|st| st.detail().cloned())
         });
         let Some(mut detail) = current else {
-            return;
+            return false;
         };
         edit(&mut detail);
         self.save_privacy_rule(key, detail, cx);
+        true
     }
 
     /// Slice S3: add or remove one user from an always/never exception
@@ -605,7 +606,7 @@ impl QuillApp {
         let PrivacyEditorTarget::Rule(key) = target else {
             return;
         };
-        self.mutate_privacy_detail(
+        let edited = self.mutate_privacy_detail(
             key,
             |detail| {
                 let (mine, other) = match kind {
@@ -623,7 +624,9 @@ impl QuillApp {
             },
             cx,
         );
-        if add {
+        // The picker closes on the edit that went out, not on one ignored
+        // while the rule is still loading or failed.
+        if add && edited {
             self.privacy.layer.close_exception_picker();
         }
         cx.notify();
@@ -642,7 +645,7 @@ impl QuillApp {
         let PrivacyEditorTarget::Rule(key) = target else {
             return;
         };
-        self.mutate_privacy_detail(
+        let edited = self.mutate_privacy_detail(
             key,
             |detail| {
                 let (mine, other) = match kind {
@@ -664,7 +667,9 @@ impl QuillApp {
             },
             cx,
         );
-        if add {
+        // The picker closes on the edit that went out, not on one ignored
+        // while the rule is still loading or failed.
+        if add && edited {
             self.privacy.layer.close_exception_picker();
         }
         cx.notify();

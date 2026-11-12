@@ -33,7 +33,7 @@ impl QuillApp {
     pub(super) fn privacy_page(&mut self, cx: &mut Context<Self>) -> Div {
         let password_check = self
             .session()
-            .is_some_and(|s| s.settings.privacy_data.check_password_suggested)
+            .is_some_and(|s| s.check_password_suggested())
             .then(|| {
                 let field = self.twofa.check_password.clone();
                 self.password_check_card(&field, cx)

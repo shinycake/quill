@@ -255,8 +255,11 @@ fn the_password_check_on_the_page_and_in_the_2fa_box_has_a_field_each(cx: &mut T
         app.show_settings_page(Page::Privacy, cx);
         app.open_twofa(cx);
         if let Some(session) = app.demo_session.as_mut() {
-            session.settings.privacy_data.check_password_suggested = true;
-            session.auth_state.password_state = Some(PasswordState {
+            session
+                .chat_list
+                .suggestions
+                .add_action(quill::chatlist_suggestions::ACTION_PASSWORD);
+            session.auth_state.password_state = quill::state::PasswordCache::Fresh(PasswordState {
                 has_password: true,
                 password_hint: String::new(),
                 has_recovery_email_address: false,
@@ -303,7 +306,7 @@ fn aborting_the_recovery_email_asks_inside_the_2fa_box(cx: &mut TestAppContext) 
         app.show_settings_page(Page::Privacy, cx);
         app.open_twofa(cx);
         if let Some(session) = app.demo_session.as_mut() {
-            session.auth_state.password_state = Some(PasswordState {
+            session.auth_state.password_state = quill::state::PasswordCache::Fresh(PasswordState {
                 has_password: true,
                 password_hint: String::new(),
                 has_recovery_email_address: false,
@@ -349,8 +352,8 @@ fn replacing_the_screen_forgets_a_half_finished_recovery_step(cx: &mut TestAppCo
         app.demo_settings(Page::Account, cx);
         app.open_twofa(cx);
         if let Some(session) = app.demo_session.as_mut() {
-            session.auth_state.twofa_flow.code_wait =
-                quill::state::CodeWait::Recovery("a***@example.com".into());
+            session.auth_state.twofa_flow =
+                quill::state::TwofaFlow::RecoveryCode("a***@example.com".into());
         }
         app.replace_screen(window, cx);
     });
@@ -359,7 +362,7 @@ fn replacing_the_screen_forgets_a_half_finished_recovery_step(cx: &mut TestAppCo
         let waiting = app
             .demo_session
             .as_ref()
-            .and_then(|session| session.auth_state.twofa_flow.code_wait.recovery());
+            .and_then(|session| session.auth_state.twofa_flow.recovery());
         assert_eq!(waiting, None);
     });
 }
@@ -375,7 +378,10 @@ fn a_typed_password_check_is_emptied_when_the_page_is_left(cx: &mut TestAppConte
         app.demo_settings(Page::Account, cx);
         app.show_settings_page(Page::Privacy, cx);
         if let Some(session) = app.demo_session.as_mut() {
-            session.settings.privacy_data.check_password_suggested = true;
+            session
+                .chat_list
+                .suggestions
+                .add_action(quill::chatlist_suggestions::ACTION_PASSWORD);
         }
         cx.notify();
     });

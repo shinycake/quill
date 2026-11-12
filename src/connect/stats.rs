@@ -119,10 +119,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             return Ok(None);
         }
-        if let Some(state) = self.session.groups.stats.message.as_mut() {
-            state.statistics = MessageStatsFetch::Loading;
-        }
         let extra = self.session.request(purpose, Some(chat_id));
+        self.session
+            .groups
+            .stats
+            .message_statistics_requested(chat_id.0, message_id.0, extra);
         if let Err(err) = self.send_json_request(
             extra,
             &get_message_statistics(extra, chat_id, message_id, is_dark),

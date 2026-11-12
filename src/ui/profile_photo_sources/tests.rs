@@ -123,3 +123,36 @@ fn a_video_avatar_opens_the_full_editor(cx: &mut TestAppContext) {
         app.connection.status_note().contains("at least 1 second")
     }));
 }
+
+/// A failed encode of any caller goes through one transition: the editor is
+/// ready again with the line (and its preview player comes back where video
+/// playback is supported).
+#[gpui_kit::test]
+fn a_failed_avatar_encode_returns_the_editor_with_its_line(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    let clip = VideoSource {
+        duration_ms: 20_000,
+        width: 1280,
+        height: 720,
+        has_audio: true,
+        ..VideoSource::default()
+    };
+    edit_avatar(&app, vcx, clip);
+    let note = app.update(vcx, |app, cx| {
+        let started = app
+            .composer_ui
+            .send_box
+            .video_editor
+            .as_mut()
+            .and_then(|editor| editor.begin_encode());
+        assert!(started.is_some(), "a ready editor starts encoding");
+        app.video_encode_failed("ffmpeg said no".into(), cx);
+        app.composer_ui
+            .send_box
+            .video_editor
+            .as_ref()
+            .and_then(|editor| editor.note())
+    });
+    assert_eq!(note.as_deref(), Some("ffmpeg said no"));
+}

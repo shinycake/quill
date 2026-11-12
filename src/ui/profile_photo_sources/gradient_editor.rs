@@ -27,8 +27,11 @@ enum Axis {
 pub(crate) struct GradientEditor {
     colors: Vec<u32>,
     selected: usize,
-    /// What the three sliders show for the selected color.
-    hsl: (f32, f32, f32),
+    /// Where the sliders were last moved to, and the color that gave: hue
+    /// is lost in a grey, so the sliders keep their own values while the
+    /// selected color is still that one (`hsl`). Any other color makes it
+    /// stale at once; nothing resets it by hand.
+    slid: Option<(u32, (f32, f32, f32))>,
     hex: Entity<TextareaState>,
     hue: Entity<SliderState>,
     saturation: Entity<SliderState>,
@@ -45,6 +48,17 @@ impl Drop for GradientEditor {
 }
 
 impl GradientEditor {
+    /// What the three sliders show: the selected color's own hue,
+    /// saturation and lightness, or where they were last dragged to for
+    /// that very color.
+    fn hsl(&self) -> Option<(f32, f32, f32)> {
+        let color = *self.colors.get(self.selected)?;
+        Some(match self.slid {
+            Some((slid_color, hsl)) if slid_color == color => hsl,
+            _ => to_hsl(color),
+        })
+    }
+
     fn redraw(&mut self) {
         let square = render_background(&self.colors, (PREVIEW_PX * 2.0) as u32);
         replace_image(
@@ -115,7 +129,7 @@ impl QuillApp {
         let mut editor = GradientEditor {
             colors,
             selected: 0,
-            hsl,
+            slid: None,
             hex,
             hue,
             saturation,
@@ -137,8 +151,7 @@ impl QuillApp {
         let Some(&color) = editor.colors.get(editor.selected) else {
             return;
         };
-        editor.hsl = to_hsl(color);
-        let (h, s, l) = editor.hsl;
+        let (h, s, l) = editor.hsl().unwrap_or_else(|| to_hsl(color));
         let hex_text = format_hex(color);
         let (hex, hue, sat, light) = (
             editor.hex.clone(),
@@ -192,17 +205,20 @@ impl QuillApp {
         let Some(editor) = self.editor_mut() else {
             return;
         };
-        let (mut h, mut s, mut l) = editor.hsl;
+        let Some(current) = editor.hsl() else {
+            return;
+        };
+        let (mut h, mut s, mut l) = current;
         match axis {
             Axis::Hue => h = value,
             Axis::Saturation => s = value,
             Axis::Lightness => l = value,
         }
-        if (h, s, l) == editor.hsl {
+        if (h, s, l) == current {
             return;
         }
-        editor.hsl = (h, s, l);
         let color = from_hsl(h, s, l);
+        editor.slid = Some((color, (h, s, l)));
         let hex = editor.hex.clone();
         self.editor_set_color(color, cx);
         // The hex field follows; its own change finds the color equal.

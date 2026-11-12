@@ -221,15 +221,15 @@ fn main_list_paging_resumes_after_a_failed_page_and_the_archive_starts() {
     };
     assert_eq!(main(&rig), 1);
     // Before the wait is over nothing goes out; after it, the page again.
-    let now = std::time::Instant::now();
-    let (at, _) = rig
+    let (at, wait) = rig
         .driver
         .session
         .chat_list
         .main_paging
         .retry()
         .expect("waiting");
-    assert!(!rig.driver.chat_list_tick(now.min(at)));
+    let before = at.checked_sub(wait).unwrap_or(at);
+    assert!(!rig.driver.chat_list_tick(before));
     assert_eq!(main(&rig), 1);
     assert!(rig.driver.chat_list_tick(at));
     assert_eq!(main(&rig), 2);
@@ -262,4 +262,67 @@ fn a_failed_folder_fetch_is_recorded_for_the_editor_and_cleared_by_the_retry() {
     );
     rig.answer_spec(&[7]);
     assert!(rig.driver.session.chat_list.fresh_spec(5).is_some());
+}
+
+#[test]
+fn a_failed_folder_page_waits_and_asks_again_and_a_404_ends_it() {
+    let mut rig = Rig::new();
+    rig.driver.load_folder_chats(2).expect("first folder page");
+    let folder_pages = |rig: &Rig| {
+        rig.sent("loadChats")
+            .into_iter()
+            .filter(|v| v["chat_list"]["@type"] == "chatListFolder")
+            .collect::<Vec<_>>()
+    };
+    let page = Rig::extra_of(folder_pages(&rig).last().expect("page"));
+    rig.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":500,"message":"Request aborted"}}"#,
+        page.0
+    ));
+    assert_eq!(folder_pages(&rig).len(), 1);
+    let (at, wait) = rig
+        .driver
+        .session
+        .chat_list
+        .folder_paging_of(2)
+        .retry()
+        .expect("waiting");
+    assert!(
+        !rig.driver
+            .chat_list_tick(at.checked_sub(wait).unwrap_or(at))
+    );
+    assert_eq!(folder_pages(&rig).len(), 1);
+    // Leaving the folder tab stops the wait; opening it asks again at once.
+    rig.driver.session.chat_list.folder_left(2);
+    assert!(!rig.driver.chat_list_tick(at));
+    assert_eq!(folder_pages(&rig).len(), 1);
+    rig.driver.load_folder_chats(2).expect("asked on return");
+    assert_eq!(folder_pages(&rig).len(), 2);
+    let page = Rig::extra_of(folder_pages(&rig).last().expect("page"));
+    rig.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":500,"message":"Request aborted"}}"#,
+        page.0
+    ));
+    let (at, _) = rig
+        .driver
+        .session
+        .chat_list
+        .folder_paging_of(2)
+        .retry()
+        .expect("waiting again");
+    assert_eq!(folder_pages(&rig).len(), 2);
+    assert!(rig.driver.chat_list_tick(at));
+    assert_eq!(folder_pages(&rig).len(), 3);
+    let page = Rig::extra_of(folder_pages(&rig).last().expect("page"));
+    rig.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":404,"message":"Not Found"}}"#,
+        page.0
+    ));
+    assert!(
+        rig.driver
+            .session
+            .chat_list
+            .folder_paging_of(2)
+            .is_exhausted()
+    );
 }

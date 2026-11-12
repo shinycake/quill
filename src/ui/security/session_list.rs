@@ -163,7 +163,7 @@ impl QuillApp {
     /// (tdesktop's "If inactive for..." row).
     pub(super) fn sessions_ttl_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let session = self.session();
-        let current = session.and_then(|s| s.settings.privacy_data.inactive_session_ttl_days);
+        let current = session.and_then(|s| s.settings.privacy_data.inactive_session_ttl.value());
         let error = session.and_then(|s| {
             s.settings
                 .privacy_data

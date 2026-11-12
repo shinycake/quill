@@ -56,11 +56,10 @@ impl Session {
             // presence check sends it again.
             Some(RequestPurpose::SetOnline) => {}
             Some(RequestPurpose::Settings(SettingsPurpose::ReviewUnconfirmedSession {
-                session_id,
                 ..
             })) => {
                 self.finish_login_review(
-                    session_id,
+                    pending.map(|p| p.id),
                     Some(sessions_error_line("review the new login", err)),
                 );
             }
@@ -173,16 +172,15 @@ impl Session {
             ) => self.apply_proxy_error(purpose, pending, err),
             Some(
                 purpose @ (RequestPurpose::GetNewChatPrivacy
-                | RequestPurpose::Settings(SettingsPurpose::SetNewChatPrivacy { .. })
+                | RequestPurpose::Settings(SettingsPurpose::SetNewChatPrivacy)
                 | RequestPurpose::CanSendMessageToUser
                 | RequestPurpose::GetPaidMessageRevenue
                 | RequestPurpose::AllowUnpaidMessages
                 | RequestPurpose::SetDirectMessagesGroup
                 | RequestPurpose::LoadDirectMessagesChat
                 | RequestPurpose::SetGiftSettings
-                | RequestPurpose::Settings(SettingsPurpose::SetInactiveSessionTtl {
-                    ..
-                })
+                | RequestPurpose::Settings(SettingsPurpose::SetInactiveSessionTtl)
+                | RequestPurpose::HideCheckPasswordSuggestion
                 | RequestPurpose::SetSensitiveContent
                 | RequestPurpose::SetContactJoinedNotifications
                 | RequestPurpose::GetNetworkStatistics

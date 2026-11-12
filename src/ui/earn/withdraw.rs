@@ -308,7 +308,7 @@ impl QuillApp {
         self.close_kit_dialog_if_done(DialogKind::EarnWithdraw, window, cx);
         let has_email = self
             .session()
-            .and_then(|s| s.auth_state.password_state.as_ref())
+            .and_then(|s| s.auth_state.password_state.get())
             .is_some_and(|state| state.has_recovery_email_address);
         self.open_twofa(cx);
         self.goto_twofa_view(crate::ui::dialogs::callback_password::TwofaView::Recover);
@@ -425,7 +425,7 @@ impl QuillApp {
                     };
                     let hint = this
                         .session()
-                        .and_then(|s| s.auth_state.password_state.as_ref())
+                        .and_then(|s| s.auth_state.password_state.get())
                         .map(|state| state.password_hint.clone())
                         .filter(|hint| !hint.is_empty());
                     // tdesktop `PasscodeBox` in check mode: the field, the

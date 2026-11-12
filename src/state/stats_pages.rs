@@ -38,13 +38,27 @@ pub enum GraphFetch {
     Failed(String),
 }
 
-/// Fetch state of a `getMessageStatistics` answer.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// Fetch state of a `getMessageStatistics` answer. Only the answer or the
+/// error of the request it waits for moves it.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MessageStatsFetch {
-    #[default]
-    Loading,
+    /// The request waited for; `None` until it is sent.
+    Loading(Option<RequestId>),
     Loaded(MessageStatisticsView),
     Failed(String),
+}
+
+impl Default for MessageStatsFetch {
+    fn default() -> Self {
+        Self::Loading(None)
+    }
+}
+
+impl MessageStatsFetch {
+    /// Whether `request` is the one this fetch waits for.
+    pub(crate) fn waits_for(&self, request: Option<RequestId>) -> bool {
+        matches!((self, request), (Self::Loading(Some(waiting)), Some(id)) if *waiting == id)
+    }
 }
 
 /// The public forwards received so far.
@@ -163,11 +177,11 @@ pub enum PostFetch {
         request: RequestId,
     },
     Ready(StatsPostPreview),
-    /// The server answered with an error (the post is gone): the row is
-    /// skipped.
+    /// Fetched and gone (TDLib's not-found): the row is skipped for good.
     Missing,
-    /// The send was refused: the row is skipped until the panel is
-    /// opened afresh.
+    /// The send was refused, or the fetch failed for another reason: the
+    /// row is skipped until `StatsState::reset` (the panel opens) lets it
+    /// ask again.
     Failed,
 }
 
@@ -211,7 +225,9 @@ impl StatsState {
         self.pages.remove(&chat_id);
         self.recent_shown.remove(&chat_id);
         self.zoomed.clear();
-        self.posts.retain(|_, post| *post != PostFetch::Failed);
+        // A failed post fetch is asked again when the panel opens.
+        self.posts
+            .retain(|(chat, _), post| *chat != chat_id || *post != PostFetch::Failed);
     }
 
     /// How many recent posts the overview lists.
@@ -302,13 +318,31 @@ impl StatsState {
         }
     }
 
+    /// A `messageStatistics` answer of `pending`, when it is one of ours.
+    pub(crate) fn accept_message_statistics_for(
+        &mut self,
+        pending: Option<&PendingRequest>,
+        statistics: MessageStatisticsView,
+    ) {
+        if let Some(RequestPurpose::Groups(GroupsPurpose::GetMessageStatistics {
+            chat_id,
+            message_id,
+        })) = pending.map(|p| p.purpose)
+        {
+            self.accept_message_statistics(chat_id, message_id, pending.map(|p| p.id), statistics);
+        }
+    }
+
     pub(crate) fn accept_message_statistics(
         &mut self,
         chat_id: i64,
         message_id: i64,
+        request: Option<RequestId>,
         statistics: MessageStatisticsView,
     ) {
-        if let Some(state) = self.message_mut(chat_id, message_id) {
+        if let Some(state) = self.message_mut(chat_id, message_id)
+            && state.statistics.waits_for(request)
+        {
             state.statistics = MessageStatsFetch::Loaded(statistics);
         }
     }
@@ -334,9 +368,29 @@ impl StatsState {
         }
     }
 
-    pub(crate) fn fail_message_statistics(&mut self, chat_id: i64, message_id: i64, error: String) {
-        if let Some(state) = self.message_mut(chat_id, message_id) {
+    pub(crate) fn fail_message_statistics(
+        &mut self,
+        chat_id: i64,
+        message_id: i64,
+        request: Option<RequestId>,
+        error: String,
+    ) {
+        if let Some(state) = self.message_mut(chat_id, message_id)
+            && state.statistics.waits_for(request)
+        {
             state.statistics = MessageStatsFetch::Failed(error);
+        }
+    }
+
+    /// The statistics request went out under `request`.
+    pub(crate) fn message_statistics_requested(
+        &mut self,
+        chat_id: i64,
+        message_id: i64,
+        request: RequestId,
+    ) {
+        if let Some(state) = self.message_mut(chat_id, message_id) {
+            state.statistics = MessageStatsFetch::Loading(Some(request));
         }
     }
 
@@ -394,7 +448,8 @@ impl StatsState {
         }
     }
 
-    /// A `getMessage` that could not be sent.
+    /// A `getMessage` that could not be sent, or that failed for a reason
+    /// other than not-found: the row is skipped until the panel opens again.
     pub(crate) fn post_unsent(&mut self, chat_id: i64, message_id: i64, request: RequestId) {
         if self.post_awaits(chat_id, message_id, request) {
             self.posts.insert((chat_id, message_id), PostFetch::Failed);

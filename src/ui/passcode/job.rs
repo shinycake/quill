@@ -17,7 +17,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.account.passcode.job = PasscodeJob::Running;
-        self.account.passcode.error = None;
+        self.account.passcode.set_error(None);
         let task = cx.background_executor().spawn(async move { job() });
         // screen-scope: the passcode is one lock over every account; only its window matters.
         // window-scope: `done` runs in its window (`in_window_of`); a held

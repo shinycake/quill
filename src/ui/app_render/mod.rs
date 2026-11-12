@@ -70,7 +70,6 @@ impl Render for QuillApp {
         self.sync_capture_block(window);
         self.sync_viewer_hdr(window);
         self.sync_window_title(window);
-        self.sync_proxy_list_box();
         // Locked, a preview left open fetches nothing: its files wait for
         // the unlock (what runs while locked is ingest and teardown).
         if !self.lock_waits() {

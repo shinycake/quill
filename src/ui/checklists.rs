@@ -516,7 +516,7 @@ impl QuillApp {
             .message_ui
             .poll_add_option
             .as_ref()
-            .is_some_and(|panel| matches!(panel.attach.media, OptionMediaSlot::Preparing(_)))
+            .is_some_and(|panel| matches!(panel.attach.media, OptionMediaSlot::Preparing { .. }))
         {
             self.set_note(StatusNote::info(tr(keys::Q_MEDIA_WAIT_FOR_THE_VIDEO_TO)));
             cx.notify();

@@ -16,7 +16,6 @@ bare:CallLinkStep::Busy 1
 bare:CallPhase::Busy 1
 bare:CallSound::Busy 1
 bare:CallWindow::Opening 2
-bare:CameraStage::Starting 1
 bare:CandidateStatus::Loading 1
 bare:CaptureStage::Running 1
 bare:CardState::Waiting 1
@@ -58,7 +57,6 @@ bare:Lookup::Pending 1
 bare:Lookup::Waiting 1
 bare:MediaFile::Downloading 1
 bare:MenuSend::Sent 1
-bare:MessageStatsFetch::Loading 1
 bare:MuteState::Connecting 1
 bare:NextPage::Loading 1
 bare:Opening::Pending 1
@@ -106,7 +104,6 @@ bare:StorageClear::Clearing 1
 bare:StoryCardState::Loading 1
 bare:StoryPageOpState::Checking 1
 bare:StoryPageOpState::Sending 1
-bare:StoryStatsFetch::Loading 1
 bare:StreamPhase::Connecting 1
 bare:StreamState::Connecting 2
 bare:SuggestedPostState::Pending 1
@@ -132,7 +129,6 @@ unkeyed:AuctionFetch::Loading 1
 unkeyed:Beats::Running 1
 unkeyed:BotUsernameCheck::Checking 1
 unkeyed:CallLinkStage::Leaving 1
-unkeyed:CameraStage::Saving 1
 unkeyed:Cancellation::InFlight 1
 unkeyed:CardState::Loading 1
 unkeyed:ChatSearchPaging::Loading 1

@@ -69,6 +69,18 @@ impl ThreadStatus {
         )
     }
 
+    /// A history page answered by `request` may be applied. While the
+    /// first page is out (`LoadingHistory`) only that request's answer
+    /// counts; any other page is from a view that is gone. (The driver
+    /// enters `LoadingHistory` in the same step that sends the page, so
+    /// nothing answers during `Starting`.)
+    pub fn takes_page_of(&self, request: RequestId) -> bool {
+        match self {
+            Self::LoadingHistory(waiting) => *waiting == request,
+            _ => true,
+        }
+    }
+
     /// The first page landed: the thread shows rows (or the reload of its
     /// window is due).
     pub fn is_loaded(&self) -> bool {

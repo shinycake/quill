@@ -19,6 +19,11 @@ pub(crate) struct AuthUi {
     pub(super) registration_last_input: Entity<TextareaState>,
     /// The registration step and the terms the user ticked in it.
     pub(super) registration: RegistrationStep,
+    /// The proxy list as a box over the sign-in screen (tdesktop's
+    /// `ProxiesBox`), which has no Settings window to hold it. It belongs to
+    /// the sign-in screen: the account reaching Ready ends it
+    /// (`follow_auth`), so it does not return if the pane connects again.
+    pub(super) proxy_list_open: bool,
     pub(super) registration_notify_contacts: bool,
     pub(super) email_input: Entity<TextareaState>,
     pub(super) phone_input: Entity<TextareaState>,
@@ -101,6 +106,9 @@ impl AuthUi {
     /// The authorization state moved on: the registration step follows it.
     /// A tick holds only while those same terms are asked.
     pub(super) fn follow_auth(&mut self, auth: &AuthorizationState) {
+        if matches!(auth, AuthorizationState::Ready) {
+            self.proxy_list_open = false;
+        }
         let AuthorizationState::WaitRegistration { terms } = auth else {
             self.registration = RegistrationStep::Idle;
             return;
@@ -180,6 +188,7 @@ impl AuthUi {
             registration_first_input,
             registration_last_input,
             registration: RegistrationStep::Idle,
+            proxy_list_open: false,
             registration_notify_contacts: false,
             email_input,
             phone_input,

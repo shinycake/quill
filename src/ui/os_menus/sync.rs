@@ -15,20 +15,39 @@ use std::time::{Duration, Instant};
 /// else changed (the registry is what no update announces).
 pub(super) const REGISTRY_MAX_AGE: Duration = Duration::from_secs(10);
 
+/// The account registry the menus are built from, and whether it was read.
+pub(super) enum RegistryRead {
+    /// Nothing read yet; the default registry stands in until the first read.
+    Never(Registry),
+    Read {
+        registry: Registry,
+        at: Instant,
+        /// `registry_writes()` when it was read.
+        writes: u64,
+        /// The background client keys when it was read.
+        clients: Vec<AccountKey>,
+    },
+}
+
+impl Default for RegistryRead {
+    fn default() -> Self {
+        Self::Never(Registry::default())
+    }
+}
+
 /// What the menu task installed and the registry it built it from.
 #[derive(Default)]
 pub(super) struct MenuSync {
-    registry: Registry,
-    registry_read: Option<Instant>,
-    /// `registry_writes()` and the background client keys when it was read.
-    read_at: (u64, Vec<AccountKey>),
+    registry: RegistryRead,
     installed: Option<(DockModel, WindowMenuState)>,
 }
 
 impl MenuSync {
     /// The registry last read.
     pub(super) fn registry(&self) -> &Registry {
-        &self.registry
+        match &self.registry {
+            RegistryRead::Never(registry) | RegistryRead::Read { registry, .. } => registry,
+        }
     }
 
     /// Whether the registry must be read again before the menus are
@@ -42,12 +61,17 @@ impl MenuSync {
         writes: u64,
         clients: &[AccountKey],
     ) -> bool {
-        match self.registry_read {
-            None => true,
-            Some(read) => {
-                now.saturating_duration_since(read) >= REGISTRY_MAX_AGE
-                    || self.read_at.0 != writes
-                    || self.read_at.1 != clients
+        match &self.registry {
+            RegistryRead::Never(_) => true,
+            RegistryRead::Read {
+                at,
+                writes: read_writes,
+                clients: read_clients,
+                ..
+            } => {
+                now.saturating_duration_since(*at) >= REGISTRY_MAX_AGE
+                    || *read_writes != writes
+                    || read_clients != clients
                     || self.installed.as_ref() != Some(current)
             }
         }
@@ -62,9 +86,12 @@ impl MenuSync {
         writes: u64,
         clients: Vec<AccountKey>,
     ) {
-        self.registry = registry;
-        self.registry_read = Some(now);
-        self.read_at = (writes, clients);
+        self.registry = RegistryRead::Read {
+            registry,
+            at: now,
+            writes,
+            clients,
+        };
     }
 
     /// Record the menus now shown; returns whether the Dock menu and the

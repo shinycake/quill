@@ -99,6 +99,52 @@ fn a_stories_page_asked_before_the_gallery_reopened_is_dropped() {
     assert!(!session.stories.chat_page_stories.contains_key(&6));
 }
 
+/// A page the stories page asked for carries no stamp: it fills the list
+/// the stories page draws but never answers the gallery tab that waits for
+/// its own request, open or reopened.
+#[test]
+fn a_stories_page_without_a_stamp_never_fills_the_gallery_tab() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(1);
+    open_user_gallery(&mut session, &seq, &sink);
+    session
+        .media
+        .shared_media
+        .begin_profile_fetch(SharedMediaTab::Stories);
+    let page = session.request(
+        RequestPurpose::GetChatPostedToChatPageStories,
+        Some(ChatId(6)),
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"stories","@extra":"{}","total_count":3,"stories":[{{"@type":"story","id":4,"poster_chat_id":6,"date":1690000000,"content":{{"@type":"storyContentUnsupported"}}}}]}}"#,
+            page.0
+        ),
+    );
+    let stories = tab(&session, SharedMediaTab::Stories);
+    assert!(stories.items.is_empty());
+    assert!(stories.status.is_loading());
+    assert!(session.stories.chat_page_stories.contains_key(&6));
+    // Its failure leaves the tab loading too.
+    let failed = session.request(
+        RequestPurpose::GetChatPostedToChatPageStories,
+        Some(ChatId(6)),
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"X"}}"#,
+            failed.0
+        ),
+    );
+    assert!(tab(&session, SharedMediaTab::Stories).status.is_loading());
+}
+
 #[test]
 fn saved_tracks_fill_the_users_playlist_and_page() {
     let (mut session, sink) = session();
@@ -277,17 +323,18 @@ fn a_late_gifts_page_for_another_chat_leaves_the_open_gallerys_offset() {
 }
 
 #[test]
-fn chat_page_stories_fill_the_stories_tab_and_failures_hide_it() {
+fn chat_page_stories_fill_the_stories_tab_and_a_failure_keeps_it_for_retry() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(1);
     open_user_gallery(&mut session, &seq, &sink);
-    session
+    let stamp = session
         .media
         .shared_media
         .begin_profile_fetch(SharedMediaTab::Stories);
-    let extra = session.request(
+    let extra = session.request_chat_search(
         RequestPurpose::GetChatPostedToChatPageStories,
-        Some(ChatId(6)),
+        ChatId(6),
+        stamp,
     );
     apply_json(
         &mut session,
@@ -312,7 +359,8 @@ fn chat_page_stories_fill_the_stories_tab_and_failures_hide_it() {
     );
 
     // A failed refetch keeps the loaded stories; a failed first fetch
-    // shows the error and hides the tab.
+    // shows the error, leaves the count unknown and keeps the tab for its
+    // Retry.
     session
         .media
         .shared_media
@@ -336,9 +384,12 @@ fn chat_page_stories_fill_the_stories_tab_and_failures_hide_it() {
     let gifts = tab(&session, SharedMediaTab::Gifts);
     assert!(gifts.status.is_failed());
     assert!(!gifts.error().is_empty());
-    assert_eq!(session.media.chat_media_counts[&6][&COUNT_KEY_GIFTS], 0);
     assert!(
-        !session
+        !session.media.chat_media_counts[&6].contains_key(&COUNT_KEY_GIFTS),
+        "no zero written for a failed page"
+    );
+    assert!(
+        session
             .shared_media_visible_tabs()
             .contains(&SharedMediaTab::Gifts)
     );
@@ -423,9 +474,14 @@ fn story_thumbnails_are_queued_once_for_download() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(1);
     open_user_gallery(&mut session, &seq, &sink);
-    let extra = session.request(
+    let stamp = session
+        .media
+        .shared_media
+        .begin_profile_fetch(SharedMediaTab::Stories);
+    let extra = session.request_chat_search(
         RequestPurpose::GetChatPostedToChatPageStories,
-        Some(ChatId(6)),
+        ChatId(6),
+        stamp,
     );
     let file = |id: i32| {
         format!(

@@ -184,10 +184,10 @@ pub struct PollDialog {
     /// together, so removing a row takes all of them.
     pub(crate) options: Vec<PollOptionRow>,
     pub(crate) explanation_input: Entity<TextareaState>,
-    /// The allowed countries (ISO codes), picked in the country box.
-    /// tdesktop's "Limit by Country" switch (channels); off keeps no codes.
-    pub(crate) limit_by_country: bool,
-    pub(crate) country_codes: Vec<String>,
+    /// tdesktop's "Limit by Country" switch (channels): `None` is off,
+    /// `Some` holds the allowed countries (ISO codes) picked in the country
+    /// box. Off keeps no codes.
+    pub(crate) countries: Option<Vec<String>>,
     /// The opposite of tdesktop's "Show Who Voted".
     pub(crate) is_anonymous: bool,
     pub(crate) allows_multiple_answers: bool,
@@ -211,9 +211,12 @@ pub struct PollDialog {
     /// The question, until the dialog has mounted and focused it (the kit
     /// dialog takes focus when it opens, so focusing at open time is lost).
     pub(crate) focus_on_mount: Option<Entity<TextareaState>>,
-    /// "Limit Duration" is on: the poll closes at `close`.
-    pub(crate) limit_duration: bool,
-    pub(crate) close: PollClose,
+    /// "Limit Duration" is on. The switch and the moment are two things
+    /// the person sets: the chosen moment is kept while the switch is off
+    /// (tdesktop keeps `closePeriod` / `closeDate` the same way), so
+    /// readers take [`Self::close`], which is `None` while it is off.
+    limit_duration: bool,
+    close_at: PollClose,
     /// A bot's one-time keyboard whose Poll button opened this box: it
     /// goes when the poll is sent, not when the box opens.
     pub(crate) dismiss_keyboard_on_send: Option<(ChatId, MessageId)>,
@@ -275,6 +278,56 @@ impl PollAddOption {
 }
 
 impl PollDialog {
+    /// "Limit Duration" is on.
+    pub(crate) fn limit_duration(&self) -> bool {
+        self.limit_duration
+    }
+
+    /// Turn "Limit Duration" on or off; a moment already chosen is kept.
+    pub(crate) fn set_limit_duration(&mut self, on: bool) {
+        self.limit_duration = on;
+    }
+
+    /// When the poll closes; `None` while the limit is off.
+    pub(crate) fn close(&self) -> Option<PollClose> {
+        self.limit_duration.then_some(self.close_at)
+    }
+
+    /// Choose when the poll closes.
+    pub(crate) fn set_close(&mut self, close: PollClose) {
+        self.close_at = close;
+    }
+
+    /// "Limit by Country" is on.
+    pub(crate) fn limit_by_country(&self) -> bool {
+        self.countries.is_some()
+    }
+
+    /// The allowed countries; none while the limit is off.
+    pub(crate) fn country_codes(&self) -> &[String] {
+        self.countries.as_deref().unwrap_or_default()
+    }
+
+    /// Turn "Limit by Country" on or off; off forgets the countries and
+    /// closes the country box.
+    pub(crate) fn set_limit_by_country(&mut self, on: bool) {
+        if on {
+            self.countries.get_or_insert_with(Vec::new);
+        } else {
+            self.countries = None;
+            if matches!(self.page, PollPage::Country(_)) {
+                self.page = PollPage::Form;
+            }
+        }
+    }
+
+    /// Keep the countries picked in the box; ignored while the limit is off.
+    pub(crate) fn set_country_codes(&mut self, codes: Vec<String>) {
+        if let Some(countries) = self.countries.as_mut() {
+            *countries = codes;
+        }
+    }
+
     pub(crate) fn country_box(&self) -> Option<&crate::ui::country_box::CountryBox> {
         match &self.page {
             PollPage::Country(country_box) => Some(country_box),
@@ -359,8 +412,7 @@ impl PollDialog {
             question_input: question_input.clone(),
             options,
             explanation_input,
-            limit_by_country: false,
-            country_codes: Vec::new(),
+            countries: None,
             is_anonymous: in_channel,
             allows_multiple_answers: true,
             is_quiz: lock == QuizLock::Quiz,
@@ -372,7 +424,7 @@ impl PollDialog {
             hide_results_until_closes: false,
             members_only: false,
             limit_duration: false,
-            close: PollClose::Period(POLL_DEFAULT_PERIOD_SECS),
+            close_at: PollClose::Period(POLL_DEFAULT_PERIOD_SECS),
             page: PollPage::Form,
             focus_on_mount: Some(question_input.clone()),
             dismiss_keyboard_on_send: None,
@@ -391,7 +443,7 @@ impl PollDialog {
             shuffle: self.shuffle_options,
             quiz: self.is_quiz,
             subscribers: self.members_only,
-            by_country: self.limit_by_country,
+            by_country: self.countries.is_some(),
             limit_duration: self.limit_duration,
             hide_results: self.hide_results_until_closes,
         }
@@ -410,12 +462,8 @@ impl PollDialog {
                 correct: row.correct,
             })
             .collect();
-        let country_codes = if self.limit_by_country {
-            self.country_codes.clone()
-        } else {
-            Vec::new()
-        };
-        let deadline = self.limit_duration.then_some(self.close);
+        let country_codes = self.countries.clone().unwrap_or_default();
+        let deadline = self.close();
         PollDraft {
             question: value(&self.question_input),
             description: value(&self.description_input),

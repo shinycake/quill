@@ -5,13 +5,27 @@ use crate::telegram::envelope::{
 };
 use crate::telegram::requests_story_insights::StoryLocationAddress;
 
-/// Fetch state of the `getStoryStatistics` answer.
-#[derive(Debug, Clone, Default, PartialEq)]
+/// Fetch state of the `getStoryStatistics` answer. Only the answer or the
+/// error of the request it waits for moves it.
+#[derive(Debug, Clone, PartialEq)]
 pub enum StoryStatsFetch {
-    #[default]
-    Loading,
+    /// The request waited for; `None` until it is sent.
+    Loading(Option<RequestId>),
     Loaded(StoryStatisticsView),
     Failed(String),
+}
+
+impl Default for StoryStatsFetch {
+    fn default() -> Self {
+        Self::Loading(None)
+    }
+}
+
+impl StoryStatsFetch {
+    /// Whether `request` is the one this fetch waits for.
+    pub(crate) fn waits_for(&self, request: RequestId) -> bool {
+        matches!(self, Self::Loading(Some(waiting)) if *waiting == request)
+    }
 }
 
 /// One page request of a paged list: idle, waiting for its own answer
@@ -177,6 +191,16 @@ impl Session {
         self.stories.insights = None;
     }
 
+    /// The statistics request went out under `request`.
+    pub fn story_statistics_requested(&mut self, chat_id: i64, story_id: i32, request: RequestId) {
+        if let Some(state) = self.stories.insights.as_mut()
+            && state.chat_id == chat_id
+            && state.story_id == story_id
+        {
+            state.statistics = StoryStatsFetch::Loading(Some(request));
+        }
+    }
+
     /// The driver sent the forwards page after `offset` as `request` for
     /// the story's insights.
     pub fn story_forwards_loading(
@@ -223,7 +247,9 @@ impl Session {
         pending: &PendingRequest,
         statistics: StoryStatisticsView,
     ) {
-        if let Some(state) = self.insights_for(pending) {
+        if let Some(state) = self.insights_for(pending)
+            && state.statistics.waits_for(pending.id)
+        {
             state.statistics = StoryStatsFetch::Loaded(statistics);
         }
     }
@@ -262,7 +288,9 @@ impl Session {
             return;
         };
         if purpose == RequestPurpose::GetStoryStatistics {
-            state.statistics = StoryStatsFetch::Failed(message);
+            if state.statistics.waits_for(pending.id) {
+                state.statistics = StoryStatsFetch::Failed(message);
+            }
         } else if matches!(
             &state.forwards_page,
             ForwardsPage::Loading { request, .. } if *request == pending.id

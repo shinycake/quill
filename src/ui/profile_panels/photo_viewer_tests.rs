@@ -122,4 +122,17 @@ fn the_group_avatar_opens_its_photos_newest_first(cx: &mut TestAppContext) {
         )
     });
     assert_eq!(after_close, (false, false), "the closed panel dropped it");
+
+    // A user's photos whose request is gone with no answer end the wait
+    // with a note instead of leaving it armed.
+    let user = PhotoOwner::User(4242);
+    let dropped = app.update(&mut vcx, |app, cx| {
+        app.wait_for_profile_gallery(user);
+        app.pump_profile_gallery(cx);
+        (
+            app.dialogs.pending_profile_gallery.is_some(),
+            app.viewer.state.is_open(),
+        )
+    });
+    assert_eq!(dropped, (false, false), "no request left: the wait ended");
 }

@@ -513,10 +513,7 @@ impl QuillApp {
                         let _ = std::fs::remove_file(output);
                     }
                     Err(note) if current => {
-                        if let Some(editor) = this.composer_ui.send_box.video_editor.as_mut() {
-                            editor.encode_failed(note);
-                        }
-                        this.start_video_editor_player(cx);
+                        this.video_encode_failed(note, cx);
                         cx.notify();
                     }
                     Err(_) => {}

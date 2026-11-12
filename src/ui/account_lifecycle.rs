@@ -366,7 +366,7 @@ impl QuillApp {
                 .and_then(|s| s.settings.account_error().map(str::to_string));
             let has_password = session
                 .as_ref()
-                .and_then(|s| s.auth_state.password_state.as_ref())
+                .and_then(|s| s.auth_state.password_state.get())
                 .is_some_and(|p| p.has_password);
             let pw_loading = session.is_some_and(|s| s.auth_state.password_state_loading());
 
