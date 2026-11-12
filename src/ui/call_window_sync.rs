@@ -29,7 +29,7 @@ pub(in crate::ui) enum CallWindowTarget {
         id: i32,
     },
     /// The summary of a line that was busy.
-    Busy {
+    BusyLine {
         id: i32,
     },
     /// A conference invitation rings, under its invite key.
@@ -43,9 +43,10 @@ impl CallWindowTarget {
     pub(in crate::ui) fn id(self) -> Option<i32> {
         match self {
             Self::None => None,
-            Self::Active { id } | Self::Ringing { id } | Self::Ended { id } | Self::Busy { id } => {
-                Some(id)
-            }
+            Self::Active { id }
+            | Self::Ringing { id }
+            | Self::Ended { id }
+            | Self::BusyLine { id } => Some(id),
             Self::Invite { key } => Some(key),
         }
     }
@@ -61,7 +62,7 @@ impl CallWindowTarget {
 
     /// The call has ended (its summary shows).
     fn ended(self) -> bool {
-        matches!(self, Self::Ended { .. } | Self::Busy { .. })
+        matches!(self, Self::Ended { .. } | Self::BusyLine { .. })
     }
 }
 
@@ -122,11 +123,11 @@ impl QuillApp {
                     _timer: self.linger_timer(cx),
                 };
             }
-            CallWindowTarget::Busy { id } if self.call_screen.end.call_id() != Some(id) => {
-                self.call_screen.end = CallEnd::Busy { call_id: id };
+            CallWindowTarget::BusyLine { id } if self.call_screen.end.call_id() != Some(id) => {
+                self.call_screen.end = CallEnd::BusyLine { call_id: id };
             }
-            CallWindowTarget::Ended { .. } | CallWindowTarget::Busy { .. } => {}
-            _ => self.call_screen.end = CallEnd::Running,
+            CallWindowTarget::Ended { .. } | CallWindowTarget::BusyLine { .. } => {}
+            _ => self.call_screen.end = CallEnd::NotEnded,
         }
     }
 
@@ -177,7 +178,7 @@ impl QuillApp {
                 CallWindowTarget::Ringing { id: call.id }
             }
             (Some(call), _) => CallWindowTarget::Active { id: call.id },
-            (None, Some(summary)) if summary.busy() => CallWindowTarget::Busy {
+            (None, Some(summary)) if summary.busy() => CallWindowTarget::BusyLine {
                 id: summary.call_id,
             },
             (None, Some(summary)) => CallWindowTarget::Ended {
@@ -238,7 +239,7 @@ mod tests {
         assert_eq!(CallWindowTarget::Ringing { id: 3 }.ringing(), Some(3));
         assert_eq!(CallWindowTarget::Invite { key: 9 }.ringing(), Some(9));
         assert_eq!(CallWindowTarget::Invite { key: 9 }.id(), Some(9));
-        assert!(CallWindowTarget::Busy { id: 4 }.ended());
+        assert!(CallWindowTarget::BusyLine { id: 4 }.ended());
         assert!(CallWindowTarget::Ended { id: 4 }.ended());
         assert!(!CallWindowTarget::Ringing { id: 4 }.ended());
     }

@@ -25,8 +25,9 @@ use quill::lang::{keys, tr, tr_with};
 use quill::state::RequestPurpose;
 use quill::telegram::envelope::{ChatAdminRights, ChatKind, ReplyMarkup};
 
-/// What pressing the box's button did.
-enum Submitted {
+/// What pressing the box's button did: the outcome of that one call, kept
+/// nowhere (the stage of a send is `begin_box_send`'s).
+enum SubmitOutcome {
     /// The request is on its way: the box stays until its answer.
     Sending,
     /// No client (the demo): nothing to wait for, the box goes.
@@ -296,11 +297,11 @@ impl QuillApp {
         rights: ChatAdminRights,
         start_parameter: &str,
         cx: &mut Context<Self>,
-    ) -> Submitted {
+    ) -> SubmitOutcome {
         let Some(live) = self.live.as_mut() else {
             self.set_note(StatusNote::info(tr(keys::Q_MEDIA_DEMO_MODE_ADDING_A_BOT)));
             cx.notify();
-            return Submitted::NoClient;
+            return SubmitOutcome::NoClient;
         };
         let chat = ChatId(chat_id);
         // The start payload of an administrator goes after the promotion's
@@ -341,9 +342,9 @@ impl QuillApp {
         match sent {
             Ok(Some(request)) => {
                 self.begin_box_send(BoxKind::AddBot, request, chat, then_start);
-                Submitted::Sending
+                SubmitOutcome::Sending
             }
-            _ => Submitted::Refused,
+            _ => SubmitOutcome::Refused,
         }
     }
 
@@ -506,7 +507,7 @@ impl QuillApp {
                                     &start_parameter,
                                     cx,
                                 ),
-                                Submitted::NoClient
+                                SubmitOutcome::NoClient
                             ) {
                                 this.close_profile_dialog(cx);
                                 this.select_listed_chat(ChatId(chat_id), window, cx);
@@ -683,13 +684,13 @@ impl QuillApp {
         game_short_name: &str,
         chat_id: i64,
         cx: &mut Context<Self>,
-    ) -> Submitted {
+    ) -> SubmitOutcome {
         let Some(live) = self.live.as_mut() else {
             self.set_note(StatusNote::info(tr(
                 keys::Q_MEDIA_DEMO_MODE_SHARING_NEEDS_A,
             )));
             cx.notify();
-            return Submitted::NoClient;
+            return SubmitOutcome::NoClient;
         };
         match live
             .driver
@@ -697,14 +698,14 @@ impl QuillApp {
         {
             Ok(request) => {
                 self.begin_box_send(BoxKind::ShareGame, request, ChatId(chat_id), None);
-                Submitted::Sending
+                SubmitOutcome::Sending
             }
             Err(_) => {
                 self.set_note(StatusNote::error(tr(
                     keys::Q_MEDIA_COULDNT_SEND_THE_GAME_HERE,
                 )));
                 cx.notify();
-                Submitted::Refused
+                SubmitOutcome::Refused
             }
         }
     }
@@ -760,7 +761,7 @@ impl QuillApp {
                             }
                             if matches!(
                                 this.send_shared_game(bot_id, &send_name, chat_id, cx),
-                                Submitted::NoClient
+                                SubmitOutcome::NoClient
                             ) {
                                 this.close_profile_dialog(cx);
                                 this.select_listed_chat(ChatId(chat_id), window, cx);

@@ -280,16 +280,16 @@ impl QuillApp {
                 *draft = Draft::Ready(Self::new_greeting_draft(&saved));
             }
             (Screen::Away { draft, .. }, View::Away) => {
-                *draft = away.map_or(Draft::Waiting, Draft::Ready);
+                *draft = away.map_or(Draft::Unbuilt, Draft::Ready);
             }
             (Screen::Hours { draft, .. }, View::Hours) => {
                 *draft = Draft::Ready(Self::new_hours_draft(&saved));
             }
             (Screen::Location(draft), View::Location) => {
-                *draft = location.map_or(Draft::Waiting, Draft::Ready);
+                *draft = location.map_or(Draft::Unbuilt, Draft::Ready);
             }
             (Screen::StartPage { draft, .. }, View::StartPage) => {
-                *draft = start_page.map_or(Draft::Waiting, Draft::Ready);
+                *draft = start_page.map_or(Draft::Unbuilt, Draft::Ready);
             }
             _ => {}
         }

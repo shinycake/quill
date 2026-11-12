@@ -275,7 +275,7 @@ fn a_busy_lines_window_stays_until_it_is_dismissed(cx: &mut TestAppContext) {
         app.sync_call_window(cx);
     });
     app.read_with(call, |app, _| {
-        assert!(matches!(app.call_screen.end, CallEnd::Running));
+        assert!(matches!(app.call_screen.end, CallEnd::NotEnded));
         assert!(app.calls.window.handle().is_none());
     });
 }

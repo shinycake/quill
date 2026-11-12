@@ -27,21 +27,29 @@ impl CallTick {
 
 /// The call window: not there, being opened (at most one open at a time),
 /// or open.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Debug, Default)]
 pub(crate) enum CallWindow {
     #[default]
     Closed,
-    Opening,
+    /// The open is queued; the stage holds the task that does it, so
+    /// leaving the stage cancels the open.
+    Opening {
+        _open: Task<()>,
+    },
     Open(AnyWindowHandle),
 }
 
 impl CallWindow {
     /// The open window's handle.
-    pub(crate) fn handle(self) -> Option<AnyWindowHandle> {
+    pub(crate) fn handle(&self) -> Option<AnyWindowHandle> {
         match self {
-            CallWindow::Open(handle) => Some(handle),
-            CallWindow::Closed | CallWindow::Opening => None,
+            CallWindow::Open(handle) => Some(*handle),
+            CallWindow::Closed | CallWindow::Opening { .. } => None,
         }
+    }
+
+    pub(crate) fn is_closed(&self) -> bool {
+        matches!(self, CallWindow::Closed)
     }
 }
 
@@ -49,14 +57,14 @@ impl CallWindow {
 #[derive(Debug, Default)]
 pub(crate) enum CallEnd {
     #[default]
-    Running,
+    NotEnded,
     /// The call ended; the window lingers on "call ended" until the timer
     /// fires. The stage holds the timer, so a new call or a switch of
     /// account drops it.
     Lingering { call_id: i32, _timer: Task<()> },
     /// An outgoing call met a busy line: the window stays until Cancel or
     /// Redial dismisses the summary.
-    Busy { call_id: i32 },
+    BusyLine { call_id: i32 },
     /// The linger is over.
     Over { call_id: i32 },
 }
@@ -64,16 +72,16 @@ pub(crate) enum CallEnd {
 impl CallEnd {
     pub(crate) fn call_id(&self) -> Option<i32> {
         match self {
-            CallEnd::Running => None,
+            CallEnd::NotEnded => None,
             CallEnd::Lingering { call_id, .. }
-            | CallEnd::Busy { call_id }
+            | CallEnd::BusyLine { call_id }
             | CallEnd::Over { call_id } => Some(*call_id),
         }
     }
 
     /// The window of the ended call may still show.
     pub(crate) fn lingers(&self) -> bool {
-        matches!(self, CallEnd::Lingering { .. } | CallEnd::Busy { .. })
+        matches!(self, CallEnd::Lingering { .. } | CallEnd::BusyLine { .. })
     }
 }
 

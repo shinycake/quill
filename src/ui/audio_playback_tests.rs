@@ -1,7 +1,7 @@
 use super::AUDIO_BUILT;
 use crate::ui::app::QuillApp;
 use crate::ui::audio::engine::test_support::{device, track};
-use crate::ui::audio::{AudioEngine, EngineState};
+use crate::ui::audio::{AudioEngine, EngineView};
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
@@ -62,7 +62,7 @@ fn a_long_start_shows_pause_alone_on_the_row(cx: &mut TestAppContext) {
     clock.store(5000, std::sync::atomic::Ordering::Relaxed);
     vcx.run_until_parked();
     app.read_with(&vcx, |app, _| {
-        assert_eq!(app.players.audio.state(), EngineState::Loading);
+        assert_eq!(app.players.audio.state(), EngineView::Loading);
         assert_eq!(shown(app), pressed);
     });
     drop(open);
@@ -85,12 +85,12 @@ fn a_finished_build_lands_when_it_says_so_and_a_failed_one_tells_the_user(cx: &m
             .start(&missing, 1.0, 1.0, 1.0, 214.0)
             .unwrap();
         app.players.audio.await_build_done();
-        assert_eq!(app.players.audio.state(), EngineState::Loading);
+        assert_eq!(app.players.audio.state(), EngineView::Loading);
     });
     AUDIO_BUILT.poke();
     vcx.run_until_parked();
     app.read_with(&vcx, |app, _| {
-        assert_eq!(app.players.audio.state(), EngineState::Failed);
+        assert_eq!(app.players.audio.state(), EngineView::Failed);
         assert_eq!(
             app.connection.status_note(),
             tr(keys::Q_AV_AUDIO_CANT_BE_PLAYED)

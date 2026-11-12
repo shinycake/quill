@@ -14,10 +14,10 @@ use zeroize::Zeroize;
 impl QuillApp {
     /// A sign-in submit is out: Enter in a field must not send a second one
     /// (the buttons are disabled by the same answer).
-    fn auth_submit_busy(&self) -> bool {
+    pub(super) fn auth_submit_busy(&self) -> bool {
         self.live
             .as_ref()
-            .is_some_and(|live| live.driver.session.requests.has_auth_submit())
+            .is_some_and(|live| self.auth_ui.submit.is_out(&live.driver.session.requests))
     }
 
     pub(super) fn cycle_auth(&mut self, cx: &mut Context<Self>) {
@@ -53,6 +53,7 @@ impl QuillApp {
         };
         let mut email = self.screen.auth_ui.email_input.read(cx).value().to_string();
         let result = live.driver.submit_email(&email);
+        self.screen.auth_ui.submit.sent(&result);
         email.zeroize();
         // The field keeps the address until the step is done: a rejected
         // one is corrected, not retyped (`sync_auth_forms` clears it).
@@ -74,6 +75,15 @@ impl QuillApp {
             let email = ui.email_input.clone();
             if !email.read(cx).value().is_empty() {
                 email.update(cx, |input, cx| input.set_value("", window, cx));
+            }
+        }
+        if !matches!(
+            auth,
+            AuthorizationState::WaitCode { .. } | AuthorizationState::WaitEmailCode { .. }
+        ) {
+            let code = ui.code_input.clone();
+            if !code.read(cx).value().is_empty() {
+                code.update(cx, |input, cx| input.set_value("", window, cx));
             }
         }
         let recovering = self.recovery_code_step();
@@ -120,7 +130,9 @@ impl QuillApp {
         let Some(live) = self.live.as_mut() else {
             return;
         };
-        match live.driver.submit_phone(&number) {
+        let result = live.driver.submit_phone(&number);
+        self.screen.auth_ui.submit.sent(&result);
+        match result {
             Ok(request) => {
                 live.driver.session.acks.expect(request);
                 // The field keeps the number so "Wrong number?" can edit it.
@@ -160,18 +172,19 @@ impl QuillApp {
         }
         let mut code = self.screen.auth_ui.code_input.read(cx).value().to_string();
         let result = live.driver.submit_code(&code);
+        self.screen.auth_ui.submit.sent(&result);
         code.zeroize();
         match result {
+            // The field keeps the code until the step is done: a rejected
+            // one is corrected, not retyped (`sync_auth_forms` clears it).
             Ok(_) => {
-                self.auth_ui
-                    .code_input
-                    .update(cx, |input, cx| input.set_value("", window, cx));
                 self.set_note(StatusNote::silent(tr(keys::Q_NOTES_CODE_SUBMITTED)));
             }
             Err(_) => {
                 self.set_note(StatusNote::error(tr(keys::Q_NOTES_COULDNT_SUBMIT_THE_CODE)));
             }
         }
+        let _ = window;
         cx.notify();
     }
 
@@ -196,6 +209,7 @@ impl QuillApp {
             .value()
             .to_string();
         let result = live.driver.submit_password(&password);
+        self.screen.auth_ui.submit.sent(&result);
         password.zeroize();
         match result {
             Ok(_) => {
@@ -229,7 +243,9 @@ impl QuillApp {
         ) {
             return;
         }
-        match live.driver.resend_code() {
+        let result = live.driver.resend_code();
+        self.screen.auth_ui.submit.sent(&result);
+        match result {
             Ok(_) => {
                 self.auth_ui.signin.step_clock.restart_code();
                 self.set_note(StatusNote::silent(tr(keys::Q_NOTES_CODE_RESENT)));
@@ -250,7 +266,9 @@ impl QuillApp {
         let Some(live) = self.live.as_mut() else {
             return;
         };
-        match live.driver.request_qr_login() {
+        let result = live.driver.request_qr_login();
+        self.screen.auth_ui.submit.sent(&result);
+        match result {
             Ok(_) => {
                 self.set_note(StatusNote::silent(tr(keys::Q_NOTES_QR_LOGIN_REQUESTED)));
             }

@@ -116,9 +116,12 @@ impl QuillApp {
         if self.demo_session.is_some() {
             return;
         }
-        quill::system_accent::refresh();
+        let (landed, landing) = futures_channel::oneshot::channel::<()>();
+        let started = quill::system_accent::refresh_then(move || {
+            let _ = landed.send(());
+        });
         let color = quill::system_accent::read();
-        if !quill::system_accent::pending() {
+        if !started && !quill::system_accent::pending() {
             let waited = matches!(self.preferences.system_accent, SystemAccent::Reading { .. });
             self.preferences.system_accent = SystemAccent::Read(color);
             // The wait that was cancelled would have applied it.
@@ -133,11 +136,8 @@ impl QuillApp {
         }
         // screen-scope: the system accent is an app-wide setting; it applies to whichever account is on screen.
         let wait = cx.spawn(async move |this, cx| {
-            while quill::system_accent::pending() {
-                cx.background_executor()
-                    .timer(std::time::Duration::from_millis(100))
-                    .await;
-            }
+            // Ends when the read thread says so, or drops its end.
+            let _ = landing.await;
             let _ = this.update(cx, |this, cx| {
                 this.preferences.system_accent = SystemAccent::Read(quill::system_accent::read());
                 this.apply_appearance(cx);

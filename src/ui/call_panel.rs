@@ -48,7 +48,7 @@ pub(super) enum CallPhase {
     ConferenceInvite,
     Active,
     /// The peer didn't pick up or was busy: Redial or Cancel.
-    Busy,
+    BusyLine,
     Ended,
 }
 
@@ -178,7 +178,7 @@ impl QuillApp {
                 name,
                 photo,
                 phase: if busy {
-                    CallPhase::Busy
+                    CallPhase::BusyLine
                 } else {
                     CallPhase::Ended
                 },
@@ -583,7 +583,7 @@ impl Render for CallPanel {
                 );
                 row
             }
-            CallPhase::Busy => {
+            CallPhase::BusyLine => {
                 let (user_id, is_video) = (snap.user_id, snap.is_video);
                 let redial_app = self.owner.clone();
                 vec![

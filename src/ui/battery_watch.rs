@@ -35,23 +35,30 @@ const POLL: Duration = Duration::from_secs(30);
 #[cfg(target_os = "linux")]
 const PARKED: Duration = Duration::from_secs(600);
 
+/// The running watcher, held for the life of the app: the global is the
+/// "started" mark, and the saver task it holds ends with it.
+struct Watching {
+    _saver: Option<Task<()>>,
+}
+
+impl Global for Watching {}
+
 /// Start the watcher; later calls do nothing.
 pub(crate) fn watch(cx: &mut App) {
-    static STARTED: std::sync::Once = std::sync::Once::new();
-    let mut first = false;
-    STARTED.call_once(|| first = true);
-    if !first {
+    if cx.has_global::<Watching>() {
         return;
     }
     watch_thermal(cx);
-    watch_saver(cx);
+    let saver = watch_saver(cx);
+    cx.set_global(Watching { _saver: saver });
 }
 
 /// Follow the saver through GPUI: read it once, then on each change.
 #[cfg(not(target_os = "linux"))]
-fn watch_saver(cx: &mut App) {
+fn watch_saver(cx: &mut App) -> Option<Task<()>> {
     apply_power_mode(cx);
     cx.on_power_mode_change(apply_power_mode).detach();
+    None
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -62,9 +69,9 @@ fn apply_power_mode(cx: &mut App) {
 }
 
 #[cfg(target_os = "linux")]
-fn watch_saver(cx: &mut App) {
+fn watch_saver(cx: &mut App) -> Option<Task<()>> {
     quill::battery_saving::start_events();
-    cx.spawn(async move |cx| {
+    Some(cx.spawn(async move |cx| {
         loop {
             let seen = quill::wake::BATTERY.epoch();
             let answer = cx
@@ -94,8 +101,7 @@ fn watch_saver(cx: &mut App) {
             )
             .await;
         }
-    })
-    .detach();
+    }))
 }
 
 /// How long the probe loop rests before asking again.

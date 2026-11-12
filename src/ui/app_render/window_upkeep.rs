@@ -79,7 +79,6 @@ impl QuillApp {
         self.ai_compose_window_upkeep(window, cx);
         // The countdowns tick while the chat shows a running one: slow
         // mode on the send button, self-destruct badges, live locations.
-        self.ensure_slow_mode_tick(cx);
         self.ensure_self_destruct_tick(cx);
         self.ensure_live_location_tick(cx);
         // A clicked mention, hashtag, command or link (`entity_links`).

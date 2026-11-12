@@ -2,8 +2,6 @@
 # <rule>:<Type::function> <count>. Only remove lines or lower counts.
 detached:AgentBridge::new 1
 detached:QuillApp::agent_driver_start 1
-detached:QuillApp::bot_username_changed 1
-detached:QuillApp::new_chatbot_draft 1
 detached:QuillApp::show_notification_with_preview 1
 detached:QuillApp::spawn_passcode_tick 1
 detached:QuillApp::spawn_system_unlock_wait 1
@@ -12,17 +10,13 @@ detached:hide_main_window 1
 detached:run_screenshot_demo 2
 detached:spawn_menu_sync 1
 detached:watch_closed_windows 2
-detached:watch_saver 1
 poll:QuillApp::arm_stream_hide_timer 1
-poll:QuillApp::autoscroll_press 1
 poll:QuillApp::download_update 1
 poll:QuillApp::ensure_live_location_tick 1
 poll:QuillApp::ensure_notify_clock 1
-poll:QuillApp::ensure_slow_mode_tick 1
 poll:QuillApp::ensure_sticker_closer 1
 poll:QuillApp::ensure_story_tick 1
 poll:QuillApp::pull_jump_when_ready 1
-poll:QuillApp::refresh_system_accent 1
 poll:QuillApp::request_tick 1
 poll:QuillApp::run_passkey_ticker 1
 poll:QuillApp::schedule_draft_commit 1
@@ -30,14 +24,11 @@ poll:QuillApp::schedule_swipe_poll 1
 poll:QuillApp::show_notification_with_preview 1
 poll:QuillApp::spawn_system_unlock_wait 1
 poll:QuillApp::spawn_voice_tick 1
-poll:QuillApp::start_mic_test 1
 poll:QuillApp::start_update_checks 1
 poll:QuillApp::stealth_box_tick 1
 poll:QuillApp::sync_qr_clock 1
-poll:QuillApp::with_device_access 1
 poll:VideoPlayer::spawn_open_poll 1
 poll:first_picture 2
 poll:poll_answer_unless 1
 poll:scan 1
 poll:spawn_menu_sync 1
-poll:watch_device 1

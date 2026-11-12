@@ -17,9 +17,10 @@ use gpui_kit::gpui::{
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::autoscroll::{Pull, pull, release_stops, scroll_step};
-use std::time::{Duration, Instant};
+use quill::ids::AccountChat;
+use std::rc::{Rc, Weak};
+use std::time::Instant;
 
-const TICK: Duration = Duration::from_millis(15);
 /// `PaintCursorImage` is 27 px in tdesktop.
 const MARK_SIZE: f32 = 27.;
 
@@ -64,13 +65,15 @@ impl AutoscrollLayer {
 
 struct Active {
     anchor: Point<Pixels>,
-    chat: i64,
+    /// The chat of the account whose history the mode scrolls.
+    chat: AccountChat,
     button: Button,
     last_tick: Instant,
     pull: Pull,
-    /// The loop that scrolls: it ends with the mode, so a quick new press
-    /// never runs beside the old loop.
-    _scroller: Task<()>,
+    /// The life of the frame loop that scrolls: each frame's step holds a
+    /// `Weak` of it and ends once the mode does, so a quick new press never
+    /// runs beside the old loop.
+    _frames: Rc<()>,
 }
 
 /// The middle button of the press that anchored the mode, for the
@@ -93,44 +96,30 @@ impl QuillApp {
             self.autoscroll_stop(cx);
             return;
         }
-        let Some(chat) = self.session().and_then(|s| s.open_chat_id()) else {
+        let Some(chat) = self.open_account_chat() else {
             return;
         };
         let now = Instant::now();
-        let handle = window.window_handle();
-        let scroller = self.spawn_scoped_in(window, cx, async move |this, cx| {
-            loop {
-                cx.background_executor().timer(TICK).await;
-                let Ok((pointer, window_active)) =
-                    cx.update(|window, _| (window.mouse_position(), window.is_window_active()))
-                else {
-                    break;
-                };
-                let step = this
-                    .update(cx, |this, cx| {
-                        this.autoscroll_plan(pointer, window_active, cx)
-                    })
-                    .ok()
-                    .flatten();
-                let Some((anchor, dy)) = step else {
-                    break;
-                };
-                if dy != 0. {
-                    let _ = handle.update(cx, |_, window, cx| {
-                        scroll_history_by(window, cx, anchor, pointer, dy);
-                    });
-                }
-            }
-        });
+        let frames = Rc::new(());
+        autoscroll_frame(self.scoped_app(cx), Rc::downgrade(&frames), window);
         self.history.autoscroll.active = Some(Active {
             anchor: position,
-            chat: chat.0,
+            chat,
             button: Button::Held { since: now },
             last_tick: now,
             pull: Pull::Neutral,
-            _scroller: scroller,
+            _frames: frames,
         });
         cx.notify();
+    }
+
+    /// The open chat of the account on screen.
+    fn open_account_chat(&self) -> Option<AccountChat> {
+        let session = self.session()?;
+        Some(AccountChat::new(
+            session.account.clone(),
+            session.open_chat_id()?,
+        ))
     }
 
     /// Middle button released: a long press was a hold and ends here.
@@ -165,9 +154,9 @@ impl QuillApp {
         window_active: bool,
         cx: &mut Context<Self>,
     ) -> Option<(Point<Pixels>, f32)> {
-        let open = self.session().and_then(|s| s.open_chat_id()).map(|id| id.0);
+        let open = self.open_account_chat();
         let active = self.history.autoscroll.active.as_mut()?;
-        if !window_active || open != Some(active.chat) {
+        if !window_active || open.as_ref() != Some(&active.chat) {
             self.history.autoscroll.active = None;
             cx.notify();
             return None;
@@ -244,6 +233,40 @@ impl QuillApp {
                 .into_any_element(),
         )
     }
+}
+
+/// One step of the mode at the next frame of `window`, then the one after:
+/// the pointer is read and the history scrolled by the time the frame took,
+/// as often as the window draws and not at all while it does not (hidden,
+/// minimized). Ends when `alive` is gone or the plan says so.
+fn autoscroll_frame(app: super::chat_window::ScopedApp, alive: Weak<()>, window: &Window) {
+    // screen-scope: `ScopedApp::update` puts the starting screen in place.
+    // window-scope: `ScopedApp::update` puts the starting window's state in place.
+    window.on_next_frame(move |window, cx| {
+        // The step runs after this frame's draw, outside it.
+        // screen-scope: `ScopedApp::update` puts the starting screen in place.
+        // window-scope: `ScopedApp::update` puts the starting window's state in place.
+        window.defer(cx, move |window, cx| {
+            if alive.strong_count() == 0 {
+                return;
+            }
+            let pointer = window.mouse_position();
+            let window_active = window.is_window_active();
+            let step = app
+                .update(cx, |this, cx| {
+                    this.autoscroll_plan(pointer, window_active, cx)
+                })
+                .ok()
+                .flatten();
+            let Some((anchor, dy)) = step else {
+                return;
+            };
+            if dy != 0. {
+                scroll_history_by(window, cx, anchor, pointer, dy);
+            }
+            autoscroll_frame(app, alive, window);
+        });
+    });
 }
 
 /// Feeds one wheel event to the list under `anchor`. The list reacts only

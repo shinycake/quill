@@ -7,11 +7,8 @@ bare:ApplyStage::Sent 1
 bare:BackgroundStatus::Connecting 1
 bare:BoxStage::Opening 1
 bare:CalendarPaging::Loading 1
-bare:CallEnd::Running 1
 bare:CallLinkStep::Busy 1
-bare:CallPhase::Busy 1
-bare:CallSound::Busy 1
-bare:CallWindow::Opening 2
+bare:CallWindow::Opening 1
 bare:CandidateStatus::Loading 1
 bare:CaptureStage::Running 1
 bare:CardState::Waiting 1
@@ -24,12 +21,9 @@ bare:CloseProgress::Pending 1
 bare:CodeLanguageStage::Opening 1
 bare:ConferenceStage::Running 1
 bare:Decoding::Running 1
-bare:DeviceLink::Opening 1
 bare:DeviceRun::Opening 1
 bare:DownloadStatus::Downloading 1
-bare:Draft::Waiting 1
 bare:Echo::Waiting 1
-bare:EngineState::Loading 1
 bare:Entry::Pending 1
 bare:ExtractionStage::Starting 1
 bare:FeederState::Syncing 1
@@ -71,7 +65,6 @@ bare:SaveAnswer::Waiting 1
 bare:SearchStatus::Searching 1
 bare:SendState::Sending 1
 bare:SendState::Sent 1
-bare:SendToMenu::Reading 1
 bare:Sent::Queued 1
 bare:SetFiles::Asked 1
 bare:ShutdownPhase::Running 1
@@ -145,7 +138,6 @@ unkeyed:Rotation::Probing 1
 unkeyed:RowDownload::Running 1
 unkeyed:RowState::Downloading 1
 unkeyed:SendStage::Sent 1
-unkeyed:SendToMenu::Applying 1
 unkeyed:SetState::Loading 1
 unkeyed:SizedState::Loading 1
 unkeyed:Stage::Running 1
@@ -155,5 +147,4 @@ unkeyed:TonConnectRequestState::Pending 1
 unkeyed:UpdateControl::Downloading 1
 unkeyed:VcardImport::Reading 1
 unkeyed:WaitingCheck::Pending 1
-unkeyed:Watch::Running 1
 unkeyed:Writer::Running 1

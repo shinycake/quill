@@ -97,6 +97,11 @@ impl QuillApp {
     ) -> AnyElement {
         let kind = self.send_button_kind_now(can_record, sendable);
         let wait = self.slow_mode_wait_secs();
+        if wait.is_some() {
+            // The countdown on the button changes every second, while it
+            // is drawn.
+            self.request_animation_tick(1, cx);
+        }
         let forbidden = self.record_forbidden(kind);
 
         let now = now_ms();

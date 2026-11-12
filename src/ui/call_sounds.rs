@@ -24,7 +24,7 @@ pub(super) enum CallSound {
     Ringback,
     Connect,
     End,
-    Busy,
+    BusyTone,
     Mute,
     Unmute,
 }
@@ -36,7 +36,7 @@ impl CallSound {
             CallSound::Ringback => call_tones::ringback(),
             CallSound::Connect => call_tones::connect(),
             CallSound::End => call_tones::end(),
-            CallSound::Busy => call_tones::busy(),
+            CallSound::BusyTone => call_tones::busy(),
             CallSound::Mute => call_tones::mute(),
             CallSound::Unmute => call_tones::unmute(),
         }
@@ -334,7 +334,7 @@ impl super::app::QuillApp {
                 if marks.call_id == Some(summary.call_id) && marks.cue < CueStage::Ended {
                     marks.cue = CueStage::Ended;
                     sounds.play(if summary.busy() {
-                        CallSound::Busy
+                        CallSound::BusyTone
                     } else {
                         CallSound::End
                     });

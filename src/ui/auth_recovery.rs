@@ -79,7 +79,9 @@ impl QuillApp {
         ) {
             return;
         }
-        match live.driver.request_password_recovery() {
+        let result = live.driver.request_password_recovery();
+        self.screen.auth_ui.submit.sent(&result);
+        match result {
             // The code step opens when the server answers `ok`
             // (`PasswordRecovery::CodeSent`); a refusal shows as the auth
             // error on the password step.
@@ -116,6 +118,7 @@ impl QuillApp {
             .value()
             .to_string();
         let result = live.driver.submit_recovery_code(&code);
+        self.screen.auth_ui.submit.sent(&result);
         code.zeroize();
         match result {
             // The field keeps the code until the step is done: a rejected

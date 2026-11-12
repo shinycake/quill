@@ -56,9 +56,9 @@ pub(super) fn clamp_speed(speed: f64) -> f32 {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Stretch {
     /// No slice taken yet; the input has more.
-    Starting,
+    First,
     /// No slice taken yet; the input ended (a track shorter than a slice).
-    StartingInputEnded,
+    FirstInputEnded,
     /// The previous slice started at `prev` (input frames); the input has
     /// more.
     Streaming { prev: usize },
@@ -73,20 +73,20 @@ impl Stretch {
     fn prev(self) -> Option<usize> {
         match self {
             Self::Streaming { prev } | Self::Draining { prev } => Some(prev),
-            Self::Starting | Self::StartingInputEnded | Self::Done => None,
+            Self::First | Self::FirstInputEnded | Self::Done => None,
         }
     }
 
     fn input_ended(self) -> bool {
         matches!(
             self,
-            Self::StartingInputEnded | Self::Draining { .. } | Self::Done
+            Self::FirstInputEnded | Self::Draining { .. } | Self::Done
         )
     }
 
     fn end_input(&mut self) {
         *self = match *self {
-            Self::Starting => Self::StartingInputEnded,
+            Self::First => Self::FirstInputEnded,
             Self::Streaming { prev } => Self::Draining { prev },
             other => other,
         };
@@ -161,7 +161,7 @@ impl<S: Source> Tempo<S> {
             out: Vec::new(),
             out_pos: 0,
             nominal: 0.0,
-            stretch: Stretch::Starting,
+            stretch: Stretch::First,
             lag: None,
             #[cfg(test)]
             tried: 0,
@@ -190,7 +190,7 @@ impl<S: Source> Tempo<S> {
         self.out.clear();
         self.out_pos = 0;
         self.nominal = 0.0;
-        self.stretch = Stretch::Starting;
+        self.stretch = Stretch::First;
         self.report_playing(0);
     }
 

@@ -25,8 +25,9 @@ fn add_about() -> &'static str {
     tr(keys::CHAT_AUTOMATION_ADD_ABOUT)
 }
 
-/// What the lookup shows under the username field.
-enum Found {
+/// What the lookup shows under the username field: a view computed from
+/// the session's lookup on each draw, stored nowhere.
+enum FoundView {
     Nothing,
     Loading,
     Bots(Vec<i64>),
@@ -57,7 +58,7 @@ impl QuillApp {
                 .placeholder(tr(keys::CHATBOTS_PLACEHOLDER))
         });
         // tdesktop debounces the lookup by 400 ms.
-        cx.subscribe_in(
+        let typing = cx.subscribe_in(
             &username,
             window,
             |this, input, event: &InputEvent, window, cx| {
@@ -90,16 +91,16 @@ impl QuillApp {
                 }
                 cx.notify();
             },
-        )
-        .detach();
+        );
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.ensure_connected_bot();
             let _ = live.driver.lookup_business_bot("");
         }
         let mut draft = ChatbotDraft {
             username,
+            _typing: typing,
             debounce: LookupDebounce::Idle,
-            bot: BotLink::Loading,
+            bot: BotLink::Unreported,
             recipients: BusinessRecipients::everyone(),
             rights: BotRights::default(),
             notice: BotNotice::None,
@@ -188,42 +189,42 @@ impl QuillApp {
         &self,
         username: &Entity<gpui_kit::component::input::InputState>,
         cx: &App,
-    ) -> Found {
+    ) -> FoundView {
         let Some(lookup) = self.session().map(|s| &s.settings.business_extra.lookup) else {
-            return Found::Nothing;
+            return FoundView::Nothing;
         };
         let text = username.read(cx).value().to_string();
         let Some(query) = parse_username_query(&text) else {
-            return Found::Nothing;
+            return FoundView::Nothing;
         };
         if lookup.query.is_empty() {
-            return Found::Nothing;
+            return FoundView::Nothing;
         }
         // Typing on while the lookup is debounced: the results on hand are
         // for the previous text.
         if lookup.query != query {
-            return Found::Loading;
+            return FoundView::Loading;
         }
         if !lookup.done() {
-            return Found::Loading;
+            return FoundView::Loading;
         }
         let exact = lookup.exact.data().copied().flatten();
         let bots = merge_found_bots(exact, lookup.mine.items(), lookup.global.items(), |id| {
             self.business_bot_usable(id)
         });
         if !bots.is_empty() {
-            return Found::Bots(bots);
+            return FoundView::Bots(bots);
         }
         if let Some(error) = lookup.error() {
-            return Found::Failed(error.to_string());
+            return FoundView::Failed(error.to_string());
         }
         let exact_bot = exact
             .and_then(|id| self.session()?.users.get(&id))
             .is_some_and(|u| u.is_bot);
         if exact_bot {
-            Found::Unsupported
+            FoundView::Unsupported
         } else {
-            Found::Missing
+            FoundView::Missing
         }
     }
 
@@ -528,7 +529,7 @@ impl QuillApp {
             None => {
                 body = body.child(Input::new(&username).aria_label(tr(keys::Q_MEDIA_BOT_USERNAME)));
                 match &found {
-                    Found::Loading => {
+                    FoundView::Loading => {
                         body = body.child(
                             div()
                                 .text_sm()
@@ -536,12 +537,12 @@ impl QuillApp {
                                 .child(tr(keys::Q_MEDIA_SEARCHING)),
                         );
                     }
-                    Found::Bots(bots) => {
+                    FoundView::Bots(bots) => {
                         for bot in bots {
                             body = body.child(self.business_bot_row(*bot, true, cx));
                         }
                     }
-                    Found::Missing => {
+                    FoundView::Missing => {
                         body = body.child(
                             div()
                                 .text_sm()
@@ -550,7 +551,7 @@ impl QuillApp {
                                 .child(tr(keys::CHATBOTS_NOT_FOUND)),
                         );
                     }
-                    Found::Unsupported => {
+                    FoundView::Unsupported => {
                         body = body.child(
                             div()
                                 .text_sm()
@@ -559,7 +560,7 @@ impl QuillApp {
                                 .child(tr(keys::CHATBOTS_NOT_SUPPORTED)),
                         );
                     }
-                    Found::Failed(error) => {
+                    FoundView::Failed(error) => {
                         let input = username.clone();
                         body = body.child(
                             div()
@@ -582,7 +583,7 @@ impl QuillApp {
                                 ),
                         );
                     }
-                    Found::Nothing => {}
+                    FoundView::Nothing => {}
                 }
             }
         }
@@ -591,7 +592,7 @@ impl QuillApp {
             .child(self.business_recipients_section(Recipients::Bot, cx));
         // Rights show for the added bot, or the first one found.
         let shown = committed.or(match &found {
-            Found::Bots(bots) => bots.first().copied(),
+            FoundView::Bots(bots) => bots.first().copied(),
             _ => None,
         });
         if shown.is_some() {
@@ -626,7 +627,7 @@ impl QuillApp {
         };
         let found = matches!(
             self.business_found_bots(&draft.username, cx),
-            Found::Bots(_)
+            FoundView::Bots(_)
         );
         let ask =
             draft.bot.connected().is_none() && found && draft.notice != BotNotice::ConfirmLeave;

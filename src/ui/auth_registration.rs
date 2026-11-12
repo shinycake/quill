@@ -7,7 +7,6 @@ use gpui_kit::component::input::Textarea;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with};
-use quill::state::RequestPurpose;
 use quill::telegram::envelope::AuthorizationState;
 use zeroize::Zeroize;
 
@@ -17,9 +16,7 @@ impl QuillApp {
             return div().into_any_element();
         };
         let accepted = terms.is_none() || self.auth_ui.registration.is_accepted();
-        let pending = self
-            .session()
-            .is_some_and(|s| s.requests.has_purpose(RequestPurpose::RegisterUser));
+        let pending = self.auth_submit_busy();
         let mut form = div()
             .flex()
             .flex_col()
@@ -108,6 +105,7 @@ impl QuillApp {
             self.screen.auth_ui.registration.accepted_terms(),
             self.screen.auth_ui.registration_notify_contacts,
         );
+        self.screen.auth_ui.submit.sent(&result);
         first.zeroize();
         last.zeroize();
         self.screen.connection.set_note_for(

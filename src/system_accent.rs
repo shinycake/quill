@@ -93,7 +93,24 @@ pub fn read() -> Option<u32> {
 /// window later reads again without every frame spawning `gdbus`.
 pub fn refresh() {
     #[cfg(target_os = "linux")]
-    linux_refresh();
+    linux_refresh(Box::new(|| {}));
+}
+
+/// Like [`refresh`], and tells the caller when the read has ended. Returns
+/// whether a read started: then `done` runs when it ends, or is dropped if
+/// the read thread dies, so a caller that waits on a channel wakes either
+/// way. When nothing started (a read already runs, the last one failed
+/// moments ago, or this platform reads in [`read`]) `done` is dropped now.
+pub fn refresh_then(done: impl FnOnce() + Send + 'static) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        linux_refresh(Box::new(done))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        drop(done);
+        false
+    }
 }
 
 /// Whether a background read is still running (Linux only).
@@ -186,19 +203,22 @@ impl Drop for ReadDone {
 }
 
 #[cfg(target_os = "linux")]
-fn linux_refresh() {
+fn linux_refresh(done: Box<dyn FnOnce() + Send>) -> bool {
     let mut state = crate::locks::lock_or_recover(&LINUX);
     if !state.begin(std::time::Instant::now()) {
-        return;
+        return false;
     }
-    let spawned = crate::thread_guard::spawn_guarded("system-accent", || {
+    let spawned = crate::thread_guard::spawn_guarded("system-accent", move || {
         let _done = ReadDone;
         let value = read_native().map(|rgb| rgb.max(1));
         crate::locks::lock_or_recover(&LINUX).finish(value, std::time::Instant::now());
+        done();
     });
     if spawned.is_err() {
         state.finish(None, std::time::Instant::now());
+        return false;
     }
+    true
 }
 
 #[cfg(all(target_os = "macos", feature = "ui"))]

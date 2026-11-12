@@ -32,7 +32,7 @@ use rodio::buffer::SamplesBuffer;
 use rodio::{Decoder, Source};
 
 use super::call_tones;
-pub(super) use engine::{AudioEngine, EngineState, Simulation};
+pub(super) use engine::{AudioEngine, EngineView, Simulation};
 pub(super) use output::{Hold, Outlet, OutputPlayer, SharedOutput};
 use tempo::{SharedSpeed, Tempo};
 

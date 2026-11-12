@@ -1037,7 +1037,7 @@ fn a_chatbot_draft_waiting_for_the_server_is_filled_when_the_answer_lands(cx: &m
     // The draft waits: the connected bot has not been reported.
     app.update(vcx, |app, _| {
         if let Some(bot) = app.business_mut().and_then(|d| d.screen.chatbot_mut()) {
-            bot.bot = super::BotLink::Loading;
+            bot.bot = super::BotLink::Unreported;
         }
     });
     act(&app, vcx, |app, window, cx| {
@@ -1057,7 +1057,7 @@ fn a_chatbot_draft_waiting_for_the_server_is_filled_when_the_answer_lands(cx: &m
     // The answer lands after the draft went back to waiting (a late one).
     app.update(vcx, |app, _| {
         if let Some(bot) = app.business_mut().and_then(|d| d.screen.chatbot_mut()) {
-            bot.bot = super::BotLink::Loading;
+            bot.bot = super::BotLink::Unreported;
         }
         if let Some(session) = app.demo_session.as_mut() {
             session.settings.business_extra.connected_bot =

@@ -5,8 +5,6 @@ QuillApp::advance_effects::active.borrow 2
 QuillApp::advance_effects::active.borrow_mut 1
 QuillApp::build_add_special_dialog::body.borrow_mut 1
 QuillApp::build_archive_settings_dialog::body.borrow_mut 1
-QuillApp::build_business_dialog::content.borrow_mut 1
-QuillApp::build_cancel_edit_dialog::body.borrow_mut 1
 QuillApp::build_direct_messages_dialog::body.borrow_mut 1
 QuillApp::build_fact_check_dialog::body.borrow_mut 1
 QuillApp::build_gifts_dialog::body.borrow_mut 1
@@ -65,7 +63,6 @@ image_tile::tile.borrow_mut 1
 last_target::last.borrow 1
 mark_revealed::reveals.borrow_mut 1
 note_target::last.borrow_mut 1
-once::body.borrow_mut 1
 paint_text_specks::painted.borrow_mut 1
 parsed_chart::charts.borrow_mut 1
 premium_playing::active.borrow 1

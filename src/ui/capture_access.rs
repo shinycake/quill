@@ -8,7 +8,6 @@ use super::app::QuillApp;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with};
-use std::time::Duration;
 
 /// Where macOS stands on one kind of capture device.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,21 +67,26 @@ fn access(_camera: bool) -> Access {
 
 /// Show the system prompt; `done` gets the answer on an arbitrary thread.
 #[cfg(target_os = "macos")]
-fn request(camera: bool, done: std::sync::mpsc::Sender<bool>) {
+fn request(camera: bool, done: futures_channel::oneshot::Sender<bool>) {
     use objc2_av_foundation::AVCaptureDevice;
     let Some(kind) = media_type(camera) else {
         let _ = done.send(true);
         return;
     };
+    // The block is called once, but the type says `Fn`: the sender waits in
+    // a slot it is taken from.
+    let done = std::sync::Mutex::new(Some(done));
     let block = block2::RcBlock::new(move |granted: objc2::runtime::Bool| {
-        let _ = done.send(granted.as_bool());
+        if let Some(done) = done.lock().ok().and_then(|mut slot| slot.take()) {
+            let _ = done.send(granted.as_bool());
+        }
     });
     // SAFETY: AVFoundation copies the block and calls it once.
     unsafe { AVCaptureDevice::requestAccessForMediaType_completionHandler(kind, &block) };
 }
 
 #[cfg(not(target_os = "macos"))]
-fn request(_camera: bool, done: std::sync::mpsc::Sender<bool>) {
+fn request(_camera: bool, done: futures_channel::oneshot::Sender<bool>) {
     let _ = done.send(true);
 }
 
@@ -182,24 +186,16 @@ impl QuillApp {
                     } else {
                         keys::Q_LEFTOVERS_ALLOW_MICROPHONE
                     })));
-                    let (sender, answer) = std::sync::mpsc::channel();
+                    let (sender, answer) = futures_channel::oneshot::channel();
                     request(device, sender);
                     // The wait belongs to the account on screen, so the stage
                     // ends whichever window asked; the recording starts in
                     // the window that asked, or not at all once it closed.
                     let asker = self.scoped_app(cx);
                     let wait = self.spawn_screen(cx, async move |this, cx| {
-                        let granted = loop {
-                            match answer.try_recv() {
-                                Ok(granted) => break granted,
-                                Err(std::sync::mpsc::TryRecvError::Empty) => {
-                                    cx.background_executor()
-                                        .timer(Duration::from_millis(100))
-                                        .await;
-                                }
-                                Err(_) => break false,
-                            }
-                        };
+                        // The prompt's answer wakes this; a prompt that went
+                        // away without one counts as a refusal.
+                        let granted = answer.await.unwrap_or(false);
                         let ended = this.update(cx, |this, cx| {
                             let mine = this.recording.finish_asking(ask);
                             if mine {

@@ -19,6 +19,8 @@ pub(crate) struct AuthUi {
     pub(super) registration_last_input: Entity<TextareaState>,
     /// The registration step and the terms the user ticked in it.
     pub(super) registration: RegistrationStep,
+    /// The sign-in submit that is out, by its request.
+    pub(super) submit: AuthSubmit,
     /// The proxy list as a box over the sign-in screen (tdesktop's
     /// `ProxiesBox`), which has no Settings window to hold it. It belongs to
     /// the sign-in screen: the account reaching Ready ends it
@@ -62,6 +64,37 @@ macro_rules! submit_on_enter {
         )
         .detach();
     };
+}
+
+/// The sign-in submit this screen sent. The session lets one go at a time,
+/// and is the one that knows when it is answered: the submit is out while
+/// its own request is still in the session's table, so another account's
+/// request, or an older one, never reads as this one.
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AuthSubmit {
+    #[default]
+    Idle,
+    Out {
+        request: quill::ids::RequestId,
+    },
+}
+
+impl AuthSubmit {
+    /// The submit's request is still unanswered in `requests`.
+    pub(super) fn is_out(self, requests: &quill::state::RequestRegistry) -> bool {
+        match self {
+            Self::Idle => false,
+            Self::Out { request } => requests.get(request).is_some(),
+        }
+    }
+
+    /// A send that went out holds its request; a refused one leaves the
+    /// stage as it was.
+    pub(super) fn sent<E>(&mut self, result: &Result<quill::ids::RequestId, E>) {
+        if let Ok(request) = result {
+            *self = Self::Out { request: *request };
+        }
+    }
 }
 
 /// The registration step by the authorization state: it exists only while
@@ -188,6 +221,7 @@ impl AuthUi {
             registration_first_input,
             registration_last_input,
             registration: RegistrationStep::Idle,
+            submit: AuthSubmit::Idle,
             proxy_list_open: false,
             registration_notify_contacts: false,
             email_input,

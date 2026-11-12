@@ -18,9 +18,7 @@
 ComposerUi.draft_load | carries its own chat and topic (the draft shown, the slot a restore asked for): a draft or restore for another slot never matches
 ComposerUi.draft_load.Restoring.slot | the slot that asked for its draft to be restored next frame; the restore runs only if that slot is still the open one
 
-ComposerUi.slow_mode_tick | the running 1 s tick task and its chat; it exits by itself when the chat changes and a newer chat's tick drops it, so resetting it would start a second task
 
-ComposerUi.slow_mode_tick.Ticking.chat | names the chat of the running 1 s tick task, which owns it and exits by itself when the chat changes; the next gated frame replaces it
 HistoryUi.painted_ids | rebuilt by every paint of the history list
 HistoryUi.seen | carries its chat; read once at the next render
 HistoryUi.on_screen | rebuilt by every paint of the history list

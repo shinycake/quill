@@ -203,8 +203,9 @@ pub(crate) struct LinkEditDraft {
 /// just added).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BotLink {
-    /// The server's bot has not been reported; nothing can save.
-    Loading,
+    /// The server's bot has not been reported (its fetch is in the
+    /// session); nothing can save.
+    Unreported,
     /// The username field shows.
     Empty,
     Connected(i64),
@@ -212,7 +213,7 @@ pub(crate) enum BotLink {
 
 impl BotLink {
     pub(super) fn is_loaded(self) -> bool {
-        self != Self::Loading
+        self != Self::Unreported
     }
 
     pub(super) fn connected(self) -> Option<i64> {
@@ -243,6 +244,8 @@ pub(crate) enum LookupDebounce {
 
 pub(crate) struct ChatbotDraft {
     pub(super) username: Entity<InputState>,
+    /// The username field's change events; they end with the draft.
+    pub(super) _typing: Subscription,
     pub(super) debounce: LookupDebounce,
     pub(super) bot: BotLink,
     pub(super) recipients: BusinessRecipients,

@@ -12,7 +12,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use quill::lang::trn;
 use quill::local_path::sandboxed_display_path;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 
 /// tdesktop `boxWidth`.
@@ -22,12 +22,9 @@ const BOX_WIDTH: f32 = 380.;
 pub(super) fn once(
     body: AnyElement,
 ) -> impl Fn(DialogContent, &mut Window, &mut App) -> DialogContent + 'static {
-    let body = Rc::new(RefCell::new(Some(body)));
+    let body = Rc::new(Cell::new(Some(body)));
     move |content, _, _| {
-        let body = body
-            .borrow_mut()
-            .take()
-            .unwrap_or_else(|| div().into_any_element());
+        let body = body.take().unwrap_or_else(|| div().into_any_element());
         content.child(body)
     }
 }

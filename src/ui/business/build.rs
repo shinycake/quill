@@ -14,8 +14,6 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
 use quill::premium_hub::BusinessFeature;
-use std::cell::RefCell;
-use std::rc::Rc;
 
 /// The icon of a hub row.
 fn icon_of(feature: BusinessFeature) -> IconName {
@@ -360,21 +358,12 @@ impl QuillApp {
                 .child(body)
                 .child(footer)
                 .into_any_element();
-            let content = Rc::new(RefCell::new(Some(content)));
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(title_of(
                     view, include, new_link,
                 )))
-                .content(crate::ui::shell::scrollable_dialog_content(
-                    move |slot, _, _| {
-                        let body = content
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        slot.child(body)
-                    },
-                ))
+                .content(crate::ui::shell::one_shot_dialog_content(content))
                 .on_close(on_close)
         })
     }

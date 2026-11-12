@@ -32,7 +32,7 @@ impl QuillApp {
         let editing_phone = signin_open && self.signin_phone_visible(&state) && !show_phone;
         let show_phone = show_phone || editing_phone;
         let show_code = show_code && !editing_phone;
-        let busy = self.session().is_some_and(|s| s.requests.has_auth_submit());
+        let busy = self.auth_submit_busy();
         let can_qr = signin_open
             && quill::auth::can_request_qr_login(&self.current_auth())
             && (self.live.is_some() || self.auth_demo.demo_inputs);
