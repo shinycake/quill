@@ -244,13 +244,13 @@ fn write_access_goes_through_consent_on_404() {
         extra.as_extra()
     ));
     assert_eq!(
-        h.driver.session.bots.web_apps.write_access,
-        Some(WriteAnswer::new(extra, 42, WriteAccessResult::NeedsConsent))
+        std::mem::take(&mut h.driver.session.bots.web_apps.write_access),
+        [WriteAnswer::new(extra, 42, WriteAccessResult::NeedsConsent)]
     );
     let extra = h.driver.allow_bot_to_send_messages(42).expect("sent");
     assert_eq!(h.last("allowBotToSendMessages")["bot_user_id"], 42);
     assert!(
-        h.driver.session.bots.web_apps.write_access.is_none(),
+        h.driver.session.bots.web_apps.write_access.is_empty(),
         "taken while in flight"
     );
     h.ingest(&format!(
@@ -258,8 +258,8 @@ fn write_access_goes_through_consent_on_404() {
         extra.as_extra()
     ));
     assert_eq!(
-        h.driver.session.bots.web_apps.write_access,
-        Some(WriteAnswer::new(extra, 42, WriteAccessResult::Granted))
+        std::mem::take(&mut h.driver.session.bots.web_apps.write_access),
+        [WriteAnswer::new(extra, 42, WriteAccessResult::Granted)]
     );
     let extra = h.driver.can_bot_send_messages(42).expect("sent");
     h.ingest(&format!(
@@ -267,8 +267,28 @@ fn write_access_goes_through_consent_on_404() {
         extra.as_extra()
     ));
     assert_eq!(
-        h.driver.session.bots.web_apps.write_access,
-        Some(WriteAnswer::new(extra, 42, WriteAccessResult::Allowed))
+        std::mem::take(&mut h.driver.session.bots.web_apps.write_access),
+        [WriteAnswer::new(extra, 42, WriteAccessResult::Allowed)]
+    );
+}
+
+#[test]
+fn two_write_access_answers_before_the_poll_both_survive() {
+    let mut h = Harness::ready();
+    let first = h.driver.can_bot_send_messages(42).expect("sent");
+    let second = h.driver.can_bot_send_messages(43).expect("sent");
+    for extra in [first, second] {
+        h.ingest(&format!(
+            r#"{{"@type":"ok","@extra":"{}"}}"#,
+            extra.as_extra()
+        ));
+    }
+    assert_eq!(
+        std::mem::take(&mut h.driver.session.bots.web_apps.write_access),
+        [
+            WriteAnswer::new(first, 42, WriteAccessResult::Allowed),
+            WriteAnswer::new(second, 43, WriteAccessResult::Allowed),
+        ]
     );
 }
 
@@ -630,14 +650,14 @@ fn sharing_the_phone_sends_my_contact_card_to_the_bot() {
     assert_eq!(content["@type"], "inputMessageContact");
     assert_eq!(content["contact"]["phone_number"], "+15550100");
     assert_eq!(content["contact"]["user_id"], 7);
-    assert_eq!(h.driver.session.bots.web_apps.phone_share, None);
+    assert!(h.driver.session.bots.web_apps.phone_share.is_empty());
     h.ingest(&format!(
         r#"{{"@type":"message","@extra":"{}","id":9,"chat_id":42,"is_outgoing":true,"date":1700000000,"content":{{"@type":"messageContact","contact":{{"@type":"contact","phone_number":"+15550100","first_name":"Ada","last_name":"L","user_id":7}}}}}}"#,
         extra.as_extra()
     ));
     assert_eq!(
         h.driver.session.bots.web_apps.phone_share,
-        Some(crate::state::PhoneShare::Sent(extra)),
+        [crate::state::PhoneShare::Sent(extra)],
         "the answer names the send it answers"
     );
 }
@@ -655,7 +675,7 @@ fn a_refused_phone_share_reports_failure() {
     ));
     assert_eq!(
         h.driver.session.bots.web_apps.phone_share,
-        Some(crate::state::PhoneShare::Refused(extra))
+        [crate::state::PhoneShare::Refused(extra)]
     );
 }
 

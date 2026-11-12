@@ -48,13 +48,16 @@ impl Session {
             .sponsored
             .remove(&chat_id.0)
             .unwrap_or_default();
-        let keep = |ids: &std::collections::HashSet<i64>| -> std::collections::HashSet<i64> {
-            ids.iter()
-                .copied()
-                .filter(|id| messages.iter().any(|m| m.message_id == *id))
-                .collect()
-        };
-        let (viewed, dismissed) = (keep(&previous.viewed), keep(&previous.dismissed));
+        let listed = |id: &i64| messages.iter().any(|m| m.message_id == *id);
+        let dismissed: std::collections::HashSet<i64> =
+            previous.dismissed.iter().copied().filter(listed).collect();
+        // A failed view asks afresh with the new list.
+        let views = previous
+            .views
+            .iter()
+            .filter(|(id, view)| listed(id) && !matches!(view, AdView::Failed { .. }))
+            .map(|(id, view)| (*id, *view))
+            .collect();
         // Ads already in the history stay where they are.
         let placed = previous
             .placed
@@ -66,7 +69,7 @@ impl Session {
             ChatSponsoredMessages {
                 messages,
                 messages_between,
-                viewed,
+                views,
                 dismissed,
                 fetched_at: Some(std::time::Instant::now()),
                 placed,
@@ -284,30 +287,70 @@ impl Session {
     }
 
     /// The UI shows these ads on screen (the whole text, button excluded).
-    /// Returns the ids not yet counted, marking them viewed so a scroll away
-    /// and back never sends a second `viewMessages`. Ids that are not in the
-    /// fetched list of an open chat are ignored.
-    pub fn take_sponsored_views(&mut self, chat_id: ChatId, shown: &[i64]) -> Vec<i64> {
+    /// Registers the `viewMessages` request for the ids not yet counted and
+    /// marks them `Counting` under it, so a scroll away and back never sends
+    /// a second one while it is out. Ids that are not in the fetched list of
+    /// an open chat are ignored. `None` when nothing is due.
+    pub fn begin_sponsored_views(
+        &mut self,
+        chat_id: ChatId,
+        shown: &[i64],
+    ) -> Option<(RequestId, Vec<i64>)> {
         if self.open_chat_id() != Some(chat_id) {
-            return Vec::new();
+            return None;
         }
-        let Some(entry) = self.messages.sponsored.get_mut(&chat_id.0) else {
-            return Vec::new();
-        };
-        let mut due = Vec::new();
+        let entry = self.messages.sponsored.get(&chat_id.0)?;
+        let mut due: Vec<i64> = Vec::new();
         for id in shown {
-            if entry.messages.iter().any(|m| m.message_id == *id) && entry.viewed.insert(*id) {
+            let listed = entry.messages.iter().any(|m| m.message_id == *id);
+            let asks = entry.views.get(id).is_none_or(|view| view.due());
+            if listed && asks && !due.contains(id) {
                 due.push(*id);
             }
         }
-        due
+        if due.is_empty() {
+            return None;
+        }
+        let request = self.request(RequestPurpose::ViewSponsoredMessages, Some(chat_id));
+        let entry = self.messages.sponsored.get_mut(&chat_id.0)?;
+        for id in &due {
+            let attempts = match entry.views.get(id) {
+                Some(AdView::Failed { attempts }) => *attempts,
+                _ => 0,
+            };
+            entry
+                .views
+                .insert(*id, AdView::Counting { request, attempts });
+        }
+        Some((request, due))
     }
 
-    /// A `viewMessages` send failed: let the next frame retry these ids.
-    pub fn untake_sponsored_views(&mut self, chat_id: ChatId, ids: &[i64]) {
-        if let Some(entry) = self.messages.sponsored.get_mut(&chat_id.0) {
-            for id in ids {
-                entry.viewed.remove(id);
+    /// The answer of a `viewMessages` for sponsored ads: its ads are counted
+    /// (`counted`) or fail one more time. An ad another request took over
+    /// since keeps that request.
+    pub(crate) fn settle_sponsored_views(
+        &mut self,
+        chat_id: ChatId,
+        request: RequestId,
+        counted: bool,
+    ) {
+        let Some(entry) = self.messages.sponsored.get_mut(&chat_id.0) else {
+            return;
+        };
+        for view in entry.views.values_mut() {
+            if let AdView::Counting {
+                request: asked,
+                attempts,
+            } = *view
+                && asked == request
+            {
+                *view = if counted {
+                    AdView::Counted
+                } else {
+                    AdView::Failed {
+                        attempts: attempts.saturating_add(1),
+                    }
+                };
             }
         }
     }

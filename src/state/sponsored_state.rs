@@ -10,9 +10,10 @@ pub struct ChatSponsoredMessages {
     /// Schema `messages_between`: minimum number of ordinary messages between
     /// shown sponsored rows (0 = after all ordinary messages).
     pub messages_between: i32,
-    /// Ids already reported to TDLib as viewed (`viewMessages`): an ad is
-    /// counted once per fetched list, however often it scrolls into view.
-    pub viewed: std::collections::HashSet<i64>,
+    /// Where each ad's impression stands (`viewMessages`): an ad is counted
+    /// once per fetched list, however often it scrolls into view. An id with
+    /// no entry was not asked for yet.
+    pub views: std::collections::HashMap<i64, AdView>,
     /// Ids the user reported or hid; never shown again for this list.
     pub dismissed: std::collections::HashSet<i64>,
     /// When the response arrived (tdesktop `lastReceived`): refetches inside
@@ -23,6 +24,33 @@ pub struct ChatSponsoredMessages {
     /// stays there as newer messages arrive. An ad not listed here is not in
     /// the history yet. Cleared when the chat is left (`clearItems`).
     pub placed: Vec<SponsoredPlacement>,
+}
+
+/// How many times an ad's `viewMessages` may fail (an error answer or a send
+/// that went nowhere) before the ad waits for the next fetched list.
+pub const AD_VIEW_ATTEMPTS: u8 = 3;
+
+/// The impression of one ad.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdView {
+    /// `viewMessages` is out; its answer settles the ad. `attempts` are the
+    /// failures before it.
+    Counting {
+        request: crate::ids::RequestId,
+        attempts: u8,
+    },
+    /// TDLib counted it.
+    Counted,
+    /// The request failed `attempts` times; the next frame asks again until
+    /// [`AD_VIEW_ATTEMPTS`].
+    Failed { attempts: u8 },
+}
+
+impl AdView {
+    /// Whether the next frame that shows the ad should ask for its view.
+    pub fn due(self) -> bool {
+        matches!(self, Self::Failed { attempts } if attempts < AD_VIEW_ATTEMPTS)
+    }
 }
 
 /// tdesktop `kRequestTimeLimit`: a chat's sponsored messages are not

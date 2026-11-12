@@ -558,7 +558,10 @@ impl Session {
                         RequestPurpose::Bots(BotsPurpose::SharePhoneWithMiniApp { .. })
                     )
                 }) {
-                    self.bots.web_apps.phone_share = Some(PhoneShare::Sent(request.id));
+                    self.bots
+                        .web_apps
+                        .phone_share
+                        .push(PhoneShare::Sent(request.id));
                     self.upsert_message(message, true);
                 } else {
                     self.upsert_message(message, false);

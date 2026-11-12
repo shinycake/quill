@@ -271,6 +271,15 @@ impl Session {
                     _ => {}
                 }
             }
+            // The impression was not counted: the ads ask again with the
+            // next frame, up to `AD_VIEW_ATTEMPTS` times.
+            Some(RequestPurpose::ViewSponsoredMessages) => {
+                if let Some(p) = pending
+                    && let Some(chat_id) = p.chat_id
+                {
+                    self.settle_sponsored_views(chat_id, p.id, false);
+                }
+            }
             // A failed translation shows "Translate failed." where the text
             // would have gone, in the box and in the translated bubble alike.
             Some(RequestPurpose::Messages(MessagesPurpose::TranslateJob)) => {

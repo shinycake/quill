@@ -64,13 +64,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let due = self.session.take_sponsored_views(chat_id, shown);
-        if due.is_empty() {
+        let Some((extra, due)) = self.session.begin_sponsored_views(chat_id, shown) else {
             return Ok(None);
-        }
-        let extra = self
-            .session
-            .request(RequestPurpose::ViewSponsoredMessages, Some(chat_id));
+        };
         let ids: Vec<MessageId> = due.iter().copied().map(MessageId).collect();
         match self.sender.send_json(&view_messages(
             extra,
@@ -82,7 +78,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.untake_sponsored_views(chat_id, &due);
+                self.session.settle_sponsored_views(chat_id, extra, false);
                 Err(err)
             }
         }

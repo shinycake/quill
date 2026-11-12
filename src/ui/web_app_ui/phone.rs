@@ -189,8 +189,13 @@ impl QuillApp {
             .and_then(|window| window.phone.waiting_on());
         // An answer that comes after this (a timed-out send) is nobody's.
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.bots.web_apps.phone_share = None;
             if let Some(request) = waiting {
+                live.driver
+                    .session
+                    .bots
+                    .web_apps
+                    .phone_share
+                    .retain(|answer| answer.request() != request);
                 live.driver.session.acks.forget(request);
             }
         }
@@ -224,16 +229,12 @@ impl QuillApp {
             _ => None,
         };
         let sent = self.live.as_mut().and_then(|live| {
-            let share = &mut live.driver.session.bots.web_apps.phone_share;
-            match (*share, flow) {
-                (Some(answer), PhoneFlow::Sending { request, .. })
-                    if answer.request() == request =>
-                {
-                    *share = None;
-                    Some(answer.is_sent())
-                }
-                _ => None,
-            }
+            let PhoneFlow::Sending { request, .. } = flow else {
+                return None;
+            };
+            let shares = &mut live.driver.session.bots.web_apps.phone_share;
+            let at = shares.iter().position(|answer| answer.request() == request)?;
+            Some(shares.remove(at).is_sent())
         });
         match flow.step(Instant::now(), unblocked, sent) {
             PhoneStep::Wait => {}

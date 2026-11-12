@@ -604,6 +604,11 @@ impl Session {
         {
             self.accept_sponsored_hidden(chat_id);
         }
+        if let Some(view) = pending.filter(|p| p.purpose == RequestPurpose::ViewSponsoredMessages)
+            && let Some(chat_id) = view.chat_id
+        {
+            self.settle_sponsored_views(chat_id, view.id, true);
+        }
         if let Some(viewed) = pending.filter(|p| p.purpose == RequestPurpose::ViewMessages)
             && let Some(chat_id) = viewed.chat_id
         {
