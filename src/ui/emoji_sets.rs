@@ -24,7 +24,6 @@ use std::time::Duration;
 
 /// How long typing pauses before the search goes out.
 const SEARCH_DELAY: Duration = Duration::from_millis(300);
-/// Distance from the end of the list at which the next page is requested.
 /// Cover previews shown on a row.
 const ROW_COVERS: usize = 4;
 const COVER_SIZE: f32 = 28.;
