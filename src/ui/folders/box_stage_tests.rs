@@ -45,6 +45,15 @@ fn sent(app: &mut QuillApp, purpose: RequestPurpose, folder: Option<i32>) -> Req
     }
 }
 
+/// The folder's spec fetch waits for `request`, as the driver records it.
+fn spec_waits_for(app: &mut QuillApp, folder_id: i32, request: RequestId) {
+    if let Some(session) = app.demo_session.as_mut() {
+        let fetch = session.chat_list.folder_specs.fetch_mut(folder_id);
+        fetch.begin();
+        fetch.sent(request);
+    }
+}
+
 /// What TDLib answers: `json` with the request's `@extra` filled in.
 fn answer(app: &mut QuillApp, request: RequestId, body: &str) {
     let sink: Arc<dyn quill::diagnostics::DiagnosticSink> = app.demo_ui.sink.clone();
@@ -215,6 +224,7 @@ fn a_save_after_the_folder_changed_goes_onto_the_fresh_folder(cx: &mut TestAppCo
         dialog.prefill_from_spec(&base, window, cx);
         dialog.editor.toggle_included(5);
         let request = sent(app, RequestPurpose::GetChatFolder, Some(5));
+        spec_waits_for(app, 5, request);
         dialog.load = FolderLoad::Merging(request);
         app.folders.editor = Some(dialog);
         app.maybe_prefill_folder_editor(window, cx);
