@@ -45,16 +45,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         build: impl FnOnce(RequestId, MessageSender) -> String,
     ) -> Result<RequestId, ConnectSendError> {
         let owner = self.gifts_owner_if_mine()?;
-        let extra = self.send_gift_mutation(owner, purpose, None, build)?;
-        // The open form that sent it is the one its answer closes.
-        self.session.payments.gifts_manage.flow_sent(purpose, extra);
-        self.session
-            .payments
-            .hub
-            .received
-            .view
-            .form_sent(purpose, extra);
-        Ok(extra)
+        self.send_gift_mutation(owner, purpose, None, build)
     }
 
     fn send_gift_mutation(
@@ -235,9 +226,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.can_pay(cost) {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.mutate_own_gifts(PaymentsPurpose::UpgradeGift, |extra, _| {
+        let extra = self.mutate_own_gifts(PaymentsPurpose::UpgradeGift, |extra, _| {
             rq::upgrade_gift(extra, id, keep_details, cost)
-        })
+        })?;
+        // The Upgrade form of this gift is the one its answer closes.
+        self.session
+            .payments
+            .hub
+            .received
+            .view
+            .form_sent(id, PaymentsPurpose::UpgradeGift, extra);
+        Ok(extra)
     }
 
     /// `transferGift` to the user or channel of `chat_id`. Gives the gift
@@ -451,9 +450,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !ok {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.mutate_own_gifts(PaymentsPurpose::SetGiftResalePrice, |extra, _| {
+        let extra = self.mutate_own_gifts(PaymentsPurpose::SetGiftResalePrice, |extra, _| {
             rq::set_gift_resale_price(extra, id, price)
-        })
+        })?;
+        // The resale form of this gift is the one its answer closes.
+        self.session.payments.hub.received.view.form_sent(
+            id,
+            PaymentsPurpose::SetGiftResalePrice,
+            extra,
+        );
+        Ok(extra)
     }
 
     pub fn create_gift_collection(&mut self, name: &str) -> Result<RequestId, ConnectSendError> {
@@ -464,9 +470,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let name = name.trim().to_string();
-        self.mutate_own_gifts(PaymentsPurpose::ChangeGiftCollection, |extra, owner| {
-            rq::create_gift_collection(extra, owner, &name, &[])
-        })
+        let extra = self
+            .mutate_own_gifts(PaymentsPurpose::ChangeGiftCollection, |extra, owner| {
+                rq::create_gift_collection(extra, owner, &name, &[])
+            })?;
+        // The New form is the one its answer closes.
+        self.session
+            .payments
+            .gifts_manage
+            .flow_sent(FlowForm::New, extra);
+        Ok(extra)
     }
 
     pub fn rename_gift_collection(
@@ -480,18 +493,32 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let name = name.trim().to_string();
-        self.mutate_own_gifts(PaymentsPurpose::ChangeGiftCollection, |extra, owner| {
-            rq::set_gift_collection_name(extra, owner, id, &name)
-        })
+        let extra = self
+            .mutate_own_gifts(PaymentsPurpose::ChangeGiftCollection, |extra, owner| {
+                rq::set_gift_collection_name(extra, owner, id, &name)
+            })?;
+        // The Rename form of this collection is the one its answer closes.
+        self.session
+            .payments
+            .gifts_manage
+            .flow_sent(FlowForm::Rename(id), extra);
+        Ok(extra)
     }
 
     pub fn delete_gift_collection(&mut self, id: i32) -> Result<RequestId, ConnectSendError> {
         if self.session.payments.gifts_manage.collection(id).is_none() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.mutate_own_gifts(PaymentsPurpose::DeleteGiftCollection, |extra, owner| {
-            rq::delete_gift_collection(extra, owner, id)
-        })
+        let extra = self
+            .mutate_own_gifts(PaymentsPurpose::DeleteGiftCollection, |extra, owner| {
+                rq::delete_gift_collection(extra, owner, id)
+            })?;
+        // The Delete form of this collection is the one its answer closes.
+        self.session
+            .payments
+            .gifts_manage
+            .flow_sent(FlowForm::Delete(id), extra);
+        Ok(extra)
     }
 
     /// `deleteGift` (tdesktop `DeleteStarGift`): only for a regular gift

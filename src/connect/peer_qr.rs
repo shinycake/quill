@@ -2,11 +2,11 @@
 //! `getUserLink`, the peer's full info for its share theme, the owned
 //! upgraded gifts and `setProfileShareTheme`).
 use super::*;
-use crate::ids::FileId;
-use crate::peer_qr::free::{FreeRequest, FreeTicket};
+use crate::ids::{FileId, RequestId};
+use crate::peer_qr::free::FreeRequest;
 use crate::peer_qr::link::{OwnLinkState, UserLinkFetch};
 use crate::peer_qr::requests::{GiftsOwner, get_share_theme_gifts, set_profile_share_theme};
-use crate::peer_qr::state::{QrPeer, SaveTicket};
+use crate::peer_qr::state::QrPeer;
 use crate::peer_qr::theme::{ThemeChoice, ThemeOwner, can_save};
 use crate::state::{RequestPurpose, UsersPurpose};
 use serde_json::json;
@@ -80,24 +80,21 @@ impl<S: JsonSender> ConnectDriver<S> {
             QrPeer::User(user_id) => GiftsOwner::User(user_id),
             QrPeer::Chat(chat_id) => GiftsOwner::Chat(chat_id),
         };
-        let Some(request) = self
+        let Some(offset) = self
             .session
             .users_state
             .peer_qr
             .gifts
-            .start(owner, more, now)
+            .plan(owner, more, now)
         else {
             return Ok(());
         };
         let extra = self.session.request(
-            RequestPurpose::Users(UsersPurpose::GetShareThemeGifts {
-                owner,
-                serial: request.serial,
-                first: !more,
-            }),
+            RequestPurpose::Users(UsersPurpose::GetShareThemeGifts { first: !more }),
             None,
         );
-        let json = get_share_theme_gifts(extra, gifts_owner, &request.offset);
+        self.session.users_state.peer_qr.gifts.asked(extra, now);
+        let json = get_share_theme_gifts(extra, gifts_owner, &offset);
         if let Err(err) = self.send_json_request(extra, &json) {
             self.session.users_state.peer_qr.gifts.fail();
             return Err(err);
@@ -106,49 +103,38 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// `setProfileShareTheme` for `peer`. Its answer reaches the box as a
-    /// save answer for `ticket`.
+    /// save answer for the request returned; a refusal returns the error and
+    /// the box is told ([`crate::peer_qr::state::QrAction::SaveUnsent`]).
     pub fn save_share_theme(
         &mut self,
-        ticket: SaveTicket,
         peer: QrPeer,
         choice: ThemeChoice,
-    ) -> Result<(), ConnectSendError> {
+    ) -> Result<RequestId, ConnectSendError> {
         let rights = self.session.qr_save_rights(peer);
         let owner = self.session.qr_theme_owner(peer);
         let (true, Some(owner)) = (self.chats_path_active() && can_save(rights), owner) else {
-            self.session
-                .users_state
-                .peer_qr
-                .fail_save(ticket, String::new());
             return Err(ConnectSendError::InvalidRequest);
         };
         let chat_id = match peer {
             QrPeer::User(user_id) | QrPeer::Chat(user_id) => user_id,
         };
         let extra = self.session.request(
-            RequestPurpose::Users(UsersPurpose::SetProfileShareTheme { ticket }),
+            RequestPurpose::Users(UsersPurpose::SetProfileShareTheme),
             None,
         );
         let Some(json) = set_profile_share_theme(extra, chat_id, &choice) else {
             self.session.requests.take(extra);
-            self.session
-                .users_state
-                .peer_qr
-                .fail_save(ticket, String::new());
             return Err(ConnectSendError::InvalidRequest);
         };
         self.session
             .users_state
             .peer_qr
-            .start_save(ticket, owner, choice);
+            .start_save(extra, owner, choice);
         if let Err(err) = self.send_json_request(extra, &json) {
-            self.session
-                .users_state
-                .peer_qr
-                .fail_save(ticket, String::new());
+            self.session.users_state.peer_qr.saves.remove(&extra);
             return Err(err);
         }
-        Ok(())
+        Ok(extra)
     }
 
     /// Download the gift stickers a share theme draws that are not local
@@ -173,29 +159,36 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// step while the box is open.
     pub fn ensure_own_contact_link(&mut self, now: i64) -> Result<(), ConnectSendError> {
         match self.session.own_qr_link("", now) {
-            Some(OwnLinkState::NeedsContactLink) => self.fetch_own_user_link(None),
+            Some(OwnLinkState::NeedsContactLink) => self.fetch_own_contact_link(),
             _ => Ok(()),
         }
     }
 
-    /// `getUserLink`: the current user's contact link (`free` is `None`)
-    /// or a free-message code. A contact link already on its way is not
-    /// asked for twice.
-    pub fn fetch_own_user_link(
-        &mut self,
-        free: Option<FreeTicket>,
-    ) -> Result<(), ConnectSendError> {
+    /// `getUserLink` for the current user's contact link. One already on
+    /// its way is not asked for twice.
+    pub fn fetch_own_contact_link(&mut self) -> Result<(), ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if free.is_none()
-            && matches!(
-                self.session.users_state.peer_qr.contact_link,
-                UserLinkFetch::Loading(_)
-            )
-        {
+        if matches!(
+            self.session.users_state.peer_qr.contact_link,
+            UserLinkFetch::Loading(_)
+        ) {
             return Ok(());
         }
+        self.send_user_link(None).map(|_| ())
+    }
+
+    /// `getUserLink` for a free-message code of this `what`; the answer
+    /// reaches the box as a free answer for the request returned.
+    pub fn fetch_free_code(&mut self, what: FreeRequest) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.send_user_link(Some(what))
+    }
+
+    fn send_user_link(&mut self, free: Option<FreeRequest>) -> Result<RequestId, ConnectSendError> {
         let extra = self.session.request(
             RequestPurpose::Users(UsersPurpose::GetUserLink { free }),
             None,
@@ -203,7 +196,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if free.is_none() {
             self.session.users_state.peer_qr.contact_link = UserLinkFetch::Loading(extra);
         }
-        let what = free.map(|ticket| ticket.request);
+        let what = free;
         let request = json!({
             "@type": "getUserLink",
             "@extra": extra.as_extra(),
@@ -213,12 +206,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         });
         if let Err(err) = self.sender.send_json(&request.to_string()) {
             self.session.requests.take(extra);
-            self.session
-                .users_state
-                .peer_qr
-                .fail_link(free, extra, String::new());
+            if free.is_none() {
+                self.session
+                    .users_state
+                    .peer_qr
+                    .fail_link(None, extra, String::new());
+            }
             return Err(err);
         }
-        Ok(())
+        Ok(extra)
     }
 }

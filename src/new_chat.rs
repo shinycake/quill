@@ -77,36 +77,31 @@ pub enum NewChatStage {
     AutoDelete,
     /// The group's members picker; Create sends.
     Members,
-    /// The create request is out; `back` is where a refusal returns. A
-    /// supergroup or channel leaves it for `Type` as its answer is taken;
-    /// only a group stays in it, `Created`, until its dialog closes.
+    /// The create request is out; `back` is where a refusal returns. It
+    /// leaves with its answer (`Created`, `Type`, `CreateRefused`) or when
+    /// the request is gone without one (`CreateLost`), as
+    /// `Session::settled_new_chat` folds the answers in; the request is not
+    /// held past it.
     Creating {
         request: RequestId,
         back: NewChatBack,
-        progress: CreateProgress,
     },
+    /// A group exists; its dialog closes and the chat opens. (A supergroup's
+    /// answer moves the stage to `Type`.)
+    Created(ChatId),
+    /// TDLib refused the create: the step `back` shows the reason.
+    CreateRefused {
+        back: NewChatBack,
+        failure: CreateFailure,
+        reason: String,
+    },
+    /// The create request is no longer pending and nothing answered it: the
+    /// step `back` returns, without a reason.
+    CreateLost { back: NewChatBack },
     /// The supergroup or channel exists: public or private.
     Type { chat: ChatId, save: TypeSaveStage },
     /// Adding subscribers (or members) to the new supergroup or channel.
     Subscribers { chat: ChatId },
-}
-
-/// How the create request stands. It leaves `InFlight` with its answer, or
-/// when the request is gone without one (`Lost`). `Created` is a group's:
-/// a supergroup's answer moves the stage to `NewChatStage::Type`.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum CreateProgress {
-    InFlight,
-    /// The chat exists.
-    Created(ChatId),
-    /// TDLib refused it.
-    Refused {
-        failure: CreateFailure,
-        reason: String,
-    },
-    /// The request is no longer pending and nothing answered it: the form
-    /// returns.
-    Lost,
 }
 
 /// The type step's Save. It leaves `Saving` with the answers of its
@@ -129,6 +124,15 @@ pub enum TypeSaveStage {
 pub enum NewChatBack {
     Info,
     Members,
+}
+
+impl NewChatBack {
+    fn step(self) -> NewChatStep {
+        match self {
+            Self::Info => NewChatStep::Info,
+            Self::Members => NewChatStep::Members,
+        }
+    }
 }
 
 /// What the dialog shows.
@@ -237,27 +241,23 @@ pub fn view(stage: &NewChatStage) -> NewChatView {
         NewChatStage::Info => plain(NewChatStep::Info),
         NewChatStage::AutoDelete => plain(NewChatStep::AutoDelete),
         NewChatStage::Members => plain(NewChatStep::Members),
-        NewChatStage::Creating { back, progress, .. } => {
-            let back = match back {
-                NewChatBack::Info => NewChatStep::Info,
-                NewChatBack::Members => NewChatStep::Members,
-            };
-            match progress {
-                CreateProgress::Created(chat) => plain(NewChatStep::Done(*chat)),
-                CreateProgress::Refused { failure, reason } => NewChatView {
-                    step: back,
-                    state: ViewState::Refused {
-                        failure: *failure,
-                        reason: reason.clone(),
-                    },
-                },
-                CreateProgress::InFlight => NewChatView {
-                    step: back,
-                    state: ViewState::Waiting,
-                },
-                CreateProgress::Lost => plain(back),
-            }
-        }
+        NewChatStage::Creating { back, .. } => NewChatView {
+            step: back.step(),
+            state: ViewState::Waiting,
+        },
+        NewChatStage::Created(chat) => plain(NewChatStep::Done(*chat)),
+        NewChatStage::CreateRefused {
+            back,
+            failure,
+            reason,
+        } => NewChatView {
+            step: back.step(),
+            state: ViewState::Refused {
+                failure: *failure,
+                reason: reason.clone(),
+            },
+        },
+        NewChatStage::CreateLost { back } => plain(back.step()),
         NewChatStage::Type { chat, save } => NewChatView {
             step: NewChatStep::Type(*chat),
             state: if matches!(save, TypeSaveStage::Saving(_)) {
@@ -359,11 +359,10 @@ mod tests {
 
     const CHAT: ChatId = ChatId(-1_005);
 
-    fn creating(back: NewChatBack, progress: CreateProgress) -> NewChatStage {
+    fn creating(back: NewChatBack) -> NewChatStage {
         NewChatStage::Creating {
             request: RequestId(7),
             back,
-            progress,
         }
     }
 
@@ -372,22 +371,20 @@ mod tests {
         let kind = NewChatKind::Group;
         assert_eq!(kind.info_confirm(), keys::CREATE_GROUP_NEXT);
         assert_eq!(view(&NewChatStage::Info).step, NewChatStep::Info);
-        let waiting = view(&creating(NewChatBack::Members, CreateProgress::InFlight));
+        let waiting = view(&creating(NewChatBack::Members));
         assert_eq!(waiting.step, NewChatStep::Members);
         assert!(waiting.busy());
         assert_eq!(
-            view(&creating(
-                NewChatBack::Members,
-                CreateProgress::Created(CHAT)
-            ))
-            .step,
+            view(&NewChatStage::Created(CHAT)).step,
             NewChatStep::Done(CHAT)
         );
     }
 
     #[test]
     fn a_lost_create_returns_to_the_form_without_a_reason() {
-        let shown = view(&creating(NewChatBack::Members, CreateProgress::Lost));
+        let shown = view(&NewChatStage::CreateLost {
+            back: NewChatBack::Members,
+        });
         assert_eq!(shown.step, NewChatStep::Members);
         assert!(!shown.busy() && shown.failure().is_none());
     }
@@ -414,11 +411,12 @@ mod tests {
 
     #[test]
     fn a_refusal_returns_to_the_step_with_its_reason() {
-        let failed = CreateProgress::Refused {
+        let failed = NewChatStage::CreateRefused {
+            back: NewChatBack::Info,
             failure: CreateFailure::Restricted,
             reason: "nope".into(),
         };
-        let shown = view(&creating(NewChatBack::Info, failed));
+        let shown = view(&failed);
         assert_eq!(shown.step, NewChatStep::Info);
         assert_eq!(shown.failure(), Some((CreateFailure::Restricted, "nope")));
         assert!(!shown.busy());

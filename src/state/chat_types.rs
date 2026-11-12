@@ -173,14 +173,10 @@ pub struct ChatSummary {
     /// `chat.draft_message` text draft. Voice/rich drafts are not stored.
     pub draft: Option<ChatDraft>,
     /// Own `chatMemberStatus*` (`getChatMember` / `updateChatMember`), with
-    /// the administrator rights that belong to it. Read through
+    /// the administrator rights or the restriction that belong to it. Read through
     /// [`Self::member_status`]; unknown until the first fetch completes,
     /// it drives the composer gate and the join/leave affordance.
     pub my_member: OwnMember,
-    /// Own `chatMemberStatusRestricted` rights and end date, from
-    /// `getChatMember(me)` / `updateChatMember`: unknown until the own
-    /// member record arrived, then restricted or not.
-    pub my_restriction: OwnRestriction,
     /// Phase 5.1: `supergroup.is_forum` (TDLib 1.8.67). `None` until
     /// `updateSupergroup` / the `getSupergroup` response resolves it; only
     /// meaningful for non-channel supergroups.
@@ -277,15 +273,27 @@ pub struct AdminRights {
     pub pin_messages: Option<bool>,
 }
 
-/// The viewer's own `chatMemberStatus*`. Administrator rights exist only
-/// for an administrator: a change of status drops them with the old one.
+/// The viewer's own membership in a chat: the `chatMemberStatus*` with what
+/// belongs to that status, one value. Administrator rights and a personal
+/// restriction exist only under their own status, so a change of status
+/// drops them with the old one.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum OwnMember {
-    /// Not fetched yet.
+    /// The own member record has not arrived (or no probe was made).
     #[default]
     Unknown,
-    /// Any status but administrator.
+    /// The probe found no member record (not a member, no access): there is
+    /// no status and no personal restriction to find.
+    /// The status `updateSupergroup` gave, when it had one, is kept.
+    NoRecord(Option<ChannelMemberStatus>),
+    /// `chatMemberStatusAdministrator` known only from `updateSupergroup`:
+    /// its rights were not read, so the own-member probe is still due.
+    AdminRightsUnread,
+    /// Any status but administrator or restricted.
     Other(ChannelMemberStatus),
+    /// `chatMemberStatusRestricted`: its rights and end date, `None` while
+    /// only the status is known (`updateSupergroup`, an optimistic change).
+    Restricted(Option<crate::telegram::envelope::MemberRestriction>),
     Administrator(AdminRights),
 }
 
@@ -296,27 +304,20 @@ impl OwnMember {
         match status {
             None => Self::Unknown,
             Some(ChannelMemberStatus::Administrator) => Self::Administrator(rights),
+            Some(ChannelMemberStatus::Restricted) => Self::Restricted(None),
             Some(other) => Self::Other(other),
         }
     }
 
     pub fn status(&self) -> Option<ChannelMemberStatus> {
         match self {
-            Self::Unknown => None,
-            Self::Other(status) => Some(*status),
+            Self::Unknown | Self::NoRecord(None) => None,
+            Self::NoRecord(Some(status)) | Self::Other(status) => Some(*status),
+            Self::AdminRightsUnread => Some(ChannelMemberStatus::Administrator),
+            Self::Restricted(_) => Some(ChannelMemberStatus::Restricted),
             Self::Administrator(_) => Some(ChannelMemberStatus::Administrator),
         }
     }
-}
-
-/// The viewer's own restriction in a chat.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum OwnRestriction {
-    /// The own member record has not arrived (or no probe was made).
-    #[default]
-    Unknown,
-    NotRestricted,
-    Restricted(crate::telegram::envelope::MemberRestriction),
 }
 
 impl ChatSummary {
@@ -421,6 +422,9 @@ impl ChatSummary {
         match &self.my_member {
             OwnMember::Other(ChannelMemberStatus::Creator) => true,
             OwnMember::Administrator(rights) => rights.post_messages.unwrap_or(true),
+            // Rights not read yet: a bare administrator posts.
+            OwnMember::AdminRightsUnread
+            | OwnMember::NoRecord(Some(ChannelMemberStatus::Administrator)) => true,
             _ => false,
         }
     }
@@ -439,24 +443,44 @@ impl ChatSummary {
     /// The viewer's own restriction; `None` when not restricted or not
     /// fetched yet ([`Self::rights_fetched`] tells them apart).
     pub fn restriction(&self) -> Option<crate::telegram::envelope::MemberRestriction> {
-        match self.my_restriction {
-            OwnRestriction::Restricted(restriction) => Some(restriction),
-            OwnRestriction::Unknown | OwnRestriction::NotRestricted => None,
+        match self.my_member {
+            OwnMember::Restricted(restriction) => restriction,
+            _ => None,
         }
     }
 
-    /// Own member record arrived at least once, so a missing restriction
-    /// means "not restricted" rather than "unknown".
+    /// The own membership says whether the viewer is restricted, so a
+    /// missing restriction means "not restricted" rather than "unknown":
+    /// false while the status is unknown or restricted with no details yet.
     pub fn rights_fetched(&self) -> bool {
-        self.my_restriction != OwnRestriction::Unknown
+        !matches!(
+            self.my_member,
+            OwnMember::Unknown | OwnMember::AdminRightsUnread | OwnMember::Restricted(None)
+        )
     }
 
     /// The probe found no member record (not a member, no access): there is
-    /// no personal restriction to find.
+    /// no personal restriction to find. A status already known from
+    /// `updateSupergroup` is kept.
     pub fn note_no_member_record(&mut self) {
-        if self.my_restriction == OwnRestriction::Unknown {
-            self.my_restriction = OwnRestriction::NotRestricted;
+        if !self.rights_fetched() {
+            self.my_member = OwnMember::NoRecord(self.member_status());
         }
+    }
+
+    /// Adopt the status `updateSupergroup` gave. An administrator's rights
+    /// and a restricted member's details were not read, so the own-member
+    /// probe stays due for them; any other status has nothing more to read.
+    /// The same status again keeps what a probe already read.
+    pub fn adopt_status_only(&mut self, status: ChannelMemberStatus) {
+        if self.member_status() == Some(status) {
+            return;
+        }
+        self.my_member = match status {
+            ChannelMemberStatus::Restricted => OwnMember::Restricted(None),
+            ChannelMemberStatus::Administrator => OwnMember::AdminRightsUnread,
+            other => OwnMember::Other(other),
+        };
     }
 
     /// Record own channel membership (`getChatMember` / `updateChatMember` /
@@ -469,7 +493,13 @@ impl ChatSummary {
         admin_can_post_messages: Option<bool>,
     ) -> bool {
         let changed = self.member_status() != Some(status);
-        // A new status drops the rights of the old one whole.
+        // A new status drops the rights and the restriction of the old one
+        // whole; the same restricted status keeps the details it has.
+        if let (OwnMember::Restricted(_), ChannelMemberStatus::Restricted) =
+            (self.my_member, status)
+        {
+            return changed;
+        }
         self.my_member = OwnMember::of(
             Some(status),
             AdminRights {
@@ -618,14 +648,18 @@ impl ChatSummary {
         }
     }
 
-    /// Record the viewer's own restriction (`None` when not restricted).
-    pub fn set_my_restriction(
+    /// Record the own member record (`getChatMember(me)` /
+    /// `updateChatMember`): the status, the rights of an administrator and
+    /// the restriction of a restricted member land together.
+    pub fn record_own_member(
         &mut self,
+        status: ChannelMemberStatus,
+        rights: AdminRights,
         restriction: Option<crate::telegram::envelope::MemberRestriction>,
     ) {
-        self.my_restriction = match restriction {
-            Some(restriction) => OwnRestriction::Restricted(restriction),
-            None => OwnRestriction::NotRestricted,
+        self.my_member = match (status, restriction) {
+            (ChannelMemberStatus::Restricted, restriction) => OwnMember::Restricted(restriction),
+            (status, _) => OwnMember::of(Some(status), rights),
         };
     }
 

@@ -2,7 +2,7 @@ use super::super::geo::{GeoOutcome, GeoPoint};
 use super::super::map_view::{MIN_ZOOM, MapSize, START_ZOOM, TileKey};
 use super::super::venues::{Venue, VenueList};
 use super::{AddressLine, HereState, LocationPicker};
-use crate::ids::{ChatId, FileId};
+use crate::ids::{ChatId, FileId, RequestId};
 
 fn point(lat: f64, lon: f64) -> GeoPoint {
     GeoPoint::new(lat, lon).expect("finite")
@@ -26,7 +26,7 @@ const SIZE: MapSize = MapSize {
 };
 
 fn fresh() -> LocationPicker {
-    LocationPicker::open(ChatId(7), None, point(31., 35.), 0)
+    LocationPicker::open(ChatId(7), None, point(31., 35.))
 }
 
 #[test]
@@ -56,14 +56,14 @@ fn my_location_after_a_refusal_is_locating_until_it_answers() {
 #[test]
 fn a_previous_fix_starts_there_with_venues_and_address() {
     let here = point(40.7, -74.);
-    let mut picker = LocationPicker::open(ChatId(7), Some(here), point(31., 35.), 0);
+    let mut picker = LocationPicker::open(ChatId(7), Some(here), point(31., 35.));
     assert_eq!(picker.view().zoom(), START_ZOOM);
     assert!(picker.can_search());
-    let (generation, at, query) = picker.venue_query_to_send().expect("venues");
+    let (at, query) = picker.venue_query_to_send().expect("venues");
     assert!(at.same_place(&here));
     assert_eq!(query, "");
     assert_eq!(picker.take_address_job(), Some(here));
-    picker.venue_query_sent(generation);
+    picker.venue_query_requested(RequestId(1));
     assert_eq!(picker.venue_query_to_send(), None);
 }
 
@@ -172,7 +172,7 @@ fn settling_elsewhere_offers_places_and_postpones_the_address() {
     assert_eq!(picker.address_line(), AddressLine::Hidden);
     picker.search_places_in_area();
     assert!(!picker.places_in_area_shown());
-    let (_, at, _) = picker.venue_query_to_send().expect("venues here");
+    let (at, _) = picker.venue_query_to_send().expect("venues here");
     assert!(at.same_place(&moved.center()));
 }
 
@@ -181,18 +181,22 @@ fn stale_venue_answers_are_dropped_and_results_cached() {
     let mut picker = fresh();
     let here = point(48.85, 2.35);
     picker.geolocated(GeoOutcome::Found(here), true);
-    let (first, ..) = picker.venue_query_to_send().expect("first");
-    picker.venue_query_sent(first);
+    picker.venue_query_to_send().expect("first");
+    let (first, second) = (RequestId(1), RequestId(2));
+    picker.venue_query_requested(first);
     picker.moved_to(picker.view().panned(300., 0.));
     picker.move_ended();
     picker.search_places_in_area();
-    let (second, ..) = picker.venue_query_to_send().expect("second");
+    picker.venue_query_to_send().expect("second");
+    picker.venue_query_requested(second);
     picker.venues_answered(first, vec![venue("Old")]);
     assert_eq!(picker.venues(), &VenueList::Loading);
     picker.venues_answered(second, vec![venue("New")]);
     assert_eq!(picker.venues(), &VenueList::Found(vec![venue("New")]));
+    // An error of the older query, or of the answered one, changes nothing.
+    picker.venues_failed(first);
     picker.venues_failed(second);
-    assert_eq!(picker.venues(), &VenueList::Failed);
+    assert_eq!(picker.venues(), &VenueList::Found(vec![venue("New")]));
 }
 
 /// Sweep r2-06b 03-C011: a failed lookup is drawn as a failure, and
@@ -201,16 +205,20 @@ fn stale_venue_answers_are_dropped_and_results_cached() {
 fn a_failed_lookup_is_a_failure_and_retry_asks_again() {
     let mut picker = fresh();
     picker.geolocated(GeoOutcome::Found(point(48.85, 2.35)), true);
-    let (first, ..) = picker.venue_query_to_send().expect("nearby");
-    picker.venue_query_sent(first);
+    let first = RequestId(1);
+    picker.venue_query_to_send().expect("nearby");
+    picker.venue_query_requested(first);
     picker.venues_failed(first);
     assert_eq!(picker.venues(), &VenueList::Failed);
     assert_eq!(picker.venue_query_to_send(), None, "not re-asked by itself");
     picker.retry_venues();
     assert_eq!(picker.venues(), &VenueList::Loading);
-    let (again, _, query) = picker.venue_query_to_send().expect("asked again");
-    assert_ne!(again, first);
+    let (_, query) = picker.venue_query_to_send().expect("asked again");
+    let again = RequestId(2);
+    picker.venue_query_requested(again);
     assert_eq!(query, "");
+    picker.venues_answered(first, vec![venue("Stale")]);
+    assert_eq!(picker.venues(), &VenueList::Loading, "the failed ask's id");
     picker.venues_answered(again, vec![venue("Near")]);
     assert_eq!(picker.venues(), &VenueList::Found(vec![venue("Near")]));
     picker.retry_venues();
@@ -222,18 +230,19 @@ fn search_debounces_and_restores_the_nearby_list() {
     let mut picker = fresh();
     let here = point(48.85, 2.35);
     picker.geolocated(GeoOutcome::Found(here), true);
-    let (nearby, ..) = picker.venue_query_to_send().expect("nearby");
-    picker.venue_query_sent(nearby);
-    picker.venues_answered(nearby, vec![venue("Near")]);
+    picker.venue_query_to_send().expect("nearby");
+    picker.venue_query_requested(RequestId(1));
+    picker.venues_answered(RequestId(1), vec![venue("Near")]);
     picker.search_changed(Some("Pizza ".into()));
     assert!(picker.search_shown());
     assert!(picker.search_debounce_pending());
     assert_eq!(picker.venues(), &VenueList::Loading);
     assert_eq!(picker.venue_query_to_send(), None);
     picker.search_debounce_fired();
-    let (search, _, query) = picker.venue_query_to_send().expect("search");
+    let (_, query) = picker.venue_query_to_send().expect("search");
     assert_eq!(query, "pizza");
-    picker.venues_answered(search, Vec::new());
+    picker.venue_query_requested(RequestId(2));
+    picker.venues_answered(RequestId(2), Vec::new());
     assert_eq!(
         picker.venues(),
         &VenueList::NothingFound {
@@ -254,17 +263,17 @@ fn search_debounces_and_restores_the_nearby_list() {
 fn closing_the_search_after_a_failed_lookup_asks_again() {
     let mut picker = fresh();
     picker.geolocated(GeoOutcome::Found(point(48.85, 2.35)), true);
-    let (first, ..) = picker.venue_query_to_send().expect("nearby");
-    picker.venue_query_sent(first);
-    picker.venues_failed(first);
+    picker.venue_query_to_send().expect("nearby");
+    picker.venue_query_requested(RequestId(1));
+    picker.venues_failed(RequestId(1));
     picker.search_changed(Some("p".into()));
     assert_eq!(picker.venues(), &VenueList::Loading);
     picker.search_changed(None);
     assert_eq!(picker.venues(), &VenueList::Loading);
-    let (again, _, query) = picker.venue_query_to_send().expect("asked again");
-    assert_ne!(again, first);
+    let (_, query) = picker.venue_query_to_send().expect("asked again");
     assert_eq!(query, "");
-    picker.venues_answered(again, vec![venue("Near")]);
+    picker.venue_query_requested(RequestId(2));
+    picker.venues_answered(RequestId(2), vec![venue("Near")]);
     assert_eq!(picker.venues(), &VenueList::Found(vec![venue("Near")]));
 }
 
@@ -275,18 +284,18 @@ fn tiles_follow_the_resting_view() {
     picker.set_map_size(SIZE);
     let key = picker.tile_to_request().expect("tile");
     assert_eq!(key, TileKey::for_view(&picker.view(), SIZE));
-    picker.tile_requested(key, 11);
+    picker.tile_requested(key, RequestId(11));
     assert_eq!(picker.tile_to_request(), None);
-    assert!(picker.tile_answered(11, Some(FileId(5))));
-    assert!(!picker.tile_answered(12, Some(FileId(6))));
+    assert!(picker.tile_answered(RequestId(11), Some(FileId(5))));
+    assert!(!picker.tile_answered(RequestId(12), Some(FileId(6))));
     assert_eq!(picker.tiles(), vec![(key, FileId(5))]);
     picker.moved_to(picker.view().panned(100., 0.));
     assert_eq!(picker.tile_to_request(), None, "no tile while moving");
     picker.move_ended();
     let next = picker.tile_to_request().expect("next tile");
     assert_ne!(next, key);
-    picker.tile_requested(next, 12);
-    picker.tile_answered(12, Some(FileId(6)));
+    picker.tile_requested(next, RequestId(12));
+    picker.tile_answered(RequestId(12), Some(FileId(6)));
     assert_eq!(picker.tiles().last(), Some(&(next, FileId(6))));
 }
 
@@ -298,8 +307,8 @@ fn tiles_are_bounded() {
         picker.moved_to(picker.view().panned(400., 0.));
         picker.move_ended();
         let key = picker.tile_to_request().expect("tile");
-        picker.tile_requested(key, n);
-        picker.tile_answered(n, Some(FileId(n as i32)));
+        picker.tile_requested(key, RequestId(n));
+        picker.tile_answered(RequestId(n), Some(FileId(n as i32)));
     }
     assert!(picker.tiles().len() <= 24);
 }
@@ -313,9 +322,9 @@ fn fail_the_tile_until_it_rests(picker: &mut LocationPicker) -> TileKey {
         assert_eq!(again, key);
         asks += 1;
         assert!(asks <= 3, "a failing tile is not asked for without end");
-        picker.tile_requested(key, asks);
+        picker.tile_requested(key, RequestId(asks));
         assert_eq!(picker.tile_to_request(), None, "one ask at a time");
-        assert!(picker.tile_answered(asks, None));
+        assert!(picker.tile_answered(RequestId(asks), None));
     }
     assert_eq!(asks, 3, "a lost answer is asked again, a few times");
     key
@@ -332,8 +341,8 @@ fn a_failed_tile_is_asked_a_few_times_then_again_once_the_map_rests() {
     picker.moved_to(view);
     picker.move_ended();
     assert_eq!(picker.tile_to_request(), Some(key), "asked after a move");
-    picker.tile_requested(key, 9);
-    assert!(picker.tile_answered(9, Some(FileId(5))));
+    picker.tile_requested(key, RequestId(9));
+    assert!(picker.tile_answered(RequestId(9), Some(FileId(5))));
     assert_eq!(picker.tile_to_request(), None);
     assert_eq!(picker.tiles(), vec![(key, FileId(5))]);
 }
@@ -369,10 +378,36 @@ fn a_tile_whose_ask_cannot_be_sent_is_not_asked_on_every_pass() {
     // A refused send between two failed answers counts with them.
     let mut picker = fresh();
     picker.set_map_size(SIZE);
-    picker.tile_requested(key, 1);
-    assert!(picker.tile_answered(1, None));
+    picker.tile_requested(key, RequestId(1));
+    assert!(picker.tile_answered(RequestId(1), None));
     picker.tile_unsent(key);
-    picker.tile_requested(key, 2);
-    assert!(picker.tile_answered(2, None));
+    picker.tile_requested(key, RequestId(2));
+    assert!(picker.tile_answered(RequestId(2), None));
     assert_eq!(picker.tile_to_request(), None);
+}
+
+/// Sweep r3-02 (05-005): a venue query or a tile whose request the session
+/// dropped fails like an error would, instead of waiting for good.
+#[test]
+fn requests_the_session_dropped_fail_the_list_and_the_tile() {
+    use std::collections::HashSet;
+    let mut picker = fresh();
+    picker.set_map_size(SIZE);
+    picker.geolocated(GeoOutcome::Found(point(48.85, 2.35)), true);
+    picker.venue_query_to_send().expect("nearby");
+    picker.venue_query_requested(RequestId(1));
+    let key = picker.tile_to_request().expect("tile");
+    picker.tile_requested(key, RequestId(2));
+    // Both still pending: nothing changes.
+    picker.forget_dropped(&HashSet::from([RequestId(1), RequestId(2)]));
+    assert_eq!(picker.venues(), &VenueList::Loading);
+    assert_eq!(picker.tile_to_request(), None);
+    // Gone from the table without an answer: the list says it failed and
+    // the tile is asked for again.
+    picker.forget_dropped(&HashSet::new());
+    assert_eq!(picker.venues(), &VenueList::Failed);
+    assert_eq!(picker.tile_to_request(), Some(key));
+    // Retry asks for the venues again.
+    picker.retry_venues();
+    assert!(picker.venue_query_to_send().is_some());
 }

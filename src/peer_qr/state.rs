@@ -4,9 +4,10 @@
 //! alone, and runs the effects [`PeerQrBox::apply`] returns.
 
 use super::appearance::{Appearance, Swatch, SwatchKey};
-use super::free::{FreeMenuItem, FreeMode, FreeRequest, FreeResult, FreeState, FreeTicket, FreeUi};
+use super::free::{FreeMenuItem, FreeMode, FreeRequest, FreeResult, FreeState, FreeUi};
 use super::link::SHARE_CUTOFF_SECS;
 use super::theme::{ThemeChoice, ThemeEmoji, ThemeGift};
+use crate::ids::RequestId;
 use crate::lang::Key;
 
 /// tdesktop `kMaxEmojiPicks`.
@@ -46,13 +47,6 @@ pub enum QrPanel {
     Gifts,
 }
 
-/// Tells this box's save answers from an earlier box's or request's.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct SaveTicket {
-    pub box_id: u64,
-    pub serial: u64,
-}
-
 /// Something the user did in the box, or a fact it reacts to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QrAction {
@@ -70,10 +64,22 @@ pub enum QrAction {
     RetryGifts,
     /// The peer's saved theme, as the session now knows it.
     Served(ThemeChoice),
-    /// A `setProfileShareTheme` came back: the theme it saved, or the
-    /// reason it failed (empty when there is none to tell).
+    /// `setProfileShareTheme` for `choice` went out as `request`: the box
+    /// waits for that request's answer.
+    SaveSent {
+        request: RequestId,
+        choice: ThemeChoice,
+    },
+    /// `setProfileShareTheme` for `choice` could not be sent: the pick
+    /// stays on screen and is not sent again until it changes.
+    SaveUnsent {
+        choice: ThemeChoice,
+    },
+    /// The `setProfileShareTheme` sent as `request` came back: the theme it
+    /// saved, or the reason it failed (empty when there is none to tell).
+    /// Only the request the box waits for counts.
     SaveAnswer {
-        ticket: SaveTicket,
+        request: RequestId,
         result: Result<ThemeChoice, String>,
     },
     /// The box is closing: a pick still unsaved is saved now.
@@ -82,9 +88,18 @@ pub enum QrAction {
     PillClicked,
     MenuDismissed,
     MenuChose(FreeMenuItem),
-    /// A free-code `getUserLink` came back.
+    /// A free-code `getUserLink` of this `what` went out as `request`.
+    FreeSent {
+        what: FreeRequest,
+        request: RequestId,
+    },
+    /// A free-code `getUserLink` could not be sent.
+    FreeUnsent,
+    /// The free-code `getUserLink` sent as `request` came back (or was
+    /// found gone, as an empty error). Only the request the pill waits for
+    /// counts.
     FreeAnswer {
-        ticket: FreeTicket,
+        request: RequestId,
         result: FreeResult,
     },
     /// The clock moved: a temporary code may have run out.
@@ -135,11 +150,13 @@ pub enum QrToast {
 /// Work the UI does after an action.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QrEffect {
-    RequestFreeCode(FreeTicket),
+    /// `getUserLink` for a free code; the UI tells the box how it went
+    /// ([`QrAction::FreeSent`] or [`QrAction::FreeUnsent`]).
+    RequestFreeCode(FreeRequest),
     Toast(QrToast),
-    /// `setProfileShareTheme` with `choice`.
+    /// `setProfileShareTheme` with `choice`; the UI tells the box how it
+    /// went ([`QrAction::SaveSent`] or [`QrAction::SaveUnsent`]).
     SaveTheme {
-        ticket: SaveTicket,
         choice: ThemeChoice,
     },
     /// The owned upgraded gifts: the first page again, or the next one.
@@ -160,7 +177,7 @@ pub struct ShownLink {
 /// The open box.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PeerQrBox {
-    /// Tells this box's free-code answers from an earlier box's.
+    /// Names this box for what outlives a poll step (the clock, the export).
     pub id: u64,
     pub subject: QrSubject,
     /// What the card shows: a color with emoji, or a gift (one value, so
@@ -173,16 +190,13 @@ pub struct PeerQrBox {
     /// Whether the box follows the saved theme or shows a pick, and the
     /// save of the pick ([`ThemeStage`]).
     pub theme: ThemeStage,
-    /// The serial of the last save sent; every save takes the next (an id
-    /// generator: the stage holds the serial that is current).
-    pub save_serial: u64,
 }
 
 /// The theme of the box, one stage at a time. `Following` leaves on the
 /// first pick; `Picked` leaves when a save goes out (`Saving`) or the right
 /// to save is lost (`Following`, showing the saved theme again); `Saving`
 /// leaves on its own answer, a newer save, or the lost right. An answer
-/// applies only while its serial is the one out.
+/// applies only while its request is the one out.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum ThemeStage {
     /// Nothing was picked: the box shows the saved theme and follows it
@@ -193,8 +207,11 @@ pub enum ThemeStage {
     /// the saved theme and saves the pick. `failed` is the pick whose save
     /// last failed: it is not sent again until the pick changes.
     Picked { failed: Option<ThemeChoice> },
-    /// The save of `choice` is out as `serial`.
-    Saving { serial: u64, choice: ThemeChoice },
+    /// The save of `choice` is out as `request`.
+    Saving {
+        request: RequestId,
+        choice: ThemeChoice,
+    },
 }
 
 impl ThemeStage {
@@ -237,13 +254,20 @@ impl PeerQrBox {
             free: FreeState::default(),
             served: None,
             theme: ThemeStage::default(),
-            save_serial: 0,
         }
     }
 
     /// The choice whose save is out, if one is.
     pub fn saving(&self) -> Option<&ThemeChoice> {
         self.theme.out()
+    }
+
+    /// The session request the box's save waits for, if one is out.
+    pub fn saving_request(&self) -> Option<RequestId> {
+        match &self.theme {
+            ThemeStage::Saving { request, .. } => Some(*request),
+            ThemeStage::Following | ThemeStage::Picked { .. } => None,
+        }
     }
 
     /// Colors and emoji are for a peer's own code only.
@@ -307,13 +331,17 @@ impl PeerQrBox {
                 }
             }
             QrAction::Served(choice) => self.served(choice),
-            QrAction::SaveAnswer { ticket, result } => return self.save_answer(ticket, result),
+            QrAction::SaveSent { request, choice } => self.save_sent(request, choice),
+            QrAction::SaveUnsent { choice } => self.save_unsent(choice),
+            QrAction::SaveAnswer { request, result } => return self.save_answer(request, result),
             QrAction::Closing => return self.save(env),
             QrAction::PillClicked => return self.pill_clicked(env),
             QrAction::MenuDismissed => self.free.close_menu(),
             QrAction::MenuChose(item) => return self.menu_chose(item, env),
-            QrAction::FreeAnswer { ticket, result } => {
-                return self.free_answer(ticket, result, env);
+            QrAction::FreeSent { what, request } => self.free.sent(what, request),
+            QrAction::FreeUnsent => return vec![QrEffect::Toast(QrToast::Unavailable)],
+            QrAction::FreeAnswer { request, result } => {
+                return self.free_answer(request, result, env);
             }
             QrAction::Tick => return self.tick(env),
             QrAction::Sync => {
@@ -420,32 +448,45 @@ impl PeerQrBox {
         if unchanged || failed_before || choice.input_json().is_none() {
             return Vec::new();
         }
-        self.save_serial += 1;
-        self.theme = ThemeStage::Saving {
-            serial: self.save_serial,
-            choice: choice.clone(),
-        };
-        vec![QrEffect::SaveTheme {
-            ticket: SaveTicket {
-                box_id: self.id,
-                serial: self.save_serial,
-            },
-            choice,
-        }]
+        vec![QrEffect::SaveTheme { choice }]
+    }
+
+    /// The save of `choice` went out as `request`: the box waits for it. A
+    /// save still out is let go (its answer no longer counts).
+    fn save_sent(&mut self, request: RequestId, choice: ThemeChoice) {
+        if matches!(
+            self.theme,
+            ThemeStage::Picked { .. } | ThemeStage::Saving { .. }
+        ) {
+            self.theme = ThemeStage::Saving { request, choice };
+        }
+    }
+
+    /// The save of `choice` could not be sent: the pick stays, and is not
+    /// sent again until it changes.
+    fn save_unsent(&mut self, choice: ThemeChoice) {
+        if matches!(
+            self.theme,
+            ThemeStage::Picked { .. } | ThemeStage::Saving { .. }
+        ) {
+            self.theme = ThemeStage::Picked {
+                failed: Some(choice),
+            };
+        }
     }
 
     /// tdesktop's save `done` and `fail`: the saved theme becomes the
     /// baseline; a failure is toasted and the pick stays on screen.
     fn save_answer(
         &mut self,
-        ticket: SaveTicket,
+        request: RequestId,
         result: Result<ThemeChoice, String>,
     ) -> Vec<QrEffect> {
-        if ticket.box_id != self.id {
-            return Vec::new();
-        }
         let sent = match std::mem::take(&mut self.theme) {
-            ThemeStage::Saving { serial, choice } if serial == ticket.serial => Some(choice),
+            ThemeStage::Saving {
+                request: out,
+                choice,
+            } if out == request => Some(choice),
             other => {
                 self.theme = other;
                 None
@@ -463,9 +504,12 @@ impl PeerQrBox {
                 Vec::new()
             }
             Err(reason) => {
-                if sent.is_some() {
-                    self.theme = ThemeStage::Picked { failed: sent };
+                // The UI tells the person about a failed save that is not
+                // the one out through the app's note.
+                if sent.is_none() {
+                    return Vec::new();
                 }
+                self.theme = ThemeStage::Picked { failed: sent };
                 if reason.is_empty() {
                     Vec::new()
                 } else {
@@ -482,12 +526,7 @@ impl PeerQrBox {
         {
             return Vec::new();
         }
-        let serial = self.free.begin_request(what);
-        vec![QrEffect::RequestFreeCode(FreeTicket {
-            request: what,
-            box_id: self.id,
-            serial,
-        })]
+        vec![QrEffect::RequestFreeCode(what)]
     }
 
     fn pill_clicked(&mut self, env: QrEnv) -> Vec<QrEffect> {
@@ -525,11 +564,15 @@ impl PeerQrBox {
     /// tdesktop `applyCode`, and its request's fail handler: a server
     /// error is only toasted; an empty or expired code is unavailable, and
     /// after a reset the fee is back.
-    fn free_answer(&mut self, ticket: FreeTicket, result: FreeResult, env: QrEnv) -> Vec<QrEffect> {
-        if ticket.box_id != self.id || !self.free.settle_request(&ticket) {
+    fn free_answer(
+        &mut self,
+        answered: RequestId,
+        result: FreeResult,
+        env: QrEnv,
+    ) -> Vec<QrEffect> {
+        let Some(request) = self.free.settle_request(answered) else {
             return Vec::new();
-        }
-        let request = ticket.request;
+        };
         if request.permanent() && env.temporary_only {
             return Vec::new();
         }

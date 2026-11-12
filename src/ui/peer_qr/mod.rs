@@ -36,11 +36,10 @@ use quill::lang::{keys, tr};
 use quill::peer_qr::free::FreeMode;
 use quill::peer_qr::link::OwnLinkState;
 use quill::peer_qr::session::PeerQrData;
-use quill::peer_qr::state::{
-    PeerQrBox, QrAction, QrEffect, QrPanel, QrPeer, QrSubject, QrToast, SaveTicket,
-};
+use quill::peer_qr::state::{PeerQrBox, QrAction, QrEffect, QrPanel, QrPeer, QrSubject, QrToast};
 use quill::peer_qr::theme::ThemeChoice;
 use quill::telegram::requests_privacy::PrivacySettingKey;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -442,23 +441,18 @@ impl QuillApp {
     fn run_qr_effects(&mut self, effects: Vec<QrEffect>, cx: &mut Context<Self>) {
         for effect in effects {
             match effect {
-                QrEffect::RequestFreeCode(ticket) => {
+                QrEffect::RequestFreeCode(what) => {
                     let sent = self
                         .live
                         .as_mut()
-                        .is_some_and(|live| live.driver.fetch_own_user_link(Some(ticket)).is_ok());
-                    if !sent {
-                        self.qr_act(
-                            QrAction::FreeAnswer {
-                                ticket,
-                                result: Err(String::new()),
-                            },
-                            cx,
-                        );
+                        .and_then(|live| live.driver.fetch_free_code(what).ok());
+                    match sent {
+                        Some(request) => self.qr_act(QrAction::FreeSent { what, request }, cx),
+                        None => self.qr_act(QrAction::FreeUnsent, cx),
                     }
                 }
                 QrEffect::Toast(toast) => self.show_qr_toast(toast, cx),
-                QrEffect::SaveTheme { ticket, choice } => self.qr_save_theme(ticket, choice, cx),
+                QrEffect::SaveTheme { choice } => self.qr_save_theme(choice, cx),
                 QrEffect::LoadGifts { more } => {
                     let now = quill::local_time::now_unix();
                     if let (Some(peer), Some(live)) = (self.qr_peer(), self.live.as_mut()) {
@@ -473,40 +467,58 @@ impl QuillApp {
 
     /// `setProfileShareTheme`; its answer comes back on a poll step. The
     /// demo has no server: the save is taken at once.
-    fn qr_save_theme(&mut self, ticket: SaveTicket, choice: ThemeChoice, cx: &mut Context<Self>) {
+    fn qr_save_theme(&mut self, choice: ThemeChoice, cx: &mut Context<Self>) {
         let Some(peer) = self.qr_peer() else {
             return;
         };
         if let Some(live) = self.live.as_mut() {
-            // A refused request leaves its own answer to take.
-            let _ = live.driver.save_share_theme(ticket, peer, choice);
+            let action = match live.driver.save_share_theme(peer, choice.clone()) {
+                Ok(request) => QrAction::SaveSent { request, choice },
+                Err(_) => QrAction::SaveUnsent { choice },
+            };
+            self.qr_act(action, cx);
             return;
         }
         let owner = self
             .session()
             .and_then(|session| session.qr_theme_owner(peer));
-        if let (Some(owner), Some(data)) = (owner, self.qr_data_mut()) {
-            data.start_save(ticket, owner, choice);
-            data.finish_save(ticket);
+        let (Some(owner), Some(session)) = (owner, self.demo_session.as_mut()) else {
+            return;
+        };
+        // A local token for the demo's save: the request is answered here,
+        // not by a server, so it leaves the table at once.
+        let request = session.request(
+            quill::state::RequestPurpose::Users(quill::state::UsersPurpose::SetProfileShareTheme),
+            None,
+        );
+        session.requests.take(request);
+        let data = &mut session.users_state.peer_qr;
+        data.start_save(request, owner, choice.clone());
+        self.qr_act(QrAction::SaveSent { request, choice }, cx);
+        if let Some(data) = self.qr_data_mut() {
+            data.finish_save(request);
         }
         self.qr_take_save_answers(cx);
     }
 
-    /// Save answers, for this box or an earlier one.
+    /// Save answers: the one the open box waits for settles it; any other
+    /// that failed (a pick saved as its box closed answers after the box is
+    /// gone) is told through the app's note, which outlives the box.
     fn qr_take_save_answers(&mut self, cx: &mut Context<Self>) -> bool {
         let answers = self
             .qr_data_mut()
             .map(|data| data.take_save_answers())
             .unwrap_or_default();
         let any = !answers.is_empty();
-        let shown = self.peer_qr.open.as_ref().map(|open| open.state.id);
-        for (ticket, result) in answers {
-            if shown == Some(ticket.box_id) {
-                self.qr_act(QrAction::SaveAnswer { ticket, result }, cx);
+        for (request, result) in answers {
+            let waited = self
+                .peer_qr
+                .open
+                .as_ref()
+                .is_some_and(|open| open.state.saving_request() == Some(request));
+            if waited {
+                self.qr_act(QrAction::SaveAnswer { request, result }, cx);
             } else if let Err(reason) = result {
-                // A pick saved as its box closed answers after the box is
-                // gone: a failure is told through the app's note, which
-                // outlives it.
                 let line = if reason.is_empty() {
                     tr(keys::Q_OPS_SHARE_THEME_NOT_SAVED).to_string()
                 } else {
@@ -650,13 +662,15 @@ impl QuillApp {
         let answers = data.take_free_answers();
         let failed = if own { data.take_contact_error() } else { None };
         if !open {
-            return self.qr_take_save_answers(cx);
+            let saved = self.qr_take_save_answers(cx);
+            return self.qr_settle_dropped_requests(cx) || saved;
         }
         let saved = self.qr_take_save_answers(cx);
-        let progressed = !answers.is_empty() || failed.is_some() || saved;
-        for (ticket, result) in answers {
-            self.qr_act(QrAction::FreeAnswer { ticket, result }, cx);
+        for (request, result) in answers.iter().cloned() {
+            self.qr_act(QrAction::FreeAnswer { request, result }, cx);
         }
+        let lost = self.qr_settle_dropped_requests(cx);
+        let progressed = !answers.is_empty() || failed.is_some() || saved || lost;
         if let Some(reason) = failed {
             let toast = if reason.is_empty() {
                 QrToast::Unavailable
@@ -669,6 +683,58 @@ impl QuillApp {
         self.qr_act(QrAction::Sync, cx);
         self.qr_refresh(cx);
         progressed
+    }
+
+    /// Requests the session no longer holds and nothing answered (a
+    /// reconnect or a client restart dropped them) end here, after the
+    /// answers were taken: the box's free-code pill and save stop waiting
+    /// for them (an empty reason, the same as a request that never left),
+    /// and the session's own waits (gifts list, contact link, saves in
+    /// flight) let go. Whether anything changed.
+    fn qr_settle_dropped_requests(&mut self, cx: &mut Context<Self>) -> bool {
+        let (free, save) = self.peer_qr.open.as_ref().map_or((None, None), |open| {
+            (open.state.free.waiting_for(), open.state.saving_request())
+        });
+        let Some(data) = self.qr_data_mut() else {
+            return false;
+        };
+        let session_waits = data.waits();
+        if !session_waits && free.is_none() && save.is_none() {
+            return false;
+        }
+        let Some(pending) = self.session().map(|session| {
+            session
+                .requests
+                .pending_ids()
+                .into_iter()
+                .collect::<HashSet<_>>()
+        }) else {
+            return false;
+        };
+        let mut changed = self
+            .qr_data_mut()
+            .is_some_and(|data| data.forget_dropped(&pending));
+        if let Some(request) = free.filter(|request| !pending.contains(request)) {
+            changed = true;
+            self.qr_act(
+                QrAction::FreeAnswer {
+                    request,
+                    result: Err(String::new()),
+                },
+                cx,
+            );
+        }
+        if let Some(request) = save.filter(|request| !pending.contains(request)) {
+            changed = true;
+            self.qr_act(
+                QrAction::SaveAnswer {
+                    request,
+                    result: Err(String::new()),
+                },
+                cx,
+            );
+        }
+        changed
     }
 
     /// Your own box: the driver asks for a temporary contact link when

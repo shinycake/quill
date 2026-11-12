@@ -24,16 +24,23 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// connection strip needs to know whether a proxy is enabled), and
     /// again whenever a mutation marked the list stale.
     pub fn maybe_fetch_proxies(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        self.maybe_fetch_proxies_at(std::time::Instant::now())
+    }
+
+    fn maybe_fetch_proxies_at(
+        &mut self,
+        now: std::time::Instant,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.proxy_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let proxy = &self.session.settings.proxy;
-        if !proxy.ops.wanted() {
+        if !proxy.ops.wanted(now) {
             return Ok(None);
         }
         // Background refetch: the box's error line is the user's, and a
         // list refresh the driver asked for does not wipe it.
-        self.send_get_proxies().map(Some)
+        self.send_get_proxies_at(now).map(Some)
     }
 
     /// Explicit refresh (the dialog's open / Refresh).
@@ -43,10 +50,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some(out) = self.session.settings.proxy.ops.fetch_out() {
             return Ok(out);
         }
-        self.send_get_proxies()
+        self.send_get_proxies_at(std::time::Instant::now())
     }
 
-    fn send_get_proxies(&mut self) -> Result<RequestId, ConnectSendError> {
+    fn send_get_proxies_at(
+        &mut self,
+        now: std::time::Instant,
+    ) -> Result<RequestId, ConnectSendError> {
         if !self.proxy_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -58,9 +68,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             Err(err) => {
                 self.session.requests.take(extra);
-                // Not retried by the tick, owed or not: the dialog's
-                // open / Refresh asks again.
-                self.session.settings.proxy.ops.fetch_unsent();
+                // Asked again by `ingest` once the retry wait is over.
+                self.session.settings.proxy.ops.fetch_unsent(now);
                 Err(err)
             }
         }
@@ -69,12 +78,19 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Refetch after a mutation marked the list stale (called from
     /// `ingest`, the `refresh_*_if_stale` pattern).
     pub fn refresh_proxies_if_stale(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        self.refresh_proxies_if_stale_at(std::time::Instant::now())
+    }
+
+    pub(crate) fn refresh_proxies_if_stale_at(
+        &mut self,
+        now: std::time::Instant,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
         // `parity:data-proxy-web`: carriers TDLib opened or closed.
         self.run_carrier_work();
-        if !self.session.settings.proxy.ops.stale() {
+        if !self.session.settings.proxy.ops.refetch_due(now) {
             return Ok(None);
         }
-        self.maybe_fetch_proxies()
+        self.maybe_fetch_proxies_at(now)
     }
 
     /// `by` is the system step this mutation carries out; `None` is the

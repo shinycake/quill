@@ -70,7 +70,7 @@ impl Session {
                     .map(|_| user_id.0),
                 _ => None,
             };
-            self.location.venue_bot_resolved(pending.id.0, bot);
+            self.location.venue_bot_resolved(pending.id, bot);
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::ResolveGifSearchBot) {
             self.stickers.gifs.search_bot_user_id = match &kind {

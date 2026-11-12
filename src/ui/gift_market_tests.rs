@@ -133,7 +133,7 @@ fn closing_the_buy_box_mid_purchase_keeps_the_purchase(cx: &mut TestAppContext) 
         assert!(
             app.session()
                 .and_then(|s| s.payments.gift_market.buy.as_ref())
-                .is_some_and(|buy| buy.waits_for(41)),
+                .is_some_and(|buy| buy.waits_for(quill::ids::RequestId(41))),
             "the purchase in flight stays for its answer"
         );
     });
@@ -316,7 +316,10 @@ fn two_failed_answers_in_one_frame_both_toast(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     app.update_in(vcx, |app, window, cx| {
         if let Some(market) = app.gift_market_mut() {
-            market.notes = vec!["Purchase failed".into(), "Craft failed".into()];
+            market.events = vec![
+                quill::gift_market::MarketEvent::Note("Purchase failed".into()),
+                quill::gift_market::MarketEvent::Note("Craft failed".into()),
+            ];
         }
         app.gift_market_frame_upkeep(window, cx);
         let toasts = &app.connection.toasts;
@@ -394,7 +397,7 @@ fn another_asks_auction_answer_does_not_open_this_asks_box(cx: &mut TestAppConte
         app.gift_market.flow.begin_opening(quill::ids::RequestId(7));
         let other = quill::gift_market::AuctionFetch::Ready {
             gift_id: AUCTION_GIFT,
-            request: 8,
+            request: quill::ids::RequestId(8),
         };
         if let Some(session) = app.demo_session.as_mut() {
             session.payments.gift_market.auction = other;

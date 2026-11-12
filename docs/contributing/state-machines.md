@@ -98,7 +98,10 @@ cannot tell its own answer from another request's, and it cannot cancel
 its work when it is replaced. The check rejects a variant named as work
 in flight (`Loading`, `Asking`, `Sending`, `Sent`, `Waiting`, `Pending`,
 `Running`, ...) that has no data (`bare`), or whose data holds no
-`RequestId`, `Task`, channel end or deadline (`unkeyed`).
+`RequestId`, `Task`, channel end or deadline (`unkeyed`). It also rejects a
+field named `request`, `extra`, `request_id`, `generation` or `serial` typed
+`u64` in any stage variant (`rawid`): a counter standing in for the
+`RequestId`, which a request the session dropped cannot be tied to.
 
 - Fix: `Loading { request: RequestId }`, compared when the answer comes,
   or `Fetch<T>`, which already does this. For local work hold the `Task`

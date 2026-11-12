@@ -6,7 +6,7 @@ use crate::peer_qr::appearance::{DEFAULT_CENTER, DEFAULT_EDGE, ShareThemeBackdro
 use crate::peer_qr::color::Rgb;
 use crate::peer_qr::requests::{GiftsOwner, get_share_theme_gifts, set_profile_share_theme};
 use crate::peer_qr::state::{
-    PeerQrBox, QrAction, QrEffect, QrEnv, QrPanel, QrPeer, QrSubject, QrToast, SaveTicket,
+    PeerQrBox, QrAction, QrEffect, QrEnv, QrPanel, QrPeer, QrSubject, QrToast,
 };
 use crate::peer_qr::theme::{
     BACKDROPS_LOAD_SECS, BACKDROPS_REFRESH_SECS, Backdrops, BackdropsStage, GiftsLayout,
@@ -59,20 +59,20 @@ fn saves(effects: &[QrEffect]) -> Vec<ThemeChoice> {
     effects
         .iter()
         .filter_map(|effect| match effect {
-            QrEffect::SaveTheme { choice, .. } => Some(choice.clone()),
+            QrEffect::SaveTheme { choice } => Some(choice.clone()),
             _ => None,
         })
         .collect()
 }
 
-fn ticket_of(effects: &[QrEffect]) -> SaveTicket {
-    effects
-        .iter()
-        .find_map(|effect| match effect {
-            QrEffect::SaveTheme { ticket, .. } => Some(*ticket),
-            _ => None,
-        })
-        .unwrap()
+/// What the UI does with a save effect: sends it and tells the box which
+/// request it went out as.
+fn sent(qr: &mut PeerQrBox, effects: &[QrEffect]) -> RequestId {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let request = RequestId(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+    let choice = saves(effects).into_iter().next().unwrap();
+    qr.apply(QrAction::SaveSent { request, choice }, env(true));
+    request
 }
 
 #[test]
@@ -336,13 +336,13 @@ fn picks_preview_and_save_once_the_panel_closes() {
         emoji: Vec::new(),
     };
     assert_eq!(saves(&effects), vec![picked.clone()]);
+    let request = sent(&mut qr, &effects);
     // The same pick again is not sent twice while it is saving.
     qr.apply(QrAction::OpenPanel(QrPanel::Colors), env(true));
     assert!(qr.apply(QrAction::ClosePanel, env(true)).is_empty());
-    let ticket = ticket_of(&effects);
     qr.apply(
         QrAction::SaveAnswer {
-            ticket,
+            request,
             result: Ok(picked.clone()),
         },
         env(true),
@@ -435,10 +435,10 @@ fn a_failed_save_is_toasted_and_the_pick_stays() {
     qr.apply(QrAction::OpenPanel(QrPanel::Colors), env(true));
     qr.apply(QrAction::PickColor(SwatchKey::Backdrop(3)), env(true));
     let effects = qr.apply(QrAction::ClosePanel, env(true));
-    let ticket = ticket_of(&effects);
+    let request = sent(&mut qr, &effects);
     let effects = qr.apply(
         QrAction::SaveAnswer {
-            ticket,
+            request,
             result: Err("Too many attempts.".into()),
         },
         env(true),
@@ -452,25 +452,87 @@ fn a_failed_save_is_toasted_and_the_pick_stays() {
     assert_eq!(qr.color(), SwatchKey::Backdrop(3));
     let silent = qr.apply(
         QrAction::SaveAnswer {
-            ticket,
+            request,
             result: Err(String::new()),
         },
         env(true),
     );
     assert!(silent.is_empty());
-    // Another box's answer is ignored.
-    let other = SaveTicket {
-        box_id: qr.id + 1,
-        serial: ticket.serial,
-    };
+    // Another box's request (another id) is ignored.
     let effects = qr.apply(
         QrAction::SaveAnswer {
-            ticket: other,
+            request: RequestId(u64::MAX),
             result: Err("x".into()),
         },
         env(true),
     );
     assert!(effects.is_empty());
+}
+
+#[test]
+fn a_save_that_could_not_be_sent_stays_picked_and_is_not_retried() {
+    let mut qr = own_box();
+    qr.apply(QrAction::Served(ThemeChoice::default()), env(true));
+    let effects = pick_and_close(&mut qr, SwatchKey::Backdrop(3));
+    // Nothing is out until the UI says the request went out.
+    assert!(qr.saving_request().is_none());
+    qr.apply(
+        QrAction::SaveUnsent {
+            choice: saves(&effects).remove(0),
+        },
+        env(true),
+    );
+    assert!(qr.saving_request().is_none());
+    assert!(saves(&qr.apply(QrAction::Closing, env(true))).is_empty());
+    // Another pick goes out again.
+    let effects = pick_and_close(&mut qr, SwatchKey::Backdrop(4));
+    assert_eq!(saves(&effects), vec![backdrop_pick(4)]);
+}
+
+#[test]
+fn the_save_the_session_dropped_ends_with_an_empty_answer() {
+    let mut qr = own_box();
+    qr.apply(QrAction::Served(ThemeChoice::default()), env(true));
+    let effects = pick_and_close(&mut qr, SwatchKey::Backdrop(3));
+    let request = sent(&mut qr, &effects);
+    assert_eq!(qr.saving_request(), Some(request));
+    // The UI found the request gone from the table: an empty failure.
+    let toasts = qr.apply(
+        QrAction::SaveAnswer {
+            request,
+            result: Err(String::new()),
+        },
+        env(true),
+    );
+    assert!(toasts.is_empty());
+    assert!(qr.saving_request().is_none(), "the box stops waiting");
+    assert!(saves(&qr.apply(QrAction::Closing, env(true))).is_empty());
+}
+
+#[test]
+fn requests_the_session_dropped_are_forgotten_by_the_data() {
+    use crate::peer_qr::link::UserLinkFetch;
+    use crate::peer_qr::session::PeerQrData;
+    use crate::peer_qr::theme::ThemeOwner;
+    use std::collections::HashSet;
+    let mut data = PeerQrData::default();
+    data.start_save(RequestId(1), ThemeOwner::User(1), ThemeChoice::default());
+    data.start_save(RequestId(2), ThemeOwner::User(1), ThemeChoice::default());
+    data.contact_link = UserLinkFetch::Loading(RequestId(3));
+    assert!(data.waits());
+    assert!(data.forget_dropped(&HashSet::from([RequestId(2), RequestId(3)])));
+    assert_eq!(
+        data.saves.keys().copied().collect::<Vec<_>>(),
+        vec![RequestId(2)]
+    );
+    assert_eq!(data.contact_link, UserLinkFetch::Loading(RequestId(3)));
+    // Nothing dropped, nothing reported: the poll is not asked to redraw.
+    assert!(!data.forget_dropped(&HashSet::from([RequestId(2), RequestId(3)])));
+    assert!(data.forget_dropped(&HashSet::new()));
+    assert!(!data.forget_dropped(&HashSet::new()));
+    assert!(data.saves.is_empty());
+    assert_eq!(data.contact_link, UserLinkFetch::Failed(None));
+    assert!(!data.waits());
 }
 
 #[test]
@@ -522,10 +584,10 @@ fn a_failed_save_is_sent_again_only_after_another_pick() {
     let mut qr = own_box();
     qr.apply(QrAction::Served(ThemeChoice::default()), env(true));
     let effects = pick_and_close(&mut qr, SwatchKey::Backdrop(3));
-    let ticket = ticket_of(&effects);
+    let request = sent(&mut qr, &effects);
     qr.apply(
         QrAction::SaveAnswer {
-            ticket,
+            request,
             result: Err("Too many attempts.".into()),
         },
         env(true),
@@ -539,9 +601,10 @@ fn a_failed_save_is_sent_again_only_after_another_pick() {
     // after it.
     let effects = pick_and_close(&mut qr, SwatchKey::Backdrop(4));
     assert_eq!(saves(&effects), vec![backdrop_pick(4)]);
+    let request = sent(&mut qr, &effects);
     qr.apply(
         QrAction::SaveAnswer {
-            ticket: ticket_of(&effects),
+            request,
             result: Ok(backdrop_pick(4)),
         },
         env(true),
@@ -556,19 +619,21 @@ fn a_failed_save_is_sent_again_only_after_another_pick() {
 fn a_late_answer_of_an_older_save_does_not_free_a_failed_pick() {
     let mut qr = own_box();
     qr.apply(QrAction::Served(ThemeChoice::default()), env(true));
-    let first = ticket_of(&pick_and_close(&mut qr, SwatchKey::Backdrop(3)));
-    let second = ticket_of(&pick_and_close(&mut qr, SwatchKey::Backdrop(4)));
-    assert_ne!(first.serial, second.serial);
+    let effects = pick_and_close(&mut qr, SwatchKey::Backdrop(3));
+    let first = sent(&mut qr, &effects);
+    let effects = pick_and_close(&mut qr, SwatchKey::Backdrop(4));
+    let second = sent(&mut qr, &effects);
+    assert_ne!(first, second);
     qr.apply(
         QrAction::SaveAnswer {
-            ticket: second,
+            request: second,
             result: Err("Too many attempts.".into()),
         },
         env(true),
     );
     qr.apply(
         QrAction::SaveAnswer {
-            ticket: first,
+            request: first,
             result: Ok(backdrop_pick(3)),
         },
         env(true),
@@ -592,19 +657,24 @@ fn the_default_is_not_saved_while_the_saved_theme_is_unknown() {
 }
 
 #[test]
-fn a_gifts_request_for_another_owner_never_reuses_a_serial() {
+fn a_gifts_request_for_another_owner_never_matches_the_old_one() {
     use crate::peer_qr::theme::{GIFTS_RETRY_SECS, ThemeOwner};
     let me = ThemeOwner::User(1);
     let channel = ThemeOwner::Supergroup(113);
     let mut gifts = ThemeGifts::default();
-    let own = gifts.start(me, false, 0).unwrap();
-    let theirs = gifts.start(channel, false, 0).unwrap();
-    assert_ne!(own.serial, theirs.serial);
-    assert!(!gifts.is_current(me, own.serial));
-    assert!(gifts.is_current(channel, theirs.serial));
+    assert_eq!(gifts.plan(me, false, 0), Some(String::new()));
+    gifts.asked(RequestId(1), 0);
+    assert!(gifts.is_current(RequestId(1)));
+    // The list moves to another owner: the old page is no longer the one
+    // waited for, and the new request is.
+    assert_eq!(gifts.plan(channel, false, 0), Some(String::new()));
+    assert!(!gifts.is_current(RequestId(1)), "the old owner's page");
+    gifts.asked(RequestId(2), 0);
+    assert!(gifts.is_current(RequestId(2)));
     // A failed next page waits, then may be asked for again.
     gifts.accept(vec![gift(1, "r1")], "page2".into(), true);
-    assert!(gifts.start(channel, true, 10).is_some());
+    assert_eq!(gifts.plan(channel, true, 10), Some("page2".into()));
+    gifts.asked(RequestId(3), 10);
     gifts.fail();
     assert_eq!(gifts.list.len(), 1);
     assert!(!gifts.wants_more(10 + GIFTS_RETRY_SECS - 1));
@@ -612,11 +682,29 @@ fn a_gifts_request_for_another_owner_never_reuses_a_serial() {
 }
 
 #[test]
+fn a_gifts_request_the_session_dropped_fails_instead_of_loading_for_good() {
+    use crate::peer_qr::theme::ThemeOwner;
+    use std::collections::HashSet;
+    let owner = ThemeOwner::User(1);
+    let mut gifts = ThemeGifts::default();
+    gifts.plan(owner, false, 0).unwrap();
+    gifts.asked(RequestId(4), 0);
+    assert!(gifts.asking());
+    // Still pending: nothing changes.
+    gifts.forget_dropped(&HashSet::from([RequestId(4)]));
+    assert!(gifts.asking());
+    // Gone from the table with no answer: the panel stops waiting.
+    gifts.forget_dropped(&HashSet::new());
+    assert!(!gifts.asking());
+    assert_eq!(gifts_layout(&gifts), GiftsLayout::Empty);
+}
+
+#[test]
 fn a_refused_gifts_request_settles_the_panel_instead_of_asking_every_frame() {
     use crate::peer_qr::theme::{GIFTS_RETRY_SECS, ThemeOwner};
     let owner = ThemeOwner::User(1);
     let mut gifts = ThemeGifts::default();
-    gifts.start(owner, false, 0).unwrap();
+    gifts.plan(owner, false, 0).unwrap();
     gifts.accept(vec![gift(1, "r1")], "page2".into(), true);
     assert!(gifts.wants_more(20));
     gifts.refuse(20);
@@ -625,7 +713,7 @@ fn a_refused_gifts_request_settles_the_panel_instead_of_asking_every_frame() {
     // No first page ever: a failure with Retry, not an empty list that
     // stays until the box is reopened, and not a spinner for good.
     let mut fresh = ThemeGifts::default();
-    fresh.start(owner, false, 20).unwrap();
+    fresh.plan(owner, false, 20).unwrap();
     fresh.refuse(20);
     assert_eq!(gifts_layout(&fresh), GiftsLayout::Failed);
     assert!(
@@ -633,9 +721,10 @@ fn a_refused_gifts_request_settles_the_panel_instead_of_asking_every_frame() {
         "a retry is the user's, not a frame's"
     );
     // Retry asks for the first page again; it lands like any first page.
-    let retry = fresh.start(owner, false, 30).unwrap();
+    let offset = fresh.plan(owner, false, 30).unwrap();
+    fresh.asked(RequestId(5), 30);
     assert_eq!(gifts_layout(&fresh), GiftsLayout::Loading);
-    assert_eq!(retry.offset, "");
+    assert_eq!(offset, "");
     fresh.accept(vec![gift(1, "r1")], String::new(), true);
     assert_eq!(gifts_layout(&fresh), GiftsLayout::Wide(1));
 }

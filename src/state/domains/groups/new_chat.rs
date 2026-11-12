@@ -2,7 +2,7 @@
 //! the photo set once the chat exists, and how the request ended
 //! (`crate::new_chat`).
 use crate::lang::{keys, tr};
-use crate::new_chat::{CreateProgress, CreationOutcome, NewChatKind, NewChatStage, TypeSaveStage};
+use crate::new_chat::{CreationOutcome, NewChatKind, NewChatStage, TypeSaveStage};
 use crate::profile_photo_sources::ChatPhotoInput;
 use crate::state::*;
 
@@ -120,35 +120,30 @@ impl Session {
     /// step at once: the create request is not held past its answer.
     pub fn settled_new_chat(&self, kind: NewChatKind, stage: &NewChatStage) -> NewChatStage {
         match stage {
-            NewChatStage::Creating {
-                request,
-                back,
-                progress: CreateProgress::InFlight,
-            } => {
+            NewChatStage::Creating { request, back } => {
                 let outcome = self
                     .groups
                     .new_chats
                     .creations
                     .get(request)
                     .and_then(NewChatCreation::outcome);
-                let progress = match outcome {
+                match outcome {
                     Some(CreationOutcome::Created(chat)) if kind.is_supergroup() => {
-                        return NewChatStage::Type {
+                        NewChatStage::Type {
                             chat,
                             save: TypeSaveStage::Editing,
-                        };
+                        }
                     }
-                    Some(CreationOutcome::Created(chat)) => CreateProgress::Created(chat),
+                    Some(CreationOutcome::Created(chat)) => NewChatStage::Created(chat),
                     Some(CreationOutcome::Failed { failure, reason }) => {
-                        CreateProgress::Refused { failure, reason }
+                        NewChatStage::CreateRefused {
+                            back: *back,
+                            failure,
+                            reason,
+                        }
                     }
-                    None if self.requests.get(*request).is_some() => CreateProgress::InFlight,
-                    None => CreateProgress::Lost,
-                };
-                NewChatStage::Creating {
-                    request: *request,
-                    back: *back,
-                    progress,
+                    None if self.requests.get(*request).is_some() => stage.clone(),
+                    None => NewChatStage::CreateLost { back: *back },
                 }
             }
             NewChatStage::Type {

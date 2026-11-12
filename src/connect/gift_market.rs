@@ -133,7 +133,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some(search) = search {
             match &result {
                 Ok(extra) => {
-                    search.load.begin(extra.0, extends);
+                    search.load.begin(*extra, extends);
                 }
                 Err(_) => search
                     .load
@@ -243,7 +243,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         });
         let market = &mut self.session.payments.gift_market;
         if let Ok(extra) = &result {
-            market.auction = AuctionFetch::Loading { request: extra.0 };
+            market.auction = AuctionFetch::Loading { request: *extra };
         }
         result
     }
@@ -275,7 +275,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.payments.gift_market.follow = match &result {
             Ok(extra) => AuctionFollow::Following {
                 gift_id: new,
-                request: extra.0,
+                request: *extra,
             },
             Err(_) => AuctionFollow::Failed(new),
         };
@@ -507,7 +507,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some(craft) = self.session.payments.gift_market.craft.as_mut() {
             match &result {
                 Ok(extra) => {
-                    craft.candidates_load.begin(extra.0, extends);
+                    craft.candidates_load.begin(*extra, extends);
                 }
                 Err(_) => craft
                     .candidates_load
@@ -546,7 +546,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Ok(extra) = &result
             && let Some(craft) = self.session.payments.gift_market.craft.as_mut()
         {
-            craft.run = CraftRun::Crafting { request: extra.0 };
+            craft.run = CraftRun::Crafting { request: *extra };
         }
         result
     }

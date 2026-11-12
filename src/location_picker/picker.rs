@@ -7,7 +7,8 @@
 use super::geo::{GeoOutcome, GeoPoint, same_place};
 use super::map_view::{MapSize, MapView, START_ZOOM, TileKey};
 use super::venues::{Venue, VenueList, normalize_query};
-use crate::ids::{ChatId, FileId};
+use crate::ids::{ChatId, FileId, RequestId};
+use std::collections::HashSet;
 
 const TILE_CAP: usize = 24;
 
@@ -73,7 +74,12 @@ enum AskStage {
     /// Not sent yet (the bot is still being looked up, or the driver has
     /// not picked it up).
     Unsent,
-    InFlight,
+    /// Sent as `request`; only its answer or error settles it, and a
+    /// request the session no longer holds ends it
+    /// ([`LocationPicker::forget_dropped`]).
+    InFlight {
+        request: RequestId,
+    },
     Answered,
     /// The lookup failed: asking for the same again sends it again.
     Failed,
@@ -93,7 +99,6 @@ struct VenueSearch {
     list: VenueList,
     request: Option<VenueAsk>,
     initial_query: String,
-    generation: u64,
     cache: Vec<(String, GeoPoint, Vec<Venue>)>,
     /// Where a search looks (tdesktop `_venuesSearchLocation`); a search
     /// is offered once it is known.
@@ -131,9 +136,9 @@ impl SearchInput {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum TileState {
-    /// Asked under request `extra`, after `failed` asks for it failed.
+    /// Asked as `request`, after `failed` asks for it failed.
     Requested {
-        extra: u64,
+        request: RequestId,
         failed: u8,
     },
     Ready(FileId),
@@ -171,12 +176,7 @@ impl LocationPicker {
     /// tdesktop `LocationPicker::setup`: start at the last exact fix when
     /// there is one (and look for places and the address there), else at
     /// `fallback` (the system country) or Null Island.
-    pub(super) fn open(
-        chat_id: ChatId,
-        last_exact: Option<GeoPoint>,
-        fallback: GeoPoint,
-        first_generation: u64,
-    ) -> Self {
+    pub(super) fn open(chat_id: ChatId, last_exact: Option<GeoPoint>, fallback: GeoPoint) -> Self {
         let view = match last_exact {
             Some(point) => MapView::new(point, START_ZOOM),
             None => MapView::new(fallback, 0),
@@ -192,7 +192,6 @@ impl LocationPicker {
                 list: VenueList::Loading,
                 request: None,
                 initial_query: String::new(),
-                generation: first_generation,
                 cache: Vec::new(),
                 search_location: None,
                 no_search_location: None,
@@ -478,7 +477,6 @@ impl LocationPicker {
             stage: AskStage::Answered,
         });
         self.venues.initial_query = query.to_string();
-        self.venues.generation += 1;
         self.apply_venues(list);
         true
     }
@@ -492,14 +490,13 @@ impl LocationPicker {
             && ask.point.same_place(&point)
             && ask.query == normalized
             && match ask.stage {
-                AskStage::Unsent | AskStage::InFlight => true,
+                AskStage::Unsent | AskStage::InFlight { .. } => true,
                 AskStage::Answered => self.venues.list != VenueList::Loading,
                 AskStage::Failed => false,
             }
         {
             return;
         }
-        self.venues.generation += 1;
         self.venues.list = VenueList::Loading;
         self.venues.request = Some(VenueAsk {
             point,
@@ -509,29 +506,32 @@ impl LocationPicker {
         self.venues.initial_query = query.to_string();
     }
 
-    /// The generation the next picker numbers its queries from, so a
-    /// late answer of this one never matches there.
-    pub(super) fn generation(&self) -> u64 {
-        self.venues.generation
-    }
-
-    pub(super) fn venue_query_to_send(&self) -> Option<(u64, GeoPoint, String)> {
+    pub(super) fn venue_query_to_send(&self) -> Option<(GeoPoint, String)> {
         let ask = self.venues.request.as_ref()?;
-        (ask.stage == AskStage::Unsent)
-            .then(|| (self.venues.generation, ask.point, ask.query.clone()))
+        (ask.stage == AskStage::Unsent).then(|| (ask.point, ask.query.clone()))
     }
 
-    pub(super) fn venue_query_sent(&mut self, generation: u64) {
-        if generation == self.venues.generation
-            && let Some(ask) = self.venues.request.as_mut()
+    /// The query to send went out as `request`.
+    pub(super) fn venue_query_requested(&mut self, request: RequestId) {
+        if let Some(ask) = self.venues.request.as_mut()
             && ask.stage == AskStage::Unsent
         {
-            ask.stage = AskStage::InFlight;
+            ask.stage = AskStage::InFlight { request };
         }
     }
 
-    pub(super) fn venues_answered(&mut self, generation: u64, venues: Vec<Venue>) {
-        if generation != self.venues.generation {
+    /// Whether the venue ask is the one sent as `request`.
+    fn venue_ask_is(&self, request: RequestId) -> bool {
+        self.venues
+            .request
+            .as_ref()
+            .is_some_and(|ask| ask.stage == (AskStage::InFlight { request }))
+    }
+
+    /// `request` answered the venue query: only the query out counts, so an
+    /// older query's answer changes nothing.
+    pub(super) fn venues_answered(&mut self, request: RequestId, venues: Vec<Venue>) {
+        if !self.venue_ask_is(request) {
             return;
         }
         if let Some(ask) = self.venues.request.as_mut() {
@@ -543,23 +543,55 @@ impl LocationPicker {
         self.apply_venues(venues);
     }
 
-    /// The lookup failed: the list says so and offers a retry.
-    pub(super) fn venues_failed(&mut self, generation: u64) {
-        if generation == self.venues.generation {
-            if let Some(ask) = self.venues.request.as_mut() {
-                ask.stage = AskStage::Failed;
-            }
-            self.venues.list = VenueList::Failed;
+    /// The venue query sent as `request` failed: the list says so and
+    /// offers a retry.
+    pub(super) fn venues_failed(&mut self, request: RequestId) {
+        if self.venue_ask_is(request) {
+            self.fail_venue_ask();
+        }
+    }
+
+    fn fail_venue_ask(&mut self) {
+        if let Some(ask) = self.venues.request.as_mut() {
+            ask.stage = AskStage::Failed;
+        }
+        self.venues.list = VenueList::Failed;
+    }
+
+    /// The venue query still to send cannot go out (the send failed, or the
+    /// bot lookup did): the list says so and offers a retry.
+    pub(super) fn venues_unsent(&mut self) {
+        if self.venue_query_to_send().is_some() {
+            self.fail_venue_ask();
         }
     }
 
     /// There is no venue bot to ask: nothing to find, and nothing to retry.
-    pub(super) fn venues_unavailable(&mut self, generation: u64) {
-        if generation == self.venues.generation {
+    pub(super) fn venues_unavailable(&mut self) {
+        if self.venue_query_to_send().is_some() {
             if let Some(ask) = self.venues.request.as_mut() {
                 ask.stage = AskStage::Answered;
             }
             self.apply_venues(Vec::new());
+        }
+    }
+
+    /// Requests the session no longer holds and nothing answered (a
+    /// reconnect or a client restart dropped them) end here: the venue list
+    /// fails (Retry asks again) and a tile counts one failed try.
+    pub(super) fn forget_dropped(&mut self, pending: &HashSet<RequestId>) {
+        let dropped = self.venues.request.as_ref().is_some_and(|ask| {
+            matches!(ask.stage, AskStage::InFlight { request } if !pending.contains(&request))
+        });
+        if dropped {
+            self.fail_venue_ask();
+        }
+        for (_, state) in &mut self.tiles {
+            if let TileState::Requested { request, failed } = *state
+                && !pending.contains(&request)
+            {
+                *state = TileState::Failed(failed.saturating_add(1));
+            }
         }
     }
 
@@ -614,11 +646,11 @@ impl LocationPicker {
         }
     }
 
-    pub(super) fn tile_requested(&mut self, key: TileKey, extra: u64) {
+    pub(super) fn tile_requested(&mut self, key: TileKey, request: RequestId) {
         let failed = self.tile_failures(key);
         self.tiles.retain(|(known, _)| *known != key);
         self.tiles
-            .push((key, TileState::Requested { extra, failed }));
+            .push((key, TileState::Requested { request, failed }));
         while self.tiles.len() > TILE_CAP {
             let Some(index) = self
                 .tiles
@@ -631,13 +663,13 @@ impl LocationPicker {
         }
     }
 
-    pub(super) fn tile_answered(&mut self, extra: u64, file_id: Option<FileId>) -> bool {
+    pub(super) fn tile_answered(&mut self, request: RequestId, file_id: Option<FileId>) -> bool {
         for (_, state) in &mut self.tiles {
             if let TileState::Requested {
-                extra: asked,
+                request: asked,
                 failed,
             } = *state
-                && asked == extra
+                && asked == request
             {
                 *state = match file_id {
                     Some(file_id) => TileState::Ready(file_id),

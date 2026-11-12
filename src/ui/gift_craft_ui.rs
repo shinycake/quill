@@ -216,7 +216,9 @@ impl QuillApp {
             Some(live) => live.driver.craft_gift().ok(),
             // The demo crafts nothing; the forge ends in a failure.
             None => self.craft_mut().map(|craft| {
-                craft.run = CraftRun::Crafting { request: 0 };
+                craft.run = CraftRun::Crafting {
+                    request: RequestId(0),
+                };
                 RequestId(0)
             }),
         };
@@ -271,7 +273,7 @@ impl QuillApp {
             self.after_craft_pop();
             return;
         };
-        let waiting = craft.run == (CraftRun::Crafting { request: request.0 });
+        let waiting = craft.run == (CraftRun::Crafting { request });
         if demo && waiting {
             craft.run = CraftRun::Done(CraftResult::Fail);
         } else if waiting {

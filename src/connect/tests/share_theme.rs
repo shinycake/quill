@@ -6,7 +6,7 @@ use super::super::*;
 use super::*;
 use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::peer_qr::appearance::SwatchKey;
-use crate::peer_qr::state::{QrPeer, SaveTicket};
+use crate::peer_qr::state::QrPeer;
 use crate::peer_qr::theme::{
     GIFTS_RETRY_SECS, GiftsRest, GiftsStage, SaveRights, ShareTheme, ThemeChoice, ThemeEmoji,
     can_save,
@@ -182,18 +182,16 @@ fn who_may_save_follows_share_themes_can_save() {
 #[test]
 fn a_save_sends_the_theme_and_keeps_it_once_answered() {
     let mut rig = Rig::new();
-    let ticket = SaveTicket {
-        box_id: 1,
-        serial: 1,
-    };
     let choice = ThemeChoice::Emoji {
         color: SwatchKey::Backdrop(4),
         emoji: vec![ThemeEmoji::Plain("🐱".into())],
     };
-    rig.driver
-        .save_share_theme(ticket, QrPeer::User(ME), choice.clone())
+    let sent = rig
+        .driver
+        .save_share_theme(QrPeer::User(ME), choice.clone())
         .unwrap();
     let request = rig.last();
+    assert_eq!(request["@extra"], sent.as_extra());
     assert_eq!(request["@type"], "setProfileShareTheme");
     assert_eq!(request["chat_id"], ME);
     assert_eq!(request["theme"]["@type"], "inputProfileShareThemeEmoji");
@@ -202,7 +200,8 @@ fn a_save_sends_the_theme_and_keeps_it_once_answered() {
     assert_eq!(request["theme"]["emojis"][0]["emoji"], "🐱");
     rig.feed(json!({"@type": "ok", "@extra": request["@extra"]}));
     let answers = rig.driver.session.users_state.peer_qr.take_save_answers();
-    assert_eq!(answers, vec![(ticket, Ok(choice.clone()))]);
+    assert_eq!(answers, vec![(sent, Ok(choice.clone()))]);
+    assert!(rig.driver.session.users_state.peer_qr.saves.is_empty());
     assert_eq!(
         rig.driver.session.qr_served_theme(QrPeer::User(ME)),
         Some(&choice.to_theme())
@@ -212,12 +211,8 @@ fn a_save_sends_the_theme_and_keeps_it_once_answered() {
 #[test]
 fn a_refused_save_reports_why() {
     let mut rig = Rig::new();
-    let ticket = SaveTicket {
-        box_id: 1,
-        serial: 2,
-    };
     rig.driver
-        .save_share_theme(ticket, QrPeer::User(ME), ThemeChoice::default())
+        .save_share_theme(QrPeer::User(ME), ThemeChoice::default())
         .unwrap();
     let request = rig.last();
     assert_eq!(request["theme"], Value::Null, "the default theme is null");
@@ -239,19 +234,15 @@ fn a_refused_save_reports_why() {
 #[test]
 fn nobody_else_saves_and_no_request_goes_out() {
     let mut rig = Rig::new();
-    let ticket = SaveTicket {
-        box_id: 1,
-        serial: 3,
-    };
     let sent = rig.sent();
     assert!(
         rig.driver
-            .save_share_theme(ticket, QrPeer::User(FRIEND), ThemeChoice::default())
+            .save_share_theme(QrPeer::User(FRIEND), ThemeChoice::default())
             .is_err()
     );
     assert_eq!(rig.sent(), sent);
-    let answers = rig.driver.session.users_state.peer_qr.take_save_answers();
-    assert_eq!(answers, vec![(ticket, Err(String::new()))]);
+    let peer_qr = &mut rig.driver.session.users_state.peer_qr;
+    assert!(peer_qr.saves.is_empty() && peer_qr.take_save_answers().is_empty());
 }
 
 fn upgraded(received: &str, id: i64, burned: bool) -> Value {

@@ -216,7 +216,7 @@ fn a_gift_market_error_with_no_request_fails_nothing_it_does_not_wait_for() {
     use crate::gift_market::{AuctionFetch, GiftMarketPurpose};
     let (mut session, _sink) = session();
     let waiting = RequestId(5);
-    session.payments.gift_market.auction = AuctionFetch::Loading { request: waiting.0 };
+    session.payments.gift_market.auction = AuctionFetch::Loading { request: waiting };
     let err = crate::telegram::envelope::TdError::from_code(400);
     let purpose = GiftMarketPurpose::AuctionState { gift_id: 1 };
     // An error nobody tracked, and another request's, leave the fetch.
@@ -224,7 +224,7 @@ fn a_gift_market_error_with_no_request_fails_nothing_it_does_not_wait_for() {
     session.apply_gift_market_error(&err, purpose, Some(RequestId(6)));
     assert_eq!(
         session.payments.gift_market.auction,
-        AuctionFetch::Loading { request: waiting.0 }
+        AuctionFetch::Loading { request: waiting }
     );
     session.apply_gift_market_error(&err, purpose, Some(waiting));
     assert_eq!(session.payments.gift_market.auction, AuctionFetch::Idle);

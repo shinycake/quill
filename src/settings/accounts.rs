@@ -328,10 +328,25 @@ fn note_read(path: &Path, readable: bool) {
 
 /// Load the registry; missing or corrupt ⇒ `[primary]` (never a hard error).
 fn load_registry(app_root: &Path) -> AccountRegistry {
+    load_registry_via(
+        app_root,
+        &|from, to| std::fs::rename(from, to),
+        &LOADED,
+        registry_writes(),
+    )
+}
+
+/// [`load_registry`] with the rename that moves a corrupt file aside, the
+/// cache slot it reads and keeps, and the write count to compare with.
+fn load_registry_via(
+    app_root: &Path,
+    rename: &dyn Fn(&Path, &Path) -> std::io::Result<()>,
+    cache: &std::sync::Mutex<Option<Loaded>>,
+    writes: u64,
+) -> AccountRegistry {
     let path = registry_path(app_root);
-    let writes = registry_writes();
     let stamp = file_stamp(&path);
-    let mut loaded = crate::locks::lock_or_recover(&LOADED);
+    let mut loaded = crate::locks::lock_or_recover(cache);
     if let Some(last) = loaded.as_ref()
         && last.path == path
         && last.writes == writes
@@ -357,7 +372,20 @@ fn load_registry(app_root: &Path) -> AccountRegistry {
                 .as_deref()
                 .map(recover_pending_deletes)
                 .unwrap_or_default();
-            quarantine_registry(&path);
+            if !quarantine_registry(&path, rename) {
+                // The corrupt file is still the account list: a save must
+                // not replace it, and the read is kept (under the file's
+                // stamp) until the file changes.
+                note_read(&path, false);
+                let registry = AccountRegistry::default();
+                *loaded = Some(Loaded {
+                    path,
+                    writes,
+                    stamp,
+                    registry: registry.clone(),
+                });
+                return registry;
+            }
             let mut registry = AccountRegistry::default();
             for key in &owed {
                 registry.mark_wipe(key);
@@ -448,7 +476,8 @@ fn save_registry(app_root: &Path, registry: &AccountRegistry) -> std::io::Result
 /// Move an unreadable `accounts.json` aside as `accounts.json.corrupt-<ts>`
 /// (never over an existing backup) so the account list stays recoverable
 /// instead of being overwritten by the next save.
-fn quarantine_registry(path: &Path) {
+/// Whether the file was moved aside.
+fn quarantine_registry(path: &Path, rename: &dyn Fn(&Path, &Path) -> std::io::Result<()>) -> bool {
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -461,13 +490,17 @@ fn quarantine_registry(path: &Path) {
         }
         backup = PathBuf::from(format!("{base}-{n}"));
     }
-    match std::fs::rename(path, &backup) {
-        Ok(()) => eprintln!(
-            "quill: accounts.json is unreadable; moved it to {} and starting from defaults",
-            backup.display()
-        ),
+    match rename(path, &backup) {
+        Ok(()) => {
+            eprintln!(
+                "quill: accounts.json is unreadable; moved it to {} and starting from defaults",
+                backup.display()
+            );
+            true
+        }
         Err(err) => {
-            eprintln!("quill: accounts.json is unreadable and could not be backed up: {err}")
+            eprintln!("quill: accounts.json is unreadable and could not be backed up: {err}");
+            false
         }
     }
 }
@@ -808,6 +841,37 @@ mod account_registry_tests {
         assert_eq!(backups.len(), 1);
         assert_eq!(std::fs::read(&backups[0]).unwrap(), b"not json{{");
         assert!(!root.join("accounts.json").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn corrupt_registry_that_cannot_be_moved_aside_is_never_overwritten() {
+        let root = tmp_root("corrupt-locked");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("accounts.json"), b"not json{{").unwrap();
+        let locked = |_: &Path, _: &Path| Err(std::io::Error::other("locked"));
+        let renames = std::cell::Cell::new(0);
+        let counting = |from: &Path, to: &Path| {
+            renames.set(renames.get() + 1);
+            locked(from, to)
+        };
+        // The test's own cache slot and write count: no other test moves them.
+        let cache = std::sync::Mutex::new(None);
+        assert_eq!(
+            load_registry_via(&root, &counting, &cache, 0)
+                .listed()
+                .len(),
+            1
+        );
+        // Read again (every frame asks): kept, not parsed and renamed again.
+        let _ = load_registry_via(&root, &counting, &cache, 0);
+        assert_eq!(renames.get(), 1);
+        // A save refuses, so the recoverable list is not replaced.
+        assert!(save_registry(&root, &AccountRegistry::default()).is_err());
+        assert_eq!(
+            std::fs::read(root.join("accounts.json")).unwrap(),
+            b"not json{{"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

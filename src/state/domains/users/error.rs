@@ -61,18 +61,20 @@ impl Session {
                     self.users_state.peer_qr.backdrops.fail(pending.id);
                 }
             }
-            Some(RequestPurpose::Users(UsersPurpose::GetShareThemeGifts {
-                owner, serial, ..
-            })) => {
-                let gifts = &mut self.users_state.peer_qr.gifts;
-                if gifts.is_current(owner, serial) {
-                    gifts.fail();
+            Some(RequestPurpose::Users(UsersPurpose::GetShareThemeGifts { .. })) => {
+                if let Some(pending) = pending {
+                    let gifts = &mut self.users_state.peer_qr.gifts;
+                    if gifts.is_current(pending.id) {
+                        gifts.fail();
+                    }
                 }
             }
-            Some(RequestPurpose::Users(UsersPurpose::SetProfileShareTheme { ticket })) => {
-                self.users_state
-                    .peer_qr
-                    .fail_save(ticket, error_reason(err));
+            Some(RequestPurpose::Users(UsersPurpose::SetProfileShareTheme)) => {
+                if let Some(pending) = pending {
+                    self.users_state
+                        .peer_qr
+                        .fail_save(pending.id, error_reason(err));
+                }
             }
             Some(RequestPurpose::Users(UsersPurpose::GetUserLink { free })) => {
                 if let Some(id) = pending.map(|p| p.id) {

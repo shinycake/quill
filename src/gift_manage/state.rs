@@ -31,6 +31,16 @@ pub enum GiftFlow {
     DeleteCollection(i32, FlowAsk),
 }
 
+/// The collection form a submit is for: sent from that form's own button,
+/// never matched from the request's purpose, so a collection change sent
+/// from the gifts list does not become the open form's request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlowForm {
+    New,
+    Rename(i32),
+    Delete(i32),
+}
+
 impl GiftFlow {
     fn ask_mut(&mut self) -> Option<&mut FlowAsk> {
         match self {
@@ -50,17 +60,14 @@ impl GiftFlow {
         }
     }
 
-    /// Whether `purpose` is a request this form sends.
-    fn sends(&self, purpose: crate::state::PaymentsPurpose) -> bool {
-        use crate::state::PaymentsPurpose as P;
-        matches!(
-            (self, purpose),
-            (
-                Self::NewCollection(_) | Self::RenameCollection(..),
-                P::ChangeGiftCollection
-            ) | (Self::DeleteCollection(..), P::DeleteGiftCollection)
-                | (Self::DeleteCollection(..), P::ChangeGiftCollection)
-        )
+    /// Whether this is the open collection form `form` names.
+    fn is_form(&self, form: FlowForm) -> bool {
+        match (self, form) {
+            (Self::NewCollection(_), FlowForm::New) => true,
+            (Self::RenameCollection(open, _), FlowForm::Rename(id))
+            | (Self::DeleteCollection(open, _), FlowForm::Delete(id)) => *open == id,
+            _ => false,
+        }
     }
 
     /// Whether the answer of `request` belongs to this form: only the form
@@ -327,15 +334,13 @@ impl GiftManageState {
         }
     }
 
-    /// The open form sent `request` for `purpose`: its answer closes it.
-    pub fn flow_sent(
-        &mut self,
-        purpose: crate::state::PaymentsPurpose,
-        request: crate::ids::RequestId,
-    ) {
+    /// The open `form` sent `request`: its answer closes it. Any other
+    /// open form, and a form already waiting, is left alone.
+    pub fn flow_sent(&mut self, form: FlowForm, request: crate::ids::RequestId) {
         if let Some(flow) = self.flow.as_mut()
-            && flow.sends(purpose)
+            && flow.is_form(form)
             && let Some(ask) = flow.ask_mut()
+            && *ask == FlowAsk::Editing
         {
             *ask = FlowAsk::Sent(request);
         }

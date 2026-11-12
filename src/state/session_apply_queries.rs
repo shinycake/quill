@@ -10,11 +10,13 @@ impl Session {
         _extra: Option<RequestId>,
         _seq: u64,
     ) {
-        if let Some(RequestPurpose::Media(MediaPurpose::LocationPicker(
-            crate::location_picker::LocationPickerPurpose::SearchVenues { generation },
-        ))) = pending.map(|p| p.purpose)
+        if let Some(pending) = pending
+            && pending.purpose
+                == RequestPurpose::Media(MediaPurpose::LocationPicker(
+                    crate::location_picker::LocationPickerPurpose::SearchVenues,
+                ))
         {
-            self.location.venues_answered(generation, page.venues);
+            self.location.venues_answered(pending.id, page.venues);
             return;
         }
         if let Some(RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {

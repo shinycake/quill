@@ -169,19 +169,17 @@ pub(super) fn pump(app: &mut QuillApp) {
                 return;
             };
             let sharing = &mut session.location;
-            sharing.request_sent(&request, extra);
+            let sent = quill::ids::RequestId(extra);
+            sharing.request_sent(&request, sent);
             match request {
                 PickerRequest::ResolveVenueBot { .. } => {
-                    sharing.venue_bot_resolved(extra, Some(DEMO_BOT))
+                    sharing.venue_bot_resolved(sent, Some(DEMO_BOT))
                 }
-                PickerRequest::Venues {
-                    generation,
-                    point,
-                    query,
-                    ..
-                } => sharing.venues_answered(generation, demo_venues(point, &query)),
-                PickerRequest::MapTile { .. } => sharing.file_answered(extra, Some(FileId(file))),
-                PickerRequest::VenueIcon { .. } => sharing.file_answered(extra, None),
+                PickerRequest::Venues { point, query, .. } => {
+                    sharing.venues_answered(sent, demo_venues(point, &query))
+                }
+                PickerRequest::MapTile { .. } => sharing.file_answered(sent, Some(FileId(file))),
+                PickerRequest::VenueIcon { .. } => sharing.file_answered(sent, None),
             }
         }
     }

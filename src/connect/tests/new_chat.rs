@@ -8,8 +8,7 @@ use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::group_type::GroupTypeEdit;
 use crate::ids::{ChatId, RequestId};
 use crate::new_chat::{
-    CreateFailure, CreateProgress, CreationOutcome, NewChatKind, NewChatStage, TypeSaveStage,
-    plan_new_chat,
+    CreateFailure, CreationOutcome, NewChatKind, NewChatStage, TypeSaveStage, plan_new_chat,
 };
 use crate::platform::MemorySecretStore;
 use crate::profile_photo_sources::ChatPhotoInput;
@@ -130,7 +129,6 @@ fn a_channel_is_created_then_gets_photo_link_and_subscribers() {
     let stage = NewChatStage::Creating {
         request: extra,
         back: crate::new_chat::NewChatBack::Info,
-        progress: CreateProgress::InFlight,
     };
     assert_eq!(
         rig.driver
@@ -364,17 +362,15 @@ fn an_answered_type_save_moves_the_stage_on() {
     let lost = NewChatStage::Creating {
         request: RequestId(9_999),
         back: crate::new_chat::NewChatBack::Info,
-        progress: CreateProgress::InFlight,
     };
-    assert!(matches!(
+    assert_eq!(
         rig.driver
             .session
             .settled_new_chat(NewChatKind::Channel, &lost),
-        NewChatStage::Creating {
-            progress: CreateProgress::Lost,
-            ..
+        NewChatStage::CreateLost {
+            back: crate::new_chat::NewChatBack::Info,
         }
-    ));
+    );
 }
 
 /// A Save request that is gone without an answer did not happen: the step

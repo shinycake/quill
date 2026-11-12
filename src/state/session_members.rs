@@ -142,7 +142,7 @@ impl Session {
         let chat_id = chat.id;
         match chat.member_status() {
             None => {
-                chat.set_member_status(status, None);
+                chat.adopt_status_only(status);
             }
             Some(
                 ChannelMemberStatus::Left
@@ -150,7 +150,7 @@ impl Session {
                 | ChannelMemberStatus::Banned
                 | ChannelMemberStatus::Restricted,
             ) if !status.is_admin() => {
-                chat.set_member_status(status, None);
+                chat.adopt_status_only(status);
             }
             _ => {}
         }
@@ -196,8 +196,7 @@ impl Session {
                 restrict_members: member.admin_rights().map(|r| r.can_restrict_members),
                 pin_messages: member.admin_rights().map(|r| r.can_pin_messages),
             };
-            chat.my_member = OwnMember::of(Some(member.status()), rights);
-            chat.set_my_restriction(member.restriction());
+            chat.record_own_member(member.status(), rights, member.restriction());
         }
         self.drop_similar_strip_if_not_member(chat_id);
     }

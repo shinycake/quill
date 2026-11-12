@@ -31,13 +31,11 @@ impl Session {
         {
             match purpose {
                 LocationPickerPurpose::ResolveVenueBot => {
-                    self.location.venue_bot_failed(pending.id.0)
+                    self.location.venue_bot_failed(pending.id)
                 }
-                LocationPickerPurpose::SearchVenues { generation } => {
-                    self.location.venues_failed(generation)
-                }
+                LocationPickerPurpose::SearchVenues => self.location.venues_failed(pending.id),
                 LocationPickerPurpose::MapTile | LocationPickerPurpose::VenueIcon => {
-                    self.location.file_answered(pending.id.0, None)
+                    self.location.file_answered(pending.id, None)
                 }
             }
         }

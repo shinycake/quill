@@ -17,8 +17,8 @@ pub use map_view::{MapSize, MapView, TileKey};
 pub use picker::{AddressLine, HereState, LocationPicker};
 pub use venues::{Venue, VenueList};
 
-use crate::ids::{ChatId, FileId};
-use std::collections::HashMap;
+use crate::ids::{ChatId, FileId, RequestId};
+use std::collections::{HashMap, HashSet};
 
 /// In-flight requests of the picker; wrapped as
 /// `MediaPurpose::LocationPicker`.
@@ -26,9 +26,9 @@ use std::collections::HashMap;
 pub enum LocationPickerPurpose {
     /// `searchPublicChat` for the `venue_search_bot_username` option.
     ResolveVenueBot,
-    /// `getInlineQueryResults` to the venue bot; `generation` names the
-    /// picker's request so a stale answer is dropped.
-    SearchVenues { generation: u64 },
+    /// `getInlineQueryResults` to the venue bot. The picker's venue ask
+    /// holds the request it waits for, so a stale answer is dropped.
+    SearchVenues,
     /// `getMapThumbnailFile` for the picker's map. Response is `file`.
     MapTile,
     /// `getRemoteFile` for a venue category icon. Response is `file`.
@@ -41,7 +41,6 @@ pub enum PickerRequest {
         username: String,
     },
     Venues {
-        generation: u64,
         bot_user_id: i64,
         chat_id: ChatId,
         point: GeoPoint,
@@ -61,9 +60,7 @@ impl PickerRequest {
     pub fn purpose(&self) -> LocationPickerPurpose {
         match self {
             Self::ResolveVenueBot { .. } => LocationPickerPurpose::ResolveVenueBot,
-            Self::Venues { generation, .. } => LocationPickerPurpose::SearchVenues {
-                generation: *generation,
-            },
+            Self::Venues { .. } => LocationPickerPurpose::SearchVenues,
             Self::MapTile { .. } => LocationPickerPurpose::MapTile,
             Self::VenueIcon { .. } => LocationPickerPurpose::VenueIcon,
         }
@@ -74,11 +71,12 @@ impl PickerRequest {
 enum VenueBot {
     #[default]
     Unknown,
-    /// The lookup is out. `request` is its id once the driver sent it
-    /// (`None` while it is being sent); only that request's answer or
-    /// error settles it, and a new picker or username drops it.
+    /// The lookup is out as `request`; only that request's answer or error
+    /// settles it, a request the session no longer holds ends it
+    /// ([`LocationSharing::forget_dropped`]), and a new picker or username
+    /// drops it.
     Resolving {
-        request: Option<crate::ids::RequestId>,
+        request: RequestId,
     },
     Found(i64),
     Missing,
@@ -89,7 +87,7 @@ enum VenueBot {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum IconState {
-    Requested(u64),
+    Requested(RequestId),
     Ready(FileId),
     Failed,
 }
@@ -101,10 +99,6 @@ pub struct LocationSharing {
     /// tdesktop `LastExactLocation`: the last fix, where the next picker starts.
     last_exact: Option<GeoPoint>,
     picker: Option<LocationPicker>,
-    /// Where the next picker numbers its venue queries from: the last
-    /// picker's count, never reset, so an answer for a closed picker's
-    /// query cannot match a later picker's.
-    venue_generation: u64,
     icons: HashMap<String, IconState>,
 }
 
@@ -140,23 +134,15 @@ impl LocationSharing {
         // by this picker.
         self.icons
             .retain(|_, state| matches!(state, IconState::Ready(_)));
-        self.retire_picker();
         self.picker = Some(LocationPicker::open(
             chat_id,
             self.last_exact,
             country.unwrap_or(GeoPoint::ORIGIN),
-            self.venue_generation,
         ));
     }
 
     pub fn close(&mut self) {
-        self.retire_picker();
-    }
-
-    fn retire_picker(&mut self) {
-        if let Some(picker) = self.picker.take() {
-            self.venue_generation = self.venue_generation.max(picker.generation());
-        }
+        self.picker = None;
     }
 
     /// "My location" began a new lookup: the picker is locating again.
@@ -179,21 +165,19 @@ impl LocationSharing {
         }
     }
 
-    /// What to send now. Marks each as sent; the driver reports a send
-    /// that failed with [`Self::request_unsent`] and the extra of one that
-    /// left with [`Self::request_sent`].
+    /// What to send now. Nothing is marked asked here: the driver reports
+    /// the request of each that left with [`Self::request_sent`], and a send
+    /// that failed with [`Self::request_unsent`].
     pub fn next_requests(&mut self) -> Vec<PickerRequest> {
         let mut out = Vec::new();
         let Some(picker) = self.picker.as_mut() else {
             return out;
         };
         let chat_id = picker.chat_id();
-        if let Some((generation, point, query)) = picker.venue_query_to_send() {
+        if let Some((point, query)) = picker.venue_query_to_send() {
             match self.venue_bot {
                 VenueBot::Found(bot_user_id) => {
-                    picker.venue_query_sent(generation);
                     out.push(PickerRequest::Venues {
-                        generation,
                         bot_user_id,
                         chat_id,
                         point,
@@ -201,14 +185,13 @@ impl LocationSharing {
                     });
                 }
                 VenueBot::Unknown if !self.venue_bot_username.is_empty() => {
-                    self.venue_bot = VenueBot::Resolving { request: None };
                     out.push(PickerRequest::ResolveVenueBot {
                         username: self.venue_bot_username.clone(),
                     });
                 }
                 VenueBot::Resolving { .. } => {}
-                VenueBot::Unknown | VenueBot::Missing => picker.venues_unavailable(generation),
-                VenueBot::Failed => picker.venues_failed(generation),
+                VenueBot::Unknown | VenueBot::Missing => picker.venues_unavailable(),
+                VenueBot::Failed => picker.venues_unsent(),
             }
         }
         if let Some(key) = picker.tile_to_request() {
@@ -231,23 +214,25 @@ impl LocationSharing {
         out
     }
 
-    pub fn request_sent(&mut self, request: &PickerRequest, extra: u64) {
+    pub fn request_sent(&mut self, request: &PickerRequest, sent: RequestId) {
         match request {
             PickerRequest::MapTile { key, .. } => {
                 if let Some(picker) = self.picker.as_mut() {
-                    picker.tile_requested(*key, extra);
+                    picker.tile_requested(*key, sent);
                 }
             }
             PickerRequest::VenueIcon { venue_type, .. } => {
                 self.icons
-                    .insert(venue_type.clone(), IconState::Requested(extra));
+                    .insert(venue_type.clone(), IconState::Requested(sent));
             }
             PickerRequest::ResolveVenueBot { .. } => {
-                if let VenueBot::Resolving { request } = &mut self.venue_bot {
-                    *request = Some(crate::ids::RequestId(extra));
+                self.venue_bot = VenueBot::Resolving { request: sent };
+            }
+            PickerRequest::Venues { .. } => {
+                if let Some(picker) = self.picker.as_mut() {
+                    picker.venue_query_requested(sent);
                 }
             }
-            PickerRequest::Venues { .. } => {}
         }
     }
 
@@ -257,9 +242,9 @@ impl LocationSharing {
                 self.venue_bot = VenueBot::Unknown;
                 self.settle_current_venues(true);
             }
-            PickerRequest::Venues { generation, .. } => {
+            PickerRequest::Venues { .. } => {
                 if let Some(picker) = self.picker.as_mut() {
-                    picker.venues_failed(*generation);
+                    picker.venues_unsent();
                 }
             }
             PickerRequest::MapTile { key, .. } => {
@@ -276,13 +261,11 @@ impl LocationSharing {
     /// The unsent venue query cannot go out: `failed` when the bot lookup
     /// went wrong (a retry may work), else there is no bot.
     fn settle_current_venues(&mut self, failed: bool) {
-        if let Some(picker) = self.picker.as_mut()
-            && let Some((generation, ..)) = picker.venue_query_to_send()
-        {
+        if let Some(picker) = self.picker.as_mut() {
             if failed {
-                picker.venues_failed(generation);
+                picker.venues_unsent();
             } else {
-                picker.venues_unavailable(generation);
+                picker.venues_unavailable();
             }
         }
     }
@@ -299,16 +282,13 @@ impl LocationSharing {
     }
 
     /// Whether the lookup out is `request`.
-    fn resolving(&self, request: u64) -> bool {
-        self.venue_bot
-            == (VenueBot::Resolving {
-                request: Some(crate::ids::RequestId(request)),
-            })
+    fn resolving(&self, request: RequestId) -> bool {
+        self.venue_bot == (VenueBot::Resolving { request })
     }
 
     /// `searchPublicChat` answered `request`: `bot_user_id` when the chat is
     /// a bot. An answer to a lookup that was dropped changes nothing.
-    pub fn venue_bot_resolved(&mut self, request: u64, bot_user_id: Option<i64>) {
+    pub fn venue_bot_resolved(&mut self, request: RequestId, bot_user_id: Option<i64>) {
         if !self.resolving(request) {
             return;
         }
@@ -320,7 +300,7 @@ impl LocationSharing {
 
     /// The lookup failed: not a missing bot, so the next picker asks
     /// again instead of showing no venues for the session.
-    pub fn venue_bot_failed(&mut self, request: u64) {
+    pub fn venue_bot_failed(&mut self, request: RequestId) {
         if !self.resolving(request) {
             return;
         }
@@ -328,33 +308,57 @@ impl LocationSharing {
         self.settle_current_venues(true);
     }
 
-    pub fn venues_answered(&mut self, generation: u64, venues: Vec<Venue>) {
+    /// `request` answered the venue query with `venues`.
+    pub fn venues_answered(&mut self, request: RequestId, venues: Vec<Venue>) {
         if let Some(picker) = self.picker.as_mut() {
-            picker.venues_answered(generation, venues);
+            picker.venues_answered(request, venues);
         }
     }
 
-    pub fn venues_failed(&mut self, generation: u64) {
+    /// The venue query sent as `request` failed.
+    pub fn venues_failed(&mut self, request: RequestId) {
         if let Some(picker) = self.picker.as_mut() {
-            picker.venues_failed(generation);
+            picker.venues_failed(request);
         }
     }
 
-    /// A `file` (or an error, `None`) answered request `extra`, sent for a
-    /// tile or an icon.
-    pub fn file_answered(&mut self, extra: u64, file_id: Option<FileId>) {
+    /// A `file` (or an error, `None`) answered `request`, sent for a tile or
+    /// an icon.
+    pub fn file_answered(&mut self, request: RequestId, file_id: Option<FileId>) {
         if let Some(picker) = self.picker.as_mut()
-            && picker.tile_answered(extra, file_id)
+            && picker.tile_answered(request, file_id)
         {
             return;
         }
         if let Some(state) = self
             .icons
             .values_mut()
-            .find(|state| **state == IconState::Requested(extra))
+            .find(|state| **state == IconState::Requested(request))
         {
             *state = file_id.map_or(IconState::Failed, IconState::Ready);
         }
+    }
+
+    /// Requests of the picker the session no longer holds and nothing
+    /// answered (a reconnect or a client restart dropped them) end here, as
+    /// the failure TDLib never sent: the bot lookup fails (the venue list
+    /// with it), the venue query fails (Retry asks again), a tile counts one
+    /// failed try and an icon is asked again by the next picker. Run after
+    /// each ingest, once the answers that did arrive were applied.
+    pub fn forget_dropped(&mut self, pending: &HashSet<RequestId>) {
+        if let VenueBot::Resolving { request } = self.venue_bot
+            && !pending.contains(&request)
+        {
+            self.venue_bot = VenueBot::Failed;
+            self.settle_current_venues(true);
+        }
+        if let Some(picker) = self.picker.as_mut() {
+            picker.forget_dropped(pending);
+        }
+        self.icons.retain(|_, state| match state {
+            IconState::Requested(request) => pending.contains(request),
+            IconState::Ready(_) | IconState::Failed => true,
+        });
     }
 
     /// The icon file of a venue category, once TDLib registered it.

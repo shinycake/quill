@@ -1217,16 +1217,41 @@ fn a_new_status_drops_the_rights_of_the_old_one() {
 
 #[test]
 fn the_own_restriction_is_unknown_then_one_of_two_answers() {
-    use crate::state::OwnRestriction;
+    use crate::state::AdminRights;
     let mut chat = placeholder_chat(ChatId(32));
     assert!(!chat.rights_fetched());
-    assert_eq!(chat.my_restriction, OwnRestriction::Unknown);
     // The probe found no member record: not restricted, and not asked again.
     chat.note_no_member_record();
     assert!(chat.rights_fetched());
     assert_eq!(chat.restriction(), None);
-    chat.set_my_restriction(None);
-    assert_eq!(chat.my_restriction, OwnRestriction::NotRestricted);
+    // A member record: the status and its restriction land together.
+    let restriction = crate::telegram::envelope::MemberRestriction {
+        until_date: 0,
+        permissions: Default::default(),
+    };
+    chat.record_own_member(
+        ChannelMemberStatus::Restricted,
+        AdminRights::default(),
+        Some(restriction),
+    );
+    assert!(chat.rights_fetched());
+    assert_eq!(chat.restriction(), Some(restriction));
+    // The admins lift it and updateSupergroup says Member before the own
+    // updateChatMember: the old restriction does not outlive its status.
+    chat.set_member_status(ChannelMemberStatus::Member, None);
+    assert_eq!(chat.restriction(), None);
+    // Leaving and rejoining does not bring it back either.
+    chat.set_member_status(ChannelMemberStatus::Left, None);
+    chat.set_member_status(ChannelMemberStatus::Member, None);
+    assert_eq!(chat.restriction(), None);
+    // The same restricted status again keeps the details it has.
+    chat.record_own_member(
+        ChannelMemberStatus::Restricted,
+        AdminRights::default(),
+        Some(restriction),
+    );
+    chat.set_member_status(ChannelMemberStatus::Restricted, None);
+    assert_eq!(chat.restriction(), Some(restriction));
 }
 
 /// Sweep r2-17 (05-066): ownership answers and errors land only on the stage

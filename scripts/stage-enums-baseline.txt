@@ -4,7 +4,6 @@ bare:AccessStage::Asking 1
 bare:AccountStage::Starting 1
 bare:Answer::Waiting 1
 bare:ApplyStage::Sent 1
-bare:AskStage::InFlight 1
 bare:Audience::Loading 1
 bare:BackgroundStatus::Connecting 1
 bare:BoxStage::Opening 1
@@ -26,7 +25,6 @@ bare:ClipState::Opening 1
 bare:CloseProgress::Pending 1
 bare:CodeLanguageStage::Opening 1
 bare:ConferenceStage::Running 1
-bare:CreateProgress::InFlight 1
 bare:Decoding::Running 1
 bare:DeviceLink::Opening 1
 bare:DeviceRun::Opening 1
@@ -112,10 +110,19 @@ bare:Waker::Pending 1
 bare:WebRowState::Connecting 1
 bare:WorkerLife::Running 1
 bare:WriteAccess::Asking 1
+rawid:BotUsernameCheck::Checking 1
+rawid:Chooser::Listing 1
+rawid:DeepLinkState::Info 1
+rawid:DeepLinkState::InvitePreview 1
+rawid:DeepLinkState::ResolvingChat 1
+rawid:DeepLinkState::ResolvingInfo 1
+rawid:EditorStage::Encoding 1
+rawid:EditorStage::Reading 1
+rawid:InviteBox::Open 1
+rawid:LimitNotice::Box 1
 unkeyed:AccentRead::Reading 1
 unkeyed:AddressStage::Resolving 1
 unkeyed:Assembly::Reading 1
-unkeyed:AuctionFetch::Loading 1
 unkeyed:Beats::Running 1
 unkeyed:BotUsernameCheck::Checking 1
 unkeyed:CallLinkStage::Leaving 1
@@ -133,11 +140,9 @@ unkeyed:Encoding::Running 1
 unkeyed:ExtractionStage::Running 1
 unkeyed:FileState::Downloading 1
 unkeyed:First::Preparing 1
-unkeyed:FreeUi::Requesting 1
 unkeyed:GiftPurchaseStage::Sent 1
 unkeyed:GiftValueStage::Loading 1
 unkeyed:GiftsRest::Waiting 1
-unkeyed:IconState::Requested 1
 unkeyed:IdLookup::Asking 1
 unkeyed:LanguageStage::Fetching 1
 unkeyed:Lifecycle::Loading 1
@@ -147,7 +152,6 @@ unkeyed:ListEdit::InFlight 1
 unkeyed:MessageReactionsState::Loading 1
 unkeyed:Neighbour::Asking 1
 unkeyed:P2pStage::Waiting 1
-unkeyed:PageLoad::Loading 1
 unkeyed:PickWait::Decoding 1
 unkeyed:PickWait::Downloading 1
 unkeyed:PickerFill::Waiting 1
@@ -164,7 +168,6 @@ unkeyed:SetState::Loading 1
 unkeyed:SizedState::Loading 1
 unkeyed:Stage::Running 1
 unkeyed:StoryFetch::Asked 1
-unkeyed:TileState::Requested 1
 unkeyed:TitleCheck::Sent 1
 unkeyed:TonConnectRequestState::Pending 1
 unkeyed:Translation::Pending 1
