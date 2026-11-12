@@ -17,7 +17,6 @@ detached:watch_closed_windows 2
 detached:watch_saver 1
 poll:QuillApp::arm_stream_hide_timer 1
 poll:QuillApp::autoscroll_press 1
-poll:QuillApp::download_emoji_set 1
 poll:QuillApp::download_update 1
 poll:QuillApp::ensure_live_location_tick 1
 poll:QuillApp::ensure_notify_clock 1

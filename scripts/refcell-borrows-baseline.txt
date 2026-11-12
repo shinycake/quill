@@ -45,9 +45,6 @@ QuillApp::run_passcode_job::asked.borrow_mut 1
 QuillApp::selection_bar::selection.borrow 1
 QuillApp::spawn_system_unlock_wait::held.borrow_mut 1
 QuillApp::spawn_system_unlock_wait::master.borrow_mut 1
-QuillApp::translate_offer::offer.borrow 1
-QuillApp::translate_offer::offer.borrow_mut 1
-active::a.borrow 1
 anchor::anchors.borrow 1
 anchor_tracker::anchors.borrow_mut 1
 begin_pass::anchors.borrow_mut 1
@@ -66,9 +63,7 @@ forget_account_notes::active.borrow_mut 1
 forget_display::displays.borrow_mut 1
 forget_reveals::reveals.borrow_mut 1
 hide_until_mouse_moves::slot.borrow 1
-image_of::sheets.borrow 1
 image_tile::tile.borrow_mut 1
-install::sheets.borrow_mut 1
 last_target::last.borrow 1
 mark_revealed::reveals.borrow_mut 1
 note_target::last.borrow_mut 1
@@ -76,13 +71,10 @@ once::body.borrow_mut 1
 paint_text_specks::painted.borrow_mut 1
 parsed_chart::charts.borrow_mut 1
 premium_playing::active.borrow 1
-preview_images::p.borrow 1
-preview_images::p.borrow_mut 1
 push_message::active.borrow_mut 1
 push_premium::active.borrow_mut 1
 release_media_tile::tile.borrow_mut 1
 remember::slot.borrow_mut 1
-request::sheets.borrow_mut 2
 retain_community_chats::chat.borrow 1
 reveal_fade::reveals.borrow 1
 revealing::reveals.borrow 1

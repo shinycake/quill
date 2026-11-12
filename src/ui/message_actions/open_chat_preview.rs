@@ -15,7 +15,7 @@ impl QuillApp {
     ) {
         // The press owns its timer: a release, a newer press or a menu
         // drops it, so it only ever fires for the press that is still held.
-        let timer = self.spawn_screen(cx, async move |this, cx| {
+        let timer = self.spawn_scoped(cx, async move |this, cx| {
             cx.background_executor()
                 .timer(Self::CHAT_PREVIEW_LONG_PRESS)
                 .await;

@@ -955,18 +955,6 @@ impl RequestRegistry {
             .any(|p| p.purpose == purpose && p.folder_id == Some(folder_id))
     }
 
-    /// The in-flight request of a purpose/folder pair, if one is.
-    pub fn request_for_purpose_folder(
-        &self,
-        purpose: RequestPurpose,
-        folder_id: i32,
-    ) -> Option<RequestId> {
-        self.pending
-            .iter()
-            .find(|(_, p)| p.purpose == purpose && p.folder_id == Some(folder_id))
-            .map(|(id, _)| RequestId(*id))
-    }
-
     /// Parity slice: the folder id stamped on an in-flight request, if any.
     pub fn folder_id_for(&self, id: RequestId) -> Option<i32> {
         self.pending.get(&id.0).and_then(|p| p.folder_id)
@@ -986,7 +974,8 @@ impl RequestRegistry {
     }
 
     /// Parity slice: the in-flight request id for a purpose/folder pair
-    /// (test hook; the live path matches responses by `@extra`).
+    /// (a second ask waits on it; the live path matches responses by
+    /// `@extra`).
     pub fn pending_extra_for_folder(
         &self,
         purpose: RequestPurpose,

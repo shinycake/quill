@@ -26,8 +26,6 @@ GiveawaySummary::finished
 
 
 ParsedSession::is_password_pending
-PasswordBox::sending
-PasswordBox::sending+error
 
 
 PlaybackHealth::output_failed

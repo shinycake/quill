@@ -310,7 +310,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some(out) = self
             .session
             .requests
-            .request_for_purpose_folder(RequestPurpose::ProcessChatFolderNewChats, folder_id)
+            .pending_extra_for_folder(RequestPurpose::ProcessChatFolderNewChats, folder_id)
         {
             return Ok(Some(out));
         }
