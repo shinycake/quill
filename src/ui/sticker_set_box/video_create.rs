@@ -99,11 +99,24 @@ impl QuillApp {
             cx.notify();
             return true;
         }
+        // The transfer ended without the file, or `downloadFile` sent
+        // nothing (the file cannot be downloaded, a cancel is settling, or
+        // TDLib's own transfer of it is not ours to track) and none of ours
+        // is out: nothing will arrive.
         let failed = self.session().is_some_and(|session| {
+            let id = file_id.0;
+            let active = session
+                .media
+                .files
+                .get(&id)
+                .is_some_and(|file| file.local.is_downloading_active());
             session
                 .media
                 .downloads
-                .ended_without_file(file_id.0, &session.media.files)
+                .ended_without_file(id, &session.media.files)
+                || (!active
+                    && !session.media.downloads.is_requested(id)
+                    && !session.requests.has_download(file_id))
         });
         if !failed {
             return false;

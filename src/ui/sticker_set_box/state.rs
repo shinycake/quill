@@ -308,7 +308,7 @@ impl SetEditing {
     /// when nothing waits on a download.
     pub(crate) fn file_landed(&mut self, path: String) -> bool {
         match std::mem::take(self) {
-            Self::Waiting(PickWait::FileWanted(pending)) => {
+            Self::Waiting(PickWait::Downloading(pending)) => {
                 *self = Self::Waiting(PickWait::Downloaded { pending, path });
                 true
             }
@@ -434,10 +434,11 @@ pub(crate) enum PickWait {
     /// The chosen file is not local yet and has been asked for. Quill holds
     /// no request or task for it: `downloadFile` answers at once and shares
     /// a transfer already under way, and the download tracker
-    /// (`media.downloads`) owns the transfer. The wait ends with that
-    /// transfer's own end (`settle_sticker_pick_download`, in the session
-    /// update path): the file landed (`Downloaded`) or it ended without it.
-    FileWanted(PendingVideo),
+    /// (`media.downloads`) owns the transfer, keyed by `pending.file_id`.
+    /// The wait ends with that transfer's own end, or when none is out
+    /// (`settle_sticker_pick_download`, in the session update path): the
+    /// file landed (`Downloaded`) or nothing will bring it.
+    Downloading(PendingVideo),
     /// The file is here. The editor opens in the window the pick was made
     /// in, so it opens in that window's next frame.
     Downloaded { pending: PendingVideo, path: String },
@@ -453,7 +454,7 @@ pub(crate) enum PickWait {
 impl PickWait {
     pub(crate) fn downloading(&self) -> Option<&PendingVideo> {
         match self {
-            Self::FileWanted(pending) => Some(pending),
+            Self::Downloading(pending) => Some(pending),
             Self::Downloaded { .. } | Self::Decoding { .. } => None,
         }
     }
@@ -638,7 +639,7 @@ mod confirm_tests {
             emoji: None,
             window: None,
         };
-        let mut editing = SetEditing::Waiting(PickWait::FileWanted(pending.clone()));
+        let mut editing = SetEditing::Waiting(PickWait::Downloading(pending.clone()));
         assert!(editing.downloading().is_some());
         assert!(editing.downloaded().is_none());
         assert!(editing.file_landed("/tmp/a.webm".into()));

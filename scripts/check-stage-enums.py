@@ -14,8 +14,9 @@ hold what ends it:
 
 - `bare`: the variant has no data at all;
 - `unkeyed`: the variant has data, but no `RequestId`, `Task`,
-  `JoinHandle`, `Subscription`, channel end or deadline in it, or in the
-  types it names;
+  `JoinHandle`, `Subscription`, channel end, deadline or `FileId` in it,
+  or in the types it names (a `FileId` is a download tracked by TDLib's
+  file id: the tracker, `media.downloads`, holds its end);
 - `optional`: the only request in it is an `Option<RequestId>`: a stage
   that is `Loading(None)` until a second call fills the request in is the
   "asked but not sent" flag again. Hold `Idle` until the request exists
@@ -76,7 +77,7 @@ IN_FLIGHT = set(
     "Building Cutting Encoding Activating Rendering Listing Jumping Capturing".split()
 )
 CARRIER = re.compile(
-    r"\b(?:RequestId|Task|TaskHold|RenderJob|JoinHandle|Subscription|Receiver|Sender|Instant|SystemTime)\b"
+    r"\b(?:RequestId|Task|TaskHold|RenderJob|JoinHandle|Subscription|Receiver|Sender|Instant|SystemTime|FileId)\b"
 )
 OPTIONAL_REQUEST = re.compile(r"Option\s*<\s*(?:[\w:]*::)?RequestId\s*>")
 # Enums that name a message, a reason or a derived view, not a stored stage.

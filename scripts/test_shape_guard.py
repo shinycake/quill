@@ -331,6 +331,16 @@ class Enums(unittest.TestCase):
         }
         self.assertEqual(keys(enums, files), ["bare:Load::Loading", "unkeyed:Gate::Asking"])
 
+    def test_a_download_stage_holds_its_file_id(self):
+        files = {
+            "src/state/a.rs": (
+                "pub enum Wait { Idle, Downloading { file: FileId }, Sending(Pending) }\n"
+                "pub struct Pending { file_id: FileId, text: String }\n"
+                "pub enum Bare { Idle, Downloading { name: String } }\n"
+            ),
+        }
+        self.assertEqual(keys(enums, files), ["unkeyed:Bare::Downloading"])
+
     def test_a_u64_standing_in_for_a_request_id_fails(self):
         files = {
             "src/state/a.rs": (

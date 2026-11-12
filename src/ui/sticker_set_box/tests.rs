@@ -617,7 +617,7 @@ fn a_still_decoding_behind_a_later_animated_pick_opens_no_editor(cx: &mut TestAp
     // A video still downloading gives way to a later pick in the same way.
     app.update(vcx, |app, _| {
         app.sticker_box.editing = crate::ui::sticker_set_box::state::SetEditing::Waiting(
-            crate::ui::sticker_set_box::state::PickWait::FileWanted(PendingVideo {
+            crate::ui::sticker_set_box::state::PickWait::Downloading(PendingVideo {
                 pick,
                 file_id: still.file_id,
                 file: PickedFile::Video,
@@ -680,7 +680,7 @@ fn a_chosen_video_still_downloading_opens_the_editor_when_it_arrives(cx: &mut Te
     app.update(vcx, |app, cx| {
         app.sticker_box.host = crate::ui::sticker_set_box::state::SetBoxHost::In(None);
         app.sticker_box.editing = crate::ui::sticker_set_box::state::SetEditing::Waiting(
-            crate::ui::sticker_set_box::state::PickWait::FileWanted(PendingVideo {
+            crate::ui::sticker_set_box::state::PickWait::Downloading(PendingVideo {
                 pick,
                 file_id,
                 file: PickedFile::Video,
@@ -735,7 +735,7 @@ fn a_download_that_ends_without_the_file_ends_the_wait_with_a_note(cx: &mut Test
     app.update(vcx, |app, _| {
         app.sticker_box.host = crate::ui::sticker_set_box::state::SetBoxHost::In(None);
         app.sticker_box.editing = crate::ui::sticker_set_box::state::SetEditing::Waiting(
-            PickWait::FileWanted(PendingVideo {
+            PickWait::Downloading(PendingVideo {
                 pick: PickExisting {
                     set_id: 78,
                     kind: SetKind::Stickers,
@@ -762,6 +762,38 @@ fn a_download_that_ends_without_the_file_ends_the_wait_with_a_note(cx: &mut Test
         if let Some(session) = app.demo_session.as_mut() {
             session.media.downloads.end(file_id.0);
         }
+    });
+    assert!(app.update(vcx, |app, cx| app.settle_sticker_pick_download(cx)));
+    assert!(app.read_with(vcx, |app, _| app.sticker_box.editing.is_idle()));
+}
+
+/// `downloadFile` sends nothing for a file that cannot be downloaded or one
+/// whose cancel is settling: no transfer is tracked, nothing will arrive, and
+/// the wait ends with a note instead of holding the pick for good.
+#[gpui_kit::test]
+fn a_pick_whose_download_sent_nothing_ends_the_wait_with_a_note(cx: &mut TestAppContext) {
+    use crate::ui::sticker_set_box::state::{PendingVideo, PickExisting, PickWait, PickedFile};
+    use quill::ids::FileId;
+    use quill::sticker_set_box::SetKind;
+    let (app, _shell, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    let file_id = FileId(48_002);
+    app.update(vcx, |app, _| {
+        app.sticker_box.host = crate::ui::sticker_set_box::state::SetBoxHost::In(None);
+        // No transfer was begun: the tracker holds no record of the file.
+        app.sticker_box.editing = crate::ui::sticker_set_box::state::SetEditing::Waiting(
+            PickWait::Downloading(PendingVideo {
+                pick: PickExisting {
+                    set_id: 78,
+                    kind: SetKind::Stickers,
+                    adapt: false,
+                },
+                file_id,
+                file: PickedFile::Video,
+                emoji: None,
+                window: None,
+            }),
+        );
     });
     assert!(app.update(vcx, |app, cx| app.settle_sticker_pick_download(cx)));
     assert!(app.read_with(vcx, |app, _| app.sticker_box.editing.is_idle()));
