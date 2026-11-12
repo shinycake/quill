@@ -152,9 +152,9 @@ pub(crate) enum CommunityBox {
     /// "Do you want to join {group}?" for a community chat the person is
     /// not in (`ShowCommunityChatJoinConfirm`).
     ConfirmJoin { chat_id: i64 },
-    /// "Ungroup Chats" from the collapsed row's menu. The box stays for the
-    /// answer of its own request (`ask`), and closes with it.
-    Ungroup { community_id: i64, ask: Ask },
+    /// "Ungroup Chats" from the collapsed row's menu. It closes at once on
+    /// confirm (`confirm_ungroup`).
+    Ungroup { community_id: i64 },
     /// "Mute for..." from the row menu's Mute submenu (tdesktop
     /// `MuteBox`): days, hours and minutes.
     MuteFor { community_id: i64 },
@@ -474,43 +474,20 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Ungroup confirmed: the toggle goes, and the box waits for its
-    /// answer (`close_answered_ungroup`). Another change already out
-    /// (the switch's) leaves the box as it is, to press again.
+    /// Ungroup confirmed: the toggle goes and the box closes at once, as
+    /// tdesktop's `PeerMenuUngroupCommunity` does (`toggleCollapsedInDialogs`,
+    /// then `close()`). A refusal says so in a toast (`CollapseFailed`); one
+    /// the driver refuses to send is a note.
     pub(super) fn confirm_ungroup(&mut self, community_id: i64, cx: &mut Context<Self>) {
-        if let Some(live) = self.live.as_mut() {
-            match live
+        if let Some(live) = self.live.as_mut()
+            && let Err(err) = live
                 .driver
                 .toggle_community_chats_collapsed(community_id, false)
-            {
-                Ok(Some(request)) => self.hold_community_ask(request),
-                Ok(None) => {}
-                Err(err) => {
-                    self.set_note(StatusNote::error(user_error(&err)));
-                    self.flush_and_close_community_box(cx);
-                }
-            }
-        } else {
-            self.flush_and_close_community_box(cx);
-        }
-        cx.notify();
-    }
-
-    /// Frame upkeep: the Ungroup box closes once its request is answered
-    /// (a refusal says so in a toast, `CollapseFailed`).
-    pub(super) fn close_answered_ungroup(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(CommunityBox::Ungroup {
-            ask: ask @ Ask::Out(_),
-            ..
-        }) = self.admin.community.flow.open
-        else {
-            return false;
-        };
-        if ask.busy(self.session()) {
-            return false;
+        {
+            self.set_note(StatusNote::error(user_error(&err)));
         }
         self.flush_and_close_community_box(cx);
-        true
+        cx.notify();
     }
 
     /// The open box that stays for its answer holds its request: it reads
@@ -519,8 +496,7 @@ impl QuillApp {
         if let Some(
             CommunityBox::Visibility { ask, .. }
             | CommunityBox::ConfirmAdd { ask, .. }
-            | CommunityBox::ConfirmProcessAll { ask, .. }
-            | CommunityBox::Ungroup { ask, .. },
+            | CommunityBox::ConfirmProcessAll { ask, .. },
         ) = self.admin.community.flow.open.as_mut()
         {
             *ask = Ask::Out(request);

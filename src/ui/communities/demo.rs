@@ -274,7 +274,6 @@ impl QuillApp {
             }),
             "ungroup" => Some(CommunityBox::Ungroup {
                 community_id: RUSTACEANS,
-                ask: Ask::Idle,
             }),
             "ban" => Some(CommunityBox::BanWarning {
                 community_id: GUILD,

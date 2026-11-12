@@ -409,12 +409,14 @@ impl QuillApp {
                 !approve,
                 ask.busy(session),
             ),
-            CommunityBox::Ungroup { ask, .. } => (
+            // Closes at once on confirm, as tdesktop does: no request to
+            // wait on.
+            CommunityBox::Ungroup { .. } => (
                 Some(tr(keys::COMMUNITY_UNGROUP_TITLE).to_string()),
                 tr(keys::COMMUNITY_UNGROUP_TEXT).to_string(),
                 tr(keys::COMMUNITY_UNGROUP).to_string(),
                 true,
-                ask.busy(session),
+                false,
             ),
             // The ban box closes at once on confirm, as tdesktop does (the
             // toast comes with the answer): no request is held to wait on.

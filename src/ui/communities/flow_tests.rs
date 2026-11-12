@@ -362,41 +362,27 @@ fn the_mute_submenu_stays_inside_the_window_near_its_edge(cx: &mut TestAppContex
     );
 }
 
-/// Ungroup is not held by another surface's toggle: it has no request of
-/// its own to wait on until it sends one (with a live client the driver
-/// declines a second toggle while one is out, and the box stays to press
-/// again; the demo has no client to send through and closes).
+/// Ungroup closes at once on confirm, as tdesktop does: the box does not
+/// wait for the toggle's answer (no busy button, and no press that does
+/// nothing while another change is out).
 #[gpui_kit::test]
-fn ungroup_is_not_busy_for_another_surfaces_toggle(cx: &mut TestAppContext) {
+fn ungroup_closes_at_once_on_confirm(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     frames(&mut vcx);
     app.update(&mut vcx, |app, cx| {
-        if let Some(session) = app.demo_session.as_mut() {
-            session.request_for_community(
-                quill::state::RequestPurpose::Communities(
-                    quill::state::CommunitiesPurpose::ToggleCollapsed { collapsed: true },
-                ),
-                RUSTACEANS,
-            );
-        }
         app.show_community_box(
             CommunityBox::Ungroup {
                 community_id: RUSTACEANS,
-                ask: super::Ask::Idle,
             },
             cx,
         );
-        assert!(matches!(
-            app.admin.community.flow.open,
-            Some(CommunityBox::Ungroup {
-                ask: super::Ask::Idle,
-                ..
-            })
-        ));
+        assert!(app.admin.community.flow.open.is_some());
         app.confirm_community_box(cx);
+        assert!(
+            app.admin.community.flow.open.is_none(),
+            "closed in the same update"
+        );
     });
-    frames(&mut vcx);
-    assert!(app.read_with(&vcx, |app, _| app.admin.community.flow.open.is_none()));
 }
 
 #[gpui_kit::test]
@@ -733,44 +719,5 @@ fn a_confirm_box_is_busy_only_while_its_own_request_is_out(cx: &mut TestAppConte
                 "answered or lost: the box is free again"
             );
         }
-    });
-}
-
-/// The Ungroup box waits for its own toggle and closes when it is
-/// answered, whichever way (a refusal is a toast of its own).
-#[gpui_kit::test]
-fn the_ungroup_box_closes_when_its_own_toggle_is_answered(cx: &mut TestAppContext) {
-    use super::{Ask, CommunityBox};
-    use quill::state::{CommunitiesPurpose, RequestPurpose};
-    let (app, mut vcx) = new_app(cx);
-    frames(&mut vcx);
-    app.update(&mut vcx, |app, cx| {
-        app.show_community_box(
-            CommunityBox::Ungroup {
-                community_id: RUSTACEANS,
-                ask: Ask::Idle,
-            },
-            cx,
-        );
-        assert!(!app.close_answered_ungroup(cx), "nothing was asked yet");
-        let own = app.demo_session.as_mut().map(|session| {
-            session.request_for_community(
-                RequestPurpose::Communities(CommunitiesPurpose::ToggleCollapsed {
-                    collapsed: false,
-                }),
-                RUSTACEANS,
-            )
-        });
-        let Some(own) = own else {
-            return;
-        };
-        app.hold_community_ask(own);
-        assert!(!app.close_answered_ungroup(cx), "still waiting");
-        assert!(app.admin.community.flow.open.is_some());
-        if let Some(session) = app.demo_session.as_mut() {
-            session.requests.take(own);
-        }
-        assert!(app.close_answered_ungroup(cx), "answered: it closes");
-        assert!(app.admin.community.flow.open.is_none());
     });
 }

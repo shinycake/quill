@@ -351,10 +351,7 @@ impl QuillApp {
                 tr(keys::COMMUNITY_UNGROUP),
                 Box::new(move |this, _, cx| {
                     this.show_community_box(
-                        CommunityBox::Ungroup {
-                            community_id,
-                            ask: super::Ask::Idle,
-                        },
+                        CommunityBox::Ungroup { community_id },
                         cx,
                     );
                 }),

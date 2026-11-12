@@ -154,7 +154,6 @@ impl QuillApp {
             self.apply_community_outcome(outcome, cx);
             progressed = true;
         }
-        progressed |= self.close_answered_ungroup(cx);
         progressed |= self.drain_pending_ban(cx);
         progressed |= self.drain_new_community_chat(cx);
         progressed
