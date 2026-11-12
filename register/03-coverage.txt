@@ -98,3 +98,8 @@ src/connect/moderation/members_more.rs 82 read
 src/connect/moderation/mod.rs 365 read
 src/connect/moderation/ownership_open.rs 63 read
 src/connect/moderation/permissions.rs 87 read
+src/connect/owned_bots.rs 235 read
+src/connect/paid_messages.rs 295 read
+src/connect/paid_reaction.rs 169 read
+src/connect/passkeys.rs 176 read
+src/connect/passkeys_login.rs 137 read
