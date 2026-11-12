@@ -123,6 +123,7 @@ impl QuillApp {
         &self,
         set_id: i64,
         kind: SetKind,
+        enabled: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let owner = cx.entity().downgrade();
@@ -146,6 +147,7 @@ impl QuillApp {
                         Button::new("sticker-set-add")
                             .icon(IconName::Plus)
                             .ghost()
+                            .disabled(!enabled)
                             .rounded(ButtonRounded::Size(px(28.)))
                             .tooltip(AddEntry::CreateNew.label(kind))
                             .accessibility_label(AddEntry::CreateNew.label(kind))

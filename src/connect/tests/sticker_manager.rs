@@ -195,3 +195,46 @@ fn a_commit_fails_the_call_only_when_nothing_was_queued() {
     assert!(driver.session.stickers.manager.commits.is_empty());
     assert_eq!(driver.session.stickers.manager.failure, None);
 }
+
+/// A commit whose first send is refused is taken back and the call fails,
+/// so the box keeps its edits (sweep 22-005); the same commit goes out and
+/// is accepted once the link is back.
+#[test]
+fn a_commit_whose_first_send_is_refused_fails_the_call_and_is_taken_back() {
+    use super::flood_retry_lost::SwitchSender;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let (_dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let down = Arc::new(AtomicBool::new(false));
+    let inner = Arc::new(RecordingSender::new());
+    let sender = SwitchSender {
+        inner: inner.clone(),
+        down: down.clone(),
+    };
+    let session = crate::state::Session::new(crate::ids::AccountKey::primary(), sink.clone());
+    let mut driver = ConnectDriver::new(session, sender, test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    driver
+        .ingest(
+            copy_and_parse(
+                r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    down.store(true, Ordering::SeqCst);
+    assert!(
+        driver
+            .commit_sticker_manager(false, vec![22], None)
+            .is_err()
+    );
+    assert!(driver.session.stickers.manager.commits.is_empty());
+    assert_eq!(driver.session.stickers.manager.failure, None);
+    down.store(false, Ordering::SeqCst);
+    driver
+        .commit_sticker_manager(false, vec![22], None)
+        .unwrap();
+    assert_eq!(count(&inner, "changeStickerSet"), 1);
+}

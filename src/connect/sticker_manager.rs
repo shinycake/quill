@@ -97,6 +97,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         }
         let order = order.map(|ids| ids.into_iter().filter(|id| !removed.contains(id)).collect());
+        let first = self.session.stickers.manager.commits.is_empty();
         self.session
             .stickers
             .manager
@@ -106,10 +107,16 @@ impl<S: JsonSender> ConnectDriver<S> {
                 removed.into_iter().filter(|id| *id > 0),
                 order,
             ));
-        // The change is queued now. A step that cannot go out is lost and
-        // reported once through `manager.failure`; the call fails only when
-        // nothing was queued, which is what the box keeps its edits for.
-        let _ = self.advance_manager_commit();
+        // Behind another change, this one waits its turn and the call
+        // succeeds. At the front its first send happens now: when that
+        // cannot go out the change is taken back, the call fails, and the
+        // box keeps its edits and tells the user itself.
+        if first && let Err(err) = self.advance_manager_commit() {
+            let manager = &mut self.session.stickers.manager;
+            manager.commits.pop_back();
+            let _ = manager.take_failure();
+            return Err(err);
+        }
         Ok(())
     }
 

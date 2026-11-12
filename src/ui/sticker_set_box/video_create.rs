@@ -32,13 +32,13 @@ impl QuillApp {
         let kind = create.kind;
         let flag = cancel.clone();
         let worker = cx.background_spawn(async move {
+            // Owned from the worker on: a step already running when the
+            // box closes still finishes, and dropping the result removes it.
             encode_sticker(&job.source, &job.edits, &job.info, kind, &cancel)
+                .map(|encoded| quill::scratch::OwnedFile::new(encoded.path))
         });
         let job = self.spawn_screen_in(window, cx, async move |this, cx| {
-            // Removed with the continuation when the screen is gone.
-            let result = worker
-                .await
-                .map(|encoded| quill::scratch::OwnedFile::new(encoded.path));
+            let result = worker.await;
             let _ = this.update_in(cx, |this, window, cx| {
                 // The box moved on (closed, or another sticker) cancels
                 // this task with its stage, so what lands here is the

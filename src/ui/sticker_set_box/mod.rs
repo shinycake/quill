@@ -436,7 +436,12 @@ impl QuillApp {
                             .child(this.sticker_set_cell(set_id, kind, is_owned, index, item, cx));
                     }
                     if !reordering && has_add_cell(is_owned, count, kind) {
-                        grid = grid.child(this.sticker_set_add_cell(set_id, kind, cx));
+                        grid = grid.child(this.sticker_set_add_cell(
+                            set_id,
+                            kind,
+                            this.sticker_box.editing.is_idle(),
+                            cx,
+                        ));
                     }
                     let more: Option<AnyElement> = set_link(&name, kind).map(|link| {
                         this.sticker_set_more_button(
@@ -494,6 +499,7 @@ impl QuillApp {
                                         Button::new("sticker-set-edit")
                                             .label(kind.edit_label())
                                             .primary()
+                                            .disabled(!this.sticker_box.editing.is_idle())
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 this.begin_edit_stickers(cx);
                                             })),

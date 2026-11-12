@@ -152,6 +152,12 @@ impl SetEditing {
         *self = next;
     }
 
+    /// At rest: nothing chosen is on its way and no box is open, so the
+    /// set box's controls act; any other stage would be ended by a press.
+    pub(crate) fn is_idle(&self) -> bool {
+        matches!(self, Self::Idle)
+    }
+
     pub(crate) fn is_reordering(&self) -> bool {
         matches!(self, Self::Reordering)
     }

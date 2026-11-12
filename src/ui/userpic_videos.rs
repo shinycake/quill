@@ -197,8 +197,10 @@ struct State {
     /// their still stays until the clip is a different file.
     failed: HashMap<FileId, PathBuf>,
     /// The sweep waiting out [`RELEASE_AFTER`], held here so it ends with
-    /// the state; `None` while none is armed.
-    timer: Option<Task<()>>,
+    /// the state, with the time it is due; `None` while none is armed. One
+    /// whose time has passed counts as spent, so a missed clear cannot keep
+    /// a new sweep from being armed.
+    timer: Option<(Instant, Task<()>)>,
     /// The history list rendered since the last app frame began.
     history_listed: bool,
 }
@@ -669,9 +671,10 @@ impl UserpicVideos {
     /// Sweep again in [`RELEASE_AFTER`] while a player is awake, so one
     /// whose surface stopped drawing pauses and sleeps.
     fn arm_timer(self: &Rc<Self>, cx: &mut App) {
+        let now = cx.background_executor().now();
         let wanted = self
             .with(|state| {
-                state.timer.is_none()
+                state.timer.as_ref().is_none_or(|(due, _)| *due <= now)
                     && state
                         .slots
                         .iter()
@@ -690,7 +693,7 @@ impl UserpicVideos {
             videos.with(|state| state.timer = None);
             cx.update(|cx| videos.sweep(false, cx));
         });
-        self.with(|state| state.timer = Some(timer));
+        self.with(|state| state.timer = Some((now + RELEASE_AFTER, timer)));
     }
 
     /// Whether the slot plays now, for tests.
