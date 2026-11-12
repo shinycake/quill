@@ -102,7 +102,11 @@ fn every_sweepable_purpose_leaves_the_registry_and_the_session_alive() {
 #[test]
 fn account_loss_resets_the_loading_flags_of_pending_lookups() {
     let mut session = ready_session();
-    session.settings.privacy_data.network.begin();
+    session
+        .settings
+        .privacy_data
+        .network
+        .begin_with(crate::ids::RequestId(7008));
     session.request(RequestPurpose::GetNetworkStatistics, None);
     let subscriptions = session.request(
         RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions { append: false }),
@@ -227,7 +231,12 @@ fn sweeping_a_lost_transfer_check_lets_the_next_open_ask_again() {
 #[test]
 fn sweeping_lost_recommended_channels_clears_their_loading_flag() {
     let mut session = ready_session();
-    session.search.search.tabs.recommended.begin();
+    session
+        .search
+        .search
+        .tabs
+        .recommended
+        .begin_with(crate::ids::RequestId(7009));
     session.request(RequestPurpose::GetRecommendedChats, None);
 
     assert!(sweep(&mut session));

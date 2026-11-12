@@ -70,8 +70,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let sent = self.send_json_request(extra, &json).map(Some);
         if sent.is_ok() {
             let gifts = &mut self.session.users_state.wearable_gifts;
-            gifts.begin();
-            gifts.sent(extra);
+            gifts.begin_with(extra);
         }
         sent
     }
@@ -117,8 +116,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let sent = self.send_json_request(extra, &json).map(Some);
         if sent.is_ok() {
             let icons = &mut self.session.users_state.background_emoji_icons;
-            icons.begin();
-            icons.sent(extra);
+            icons.begin_with(extra);
         }
         sent
     }

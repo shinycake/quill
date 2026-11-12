@@ -330,8 +330,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .and_then(|open| open.from_picker.as_mut())
         {
             picker.query = query.to_string();
-            picker.members.begin();
-            picker.members.sent(extra);
+            picker.members.begin_with(extra);
         }
         match self.sender.send_json(&search_chat_members(
             extra,

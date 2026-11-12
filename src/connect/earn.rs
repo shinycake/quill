@@ -63,8 +63,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             crate::telegram::requests::get_application_config,
         )?;
         let app_config = &mut self.session.payments.earn.limits.app_config;
-        app_config.begin();
-        app_config.sent(request);
+        app_config.begin_with(request);
         Ok(())
     }
 
@@ -99,8 +98,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             get_star_revenue_statistics(extra, peer, false)
         })?;
         let stats = &mut self.session.payments.earn.self_stats;
-        stats.begin();
-        stats.sent(extra);
+        stats.begin_with(extra);
         Ok(())
     }
 

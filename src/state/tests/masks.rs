@@ -25,8 +25,7 @@ fn installed_and_archived_masks_stay_out_of_the_regular_panel() {
     let seq = AtomicU64::new(0);
 
     let extra = session.request(StickersPurpose::GetInstalledMaskSets.into(), None);
-    session.stickers.masks.installed.begin();
-    session.stickers.masks.installed.sent(extra);
+    session.stickers.masks.installed.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -53,15 +52,13 @@ fn installed_and_archived_masks_stay_out_of_the_regular_panel() {
         StickersPurpose::GetArchivedMaskSets { first_page: true }.into(),
         None,
     );
-    session.stickers.masks.archived.begin();
-    session.stickers.masks.archived.sent(extra);
+    session.stickers.masks.archived.begin_with(extra);
     apply_json(&mut session, &seq, &sink, &sets_json(extra, &[(21, "Old")]));
     let extra = session.request(
         StickersPurpose::GetArchivedMaskSets { first_page: false }.into(),
         None,
     );
-    session.stickers.masks.archived.begin();
-    session.stickers.masks.archived.sent(extra);
+    session.stickers.masks.archived.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -103,8 +100,7 @@ fn a_mask_set_answer_fills_the_strip_for_that_set() {
     let seq = AtomicU64::new(0);
     let extra = session.request(StickersPurpose::GetMaskSet { set_id: 11 }.into(), None);
     let set = session.stickers.masks.sets.entry(11).or_default();
-    set.begin();
-    set.sent(extra);
+    set.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -133,7 +129,7 @@ fn a_confirmed_change_drops_both_lists_and_an_error_marks_failure() {
         11,
         Fetch::Loading {
             stale: None,
-            request: None,
+            request: crate::ids::RequestId(900),
         },
     );
 
@@ -199,8 +195,7 @@ fn installed_order_updates_route_by_sticker_type() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(StickersPurpose::GetInstalledMaskSets.into(), None);
-    session.stickers.masks.installed.begin();
-    session.stickers.masks.installed.sent(extra);
+    session.stickers.masks.installed.begin_with(extra);
     apply_json(
         &mut session,
         &seq,

@@ -317,8 +317,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         if let Some(list) = self.session.stickers.emoji.lists.for_purpose(purpose) {
-            list.begin();
-            list.sent(extra);
+            list.begin_with(extra);
         }
         Ok(Some(extra))
     }

@@ -93,14 +93,12 @@ pub enum Fetch<T> {
     #[default]
     Idle,
     /// A request is in flight; `stale` is the last answer, if any.
-    /// `request` is the one that asked, recorded by [`Fetch::sent`] (`None`
-    /// until it is sent, and for the senders listed in
-    /// `scripts/request-match-baseline.txt`, which take their answer
-    /// through [`Fetch::succeed`] and [`Fetch::fail`]): only its own answer or
-    /// error acts through [`Fetch::answered`] and [`Fetch::failed`].
+    /// `request` is the one that asked, recorded when the stage begins
+    /// ([`Fetch::begin_with`]): only its own answer or error acts through
+    /// [`Fetch::answered`] and [`Fetch::failed`].
     Loading {
         stale: Option<T>,
-        request: Option<crate::ids::RequestId>,
+        request: crate::ids::RequestId,
     },
     /// The latest request answered.
     Ready(T),
@@ -215,26 +213,17 @@ impl<T> Fetch<T> {
         matches!(self, Self::Idle | Self::Outdated(_))
     }
 
-    /// A request goes out. The last answer stays visible, the last error is
-    /// gone.
-    pub fn begin(&mut self) {
+    /// A request goes out as `request` (registered before this call, so the
+    /// stage never reads Loading with nothing to wait for). The last answer
+    /// stays visible, the last error is gone.
+    pub fn begin_with(&mut self, request: crate::ids::RequestId) {
         let stale = self.take_data();
-        *self = Self::Loading {
-            stale,
-            request: None,
-        };
-    }
-
-    /// The request that was begun went out as `request`.
-    pub fn sent(&mut self, request: crate::ids::RequestId) {
-        if let Self::Loading { request: slot, .. } = self {
-            *slot = Some(request);
-        }
+        *self = Self::Loading { stale, request };
     }
 
     /// The fetch waits for the answer of `request`.
     pub fn waits_for(&self, request: crate::ids::RequestId) -> bool {
-        matches!(self, Self::Loading { request: Some(asked), .. } if *asked == request)
+        matches!(self, Self::Loading { request: asked, .. } if *asked == request)
     }
 
     /// `request` answered: taken only by the fetch that waits for it
@@ -449,7 +438,7 @@ mod tests {
             error: "no network".to_string(),
             stale: Some(vec![1]),
         };
-        fetch.begin();
+        fetch.begin_with(crate::ids::RequestId(7004));
         assert!(fetch.is_loading());
         assert_eq!(fetch.data(), Some(&vec![1]));
         assert_eq!(fetch.error(), None);
@@ -460,7 +449,7 @@ mod tests {
     #[test]
     fn failing_keeps_the_last_answer() {
         let mut fetch = Fetch::Ready(vec![1]);
-        fetch.begin();
+        fetch.begin_with(crate::ids::RequestId(7005));
         fetch.fail("timeout");
         assert_eq!(fetch.error(), Some("timeout"));
         assert_eq!(fetch.data(), Some(&vec![1]));
@@ -478,11 +467,11 @@ mod tests {
     #[test]
     fn cancel_returns_to_what_was_held() {
         let mut empty: Fetch<i32> = Fetch::Idle;
-        empty.begin();
+        empty.begin_with(crate::ids::RequestId(7006));
         empty.cancel();
         assert!(empty.is_idle());
         let mut held = Fetch::Ready(5);
-        held.begin();
+        held.begin_with(crate::ids::RequestId(7007));
         held.cancel();
         assert_eq!(held, Fetch::Ready(5));
         // Not loading: nothing to cancel.
@@ -510,7 +499,7 @@ mod tests {
         assert!(bare.is_idle());
         let mut loading: Fetch<i32> = Fetch::Loading {
             stale: None,
-            request: None,
+            request: RequestId(1),
         };
         loading.clear_error();
         assert!(loading.is_loading());
@@ -525,7 +514,7 @@ mod tests {
 
         let mut loading: Fetch<Vec<i32>> = Fetch::Loading {
             stale: None,
-            request: None,
+            request: RequestId(1),
         };
         loading.insert_data_if_missing(Vec::new);
         loading.data_mut().into_iter().for_each(|list| list.push(2));
@@ -533,7 +522,7 @@ mod tests {
             loading,
             Fetch::Loading {
                 stale: Some(vec![2]),
-                request: None,
+                request: RequestId(1),
             }
         );
 

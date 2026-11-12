@@ -71,11 +71,14 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     fn fetch_chat_links(&mut self) -> Result<(), ConnectSendError> {
-        self.session.settings.business_extra.chat_links.begin();
         let sent =
             self.send_business_extra(SettingsPurpose::GetChatLinks, links::get_links_request);
         if let Ok(extra) = sent {
-            self.session.settings.business_extra.chat_links.sent(extra);
+            self.session
+                .settings
+                .business_extra
+                .chat_links
+                .begin_with(extra);
         }
         // A send that never left lands in `Failed` (drawn with Retry), not
         // back in `Idle`, which a page draws as a spinner and asks again.
@@ -182,7 +185,6 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     fn fetch_connected_bot(&mut self) -> Result<(), ConnectSendError> {
-        self.session.settings.business_extra.connected_bot.begin();
         let sent = self.send_business_extra(
             SettingsPurpose::GetConnectedBot,
             bots::get_connected_bot_request,
@@ -192,7 +194,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .settings
                 .business_extra
                 .connected_bot
-                .sent(extra);
+                .begin_with(extra);
         }
         if sent.is_err() {
             self.session
@@ -257,24 +259,21 @@ impl<S: JsonSender> ConnectDriver<S> {
             })
             .and_then(|id| {
                 let exact = &mut self.session.settings.business_extra.lookup.exact;
-                exact.begin();
-                exact.sent(id);
+                exact.begin_with(id);
                 self.send_business_extra(part(BotLookupPart::Mine), |extra| {
                     bots::search_bots_on_server_request(extra, &query)
                 })
             })
             .and_then(|id| {
                 let mine = &mut self.session.settings.business_extra.lookup.mine;
-                mine.begin();
-                mine.sent(id);
+                mine.begin_with(id);
                 self.send_business_extra(part(BotLookupPart::Global), |extra| {
                     bots::search_public_bots_request(extra, &query)
                 })
             })
             .map(|id| {
                 let global = &mut self.session.settings.business_extra.lookup.global;
-                global.begin();
-                global.sent(id);
+                global.begin_with(id);
             });
         if sent.is_err() {
             self.session.settings.business_extra.lookup = BotLookup::default();

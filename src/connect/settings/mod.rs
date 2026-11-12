@@ -180,8 +180,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             // matches the fetch.
             *list = crate::state::fetch::Fetch::Idle;
         }
-        list.begin();
-        list.sent(extra);
+        list.begin_with(extra);
         if let Err(err) =
             self.sender
                 .send_json(&get_blocked_message_senders(extra, offset as i32, 100))

@@ -133,8 +133,7 @@ fn cl2_archive_settings_fetch_stores_and_set_rolls_back() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetArchiveChatListSettings, None);
-    session.chat_list.archive_settings.begin();
-    session.chat_list.archive_settings.sent(extra);
+    session.chat_list.archive_settings.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -194,8 +193,7 @@ fn a_refused_archive_settings_fetch_leaves_loading() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetArchiveChatListSettings, None);
-    session.chat_list.archive_settings.begin();
-    session.chat_list.archive_settings.sent(extra);
+    session.chat_list.archive_settings.begin_with(extra);
     assert!(session.chat_list.archive_settings.is_loading());
     apply_json(
         &mut session,
@@ -429,8 +427,7 @@ fn folder_invite_links_list_create_edit_and_errors() {
     // getChatFolderInviteLinks fills the folder's list.
     let extra = session.request_for_folder(RequestPurpose::GetChatFolderInviteLinks, 3);
     let links_fetch = &mut session.chat_list.folder_shares.entry(3).or_default().links;
-    links_fetch.begin();
-    links_fetch.sent(extra);
+    links_fetch.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -591,8 +588,7 @@ fn folder_link_chats_are_cached_per_folder() {
     let seq = AtomicU64::new(0);
     let extra = session.request_for_folder(RequestPurpose::GetChatsForFolderInviteLink, 3);
     let share = session.chat_list.folder_shares.entry(3).or_default();
-    share.chats.begin();
-    share.chats.sent(extra);
+    share.chats.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -620,8 +616,7 @@ fn installed_backgrounds_and_default_updates_are_cached() {
     );
     {
         let fetch = session.chats_state.installed_backgrounds.theme_mut(false);
-        fetch.begin();
-        fetch.sent(extra);
+        fetch.begin_with(extra);
     }
     apply_json(
         &mut session,

@@ -62,8 +62,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // A send that did not leave stays unasked: the next look asks again.
         if let Ok(Some(request)) = sent {
             let load = &mut self.session.settings.quick_replies.shortcuts_load;
-            load.begin();
-            load.sent(request);
+            load.begin_with(request);
         }
         sent.map(|_| ())
     }
@@ -91,8 +90,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         )?;
         if let Some(request) = sent {
             let mut load = Fetch::Idle;
-            load.begin();
-            load.sent(request);
+            load.begin_with(request);
             self.session
                 .settings
                 .quick_replies

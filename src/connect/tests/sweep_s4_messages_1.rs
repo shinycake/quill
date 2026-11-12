@@ -208,8 +208,7 @@ fn a_mask_list_asked_before_a_change_does_not_land_after_it() {
         installed: false,
         archived: false,
     });
-    session.stickers.masks.installed.begin();
-    session.stickers.masks.installed.sent(list);
+    session.stickers.masks.installed.begin_with(list);
     session.finish_mask_mutation(Some(change));
     // The fetch forgot the request it waited for: the refetch may go out,
     // and the late answer below finds nothing to land on.

@@ -361,8 +361,7 @@ fn shared_delete_box(app: &mut QuillApp) -> RequestId {
             .folder_chats_to_leave
             .entry(5)
             .or_default();
-        to_leave.begin();
-        to_leave.sent(request);
+        to_leave.begin_with(request);
     }
     request
 }

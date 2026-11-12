@@ -9,8 +9,12 @@ fn s8_sticker_backend_purpose_gated_dispatch() {
 
     // Trending sets land under GetTrendingStickerSets.
     let extra = with_purpose.request(RequestPurpose::GetTrendingStickerSets, None);
-    with_purpose.stickers.stickers.lists.trending.begin();
-    with_purpose.stickers.stickers.lists.trending.sent(extra);
+    with_purpose
+        .stickers
+        .stickers
+        .lists
+        .trending
+        .begin_with(extra);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -38,8 +42,12 @@ fn s8_sticker_backend_purpose_gated_dispatch() {
     // Favorites arrive as the bare `stickers` type under
     // GetFavoriteStickers.
     let extra = with_purpose.request(RequestPurpose::GetFavoriteStickers, None);
-    with_purpose.stickers.stickers.lists.favorites.begin();
-    with_purpose.stickers.stickers.lists.favorites.sent(extra);
+    with_purpose
+        .stickers
+        .stickers
+        .lists
+        .favorites
+        .begin_with(extra);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -55,8 +63,12 @@ fn s8_sticker_backend_purpose_gated_dispatch() {
     // searchStickerSets answers with `stickerSets` under
     // SearchStickerSets (not the installed-sets slot).
     let extra = with_purpose.request(RequestPurpose::SearchStickerSets, None);
-    with_purpose.stickers.stickers.lists.search.begin();
-    with_purpose.stickers.stickers.lists.search.sent(extra);
+    with_purpose
+        .stickers
+        .stickers
+        .lists
+        .search
+        .begin_with(extra);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -207,8 +219,7 @@ fn sound_list_refetch_prunes_file_ids() {
     session.settings.sound_file_ids.insert(91, 7); // dropped from the list
     session.settings.sound_file_ids.insert(92, 8); // still saved
     let extra = session.request(RequestPurpose::GetSavedNotificationSounds, None);
-    session.settings.saved_sounds.begin();
-    session.settings.saved_sounds.sent(extra);
+    session.settings.saved_sounds.begin_with(extra);
     let sound_file = r#"{"@type":"file","id":92,"size":12,"expected_size":12,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"r","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":12}}"#;
     apply_json(
         &mut session,
@@ -433,7 +444,7 @@ fn saved_gif(id: i32) -> crate::telegram::envelope::AnimationItem {
 #[test]
 fn an_update_during_the_request_survives_its_answer_and_asks_again() {
     let mut gifs = crate::state::GifPanel::default();
-    gifs.saved_asked();
+    gifs.saved_asked(crate::ids::RequestId(101));
     // `updateSavedAnimations` while the request is out: the answer may
     // predate the change.
     gifs.saved_outdated();
@@ -448,7 +459,7 @@ fn an_update_during_the_request_survives_its_answer_and_asks_again() {
     assert!(gifs.loaded() && gifs.saved_is_outdated());
     // A failure of the new ask keeps the list and counts as loaded until
     // the next opening.
-    gifs.saved_asked();
+    gifs.saved_asked(crate::ids::RequestId(102));
     gifs.saved_failed();
     assert!(gifs.failed() && gifs.loaded());
     assert_eq!(gifs.animations.len(), 1);

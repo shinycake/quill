@@ -436,8 +436,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         // A cached copy stays on screen while it reloads.
-        self.session.chat_list.archive_settings.begin();
-        self.session.chat_list.archive_settings.sent(extra);
+        self.session.chat_list.archive_settings.begin_with(extra);
         self.session.chat_list.archive_mute.note_sent(extra);
         Ok(Some(extra))
     }

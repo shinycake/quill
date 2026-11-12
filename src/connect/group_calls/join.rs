@@ -250,8 +250,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Asked once; an answered or failed request is not repeated (the
         // picker is optional, so a failure just leaves it out).
         if let Some(call) = self.session.calls.active_group_call.as_mut() {
-            call.join_as_options.begin();
-            call.join_as_options.sent(extra);
+            call.join_as_options.begin_with(extra);
         }
         Ok(())
     }

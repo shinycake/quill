@@ -25,8 +25,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         match sent {
             Ok(Some(request)) => {
                 let categories = &mut self.session.stickers.emoji.sticker_categories;
-                categories.begin();
-                categories.sent(request);
+                categories.begin_with(request);
                 Ok(())
             }
             Ok(None) => Ok(()),

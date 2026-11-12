@@ -211,10 +211,8 @@ impl QuillApp {
                         failed(error_message.clone())
                     }
                     Some(GraphFetch::Failed(message)) => failed(message.clone()),
-                    _ => Fetch::Loading {
-                        stale: None,
-                        request: None,
-                    },
+                    // Not answered yet: the view draws its loading note.
+                    _ => Fetch::Idle,
                 };
                 ZoomedDay { x, fetch }
             });

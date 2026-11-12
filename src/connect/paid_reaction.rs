@@ -161,8 +161,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         match self.send_json_request(extra, &json) {
             Ok(id) => {
                 let options = &mut self.session.payments.star_packs.options;
-                options.begin();
-                options.sent(id);
+                options.begin_with(id);
                 Ok(Some(id))
             }
             Err(err) => Err(err),

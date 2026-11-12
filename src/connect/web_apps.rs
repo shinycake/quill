@@ -356,8 +356,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let json = get_grossing_web_app_bots(extra, GROSSING_APPS_LIMIT);
         // The list waits for this request's answer and no other; a refused
         // send is a failed list with its Retry, not "Loading apps".
-        self.session.bots.web_apps.grossing.begin();
-        self.session.bots.web_apps.grossing.sent(extra);
+        self.session.bots.web_apps.grossing.begin_with(extra);
         match self.send_json_request(extra, &json) {
             Ok(id) => Ok(Some(id)),
             Err(err) => {

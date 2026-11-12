@@ -509,7 +509,7 @@ fn push_ban(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, member: i64, re
                 (RUSTACEANS, member),
                 Fetch::Loading {
                     stale: None,
-                    request: Some(quill::ids::RequestId(request)),
+                    request: quill::ids::RequestId(request),
                 },
             );
         }
@@ -569,7 +569,7 @@ fn a_ban_follows_a_newer_ask_for_its_member(cx: &mut TestAppContext) {
                 (RUSTACEANS, quill::state::CommunityMember::User(5)),
                 quill::state::fetch::Fetch::Loading {
                     stale: None,
-                    request: Some(quill::ids::RequestId(30)),
+                    request: quill::ids::RequestId(30),
                 },
             );
         }
@@ -620,7 +620,10 @@ fn the_chooser_reads_loading_while_the_owned_bots_load(cx: &mut TestAppContext) 
     frames(&mut vcx);
     app.update(&mut vcx, |app, _| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.communities.owned_bots.begin();
+            session
+                .communities
+                .owned_bots
+                .begin_with(quill::ids::RequestId(1));
         }
     });
     let status = app.read_with(&vcx, |app, _| app.community_candidates("").1);

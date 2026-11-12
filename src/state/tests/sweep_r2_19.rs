@@ -193,8 +193,7 @@ fn a_boost_status_marked_out_of_date_is_replaced_only_by_its_own_request() {
     let older = session.request(RequestPurpose::GetChatBoostStatus, Some(ChatId(13)));
     let newer = session.request(RequestPurpose::GetChatBoostStatus, Some(ChatId(13)));
     let fetch = session.groups.chat_boost_status.entry(13).or_default();
-    fetch.begin();
-    fetch.sent(newer);
+    fetch.begin_with(newer);
     let status = |extra: RequestId, level: i32| {
         format!(
             r#"{{"@type":"chatBoostStatus","@extra":"{}","level":{level},"boost_count":9}}"#,
@@ -299,8 +298,7 @@ fn a_sticker_list_marked_out_of_date_keeps_the_mark_through_an_older_answer() {
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetRecentStickers, None);
     let lists = &mut session.stickers.stickers.lists;
-    lists.recent.begin();
-    lists.recent.sent(extra);
+    lists.recent.begin_with(extra);
     apply_json(
         &mut session,
         &seq,

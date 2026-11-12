@@ -56,8 +56,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         match &sent {
             Ok(Some(id)) => {
                 let installed = &mut self.session.stickers.masks.installed;
-                installed.begin();
-                installed.sent(*id);
+                installed.begin_with(*id);
             }
             Err(_) => self.note_mask_send_failed(StickersPurpose::GetInstalledMaskSets),
             Ok(None) => {}
@@ -83,8 +82,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         match &sent {
             Ok(Some(id)) => {
                 let archived = &mut self.session.stickers.masks.archived;
-                archived.begin();
-                archived.sent(*id);
+                archived.begin_with(*id);
             }
             Err(_) => self.note_mask_send_failed(purpose),
             Ok(None) => {}
@@ -258,8 +256,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             }) {
                 Ok(Some(id)) => {
                     let set = self.session.stickers.masks.sets.entry(set_id).or_default();
-                    set.begin();
-                    set.sent(id);
+                    set.begin_with(id);
                 }
                 Ok(None) => {}
                 // Never left: asked again on the next strip refresh.

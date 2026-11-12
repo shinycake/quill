@@ -50,8 +50,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .chat_boost_status
             .entry(chat_id.0)
             .or_default();
-        fetch.begin();
-        fetch.sent(extra);
+        fetch.begin_with(extra);
         if let Err(err) = self
             .sender
             .send_json(&get_chat_boost_status(extra, chat_id))
@@ -72,8 +71,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .chat_boost_status
             .entry(chat_id.0)
             .or_default();
-        fetch.begin();
-        fetch.sent(extra);
+        fetch.begin_with(extra);
         Ok(Some(extra))
     }
 
@@ -201,8 +199,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let extra = self.session.request(RequestPurpose::GetBoostsPerGift, None);
         let fetch = &mut self.session.groups.boosts_per_gift;
-        fetch.begin();
-        fetch.sent(extra);
+        fetch.begin_with(extra);
         if let Err(err) = self
             .sender
             .send_json(&crate::telegram::requests::get_application_config(extra))

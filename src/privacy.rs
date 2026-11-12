@@ -1004,8 +1004,7 @@ mod tests {
             RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders { offset: 2 }),
             None,
         );
-        session.settings.blocked_senders.begin();
-        session.settings.blocked_senders.sent(old);
+        session.settings.blocked_senders.begin_with(old);
         // The list restarted: its first page is in, and the fetch moved on.
         session.settings.blocked_senders = crate::state::fetch::Fetch::Idle;
         session.settings.blocked_senders.succeed(vec![61, 62]);
@@ -1026,8 +1025,7 @@ mod tests {
             RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders { offset: 2 }),
             None,
         );
-        session.settings.blocked_senders.begin();
-        session.settings.blocked_senders.sent(live);
+        session.settings.blocked_senders.begin_with(live);
         apply_json(
             &mut session,
             &seq,
@@ -1053,8 +1051,7 @@ mod tests {
             RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders { offset: 0 }),
             None,
         );
-        session.settings.blocked_senders.begin();
-        session.settings.blocked_senders.sent(extra);
+        session.settings.blocked_senders.begin_with(extra);
         apply_json(
             &mut session,
             &seq,
@@ -1072,8 +1069,7 @@ mod tests {
             RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders { offset: 2 }),
             None,
         );
-        session.settings.blocked_senders.begin();
-        session.settings.blocked_senders.sent(extra);
+        session.settings.blocked_senders.begin_with(extra);
         apply_json(
             &mut session,
             &seq,

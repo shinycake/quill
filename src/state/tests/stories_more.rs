@@ -400,8 +400,7 @@ fn story_manage_state_transitions() {
     assert!(error.contains("Story update failed"), "{error}");
 
     let extra = session.request(RequestPurpose::GetChatsToPostStories, None);
-    session.stories.post_as.begin();
-    session.stories.post_as.sent(extra);
+    session.stories.post_as.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -416,8 +415,7 @@ fn story_manage_state_transitions() {
     // Review fix-up: a failed `getChatsToPostStories` surfaces a
     // transient error instead of silently leaving only "Myself".
     let extra = session.request(RequestPurpose::GetChatsToPostStories, None);
-    session.stories.post_as.begin();
-    session.stories.post_as.sent(extra);
+    session.stories.post_as.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -571,12 +569,11 @@ fn set_account_ttl_ok_stores_confirmed_days() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     session.settings.account_ttl.succeed(90);
-    session.settings.account_ttl.begin();
     let extra = session.request(
         RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { days: 365 }),
         None,
     );
-    session.settings.account_ttl.sent(extra);
+    session.settings.account_ttl.begin_with(extra);
     apply_json(
         &mut session,
         &seq,

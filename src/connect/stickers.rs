@@ -107,8 +107,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         match sent {
             Ok(Some(request)) => {
                 let greeting = &mut self.session.stickers.stickers.greeting;
-                greeting.begin();
-                greeting.sent(request);
+                greeting.begin_with(request);
             }
             _ => self
                 .session
@@ -164,8 +163,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         match self.sender.send_json(&get_installed_sticker_sets(extra)) {
             Ok(()) => {
                 let installed = &mut self.session.stickers.stickers.lists.installed;
-                installed.begin();
-                installed.sent(extra);
+                installed.begin_with(extra);
                 Ok(Some(extra))
             }
             Err(err) => {
@@ -213,8 +211,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         if let Some(list) = self.session.stickers.stickers.lists.for_purpose(purpose) {
-            list.begin();
-            list.sent(extra);
+            list.begin_with(extra);
         }
         Ok(Some(extra))
     }
@@ -872,15 +869,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let owed = self.session.stickers.gifs.saved_is_outdated();
-        self.session.stickers.gifs.saved_asked();
         let extra = self
             .session
             .request(RequestPurpose::GetSavedAnimations, None);
+        self.session.stickers.gifs.saved_asked(extra);
         match self.sender.send_json(&get_saved_animations(extra)) {
-            Ok(()) => {
-                self.session.stickers.gifs.saved.sent(extra);
-                Ok(Some(extra))
-            }
+            Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
                 // A refetch owed after an update stays owed.

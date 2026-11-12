@@ -497,8 +497,7 @@ fn folder_chats_to_leave_cached_per_folder() {
         .folder_chats_to_leave
         .entry(3)
         .or_default();
-    to_leave.begin();
-    to_leave.sent(extra);
+    to_leave.begin_with(extra);
     let json = format!(
         r#"{{"@type":"chats","@extra":"{}","total_count":2,"chat_ids":[5,6]}}"#,
         extra.0

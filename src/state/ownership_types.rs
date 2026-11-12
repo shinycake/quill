@@ -141,7 +141,7 @@ impl Session {
     pub fn begin_ownership_check(&mut self, request: RequestId) {
         self.groups.ownership.check = Fetch::Loading {
             stale: None,
-            request: Some(request),
+            request,
         };
     }
 

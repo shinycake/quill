@@ -80,7 +80,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .notification_exceptions
             .entry(scope)
             .or_default()
-            .begin();
+            .begin_with(extra);
         if let Err(err) = self
             .sender
             .send_json(&get_chat_notification_settings_exceptions(
@@ -97,12 +97,6 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .fail("could not send the request");
             return Err(err);
         }
-        self.session
-            .settings
-            .notification_exceptions
-            .entry(scope)
-            .or_default()
-            .sent(extra);
         Ok(())
     }
 
@@ -269,8 +263,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetSavedNotificationSounds, None);
-        self.session.settings.saved_sounds.begin();
-        self.session.settings.saved_sounds.sent(extra);
+        self.session.settings.saved_sounds.begin_with(extra);
         match self.sender.send_json(&get_saved_notification_sounds(extra)) {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {

@@ -191,13 +191,14 @@ impl Session {
             Some(RequestPurpose::ResetNetworkStatistics) => {
                 // The old numbers are gone; the next open refetches.
                 let network = &mut self.settings.privacy_data.network;
-                *network = if network.is_loading() {
-                    crate::state::fetch::Fetch::Loading {
-                        stale: None,
-                        request: None,
+                *network = match network {
+                    crate::state::fetch::Fetch::Loading { request, .. } => {
+                        crate::state::fetch::Fetch::Loading {
+                            stale: None,
+                            request: *request,
+                        }
                     }
-                } else {
-                    crate::state::fetch::Fetch::Idle
+                    _ => crate::state::fetch::Fetch::Idle,
                 };
             }
             Some(RequestPurpose::HideCheckPasswordSuggestion) => {

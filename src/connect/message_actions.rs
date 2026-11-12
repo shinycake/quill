@@ -303,8 +303,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .pinned_messages
             .entry(chat_id.0)
             .or_default();
-        fetch.begin();
-        fetch.sent(extra);
+        fetch.begin_with(extra);
         if let Err(err) = self.sender.send_json(&json) {
             self.session.requests.take(extra);
             self.session

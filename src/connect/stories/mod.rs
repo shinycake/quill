@@ -327,8 +327,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetStoryAvailableReactions, None);
-        self.session.stories.available_reactions.begin();
-        self.session.stories.available_reactions.sent(extra);
+        self.session.stories.available_reactions.begin_with(extra);
         match self
             .sender
             .send_json(&get_story_available_reactions(extra, 10))

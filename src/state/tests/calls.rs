@@ -118,8 +118,7 @@ fn join_as_answer_fills_options_and_preselects_the_saved_default() {
         None,
     );
     if let Some(call) = session.calls.active_group_call.as_mut() {
-        call.join_as_options.begin();
-        call.join_as_options.sent(extra);
+        call.join_as_options.begin_with(extra);
     }
     apply_json(
         &mut session,
@@ -501,9 +500,6 @@ fn join_as_failure_leaves_the_picker_out_and_is_not_asked_again() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     session.calls.active_group_call = Some(ActiveGroupCall::fresh(555));
-    if let Some(call) = session.calls.active_group_call.as_mut() {
-        call.join_as_options.begin();
-    }
     let extra = session.request(
         RequestPurpose::Calls(CallsPurpose::GetVideoChatAvailableParticipants {
             group_call_id: 555,
@@ -511,7 +507,7 @@ fn join_as_failure_leaves_the_picker_out_and_is_not_asked_again() {
         None,
     );
     if let Some(call) = session.calls.active_group_call.as_mut() {
-        call.join_as_options.sent(extra);
+        call.join_as_options.begin_with(extra);
     }
     apply_json(
         &mut session,

@@ -474,7 +474,10 @@ fn delete_account_ok_clears_mutating_without_local_teardown() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     session.settings.account_delete.fail("stale");
-    session.settings.account_delete.begin();
+    session
+        .settings
+        .account_delete
+        .begin_with(crate::ids::RequestId(7010));
     let extra = session.request(RequestPurpose::DeleteAccount, None);
     apply_json(
         &mut session,
@@ -490,7 +493,10 @@ fn delete_account_ok_clears_mutating_without_local_teardown() {
 fn delete_account_error_surfaces_honestly() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.settings.account_delete.begin();
+    session
+        .settings
+        .account_delete
+        .begin_with(crate::ids::RequestId(7011));
     let extra = session.request(RequestPurpose::DeleteAccount, None);
     apply_json(
         &mut session,

@@ -48,8 +48,7 @@ fn an_older_installed_emoji_list_never_answers_a_newer_ask() {
             None,
             |s, id| {
                 let list = &mut s.stickers.emoji.lists.installed;
-                list.begin();
-                list.sent(id);
+                list.begin_with(id);
             },
         );
         let (first, second) = asks.ids();
@@ -76,8 +75,7 @@ fn an_older_emoji_search_never_answers_a_newer_ask() {
         None,
         |s, id| {
             let list = &mut s.stickers.emoji.lists.search;
-            list.begin();
-            list.sent(id);
+            list.begin_with(id);
         },
     );
     let (first, second) = asks.ids();
@@ -96,8 +94,7 @@ fn an_older_sticker_category_strip_never_answers_a_newer_ask() {
         None,
         |s, id| {
             let strip = &mut s.stickers.emoji.sticker_categories;
-            strip.begin();
-            strip.sent(id);
+            strip.begin_with(id);
         },
     );
     let (first, second) = asks.ids();
@@ -125,8 +122,7 @@ fn an_older_premium_sticker_preview_never_answers_a_newer_ask() {
         None,
         |s, id| {
             let list = &mut s.payments.hub.premium_stickers;
-            list.begin();
-            list.sent(id);
+            list.begin_with(id);
         },
     );
     let payload = || StickersPayload::Stickers {
@@ -149,8 +145,7 @@ fn an_older_default_auto_delete_answer_never_lands_on_a_newer_ask() {
             None,
             |s, id| {
                 let fetch = &mut s.settings.default_auto_delete;
-                fetch.begin();
-                fetch.sent(id);
+                fetch.begin_with(id);
             },
         );
         let answer = |session: &mut Session, pending: &PendingRequest, seconds| {
@@ -183,8 +178,7 @@ fn an_older_pinned_list_never_answers_a_newer_ask() {
         Some(chat),
         |s, id| {
             let list = s.messages.pinned_messages.entry(chat.0).or_default();
-            list.begin();
-            list.sent(id);
+            list.begin_with(id);
         },
     );
     session.apply_found_chat_messages(Vec::new(), 0, MessageId(0), Some(&asks.first), None, 0);
@@ -203,8 +197,7 @@ fn an_older_chat_preview_never_answers_a_newer_ask() {
         Some(chat),
         |s, id| {
             let peek = s.chat_list.chat_preview_fetch.entry(chat).or_default();
-            peek.begin();
-            peek.sent(id);
+            peek.begin_with(id);
         },
     );
     session.apply_messages(Vec::new(), Some(&asks.first), None, 0);
@@ -221,8 +214,7 @@ fn an_older_post_as_list_never_answers_a_newer_ask() {
         RequestPurpose::GetChatsToPostStories,
         None,
         |s, id| {
-            s.stories.post_as.begin();
-            s.stories.post_as.sent(id);
+            s.stories.post_as.begin_with(id);
         },
     );
     session.apply_chats(vec![ChatId(1)], Some(&asks.first));
@@ -237,8 +229,7 @@ fn an_older_folder_leave_list_never_answers_a_newer_ask() {
     let folder = 5;
     let ask = |s: &mut Session, id: RequestId| {
         let list = s.chat_list.folder_chats_to_leave.entry(folder).or_default();
-        list.begin();
-        list.sent(id);
+        list.begin_with(id);
     };
     let first = session.request_for_folder(RequestPurpose::GetChatFolderChatsToLeave, folder);
     ask(&mut session, first);
@@ -264,8 +255,7 @@ fn an_older_join_as_list_never_answers_a_newer_ask() {
     let sender = |user_id| MessageSender::User { user_id };
     let ask = |s: &mut Session, id: RequestId| {
         if let Some(call) = s.calls.active_group_call.as_mut() {
-            call.join_as_options.begin();
-            call.join_as_options.sent(id);
+            call.join_as_options.begin_with(id);
         }
     };
     let first = session.request(RequestPurpose::Other, None);

@@ -67,8 +67,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // the refetch marks the list again); a send that fails gives it back.
         let was_stale = self.session.settings.sessions_op.is_stale();
         self.session.settings.sessions_op.refetched();
-        self.session.settings.sessions.begin();
-        self.session.settings.sessions.sent(extra);
+        self.session.settings.sessions.begin_with(extra);
         match self.sender.send_json(&get_active_sessions(extra)) {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
@@ -170,7 +169,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.session.settings.account_ttl.clear_error();
         let extra = self.session.request(RequestPurpose::DeleteAccount, None);
-        self.session.settings.account_delete.begin();
+        self.session.settings.account_delete.begin_with(extra);
         match self
             .sender
             .send_json(&delete_account(extra, reason, password))
@@ -198,8 +197,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetDefaultAutoDelete, None);
-        self.session.settings.default_auto_delete.begin();
-        self.session.settings.default_auto_delete.sent(extra);
+        self.session.settings.default_auto_delete.begin_with(extra);
         let json = crate::telegram::requests::get_default_message_auto_delete_time(extra);
         match self.sender.send_json(&json) {
             Ok(()) => Ok(Some(extra)),
@@ -225,8 +223,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Settings(SettingsPurpose::SetDefaultAutoDelete { seconds }),
             None,
         );
-        self.session.settings.default_auto_delete.begin();
-        self.session.settings.default_auto_delete.sent(extra);
+        self.session.settings.default_auto_delete.begin_with(extra);
         let json = crate::telegram::requests::set_default_message_auto_delete_time(extra, seconds);
         match self.sender.send_json(&json) {
             Ok(()) => Ok(extra),
@@ -251,8 +248,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let extra = self.session.request(RequestPurpose::GetAccountTtl, None);
-        self.session.settings.account_ttl.begin();
-        self.session.settings.account_ttl.sent(extra);
+        self.session.settings.account_ttl.begin_with(extra);
         match self.sender.send_json(&get_account_ttl(extra)) {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
@@ -275,8 +271,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { days }),
             None,
         );
-        self.session.settings.account_ttl.begin();
-        self.session.settings.account_ttl.sent(extra);
+        self.session.settings.account_ttl.begin_with(extra);
         match self.sender.send_json(&set_account_ttl(extra, days)) {
             Ok(()) => Ok(extra),
             Err(err) => {
@@ -402,8 +397,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // the refetch marks the list again); a send that fails gives it back.
         let was_stale = self.session.settings.websites_op.is_stale();
         self.session.settings.websites_op.refetched();
-        self.session.settings.connected_websites.begin();
-        self.session.settings.connected_websites.sent(extra);
+        self.session.settings.connected_websites.begin_with(extra);
         match self.sender.send_json(&get_connected_websites(extra)) {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {

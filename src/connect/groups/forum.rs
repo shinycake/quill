@@ -111,8 +111,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .fail(chat_id.0, "could not send the request");
             return Err(err);
         }
-        self.session.threads.forum_topics.begin(chat_id.0);
-        self.session.threads.forum_topics.sent(chat_id.0, extra);
+        self.session
+            .threads
+            .forum_topics
+            .begin_with(chat_id.0, extra);
         Ok(())
     }
 

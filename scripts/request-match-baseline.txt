@@ -93,12 +93,5 @@ unmatched:QuillApp::submit_default_auto_delete 1
 unmatched:SearchState::accept_recommended 1
 unmatched:Session::apply_privacy_data_payload 1
 unmatched:Session::apply_saved_tags 1
-unsent:ConnectDriver::delete_account 1
-unsent:ConnectDriver::fetch_contacts 1
-unsent:ConnectDriver::fetch_network_statistics 1
-unsent:ConnectDriver::fetch_recommended_chats 1
-unsent:ConnectDriver::maybe_fetch_live_story_extras 1
-unsent:ConnectDriver::maybe_fetch_notification_exceptions 1
-unsent:GifPanel::saved_asked 1
 unsent:QuillApp::begin_screen_worker 1
 unsent:QuillApp::menu_focus_upkeep 1

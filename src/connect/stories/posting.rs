@@ -368,8 +368,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&get_chats_to_post_stories_request(extra))
         {
             Ok(()) => {
-                self.session.stories.post_as.begin();
-                self.session.stories.post_as.sent(extra);
+                self.session.stories.post_as.begin_with(extra);
                 Ok(Some(extra))
             }
             Err(err) => {

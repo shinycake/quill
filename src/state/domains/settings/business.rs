@@ -94,13 +94,13 @@ impl Session {
         if self.users_state.user_full_infos.contains_key(&me) {
             return Fetch::Ready(());
         }
-        if self
+        if let Some(request) = self
             .requests
-            .has_purpose_for_user(RequestPurpose::GetUserFullInfo, me)
+            .find_for_user(RequestPurpose::GetUserFullInfo, me)
         {
             return Fetch::Loading {
                 stale: None,
-                request: None,
+                request,
             };
         }
         match &self.settings.business.own_info_error {

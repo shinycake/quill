@@ -840,8 +840,7 @@ fn pinned_list_fills_newest_first_and_drops_unpins() {
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetPinnedMessages, Some(ChatId(16)));
     let fetch = session.messages.pinned_messages.entry(16).or_default();
-    fetch.begin();
-    fetch.sent(extra);
+    fetch.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -1388,8 +1387,7 @@ fn r2_an_older_pinned_fetch_neither_lands_nor_fails_over_the_newer_one() {
         let older = session.request(RequestPurpose::GetPinnedMessages, Some(ChatId(16)));
         let newer = session.request(RequestPurpose::GetPinnedMessages, Some(ChatId(16)));
         let fetch = session.messages.pinned_messages.entry(16).or_default();
-        fetch.begin();
-        fetch.sent(newer);
+        fetch.begin_with(newer);
         let error = |extra: RequestId| {
             format!(
                 r#"{{"@type":"error","@extra":"{}","code":500,"message":"X"}}"#,

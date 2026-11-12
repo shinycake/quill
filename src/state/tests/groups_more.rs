@@ -795,8 +795,7 @@ fn g2_chat_boost_status_cached() {
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetChatBoostStatus, Some(ChatId(13)));
     let fetch = session.groups.chat_boost_status.entry(13).or_default();
-    fetch.begin();
-    fetch.sent(extra);
+    fetch.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -959,8 +958,7 @@ fn g2_welcome_fetch_error_marks_failed() {
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::LoadChatWelcomeMessages, Some(ChatId(13)));
     let pack = session.groups.welcome_messages.entry(13).or_default();
-    pack.begin();
-    pack.sent(extra);
+    pack.begin_with(extra);
     apply_json(
         &mut session,
         &seq,

@@ -132,8 +132,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // A send that failed leaves the ask open for the next ingest.
         if self.send_json_request(extra, &json).is_ok() {
             let config = &mut self.session.settings.passkeys.login.config;
-            config.begin();
-            config.sent(extra);
+            config.begin_with(extra);
         }
     }
 }

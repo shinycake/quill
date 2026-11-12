@@ -186,8 +186,7 @@ fn sessions_answer_replaces_cache_for_matching_request() {
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetActiveSessions, None);
     session.settings.sessions.fail("stale");
-    session.settings.sessions.begin();
-    session.settings.sessions.sent(extra);
+    session.settings.sessions.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -332,14 +331,16 @@ fn a_failed_website_write_keeps_the_refetch_that_went_stale_meanwhile() {
 fn sessions_fetch_error_clears_loading() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.settings.sessions.begin();
+    session
+        .settings
+        .sessions
+        .begin_with(crate::ids::RequestId(7014));
     // A failed stale-refetch (e.g. after a terminate-ok marked the
     // cache stale) must NOT leave the cache stale — otherwise the
     // next ingest retries the fetch and flood state worsens.
     session.settings.sessions_op.mark_stale();
     let extra = session.request(RequestPurpose::GetActiveSessions, None);
-    session.settings.sessions.begin();
-    session.settings.sessions.sent(extra);
+    session.settings.sessions.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -365,8 +366,7 @@ fn account_ttl_answer_writes_cache_for_matching_request() {
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetAccountTtl, None);
     session.settings.account_ttl.fail("stale");
-    session.settings.account_ttl.begin();
-    session.settings.account_ttl.sent(extra);
+    session.settings.account_ttl.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -385,9 +385,8 @@ fn account_ttl_answer_writes_cache_for_matching_request() {
 fn account_ttl_fetch_error_surfaces_honestly() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.settings.account_ttl.begin();
     let extra = session.request(RequestPurpose::GetAccountTtl, None);
-    session.settings.account_ttl.sent(extra);
+    session.settings.account_ttl.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -511,8 +510,7 @@ fn websites_answer_replaces_cache_for_matching_request() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetConnectedWebsites, None);
-    session.settings.connected_websites.begin();
-    session.settings.connected_websites.sent(extra);
+    session.settings.connected_websites.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -612,14 +610,16 @@ fn disconnect_all_websites_error_surfaces_honestly() {
 fn websites_fetch_error_clears_loading() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.settings.connected_websites.begin();
+    session
+        .settings
+        .connected_websites
+        .begin_with(crate::ids::RequestId(7015));
     // A failed stale-refetch (e.g. after a disconnect-ok marked the
     // cache stale) must NOT leave the cache stale — otherwise the
     // next ingest retries the fetch and flood state worsens.
     session.settings.websites_op.mark_stale();
     let extra = session.request(RequestPurpose::GetConnectedWebsites, None);
-    session.settings.connected_websites.begin();
-    session.settings.connected_websites.sent(extra);
+    session.settings.connected_websites.begin_with(extra);
     apply_json(
         &mut session,
         &seq,

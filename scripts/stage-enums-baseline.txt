@@ -90,7 +90,6 @@ bare:ViewState::Waiting 1
 bare:Waker::Pending 1
 bare:WorkerLife::Running 1
 bare:WriteAccess::Asking 1
-optional:Fetch::Loading 1
 optional:LiveJoin::Joining 1
 optional:SetStage::Resolving 1
 optional:TrendingSets::Loading 1

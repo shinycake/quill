@@ -385,8 +385,7 @@ fn storage_statistics_answer_cached_by_purpose() {
     let (mut without_purpose, sink2) = session();
     let seq = AtomicU64::new(0);
     let extra = with_purpose.request(RequestPurpose::GetStorageStatistics, None);
-    with_purpose.settings.storage_stats.begin();
-    with_purpose.settings.storage_stats.sent(extra);
+    with_purpose.settings.storage_stats.begin_with(extra);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -427,8 +426,7 @@ fn storage_statistics_error_clears_loading() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetStorageStatistics, None);
-    session.settings.storage_stats.begin();
-    session.settings.storage_stats.sent(extra);
+    session.settings.storage_stats.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -780,8 +778,7 @@ fn cl_chat_preview_cached_for_unopened_chat() {
         .chat_preview_fetch
         .entry(ChatId(12))
         .or_default();
-    peek.begin();
-    peek.sent(extra);
+    peek.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -811,8 +808,7 @@ fn cl_chat_preview_cached_for_unopened_chat() {
         .chat_preview_fetch
         .entry(ChatId(12))
         .or_default();
-    peek.begin();
-    peek.sent(extra);
+    peek.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -841,15 +837,13 @@ fn a_late_preview_answer_for_another_chat_keeps_the_one_on_screen() {
         .chat_preview_fetch
         .entry(ChatId(11))
         .or_default();
-    peek.begin();
-    peek.sent(a);
+    peek.begin_with(a);
     let peek = session
         .chat_list
         .chat_preview_fetch
         .entry(ChatId(12))
         .or_default();
-    peek.begin();
-    peek.sent(b);
+    peek.begin_with(b);
     apply_json(
         &mut session,
         &seq,

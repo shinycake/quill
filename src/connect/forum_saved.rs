@@ -284,13 +284,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !saved.tags.is_idle() {
             return Ok(None);
         }
-        saved.tags.begin();
         let sent = self.send_purpose(purpose, None, |extra| {
             get_saved_messages_tags(extra, topic_id)
         });
         let tags = &mut self.session.threads.saved.tags;
         match &sent {
-            Ok(Some(extra)) => tags.sent(*extra),
+            Ok(Some(extra)) => tags.begin_with(*extra),
             _ => tags.fail_dropping_data("could not send the request"),
         }
         sent

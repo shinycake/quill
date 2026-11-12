@@ -57,8 +57,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Some(crate::ids::ChatId(boosted_chat_id)),
         );
         let premium_list = &mut self.session.payments.giveaway.options.premium;
-        premium_list.begin();
-        premium_list.sent(extra);
+        premium_list.begin_with(extra);
         let premium = self.send_json_request(
             extra,
             &get_premium_giveaway_payment_options(extra, boosted_chat_id),
@@ -75,8 +74,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request(RequestPurpose::GetStarGiveawayOptions, None);
         let stars_list = &mut self.session.payments.giveaway.options.stars;
-        stars_list.begin();
-        stars_list.sent(extra);
+        stars_list.begin_with(extra);
         let stars = self.send_json_request(extra, &get_star_giveaway_payment_options(extra));
         if stars.is_err() {
             self.session

@@ -36,7 +36,7 @@ fn an_outdated_fetch_keeps_its_answer_and_a_change_clears_its_line() {
     let mut never: Fetch<Vec<i32>> = Fetch::Idle;
     never.outdate();
     assert!(never.is_outdated() && never.items().is_empty());
-    list.begin();
+    list.begin_with(crate::ids::RequestId(1));
     assert!(list.is_loading() && !list.is_outdated());
     list.succeed(vec![3]);
     assert_eq!(list.items(), [3]);
@@ -46,10 +46,10 @@ fn an_outdated_fetch_keeps_its_answer_and_a_change_clears_its_line() {
 fn a_wearable_gifts_failure_leaves_loading_and_a_retry_asks_again() {
     let (mut session, _sink) = session();
     let gifts = &mut session.users_state.wearable_gifts;
-    gifts.begin();
+    gifts.begin_with(crate::ids::RequestId(1));
     gifts.fail("boom");
     assert!(gifts.can_ask() && gifts.error().is_some());
-    gifts.begin();
+    gifts.begin_with(crate::ids::RequestId(2));
     assert!(gifts.is_loading());
 }
 
@@ -57,7 +57,7 @@ fn a_wearable_gifts_failure_leaves_loading_and_a_retry_asks_again() {
 fn a_change_during_a_first_ask_outdates_it_and_drops_the_old_answer() {
     let mut list: Fetch<Vec<i32>> = Fetch::Loading {
         stale: None,
-        request: None,
+        request: crate::ids::RequestId(1),
     };
     list.outdate();
     assert!(list.is_outdated() && list.shows_loading());
@@ -66,7 +66,7 @@ fn a_change_during_a_first_ask_outdates_it_and_drops_the_old_answer() {
     assert!(list.is_outdated());
     assert!(!list.answer_failed("late"));
     assert!(list.is_outdated());
-    list.begin();
+    list.begin_with(crate::ids::RequestId(2));
     assert!(list.answer(vec![2]));
     assert_eq!(list.items(), [2]);
 }

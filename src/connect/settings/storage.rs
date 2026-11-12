@@ -34,8 +34,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .request(RequestPurpose::GetStorageStatistics, None);
         match self.sender.send_json(&get_storage_statistics(extra, 50)) {
             Ok(()) => {
-                self.session.settings.storage_stats.begin();
-                self.session.settings.storage_stats.sent(extra);
+                self.session.settings.storage_stats.begin_with(extra);
                 Ok(Some(extra))
             }
             Err(err) => {

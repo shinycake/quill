@@ -243,10 +243,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.settings.privacy_data.network.begin();
         let extra = self
             .session
             .request(RequestPurpose::GetNetworkStatistics, None);
+        self.session.settings.privacy_data.network.begin_with(extra);
         if let Err(err) = self.sender.send_json(&get_network_statistics(extra)) {
             self.session.requests.take(extra);
             self.session.settings.privacy_data.network.cancel();

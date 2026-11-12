@@ -203,10 +203,8 @@ fn acquired_gifts_and_preview_failures_say_so_and_can_be_asked_again() {
         None,
     );
     let market = &mut session.payments.gift_market;
-    market.acquired.entry(8).or_default().begin();
-    market.acquired.entry(8).or_default().sent(acquired);
-    market.previews.entry(8).or_default().begin();
-    market.previews.entry(8).or_default().sent(preview);
+    market.acquired.entry(8).or_default().begin_with(acquired);
+    market.previews.entry(8).or_default().begin_with(preview);
     fail(&mut session, acquired, &sink);
     fail(&mut session, preview, &sink);
     let market = &session.payments.gift_market;
@@ -354,8 +352,7 @@ fn an_older_acquired_gifts_failure_leaves_the_live_request_loading() {
     let old = session.request(purpose(), None);
     let live = session.request(purpose(), None);
     let fetch = session.payments.gift_market.acquired.entry(8).or_default();
-    fetch.begin();
-    fetch.sent(live);
+    fetch.begin_with(live);
     fail(&mut session, old, &sink);
     assert!(session.payments.gift_market.acquired[&8].is_loading());
     fail(&mut session, live, &sink);

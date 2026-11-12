@@ -91,16 +91,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         }
         if want.0 {
-            if let Some(live) = self.session.live_story_mut(group_call_id) {
-                live.streamer.begin();
-            }
             let sent = self
                 .live_story_request(LiveStoryPurpose::GetStreamer { group_call_id }, |extra| {
                     get_live_story_streamer(extra, group_call_id)
                 });
             match sent {
                 Ok(request) => {
-                    self.live_story_unsent(group_call_id, |live| live.streamer.sent(request));
+                    self.live_story_unsent(group_call_id, |live| live.streamer.begin_with(request));
                 }
                 Err(err) => {
                     self.live_story_unsent(group_call_id, |live| live.streamer.cancel());
@@ -109,16 +106,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
         }
         if want.1 {
-            if let Some(live) = self.session.live_story_mut(group_call_id) {
-                live.donors.begin();
-            }
             let sent = self
                 .live_story_request(LiveStoryPurpose::GetTopDonors { group_call_id }, |extra| {
                     get_live_story_top_donors(extra, group_call_id)
                 });
             match sent {
                 Ok(request) => {
-                    self.live_story_unsent(group_call_id, |live| live.donors.sent(request));
+                    self.live_story_unsent(group_call_id, |live| live.donors.begin_with(request));
                 }
                 Err(err) => {
                     self.live_story_unsent(group_call_id, |live| live.donors.cancel());
@@ -127,9 +121,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
         }
         if want.2 {
-            if let Some(live) = self.session.live_story_mut(group_call_id) {
-                live.message_senders.begin();
-            }
             let sent = self.live_story_request(
                 LiveStoryPurpose::GetMessageSenders { group_call_id },
                 |extra| get_live_story_available_message_senders(extra, group_call_id),
@@ -137,7 +128,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             match sent {
                 Ok(request) => {
                     self.live_story_unsent(group_call_id, |live| {
-                        live.message_senders.sent(request);
+                        live.message_senders.begin_with(request);
                     });
                 }
                 Err(err) => {

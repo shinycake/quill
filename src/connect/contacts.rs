@@ -30,7 +30,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !(contacts.can_ask() || contacts.is_outdated()) {
             return Ok(None);
         }
-        self.session.users_state.contacts.begin();
         let extra = self.session.request(RequestPurpose::GetContacts, None);
         if let Err(err) = self.sender.send_json(&get_contacts(extra)) {
             self.session.requests.take(extra);
@@ -42,7 +41,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .fail_dropping_data("could not send the request");
             return Err(err);
         }
-        self.session.users_state.contacts.sent(extra);
+        self.session.users_state.contacts.begin_with(extra);
         Ok(Some(extra))
     }
 

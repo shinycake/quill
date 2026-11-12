@@ -781,6 +781,14 @@ impl RequestRegistry {
 
     /// Phase 6: an in-flight request for a purpose/user pair (user-scoped
     /// `GetUserFullInfo` / `AddContact`).
+    /// The in-flight request of `purpose` for `user_id`, if any.
+    pub fn find_for_user(&self, purpose: RequestPurpose, user_id: i64) -> Option<RequestId> {
+        self.pending
+            .values()
+            .find(|p| p.purpose == purpose && p.user_id() == Some(user_id))
+            .map(|p| p.id)
+    }
+
     pub fn has_purpose_for_user(&self, purpose: RequestPurpose, user_id: i64) -> bool {
         self.pending
             .values()

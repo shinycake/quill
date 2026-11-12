@@ -250,8 +250,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .folder_chats_to_leave
             .entry(folder_id)
             .or_default();
-        to_leave.begin();
-        to_leave.sent(extra);
+        to_leave.begin_with(extra);
         if let Err(err) = self.sender.send_json(&{
             serde_json::json!({
                 "@type": "getChatFolderChatsToLeave",
@@ -305,13 +304,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .chat_lists_for_add
             .entry(chat_id.0)
             .or_default()
-            .begin();
-        self.session
-            .chat_list
-            .chat_lists_for_add
-            .entry(chat_id.0)
-            .or_default()
-            .sent(extra);
+            .begin_with(extra);
         if let Err(err) = self
             .sender
             .send_json(&get_chat_lists_to_add_chat(extra, chat_id))

@@ -32,11 +32,9 @@ fn an_older_forum_topics_answer_while_a_newer_ask_waits_lands_nowhere() {
     let seq = AtomicU64::new(0);
     let chat = ChatId(16);
     let old = session.request(RequestPurpose::GetForumTopics, Some(chat));
-    session.threads.forum_topics.begin(16);
-    session.threads.forum_topics.sent(16, old);
+    session.threads.forum_topics.begin_with(16, old);
     let new = session.request(RequestPurpose::GetForumTopics, Some(chat));
-    session.threads.forum_topics.begin(16);
-    session.threads.forum_topics.sent(16, new);
+    session.threads.forum_topics.begin_with(16, new);
     let answer = |extra: RequestId| {
         format!(
             r#"{{"@type":"forumTopics","@extra":"{}","total_count":0,"topics":[],"next_offset_date":0,"next_offset_message_id":0,"next_offset_forum_topic_id":0}}"#,
@@ -54,8 +52,7 @@ fn an_older_forum_topics_answer_while_a_newer_ask_waits_lands_nowhere() {
 fn a_refused_chatbot_search_leg_is_a_failure_not_an_empty_answer() {
     use crate::state::BotLookup;
     let mut lookup = BotLookup::default();
-    lookup.exact.begin();
-    lookup.exact.sent(RequestId(1));
+    lookup.exact.begin_with(RequestId(1));
     assert!(!lookup.done());
     // Another request's refusal does not end the leg.
     lookup.exact.failed(Some(RequestId(9)), "x", true);
@@ -152,11 +149,9 @@ fn an_older_sessions_refresh_neither_fails_nor_fills_the_newer_one_in_either_ord
         let (mut session, sink) = session();
         let seq = AtomicU64::new(0);
         let old = session.request(RequestPurpose::GetActiveSessions, None);
-        session.settings.sessions.begin();
-        session.settings.sessions.sent(old);
+        session.settings.sessions.begin_with(old);
         let new = session.request(RequestPurpose::GetActiveSessions, None);
-        session.settings.sessions.begin();
-        session.settings.sessions.sent(new);
+        session.settings.sessions.begin_with(new);
         if newest_first {
             apply_json(&mut session, &seq, &sink, &sessions_json(new));
             apply_json(&mut session, &seq, &sink, &error_json(old));

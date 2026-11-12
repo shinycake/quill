@@ -358,8 +358,12 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
         )
     };
     let extra = with_purpose.request(RequestPurpose::GetInstalledEmojiSets, None);
-    with_purpose.stickers.emoji.lists.installed.begin();
-    with_purpose.stickers.emoji.lists.installed.sent(extra);
+    with_purpose
+        .stickers
+        .emoji
+        .lists
+        .installed
+        .begin_with(extra);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -375,8 +379,7 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
     assert!(with_purpose.stickers.stickers.sets.is_empty());
 
     let extra = with_purpose.request(RequestPurpose::SearchEmojiSets, None);
-    with_purpose.stickers.emoji.lists.search.begin();
-    with_purpose.stickers.emoji.lists.search.sent(extra);
+    with_purpose.stickers.emoji.lists.search.begin_with(extra);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -510,8 +513,7 @@ fn an_empty_installed_list_is_loaded_only_after_its_answer() {
     let (mut session, _) = session();
     assert!(session.stickers.emoji.lists.installed.can_ask());
     let request = session.request(RequestPurpose::GetInstalledEmojiSets, None);
-    session.stickers.emoji.lists.installed.begin();
-    session.stickers.emoji.lists.installed.sent(request);
+    session.stickers.emoji.lists.installed.begin_with(request);
     session.accept_installed_emoji_sets(Some(request), Vec::new());
     assert!(!session.stickers.emoji.lists.installed.can_ask());
     session.invalidate_installed_emoji_sets();

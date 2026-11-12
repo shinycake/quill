@@ -17,10 +17,7 @@ fn a_late_links_answer_does_not_replace_a_list_a_failed_delete_dropped() {
     let asked = t.driver.session.chat_list.folder_shares[&3].links.clone();
     assert!(matches!(
         asked,
-        crate::state::fetch::Fetch::Loading {
-            request: Some(_),
-            ..
-        }
+        crate::state::fetch::Fetch::Loading { request: _, .. }
     ));
     t.driver
         .delete_folder_invite_link(3, "https://t.me/addlist/a")

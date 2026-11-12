@@ -15,8 +15,7 @@ fn asked_list(session: &mut Session, for_dark_theme: bool) -> RequestId {
         .chats_state
         .installed_backgrounds
         .theme_mut(for_dark_theme);
-    fetch.begin();
-    fetch.sent(extra);
+    fetch.begin_with(extra);
     extra
 }
 

@@ -51,17 +51,10 @@ impl ForumTopicsMap {
             .is_some_and(|list| list.error().is_some())
     }
 
-    /// `getForumTopics` for `chat_id` went out.
-    pub fn begin(&mut self, chat_id: i64) {
-        self.lists.entry(chat_id).or_default().begin();
-    }
-
-    /// The `begin` ask for `chat_id` went out as `request`: only its
+    /// `getForumTopics` for `chat_id` goes out as `request`: only its
     /// answer or error acts.
-    pub fn sent(&mut self, chat_id: i64, request: RequestId) {
-        if let Some(list) = self.lists.get_mut(&chat_id) {
-            list.sent(request);
-        }
+    pub fn begin_with(&mut self, chat_id: i64, request: RequestId) {
+        self.lists.entry(chat_id).or_default().begin_with(request);
     }
 
     /// The topics changed on the server: what is held stays until the
@@ -186,8 +179,7 @@ impl Session {
     /// is the one a fixture or demo that plays the answer uses.
     pub fn ask_forum_topics(&mut self, chat_id: ChatId) -> RequestId {
         let request = self.request(RequestPurpose::GetForumTopics, Some(chat_id));
-        self.threads.forum_topics.begin(chat_id.0);
-        self.threads.forum_topics.sent(chat_id.0, request);
+        self.threads.forum_topics.begin_with(chat_id.0, request);
         request
     }
 }
@@ -214,13 +206,12 @@ mod tests {
     fn a_forum_list_is_asked_answered_or_failed_as_one_value() {
         let mut map = ForumTopicsMap::default();
         assert!(!map.asked(5) && !map.failed(5) && !map.contains_key(&5));
-        map.begin(5);
-        map.sent(5, RequestId(1));
+        map.begin_with(5, RequestId(1));
         assert!(map.asked(5) && !map.failed(5) && !map.contains_key(&5));
         assert!(map.answered(5, Some(RequestId(1)), Vec::new()));
         assert!(map.asked(5) && map.contains_key(&5));
         // A failed refetch keeps the answer and does not ask again.
-        map.begin(5);
+        map.begin_with(5, RequestId(2));
         map.fail(5, "flood");
         assert!(map.failed(5) && map.asked(5) && map.contains_key(&5));
         // A failed first ask is final: "No chats", never asked again.

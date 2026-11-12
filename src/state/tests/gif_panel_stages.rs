@@ -43,7 +43,7 @@ fn a_late_page_of_an_earlier_search_does_not_answer_the_new_one() {
 #[test]
 fn a_failed_save_while_the_list_loads_keeps_the_fetch() {
     let mut panel = GifPanel::default();
-    panel.saved_asked();
+    panel.saved_asked(crate::ids::RequestId(101));
     panel.saved_mutation_failed();
     assert!(panel.loading() && !panel.failed());
 }
@@ -69,12 +69,12 @@ fn an_answer_to_a_left_search_changes_nothing() {
 fn the_saved_list_is_loaded_after_an_answer_or_a_failure_and_asked_again_after_a_retry() {
     let mut panel = GifPanel::default();
     assert!(!panel.loaded());
-    panel.saved_asked();
+    panel.saved_asked(crate::ids::RequestId(102));
     assert!(panel.loading() && !panel.loaded());
     panel.saved_answered(Vec::new());
     assert!(panel.loaded() && !panel.loading() && !panel.failed());
     // A refresh runs over the answer: still loaded, and loading.
-    panel.saved_asked();
+    panel.saved_asked(crate::ids::RequestId(103));
     assert!(panel.loaded() && panel.loading());
     panel.saved_failed();
     assert!(panel.loaded() && panel.failed() && !panel.loading());
@@ -103,7 +103,7 @@ fn clearing_a_failure_leaves_a_list_that_did_not_fail_alone() {
     let mut idle = GifPanel::default();
     idle.saved_failure_cleared();
     assert!(!idle.loaded());
-    idle.saved_asked();
+    idle.saved_asked(crate::ids::RequestId(104));
     idle.saved_failure_cleared();
     assert!(idle.loading());
 }
@@ -131,7 +131,7 @@ fn a_saved_list_marked_out_of_date_drops_the_older_answer_and_is_asked_again() {
     let mut panel = GifPanel::default();
     panel.saved_answered(Vec::new());
     assert!(panel.loaded() && !panel.saved_is_outdated());
-    panel.saved_asked();
+    panel.saved_asked(crate::ids::RequestId(105));
     panel.saved_outdated();
     panel.saved_answered(Vec::new());
     assert!(
@@ -143,6 +143,6 @@ fn a_saved_list_marked_out_of_date_drops_the_older_answer_and_is_asked_again() {
         !panel.loaded() || panel.saved_is_outdated(),
         "a failure keeps the mark"
     );
-    panel.saved_asked();
+    panel.saved_asked(crate::ids::RequestId(106));
     assert!(panel.loaded() && !panel.saved_is_outdated());
 }

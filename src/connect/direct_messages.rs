@@ -218,7 +218,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         if status.data().is_some() || status.is_loading() {
             return Ok(None);
         }
-        status.begin();
         let extra = self.session.request(purpose, Some(channel));
         if let Some(status) = self
             .session
@@ -227,7 +226,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .kicked
             .get_mut(&(channel.0, user_id))
         {
-            status.sent(extra);
+            status.begin_with(extra);
         }
         let json = get_chat_member(extra, channel, user_id);
         match self.send_json_request(extra, &json) {

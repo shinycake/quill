@@ -498,13 +498,7 @@ fn notification_exceptions_answer_lands_per_scope() {
         .notification_exceptions
         .entry(NotificationSettingsScope::PrivateChats)
         .or_default()
-        .begin();
-    session
-        .settings
-        .notification_exceptions
-        .entry(NotificationSettingsScope::PrivateChats)
-        .or_default()
-        .sent(extra);
+        .begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -535,13 +529,7 @@ fn failed_notification_exceptions_fetch_retries() {
         .notification_exceptions
         .entry(NotificationSettingsScope::GroupChats)
         .or_default()
-        .begin();
-    session
-        .settings
-        .notification_exceptions
-        .entry(NotificationSettingsScope::GroupChats)
-        .or_default()
-        .sent(extra);
+        .begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -871,8 +859,7 @@ fn default_auto_delete_roundtrip_and_failure() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetDefaultAutoDelete, None);
-    session.settings.default_auto_delete.begin();
-    session.settings.default_auto_delete.sent(extra);
+    session.settings.default_auto_delete.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -892,8 +879,7 @@ fn default_auto_delete_roundtrip_and_failure() {
         RequestPurpose::Settings(SettingsPurpose::SetDefaultAutoDelete { seconds: 86_400 }),
         None,
     );
-    session.settings.default_auto_delete.begin();
-    session.settings.default_auto_delete.sent(extra);
+    session.settings.default_auto_delete.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -909,8 +895,7 @@ fn default_auto_delete_roundtrip_and_failure() {
         RequestPurpose::Settings(SettingsPurpose::SetDefaultAutoDelete { seconds: 0 }),
         None,
     );
-    session.settings.default_auto_delete.begin();
-    session.settings.default_auto_delete.sent(extra);
+    session.settings.default_auto_delete.begin_with(extra);
     apply_json(
         &mut session,
         &seq,

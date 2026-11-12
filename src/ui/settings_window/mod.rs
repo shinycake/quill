@@ -464,7 +464,7 @@ impl QuillApp {
         }
         session.settings.blocked_senders = Fetch::Loading {
             stale: Some(ids),
-            request: None,
+            request: quill::ids::RequestId(1),
         };
         session.settings.blocked_total = 120;
         self.demo_ui.seq.store(

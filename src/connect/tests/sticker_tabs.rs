@@ -346,8 +346,13 @@ fn sticker_reordering_preserves_order_on_failure_and_refetches_on_success() {
     let fetch = driver
         .session
         .request(RequestPurpose::GetInstalledStickerSets, None);
-    driver.session.stickers.stickers.lists.installed.begin();
-    driver.session.stickers.stickers.lists.installed.sent(fetch);
+    driver
+        .session
+        .stickers
+        .stickers
+        .lists
+        .installed
+        .begin_with(fetch);
     let sets = |extra, ids: &[i64]| {
         json!({"@type":"stickerSets","@extra":extra,"sets":ids.iter().map(|id| json!({"@type":"stickerSetInfo","id":id.to_string(),"title":"Test","name":"Test","size":0,"is_installed":true})).collect::<Vec<_>>()}).to_string()
     };

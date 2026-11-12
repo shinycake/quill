@@ -49,8 +49,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .welcome_messages
             .entry(chat_id.0)
             .or_default();
-        pack.begin();
-        pack.sent(extra);
+        pack.begin_with(extra);
         Ok(Some(extra))
     }
 

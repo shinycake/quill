@@ -45,10 +45,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             get_ton_transactions(extra, TxFilter::All, "", 1)
         });
         let probe = &mut self.session.payments.hub.grams.probe;
-        probe.begin();
         match sent {
             Ok(request) => {
-                probe.sent(request);
+                probe.begin_with(request);
                 Ok(Some(request))
             }
             Err(err) => {

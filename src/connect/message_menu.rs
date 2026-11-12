@@ -331,8 +331,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Some(chat_id),
         );
         if let Some(menu) = self.session.messages.poll_option_menu.as_mut() {
-            menu.properties.begin();
-            menu.properties.sent(extra);
+            menu.properties.begin_with(extra);
         }
         if let Err(err) = self.send_audience(
             extra,
