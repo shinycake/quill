@@ -670,7 +670,11 @@ fn the_buy_box_is_one_stage_from_view_to_the_purchase_and_back() {
     buy.go(BuyStep::Confirm);
     assert_eq!(buy.stage, BuyStage::Confirm);
     buy.begin_send(5);
-    assert!(buy.sending() && buy.waits_for(crate::ids::RequestId(5)) && !buy.waits_for(crate::ids::RequestId(6)));
+    assert!(
+        buy.sending()
+            && buy.waits_for(crate::ids::RequestId(5))
+            && !buy.waits_for(crate::ids::RequestId(6))
+    );
     assert_eq!(buy.step(), BuyStep::Confirm);
     // Back during the purchase leaves it out; its answer still lands.
     buy.go(BuyStep::Send);

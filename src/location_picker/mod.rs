@@ -75,7 +75,9 @@ enum VenueBot {
     /// settles it, a request the session no longer holds ends it
     /// ([`LocationSharing::forget_dropped`]), and a new picker or username
     /// drops it.
-    Resolving { request: RequestId },
+    Resolving {
+        request: RequestId,
+    },
     Found(i64),
     Missing,
     /// The lookup failed (FLOOD_WAIT, a server error): no venues in this

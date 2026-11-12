@@ -470,10 +470,7 @@ fn save_registry(app_root: &Path, registry: &AccountRegistry) -> std::io::Result
 /// (never over an existing backup) so the account list stays recoverable
 /// instead of being overwritten by the next save.
 /// Whether the file was moved aside.
-fn quarantine_registry(
-    path: &Path,
-    rename: &dyn Fn(&Path, &Path) -> std::io::Result<()>,
-) -> bool {
+fn quarantine_registry(path: &Path, rename: &dyn Fn(&Path, &Path) -> std::io::Result<()>) -> bool {
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -857,7 +854,10 @@ mod account_registry_tests {
         assert_eq!(renames.get(), 1);
         // A save refuses, so the recoverable list is not replaced.
         assert!(save_registry(&root, &AccountRegistry::default()).is_err());
-        assert_eq!(std::fs::read(root.join("accounts.json")).unwrap(), b"not json{{");
+        assert_eq!(
+            std::fs::read(root.join("accounts.json")).unwrap(),
+            b"not json{{"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -72,7 +72,9 @@ pub enum QrAction {
     },
     /// `setProfileShareTheme` for `choice` could not be sent: the pick
     /// stays on screen and is not sent again until it changes.
-    SaveUnsent { choice: ThemeChoice },
+    SaveUnsent {
+        choice: ThemeChoice,
+    },
     /// The `setProfileShareTheme` sent as `request` came back: the theme it
     /// saved, or the reason it failed (empty when there is none to tell).
     /// Only the request the box waits for counts.
@@ -452,7 +454,10 @@ impl PeerQrBox {
     /// The save of `choice` went out as `request`: the box waits for it. A
     /// save still out is let go (its answer no longer counts).
     fn save_sent(&mut self, request: RequestId, choice: ThemeChoice) {
-        if matches!(self.theme, ThemeStage::Picked { .. } | ThemeStage::Saving { .. }) {
+        if matches!(
+            self.theme,
+            ThemeStage::Picked { .. } | ThemeStage::Saving { .. }
+        ) {
             self.theme = ThemeStage::Saving { request, choice };
         }
     }
@@ -460,7 +465,10 @@ impl PeerQrBox {
     /// The save of `choice` could not be sent: the pick stays, and is not
     /// sent again until it changes.
     fn save_unsent(&mut self, choice: ThemeChoice) {
-        if matches!(self.theme, ThemeStage::Picked { .. } | ThemeStage::Saving { .. }) {
+        if matches!(
+            self.theme,
+            ThemeStage::Picked { .. } | ThemeStage::Saving { .. }
+        ) {
             self.theme = ThemeStage::Picked {
                 failed: Some(choice),
             };

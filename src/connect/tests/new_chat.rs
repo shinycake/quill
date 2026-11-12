@@ -8,8 +8,7 @@ use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::group_type::GroupTypeEdit;
 use crate::ids::{ChatId, RequestId};
 use crate::new_chat::{
-    CreateFailure, CreationOutcome, NewChatKind, NewChatStage, TypeSaveStage,
-    plan_new_chat,
+    CreateFailure, CreationOutcome, NewChatKind, NewChatStage, TypeSaveStage, plan_new_chat,
 };
 use crate::platform::MemorySecretStore;
 use crate::profile_photo_sources::ChatPhotoInput;

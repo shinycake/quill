@@ -32,16 +32,14 @@ use super::app::QuillApp;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::ids::ChatId;
-use std::collections::HashSet;
 use quill::lang::{keys, tr};
 use quill::peer_qr::free::FreeMode;
 use quill::peer_qr::link::OwnLinkState;
 use quill::peer_qr::session::PeerQrData;
-use quill::peer_qr::state::{
-    PeerQrBox, QrAction, QrEffect, QrPanel, QrPeer, QrSubject, QrToast,
-};
+use quill::peer_qr::state::{PeerQrBox, QrAction, QrEffect, QrPanel, QrPeer, QrSubject, QrToast};
 use quill::peer_qr::theme::ThemeChoice;
 use quill::telegram::requests_privacy::PrivacySettingKey;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -694,13 +692,9 @@ impl QuillApp {
     /// and the session's own waits (gifts list, contact link, saves in
     /// flight) let go. Whether anything changed.
     fn qr_settle_dropped_requests(&mut self, cx: &mut Context<Self>) -> bool {
-        let (free, save) = self
-            .peer_qr
-            .open
-            .as_ref()
-            .map_or((None, None), |open| {
-                (open.state.free.waiting_for(), open.state.saving_request())
-            });
+        let (free, save) = self.peer_qr.open.as_ref().map_or((None, None), |open| {
+            (open.state.free.waiting_for(), open.state.saving_request())
+        });
         let Some(data) = self.qr_data_mut() else {
             return false;
         };
@@ -708,10 +702,13 @@ impl QuillApp {
         if !session_waits && free.is_none() && save.is_none() {
             return false;
         }
-        let Some(pending) = self
-            .session()
-            .map(|session| session.requests.pending_ids().into_iter().collect::<HashSet<_>>())
-        else {
+        let Some(pending) = self.session().map(|session| {
+            session
+                .requests
+                .pending_ids()
+                .into_iter()
+                .collect::<HashSet<_>>()
+        }) else {
             return false;
         };
         if let Some(data) = self.qr_data_mut() {

@@ -1,9 +1,9 @@
+use crate::ids::RequestId;
 use crate::peer_qr::appearance::{
     DEFAULT_CENTER, DEFAULT_EDGE, PeerQrColors, ShareThemeBackdrop, Swatch, SwatchKey,
     gradient_stops, swatches,
 };
 use crate::peer_qr::color::{Rgb, contrast, mix_lab, to_lab};
-use crate::ids::RequestId;
 use crate::peer_qr::free::{FreeCode, FreeMenuItem, FreeMode, FreeRequest, FreeResult};
 use crate::peer_qr::link::{
     OwnLinkInputs, OwnLinkKind, OwnLinkState, UserLinkData, UserLinkFetch, countdown_text,
@@ -454,7 +454,11 @@ fn a_free_request_that_never_left_only_toasts() {
         effects,
         vec![QrEffect::RequestFreeCode(FreeRequest::Temporary)]
     );
-    assert_eq!(qr.free.requesting(), None, "nothing is out until it is sent");
+    assert_eq!(
+        qr.free.requesting(),
+        None,
+        "nothing is out until it is sent"
+    );
     assert_eq!(
         qr.apply(QrAction::FreeUnsent, env(100)),
         vec![QrEffect::Toast(QrToast::Unavailable)]
@@ -493,7 +497,11 @@ fn menu_switches_timer_resets_and_restores() {
         qr.free.menu_items(true),
         vec![FreeMenuItem::Reset, FreeMenuItem::RestoreFee]
     );
-    let effects = act(&mut qr, QrAction::MenuChose(FreeMenuItem::ToggleTimer), env(101));
+    let effects = act(
+        &mut qr,
+        QrAction::MenuChose(FreeMenuItem::ToggleTimer),
+        env(101),
+    );
     assert_eq!(
         effects,
         vec![QrEffect::RequestFreeCode(FreeRequest::Permanent)]
@@ -522,7 +530,11 @@ fn menu_switches_timer_resets_and_restores() {
         env(103),
     );
     assert_eq!(effects, vec![QrEffect::Toast(QrToast::CodeReset)]);
-    let effects = act(&mut qr, QrAction::MenuChose(FreeMenuItem::RestoreFee), env(104));
+    let effects = act(
+        &mut qr,
+        QrAction::MenuChose(FreeMenuItem::RestoreFee),
+        env(104),
+    );
     assert_eq!(effects, vec![QrEffect::Toast(QrToast::FeeRestored)]);
     assert_eq!(qr.free.mode, FreeMode::Fee);
 }
@@ -565,8 +577,12 @@ fn temporary_only_accounts_cannot_ask_for_permanent_codes() {
         only,
     );
     assert!(
-        act(&mut qr, QrAction::MenuChose(FreeMenuItem::ToggleTimer), only)
-            .is_empty()
+        act(
+            &mut qr,
+            QrAction::MenuChose(FreeMenuItem::ToggleTimer),
+            only
+        )
+        .is_empty()
     );
 }
 
@@ -582,7 +598,11 @@ fn a_link_turning_temporary_drops_the_permanent_code() {
         ),
         env(100),
     );
-    act(&mut qr, QrAction::MenuChose(FreeMenuItem::ToggleTimer), env(101));
+    act(
+        &mut qr,
+        QrAction::MenuChose(FreeMenuItem::ToggleTimer),
+        env(101),
+    );
     qr.apply(
         answer(
             &qr,

@@ -899,7 +899,8 @@ fn a_stale_proxy_list_whose_refetch_cannot_be_sent_is_asked_again_after_the_wait
     // The ingests that follow inside the wait send nothing and report nothing.
     for _ in 0..3 {
         assert!(matches!(
-            t.driver.refresh_proxies_if_stale_at(now + UNSENT_RETRY_AFTER / 2),
+            t.driver
+                .refresh_proxies_if_stale_at(now + UNSENT_RETRY_AFTER / 2),
             Ok(None)
         ));
     }

@@ -408,7 +408,10 @@ fn a_list_collection_change_is_not_the_open_forms_request() {
         &mut p,
         json!({"@type": "giftCollection", "@extra": other.as_extra(), "id": 4, "name": "Cats", "gift_count": 1}),
     );
-    assert!(p.0.session.payments.gifts_manage.flow.is_some(), "its answer does not close the form");
+    assert!(
+        p.0.session.payments.gifts_manage.flow.is_some(),
+        "its answer does not close the form"
+    );
     // The form's own submit is what it waits for.
     let own = p.0.create_gift_collection("Dogs").unwrap();
     assert_eq!(
@@ -416,8 +419,7 @@ fn a_list_collection_change_is_not_the_open_forms_request() {
         Some(GiftFlow::NewCollection(FlowAsk::Sent(own)))
     );
     // A Rename form for another collection is not marked by it either.
-    p.0.session.payments.gifts_manage.flow =
-        Some(GiftFlow::RenameCollection(4, FlowAsk::Editing));
+    p.0.session.payments.gifts_manage.flow = Some(GiftFlow::RenameCollection(4, FlowAsk::Editing));
     p.0.session.payments.hub.received.op = crate::state::fetch::ListOp::Idle;
     p.0.create_gift_collection("Birds").unwrap();
     assert_eq!(

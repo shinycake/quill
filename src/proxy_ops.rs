@@ -224,7 +224,10 @@ mod tests {
         ops.fetch_sent(RequestId(3));
         assert!(ops.fetch_failed(RequestId(3)));
         assert_eq!(ops.fetch(), ProxyFetch::Failed);
-        assert!(!ops.refetch_due(now + UNSENT_RETRY_AFTER * 9), "an error answer waits for Refresh");
+        assert!(
+            !ops.refetch_due(now + UNSENT_RETRY_AFTER * 9),
+            "an error answer waits for Refresh"
+        );
     }
 
     #[test]

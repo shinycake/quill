@@ -77,7 +77,9 @@ enum AskStage {
     /// Sent as `request`; only its answer or error settles it, and a
     /// request the session no longer holds ends it
     /// ([`LocationPicker::forget_dropped`]).
-    InFlight { request: RequestId },
+    InFlight {
+        request: RequestId,
+    },
     Answered,
     /// The lookup failed: asking for the same again sends it again.
     Failed,
@@ -174,11 +176,7 @@ impl LocationPicker {
     /// tdesktop `LocationPicker::setup`: start at the last exact fix when
     /// there is one (and look for places and the address there), else at
     /// `fallback` (the system country) or Null Island.
-    pub(super) fn open(
-        chat_id: ChatId,
-        last_exact: Option<GeoPoint>,
-        fallback: GeoPoint,
-    ) -> Self {
+    pub(super) fn open(chat_id: ChatId, last_exact: Option<GeoPoint>, fallback: GeoPoint) -> Self {
         let view = match last_exact {
             Some(point) => MapView::new(point, START_ZOOM),
             None => MapView::new(fallback, 0),

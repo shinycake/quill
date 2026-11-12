@@ -470,9 +470,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let name = name.trim().to_string();
-        let extra = self.mutate_own_gifts(PaymentsPurpose::ChangeGiftCollection, |extra, owner| {
-            rq::create_gift_collection(extra, owner, &name, &[])
-        })?;
+        let extra = self
+            .mutate_own_gifts(PaymentsPurpose::ChangeGiftCollection, |extra, owner| {
+                rq::create_gift_collection(extra, owner, &name, &[])
+            })?;
         // The New form is the one its answer closes.
         self.session
             .payments
@@ -492,9 +493,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let name = name.trim().to_string();
-        let extra = self.mutate_own_gifts(PaymentsPurpose::ChangeGiftCollection, |extra, owner| {
-            rq::set_gift_collection_name(extra, owner, id, &name)
-        })?;
+        let extra = self
+            .mutate_own_gifts(PaymentsPurpose::ChangeGiftCollection, |extra, owner| {
+                rq::set_gift_collection_name(extra, owner, id, &name)
+            })?;
         // The Rename form of this collection is the one its answer closes.
         self.session
             .payments
@@ -507,9 +509,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.payments.gifts_manage.collection(id).is_none() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let extra = self.mutate_own_gifts(PaymentsPurpose::DeleteGiftCollection, |extra, owner| {
-            rq::delete_gift_collection(extra, owner, id)
-        })?;
+        let extra = self
+            .mutate_own_gifts(PaymentsPurpose::DeleteGiftCollection, |extra, owner| {
+                rq::delete_gift_collection(extra, owner, id)
+            })?;
         // The Delete form of this collection is the one its answer closes.
         self.session
             .payments

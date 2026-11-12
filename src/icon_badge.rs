@@ -494,7 +494,11 @@ fn launcher_loop() {
         if sent.is_err() {
             connection = None;
         }
-        crate::locks::lock_or_recover(&BADGE).answered(count, sent.is_ok(), std::time::Instant::now());
+        crate::locks::lock_or_recover(&BADGE).answered(
+            count,
+            sent.is_ok(),
+            std::time::Instant::now(),
+        );
     }
 }
 

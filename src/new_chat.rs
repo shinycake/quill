@@ -82,7 +82,10 @@ pub enum NewChatStage {
     /// the request is gone without one (`CreateLost`), as
     /// `Session::settled_new_chat` folds the answers in; the request is not
     /// held past it.
-    Creating { request: RequestId, back: NewChatBack },
+    Creating {
+        request: RequestId,
+        back: NewChatBack,
+    },
     /// A group exists; its dialog closes and the chat opens. (A supergroup's
     /// answer moves the stage to `Type`.)
     Created(ChatId),

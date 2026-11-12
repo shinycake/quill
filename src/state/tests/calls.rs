@@ -361,7 +361,11 @@ fn engine_hang_up_is_owed_once_after_tdlib_takes_the_discard() {
     let seq = AtomicU64::new(0);
     apply_json(&mut session, &seq, &sink, &swap_active_json(77, 41));
     let request = hanging_up(&mut session, 77);
-    let owed = |s: &mut Session| s.calls.hang_up_mut().is_some_and(|h| h.take_engine_hang_up());
+    let owed = |s: &mut Session| {
+        s.calls
+            .hang_up_mut()
+            .is_some_and(|h| h.take_engine_hang_up())
+    };
     // Nothing is owed while the discard is in flight.
     assert!(!owed(&mut session));
     apply_json(

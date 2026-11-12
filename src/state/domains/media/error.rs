@@ -33,9 +33,7 @@ impl Session {
                 LocationPickerPurpose::ResolveVenueBot => {
                     self.location.venue_bot_failed(pending.id)
                 }
-                LocationPickerPurpose::SearchVenues => {
-                    self.location.venues_failed(pending.id)
-                }
+                LocationPickerPurpose::SearchVenues => self.location.venues_failed(pending.id),
                 LocationPickerPurpose::MapTile | LocationPickerPurpose::VenueIcon => {
                     self.location.file_answered(pending.id, None)
                 }

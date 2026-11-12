@@ -233,7 +233,11 @@ mod tests {
         view.form_sent("a", PaymentsPurpose::UpgradeGift, RequestId(1));
         assert_eq!(view.form(), Some(&GiftForm::resale()), "not its request");
         view.form_sent("b", PaymentsPurpose::SetGiftResalePrice, RequestId(9));
-        assert_eq!(view.form(), Some(&GiftForm::resale()), "another gift's request");
+        assert_eq!(
+            view.form(),
+            Some(&GiftForm::resale()),
+            "another gift's request"
+        );
         view.form_sent("a", PaymentsPurpose::SetGiftResalePrice, RequestId(2));
         view.close_form_answered_by(Some(RequestId(1)));
         assert!(view.form().is_some());

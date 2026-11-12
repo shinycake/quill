@@ -445,7 +445,10 @@ impl ChatSummary {
     /// missing restriction means "not restricted" rather than "unknown":
     /// false while the status is unknown or restricted with no details yet.
     pub fn rights_fetched(&self) -> bool {
-        !matches!(self.my_member, OwnMember::Unknown | OwnMember::Restricted(None))
+        !matches!(
+            self.my_member,
+            OwnMember::Unknown | OwnMember::Restricted(None)
+        )
     }
 
     /// The probe found no member record (not a member, no access): there is

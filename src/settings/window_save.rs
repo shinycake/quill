@@ -25,7 +25,9 @@ struct Saver {
 /// itself. A save while it runs only stages.
 enum Writer {
     Idle,
-    Running { _thread: std::thread::JoinHandle<()> },
+    Running {
+        _thread: std::thread::JoinHandle<()>,
+    },
 }
 
 static SAVER: Saver = Saver {
@@ -128,7 +130,7 @@ pub fn flush_window_state() {
 
 #[cfg(test)]
 mod tests {
-    use super::{Saver, Writer, WindowState};
+    use super::{Saver, WindowState, Writer};
     use std::sync::Mutex;
 
     fn state(x: f32) -> WindowState {

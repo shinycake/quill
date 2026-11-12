@@ -707,11 +707,7 @@ fn opening_the_resale_list_keeps_a_buy_that_is_out() {
         json!({"@type": "giftResaleResultOk", "received_gift_id": "rx"}),
     );
     assert!(f.driver.session.payments.gift_market.buy.is_none());
-    assert_eq!(
-        toasts(&mut f.driver.session).len(),
-        1,
-        "its answer landed"
-    );
+    assert_eq!(toasts(&mut f.driver.session).len(), 1, "its answer landed");
 }
 
 /// A bid owned by a channel can be raised (`increaseGiftAuctionBid` needs

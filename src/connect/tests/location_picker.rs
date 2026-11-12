@@ -206,7 +206,11 @@ fn requests_a_reconnect_dropped_fail_on_the_next_pump() {
     }
     f.driver.pump_location_picker().unwrap();
     assert_eq!(waiting(&f), Some(VenueList::Failed));
-    assert_eq!(f.sent("getMapThumbnailFile").len(), 2, "the tile is asked again");
+    assert_eq!(
+        f.sent("getMapThumbnailFile").len(),
+        2,
+        "the tile is asked again"
+    );
 }
 
 #[test]

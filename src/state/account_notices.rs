@@ -465,11 +465,9 @@ impl Session {
         error: Option<String>,
     ) {
         let at = match (&self.settings.notices.review, request) {
-            (ReviewStage::Reviewing { items, .. }, Some(id)) => {
-                items
-                    .iter()
-                    .position(|item| item.stage == ReviewItemStage::InFlight(id))
-            }
+            (ReviewStage::Reviewing { items, .. }, Some(id)) => items
+                .iter()
+                .position(|item| item.stage == ReviewItemStage::InFlight(id)),
             _ => None,
         };
         if let Some(at) = at {

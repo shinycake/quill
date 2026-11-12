@@ -1,9 +1,8 @@
 //! Reducer for the gift market (`crate::gift_market`): resale pages and
 //! purchases, auction states and bids, crafting candidates and results.
 use crate::gift_market::{
-    MarketEvent,
     AuctionFetch, AuctionFollow, CraftGift, CraftResult, CraftRun, GiftMarketPayload,
-    GiftMarketPurpose, PageLoad, bid_done_toast, error_note,
+    GiftMarketPurpose, MarketEvent, PageLoad, bid_done_toast, error_note,
 };
 use crate::marketplace::GiftPurchaseResult;
 use crate::state::*;

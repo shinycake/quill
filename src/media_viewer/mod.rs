@@ -244,9 +244,14 @@ enum Origin {
     Chat,
     /// The tab's total count, so the header can say "Photo 120 of 340"
     /// while only a prefix of the list is loaded.
-    Shared { total: usize },
+    Shared {
+        total: usize,
+    },
     /// The photos not loaded yet count in `total`.
-    Profile { owner: PhotoOwner, total: usize },
+    Profile {
+        owner: PhotoOwner,
+        total: usize,
+    },
     Poll,
 }
 
@@ -606,11 +611,7 @@ mod tests {
 
     #[test]
     fn deleting_the_last_item_closes_the_viewer_with_its_source() {
-        let mut viewer = MediaViewer::open_shared(
-            vec![item(MediaViewerKind::Photo, 10)],
-            0,
-            3,
-        );
+        let mut viewer = MediaViewer::open_shared(vec![item(MediaViewerKind::Photo, 10)], 0, 3);
         assert!(viewer.is_open() && viewer.source() == ViewerSource::SharedMedia);
         assert!(viewer.retain(|_| false));
         assert!(!viewer.is_open());
