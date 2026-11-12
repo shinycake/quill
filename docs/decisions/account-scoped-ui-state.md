@@ -10275,3 +10275,4 @@ orders), `deep_link_routes_tests` (seek stays with its account).
 
 Guards: nothing added; `Fetch::pushed` is the named path for pushed values, so `succeed` stays counted by `check-request-match.py`.
 
+Hotspot note (r4-05): `src/state/session_apply_error.rs` changes by three lines: the new-chat type Save's refusal now goes through `NewChatState::type_save_failed` (the list of saves is private), so the reason is still worded where the error is applied.
