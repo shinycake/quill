@@ -443,7 +443,7 @@ fn a_silent_retry_runs_out_at_its_deadline_and_spends_the_budget() {
     };
     assert_eq!(state(&driver), Some(TransportState::Reconnecting));
     // Before its deadline the retry is left alone.
-    assert!(!driver.expire_call_reconnect(t0 + CALL_RECONNECT_WINDOW - Duration::from_secs(1)));
+    assert!(!driver.expire_call_reconnect(t0 + Duration::from_secs(19)));
     assert_eq!(handle.connects().len(), 2);
     // Each silent retry that passes its deadline asks again, until the
     // budget is spent.
