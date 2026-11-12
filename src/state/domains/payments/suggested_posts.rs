@@ -27,7 +27,7 @@ impl Session {
     }
 
     /// An approve or decline of the post went out as `request`.
-    pub(crate) fn decision_sent(&mut self, chat_id: i64, message_id: i64, request: RequestId) {
+    pub fn decision_sent(&mut self, chat_id: i64, message_id: i64, request: RequestId) {
         self.payments
             .suggested_posts
             .deciding
@@ -39,7 +39,7 @@ impl Session {
     }
 
     /// `request` was answered, refused or lost: its post is free.
-    pub(crate) fn decision_settled(&mut self, request: RequestId) {
+    pub fn decision_settled(&mut self, request: RequestId) {
         self.payments
             .suggested_posts
             .deciding
