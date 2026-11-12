@@ -162,6 +162,15 @@ impl Session {
             }
             _ => {}
         }
+        // A block or unblock was answered: it is no longer out.
+        if let Some(asked) = pending.filter(|p| {
+            matches!(
+                p.purpose,
+                RequestPurpose::Settings(SettingsPurpose::SetSenderBlockList { .. })
+            )
+        }) {
+            self.settings.block_note.settled(asked.id);
+        }
         // Slice A3: a `terminateSession` /
         // `terminateAllOtherSessions` succeeded — keep the old
         // cache visible and mark it stale so the driver refetches
@@ -178,6 +187,9 @@ impl Session {
         ) {
             self.settings.sessions_op.changed(pending.map(|p| p.id));
             self.settings.sessions.clear_error();
+            if let Some(asked) = pending {
+                self.settings.sessions_note.settled(asked.id);
+            }
         }
         // Slice A4: a `toggleSessionCanAcceptSecretChats` /
         // `toggleSessionCanAcceptCalls` succeeded — same stale
@@ -192,6 +204,9 @@ impl Session {
         ) {
             self.settings.sessions_op.changed(pending.map(|p| p.id));
             self.settings.sessions.clear_error();
+            if let Some(asked) = pending {
+                self.settings.sessions_note.settled(asked.id);
+            }
         }
         if let Some(RequestPurpose::Settings(SettingsPurpose::SetDefaultAutoDelete { seconds })) =
             pending.map(|p| p.purpose)
@@ -297,6 +312,9 @@ impl Session {
         ) {
             self.settings.websites_op.changed(pending.map(|p| p.id));
             self.settings.connected_websites.clear_error();
+            if let Some(asked) = pending {
+                self.settings.websites_note.settled(asked.id);
+            }
         }
         // Slice `parity:bots-payment-recurring`: an
         // `editStarSubscription` / `reuseStarSubscription` succeeded —

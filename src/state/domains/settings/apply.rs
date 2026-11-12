@@ -240,6 +240,7 @@ impl Session {
                     pending.filter(|p| p.purpose == RequestPurpose::ConfirmDeviceLogin)
                 {
                     self.settings.device_login.settle(asked.id, result);
+                    self.settings.sessions_note.settled(asked.id);
                     if result != crate::auth::DeviceLoginResult::Failed {
                         self.settings.sessions_op.changed(pending.map(|p| p.id));
                         self.settings.sessions.clear_error();

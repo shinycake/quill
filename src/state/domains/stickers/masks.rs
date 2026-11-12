@@ -148,6 +148,7 @@ impl MasksPanel {
 
     /// `request` answered or failed: its change is no longer in flight.
     pub fn settle_change(&mut self, request: RequestId) -> bool {
+        self.change_note.settled(request);
         let before = self.changes.len();
         self.changes.retain(|change| change.request != request);
         self.changes.len() < before
@@ -299,12 +300,12 @@ impl Session {
                 // A list fetch in flight keeps its place: its answer is the
                 // truth after the change. The refusal is the change's own
                 // line.
-                if let Some(pending) = pending {
-                    masks.settle_change(pending.id);
-                }
                 masks
                     .change_note
                     .refused(pending.map(|p| p.id), MASK_CHANGE_FAILED);
+                if let Some(pending) = pending {
+                    masks.settle_change(pending.id);
+                }
             }
             _ => return,
         }

@@ -220,7 +220,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session
                 .settings
                 .block_note
-                .refused(None, "The unblock request was not sent.");
+                .refused(Some(extra), "The unblock request was not sent.");
             return Err(err);
         }
         if let Some(list) = self.session.settings.blocked_senders.data_mut() {
@@ -263,7 +263,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session
                     .settings
                     .block_note
-                    .refused(None, "The block request was not sent.");
+                    .refused(Some(extra), "The block request was not sent.");
             }
             return Err(err);
         }

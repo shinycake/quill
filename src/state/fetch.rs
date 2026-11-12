@@ -129,6 +129,21 @@ impl ChangeNote {
         *self = Self::Waiting { requests };
     }
 
+    /// `request` (a change) was answered ok: it is no longer out. A wait
+    /// with nothing left becomes `Idle`; a shown refusal stays.
+    pub fn settled(&mut self, request: crate::ids::RequestId) {
+        match self {
+            Self::Idle => {}
+            Self::Waiting { requests } => {
+                requests.retain(|id| *id != request);
+                if requests.is_empty() {
+                    *self = Self::Idle;
+                }
+            }
+            Self::Refused { waiting, .. } => waiting.retain(|id| *id != request),
+        }
+    }
+
     /// `request` (a change) was refused; `None` when it never left. A
     /// refusal of a request the note does not hold lands nowhere.
     pub fn refused(&mut self, request: Option<crate::ids::RequestId>, line: impl Into<String>) {
