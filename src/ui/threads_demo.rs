@@ -52,11 +52,7 @@ pub(super) fn apply_ready_thread(session: &mut Session, seq: &AtomicU64, sink: &
     ] {
         apply(session, json);
     }
-    session.begin_thread(CHANNEL, POST);
-    let info = session.request(
-        RequestPurpose::GetMessageThread { message_id: POST.0 },
-        Some(CHANNEL),
-    );
+    let info = session.begin_thread(CHANNEL, POST);
     let root = format!(
         r#"{{"@type":"message","id":{THREAD},"chat_id":14,"is_outgoing":false,"is_channel_post":true,"date":1790631600,"topic_id":{{"@type":"messageTopicThread","message_thread_id":{THREAD}}},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Release notes are up. Questions welcome below.","entities":[]}}}}}}"#
     );

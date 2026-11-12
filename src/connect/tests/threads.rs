@@ -63,7 +63,7 @@ fn comments_thread_open_load_send_and_close() {
     assert_eq!(sent[0]["@extra"], extra.0.to_string());
     assert_eq!(
         driver.session.threads.thread.as_ref().unwrap().status,
-        ThreadStatus::Resolving
+        ThreadStatus::Resolving { request: extra }
     );
     // A second click on the same post does not resend.
     assert_eq!(

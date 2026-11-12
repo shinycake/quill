@@ -60,13 +60,7 @@ impl Sim {
         let app: Entity<QuillApp> = slot.borrow().clone().expect("app");
         let vcx = VisualTestContext::from_window(handle.into(), cx);
         let mut sim = Sim { app, vcx };
-        let info = sim.session(|s| {
-            s.begin_thread(CHANNEL, POST);
-            s.request(
-                RequestPurpose::GetMessageThread { message_id: POST.0 },
-                Some(CHANNEL),
-            )
-        });
+        let info = sim.session(|s| s.begin_thread(CHANNEL, POST));
         sim.apply(&[
             format!(
                 r#"{{"@type":"updateNewChat","chat":{{"id":{},"title":"Discussion","type":{{"@type":"chatTypeSupergroup","supergroup_id":14,"is_channel":false}},"unread_count":0}}}}"#,

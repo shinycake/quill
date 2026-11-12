@@ -379,13 +379,9 @@ fn a_thread_restores_its_draft_from_message_thread_info() {
         r#"{"@type":"chatTypeSupergroup","supergroup_id":14,"is_channel":false}"#,
     );
     session.open_chat(ChatId(13));
-    session.begin_thread(ChatId(13), MessageId(101));
+    let extra = session.begin_thread(ChatId(13), MessageId(101));
     // Resolving: the thread is not a slot yet.
     assert_eq!(session.open_draft_topic(ChatId(13)), DraftTopic::Chat);
-    let extra = session.request(
-        RequestPurpose::GetMessageThread { message_id: 101 },
-        Some(ChatId(13)),
-    );
     let reply_draft = r#"{"@type":"draftMessage","reply_to":{"@type":"inputMessageReplyToMessage","message_id":502,"quote":null,"checklist_task_id":0,"poll_option_id":""},"date":5,"content":{"@type":"draftMessageContentText","text":{"@type":"formattedText","text":"in the thread","entities":[]},"link_preview_options":null},"effect_id":"0","suggested_post_info":null}"#;
     apply_json(
         &mut session,
@@ -457,11 +453,7 @@ fn a_thread_inside_a_forum_topic_uses_the_topic_slot() {
     forum(&mut session, &seq, &sink);
     session.open_chat(ChatId(16));
     session.select_topic(ChatId(16), 3);
-    session.begin_thread(ChatId(16), MessageId(77));
-    let extra = session.request(
-        RequestPurpose::GetMessageThread { message_id: 77 },
-        Some(ChatId(16)),
-    );
+    let extra = session.begin_thread(ChatId(16), MessageId(77));
     apply_json(
         &mut session,
         &seq,

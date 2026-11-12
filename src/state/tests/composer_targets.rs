@@ -142,7 +142,7 @@ fn a_selection_survives_the_window_trim_and_a_window_reset() {
 #[test]
 fn a_delete_is_a_tombstone_in_the_open_thread_and_every_topic_of_the_chat() {
     let (mut session, sink, seq) = seeded();
-    let mut thread = ThreadView::resolving(ChatId(7), MessageId(1));
+    let mut thread = ThreadView::resolving(ChatId(7), MessageId(1), RequestId(1));
     thread.status = ThreadStatus::Ready;
     session.threads.thread = Some(thread);
     session
@@ -165,7 +165,7 @@ fn a_message_deleted_only_in_the_thread_or_topic_it_was_found_in_is_gone() {
     // "deleted" answers for the same places.
     let (mut session, _sink, _seq) = seeded();
     assert!(!session.message_deleted(ChatId(7), MessageId(60)));
-    let mut thread = ThreadView::resolving(ChatId(7), MessageId(1));
+    let mut thread = ThreadView::resolving(ChatId(7), MessageId(1), RequestId(1));
     thread.status = ThreadStatus::Ready;
     thread.history.remove(MessageId(60), true);
     session.threads.thread = Some(thread);
