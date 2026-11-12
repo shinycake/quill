@@ -108,8 +108,6 @@ disk.floors | the floors for that level
 disk.waited | how long the disk has been short
 disk._watcher | the disk poll, which ends with the disk state
 disk.full_notices | how many full-disk notices were shown
-disk.cache_folder | the cache folder measured
-disk.database_bytes | the database size measured
 disk.main_window | the window the space notice opens on
 demo_ui.call_devices | the screenshot demos' call devices
 demo_ui.selected_devices | the screenshot demos' chosen devices
@@ -166,7 +164,6 @@ group_call.ptt | push-to-talk key settings
 group_call.ptt_clock | the push-to-talk clock
 group_call.global_ptt * | the OS-wide push-to-talk hook with its listener and permission re-check tasks
 group_call.level_anim | the own voice level animation
-group_call.level_seen | the level last drawn
 group_call.panel_scroll | the window's participant list scroll
 group_call.rows_place * | where the participant rows sit in the window
 group_call.players | tile players by `LiveKey`; the sync drops every one whose call is not the call shown
@@ -183,7 +180,8 @@ main_window.handle | the main window's handle
 main_window.place * | the main window's place
 main_window.cascade | the chat window cascade count
 main_window.quit_gate | the Quit held behind the Stop and quit alert, which is the window's
-main_window.quit_gate.Asking.exit | the exit a Quit left behind the Stop and quit alert, which is the window's
+main_window.quit_gate.Held.exit | the exit a Quit left behind the Stop and quit alert, which is the window's
+main_window.quit_gate.Held.alert | the id of the Stop and quit alert dialog, which is the window's
 main_window._key_scope | the key-scope interceptor
 first_run.Writing * | the first-run intro's clip write and timing, before any account
 first_run.Playing * | the first-run intro's player and timing, before any account

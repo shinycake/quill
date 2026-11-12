@@ -22,11 +22,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                 | RequestPurpose::Stickers(StickersPurpose::GetGifSearchResults { .. })
         );
         // The search waits on its own request; a save or remove on the one
-        // this driver sent.
+        // the panel's `save` stage holds.
         let busy = if search {
             self.gif_search_out()
         } else {
-            self.asked.is_out(&self.session.requests, purpose)
+            self.session.gif_save_in_flight()
         };
         if busy {
             return Ok(None);
@@ -37,9 +37,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.stickers.gifs.saved_failure_cleared();
         }
         let extra = self.session.request(purpose, None);
-        if !search {
-            self.asked.sent(&self.session.requests, purpose, extra);
-        }
         if let Err(error) = self.sender.send_json(&build(extra)) {
             self.session.requests.take(extra);
             if search {
@@ -159,14 +156,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || file_id.0 <= 0 {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let requests = &self.session.requests;
-        if self
-            .asked
-            .is_out(requests, RequestPurpose::AddSavedAnimation)
-            || self
-                .asked
-                .is_out(requests, RequestPurpose::RemoveSavedAnimation)
-        {
+        if self.session.gif_save_in_flight() {
             return Ok(None);
         }
         let purpose = if saved {
@@ -174,12 +164,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         } else {
             RequestPurpose::RemoveSavedAnimation
         };
-        self.gif_request(purpose, |id| {
+        let sent = self.gif_request(purpose, |id| {
             if saved {
                 add_saved_animation(id, file_id)
             } else {
                 remove_saved_animation(id, file_id)
             }
-        })
+        })?;
+        if let Some(request) = sent {
+            self.session.stickers.gifs.save_sent(request);
+        }
+        Ok(sent)
     }
 }

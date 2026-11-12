@@ -1193,10 +1193,7 @@ fn a_stale_render_does_not_land_in_a_new_edit_of_the_same_message(cx: &mut TestA
     let vcx = &mut vcx;
     open_chat(&app, vcx, GROUP);
     begin_edit(&app, vcx);
-    let (chat, message) = app.read_with(vcx, |app, _| {
-        let edit = app.chat_ui.pending_edit().expect("editing");
-        (edit.chat_id, edit.message_id)
-    });
+    let edit = app.read_with(vcx, |app, _| app.chat_ui.edit_id().expect("editing"));
     let as_photo = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
         app.update(vcx, |app, _| {
             if let Some(edit) = app.chat_ui.pending_edit_mut() {
@@ -1209,7 +1206,7 @@ fn a_stale_render_does_not_land_in_a_new_edit_of_the_same_message(cx: &mut TestA
         app.update(cx, |app, cx| {
             let pixels = image::RgbaImage::from_pixel(47, 13, image::Rgba([1, 2, 3, 255]));
             app.viewer.photo_editor.open(PhotoEditor::new(
-                EditorPurpose::MessageEdit { chat, message },
+                EditorPurpose::MessageEdit { edit },
                 pixels,
             ));
             app.save_photo_editor(window, cx);
@@ -1226,4 +1223,40 @@ fn a_stale_render_does_not_land_in_a_new_edit_of_the_same_message(cx: &mut TestA
             .map(|replacement| replacement.path.clone())
     });
     assert_eq!(staged, None, "the stale render is not the new edit's photo");
+}
+
+/// Sweep r4-08 round 3: Done of the editor opened for one edit does nothing
+/// once that edit ended and a new edit of the same message began.
+#[gpui_kit::test]
+fn the_editors_done_is_not_taken_by_a_later_edit_of_the_same_message(cx: &mut TestAppContext) {
+    use crate::ui::photo_editor::{EditorPurpose, PhotoEditor};
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_chat(&app, vcx, GROUP);
+    begin_edit(&app, vcx);
+    let first = app.read_with(vcx, |app, _| app.chat_ui.edit_id().expect("editing"));
+    vcx.update(|window, cx| app.update(cx, |app, cx| app.clear_edit(window, cx)));
+    begin_edit(&app, vcx);
+    app.update(vcx, |app, _| {
+        if let Some(edit) = app.chat_ui.pending_edit_mut() {
+            edit.media_edit.media = Some(quill::composer::EditableMedia::Photo);
+        }
+    });
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            let pixels = image::RgbaImage::from_pixel(47, 13, image::Rgba([1, 2, 3, 255]));
+            app.viewer.photo_editor.open(PhotoEditor::new(
+                EditorPurpose::MessageEdit { edit: first },
+                pixels,
+            ));
+            app.save_photo_editor(window, cx);
+        });
+    });
+    app.read_with(vcx, |app, _| {
+        let edit = app.chat_ui.pending_edit().expect("editing");
+        assert!(
+            matches!(edit.media_edit.render, quill::composer::EditRender::Idle),
+            "no render was started for the new edit"
+        );
+    });
 }

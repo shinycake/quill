@@ -17,13 +17,11 @@ use std::cell::Cell;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-/// The preparation on the worker: `None` when it left the connection to
-/// `start_connection` (a local passcode, or no app folder).
-pub(super) type Early = oneshot::Receiver<Option<Prepared>>;
-
 /// How far the first connection got before `QuillApp` asked for it.
 pub(super) enum First {
-    Preparing(Early),
+    /// The preparation on the worker: `None` when it left the connection to
+    /// `start_connection` (a local passcode, or no app folder).
+    Preparing(oneshot::Receiver<Option<Prepared>>),
     Opened {
         /// The folders the startup sweep deleted.
         swept: (PathBuf, Vec<quill::ids::AccountKey>),

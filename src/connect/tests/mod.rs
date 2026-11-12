@@ -163,6 +163,7 @@ mod sweep_r3_03;
 mod sweep_r4_02;
 mod sweep_r4_02_round2;
 mod sweep_r4_02_round3;
+mod sweep_r4_08;
 mod sweep_s3;
 mod sweep_s3_messages_1;
 mod sweep_s3_payments_1;

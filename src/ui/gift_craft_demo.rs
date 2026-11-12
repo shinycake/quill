@@ -112,9 +112,7 @@ impl QuillApp {
                     };
                 }
                 if let Some(since) = Instant::now().checked_sub(Duration::from_millis(1_400)) {
-                    self.gift_market
-                        .craft
-                        .start_forge(since, quill::ids::RequestId(0));
+                    self.gift_market.craft.start_forge(since);
                 }
             }
             "success" | "failed" => {

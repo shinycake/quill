@@ -493,7 +493,7 @@ fn an_all_disabled_menu_has_no_target(cx: &mut TestAppContext) {
     let (_app, mut vcx) = new_app(cx);
     let items = ContextMenuItems::default();
     vcx.update(|window, cx| {
-        items.begin();
+        items.reset_claims();
         for i in 0..3usize {
             let _ = context_menu_item(
                 ("disabled-item", i),
@@ -558,7 +558,7 @@ fn disabled_items_are_never_focused(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     let items = ContextMenuItems::default();
     vcx.update(|_, cx| {
-        items.begin();
+        items.reset_claims();
         for (i, enabled) in [false, true, false].into_iter().enumerate() {
             let _ = context_menu_item(
                 ("test-item", i),
@@ -585,7 +585,7 @@ fn disabled_items_are_never_focused(cx: &mut TestAppContext) {
         );
     });
     let none = ContextMenuItems::default();
-    none.begin();
+    none.reset_claims();
     vcx.update(|window, _| {
         assert!(
             none.step(true, None, window).is_none(),

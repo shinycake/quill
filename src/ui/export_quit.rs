@@ -18,20 +18,23 @@ pub(crate) type ExitAfterStop = Box<dyn Fn(&mut Window, &mut App)>;
 pub(crate) enum QuitGate {
     #[default]
     Open,
-    Asking {
+    Held {
         exit: ExitAfterStop,
+        /// The alert's dialog id: the hold ending closes that dialog, not
+        /// whatever box opened above it since.
+        alert: usize,
     },
 }
 
 impl QuitGate {
-    pub(crate) fn is_asking(&self) -> bool {
-        matches!(self, Self::Asking { .. })
+    pub(crate) fn is_held(&self) -> bool {
+        matches!(self, Self::Held { .. })
     }
 
     /// Leave the hold, giving back the exit it kept.
     fn take(&mut self) -> Option<ExitAfterStop> {
         match std::mem::take(self) {
-            Self::Asking { exit } => Some(exit),
+            Self::Held { exit, .. } => Some(exit),
             Self::Open => None,
         }
     }
@@ -92,14 +95,10 @@ impl QuillApp {
         raise_main_window(window, cx);
         // A second Quit under the alert keeps the alert and takes over the
         // exit it will run.
-        let asking = self.main_window.quit_gate.is_asking();
-        self.main_window.quit_gate = QuitGate::Asking {
-            exit: Box::new(exit),
-        };
-        if asking {
+        if let QuitGate::Held { exit: kept, .. } = &mut self.main_window.quit_gate {
+            *kept = Box::new(exit);
             return true;
         }
-        window.set_shutdown_block_reason(Some(tr(keys::EXPORT_PROGRESS_TITLE)));
         let app = cx.entity().downgrade();
         window.open_alert_dialog(cx, move |alert, _, _| {
             let (stop, closed) = (app.clone(), app.clone());
@@ -125,6 +124,14 @@ impl QuillApp {
                         closed.update(cx, |this, _| this.main_window.quit_gate = QuitGate::Open);
                 })
         });
+        let Some(alert) = window.last_dialog_id(cx) else {
+            return false;
+        };
+        window.set_shutdown_block_reason(Some(tr(keys::EXPORT_PROGRESS_TITLE)));
+        self.main_window.quit_gate = QuitGate::Held {
+            exit: Box::new(exit),
+            alert,
+        };
         true
     }
 
@@ -133,12 +140,14 @@ impl QuillApp {
     /// carried out: the user was asked about stopping, not about quitting
     /// now.
     pub(in crate::ui) fn quit_gate_upkeep(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.main_window.quit_gate.is_asking() || self.exporting_anywhere() {
+        if !self.main_window.quit_gate.is_held() || self.exporting_anywhere() {
             return;
         }
-        self.main_window.quit_gate = QuitGate::Open;
+        let QuitGate::Held { alert, .. } = std::mem::take(&mut self.main_window.quit_gate) else {
+            return;
+        };
         window.set_shutdown_block_reason(None);
-        window.close_dialog(cx);
+        window.close_dialog_by_id(alert, cx);
         cx.notify();
     }
 

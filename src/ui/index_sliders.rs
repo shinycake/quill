@@ -127,10 +127,10 @@ impl QuillApp {
 
     /// A slider moved (`Change`, while dragging) or was let go (`Release`).
     fn on_step_slider(&mut self, key: StepSlider, event: &SliderEvent, cx: &mut Context<Self>) {
-        let (SliderEvent::Change(value) | SliderEvent::Release(value)) = event;
-        let index = position(value.end(), key.steps());
+        let (SliderEvent::Change(_) | SliderEvent::Release(_)) = event;
         match key {
-            StepSlider::AutoDownloadLimit(group) => self.on_auto_download_slider(group, index),
+            // The box reads its sliders when it is saved.
+            StepSlider::AutoDownloadLimit(_) => {}
             StepSlider::StorageSize | StepSlider::StorageKeep => {
                 // tdesktop applies on every move; one `setOption` round per
                 // drag step would flood TDLib, so the release applies, or

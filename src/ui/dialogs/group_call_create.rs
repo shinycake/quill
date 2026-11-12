@@ -18,6 +18,7 @@ use super::super::group_call_state::VideoChatCreate;
 use super::super::group_call_stream_layout::StreamJoinIntent;
 use super::super::scheduled::{TimePicker, new_date_time_picker, picked_unix};
 use super::super::shell::{DialogKind, QuillShell};
+use super::super::status_note::StatusNote;
 use super::super::wall_clock::WallClock;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::date_picker::DatePicker;
@@ -396,13 +397,15 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.group_call_boxes.start_dialog = None;
         // One `createVideoChat` at a time: a second would replace the stage
-        // and its answer (or refusal) would never be matched.
+        // and its answer (or refusal) would never be matched. The box stays
+        // up, and a note says the first is still starting.
         if self.video_chat_create_in_flight() {
+            self.set_note(StatusNote::silent(tr(keys::Q_AV_STARTING_THE_VIDEO_CHAT)));
             cx.notify();
             return;
         }
+        self.group_call_boxes.start_dialog = None;
         // The call you are in ends only for a request the driver will take.
         if let Some(live) = self.live.as_ref()
             && live

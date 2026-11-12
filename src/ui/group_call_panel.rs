@@ -50,7 +50,7 @@ pub(super) type MemberAction = Box<dyn Fn(&mut QuillApp, &mut Context<QuillApp>)
 
 /// What the big button says and does.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum MuteState {
+enum MuteButtonView {
     /// Not in the call yet.
     Join,
     Connecting,
@@ -63,43 +63,45 @@ enum MuteState {
     Scheduled,
 }
 
-impl MuteState {
+impl MuteButtonView {
     /// tdesktop's button gradients (`groupCallLive*`, `groupCallMuted*`,
     /// `groupCallForceMuted*`).
     fn colors(self) -> (u32, u32) {
         match self {
-            MuteState::Live => (0x0dcc39, 0x0bb6bd),
-            MuteState::Muted | MuteState::Join | MuteState::Scheduled => (0x0992ef, 0x16ccfb),
-            MuteState::ForceMuted | MuteState::HandRaised => (0x9b52e9, 0xeb5353),
-            MuteState::Connecting => (0x5b6570, 0x6f7a86),
+            MuteButtonView::Live => (0x0dcc39, 0x0bb6bd),
+            MuteButtonView::Muted | MuteButtonView::Join | MuteButtonView::Scheduled => {
+                (0x0992ef, 0x16ccfb)
+            }
+            MuteButtonView::ForceMuted | MuteButtonView::HandRaised => (0x9b52e9, 0xeb5353),
+            MuteButtonView::Connecting => (0x5b6570, 0x6f7a86),
         }
     }
 
     fn label(self) -> &'static str {
         match self {
-            MuteState::Join => tr(keys::GROUP_CALL_JOIN),
-            MuteState::Connecting => tr(keys::GROUP_CALL_CONNECTING),
-            MuteState::Live => tr(keys::GROUP_CALL_YOU_ARE_LIVE),
-            MuteState::Muted => tr(keys::GROUP_CALL_UNMUTE),
-            MuteState::ForceMuted => tr(keys::GROUP_CALL_FORCE_MUTED),
-            MuteState::HandRaised => tr(keys::GROUP_CALL_RAISED_HAND),
-            MuteState::Scheduled => tr(keys::Q_AV_STARTS_SOON),
+            MuteButtonView::Join => tr(keys::GROUP_CALL_JOIN),
+            MuteButtonView::Connecting => tr(keys::GROUP_CALL_CONNECTING),
+            MuteButtonView::Live => tr(keys::GROUP_CALL_YOU_ARE_LIVE),
+            MuteButtonView::Muted => tr(keys::GROUP_CALL_UNMUTE),
+            MuteButtonView::ForceMuted => tr(keys::GROUP_CALL_FORCE_MUTED),
+            MuteButtonView::HandRaised => tr(keys::GROUP_CALL_RAISED_HAND),
+            MuteButtonView::Scheduled => tr(keys::Q_AV_STARTS_SOON),
         }
     }
 
     fn sublabel(self) -> Option<&'static str> {
         match self {
-            MuteState::ForceMuted => Some(tr(keys::GROUP_CALL_FORCE_MUTED_SUB)),
-            MuteState::HandRaised => Some(tr(keys::Q_AV_WE_LET_THE_SPEAKERS_KNOW)),
+            MuteButtonView::ForceMuted => Some(tr(keys::GROUP_CALL_FORCE_MUTED_SUB)),
+            MuteButtonView::HandRaised => Some(tr(keys::Q_AV_WE_LET_THE_SPEAKERS_KNOW)),
             _ => None,
         }
     }
 
     fn icon(self) -> IconName {
         match self {
-            MuteState::Live => IconName::Mic,
-            MuteState::ForceMuted | MuteState::HandRaised => IconName::Hand,
-            MuteState::Join | MuteState::Scheduled => IconName::Phone,
+            MuteButtonView::Live => IconName::Mic,
+            MuteButtonView::ForceMuted | MuteButtonView::HandRaised => IconName::Hand,
+            MuteButtonView::Join | MuteButtonView::Scheduled => IconName::Phone,
             _ => IconName::MicOff,
         }
     }
@@ -107,38 +109,42 @@ impl MuteState {
 
 /// `joining`: the join request is out (the Join press was taken), so the
 /// button reads Connecting instead of inviting another press.
-fn mute_state(call: &ActiveGroupCall, joining: bool) -> MuteState {
+fn mute_state(call: &ActiveGroupCall, joining: bool) -> MuteButtonView {
     if call.scheduled_start_date > 0 && !call.is_joined {
-        return MuteState::Scheduled;
+        return MuteButtonView::Scheduled;
     }
     if !call.is_joined {
         return if joining {
-            MuteState::Connecting
+            MuteButtonView::Connecting
         } else {
-            MuteState::Join
+            MuteButtonView::Join
         };
     }
     let me = call.participants.iter().find(|p| p.is_current_user);
     let Some(me) = me.filter(|_| !call.reconnecting()) else {
-        return MuteState::Connecting;
+        return MuteButtonView::Connecting;
     };
     if me.is_muted_for_all_users && !me.can_unmute_self {
         return if me.is_hand_raised {
-            MuteState::HandRaised
+            MuteButtonView::HandRaised
         } else {
-            MuteState::ForceMuted
+            MuteButtonView::ForceMuted
         };
     }
     if call.is_muted_self {
-        MuteState::Muted
+        MuteButtonView::Muted
     } else {
-        MuteState::Live
+        MuteButtonView::Live
     }
 }
 
 /// How far the mute button's halo has breathed out at `now_ms`, 0 to 1.
-fn breath_at(now_ms: u64, state: MuteState) -> f32 {
-    let period = if state == MuteState::Live { 1100 } else { 2600 };
+fn breath_at(now_ms: u64, state: MuteButtonView) -> f32 {
+    let period = if state == MuteButtonView::Live {
+        1100
+    } else {
+        2600
+    };
     pulsating_between(0.0, 1.0)((now_ms % period) as f32 / period as f32)
 }
 
@@ -169,13 +175,11 @@ impl QuillApp {
         let breath = (!still).then(|| breath_at(now, state));
         // Your own microphone: the ring follows the level while live.
         let (self_level, _) = self.group_call_self_level();
-        let level_reach = (state == MuteState::Live).then(|| {
-            if (self_level - self.group_call.level_seen).abs() > f32::EPSILON {
-                self.group_call.level_seen = self_level;
-                self.group_call
-                    .level_anim
-                    .retarget(self_level.clamp(0.0, 1.0), now);
-            }
+        let level_reach = (state == MuteButtonView::Live).then(|| {
+            // An unchanged target is no restart (`LevelAnimation::retarget`).
+            self.group_call
+                .level_anim
+                .retarget(self_level.clamp(0.0, 1.0), now);
             quill::calls::audio_level::halo_reach(self.group_call.level_anim.value(now))
         });
         let title = if call.title.is_empty() {
@@ -204,7 +208,7 @@ impl QuillApp {
                 )],
             ));
         }
-        if state == MuteState::Scheduled {
+        if state == MuteButtonView::Scheduled {
             subtitle = tr_with(
                 keys::GROUP_CALL_STARTS_SHORT,
                 &[(
@@ -560,7 +564,7 @@ impl QuillApp {
     fn group_call_controls(
         &self,
         call: &ActiveGroupCall,
-        state: MuteState,
+        state: MuteButtonView,
         level_reach: Option<f32>,
         breath: Option<f32>,
         cx: &mut Context<Self>,
@@ -630,9 +634,9 @@ impl QuillApp {
                 this.close_group_call_window(cx);
             }
         }));
-        let scheduled_admin = state == MuteState::Scheduled && call.can_be_managed;
-        let muted_hint =
-            (state == MuteState::Muted && self.group_call_muted_hint_shown()).then(|| {
+        let scheduled_admin = state == MuteButtonView::Scheduled && call.can_be_managed;
+        let muted_hint = (state == MuteButtonView::Muted && self.group_call_muted_hint_shown())
+            .then(|| {
                 div()
                     .absolute()
                     .bottom(px(104.))
@@ -660,11 +664,13 @@ impl QuillApp {
             .tab_index(0)
             .focus_ring_visible(cx.theme())
             .on_click(cx.listener(move |this, _, _, cx| match state {
-                MuteState::Join => this.join_active_group_call(cx),
-                MuteState::Live | MuteState::Muted => this.toggle_group_call_self_mute(cx),
-                MuteState::ForceMuted => this.toggle_group_call_self_hand(true, cx),
-                MuteState::Scheduled if scheduled_admin => this.start_scheduled_video_chat(cx),
-                MuteState::Scheduled => this.toggle_video_chat_start_notification(cx),
+                MuteButtonView::Join => this.join_active_group_call(cx),
+                MuteButtonView::Live | MuteButtonView::Muted => {
+                    this.toggle_group_call_self_mute(cx)
+                }
+                MuteButtonView::ForceMuted => this.toggle_group_call_self_hand(true, cx),
+                MuteButtonView::Scheduled if scheduled_admin => this.start_scheduled_video_chat(cx),
+                MuteButtonView::Scheduled => this.toggle_video_chat_start_notification(cx),
                 _ => {}
             }))
             .child(
@@ -691,7 +697,11 @@ impl QuillApp {
                         match breath {
                             None => halo.opacity(0.24),
                             Some(delta) => {
-                                let reach = if state == MuteState::Live { 14. } else { 6. };
+                                let reach = if state == MuteButtonView::Live {
+                                    14.
+                                } else {
+                                    6.
+                                };
                                 halo.opacity(0.18 + 0.12 * delta).inset(px(-reach * delta))
                             }
                         }
@@ -721,9 +731,13 @@ impl QuillApp {
                     .text_size(px(16.))
                     .font_weight(FontWeight::SEMIBOLD)
                     .child(match state {
-                        MuteState::Scheduled if scheduled_admin => tr(keys::GROUP_CALL_START_NOW),
-                        MuteState::Scheduled if notify_on => tr(keys::GROUP_CALL_CANCEL_REMINDER),
-                        MuteState::Scheduled => tr(keys::Q_AV_NOTIFY_ME),
+                        MuteButtonView::Scheduled if scheduled_admin => {
+                            tr(keys::GROUP_CALL_START_NOW)
+                        }
+                        MuteButtonView::Scheduled if notify_on => {
+                            tr(keys::GROUP_CALL_CANCEL_REMINDER)
+                        }
+                        MuteButtonView::Scheduled => tr(keys::Q_AV_NOTIFY_ME),
                         _ => state.label(),
                     }),
             )
@@ -734,7 +748,7 @@ impl QuillApp {
                     .child(sub)
             }))
             .children(
-                matches!(state, MuteState::Live | MuteState::Muted)
+                matches!(state, MuteButtonView::Live | MuteButtonView::Muted)
                     .then(|| self.ptt_hint())
                     .flatten()
                     .map(|hint| {
@@ -891,7 +905,7 @@ impl QuillApp {
 
 #[cfg(test)]
 mod tests {
-    use super::{MuteState, mute_state};
+    use super::{MuteButtonView, mute_state};
     use crate::ui::group_call_members::{member_look, member_status};
     use gpui_kit::assets::IconName;
     use quill::state::ActiveGroupCall;
@@ -922,24 +936,24 @@ mod tests {
     #[test]
     fn the_big_button_follows_tdesktop_states() {
         let mut call = ActiveGroupCall::fresh(1);
-        assert!(mute_state(&call, false) == MuteState::Join);
+        assert!(mute_state(&call, false) == MuteButtonView::Join);
         assert!(
-            mute_state(&call, true) == MuteState::Connecting,
+            mute_state(&call, true) == MuteButtonView::Connecting,
             "the join is out: no second invitation to press"
         );
         call.is_joined = true;
-        assert!(mute_state(&call, false) == MuteState::Connecting);
+        assert!(mute_state(&call, false) == MuteButtonView::Connecting);
         call.participants = vec![me(false, true, false)].into();
-        assert!(mute_state(&call, false) == MuteState::Live);
+        assert!(mute_state(&call, false) == MuteButtonView::Live);
         call.is_muted_self = true;
-        assert!(mute_state(&call, false) == MuteState::Muted);
+        assert!(mute_state(&call, false) == MuteButtonView::Muted);
         call.participants = vec![me(true, false, false)].into();
-        assert!(mute_state(&call, false) == MuteState::ForceMuted);
+        assert!(mute_state(&call, false) == MuteButtonView::ForceMuted);
         call.participants = vec![me(true, false, true)].into();
-        assert!(mute_state(&call, false) == MuteState::HandRaised);
+        assert!(mute_state(&call, false) == MuteButtonView::HandRaised);
         call.is_joined = false;
         call.scheduled_start_date = 2_000_000_000;
-        assert!(mute_state(&call, false) == MuteState::Scheduled);
+        assert!(mute_state(&call, false) == MuteButtonView::Scheduled);
     }
 
     #[test]

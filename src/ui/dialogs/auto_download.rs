@@ -286,25 +286,24 @@ impl QuillApp {
     }
 
     fn save_auto_download(&mut self, cx: &mut Context<Self>) {
-        let AutoDownloadEditor::Open(draft) = self.settings.auto_download_editor.clone() else {
+        let AutoDownloadEditor::Open(mut draft) = self.settings.auto_download_editor.clone() else {
             return;
         };
+        // The sliders hold the limits while the box is open (the draft only
+        // seeded them): read them once, here.
+        for group in [
+            AutoDownloadLimitGroup::Download,
+            AutoDownloadLimitGroup::Autoplay,
+        ] {
+            if let Some(index) = self.index_sliders.index(slider_key(group), cx) {
+                draft.set_group_limit(group, cap_at(index));
+            }
+        }
         let mut settings = self.auto_download_settings();
         draft.apply(&mut settings, self.auto_download_source_of());
         self.set_media_pref(move |prefs| *prefs.auto_download = settings, cx);
         self.close_auto_download();
         cx.notify();
-    }
-
-    /// A slider of the box moved.
-    pub(in crate::ui) fn on_auto_download_slider(
-        &mut self,
-        group: AutoDownloadLimitGroup,
-        index: usize,
-    ) {
-        if let Some(draft) = self.settings.auto_download_editor.draft_mut() {
-            draft.set_group_limit(group, cap_at(index));
-        }
     }
 
     /// The page body while the box is open: the box, or its picker.
@@ -406,7 +405,13 @@ impl QuillApp {
         group: AutoDownloadLimitGroup,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let megabytes = draft.group_limit(group) / (1024 * 1024);
+        // The slider is the limit while the box is open; the draft's is the
+        // seed it started from.
+        let limit = self
+            .index_sliders
+            .index(slider_key(group), cx)
+            .map_or_else(|| draft.group_limit(group), cap_at);
+        let megabytes = limit / (1024 * 1024);
         let size = format!("{megabytes} {}", tr(keys::SIZE_MEGABYTES));
         let value = tr_with(keys::MEDIA_SIZE_UP_TO, &[("size", size.as_str())]);
         let row = self.step_slider_row(

@@ -97,10 +97,7 @@ pub(crate) struct GroupCallUi {
     pub(super) global_ptt: GlobalPtt,
     /// Your own microphone level on the mute button: the halo follows
     /// the driver's level over `LEVEL_ANIMATION_MS` (tdesktop's blobs).
-    /// `level_seen` is the last driver level the animation was aimed
-    /// at.
     pub(super) level_anim: quill::calls::audio_level::LevelAnimation,
-    pub(super) level_seen: f32,
     pub(super) panel_scroll: ScrollHandle,
     pub(super) rows_place: super::group_call_members_view::RowsPlace,
     /// The video tiles' live players, by feed (`(call, user, screen)`,
@@ -610,7 +607,6 @@ impl GroupCallUi {
                 0.0,
                 quill::calls::audio_level::LEVEL_ANIMATION_MS,
             ),
-            level_seen: 0.0,
             panel_scroll: ScrollHandle::new(),
             rows_place: Default::default(),
             players: HashMap::new(),

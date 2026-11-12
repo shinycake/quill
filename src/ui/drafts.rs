@@ -4,7 +4,6 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::draft_timer::DraftTimerStep;
 use gpui_kit::*;
 use quill::composer::{ComposerReplyTo, DraftContent, DraftTopic, draft_text_to_store};
 use quill::connect::DraftSaveOutcome;
@@ -265,34 +264,21 @@ impl QuillApp {
     ) {
         // The draft of a client leaving the screen is sent as it leaves
         // (`take_live`), so the timer only ever commits the client on screen.
-        self.frame
-            .draft_timer
-            .arm(token, delay, std::time::Instant::now(), || {
-                // window-scope: the pending draft names its own chat and topic.
-                // screen-scope: the driver on screen holds the draft and ignores a
-                // token it did not issue; a task bound to one screen would strand it.
-                cx.spawn(async move |this, cx| {
-                    loop {
-                        let step = this
-                            .update(cx, |this, _cx| {
-                                let step = this.frame.draft_timer.step(std::time::Instant::now());
-                                if let DraftTimerStep::Fire(token) = step
-                                    && let Some(live) = this.live.as_mut()
-                                {
-                                    let _ = live.driver.commit_debounced_draft(token);
-                                }
-                                step
-                            })
-                            .unwrap_or(DraftTimerStep::Idle);
-                        match step {
-                            DraftTimerStep::Sleep(wait) => {
-                                cx.background_executor().timer(wait).await
-                            }
-                            DraftTimerStep::Idle | DraftTimerStep::Fire(_) => break,
-                        }
+        self.frame.draft_timer.arm(token, || {
+            // window-scope: the pending draft names its own chat and topic.
+            // screen-scope: the driver on screen holds the draft and ignores a
+            // token it did not issue; a task bound to one screen would strand it.
+            cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(delay).await;
+                let _ = this.update(cx, |this, _cx| {
+                    if let Some(token) = this.frame.draft_timer.settle(token)
+                        && let Some(live) = this.live.as_mut()
+                    {
+                        let _ = live.driver.commit_debounced_draft(token);
                     }
-                })
-            });
+                });
+            })
+        });
     }
 
     pub(super) fn forget_local_draft(&mut self, chat_id: ChatId) {

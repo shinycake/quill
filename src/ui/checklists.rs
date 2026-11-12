@@ -583,6 +583,10 @@ impl QuillApp {
         }
         let (chat_id, message_id) = (panel.chat_id, panel.message_id);
         let text = super::composer_field::field_doc(panel.input.read(cx)).to_markup();
+        // An earlier refusal is about an earlier text: this Add judges anew.
+        if let Some(panel) = self.message_ui.poll_add_option.as_mut() {
+            panel.clear_refusal();
+        }
         let poll = self
             .session()
             .and_then(|session| session.histories.get(&chat_id.0))

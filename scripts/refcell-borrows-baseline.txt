@@ -1,13 +1,9 @@
 # RefCell borrows that can panic (scripts/check-refcell-borrows.py).
 # <Type::function>::<receiver>.<call> <count>. Only remove lines or lower counts.
-FrameUi::forget_native_window::window_title_shown.borrow_mut 1
-QuillApp::advance_effects::active.borrow 2
-QuillApp::advance_effects::active.borrow_mut 1
 QuillApp::build_add_special_dialog::body.borrow_mut 1
 QuillApp::build_business_dialog::content.borrow_mut 1
 QuillApp::build_cancel_edit_dialog::body.borrow_mut 1
 QuillApp::build_direct_messages_dialog::body.borrow_mut 1
-QuillApp::build_fact_check_dialog::body.borrow_mut 1
 QuillApp::build_grams_needed_dialog::body.borrow_mut 1
 QuillApp::build_paid_confirm_dialog::body.borrow_mut 1
 QuillApp::build_paid_reaction_dialog::body.borrow_mut 1
@@ -17,28 +13,16 @@ QuillApp::build_suggest_price_dialog::body.borrow_mut 1
 QuillApp::build_suggest_time_dialog::body.borrow_mut 1
 QuillApp::build_text_box::body.borrow_mut 1
 QuillApp::build_wallet_notice_dialog::body.borrow_mut 1
-QuillApp::emoji_effect_overlay::active.borrow 3
-QuillApp::emoji_effect_overlay::active.borrow_mut 1
 QuillApp::media_panel_reveal::media_panel.borrow_mut 1
 QuillApp::run_passcode_job::answer.borrow_mut 1
 QuillApp::run_passcode_job::asked.borrow_mut 1
 QuillApp::spawn_system_unlock_wait::held.borrow_mut 1
 QuillApp::spawn_system_unlock_wait::master.borrow_mut 1
-anchor::anchors.borrow 1
-anchor_tracker::anchors.borrow_mut 1
-begin_pass::anchors.borrow_mut 1
-build_community_hub_dialog::body.borrow_mut 1
-build_create_community_dialog::body.borrow_mut 1
 char_width::cache.borrow 1
 char_width::cache.borrow_mut 1
 current::current.borrow 1
 fit::window.borrow_mut 1
-follow_badges::active.borrow_mut 1
-forget_account_notes::active.borrow_mut 1
 last_target::last.borrow 1
 note_target::last.borrow_mut 1
 once::body.borrow_mut 1
-premium_playing::active.borrow 1
-push_message::active.borrow_mut 1
-push_premium::active.borrow_mut 1
 sync::applied.borrow_mut 2

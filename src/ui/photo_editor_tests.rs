@@ -142,8 +142,7 @@ fn pending_turns_render_the_same_pixels_and_preview() {
     let steps = [true, false, true, true, false];
     let mut editor = PhotoEditor::new(
         EditorPurpose::MessageEdit {
-            chat: quill::ids::ChatId(1),
-            message: quill::ids::MessageId(2),
+            edit: crate::ui::chat_ui_state::EditId::next(),
         },
         picture.clone(),
     );

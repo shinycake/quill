@@ -397,6 +397,7 @@ impl Session {
         ) {
             self.stickers.gifs.animations.clear();
             self.stickers.gifs.saved_forgotten();
+            self.stickers.gifs.save_settled(pending.map(|p| p.id));
         }
         // Phase C3a: a successful `leaveGroupCall` /
         // `endGroupCall` drops the tracked call (the `ok`

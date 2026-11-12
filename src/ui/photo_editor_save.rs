@@ -64,9 +64,8 @@ impl QuillApp {
                 self.render_attachment_edit(item, editor, window, cx)
             }
             EditorPurpose::Profile(target) => self.finish_profile_crop(editor, target, cx),
-            EditorPurpose::MessageEdit { chat, message } => {
-                let edit_of = (chat, message);
-                if self.edited_message() != Some(edit_of) {
+            EditorPurpose::MessageEdit { edit: edit_of } => {
+                if self.chat_ui.edit_id() != Some(edit_of) {
                     return;
                 }
                 let token = RenderToken::new();
@@ -79,7 +78,7 @@ impl QuillApp {
                     let saved = render.await.map(TempFile::claim);
                     let kept = saved.clone();
                     let landed = app.update(cx, |this, cx| {
-                        if this.edited_message() == Some(edit_of)
+                        if this.chat_ui.edit_id() == Some(edit_of)
                             && this
                                 .chat_ui
                                 .pending_edit()
@@ -203,12 +202,6 @@ impl QuillApp {
         self.set_note(StatusNote::error(tr(
             keys::Q_MISC_NOT_SENT_THE_CHAT_CLOSED_BEFORE_THE_PHOTO,
         )));
-    }
-
-    /// The message whose media is being edited, if any.
-    pub(super) fn edited_message(&self) -> Option<(quill::ids::ChatId, quill::ids::MessageId)> {
-        let edit = self.chat_ui.pending_edit()?;
-        Some((edit.chat_id, edit.message_id))
     }
 
     /// Render `render` in the tray of `slot` finished. Its PNG replaces

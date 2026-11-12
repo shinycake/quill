@@ -218,9 +218,22 @@ pub(crate) struct PlaybackUi {
     /// GIFs that autoplayed once, by chat: leaving a chat resets only
     /// its own, so another window's GIF does not start over.
     pub(super) autoplayed_gifs: std::collections::HashSet<ChatMessage>,
-    /// A linked `?t=` media timestamp waiting for its message to load
-    /// (chat, message, seconds, when to give up).
-    pub(super) pending_media_seek: Option<(ChatId, quill::ids::MessageId, i32, std::time::Instant)>,
+    /// A linked `?t=` media timestamp waiting for its message to load.
+    pub(super) media_seek: MediaSeek,
+}
+
+/// A linked media timestamp: none, or waiting for its message to load. The
+/// stage owns the give-up timer, so leaving it (the seek ran, the reader left
+/// the chat, the screen went) drops the timer with it.
+#[derive(Default)]
+pub(super) enum MediaSeek {
+    #[default]
+    Idle,
+    Seeking {
+        target: quill::ids::ChatMessage,
+        seconds: i32,
+        _give_up: Task<()>,
+    },
 }
 
 /// The `image/gif` file looping in a history row: the row of one window,
@@ -391,7 +404,7 @@ impl PlaybackUi {
             positions: HashMap::new(),
             animation: GifPlayback::Idle,
             autoplayed_gifs: Default::default(),
-            pending_media_seek: None,
+            media_seek: MediaSeek::Idle,
         }
     }
 }

@@ -696,3 +696,28 @@ fn a_create_pressed_while_one_with_a_picture_is_out_tells_the_person(cx: &mut Te
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Sweep r4-08 fix round: a community info panel whose full-info ask failed
+/// shows the error with a Retry, not "Loading" for good; Retry asks again.
+#[gpui_kit::test]
+fn a_failed_community_info_ask_shows_a_retry(cx: &mut TestAppContext) {
+    use quill::state::InfoPanelTarget;
+    let (app, mut vcx) = new_app(cx);
+    frames(&mut vcx);
+    app.update(&mut vcx, |app, cx| {
+        let session = app.demo_session.as_mut().expect("demo session");
+        let infos = &mut session.groups.community_full_infos;
+        infos.remove(&RUSTACEANS);
+        infos.begin(RUSTACEANS);
+        let request = quill::ids::RequestId(7_001);
+        infos.sent(RUSTACEANS, request);
+        infos.failed(RUSTACEANS, Some(request), "boom");
+        session.users_state.open_info_panel = Some(InfoPanelTarget::Community(RUSTACEANS));
+        cx.notify();
+    });
+    frames(&mut vcx);
+    assert!(
+        vcx.debug_bounds("community-info-retry").is_some(),
+        "the failure is drawn with a Retry"
+    );
+}

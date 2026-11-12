@@ -2,6 +2,15 @@
 use crate::state::*;
 
 impl Session {
+    /// Whether a saved-GIF save or remove is out: the request the panel's
+    /// `save` stage holds is still in the table.
+    pub fn gif_save_in_flight(&self) -> bool {
+        match self.stickers.gifs.save {
+            crate::state::GifSave::Saving { request } => self.requests.get(request).is_some(),
+            crate::state::GifSave::Idle => false,
+        }
+    }
+
     /// Reacts to a failed stickers request; called by
     /// [`Session::apply_error`] after the shared handling.
     pub(crate) fn apply_stickers_error(
@@ -241,6 +250,7 @@ impl Session {
             Some(RequestPurpose::AddSavedAnimation | RequestPurpose::RemoveSavedAnimation)
         ) {
             self.stickers.gifs.saved_mutation_failed();
+            self.stickers.gifs.save_settled(pending.map(|p| p.id));
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSavedAnimations) {
             self.stickers

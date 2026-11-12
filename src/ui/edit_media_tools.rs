@@ -145,22 +145,22 @@ impl QuillApp {
             self.request_edit_image_download(cx);
             return;
         };
-        let asked_for = (edit.chat_id, edit.message_id);
-        self.decode_image_then(
+        let Some(edit_id) = self.chat_ui.edit_id() else {
+            return;
+        };
+        let decoding = self.decode_image_task(
             source,
             move |this, result, cx| {
                 // The edit it was started for is gone or another one now.
-                if this.edited_message() != Some(asked_for) {
+                if !this.chat_ui.end_image_decode(edit_id) {
                     return;
                 }
                 match result {
                     Ok(pixels) => {
                         if this.viewer.photo_editor.is_none() {
-                            this.viewer.photo_editor.open(PhotoEditor::for_message_edit(
-                                asked_for.0,
-                                asked_for.1,
-                                pixels,
-                            ));
+                            this.viewer
+                                .photo_editor
+                                .open(PhotoEditor::for_message_edit(edit_id, pixels));
                         }
                     }
                     Err(_) => this.set_note(StatusNote::error(tr(
@@ -171,6 +171,7 @@ impl QuillApp {
             },
             cx,
         );
+        self.chat_ui.begin_image_decode(decoding);
     }
 
     /// The photo isn't on disk yet: ask TDLib for it; the editor opens
@@ -286,9 +287,10 @@ impl QuillApp {
 
     /// "Edit Cover": choose an image (tdesktop `VideoCoverUploader::choose`).
     fn pick_edit_cover(&mut self, cx: &mut Context<Self>) {
-        // The edit the cover is for: a picker that returns after the edit
-        // ended or moved to another message drops its answer.
-        let Some(asked_for) = self.edited_message() else {
+        // The edit the cover is for: its dialog's wait lives in that edit, so
+        // a picker that returns after the edit ended, or after another edit
+        // of the same message began, drops its answer.
+        let Some(asked_for) = self.chat_ui.edit_id() else {
             return;
         };
         let picker = cx.prompt_for_paths(PathPromptOptions {
@@ -297,18 +299,20 @@ impl QuillApp {
             multiple: false,
             prompt: Some(tr(keys::Q_MISC_CHOOSE_VIDEO_COVER).into()),
         });
-        self.spawn_scoped(cx, async move |this, cx| {
-            if let Ok(Ok(Some(paths))) = picker.await
-                && let Some(path) = paths.first().cloned()
-            {
-                let _ = this.update(cx, |this, cx| {
-                    if this.edited_message() == Some(asked_for) {
-                        this.set_edit_cover(&path, cx);
-                    }
-                });
-            }
-        })
-        .detach();
+        let waiting = self.spawn_scoped(cx, async move |this, cx| {
+            let picked = picker.await;
+            let _ = this.update(cx, |this, cx| {
+                if !this.chat_ui.end_cover_pick(asked_for) {
+                    return;
+                }
+                if let Ok(Ok(Some(paths))) = picked
+                    && let Some(path) = paths.first()
+                {
+                    this.set_edit_cover(path, cx);
+                }
+            });
+        });
+        self.chat_ui.begin_cover_pick(waiting);
     }
 
     /// Stage a picked cover; it goes out with the edit.

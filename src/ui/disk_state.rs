@@ -19,6 +19,7 @@ use quill::disk_guard::{
     data_floors, data_root_device, fall_per_sec, next_read_in, read_data,
 };
 use quill::lang::{keys, tr, tr_with};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -36,14 +37,11 @@ pub(crate) struct DiskUi {
     /// How many times this run the full-disk screen went up, each with one
     /// system notification.
     full_notices: u32,
-    /// The on-screen account's cached files, while that folder exists.
-    cache_folder: Option<PathBuf>,
-    /// The on-screen account's message database, for Manage local storage.
-    pub(super) database_bytes: Option<u64>,
-    /// The account on screen since the last switch: `cache_folder` and
-    /// `database_bytes` read for another one are dropped. `None` before
-    /// any switch: the reading's own account is the one on screen.
-    on_screen: Option<quill::ids::AccountKey>,
+    /// The cached files folder (while it exists) and message database size
+    /// read for each account, keyed by it: the screen shows the entry of the
+    /// account on screen (`current_account`), so another account's figures
+    /// are never drawn for it.
+    files: HashMap<quill::ids::AccountKey, AccountFiles>,
     main_window: AnyWindowHandle,
     /// The poll of the disk, which ends with this value.
     _watcher: Option<Task<()>>,
@@ -81,9 +79,7 @@ impl DiskUi {
             floors: FLOORS,
             waited: Duration::ZERO,
             full_notices: 0,
-            cache_folder: None,
-            database_bytes: None,
-            on_screen: None,
+            files: HashMap::new(),
             main_window: window.window_handle(),
             _watcher: watcher,
         }
@@ -199,42 +195,39 @@ fn demo_reading() -> Option<u64> {
 }
 
 impl QuillApp {
-    /// The cache folder and database size read for an account: kept only
-    /// while that account is on screen, since a read that started before a
-    /// switch can land after it.
+    /// The cache folder and database size read for an account. Kept under
+    /// its own account, so a read that started before a switch and lands
+    /// after it never shows for the account now on screen.
     pub(super) fn note_account_files(&mut self, files: AccountFiles, cx: &mut Context<Self>) {
-        if self
-            .disk
-            .on_screen
-            .as_ref()
-            .is_some_and(|on_screen| *on_screen != files.account)
-        {
-            return;
-        }
-        self.disk.cache_folder = files.cache_folder;
-        self.disk.database_bytes = files.database_bytes;
+        self.disk.files.insert(files.account.clone(), files);
         cx.notify();
     }
 
-    /// The account on screen changed to `account`: the old figures go at
-    /// once (Manage local storage must not show the previous account's
-    /// database), and the new ones are read now instead of at the next
-    /// reading, up to 30 s away.
-    /// The lock-screen log out deleted every account and the next one on
-    /// screen comes without a switch: until one is recorded, any reading is
-    /// that account's.
-    pub(super) fn disk_accounts_wiped(&mut self) {
-        self.disk.on_screen = None;
+    /// The on-screen account's files.
+    fn account_files(&self) -> Option<&AccountFiles> {
+        self.disk.files.get(&self.current_account()?)
     }
 
+    /// The on-screen account's message database size, once read.
+    pub(super) fn database_bytes(&self) -> Option<u64> {
+        self.account_files()?.database_bytes
+    }
+
+    /// The lock-screen log out deleted every account: no figure is theirs.
+    pub(super) fn disk_accounts_wiped(&mut self) {
+        self.disk.files.clear();
+    }
+
+    /// The account on screen changed to `account`: its figures from before
+    /// go at once (Manage local storage must not show a database that is
+    /// gone), and are read now instead of at the next reading, up to 30 s
+    /// away.
     pub(super) fn disk_account_switched(
         &mut self,
         account: quill::ids::AccountKey,
         cx: &mut Context<Self>,
     ) {
-        self.disk.on_screen = Some(account);
-        self.disk.cache_folder = None;
-        self.disk.database_bytes = None;
+        self.disk.files.remove(&account);
         cx.notify();
         if cfg!(test) {
             return;
@@ -242,7 +235,8 @@ impl QuillApp {
         let Some(root) = quill::settings::safe_app_root() else {
             return;
         };
-        QuillApp::spawn_app(cx, async move |this, cx| {
+        // The read is for the screen it starts on: another switch drops it.
+        self.spawn_screen(cx, async move |this, cx| {
             let files = cx
                 .background_executor()
                 .spawn(async move { account_files(&root) })
@@ -496,7 +490,7 @@ impl QuillApp {
         if !self.shows_disk_screen() || self.disk.seen.unwritable {
             return None;
         }
-        let folder = self.disk.cache_folder.clone()?;
+        let folder = self.account_files()?.cache_folder.clone()?;
         Some(
             Button::new("disk-full-reveal")
                 .label(tr(keys::Q_DISK_SHOW_CACHED_FILES))

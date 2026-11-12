@@ -31,7 +31,7 @@ pub(super) struct EmptyState {
 
 enum Picture {
     Icon(IconName),
-    Loading,
+    Spinner,
 }
 
 impl EmptyState {
@@ -49,7 +49,7 @@ impl EmptyState {
     /// Still loading: a spinner where the icon would be.
     pub(super) fn loading(id: impl Into<ElementId>) -> Self {
         Self {
-            picture: Picture::Loading,
+            picture: Picture::Spinner,
             ..Self::new(id, IconName::Loader)
         }
     }
@@ -93,7 +93,7 @@ impl RenderOnce for EmptyState {
                 .rounded_full()
                 .bg(theme.secondary)
                 .child(Icon::new(icon).size(px(ICON)).text_color(muted)),
-            Picture::Loading => EmptyMedia::new()
+            Picture::Spinner => EmptyMedia::new()
                 .size(px(TILE))
                 .child(Spinner::new().large().color(muted)),
         };

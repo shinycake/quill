@@ -50,7 +50,7 @@ fn with_vec<T, R>(cell: &Cell<Vec<T>>, f: impl FnOnce(&mut Vec<T>) -> R) -> R {
 }
 
 /// Focus handles of the enabled items of the open menu. Handles are kept by
-/// claim position so they survive re-renders; `begin` runs at the top of
+/// claim position so they survive re-renders; `reset_claims` runs at the top of
 /// every frame and each enabled item drawn after it claims the next slot,
 /// with a sort key that says where the row sits in the menu (menus that sort
 /// their rows after building them pass the row's order).
@@ -159,7 +159,7 @@ pub(super) fn row_key(order: u8) -> u32 {
 impl ContextMenuItems {
     /// A new frame starts: no item has been drawn yet. The handles are
     /// retained across frames; only the claims reset.
-    pub(super) fn begin(&self) {
+    pub(super) fn reset_claims(&self) {
         drop(self.keys.take());
         drop(self.parents.take());
     }
@@ -395,7 +395,7 @@ impl QuillApp {
     /// takes the focus, and one that just closed gives it back unless its
     /// action moved it on purpose. Then the same for the hand-drawn layers.
     pub(super) fn menu_focus_upkeep(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.frame.menu.items.begin();
+        self.frame.menu.items.reset_claims();
         let menu_open = self.context_menu_open();
         self.frame.menu.settle(menu_open, window, cx);
         self.track_layer_focus(window, cx);

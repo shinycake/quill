@@ -1154,8 +1154,7 @@ fn a_message_photo_edit_whose_chat_window_closed_leaves_no_png(cx: &mut TestAppC
                 let pixels = image::RgbaImage::from_pixel(59, 11, image::Rgba([4, 5, 6, 255]));
                 app.viewer.photo_editor.open(PhotoEditor::new(
                     EditorPurpose::MessageEdit {
-                        chat: ChatId(1),
-                        message: MessageId(2),
+                        edit: crate::ui::chat_ui_state::EditId::next(),
                     },
                     pixels,
                 ));

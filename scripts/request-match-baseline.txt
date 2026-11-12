@@ -1,7 +1,6 @@
 # Answers not matched by RequestId (scripts/check-request-match.py).
 # <rule>:<Type::function> <count>. Only remove lines or lower counts.
 purpose:QuillApp::chat_appearance_level_line 1
-purpose:QuillApp::gif_grid 2
 purpose:QuillApp::onboarding 1
 purpose:QuillApp::registration_form 1
 purpose:QuillApp::sidebar_auth 1
@@ -19,4 +18,3 @@ unmatched:Session::apply_saved_tags 1
 unmatched:Session::apply_ton_wallet 1
 unsent:GiveawayOptions::begin 2
 unsent:QuillApp::begin_screen_worker 1
-unsent:QuillApp::menu_focus_upkeep 1

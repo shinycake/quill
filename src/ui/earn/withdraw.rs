@@ -283,7 +283,7 @@ impl QuillApp {
         {
             return;
         }
-        let password = self.earn.password.read(cx).value().to_string();
+        let password = zeroize::Zeroizing::new(self.earn.password.read(cx).value().to_string());
         let sent = self
             .live
             .as_mut()

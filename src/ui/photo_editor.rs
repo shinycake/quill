@@ -55,12 +55,10 @@ pub(super) enum EditorPurpose {
     /// A pending composer attachment, as it was when the editor opened.
     Attachment(TrayItem),
     /// The media of a message being edited (`edit_media_tools.rs`): the
-    /// message the editor was opened for, so its result lands only while
-    /// that edit is still the pending one.
-    MessageEdit {
-        chat: quill::ids::ChatId,
-        message: quill::ids::MessageId,
-    },
+    /// edit the editor was opened for, so its result lands only while that
+    /// very edit is still the pending one (not a later edit of the same
+    /// message).
+    MessageEdit { edit: super::chat_ui_state::EditId },
     /// A new sticker or emoji for a set the user owns: the image sits on a
     /// transparent square canvas, the crop is fixed, and the result is
     /// fitted to the set's side (tdesktop's `fixedCrop` editor from
@@ -224,12 +222,8 @@ impl PhotoEditor {
     }
 
     /// An editor on the photo of a message being edited.
-    pub(super) fn for_message_edit(
-        chat: quill::ids::ChatId,
-        message: quill::ids::MessageId,
-        working: RgbaImage,
-    ) -> Self {
-        Self::new(EditorPurpose::MessageEdit { chat, message }, working)
+    pub(super) fn for_message_edit(edit: super::chat_ui_state::EditId, working: RgbaImage) -> Self {
+        Self::new(EditorPurpose::MessageEdit { edit }, working)
     }
 
     /// An editor on a transparent canvas with `working` as its base item

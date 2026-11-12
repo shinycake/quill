@@ -23,7 +23,6 @@ bare:EngineState::Loading 1
 bare:Entry::Pending 1
 bare:ExtractionStage::Starting 1
 bare:GiftsLayout::Loading 1
-bare:GoalNow::Waiting 1
 bare:Kind::Applying 1
 bare:LinkHandlerState::Checking 1
 bare:LinkStatus::Pending 1
@@ -31,7 +30,6 @@ bare:LookStage::Rendering 1
 bare:Lookup::Pending 1
 bare:MediaFile::Downloading 1
 bare:MenuSend::Sent 1
-bare:MuteState::Connecting 1
 bare:OwnLinkState::Waiting 1
 bare:PaidStage::Waiting 1
 bare:PaneMode::Connecting 1
@@ -40,12 +38,10 @@ bare:Phase::Downloading 1
 bare:Phase::Requested 1
 bare:Phase::Waiting 1
 bare:PhoneFlow::Asking 1
-bare:Picture::Loading 1
 bare:PictureState::Waiting 1
 bare:PinTarget::Loading 1
 bare:PlayHead::Waiting 1
 bare:PlayState::Opening 1
-bare:Playback::Waiting 1
 bare:Refire::Running 1
 bare:ReplyState::Loading 1
 bare:Restore::Pending 1
@@ -91,7 +87,6 @@ unkeyed:DemandStage::Asked 1
 unkeyed:Dnd::Refreshing 1
 unkeyed:ExtractionStage::Running 1
 unkeyed:FileState::Downloading 1
-unkeyed:First::Preparing 1
 unkeyed:GiftPurchaseStage::Sent 1
 unkeyed:GiftValueStage::Loading 1
 unkeyed:GiftsRest::Waiting 1
