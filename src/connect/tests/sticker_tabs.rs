@@ -245,11 +245,9 @@ fn sticker_search_and_set_management_use_latest_confirmed_state() {
     assert_eq!(sent_request(&recorder, "getStickerSet")["set_id"], "77");
     driver.select_sticker_tab(StickerTab::Search).unwrap();
     assert_eq!(driver.session.stickers.stickers.selection.set_id(), None);
-    assert!(
-        !driver
-            .session
-            .requests
-            .has_purpose(RequestPurpose::GetStickerSet)
+    assert_eq!(
+        driver.session.stickers.stickers.selection.stage,
+        crate::state::StickerSetStage::Idle
     );
     assert!(driver.manage_sticker_set(77, true, true).is_err());
     let install = driver.manage_sticker_set(77, true, false).unwrap().unwrap();
