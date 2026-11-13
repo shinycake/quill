@@ -143,13 +143,12 @@ impl Runtime {
             inbox: inbox.clone(),
             outbox: outbox.clone(),
         };
-        let spawned = std::thread::Builder::new()
-            .name("quill-widget".into())
-            .spawn(move || thread::run(launch, inbox, rx, outbox.clone()));
+        let spawned = quill::thread_guard::spawn_guarded("quill-widget", move || {
+            let told = outbox.clone();
+            run_told(&told, || thread::run(launch, inbox, rx, outbox));
+        });
         if let Err(err) = spawned {
-            let mut out = quill::locks::lock_or_recover(&runtime.outbox);
-            out.events.push(RuntimeEvent::Failed(err.to_string()));
-            WIDGETS.poke();
+            fail(&runtime.outbox, err.to_string());
         }
         runtime
     }
@@ -209,6 +208,23 @@ impl Drop for Runtime {
     }
 }
 
+/// Runs the runtime thread's `body`. A panic in it ends the thread, so the
+/// UI is told the widget failed instead of keeping a bubble that never
+/// answers again.
+fn run_told(outbox: &Mutex<Outbox>, body: impl FnOnce()) {
+    if quill::thread_guard::run_guarded(body).is_none() {
+        fail(outbox, "the widget runtime panicked".into());
+    }
+}
+
+/// The runtime cannot go on: the entry leaves Loading or Running.
+fn fail(outbox: &Mutex<Outbox>, reason: String) {
+    quill::locks::lock_or_recover(outbox)
+        .events
+        .push(RuntimeEvent::Failed(reason));
+    WIDGETS.poke();
+}
+
 /// Milliseconds on the widgets' clock (`performance.now()`), from the
 /// first call in the process.
 pub fn clock_ms() -> f64 {
@@ -222,3 +238,6 @@ pub fn clock_ms() -> f64 {
 
 #[cfg(test)]
 mod smoke_tests;
+
+#[cfg(test)]
+mod runtime_tests;
