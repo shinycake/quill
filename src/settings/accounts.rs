@@ -582,6 +582,12 @@ pub fn desktop_notifications(app_root: &Path, account: &Preferences) -> bool {
         .unwrap_or(account.desktop_notifications)
 }
 
+/// The app's switch with no account on screen to ask: on until it is
+/// first switched.
+pub fn app_desktop_notifications(app_root: &Path) -> bool {
+    load_registry(app_root).desktop_notifications.unwrap_or(true)
+}
+
 /// Switch OS notifications on or off for every account, the ones with no
 /// client running too.
 pub fn set_desktop_notifications(app_root: &Path, on: bool) -> std::io::Result<()> {
@@ -1221,6 +1227,19 @@ mod account_registry_tests {
         );
         set_desktop_notifications(&root, true).unwrap();
         assert!(desktop_notifications(&root, &earlier));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// With no account on screen the menus read the app's switch, not a
+    /// default.
+    #[test]
+    fn with_no_account_on_screen_the_app_switch_is_read() {
+        let root = tmp_root("desktop-notify-app");
+        assert!(app_desktop_notifications(&root), "never switched: on");
+        set_desktop_notifications(&root, false).unwrap();
+        assert!(!app_desktop_notifications(&root));
+        set_desktop_notifications(&root, true).unwrap();
+        assert!(app_desktop_notifications(&root));
         let _ = std::fs::remove_dir_all(&root);
     }
 }

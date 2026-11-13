@@ -356,6 +356,11 @@ impl super::app::QuillApp {
             Ok(mut live) => {
                 quill::startup_trace::mark("client_open");
                 live.driver.set_stream_volume(self.players.volume());
+                // The first client of a run was opened before the app
+                // could flip the switch (`early_connect`): it takes the
+                // app's value as it joins.
+                live.driver
+                    .read_desktop_notifications(quill::settings::safe_app_root().as_deref());
                 self.disk.seed(&mut live.driver);
                 self.put_on_screen(live);
             }

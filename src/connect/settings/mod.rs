@@ -313,6 +313,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         save_preferences(&self.paths, &prefs)
     }
 
+    /// Take the app's desktop notifications switch as it is now
+    /// (`settings::desktop_notifications`, kept in the registry under
+    /// `app_root`), or with no app folder this account's own value. Run
+    /// when the client opens and again when it joins the app, so a switch
+    /// flipped in between is not missed.
+    pub fn read_desktop_notifications(&mut self, app_root: Option<&std::path::Path>) {
+        let prefs = load_preferences(&self.paths);
+        self.session.settings.desktop_notifications = app_root.map_or(
+            prefs.desktop_notifications,
+            |root| crate::settings::desktop_notifications(root, &prefs),
+        );
+    }
+
     /// Parity slice (platform-custom-keybindings): load the user's shortcut
     /// overrides (`prefs.json`).
     pub fn load_custom_keybindings(&self) -> Vec<crate::settings::CustomKeybinding> {

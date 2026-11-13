@@ -73,9 +73,14 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The switch as the account on screen holds it, or with none on
+    /// screen (signing in, connecting) the app's own.
     pub(crate) fn desktop_notifications_enabled(&self) -> bool {
-        self.session()
-            .is_none_or(|s| s.settings.desktop_notifications)
+        match self.session() {
+            Some(session) => session.settings.desktop_notifications,
+            None => quill::settings::safe_app_root()
+                .is_none_or(|root| quill::settings::app_desktop_notifications(&root)),
+        }
     }
 
     pub(crate) fn notification_sounds_enabled(&self) -> bool {

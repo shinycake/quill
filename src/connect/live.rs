@@ -258,11 +258,6 @@ fn open_prepared_client(
     // sounds") loads the same way.
     let prefs = load_preferences(&prepared.paths);
     session.settings.inapp_sounds_enabled = prefs.inapp_sounds_enabled;
-    // Desktop notifications are the app's switch, every account's alike.
-    session.settings.desktop_notifications = safe_app_root()
-        .map_or(prefs.desktop_notifications, |root| {
-            crate::settings::desktop_notifications(&root, &prefs)
-        });
     session.settings.notify_view = prefs.notify_view;
     session.settings.notify_photo_previews = prefs.notify_photo_previews;
     // Slice parity:settings-language: the app language tag load the same
@@ -285,6 +280,8 @@ fn open_prepared_client(
         capability: crate::proxy_carrier::helper::Capability::app(),
     };
     let mut driver = ConnectDriver::new(session, sender, credentials, prepared);
+    // Desktop notifications are the app's switch, every account's alike.
+    driver.read_desktop_notifications(safe_app_root().as_deref());
     driver.set_carrier_host(Box::new(
         crate::proxy_carrier::helper::HelperCarrierHost::new(carrier_config),
     ));
