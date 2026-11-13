@@ -97,3 +97,18 @@ fn a_failed_device_link_send_shows_the_line_with_nothing_waiting() {
         &driver.session.settings.sessions_note
     ));
 }
+
+#[test]
+fn a_failed_mask_change_send_shows_the_line_with_nothing_waiting() {
+    let (mut driver, recorder) = driver_parts();
+    recorder.refuse_sends(true);
+    assert!(driver.change_mask_set(12, true, false).is_err());
+    assert!(shows_line_waiting_for_nothing(
+        &driver.session.stickers.masks.change_note
+    ));
+    assert!(
+        !driver.session.stickers.masks.change_pending(),
+        "a change that never left is not pending"
+    );
+    assert!(!driver.session.stickers.masks.set_change_pending(12));
+}
