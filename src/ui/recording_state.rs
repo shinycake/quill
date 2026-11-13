@@ -52,7 +52,7 @@ pub(super) enum RecordStage {
     },
     /// The voice or round video message being recorded, with the window it
     /// belongs to. One at a time, for the whole app.
-    Recording(Capture),
+    Recording(Box<Capture>),
 }
 
 /// Which start a device answer belongs to. An answer for any start but the
@@ -229,14 +229,14 @@ impl RecordingUi {
 impl RecordingUi {
     fn capture(&self) -> Option<&Capture> {
         match &self.stage {
-            RecordStage::Recording(capture) => Some(capture),
+            RecordStage::Recording(capture) => Some(capture.as_ref()),
             _ => None,
         }
     }
 
     fn capture_mut(&mut self) -> Option<&mut Capture> {
         match &mut self.stage {
-            RecordStage::Recording(capture) => Some(capture),
+            RecordStage::Recording(capture) => Some(capture.as_mut()),
             _ => None,
         }
     }
@@ -244,7 +244,7 @@ impl RecordingUi {
     /// Take the recording out, leaving the stage idle.
     fn take_capture(&mut self) -> Option<Capture> {
         match std::mem::replace(&mut self.stage, RecordStage::Idle) {
-            RecordStage::Recording(capture) => Some(capture),
+            RecordStage::Recording(capture) => Some(*capture),
             other => {
                 self.stage = other;
                 None
@@ -451,7 +451,7 @@ impl RecordingUi {
                 ..
             } => Some(voice),
             other => {
-                self.stage = RecordStage::Recording(other);
+                self.stage = RecordStage::Recording(Box::new(other));
                 None
             }
         }
@@ -466,7 +466,7 @@ impl RecordingUi {
                 ..
             } => Some(video),
             other => {
-                self.stage = RecordStage::Recording(other);
+                self.stage = RecordStage::Recording(Box::new(other));
                 None
             }
         }
@@ -508,7 +508,7 @@ impl QuillApp {
     /// Hold a recording that just started, as the window whose state is
     /// in place (the one whose composer or story viewer asked for it).
     pub(super) fn hold_capture(&mut self, media: CaptureMedia, purpose: CaptureFor) {
-        self.recording.stage = RecordStage::Recording(Capture {
+        self.recording.stage = RecordStage::Recording(Box::new(Capture {
             media,
             origin: self.windows.scope,
             purpose,
@@ -518,6 +518,6 @@ impl QuillApp {
             preview: None,
             round: Default::default(),
             wake: RecordWake::Stopped,
-        });
+        }));
     }
 }

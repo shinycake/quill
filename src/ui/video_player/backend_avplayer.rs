@@ -443,11 +443,11 @@ impl Backend for AvPlayerBackend {
 
 impl Drop for AvPlayerBackend {
     fn drop(&mut self) {
+        // The watch removes its observer as it drops, before the item goes.
+        drop(self.open_watch.take());
         // SAFETY: stop audio before the player is released (main thread:
         // the player is dropped where it lives). An output left attached
         // keeps the item's timebases and listeners alive for good.
-        // The watch removes its observer as it drops, before the item goes.
-        drop(self.open_watch.take());
         unsafe {
             self.player.pause();
             self.item.removeOutput(&self.output);
