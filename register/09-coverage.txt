@@ -108,4 +108,31 @@ src/state/session_reply.rs 895 read
 src/state/session_reply_keyboard.rs 167 read
 src/state/session_requests.rs 252 read
 src/state/session_saved.rs 384 read
-110 / 137 files read
+src/state/session_search.rs 136 read
+src/state/session_service.rs 160 read
+src/state/session_share.rs 350 read (lines 1-347 read in full; test module lines 348-350 skimmed)
+src/state/session_similar.rs 221 read
+src/state/session_sponsored.rs 568 read
+src/state/session_stickers.rs 309 read
+src/state/session_stories.rs 353 read
+src/state/session_subsection_tabs.rs 547 read
+src/state/session_thread.rs 467 read
+src/state/session_topic_load.rs 47 read
+src/state/session_translate.rs 395 read
+src/state/session_updates.rs 334 read
+src/state/session_video_chat_caps.rs 117 read
+src/state/session_views.rs 233 read
+src/state/session_web_apps.rs 326 read
+src/state/session_window_chats.rs 344 read
+src/state/shared_media_meta.rs 795 read (lines 1-536 read in full; test module lines 537-795 skimmed)
+src/state/shared_media_months.rs 254 read (lines 1-124 read in full; test module lines 125-254 skimmed)
+src/state/shared_media_profile.rs 1026 read (lines 1-687 read in full; test module lines 688-1026 skimmed)
+src/state/shared_media_rows.rs 128 read (lines 1-83 read in full; test module lines 84-128 skimmed)
+src/state/shared_media_search.rs 174 read (lines 1-99 read in full; test module lines 100-174 skimmed)
+src/state/shared_media_select.rs 444 read (lines 1-237 read in full; test module lines 238-444 skimmed)
+src/state/shared_media_types.rs 785 read
+src/state/shown_history.rs 36 read
+src/state/sponsored_state.rs 156 read
+src/state/sponsored_types.rs 22 read
+src/state/stats_pages.rs 588 read
+137 / 137 files read
