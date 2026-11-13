@@ -211,7 +211,7 @@ fn a_window_clicked_under_the_pointer_lets_the_others_fade(cx: &mut TestAppConte
         app.delivery.windows.platform = NotifyPlatform::Windows;
         app.show_custom_notification(&me, message(7), None, None, false, false, cx);
         app.show_custom_notification(&me, message(8), None, None, false, false, cx);
-        let now = std::time::Instant::now();
+        let now = cx.background_executor().now();
         let later = now + std::time::Duration::from_secs(600);
         // The user was back at the computer: both are due later.
         for shown in app.delivery.windows.shown.iter_mut() {
