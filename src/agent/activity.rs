@@ -209,11 +209,38 @@ struct Connection {
     process: Option<i64>,
 }
 
+/// The name shown for a client that declared none. Every such client
+/// shares it, so a refusal never matches on it.
+pub const UNNAMED_AGENT: &str = "An agent";
+
 /// An agent the user disconnected.
-struct Refused {
-    agent: String,
-    /// The processes that were connected under the name when it was revoked.
-    processes: Vec<i64>,
+enum Refused {
+    /// A client that declared a name: every client under the name, and
+    /// the processes connected under it when it was revoked.
+    Named { agent: String, processes: Vec<i64> },
+    /// A client that declared no name: only its own process, since the
+    /// name it is shown under is every nameless client's.
+    Unnamed { process: i64 },
+}
+
+impl Refused {
+    /// The name the Settings page lists it under.
+    fn agent(&self) -> &str {
+        match self {
+            Refused::Named { agent, .. } => agent,
+            Refused::Unnamed { .. } => UNNAMED_AGENT,
+        }
+    }
+
+    fn holds_back(&self, agent: &str, process: Option<i64>) -> bool {
+        match self {
+            Refused::Named {
+                agent: name,
+                processes,
+            } => name == agent || process.is_some_and(|process| processes.contains(&process)),
+            Refused::Unnamed { process: refused } => process == Some(*refused),
+        }
+    }
 }
 
 /// Who is connected and who is refused, under one lock so a connection and
@@ -425,24 +452,41 @@ pub fn revoke(id: u64) {
     connection.stage = Stage::Revoked;
     let agent = connection.shown.agent.clone();
     let process = connection.process;
-    let known = roster.refused.iter().position(|r| r.agent == agent);
-    let entry = match known {
-        Some(at) => roster.refused.get_mut(at),
-        None => {
-            roster.refused.push(Refused {
-                agent,
-                processes: Vec::new(),
-            });
-            roster.refused.last_mut()
-        }
-    };
-    if let (Some(entry), Some(process)) = (entry, process)
-        && !entry.processes.contains(&process)
+    if agent == UNNAMED_AGENT
+        && let Some(process) = process
     {
-        entry.processes.push(process);
+        if !roster.refused.iter().any(|r| r.holds_back("", Some(process))) {
+            roster.refused.push(Refused::Unnamed { process });
+        }
+    } else {
+        refuse_named(&mut roster.refused, agent, process);
     }
     drop(roster);
     crate::wake::AGENT.poke();
+}
+
+/// Refuse `agent` by name, and `process` with it when the socket named one.
+fn refuse_named(refused: &mut Vec<Refused>, agent: String, process: Option<i64>) {
+    let known = refused.iter_mut().find_map(|r| match r {
+        Refused::Named {
+            agent: name,
+            processes,
+        } if *name == agent => Some(processes),
+        _ => None,
+    });
+    match known {
+        Some(processes) => {
+            if let Some(process) = process
+                && !processes.contains(&process)
+            {
+                processes.push(process);
+            }
+        }
+        None => refused.push(Refused::Named {
+            agent,
+            processes: process.into_iter().collect(),
+        }),
+    }
 }
 
 /// Whether the user revoked connection `id`.
@@ -464,12 +508,18 @@ pub fn refused_from(agent: &str, process: Option<i64>) -> bool {
     roster()
         .refused
         .iter()
-        .any(|r| r.agent == agent || process.is_some_and(|process| r.processes.contains(&process)))
+        .any(|r| r.holds_back(agent, process))
 }
 
-/// The agents the user disconnected, in the order they were.
+/// The agents the user disconnected, in the order they were, each name once.
 pub fn refused_agents() -> Vec<String> {
-    roster().refused.iter().map(|r| r.agent.clone()).collect()
+    let mut names: Vec<String> = Vec::new();
+    for refused in &roster().refused {
+        if !names.iter().any(|name| name == refused.agent()) {
+            names.push(refused.agent().to_string());
+        }
+    }
+    names
 }
 
 /// "Allow again" for one disconnected agent.
@@ -477,7 +527,7 @@ pub fn allow_again(agent: &str) {
     if super::ui_driver::guard::refuse_if_injecting("allow an agent again") {
         return;
     }
-    roster().refused.retain(|r| r.agent != agent);
+    roster().refused.retain(|r| r.agent() != agent);
     crate::wake::AGENT.poke();
 }
 
@@ -645,6 +695,33 @@ mod tests {
         assert!(!super::refused_from("Rename test 2", None));
         allow_again("Rename test");
         assert!(!super::refused_from("Rename test 2", Some(4_242_001)));
+    }
+
+    #[test]
+    fn revoking_a_nameless_agent_refuses_only_its_process() {
+        use super::{UNNAMED_AGENT, refused_agents, refused_from};
+        let _lock = crate::locks::lock_or_recover(&crate::agent::access::TEST_LOCK);
+        let first = super::connect_from(UNNAMED_AGENT, Some(4_343_001));
+        let second = super::connect_from(UNNAMED_AGENT, Some(4_343_002));
+        revoke(first.id());
+        revoke(second.id());
+        revoke(first.id());
+        assert!(refused_from(UNNAMED_AGENT, Some(4_343_001)));
+        assert!(refused_from("Renamed", Some(4_343_002)));
+        assert!(
+            !refused_from(UNNAMED_AGENT, Some(4_343_003)),
+            "another nameless client still gets in"
+        );
+        assert!(!refused_from(UNNAMED_AGENT, None));
+        let listed = refused_agents();
+        assert_eq!(
+            listed.iter().filter(|name| *name == UNNAMED_AGENT).count(),
+            1,
+            "listed once: {listed:?}"
+        );
+        allow_again(UNNAMED_AGENT);
+        assert!(!refused_from(UNNAMED_AGENT, Some(4_343_001)));
+        assert!(!refused_from(UNNAMED_AGENT, Some(4_343_002)));
     }
 
     #[test]
