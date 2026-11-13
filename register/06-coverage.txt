@@ -86,3 +86,17 @@ src/premium_hub/purchase.rs 108 read
 src/premium_hub/ton.rs 777 read
 src/premium_hub/ton_withdraw.rs 115 read
 src/premium_hub/upgraded.rs 203 read
+src/premium_limits.rs 871 read
+src/presence.rs 81 read
+src/privacy.rs 1385 read
+src/privacy/prefs.rs 113 read
+src/profile_actions.rs 286 read
+src/profile_cover.rs 241 read
+src/profile_forms.rs 284 read
+src/profile_photo_camera.rs 233 read
+src/profile_photo_gradient.rs 308 read
+src/profile_photo_sources.rs 373 read
+src/profile_photo_video.rs 287 read
+src/profile_tab.rs 132 read
+src/promotion.rs 539 read
+src/proxy.rs 1372 read
